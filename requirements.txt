@@ -1,0 +1,16 @@
+# requirements.txt
+# Dependencias para el cliente ligero del bot de Telegram.
+
+# --- Framework del Bot y Comunicación ---
+python-telegram-bot
+httpx # Para hacer peticiones asíncronas a nuestra API de backend.
+
+# --- Procesamiento de Audio ---
+faster-whisper
+# Nota: faster-whisper puede requerir dependencias adicionales del sistema
+# que ya están incluidas en nuestro Dockerfile.
+
+# --- Utilidades Generales ---
+python-dotenv # Para cargar variables desde el archivo .env
+pytz # Para manejo de zonas horarias
+dateparser # Para interpretar fechas en lenguaje natural

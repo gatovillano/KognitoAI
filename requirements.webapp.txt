@@ -1,0 +1,31 @@
+# requirements.webapp.txt
+
+# Dependencias para el servidor FastAPI
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Dependencias Core del proyecto (compartidas con el bot)
+python-dotenv
+psycopg[async]
+sqlalchemy[asyncio]
+langchain
+langchain-core
+langchain-community
+langchain-google-genai
+langchain-postgres==0.0.4
+pgvector
+httpx
+beautifulsoup4
+dateparser
+pydantic
+faster-whisper
+ffmpeg-python
+aiofiles
+python-docx
+pdfminer.six
+tiktoken
+emoji
+requests
+google-auth
+PyJWT

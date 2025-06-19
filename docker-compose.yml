@@ -1,0 +1,69 @@
+# docker-compose.yml - VERSIÓN FINAL Y DEFINITIVA
+
+version: "3.8"
+
+services:
+  # --- 1. Base de Datos (PostgreSQL con pgvector) ---
+  db:
+    image: pgvector/pgvector:pg15
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-telegram_bot_db}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - ai_network
+
+  # --- 2. Servidor API/Web (FastAPI) - El Cerebro ---
+  webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile.webapp
+    restart: always
+    depends_on:
+      - db
+    ports:
+      # Expone el puerto 8000 del contenedor al 8007 de tu máquina.
+      - "8009:8000"
+    volumes:
+      # Monta todo el directorio del proyecto en /app.
+      # ¡Simple y potente!
+      - .:/app
+    environment:
+      # URL para conectar a la base de datos dentro de la red de Docker.
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-telegram_bot_db}
+    env_file:
+      - ./.env # Carga el resto de variables (API keys, etc.).
+    networks:
+      - ai_network
+
+  # --- 3. Bot de Telegram - El Cliente Ligero ---
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      - webapp # Es crucial que espere a que la API esté lista.
+    volumes:
+      # Monta también todo el directorio del proyecto en /app.
+      - .:/app
+    env_file:
+      - ./.env
+    environment:
+      # URL para que el bot se comunique con la API.
+      # 'webapp' es el nombre del servicio, que Docker resuelve a la IP interna.
+      API_SERVER_URL: http://webapp:8000
+    networks:
+      - ai_network
+
+# --- Red interna para la comunicación entre servicios ---
+networks:
+  ai_network:
+    driver: bridge
+
+# --- Volúmenes para la persistencia de datos ---
+volumes:
+  db_data:
