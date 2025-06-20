@@ -13,7 +13,7 @@ import hashlib
 import time
 import random
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from urllib.parse import unquote, parse_qs
 
@@ -23,13 +23,14 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-
+import httpx
 # --- Módulos del Proyecto (Lógica Compartida) ---
 # Se importan todas las funciones y clases necesarias desde sus nuevos hogares.
 from core.config import settings
 from core.database import (
     create_tables, SessionLocal, Account, PlatformIdentity, Perfil, 
-    get_or_create_account_from_platform_id, get_account_by_telegram_id
+    get_or_create_account_from_platform_id, get_account_by_telegram_id,
+    find_telegram_identity,
 )
 from core.agent import initialize_llms, create_and_run_agent
 from utils.db_session import DBSession
@@ -39,7 +40,8 @@ from core.notes_manager import get_notes, add_note, update_note, delete_note
 from core.agenda_manager import get_events_as_dicts, schedule_event, cancel_event
 from telegram_client.bot_manager import bot_manager
 from sqlalchemy import select
-
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, Field
 # --- Configuración de Logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -74,14 +76,19 @@ async def startup_event():
 # SECCIÓN 2: MIDDLEWARE Y VALIDACIÓN DE `initData` (Para Panel de Telegram)
 # ==============================================================================
 
+origins = [
+    "http://localhost",
+    "http://localhost:8880",
+    "https://kognito.gatoslibres.art" # El puerto de nuestro frontend
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Considerar restringir esto en producción
+    allow_origins=origins,      # ¡CORREGIDO! Usamos nuestra lista explícita.
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],        # Permitimos todos los métodos (GET, POST, etc.)
+    allow_headers=["*"],        # Permitimos todas las cabeceras
 )
-
 class TelegramUserData(BaseModel):
     id: int
     first_name: str
@@ -125,10 +132,10 @@ async def get_validated_user_id(initData: str = Form(...)) -> int:
 verification_codes: Dict[str, Dict[str, Any]] = {}
 
 class AuthRequestCode(BaseModel):
-    telegram_id: int
+    identifier: str
 
 class AuthVerifyCode(BaseModel):
-    telegram_id: int
+    identifier: str
     code: str
 
 class TokenResponse(BaseModel):
@@ -137,61 +144,149 @@ class TokenResponse(BaseModel):
 
 @app.post("/api/auth/request-code", summary="Solicitar código de verificación")
 async def request_verification_code(request_data: AuthRequestCode):
-    telegram_id = request_data.telegram_id
-    logger.info(f"Solicitud de código de verificación para el usuario de Telegram: {telegram_id}")
+    identifier = request_data.identifier
+    logger.info(f"Solicitud de código de verificación para el identificador: '{identifier}'")
 
     async with DBSession(SessionLocal) as db:
-        account = await get_account_by_telegram_id(db, telegram_id)
-        if not account:
-            raise HTTPException(status_code=404, detail="El ID de Telegram proporcionado no se encuentra en nuestro sistema.")
+        # ¡NUEVA LÓGICA!
+        # Buscamos la identidad del usuario usando el identificador proporcionado.
+        identity = await find_telegram_identity(db, identifier)
+        
+        if not identity:
+            raise HTTPException(status_code=404, detail=f"No se encontró ningún usuario de Telegram con el identificador '{identifier}'.")
 
-    code = str(random.randint(100000, 999999))
-    expiration_time = datetime.utcnow() + timedelta(minutes=10)
-    verification_codes[str(telegram_id)] = {"code": code, "exp": expiration_time}
-
-    logger.info(f"Código de verificación generado para {telegram_id}: {code}")
-
+        telegram_id = int(identity.platform_user_id) # Obtenemos el ID numérico real.
+        
+        # --- El resto de la lógica es la misma ---
+        code = str(random.randint(100000, 999999))
+        expiration_time = datetime.now(timezone.utc) + timedelta(minutes=10)
+        verification_codes[identifier.lower()] = {"code": code, "exp": expiration_time}
+        
+        logger.info(f"Código de verificación generado para {telegram_id}: {code}")
+        
     try:
-        message_text = (
-            f"Hola, estás intentando iniciar sesión en la aplicación web de Kognito AI.\n\n"
-            f"Tu código de verificación es: <b>{code}</b>\n\n"
-            f"Este código expirará en 10 minutos. Si no has solicitado este código, puedes ignorar este mensaje."
-        )
-        await bot_manager.bot.send_message(chat_id=telegram_id, text=message_text, parse_mode='HTML')
-        logger.info(f"Código de verificación enviado exitosamente a {telegram_id}.")
-        return {"message": "Código de verificación enviado exitosamente a tu chat de Telegram."}
-    except Exception as e:
-        logger.error(f"Error al enviar el código de verificación por Telegram a {telegram_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="No se pudo enviar el código de verificación.")
+        message_text = f"Tu código de Kognito AI es: <b>{code}</b>"
+        internal_api_url = "http://telegram_client:9090/internal/send-message"
+        payload = {"chat_id": telegram_id, "text": message_text}
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(internal_api_url, json=payload)
+            response.raise_for_status()
 
+        logger.info(f"Solicitud de envío de código enviada exitosamente al cliente de Telegram para {telegram_id}.")
+        return {"message": "Código de verificación enviado a tu chat de Telegram."}
+    except Exception as e:
+        logger.error(f"Error al solicitar el envío del código de verificación a {telegram_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="No se pudo contactar al servicio de mensajería.")
 @app.post("/api/auth/verify-code", response_model=TokenResponse, summary="Verificar código y obtener token JWT")
 async def verify_code_and_get_token(request_data: AuthVerifyCode):
-    telegram_id_str = str(request_data.telegram_id)
+    """
+    Verifica el código proporcionado y, si es correcto, emite un token JWT.
+    """
+    identifier = request_data.identifier.lower()
     code = request_data.code
-    logger.info(f"Intento de verificación de código para Telegram ID: {telegram_id_str}")
+    logger.info(f"Intento de verificación de código para el identificador: '{identifier}'")
 
-    stored_code_data = verification_codes.get(telegram_id_str)
+    # Validar el código
+    stored_code_data = verification_codes.get(identifier)
     if not stored_code_data or stored_code_data["code"] != code:
         raise HTTPException(status_code=400, detail="Código de verificación incorrecto.")
-    if datetime.utcnow() > stored_code_data["exp"]:
+    if datetime.now(timezone.utc) > stored_code_data["exp"]:
         raise HTTPException(status_code=400, detail="El código de verificación ha expirado.")
 
+    # Si el código es correcto, obtener el account_id universal del usuario
     async with DBSession(SessionLocal) as db:
-        account = await get_account_by_telegram_id(db, int(telegram_id_str))
-        if not account:
-            raise HTTPException(status_code=404, detail="No se pudo encontrar la cuenta asociada a este ID de Telegram.")
-        account_id = str(account.id)
+        # ¡CORREGIDO! Usamos la misma función `find_telegram_identity`
+        # para obtener la identidad a partir del alias o ID.
+        identity = await find_telegram_identity(db, identifier)
+        if not identity:
+            # Esto no debería ocurrir si el request-code funcionó, pero es una buena comprobación.
+            raise HTTPException(status_code=404, detail="No se pudo encontrar la cuenta asociada a este identificador.")
+        
+        account_id = str(identity.account_id)
 
-    del verification_codes[telegram_id_str]
+    # ¡CORREGIDO! Limpiar el código usado usando la clave `identifier`.
+    if identifier in verification_codes:
+        del verification_codes[identifier]
 
+    # Crear el token JWT
     payload = {
-        "sub": account_id,
-        "iat": datetime.utcnow(),
-        "exp": datetime.utcnow() + timedelta(days=settings.jwt_expiry_days)
+        "sub": account_id,  # 'sub' (subject) es el estándar para el ID del usuario en JWT.
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(days=settings.jwt_expiry_days)
     }
     access_token = jwt.encode(payload, settings.jwt_secret_key, algorithm="HS256")
-    logger.info(f"Token JWT emitido exitosamente para la cuenta {account_id}")
+    logger.info(f"Token JWT emitido exitosamente para la cuenta {account_id} (Identificador: {identifier})")
+    
     return TokenResponse(access_token=access_token)
+
+# ==============================================================================
+# --- NUEVA SECCIÓN ---
+# SECCIÓN 3.5: GESTIÓN DE USUARIOS Y AUTENTICACIÓN PROTEGIDA
+# ==============================================================================
+
+# Esquema de seguridad para los tokens JWT.
+auth_scheme = HTTPBearer()
+
+# Modelo para la respuesta del perfil de usuario
+class UserResponse(BaseModel):
+    account_id: str
+    telegram_id: int | None
+    name: str | None
+    username: str | None
+
+async def get_current_user_account_id(token: HTTPAuthorizationCredentials = Depends(auth_scheme)) -> str:
+    """
+    Dependencia de FastAPI para decodificar un token JWT y devolver el account_id.
+    Esto protegerá nuestros endpoints.
+    """
+    try:
+        payload = jwt.decode(token.credentials, settings.jwt_secret_key, algorithms=["HS256"])
+        account_id: str | None = payload.get("sub")
+        if account_id is None:
+            raise HTTPException(status_code=401, detail="Token inválido: subject no encontrado.")
+        return account_id
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token ha expirado.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token inválido.")
+
+
+@app.get("/api/users/me", response_model=UserResponse, summary="Obtener perfil del usuario actual")
+async def get_current_user_info(account_id: str = Depends(get_current_user_account_id)):
+    """
+    Devuelve la información del perfil del usuario autenticado a través del token JWT.
+    """
+    async with DBSession(SessionLocal) as db:
+        # Usamos una consulta explícita para cargar la cuenta y la identidad de telegram.
+        stmt = (
+            select(Account, PlatformIdentity)
+            .join(PlatformIdentity, Account.id == PlatformIdentity.account_id)
+            .where(Account.id == account_id, PlatformIdentity.platform == 'telegram')
+        )
+        result = await db.execute(stmt)
+        res = result.first() # puede ser None si no hay identidad de telegram
+        
+        if not res:
+            # Buscar solo la cuenta si no hay identidad de telegram
+            account = await db.get(Account, account_id)
+            if not account:
+                raise HTTPException(status_code=404, detail="Cuenta no encontrada.")
+            return UserResponse(
+                account_id=str(account.id),
+                telegram_id=None,
+                name=account.name,
+                username=account.username
+            )
+
+        account, telegram_identity = res
+        
+        return UserResponse(
+            account_id=str(account.id),
+            telegram_id=int(telegram_identity.platform_user_id),
+            name=account.name,
+            username=account.username
+        )
 
 # ==============================================================================
 # SECCIÓN 4: API PRINCIPAL DEL CHAT
@@ -357,13 +452,17 @@ async def add_event_endpoint(user_id: int = Depends(get_validated_user_id), desc
     async with DBSession(SessionLocal) as db:
         account = await get_account_by_telegram_id(db, user_id)
         if not account: raise HTTPException(status_code=404, detail="Usuario no encontrado.")
-        _, message = await schedule_event(
-            account_id=str(account.id), 
-            telegram_id=user_id,
-            description=description, 
+        success, message, new_event = await schedule_event(
+            account_id=str(account.id),
+            description=description,
             natural_language_datetime=event_datetime
         )
-        return {"message": message}
+    
+    # Es una buena práctica que el panel web también programe la notificación si es necesario.
+    # Por ahora, la creación en la BD es suficiente.
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    return {"message": message}
 
 @app.post("/api/cancel-event")
 async def cancel_event_endpoint(user_id: int = Depends(get_validated_user_id), event_id: int = Form(...)):

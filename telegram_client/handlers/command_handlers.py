@@ -48,7 +48,10 @@ async def start(update: Update, context: CallbackContext) -> None:
         # Solo pasamos la plataforma y el ID.
         result = await get_or_create_account_from_platform_id(
             platform='telegram',
-            platform_user_id=str(user.id)
+            platform_user_id=str(user.id),
+            first_name=user.first_name,
+            last_name=user.last_name,
+            username=user.username
         )
         # Luego, comprobamos si el resultado es válido antes de desempaquetar.
         if not result:
@@ -120,6 +123,9 @@ async def open_documents_panel(update: Update, context: CallbackContext) -> None
         account = await get_or_create_account_from_platform_id(
             platform='telegram',
             platform_user_id=str(user.id),
+            first_name=user.first_name,
+            last_name=user.last_name,
+            username=user.username,
             
         )
 

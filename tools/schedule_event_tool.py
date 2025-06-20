@@ -2,15 +2,7 @@
 
 """
 Herramienta de LangChain para programar un nuevo evento en la agenda de un usuario.
-
-Esta herramienta permite al agente de IA crear eventos, citas o recordatorios
-con fechas y horas específicas. Es fundamental para la gestión del tiempo y la
-planificación del usuario.
-
-La herramienta está diseñada para ser agnóstica de la plataforma, utilizando el
-`account_id` universal del usuario. Esto permite que un usuario programe un
-evento desde Telegram y, en el futuro, pueda consultarlo o modificarlo desde
-una interfaz web, manteniendo una experiencia unificada.
+Esta versión es "pura": interactúa con el core pero no con la lógica de entrega.
 """
 
 import logging
@@ -19,82 +11,64 @@ from typing import Type, Any
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 
-# Importa la función de lógica de negocio desde el gestor de agenda.
 from core.agenda_manager import schedule_event
+# ¡NUEVO! Importamos el bot_manager para acceder al user_data
+from telegram_client.bot_manager import bot_manager
 
-# Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
+
+# ¡NUEVO! Clave para pasar el ID del evento al handler
+EVENT_ID_FOR_SCHEDULING_KEY = "event_id_to_schedule"
 
 
 class ScheduleEventInput(BaseModel):
     """
-    Define el esquema de entrada para la herramienta de programación de eventos.
-    Valida que todos los argumentos necesarios sean proporcionados por el LLM.
+    Define el esquema de entrada para la herramienta. Ya no necesita telegram_id.
     """
-    description: str = Field(
-        ...,
-        description="La descripción detallada del evento o actividad a programar."
-    )
-    natural_language_datetime: str = Field(
-        ...,
-        description="Una descripción en lenguaje natural de cuándo ocurrirá el evento. Por ejemplo: 'mañana a las 3pm', 'en 2 horas', 'el próximo viernes a las 10 de la mañana'."
-    )
-    # Cambiamos telegram_id por account_id para que sea universal.
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    
-    )
-    telegram_id: int = Field(
-        ...,
-        description="El ID numérico de Telegram del usuario. Es necesario para enviar el recordatorio."
-    )
+    description: str = Field(...)
+    natural_language_datetime: str = Field(...)
+    account_id: str = Field(...)
 
 
 class ScheduleEventTool(BaseTool):
     """
-    Una herramienta de LangChain que se conecta a la función `schedule_event`
-    para crear un nuevo evento en la base de datos y programar su recordatorio.
+    Herramienta que se conecta a la función `schedule_event` del core.
     """
     name: str = "schedule_event_tool"
-    description: str = (
-        "Útil para cuando un usuario quiere programar una actividad, un evento o un recordatorio "
-        "en su agenda. Usa esto si dice 'recuérdame', 'agenda', 'anota para tal fecha', etc. "
-        "Esta herramienta es ideal para eventos con fechas y horas específicas."
-    )
+    description: str = "Útil para programar una actividad, evento o recordatorio en la agenda."
     args_schema: Type[BaseModel] = ScheduleEventInput
-    return_direct: bool = False  # El agente debe procesar la respuesta.
+    return_direct: bool = False
 
-    async def _arun(self, description: str, natural_language_datetime: str, account_id: str, telegram_id: int, **kwargs: Any) -> str:
+    async def _arun(self, description: str, natural_language_datetime: str, account_id: str, **kwargs: Any) -> str:
         """
-        Ejecuta la lógica de la herramienta de forma asíncrona.
-
-        Args:
-            description: La descripción del evento.
-            natural_language_datetime: El texto con la fecha/hora del evento.
-            account_id: El ID universal de la cuenta del usuario.
-            telegram_id: El ID de Telegram para programar la notificación.
-            **kwargs: Argumentos adicionales (no utilizados).
-
-        Returns:
-            Un mensaje de texto indicando el resultado de la operación.
+        Ejecuta la lógica: llama al core para crear el evento y luego guarda el
+        ID del evento para que el handler programe la notificación.
         """
-        logger.info(f"Ejecutando ScheduleEventTool para la cuenta '{account_id}' con descripción: '{description}'")
+        logger.info(f"Ejecutando ScheduleEventTool para la cuenta '{account_id}'...")
         try:
-            # Ahora la llamada a la función es correcta porque la variable `telegram_id`
-            # está definida como un parámetro de `_arun`.
-            success, message = await schedule_event(
+            # Llama a la función del core, que ahora devuelve el objeto del evento
+            success, message, new_event = await schedule_event(
                 account_id=account_id,
-                telegram_id=telegram_id,
                 description=description,
                 natural_language_datetime=natural_language_datetime
             )
-            logger.info(f"Herramienta de programación de evento completada para la cuenta '{account_id}'. Mensaje: {message}")
+
+            # ¡NUEVO! Si el evento se creó, guardamos su ID en user_data.
+            # Necesitamos el telegram_id del config de la invocación del agente.
+            if success and new_event:
+                run_manager = kwargs.get("run_manager")
+                if run_manager:
+                    telegram_id = run_manager.config.get("configurable", {}).get("telegram_id")
+                    if telegram_id:
+                        user_data = bot_manager.get_user_data(telegram_id)
+                        user_data[EVENT_ID_FOR_SCHEDULING_KEY] = new_event.id
+                        await bot_manager.flush_persistence()
+                        logger.info(f"ID de evento {new_event.id} guardado en user_data para que el handler lo programe.")
+
             return message
         except Exception as e:
-            logger.error(f"Error en ScheduleEventTool para la cuenta '{account_id}': {e}", exc_info=True)
-            return f"Ocurrió un error inesperado al intentar programar el evento: {e}"
+            logger.error(f"Error en ScheduleEventTool: {e}", exc_info=True)
+            return "Ocurrió un error inesperado al programar el evento."
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:
-        """La ejecución síncrona no está soportada en nuestra arquitectura asíncrona."""
         raise NotImplementedError("schedule_event_tool no soporta ejecución síncrona.")

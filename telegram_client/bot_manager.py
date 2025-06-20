@@ -24,51 +24,52 @@ Flujo de uso:
 """
 
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from telegram.ext import Application, ExtBot
+from telegram.ext import JobQueue  # <-- add this import
 
 logger = logging.getLogger(__name__)
 
 
 class BotManager:
     """
-    Una clase Singleton que mantiene una referencia a la instancia de la aplicación del bot.
+    Implementa un patrón Singleton para proporcionar acceso global a la instancia
+    de la `Application` de `python-telegram-bot`.
     """
-    _instance: Optional['BotManager'] = None
+    _instance = None
     _application: Optional[Application] = None
-    _bot: Optional[ExtBot] = None
 
     def __new__(cls):
-        """
-        Implementación del patrón Singleton.
-        """
         if cls._instance is None:
             cls._instance = super(BotManager, cls).__new__(cls)
-            logger.debug("Creando nueva instancia de BotManager.")
         return cls._instance
 
-    def initialize(self, application: Application):
+    def initialize(self, application: Application) -> None:
         """
-        Inicializa el gestor con la instancia de la aplicación del bot.
-        Este método debe ser llamado una sola vez al inicio de la aplicación.
+        Inicializa el BotManager con la instancia de la aplicación.
+        Este método debe ser llamado una sola vez al arrancar el bot.
         """
-        if self._application is not None:
-            logger.warning("BotManager ya ha sido inicializado. Ignorando llamada.")
-            return
+        if self._application is None:
+            self._application = application
+            logger.info("✅ BotManager inicializado con la aplicación de Telegram.")
+        else:
+            logger.warning("BotManager ya ha sido inicializado.")
 
-        if not isinstance(application, Application):
-            raise TypeError("El objeto proporcionado no es una instancia de telegram.ext.Application")
+    # ¡NUEVO MÉTODO!
+    def is_initialized(self) -> bool:
+        """
+        Comprueba si el BotManager ha sido inicializado.
 
-        self._application = application
-        self._bot = application.bot
-        logger.info("✅ BotManager inicializado con la aplicación de Telegram.")
+        Returns:
+            True si la aplicación ha sido establecida, False en caso contrario.
+        """
+        return self._application is not None
 
     @property
     def application(self) -> Application:
         """
-        Devuelve la instancia de la `Application`.
-        Lanza un error si el gestor no ha sido inicializado.
+        Propiedad para acceder a la instancia completa de la aplicación.
         """
         if self._application is None:
             raise RuntimeError("BotManager no ha sido inicializado. Llama a `initialize()` primero.")
@@ -77,39 +78,35 @@ class BotManager:
     @property
     def bot(self) -> ExtBot:
         """
-        Devuelve la instancia del `ExtBot` para enviar mensajes.
-        Lanza un error si el gestor no ha sido inicializado.
+        Propiedad de conveniencia para acceder directamente al objeto `bot`.
         """
-        if self._bot is None:
-            raise RuntimeError("BotManager no ha sido inicializado. Llama a `initialize()` primero.")
-        return self._bot
+        return self.application.bot
 
     @property
-    def job_queue(self):
+    def job_queue(self) -> JobQueue:
         """
+        Propiedad de conveniencia para acceder directamente al objeto `job_queue`.
+        """
+        if self.application.job_queue is None:
+            raise RuntimeError("La JobQueue no está disponible. Asegúrate de que no esté deshabilitada en la configuración.")
+        return self.application.job_queue
 
-        Devuelve la `JobQueue` de la aplicación para programar tareas.
-        Lanza un error si el gestor no ha sido inicializado.
+    def get_user_data(self, user_id: int) -> Dict[Any, Any]:
         """
-        if self._application is None or self._application.job_queue is None:
-            raise RuntimeError("BotManager no ha sido inicializado o la JobQueue no está disponible.")
-        return self._application.job_queue
+        Obtiene el `user_data` para un ID de usuario específico.
+        """
+        return self.application.user_data.get(user_id, {})
+    
+    async def flush_persistence(self) -> None:
+        """
+        Fuerza el guardado de todos los datos de persistencia en el disco.
+        """
+        if self.application.persistence:
+            await self.application.persistence.flush()
+            logger.info("Datos de persistencia guardados en el disco.")
 
-    def get_user_data(self, user_id: int) -> dict:
-        """
-        Devuelve el diccionario `user_data` para un usuario específico.
-        """
-        if self._application is None or self._application.user_data is None:
-             raise RuntimeError("BotManager no ha sido inicializado o la persistencia no está habilitada.")
-        return self._application.user_data.get(user_id, {})
-
-    async def flush_persistence(self):
-        """
-        Fuerza el guardado de todos los datos de persistencia (user_data, chat_data).
-        """
-        if self._application and self._application.persistence:
-            await self._application.persistence.flush()
-            logger.debug("Datos de persistencia guardados manualmente.")
+# Crear la instancia única que será importada por otros módulos.
+bot_manager = BotManager()
 
 # Se crea una única instancia global que será importada por otros módulos.
 bot_manager = BotManager()

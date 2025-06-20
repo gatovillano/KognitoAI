@@ -1,294 +1,152 @@
-# telegram_bot/agenda_manager.py
+# core/agenda_manager.py
 
 """
-Gestor de Lógica de Negocio para la Agenda y los Recordatorios de Eventos.
+Gestor de Lógica de Negocio para la Agenda (Versión Pura).
 
-Este módulo encapsula toda la lógica para programar, consultar y cancelar
-eventos en la agenda de un usuario. Interactúa con la base de datos para la
-persistencia de los eventos y con el `JobQueue` del bot de Telegram para
-programar los recordatorios.
+Este módulo encapsula toda la lógica para interactuar con la tabla `agenda_events`
+en la base de datos. Se encarga de crear, consultar y eliminar eventos.
 
-En la nueva arquitectura, las funciones principales han sido refactorizadas para
-operar con el `account_id` universal del usuario. Sin embargo, para poder enviar
-la notificación del recordatorio a través de Telegram, el sistema necesita
-resolver el `telegram_id` asociado a esa cuenta en el momento de programar el job.
+En esta arquitectura final y desacoplada, este módulo es "puro": no tiene
+conocimiento de ninguna plataforma de interfaz como Telegram. Su única
+responsabilidad es la lógica de negocio y la persistencia de datos.
 
-Este módulo es un excelente ejemplo de cómo la lógica de negocio (`account_id`)
-se mantiene separada de la lógica de entrega de la notificación (`telegram_id`).
+La programación de notificaciones (que es específica de la plataforma) se
+delega a la capa del cliente (ej. `telegram_client`).
 """
 
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 import dateparser
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Tuple, List, Dict, Any
 
-from sqlalchemy import select, delete
-from telegram.ext import CallbackContext
+from sqlalchemy import select
 
 # Importaciones del proyecto
-from core.database import SessionLocal, Account, AgendaEvent, PlatformIdentity
+from core.database import SessionLocal, Account, AgendaEvent
 from utils.db_session import DBSession
-from telegram_client.bot_manager import bot_manager # Aún necesario para la JobQueue
 
-# Configuración del logger para este módulo
+# Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
 
 
-async def _send_reminder_callback(context: CallbackContext):
+async def schedule_event(account_id: str, description: str, natural_language_datetime: str) -> Tuple[bool, str, AgendaEvent | None]:
     """
-    La función que ejecuta JobQueue para enviar un recordatorio de evento.
-    Esta función sigue dependiendo del ecosistema de Telegram para la entrega.
-    """
-    job = context.job
-    if not job or not job.data:
-        logger.error("Job de recordatorio de evento ejecutado sin datos.")
-        return
+    Crea un nuevo evento y lo guarda en la base de datos.
 
-    # Extraer datos del job
-    event_id = job.data.get("event_id")
-    account_id = job.data.get("account_id")
-    telegram_id = job.data.get("telegram_id")
-    description = job.data.get("description")
-
-    if not all([event_id, account_id, telegram_id, description]):
-        logger.error(f"Faltan datos en el job del recordatorio de evento: {job.data}")
-        return
-
-    logger.info(f"Enviando recordatorio para el evento {event_id} (cuenta: {account_id}) al usuario de Telegram {telegram_id}")
-    try:
-        # Usamos el bot_manager para asegurar el acceso al bot y enviar el mensaje
-        await bot_manager.bot.send_message(
-            chat_id=telegram_id,
-            text=f"⏰ ¡Recordatorio! Tienes un evento programado:\n\n<b>{description}</b>",
-            parse_mode='HTML'
-        )
-        # Marcar el recordatorio como enviado en la BD para no reenviarlo
-        async with DBSession(SessionLocal) as db:
-            event = await db.get(AgendaEvent, event_id)
-            if event:
-                event.reminder_sent = True
-                await db.commit()
-                logger.info(f"Evento {event_id} marcado como 'reminder_sent=True'.")
-    except Exception as e:
-        logger.error(f"Error al enviar recordatorio para evento {event_id}: {e}", exc_info=True)
-
-
-async def schedule_event(account_id: str, description: str, natural_language_datetime: str, telegram_id: int) -> Tuple[bool, str]:
-    """
-    Programa un nuevo evento y su recordatorio, usando `account_id` para la lógica
-    y `telegram_id` para la notificación.
+    Esta versión pura NO interactúa con la JobQueue. Solo se encarga de la
+    lógica de la base de datos y devuelve el objeto del evento creado para que
+    el llamador (el handler) decida cómo programar la notificación.
 
     Args:
         account_id: El ID universal de la cuenta del usuario.
         description: La descripción del evento.
-        natural_language_datetime: El texto con la fecha/hora.
-        telegram_id: El ID de Telegram para la entrega del recordatorio.
+        natural_language_datetime: La descripción en lenguaje natural del tiempo.
 
     Returns:
-        Una tupla (éxito, mensaje).
+        Una tupla (bool, str, AgendaEvent | None) indicando éxito, un mensaje
+        para el usuario, y el objeto del evento creado.
     """
     async with DBSession(SessionLocal) as db:
         try:
-            # PASO 1: OBTENER LA CUENTA Y SU ZONA HORARIA
-            account = await db.get(Account, uuid.UUID(account_id))
-            if not account or not account.profile or not account.profile.timezone:
-                logger.warning(f"Intento de programar evento para la cuenta {account_id} sin zona horaria configurada.")
-                return False, "No tienes una zona horaria configurada. Por favor, configúrala primero."
+            account = await db.get(Account, account_id)
+            if not account or not account.timezone:
+                return False, "No pude programar el evento porque no conozco tu zona horaria. Por favor, configúrala primero.", None
 
-            user_tz_str = account.profile.timezone
+            user_tz_str = account.timezone
             user_tz = pytz.timezone(user_tz_str)
             
-            # PASO 2: PARSEAR LA FECHA CON LA ZONA HORARIA DEL USUARIO
-            date_settings = {'PREFER_DATES_FROM': 'future', 'TIMEZONE': user_tz_str}
-            event_datetime_local = dateparser.parse(natural_language_datetime, **date_settings)
-            if not event_datetime_local:
-                logger.warning(f"Dateparser no pudo entender '{natural_language_datetime}' para la zona horaria {user_tz_str}.")
-                return False, f"No pude entender la fecha y hora '{natural_language_datetime}'. Intenta ser más específico."
+            # ¡CORREGIDO! Usamos **date_settings en lugar de settings=...
+            date_settings = {'TO_TIMEZONE': 'UTC', 'RETURN_AS_TIMEZONE_AWARE': True, 'RELATIVE_BASE': datetime.now(user_tz)}
+            event_datetime_utc = dateparser.parse(natural_language_datetime, **date_settings)
 
-            if event_datetime_local.tzinfo is None:
-                event_datetime_local = user_tz.localize(event_datetime_local)
+            if not event_datetime_utc:
+                logger.warning(f"Dateparser no pudo entender '{natural_language_datetime}'.")
+                return False, f"No pude entender el tiempo '{natural_language_datetime}'. Intenta con 'mañana a las 3pm', 'en 2 horas', etc.", None
 
-            if event_datetime_local < datetime.now(user_tz):
-                return False, "No puedo programar recordatorios en el pasado. Por favor, elige una fecha y hora futura."
+            now_utc = datetime.now(pytz.utc)
+            if event_datetime_utc < now_utc:
+                return False, "No puedo programar eventos en el pasado. Por favor, elige una fecha y hora futura.", None
 
-            event_datetime_utc = event_datetime_local.astimezone(pytz.utc)
-
-            # PASO 3: GUARDAR EL EVENTO EN LA BD
             new_event = AgendaEvent(
-                account_id=uuid.UUID(account_id),
+                account_id=account_id,
                 description=description,
                 event_datetime_utc=event_datetime_utc,
-                user_timezone=user_tz_str,
+                is_active=True
             )
             db.add(new_event)
-            await db.flush() # Para obtener el ID del nuevo evento
-
-            # PASO 4: PROGRAMAR EL JOB DE RECORDATORIO
-            job_name = f"reminder_{new_event.id}_{uuid.uuid4()}"
-            new_event.job_name = job_name
-
-            bot_manager.job_queue.run_once(
-                _send_reminder_callback,
-                when=event_datetime_utc,
-                data={
-                    "event_id": new_event.id,
-                    "account_id": account_id,
-                    "telegram_id": telegram_id, # Guardamos el ID de entrega
-                    "description": description
-                },
-                name=job_name
-            )
-
             await db.commit()
-            formatted_local_time = event_datetime_local.strftime('%Y-%m-%d a las %H:%M:%S')
-            logger.info(f"Evento programado para cuenta {account_id} en UTC: {event_datetime_utc}, local: {event_datetime_local}")
-            return True, f"¡Evento programado! Te recordaré sobre '{description}' el {formatted_local_time} ({user_tz_str})."
+            await db.refresh(new_event)
+            
+            display_time = event_datetime_utc.astimezone(user_tz)
+            display_time_str = display_time.strftime('%H:%M del %d-%m-%Y')
+            
+            message = f"¡Evento guardado! Te recordaré sobre '{description}' el {display_time_str} ({user_tz_str})."
+            logger.info(f"Evento {new_event.id} creado para la cuenta {account_id}.")
+            
+            return True, message, new_event
 
         except Exception as e:
-            logger.error(f"Error al programar evento para la cuenta {account_id}: {e}", exc_info=True)
+            logger.error(f"Error al guardar evento para la cuenta '{account_id}': {e}", exc_info=True)
             await db.rollback()
-            return False, "Ocurrió un error inesperado al programar tu evento."
-
+            return False, "Ocurrió un error inesperado al guardar tu evento.", None
 
 async def get_agenda_for_day(account_id: str, target_day: str) -> str:
     """
-    Consulta la agenda para un día específico ('hoy', 'mañana', o una fecha).
-    Opera exclusivamente con el `account_id`.
+    Obtiene los eventos de un usuario para un día específico y los formatea como texto.
+    Esta función está diseñada para ser llamada por el agente de IA.
+
+    Args:
+        account_id: El ID universal de la cuenta del usuario.
+        target_day: Una cadena en lenguaje natural que representa el día a consultar.
+
+    Returns:
+        Una cadena de texto formateada con la lista de eventos.
     """
     async with DBSession(SessionLocal) as db:
-        account = await db.get(Account, uuid.UUID(account_id))
-        if not account or not account.profile or not account.profile.timezone:
-            return "Necesito que configures tu zona horaria para poder ver tu agenda."
+        account = await db.get(Account, account_id)
+        if not account or not account.timezone:
+            return "No puedo consultar tu agenda porque no conozco tu zona horaria."
+
+        user_tz = pytz.timezone(account.timezone)
+        now_in_user_tz = datetime.now(user_tz)
         
-        user_tz = pytz.timezone(account.profile.timezone)
-        now_local = datetime.now(user_tz)
-
-        # Determinar el rango de fechas a consultar
-        if target_day.lower() == 'hoy':
-            start_of_day_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-            day_description = "hoy"
-        elif target_day.lower() == 'mañana':
-            start_of_day_local = (now_local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-            day_description = "mañana"
-        else:
-            parsed_date = dateparser.parse(target_day, settings={'TIMEZONE': account.profile.timezone, 'PREFER_DATES_FROM': 'future'})
-            if not parsed_date:
-                return f"No pude entender la fecha '{target_day}'. Intenta con 'hoy', 'mañana' o una fecha."
-            start_of_day_local = user_tz.localize(parsed_date.replace(hour=0, minute=0, second=0, microsecond=0))
-            day_description = f"el {start_of_day_local.strftime('%d de %B de %Y')}"
-
-        end_of_day_local = start_of_day_local + timedelta(days=1)
-        start_utc = start_of_day_local.astimezone(pytz.utc)
-        end_utc = end_of_day_local.astimezone(pytz.utc)
-
-        # Consultar los eventos en la base de datos
-        stmt = select(AgendaEvent).where(
-            AgendaEvent.account_id == uuid.UUID(account_id),
-            AgendaEvent.event_datetime_utc >= start_utc,
-            AgendaEvent.event_datetime_utc < end_utc
-        ).order_by(AgendaEvent.event_datetime_utc)
+        # Usamos 'PREFER_DATES_FROM': 'future' para que 'hoy a las 10pm' no se interprete como en el pasado si ya son las 11pm.
+        target_date_obj = dateparser.parse(target_day, settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': now_in_user_tz})
         
-        results = await db.execute(stmt)
-        events = results.scalars().all()
+        if not target_date_obj:
+            return f"No entendí la fecha '{target_day}'. Por favor, intenta de nuevo."
+
+        start_of_day = user_tz.localize(datetime(target_date_obj.year, target_date_obj.month, target_date_obj.day, 0, 0, 0))
+        end_of_day = user_tz.localize(datetime(target_date_obj.year, target_date_obj.month, target_date_obj.day, 23, 59, 59))
+
+        start_of_day_utc = start_of_day.astimezone(pytz.utc)
+        end_of_day_utc = end_of_day.astimezone(pytz.utc)
+
+        stmt = (
+            select(AgendaEvent)
+            .where(
+                AgendaEvent.account_id == account_id,
+                AgendaEvent.is_active == True,
+                AgendaEvent.event_datetime_utc >= start_of_day_utc,
+                AgendaEvent.event_datetime_utc <= end_of_day_utc
+            )
+            .order_by(AgendaEvent.event_datetime_utc)
+        )
+        result = await db.execute(stmt)
+        events = result.scalars().all()
 
         if not events:
-            return f"No tienes nada programado para {day_description}."
+            return f"No tienes eventos programados para el {target_date_obj.strftime('%d de %B de %Y')}."
 
-        response_lines = [f"Esto es lo que tienes en tu agenda para {day_description}:"]
+        event_list = [f"Tu agenda para el {target_date_obj.strftime('%d de %B de %Y')}:"]
         for event in events:
-            event_time_local = event.event_datetime_utc.astimezone(user_tz)
-            response_lines.append(f"- A las {event_time_local.strftime('%H:%M')}: {event.description} (ID: {event.id})")
+            local_time = event.event_datetime_utc.astimezone(user_tz)
+            event_list.append(f"- ID {event.id}: {event.description} a las {local_time.strftime('%H:%M')}")
         
-        return "\n".join(response_lines)
+        return "\n".join(event_list)
 
-
-async def cancel_event(account_id: str, event_id: int) -> Tuple[bool, str]:
-    """
-    Cancela un evento programado y su recordatorio, usando `account_id`.
-    """
-    logger.info(f"Cuenta {account_id} intentando cancelar el evento ID: {event_id}")
-    async with DBSession(SessionLocal) as db:
-        try:
-            stmt = select(AgendaEvent).where(
-                AgendaEvent.id == event_id,
-                AgendaEvent.account_id == uuid.UUID(account_id)
-            )
-            result = await db.execute(stmt)
-            event_to_cancel = result.scalars().first()
-
-            if not event_to_cancel:
-                logger.warning(f"No se encontró el evento {event_id} para la cuenta {account_id}.")
-                return False, f"No encontré ningún evento con el ID {event_id} en tu agenda."
-
-            # Cancelar el job en la JobQueue
-            if event_to_cancel.job_name:
-                current_jobs = bot_manager.job_queue.get_jobs_by_name(event_to_cancel.job_name)
-                if not current_jobs:
-                    logger.warning(f"No se encontró el job '{event_to_cancel.job_name}' para el evento {event_id}.")
-                else:
-                    for job in current_jobs:
-                        job.schedule_removal()
-                    logger.info(f"Job '{event_to_cancel.job_name}' cancelado.")
-
-            # Eliminar el evento de la base de datos
-            description = event_to_cancel.description
-            await db.delete(event_to_cancel)
-            await db.commit()
-            
-            logger.info(f"Evento {event_id} ('{description}') eliminado de la DB para la cuenta {account_id}.")
-            return True, f"¡Hecho! El evento '{description}' (ID: {event_id}) ha sido cancelado y eliminado de tu agenda."
-
-        except Exception as e:
-            logger.error(f"Error al cancelar el evento {event_id} para la cuenta {account_id}: {e}", exc_info=True)
-            await db.rollback()
-            return False, "Ocurrió un error inesperado al intentar cancelar el evento."
-
-
-async def reschedule_pending_reminders(application):
-    """
-    Carga los recordatorios pendientes de la BD y los vuelve a programar al iniciar el bot.
-    """
-    logger.info("Re-programando recordatorios de agenda pendientes...")
-    async with DBSession(SessionLocal) as db:
-        now_utc = datetime.now(pytz.utc)
-        stmt = select(AgendaEvent).where(
-            AgendaEvent.reminder_sent == False,
-            AgendaEvent.event_datetime_utc > now_utc
-        )
-        results = await db.execute(stmt)
-        pending_events = results.scalars().all()
-
-        count = 0
-        for event in pending_events:
-            if not event.job_name: continue
-
-            # Necesitamos obtener el telegram_id para la entrega de la notificación
-            identity_stmt = select(PlatformIdentity).where(
-                PlatformIdentity.account_id == event.account_id,
-                PlatformIdentity.platform == 'telegram'
-            )
-            identity_result = await db.execute(identity_stmt)
-            identity = identity_result.scalars().first()
-
-            if not identity:
-                logger.warning(f"No se pudo encontrar una identidad de Telegram para la cuenta {event.account_id} del evento {event.id}. No se puede reprogramar.")
-                continue
-
-            application.job_queue.run_once(
-                _send_reminder_callback,
-                when=event.event_datetime_utc,
-                data={
-                    "event_id": event.id,
-                    "account_id": str(event.account_id),
-                    "telegram_id": identity.platform_user_id,
-                    "description": event.description
-                },
-                name=event.job_name
-            )
-            count += 1
-        logger.info(f"✅ {count} recordatorios de agenda han sido re-programados.")
 
 async def get_events_as_dicts(account_id: str) -> List[Dict[str, Any]]:
     """
@@ -303,10 +161,40 @@ async def get_events_as_dicts(account_id: str) -> List[Dict[str, Any]]:
         now_utc = datetime.now(pytz.utc)
         stmt = (
             select(AgendaEvent)
-            .where(AgendaEvent.account_id == account_id, AgendaEvent.event_datetime_utc > now_utc)
+            .where(AgendaEvent.account_id == account_id, AgendaEvent.event_datetime_utc > now_utc, AgendaEvent.is_active == True)
             .order_by(AgendaEvent.event_datetime_utc)
         )
         result = await db.execute(stmt)
         events = result.scalars().all()
-        # Usa el método to_dict que ya definimos en el modelo AgendaEvent
+        # Usa el método to_dict que definimos en el modelo AgendaEvent
         return [event.to_dict(account.timezone) for event in events]
+
+
+async def cancel_event(account_id: str, event_id: int) -> Tuple[bool, str]:
+    """
+    Cancela un evento marcándolo como inactivo en la base de datos.
+    NO se encarga de cancelar el job en la JobQueue, eso debe hacerlo el llamador.
+
+    Args:
+        account_id: El ID universal de la cuenta del usuario.
+        event_id: El ID del evento a cancelar.
+
+    Returns:
+        Una tupla (bool, str) indicando éxito y un mensaje para el usuario.
+    """
+    async with DBSession(SessionLocal) as db:
+        stmt = select(AgendaEvent).where(AgendaEvent.id == event_id, AgendaEvent.account_id == account_id)
+        result = await db.execute(stmt)
+        event_to_cancel = result.scalars().first()
+
+        if not event_to_cancel:
+            return False, "No se encontró un evento con ese ID en tu cuenta."
+        
+        if not event_to_cancel.is_active:
+            return False, "Este evento ya ha sido cancelado o ya ocurrió."
+            
+        event_to_cancel.is_active = False
+        await db.commit()
+        
+        logger.info(f"Evento {event_id} cancelado en la base de datos para la cuenta {account_id}.")
+        return True, f"El evento '{event_to_cancel.description}' ha sido cancelado."

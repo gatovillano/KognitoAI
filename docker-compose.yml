@@ -1,69 +1,90 @@
-# docker-compose.yml - VERSIÓN FINAL Y DEFINITIVA
+# docker-compose.yml - VERSIÓN CON REDES EXPLÍCITAS
 
 version: "3.8"
 
 services:
-  # --- 1. Base de Datos (PostgreSQL con pgvector) ---
+  # 1. Base de Datos
   db:
     image: pgvector/pgvector:pg15
+    container_name: kognito_db # Nombre explícito
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-telegram_bot_db}
+      POSTGRES_DB: ${POSTGRES_DB:-kognito_db}
     volumes:
       - db_data:/var/lib/postgresql/data
     networks:
-      - ai_network
+      - kognito_network
 
-  # --- 2. Servidor API/Web (FastAPI) - El Cerebro ---
-  webapp:
+  # 2. El Cerebro (Servicio Core API)
+  core:
     build:
       context: .
-      dockerfile: Dockerfile.webapp
+      dockerfile: Dockerfile.core
+    container_name: kognito_core # Nombre explícito
     restart: always
     depends_on:
       - db
     ports:
-      # Expone el puerto 8000 del contenedor al 8007 de tu máquina.
-      - "8009:8000"
+      - "${API_PORT:-8889}:8000" # Usamos una variable de entorno para el puerto
     volumes:
-      # Monta todo el directorio del proyecto en /app.
-      # ¡Simple y potente!
-      - .:/app
-    environment:
-      # URL para conectar a la base de datos dentro de la red de Docker.
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-telegram_bot_db}
-    env_file:
-      - ./.env # Carga el resto de variables (API keys, etc.).
-    networks:
-      - ai_network
-
-  # --- 3. Bot de Telegram - El Cliente Ligero ---
-  bot:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: always
-    depends_on:
-      - webapp # Es crucial que espere a que la API esté lista.
-    volumes:
-      # Monta también todo el directorio del proyecto en /app.
-      - .:/app
+      - ./core:/app/core
+      - ./tools:/app/tools
+      - ./utils:/app/utils
+      - ./run_api.py:/app/run_api.py
+      - ./credentials/gen-lang-client-0283065579-d517663d377f.json:/app/credentials/gen-lang-client-0283065579-d517663d377f.json:ro
     env_file:
       - ./.env
-    environment:
-      # URL para que el bot se comunique con la API.
-      # 'webapp' es el nombre del servicio, que Docker resuelve a la IP interna.
-      API_SERVER_URL: http://webapp:8000
     networks:
-      - ai_network
+      - kognito_network
 
-# --- Red interna para la comunicación entre servicios ---
+  # 3. El Cliente de Telegram
+  telegram_client:
+    build:
+      context: .
+      dockerfile: Dockerfile.telegram
+    container_name: kognito_telegram_client # Nombre explícito
+    restart: always
+    ports:
+      # Puerto para comunicación interna desde otros servicios.
+      - "9090:9090"
+    depends_on:
+      - core
+    volumes:
+      - ./telegram_client:/app/telegram_client
+      - ./run_telegram_bot.py:/app/run_telegram_bot.py
+      - ./core:/app/core
+      - ./utils:/app/utils
+    env_file:
+      - ./.env
+    networks:
+      - kognito_network
+    links:
+      - core # ¡NUEVO! Creamos un enlace explícito al servicio core.
+
+  # 4. El Frontend de la Web App Pública
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: kognito_frontend # Nombre explícito
+    restart: always
+    ports:
+      - "${FRONTEND_PORT:-8880}:80"
+    volumes:
+      - ./public_chat_ui:/usr/share/nginx/html
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - core
+    networks:
+      - kognito_network
+    links:
+      - core # ¡NUEVO! El frontend también necesita hablar con el core.
+
 networks:
-  ai_network:
+  kognito_network:
     driver: bridge
 
-# --- Volúmenes para la persistencia de datos ---
 volumes:
   db_data:

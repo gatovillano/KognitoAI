@@ -24,6 +24,7 @@ import uuid
 from typing import List, Tuple, Optional
 
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.constants import ParseMode  # <-- Add this import
 
 logger = logging.getLogger(__name__)
 
@@ -80,79 +81,71 @@ def split_text_into_pages(text: str, max_chars: int = TELEGRAM_MAX_MESSAGE_LENGT
     return pages
 
 
+# ...dentro de paginator.py
+
 class Paginator:
     """
-    Gestiona el estado y la presentación de un texto paginado.
+    Gestiona la paginación de texto largo para los mensajes de Telegram.
     """
     def __init__(self,
                  chunks: List[str],
-                 session_id: Optional[str] = None,
-                 title: str = "Respuesta",
-                 parse_mode: str = 'HTML'):
+                 title: str = "",
+                 parse_mode: str = ParseMode.HTML,
+                 initial_page: int = 1,
+                 prefix: Optional[str] = None): # <-- ¡NUEVO PARÁMETRO!
         """
-        Inicializa una nueva sesión de paginación.
+        Inicializa el paginador.
 
         Args:
-            chunks: La lista de páginas (texto ya dividido).
-            session_id: Un ID único para esta sesión de paginación. Se genera si no se proporciona.
-            title: Un título para mostrar en el encabezado de cada página.
-            parse_mode: El modo de parseo para el texto (HTML, MarkdownV2).
+            chunks: Una lista de cadenas, donde cada cadena es una página.
+            title: Un título opcional que aparecerá en el encabezado de cada página.
+            parse_mode: El modo de parseo para el mensaje (HTML, MarkdownV2).
+            initial_page: La página con la que comenzar (por defecto 1).
+            prefix: Un prefijo opcional para el ID de la sesión, útil para depuración.
         """
+        if not chunks:
+            raise ValueError("La lista de chunks no puede estar vacía.")
+
         self.chunks = chunks
-        self.total_pages = len(chunks)
-        self.current_page_index = 0
-        self.session_id = session_id or str(uuid.uuid4())
         self.title = title
+        self.total_pages = len(chunks)
         self.parse_mode = parse_mode
+        self.current_page = max(1, min(initial_page, self.total_pages))
 
-    def get_page(self) -> Tuple[str, Optional[InlineKeyboardMarkup]]:
+        # ¡CORREGIDO! Usa el prefijo para generar un ID de sesión más descriptivo.
+        prefix_str = prefix if prefix and prefix.strip() else "paginator"
+        self.session_id: str = f"{prefix_str}_{uuid.uuid4().hex[:8]}"
+
+    def get_page(self) -> Tuple[str, InlineKeyboardMarkup]:
         """
-        Obtiene el texto formateado y el teclado de botones para la página actual.
-
-        Returns:
-            Una tupla que contiene:
-            - El texto de la página actual con su encabezado y pie de página.
-            - Un `InlineKeyboardMarkup` con los botones de navegación, o `None` si solo hay una página.
+        Obtiene el texto y los botones para la página actual.
         """
-        if not self.chunks:
-            return "No hay contenido para mostrar.", None
+        page_index = self.current_page - 1
+        text_chunk = self.chunks[page_index]
 
-        page_content = self.chunks[self.current_page_index]
-        page_num = self.current_page_index + 1
+        header = f"📄 <b>{self.title}</b>\n\n" if self.title else ""
+        footer = f"\n\n--- Página {self.current_page}/{self.total_pages} ---"
         
-        # Formatear el texto completo del mensaje
-        header = f"📄 <b>{self.title}</b> (Página {page_num}/{self.total_pages})\n"
-        footer = f"\n(Página {page_num}/{self.total_pages})"
-        
-        full_text = header + page_content + footer
+        full_text = f"{header}{text_chunk}{footer}"
 
-        # Crear el teclado de botones
-        keyboard = self._create_keyboard()
-
-        return full_text, keyboard
-
-    def _create_keyboard(self) -> Optional[InlineKeyboardMarkup]:
-        """Crea el teclado en línea con los botones de navegación."""
-        if self.total_pages <= 1:
-            return None
-
-        buttons = []
-        # Botón "Anterior" (deshabilitado en la primera página)
-        if self.current_page_index > 0:
-            buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"paginator:{self.session_id}:prev"))
-        
-        # Botón "Siguiente" (deshabilitado en la última página)
-        if self.current_page_index < self.total_pages - 1:
-            buttons.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"paginator:{self.session_id}:next"))
-
-        return InlineKeyboardMarkup([buttons])
+        keyboard = []
+        row = []
+        if self.current_page > 1:
+            row.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"{self.session_id}:prev"))
+        if self.current_page < self.total_pages:
+            row.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"{self.session_id}:next"))
+        if row:
+            keyboard.append(row)
+            
+        return full_text, InlineKeyboardMarkup(keyboard)
 
     def next_page(self):
-        """Avanza a la siguiente página, si es posible."""
-        if self.current_page_index < self.total_pages - 1:
-            self.current_page_index += 1
+        """Avanza a la siguiente página."""
+        if self.current_page < self.total_pages:
+            self.current_page += 1
 
     def previous_page(self):
-        """Retrocede a la página anterior, si es posible."""
-        if self.current_page_index > 0:
-            self.current_page_index -= 1
+        """Retrocede a la página anterior."""
+        if self.current_page > 1:
+            self.current_page -= 1
+

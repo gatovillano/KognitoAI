@@ -1,39 +1,44 @@
 # requirements.txt
-# Dependencias para el cliente ligero del bot de Telegram.
+# Dependencias unificadas para todos los servicios de Python de Kognito AI.
 
-# --- Framework del Bot y Comunicación ---
+# --- Frameworks Principales ---
+fastapi
+uvicorn[standard]
 python-telegram-bot
-httpx # Para hacer peticiones asíncronas a nuestra API de backend.
+httpx
 
-# --- Procesamiento de Audio ---
-faster-whisper
-# Nota: faster-whisper puede requerir dependencias adicionales del sistema
-# que ya están incluidas en nuestro Dockerfile.
-
-# --- Utilidades Generales ---
-python-dotenv # Para cargar variables desde el archivo .env
-pytz # Para manejo de zonas horarias
-dateparser # Para interpretar fechas en lenguaje natural
-sqlalchemy
+# --- Base de Datos y ORM ---
+sqlalchemy[asyncio]
+psycopg[async] # Driver de BD
 pgvector
 
-# Dependencias adicionales mínimas para el bot
-psycopg[async]
-sqlalchemy[asyncio]
+# --- LangChain y Lógica de IA (Stack de Google) ---
 langchain
 langchain-core
 langchain-community
 langchain-google-genai
+langgraph
 langchain-postgres==0.0.4
-pydantic
-beautifulsoup4
-python-multipart
-aiofiles
-python-docx
-pdfminer.six
-tiktoken
-emoji
-requests
+langchain-google-vertexai
+
+# --- Autenticación y Credenciales ---
 google-auth
+google-auth-httplib2
+google-api-python-client
 PyJWT
-ffmpeg-python
+
+# --- Utilidades y Herramientas ---
+tiktoken
+beautifulsoup4
+aiohttp
+requests
+python-dotenv
+pytz
+dateparser
+emoji
+aiofiles
+python-multipart
+# --- Procesamiento de Audio y Documentos ---
+faster-whisper
+pdfminer.six
+python-docx

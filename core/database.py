@@ -29,14 +29,16 @@ import logging
 import asyncio
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, Optional, Tuple
+
+import pytz
 
 # --- Importaciones de SQLAlchemy ---
 from sqlalchemy import (
     Column, String, DateTime, Text, ForeignKey, BigInteger, Integer, Boolean,
     UniqueConstraint, select, text
 )
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import sessionmaker, relationship, selectinload
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -89,6 +91,7 @@ class Account(Base):
     
     name = Column(String(255), nullable=True, comment="Nombre principal de la cuenta, puede ser establecido por el usuario.")
     email = Column(String(255), unique=True, nullable=True, index=True, comment="Email opcional para inicio de sesión o notificaciones.")
+    username = Column(String(255), unique=True, nullable=True, index=True) 
     timezone = Column(String(255), nullable=True, default="UTC", comment="Zona horaria preferida de la cuenta.")
     custom_system_prompt = Column(Text, nullable=True, comment="Prompt de sistema personalizado para la IA de esta cuenta.")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -137,16 +140,20 @@ class PlatformIdentity(Base):
 # --- Modelos de Datos Refactorizados (ahora vinculados a Account) ---
 
 class Perfil(Base):
-    """Almacena el perfil estructurado de un usuario."""
+    """Modelo para el perfil estructurado del usuario."""
     __tablename__ = "profiles"
-    id = Column(Integer, primary_key=True, index=True)
-    # Refactorizado: Se vincula a account_id
+
+    id = Column(Integer, primary_key=True)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, unique=True)
     
     nombre = Column(String(255), nullable=True)
-    gustos = Column(Text, nullable=True)
-    intereses = Column(Text, nullable=True)
-    otros_datos = Column(Text, nullable=True)
+    gustos = Column(String, nullable=True)
+    intereses = Column(String, nullable=True)
+    otros_datos = Column(String, nullable=True)
+    
+    # ¡CORREGIDO! Añadimos la columna que faltaba.
+    # Será un string que puede ser nulo si el usuario no tiene un prompt personalizado.
+    system_prompt = Column(String, nullable=True)
 
     account = relationship("Account", back_populates="profile")
 
@@ -183,20 +190,35 @@ class Nota(Base):
 
 
 class AgendaEvent(Base):
-    """Almacena los eventos de la agenda de un usuario."""
+    """Modelo para los eventos de la agenda del usuario."""
     __tablename__ = "agenda_events"
-    id = Column(Integer, primary_key=True, index=True)
-    # Refactorizado: Se vincula a account_id
+
+    id = Column(Integer, primary_key=True)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
-    
-    description = Column(Text, nullable=False)
+    description = Column(String, nullable=False)
     event_datetime_utc = Column(DateTime(timezone=True), nullable=False)
-    user_timezone = Column(String(255), nullable=False)
-    reminder_sent = Column(Boolean, default=False)
-    job_name = Column(String(255), unique=True, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # ¡CORREGIDO! Añadimos la columna que faltaba.
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    job_name = Column(String, nullable=True, unique=True) # Para poder cancelar los jobs de Telegram
 
     account = relationship("Account", back_populates="agenda_events")
+
+    def to_dict(self, timezone_str: str | None = "UTC") -> Dict[str, Any]:
+        """Convierte el objeto a un diccionario para su uso en APIs."""
+        user_tz = pytz.timezone(timezone_str) if timezone_str else pytz.utc
+        local_datetime = self.event_datetime_utc.astimezone(user_tz)
+        
+        return {
+            "id": self.id,
+            "account_id": str(self.account_id),
+            "description": self.description,
+            "event_datetime_utc": self.event_datetime_utc.isoformat(),
+            "event_datetime_local": local_datetime.isoformat(),
+            "user_timezone": str(user_tz),
+            "is_active": self.is_active
+        }
 
 
 class Recordatorio(Base):
@@ -240,68 +262,67 @@ async def create_tables():
 
 
 async def get_or_create_account_from_platform_id(
-    platform: str,
+    platform: str, 
     platform_user_id: str,
-    platform_user_name: Optional[str] = None
-) -> Optional[Account]:
+    first_name: str | None = None,
+    last_name: str | None = None,
+    username: str | None = None
+) -> Tuple[Account, bool] | None:
     """
-    Obtiene una cuenta universal a partir de un ID de plataforma, o la crea si no existe.
-
-    Esta es la función de enlace clave entre una plataforma externa (como Telegram)
-    y nuestro sistema de cuentas interno.
-
-    Args:
-        platform: El nombre de la plataforma (ej. "telegram").
-        platform_user_id: El ID del usuario en esa plataforma.
-        platform_user_name: El nombre del usuario en esa plataforma (para crear la cuenta).
-
-    Returns:
-        El objeto `Account` correspondiente, o `None` si ocurre un error.
+    Obtiene una cuenta basada en un ID de plataforma, o la crea si no existe,
+    poblando los datos del perfil si se proporcionan.
     """
     async with DBSession(SessionLocal) as db:
         try:
-            # 1. Buscar si ya existe una identidad para esta plataforma y ID
+            # Primero, buscar si la identidad de la plataforma ya existe.
             stmt = select(PlatformIdentity).where(
                 PlatformIdentity.platform == platform,
-                PlatformIdentity.platform_user_id == str(platform_user_id)
-            )
+                PlatformIdentity.platform_user_id == platform_user_id
+            ).options(selectinload(PlatformIdentity.account).selectinload(Account.profile))
+            
             result = await db.execute(stmt)
             identity = result.scalars().first()
-
+            
             if identity:
-                # Si la identidad existe, devolvemos la cuenta asociada
-                logger.debug(f"Identidad de plataforma encontrada para {platform}:{platform_user_id}. Devolviendo cuenta existente.")
-                return identity.account
-            else:
-                # 2. Si no existe, creamos una nueva cuenta y una nueva identidad
-                logger.info(f"No se encontró identidad para {platform}:{platform_user_id}. Creando nueva cuenta...")
-                
-                # Crear la cuenta universal
-                new_account = Account(name=platform_user_name)
-                db.add(new_account)
-                
-                # Crear la identidad de la plataforma y vincularla a la nueva cuenta
-                new_identity = PlatformIdentity(
-                    platform=platform,
-                    platform_user_id=str(platform_user_id),
-                    account=new_account  # Vincula directamente el objeto
-                )
-                db.add(new_identity)
+                # Si la cuenta existe pero no tiene nombre, la actualizamos.
+                if identity.account and not identity.account.name and first_name:
+                    identity.account.name = first_name
+                    identity.account.username = username
+                    await db.commit()
+                return (identity.account, False)
 
-                # Crear un perfil vacío para la nueva cuenta
-                new_profile = Perfil(account=new_account)
-                db.add(new_profile)
-
-                await db.commit()
-                await db.refresh(new_account) # Refrescar para obtener el ID generado y otras relaciones
-                
-                logger.info(f"✅ Nueva cuenta e identidad creadas para {platform}:{platform_user_id}. Account ID: {new_account.id}")
-                return new_account
+            # Si no existe, crear todo desde cero.
+            logger.info(f"Creando nueva cuenta para {platform}:{platform_user_id}...")
+            
+            # ¡CORREGIDO! Creamos la cuenta con los datos proporcionados.
+            new_account = Account(
+                name=first_name,
+                username=username
+            )
+            db.add(new_account)
+            await db.flush()
+            
+            new_identity = PlatformIdentity(
+                account_id=new_account.id,
+                platform=platform,
+                platform_user_id=platform_user_id
+            )
+            db.add(new_identity)
+            
+            # Crear también un perfil vacío.
+            new_profile = Perfil(account_id=new_account.id)
+            db.add(new_profile)
+            
+            await db.commit()
+            
+            logger.info(f"✅ Nueva cuenta e identidad creadas para {platform}:{platform_user_id}. Account ID: {new_account.id}")
+            return (new_account, True)
 
         except Exception as e:
-            logger.error(f"❌ Error al obtener o crear cuenta para {platform}:{platform_user_id}: {e}", exc_info=True)
+            logger.error(f"Error en get_or_create_account_from_platform_id para {platform}:{platform_user_id}: {e}", exc_info=True)
             await db.rollback()
             return None
+
         
 # En core/database.py, al final del archivo
 
@@ -318,5 +339,29 @@ async def get_account_by_telegram_id(db_session, telegram_id: int) -> Optional[A
             PlatformIdentity.platform_user_id == str(telegram_id)
         )
     )
+    result = await db_session.execute(stmt)
+    return result.scalars().first()
+
+
+# Al final de core/database.py
+
+async def find_telegram_identity(db_session, identifier: str) -> Optional[PlatformIdentity]:
+    """
+    Busca una identidad de Telegram por su ID numérico o su nombre de usuario.
+    """
+    # Intentar buscar por ID numérico primero
+    if identifier.isdigit():
+        stmt = select(PlatformIdentity).where(
+            PlatformIdentity.platform == 'telegram',
+            PlatformIdentity.platform_user_id == identifier
+        )
+    else:
+        # Si no es un número, buscar por nombre de usuario (ignorando mayúsculas/minúsculas)
+        # Necesitamos unir con la tabla Account para obtener el username.
+        stmt = select(PlatformIdentity).join(Account).where(
+            PlatformIdentity.platform == 'telegram',
+            Account.username.ilike(identifier) # ilike es case-insensitive
+        )
+    
     result = await db_session.execute(stmt)
     return result.scalars().first()

@@ -49,7 +49,8 @@ from core.config import settings
 # --- Claves para estado temporal ---
 from utils.image_generation import GENERATED_IMAGE_KEY
 from tools.get_document_content_tool import DOCUMENT_NAME_KEY
-
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 # --- Configuración del Logger ---
 logger = logging.getLogger(__name__)
 
@@ -204,24 +205,20 @@ async def create_and_run_agent(
     Crea y ejecuta el agente de Langchain con manejo explícito de memoria.
     """
     logger.info(f"--- Ejecutando agente para account_id: {account_id} (desde telegram_id: {telegram_id}) ---")
-
-    # 1. --- Obtener Datos del Usuario y Gestionar Historial ---
-    session_id = str(telegram_id)
-    if settings.database_url is None:
-        raise ValueError("DATABASE_URL no está configurada.")
     
-    # Optimizamos haciendo una sola consulta a la BD para obtener todo lo que necesitamos de la cuenta.
-    async with DBSession(SessionLocal) as db:
-        account = await db.get(Account, account_id)
-        author_name = account.name if account and account.name else "Usuario"
-        custom_prompt = account.profile.custom_system_prompt if account and account.profile and account.profile.custom_system_prompt else None
-
+    # --- 1. Gestión del Historial de Chat ---
+    session_id = str(telegram_id)
+    if not settings.database_url:
+        raise ValueError("DATABASE_URL no está configurada para el historial de chat.")
     db_sync_url = settings.database_url.replace("+psycopg", "")
     chat_message_history = PostgresChatMessageHistory(
-        connection_string=db_sync_url, session_id=session_id, table_name="langchain_chat_history"
+        connection_string=db_sync_url,
+        session_id=session_id,
+        table_name="langchain_chat_history",
     )
     full_history = await chat_message_history.aget_messages()
     
+    # Extraer resumen y filtrar historial para el prompt
     summary_string = ""
     history_for_prompt = []
     for msg in full_history:
@@ -230,100 +227,138 @@ async def create_and_run_agent(
         else:
             history_for_prompt.append(msg)
 
-    # 2. --- Preparar el Mensaje Actual ---
+    # --- 2. Preparar el Mensaje Actual del Usuario ---
+    account_name = "Usuario" # Valor por defecto
+    async with DBSession(SessionLocal) as db:
+        account = await db.get(Account, account_id)
+        if account and account.name:
+            account_name = account.name
+            
     current_user_input_content: Any = user_message
     if image_base64:
         current_user_input_content = [
             {"type": "text", "text": user_message},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
         ]
+    current_human_message = HumanMessage(content=current_user_input_content, additional_kwargs={"user_name": account_name})
     
-    # ¡CORREGIDO! Ya no usamos `update`, sino el nombre que obtuvimos de la BD.
-    current_human_message = HumanMessage(
-        content=current_user_input_content,
-        additional_kwargs={"user_name": author_name}
-    )
+    # Combinar historial filtrado con el mensaje actual para el prompt
     full_history_for_llm_prompt = history_for_prompt + [current_human_message]
 
-    # 3. --- Construir el Prompt del Sistema ---
-    user_context_string = await _get_user_context(account_id, user_message)
-    # Ya tenemos `custom_prompt` de la consulta anterior, no necesitamos volver a buscarlo.
-    effective_system_prompt = custom_prompt or settings.default_system_prompt
+    # --- 3. Construir el Prompt del Sistema Dinámicamente ---
+    
+    # ¡CORREGIDO! Llamamos a las funciones que sí existen en tu memory_manager.py
+    
+    # Obtener el perfil y las memorias
+    user_profile = await get_user_profile(account_id)
+    relevant_memories = await get_relevant_memories(account_id, user_message)
 
+    # Construir la parte del perfil del prompt
+    profile_info = []
+    custom_prompt = None
+    if user_profile:
+        if user_profile.nombre: profile_info.append(f"- Nombre: {user_profile.nombre}")
+        if user_profile.gustos: profile_info.append(f"- Gustos: {user_profile.gustos}")
+        if user_profile.intereses: profile_info.append(f"- Intereses: {user_profile.intereses}")
+        if user_profile.otros_datos: profile_info.append(f"- Otros datos: {user_profile.otros_datos}")
+        # ¡CORREGIDO! Usamos el nombre correcto del atributo: system_prompt
+        custom_prompt = user_profile.system_prompt
+        
+    user_context_parts = [
+        "--- Información Relevante sobre el Usuario y su Contexto ---",
+        "Información de Perfil del Usuario:",
+        "\n".join(profile_info) if profile_info else "No hay información de perfil disponible."
+    ]
+
+    if relevant_memories and "No se encontraron memorias relevantes" not in relevant_memories:
+        user_context_parts.append("\nMemorias y Documentos Relevantes (Base de Conocimiento):")
+        user_context_parts.append(relevant_memories)
+
+    user_context_parts.append("---------------------------------------------------------")
+    user_context_string = "\n".join(user_context_parts)
+    
+    effective_system_prompt = custom_prompt or settings.default_system_prompt
     tools = get_all_langchain_tools()
     tool_descriptions = "\n".join([f"- `{tool.name}`: {tool.description}" for tool in tools])
 
-    # ¡INSTRUCCIÓN CRÍTICA PARA EL LLM!
     id_instructions = f"""
     <b>Instrucciones Críticas de Identificación de Usuario:</b>
     - Para CUALQUIER herramienta que requiera el argumento `account_id`, DEBES usar este valor exacto: <b>{account_id}</b>.
     - Para CUALQUIER herramienta que requiera el argumento `telegram_id`, DEBES usar este valor exacto: <b>{telegram_id}</b>.
-    No inventes ni uses otros IDs. Son fundamentales para que las herramientas funcionen.
     """
-    
     system_prompt_content = f"""
-    {user_context_string}
-    {summary_string}
+{user_context_string}
+{summary_string}
     <hr>
-    {effective_system_prompt}
+{effective_system_prompt}
     <hr>
-    {id_instructions}
+{id_instructions}
     <hr>
     <b>Guía de Uso de Herramientas Obligatoria:</b>
     Debes analizar CADA petición del usuario para determinar si una de tus herramientas es la forma más apropiada de responder. Si una herramienta encaja, DEBES usarla.
-    {tool_descriptions}
+{tool_descriptions}
     """
 
     # 4. --- Configurar y Ejecutar el Agente ---
-    prompt_template = ChatPromptTemplate.from_messages([
-        SystemMessage(content=system_prompt_content),
-        MessagesPlaceholder(variable_name="chat_history"),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
-    ])
-    
+    prompt_template = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt_content),
+            MessagesPlaceholder(variable_name="chat_history", optional=True),
+            ("human", "{input}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad"),
+        ]
+    )
+
     if not _main_agent_llm_instance:
         raise RuntimeError("El LLM principal no está inicializado.")
-    
+
     llm_with_tools = _main_agent_llm_instance.bind_tools(tools)
-    
+
+    # ¡CADENA CORREGIDA! La estructura es más estándar y clara.
     agent_chain = (
-        RunnablePassthrough.assign(agent_scratchpad=lambda x: format_to_tool_messages(x.get("intermediate_steps", [])))
+        RunnablePassthrough.assign(
+            agent_scratchpad=lambda x: format_to_tool_messages(x.get("intermediate_steps", []))
+        )
         | prompt_template
         | llm_with_tools
         | ToolsAgentOutputParser()
     )
-    
+
     agent_executor = AgentExecutor(
-        agent=agent_chain,
-        tools=tools,
-        verbose=True,
+        agent=agent_chain, 
+        tools=tools, 
+        verbose=True, 
         handle_parsing_errors=True
     )
-    
+
     final_output = ""
     try:
-        input_dict = {
+        # ¡INVOCACIÓN CORREGIDA! El diccionario de entrada ahora es simple y directo.
+        # Solo pasamos las variables que nuestra plantilla espera: `input` y `chat_history`.
+        # `history_for_prompt` ya contiene los mensajes del historial en el formato correcto.
+        input_data = {
             "input": user_message,
-            "chat_history": full_history_for_llm_prompt,
+            "chat_history": history_for_prompt,
         }
-        
+
         response = await agent_executor.ainvoke(
-            input_dict,
-            config={
-                "configurable": {"account_id": account_id, "telegram_id": telegram_id},
-            }
+            input_data,
+            config={"configurable": {"account_id": account_id, "telegram_id": telegram_id}}
         )
         final_output = response.get("output", "No pude procesar tu solicitud.")
-
-        # 5. --- Guardar Historial y Sumarizar si es necesario ---
-        await chat_message_history.aadd_messages([current_human_message, AIMessage(content=final_output)])
-        
-        updated_full_history = await chat_message_history.aget_messages()
-        if _main_agent_llm_instance.get_num_tokens_from_messages(updated_full_history) > 3000:
-            asyncio.create_task(summarize_history_in_background(updated_full_history, chat_message_history))
 
     except Exception as e:
         logger.error(f"❌ FATAL: Error durante la ejecución del agente para la cuenta {account_id}: {e}", exc_info=True)
         final_output = "Lo siento, ocurrió un error inesperado al procesar tu solicitud. El error ha sido registrado."
-
+    # 5. --- Guardar Historial y Sumarizar ---
+    # Es importante añadir el `current_human_message` que creamos antes
+    await chat_message_history.aadd_messages([current_human_message, AIMessage(content=final_output)])
+    updated_full_history = await chat_message_history.aget_messages()
+    
+    if _main_agent_llm_instance.get_num_tokens_from_messages(updated_full_history) > 3000:
+        asyncio.create_task(summarize_history_in_background(updated_full_history, chat_message_history))
+        
     return sanitize_html(final_output)
+
+
+

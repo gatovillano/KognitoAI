@@ -31,7 +31,7 @@ from langchain_core.tools import BaseTool
 # La función que llama a la API de Vertex AI/Gemini
 from utils.image_generation import generar_imagen_vertex_ai_binario 
 # La clave donde se almacenará la imagen generada
-from utils.image_generation_gemini import GENERATED_IMAGE_KEY 
+from utils.image_generation import GENERATED_IMAGE_KEY 
 # El gestor de estado de la sesión de Telegram
 from telegram_client.bot_manager import bot_manager
 
