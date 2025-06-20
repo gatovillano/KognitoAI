@@ -1,4 +1,3 @@
-```markdown:README.md
 # Kognito AI System
 
 Kognito AI es un sistema modular de asistente inteligente diseñado para integrar diversas funcionalidades de IA y gestión de información personal a través de múltiples plataformas, comenzando con Telegram y una aplicación web. Su arquitectura desacoplada asegura que la lógica de negocio principal sea independiente de la interfaz de usuario, permitiendo una experiencia unificada y extensible.
@@ -146,4 +145,3 @@ Este proyecto está bajo la Licencia MIT. Consulta el archivo `LICENSE` para má
 ---
 
 **Kognito AI System** — Un asistente inteligente modular, seguro y extensible.
-```
