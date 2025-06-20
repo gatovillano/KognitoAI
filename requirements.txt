@@ -14,3 +14,26 @@ faster-whisper
 python-dotenv # Para cargar variables desde el archivo .env
 pytz # Para manejo de zonas horarias
 dateparser # Para interpretar fechas en lenguaje natural
+sqlalchemy
+pgvector
+
+# Dependencias adicionales mínimas para el bot
+psycopg[async]
+sqlalchemy[asyncio]
+langchain
+langchain-core
+langchain-community
+langchain-google-genai
+langchain-postgres==0.0.4
+pydantic
+beautifulsoup4
+python-multipart
+aiofiles
+python-docx
+pdfminer.six
+tiktoken
+emoji
+requests
+google-auth
+PyJWT
+ffmpeg-python

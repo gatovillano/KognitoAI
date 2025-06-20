@@ -28,9 +28,9 @@ from sqlalchemy import select, delete
 from telegram.ext import CallbackContext
 
 # Importaciones del proyecto
-from telegram_bot.database import SessionLocal, Account, AgendaEvent, PlatformIdentity
+from core.database import SessionLocal, Account, AgendaEvent, PlatformIdentity
 from utils.db_session import DBSession
-from telegram_bot.bot_manager import bot_manager # Aún necesario para la JobQueue
+from telegram_client.bot_manager import bot_manager # Aún necesario para la JobQueue
 
 # Configuración del logger para este módulo
 logger = logging.getLogger(__name__)
@@ -102,8 +102,7 @@ async def schedule_event(account_id: str, description: str, natural_language_dat
             
             # PASO 2: PARSEAR LA FECHA CON LA ZONA HORARIA DEL USUARIO
             date_settings = {'PREFER_DATES_FROM': 'future', 'TIMEZONE': user_tz_str}
-            event_datetime_local = dateparser.parse(natural_language_datetime, settings=date_settings)
-
+            event_datetime_local = dateparser.parse(natural_language_datetime, **date_settings)
             if not event_datetime_local:
                 logger.warning(f"Dateparser no pudo entender '{natural_language_datetime}' para la zona horaria {user_tz_str}.")
                 return False, f"No pude entender la fecha y hora '{natural_language_datetime}'. Intenta ser más específico."
@@ -290,3 +289,24 @@ async def reschedule_pending_reminders(application):
             )
             count += 1
         logger.info(f"✅ {count} recordatorios de agenda han sido re-programados.")
+
+async def get_events_as_dicts(account_id: str) -> List[Dict[str, Any]]:
+    """
+    Recupera todos los eventos futuros de un usuario y los devuelve como una lista de diccionarios.
+    Esta función está diseñada para ser utilizada por endpoints de API que sirven a interfaces web.
+    """
+    async with DBSession(SessionLocal) as db:
+        account = await db.get(Account, account_id)
+        if not account:
+            return []
+
+        now_utc = datetime.now(pytz.utc)
+        stmt = (
+            select(AgendaEvent)
+            .where(AgendaEvent.account_id == account_id, AgendaEvent.event_datetime_utc > now_utc)
+            .order_by(AgendaEvent.event_datetime_utc)
+        )
+        result = await db.execute(stmt)
+        events = result.scalars().all()
+        # Usa el método to_dict que ya definimos en el modelo AgendaEvent
+        return [event.to_dict(account.timezone) for event in events]

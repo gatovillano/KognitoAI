@@ -21,7 +21,7 @@ from telegram.ext import Application, CallbackQueryHandler, CallbackContext
 
 # Importaciones del proyecto
 from utils.paginator import Paginator
-from telegram_bot.handlers.message_handlers import PAGINATOR_SESSIONS_KEY
+from telegram_client.handlers.message_handlers import PAGINATOR_SESSIONS_KEY
 
 logger = logging.getLogger(__name__)
 

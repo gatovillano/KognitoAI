@@ -33,7 +33,7 @@ from utils.image_generation import generar_imagen_vertex_ai_binario
 # La clave donde se almacenará la imagen generada
 from utils.image_generation_gemini import GENERATED_IMAGE_KEY 
 # El gestor de estado de la sesión de Telegram
-from telegram_bot.bot_manager import bot_manager
+from telegram_client.bot_manager import bot_manager
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)

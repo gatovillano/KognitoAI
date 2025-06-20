@@ -78,6 +78,10 @@ class Config:
         # Clave para la herramienta de búsqueda web.
         self.brave_search_api_key: Optional[str] = os.getenv("BRAVE_SEARCH_API_KEY")
 
+        # ¡NUEVA LÍNEA! La URL de nuestro servidor API para que los clientes sepan a dónde llamar.
+        self.api_server_url: str = os.getenv("API_SERVER_URL", "http://localhost:8080")
+        # ¡NUEVA LÍNEA! Un secreto para proteger los endpoints de administración.
+        self.admin_secret: str = os.getenv("ADMIN_SECRET", "default-admin-secret")
 
         # --- Configuración de la Base de Datos (PostgreSQL) ---
         self.postgres_user: Optional[str] = os.getenv("POSTGRES_USER")
@@ -101,6 +105,11 @@ class Config:
             debes pegar aquí el prompt completo que ya tienes).
             """
         )
+
+        # --- Configuración de JWT ---
+        self.jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "supersecretkey")
+        self.jwt_expiry_days: int = int(os.getenv("JWT_EXPIRY_DAYS", 7))
+        self.debug_mode: bool = os.getenv("DEBUG_MODE", "False").lower() in ('true', '1', 't')
 
         # Realizar validación al final de la inicialización.
         self._validate_config()
@@ -132,7 +141,6 @@ class Config:
             logger.warning("⚠️ ADVERTENCIA: TELEGRAM_WEBAPP_URL no está definido. El panel de control no será accesible.")
         if not self.admin_telegram_ids:
             logger.warning("⚠️ ADVERTENCIA: ADMIN_TELEGRAM_IDS no está configurado. Ningún usuario tendrá privilegios de administrador.")
-
-
+        
 # Crear una instancia única de la configuración para que sea importada por otros módulos.
 settings = Config()

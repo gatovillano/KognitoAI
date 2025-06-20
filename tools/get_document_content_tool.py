@@ -23,8 +23,8 @@ from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importaciones de la lógica de negocio y gestión de estado
-from telegram_bot.memory_manager import get_full_document_content
-from telegram_bot.bot_manager import bot_manager
+from core.memory_manager import get_full_document_content
+from telegram_client.bot_manager import bot_manager
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)

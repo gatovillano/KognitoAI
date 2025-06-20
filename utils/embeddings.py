@@ -22,7 +22,7 @@ from typing import Optional
 from langchain_google_vertexai import VertexAIEmbeddings
 
 # Importamos nuestro objeto de configuración centralizado.
-from telegram_bot.config import settings
+from core.config import settings
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -32,57 +32,37 @@ logger = logging.getLogger(__name__)
 _embedding_model: Optional[VertexAIEmbeddings] = None
 
 
-def initialize_embeddings() -> VertexAIEmbeddings:
+def initialize_embeddings():
     """
-    Inicializa y devuelve el modelo de embeddings de Vertex AI.
+    Inicializa la instancia global del modelo de embeddings desde Vertex AI.
 
-    Utiliza un patrón singleton para asegurar que el modelo se cargue solo una vez.
-    Lee la configuración (ID del proyecto, ubicación, nombre del modelo) desde
-    el objeto `settings`. Realiza una prueba de conexión al inicializar.
-
-    Raises:
-        ValueError: Si la configuración necesaria de Google Cloud no está definida
-                    o si el modelo no se puede inicializar por alguna razón.
-
-    Returns:
-        Una instancia funcional de VertexAIEmbeddings.
+    Esta función se llama una sola vez al arrancar el `web_server`. Crea la
+    instancia del modelo y la almacena en una variable global para su
+    reutilización, siguiendo un patrón Singleton.
     """
     global _embedding_model
-
-    # Si el modelo ya ha sido inicializado, simplemente lo devolvemos.
     if _embedding_model is not None:
-        return _embedding_model
-
-    logger.info(f"✨ Inicializando el modelo de embeddings de Vertex AI: '{settings.google_embedding_model_name}'...")
-
-    # Validación crítica: Asegurarse de que tenemos los datos del proyecto.
-    if not settings.google_project_id or not settings.google_project_location:
-        logger.error("❌ La configuración de Google Cloud (GOOGLE_PROJECT_ID, GOOGLE_PROJECT_LOCATION) es incompleta.")
-        raise ValueError("El ID del proyecto y la ubicación de Google Cloud deben estar definidos en la configuración.")
+        logger.debug("El modelo de embeddings ya está inicializado.")
+        return
 
     try:
-        # Instanciamos la clase de embeddings de Vertex AI con los parámetros de nuestra configuración.
-        _embedding_model = VertexAIEmbeddings(
+        logger.info(f"🛠️ Inicializando modelo de embeddings de Vertex AI ({settings.google_embedding_model_name})...")
+        
+        # 1. Crear la instancia del modelo.
+        # La propia creación de la instancia ya valida las credenciales y la configuración.
+        embedding_model_instance = VertexAIEmbeddings(
             model_name=settings.google_embedding_model_name,
             project=settings.google_project_id,
             location=settings.google_project_location,
         )
 
-        # Realizamos una pequeña prueba de conexión para verificar que todo funciona.
-        # Esto lanzará una excepción si hay problemas de autenticación o configuración.
-        logger.debug("Realizando una prueba de embedding para verificar la conexión...")
-        _embedding_model.embed_query("Prueba de inicialización de embeddings.")
+        # 2. ¡CORREGIDO! Asignar la instancia a la variable global DESPUÉS de crearla.
+        _embedding_model = embedding_model_instance
         
-        logger.info(f"✅ Modelo de embeddings de Vertex AI '{settings.google_embedding_model_name}' inicializado correctamente.")
+        logger.info("✅ Modelo de embeddings de Vertex AI inicializado exitosamente.")
 
     except Exception as e:
-        logger.error(f"❌ Error fatal al inicializar el modelo de embeddings de Vertex AI: {e}", exc_info=True)
-        # Relanzamos la excepción porque los embeddings son una parte crítica de la aplicación.
-        # Si no funcionan, el sistema de memoria RAG estará roto.
-        raise ValueError(f"No se pudo inicializar el modelo de embeddings de Vertex AI: {e}") from e
-
-    if _embedding_model is None:
-        # Esta es una comprobación de seguridad final. No debería ocurrir si el try/except funciona bien.
-        raise ValueError("Falló la inicialización del modelo de embeddings por una razón desconocida.")
-
-    return _embedding_model
+        # Si la inicialización falla, _embedding_model seguirá siendo None.
+        logger.error(f"❌ FATAL: Fallo al inicializar el modelo de embeddings de Vertex AI: {e}", exc_info=True)
+        # No relanzamos la excepción para permitir que el resto de la app intente arrancar,
+        # pero la función `embed_text` lanzará un error si se intenta usar.

@@ -27,8 +27,8 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, CallbackContext
 
 # Importaciones de la nueva arquitectura y del proyecto
-from telegram_bot.config import settings
-from telegram_bot.database import get_or_create_account_from_platform_id
+from core.config import settings
+from core.database import get_or_create_account_from_platform_id
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +54,7 @@ async def document_message_handler(update: Update, context: CallbackContext) -> 
         account = await get_or_create_account_from_platform_id(
             platform='telegram',
             platform_user_id=str(user.id),
-            first_name=user.first_name,
-            last_name=user.last_name,
-            username=user.username
+       
         )
         if not account:
             await message.reply_text("No pude identificarte en el sistema. Por favor, intenta de nuevo.")

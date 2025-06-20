@@ -28,15 +28,15 @@ from langchain_core.embeddings import Embeddings
 from langchain_postgres import PGVector
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-from telegram_bot.database import Perfil, SessionLocal, Account
+from core.database import Perfil, SessionLocal, Account
 from utils.db_session import DBSession
 from utils.embeddings import initialize_embeddings
-from telegram_bot.config import settings
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
-CHUNK_SIZE = settings.CHUNK_SIZE
-CHUNK_OVERLAP = settings.CHUNK_OVERLAP
+CHUNK_SIZE = settings.chunk_size
+CHUNK_OVERLAP = settings.chunk_overlap
 GLOBAL_COLLECTION_NAME = "global_knowledge_base"
 
 

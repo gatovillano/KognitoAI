@@ -27,15 +27,15 @@ from telegram import Update, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardBut
 from telegram.ext import Application, CommandHandler, CallbackContext
 
 # Importaciones de la nueva arquitectura y del proyecto
-from telegram_bot.config import settings
-from telegram_bot.database import get_or_create_account_from_platform_id
+from core.config import settings
+from core.database import get_or_create_account_from_platform_id
 
 logger = logging.getLogger(__name__)
 
 
 async def start(update: Update, context: CallbackContext) -> None:
     """
-    Manejador para el comando /start. Saluda al usuario y le da la bienvenida.
+    Manejador para el comando /start. Saluda al usuario y registra su cuenta.
     """
     if not update.message or not update.message.from_user:
         return
@@ -43,28 +43,40 @@ async def start(update: Update, context: CallbackContext) -> None:
     user = update.message.from_user
     logger.info(f"Comando /start recibido de {user.id} ({user.first_name})")
 
-    # Aunque el comando start es simple, es una buena práctica registrar
-    # al usuario en nuestro sistema de cuentas universal desde el primer contacto.
     try:
-        account = await get_or_create_account_from_platform_id(
+        # ¡CORREGIDO! La llamada ahora es simple y coincide con la nueva firma.
+        # Solo pasamos la plataforma y el ID.
+        result = await get_or_create_account_from_platform_id(
             platform='telegram',
-            platform_user_id=str(user.id),
-            first_name=user.first_name,
-            last_name=user.last_name,
-            username=user.username
+            platform_user_id=str(user.id)
         )
-        logger.info(f"Usuario {user.id} asociado a la cuenta universal {account.id}")
+        # Luego, comprobamos si el resultado es válido antes de desempaquetar.
+        if not result:
+            logger.error(f"No se pudo obtener/crear una cuenta en /start para {user.id}.")
+            # No es necesario enviar un mensaje de error aquí, el saludo es suficiente.
+            return
+        
+        # Ahora es seguro desempaquetar.
+        account, created = result
+        
+        if created:
+            logger.info(f"Nueva cuenta creada ({account.id}) para el usuario de Telegram {user.id}.")
+            welcome_message = (
+                f"¡Hola {user.first_name}! 👋 Soy Kognito, tu asistente de IA personal. "
+                "Encantado de conocerte. Puedes empezar a chatear conmigo directamente, "
+                "o usar /documentos para ver el panel de control."
+            )
+        else:
+            welcome_message = (
+                f"¡Hola de nuevo, {user.first_name}! 👋 Qué bueno verte por aquí. "
+                "¿En qué puedo ayudarte hoy?"
+            )
+        
+        await update.message.reply_text(welcome_message)
+
     except Exception as e:
-        logger.error(f"Error al obtener/crear la cuenta para el usuario {user.id} en /start: {e}", exc_info=True)
-        # Aunque falle, podemos continuar con un saludo genérico.
-    
-    welcome_message = (
-        f"¡Hola, {user.first_name}! 👋\n\n"
-        "Soy Fito, tu asistente personal de IA. Estoy aquí para ayudarte con lo que necesites.\n\n"
-        "Puedes conversar conmigo, pedirme que recuerde cosas, que gestione tu agenda, o que analice documentos por ti.\n\n"
-        "Escribe /help para ver una lista de comandos disponibles."
-    )
-    await update.message.reply_text(welcome_message)
+        logger.error(f"Error en el handler /start para el usuario {user.id}: {e}", exc_info=True)
+        await update.message.reply_text("Lo siento, ocurrió un error al procesar tu inicio. Por favor, intenta de nuevo.")
 
 
 async def help_command(update: Update, context: CallbackContext) -> None:
@@ -108,10 +120,11 @@ async def open_documents_panel(update: Update, context: CallbackContext) -> None
         account = await get_or_create_account_from_platform_id(
             platform='telegram',
             platform_user_id=str(user.id),
-            first_name=user.first_name,
-            last_name=user.last_name,
-            username=user.username
+            
         )
+
+        if not account:
+            raise Exception("La cuenta no pudo ser creada o recuperada.")
     except Exception as e:
         logger.error(f"Error al obtener/crear cuenta en /documentos para {user.id}: {e}", exc_info=True)
         await update.message.reply_text("Ocurrió un error al preparar el panel. Por favor, inténtalo de nuevo más tarde.")
@@ -120,7 +133,7 @@ async def open_documents_panel(update: Update, context: CallbackContext) -> None
     # La URL de nuestra WebApp, que es servida por web_server.py.
     # El `web_server` debe estar configurado para servir el panel en la ruta raíz.
     # Esta URL debe ser la URL pública donde se despliega el web_server.
-    web_app_url = settings.web_app_url
+    web_app_url = settings.webapp_url
     if not web_app_url:
         logger.error("❌ WEB_APP_URL no está configurada en .env. No se puede abrir el panel.")
         await update.message.reply_text("La función del panel de control no está configurada en este momento.")

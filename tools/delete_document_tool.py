@@ -21,7 +21,7 @@ from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de memoria.
-from telegram_bot.memory_manager import delete_document_chunks
+from core.memory_manager import delete_document_chunks
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)

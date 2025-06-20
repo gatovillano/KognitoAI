@@ -27,7 +27,7 @@ import aiohttp
 
 # Importaciones de LangChain y del proyecto
 from langchain_core.tools import Tool
-from telegram_bot.config import settings
+from core.config import settings
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)

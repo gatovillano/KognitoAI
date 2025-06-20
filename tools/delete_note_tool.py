@@ -21,7 +21,7 @@ from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de notas.
-from telegram_bot.notes_manager import delete_note
+from core.notes_manager import delete_note
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)

@@ -21,7 +21,7 @@ from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de notas.
 # (Asumimos que esta función también será refactorizada para usar account_id).
-from telegram_bot.notes_manager import get_notes
+from core.notes_manager import get_notes
 
 logger = logging.getLogger(__name__)
 

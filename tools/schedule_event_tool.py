@@ -20,7 +20,7 @@ from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de agenda.
-from telegram_bot.agenda_manager import schedule_event
+from core.agenda_manager import schedule_event
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -43,6 +43,11 @@ class ScheduleEventInput(BaseModel):
     account_id: str = Field(
         ...,
         description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
+    
+    )
+    telegram_id: int = Field(
+        ...,
+        description="El ID numérico de Telegram del usuario. Es necesario para enviar el recordatorio."
     )
 
 
@@ -60,7 +65,7 @@ class ScheduleEventTool(BaseTool):
     args_schema: Type[BaseModel] = ScheduleEventInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
 
-    async def _arun(self, description: str, natural_language_datetime: str, account_id: str, **kwargs: Any) -> str:
+    async def _arun(self, description: str, natural_language_datetime: str, account_id: str, telegram_id: int, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -68,6 +73,7 @@ class ScheduleEventTool(BaseTool):
             description: La descripción del evento.
             natural_language_datetime: El texto con la fecha/hora del evento.
             account_id: El ID universal de la cuenta del usuario.
+            telegram_id: El ID de Telegram para programar la notificación.
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
@@ -75,10 +81,11 @@ class ScheduleEventTool(BaseTool):
         """
         logger.info(f"Ejecutando ScheduleEventTool para la cuenta '{account_id}' con descripción: '{description}'")
         try:
-            # Llama a la función de lógica de negocio, que ahora debe ser actualizada
-            # para aceptar 'account_id' en lugar de 'telegram_id'.
+            # Ahora la llamada a la función es correcta porque la variable `telegram_id`
+            # está definida como un parámetro de `_arun`.
             success, message = await schedule_event(
                 account_id=account_id,
+                telegram_id=telegram_id,
                 description=description,
                 natural_language_datetime=natural_language_datetime
             )

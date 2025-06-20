@@ -20,7 +20,7 @@ from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de agenda.
-from telegram_bot.agenda_manager import cancel_event
+from core.agenda_manager import cancel_event
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)

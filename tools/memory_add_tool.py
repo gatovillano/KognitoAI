@@ -21,7 +21,7 @@ from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de memoria.
-from telegram_bot.memory_manager import add_memory_to_vector_db
+from core.memory_manager import add_memory_to_vector_db
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)

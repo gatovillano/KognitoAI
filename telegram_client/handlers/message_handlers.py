@@ -39,9 +39,9 @@ from telegram.ext import (
 from telegram.constants import ChatAction, ParseMode
 
 # Importaciones de la nueva arquitectura y del proyecto
-from telegram_bot.config import settings
-from telegram_bot.database import get_or_create_account_from_platform_id
-from telegram_bot.bot_manager import bot_manager
+from core.config import settings
+from core.database import get_or_create_account_from_platform_id
+from telegram_client.bot_manager import bot_manager
 from utils.helpers import sanitize_html
 from utils.paginator import Paginator, split_text_into_pages
 from utils.image_generation import GENERATED_IMAGE_KEY
@@ -54,7 +54,8 @@ logger = logging.getLogger(__name__)
 PAGINATOR_SESSIONS_KEY = "paginator_sessions"
 PAGINATOR_CHUNKS_KEY = "chunks"
 PAGINATOR_PAGE_KEY = "current_page"
-API_BASE_URL = settings.api_server_url
+# settings.api_server_url no existe, usar settings.webapp_url si es para la webapp
+API_BASE_URL = settings.webapp_url
 
 # --- Estados de Conversación para acciones rápidas ---
 (WAITING_FOR_NOTE_CONTENT, WAITING_FOR_EVENT_DETAILS) = range(100, 102)
@@ -141,12 +142,11 @@ async def handle_text_and_photo(update: Update, context: CallbackContext) -> Non
         account = await get_or_create_account_from_platform_id(
             platform='telegram',
             platform_user_id=str(telegram_id),
-            display_name=first_name,
-            last_name=last_name
+            platform_user_name=first_name
         )
         if not account:
             raise Exception("No se pudo obtener o crear una cuenta de usuario.")
-        account_id = str(account.id)
+        account_id = str(account.id) if account else None
         # --- Fin Lógica de Identidad ---
 
         api_payload = {
@@ -212,12 +212,11 @@ async def handle_audio(update: Update, context: CallbackContext) -> None:
         account = await get_or_create_account_from_platform_id(
             platform='telegram',
             platform_user_id=str(telegram_id),
-            display_name=first_name,
-            last_name=last_name
+            platform_user_name=first_name
         )
         if not account:
             raise Exception("No se pudo obtener o crear una cuenta de usuario.")
-        account_id = str(account.id)
+        account_id = str(account.id) if account else None
         # --- Fin Lógica de Identidad ---
 
         await update.message.reply_text(f"<i>(Transcripción: «{transcribed_text}»)</i>", parse_mode=ParseMode.HTML)
@@ -270,7 +269,7 @@ async def process_and_send_response(update: Update, context: CallbackContext, re
         paginator_key = f"paginator_{chat_id}_{update.message.message_id if update.message else 'cb'}"
         context.chat_data[paginator_key] = paginator
 
-        message_text, keyboard = paginator.get_page(0)
+        message_text, keyboard = paginator.get_page()
         await context.bot.send_message(chat_id, text=message_text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
         return
         
@@ -293,22 +292,63 @@ async def start_add_note_from_button(update: Update, context: CallbackContext) -
     return WAITING_FOR_NOTE_CONTENT
 
 async def add_note_content_received(update: Update, context: CallbackContext) -> int:
+    """
+    Recibe el contenido de la nota del usuario, lo procesa y finaliza la conversación.
+    """
+    # ¡CORREGIDO! Añadimos guardas para asegurar que los objetos existen antes de usarlos.
+    if not update.message or not update.message.text or not update.effective_user:
+        logger.warning("add_note_content_received recibió una actualización inválida.")
+        # Si no podemos continuar, es mejor terminar la conversación.
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id, 
+            text="Ocurrió un error inesperado. Por favor, intenta de nuevo."
+        )
+        return ConversationHandler.END
+
     note_content = update.message.text
-    telegram_id = update.effective_user.id
-    account = await get_or_create_account_from_platform_id('telegram', str(telegram_id))
-    
-    # Aquí podríamos llamar a una herramienta o directamente a la API.
-    # Por simplicidad, llamamos a la API.
-    api_payload = {
-        "account_id": str(account.id),
-        "telegram_id": telegram_id,
-        "content": note_content
-    }
-    # La API para añadir nota debería existir en web_server.py
-    # async with httpx.AsyncClient() as client:
-    #     await client.post(f"{API_BASE_URL}/api/notes/add", json=api_payload)
-    
-    await update.message.reply_text(f"¡Nota guardada! Contenido: '{note_content}'")
+    user = update.effective_user
+
+    try:
+        # Obtener la identidad universal del usuario.
+        account = await get_or_create_account_from_platform_id(
+            platform='telegram',
+            platform_user_id=str(user.id),
+
+        )
+        if not account:
+            logger.error(f"No se pudo obtener o crear una cuenta para el usuario de Telegram {user.id}.")
+            await update.message.reply_text("Lo siento, no pude identificar tu cuenta en mi sistema. Por favor, intenta de nuevo más tarde.")
+            return ConversationHandler.END
+
+        # El account_id es un UUID, lo convertimos a string para el payload JSON.
+        account_id_str = str(account.id)
+
+        # Preparamos el payload para enviar a nuestra API central.
+        api_payload = {
+            "account_id": account_id_str,
+            "telegram_id": user.id,
+            "content": note_content
+            # Podríamos añadir "title" y "category" si quisiéramos pedirlos en la conversación.
+        }
+
+        # La URL del endpoint en nuestro `run_api.py`.
+        # ¡Importante! Este endpoint debe existir.
+        api_url = f"{API_BASE_URL}/api/add-note"
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(api_url, json=api_payload, timeout=20)
+            response.raise_for_status() # Lanza una excepción para errores HTTP 4xx/5xx.
+        
+        await update.message.reply_text(f"¡Nota guardada exitosamente!")
+
+    except httpx.HTTPStatusError as e:
+        error_detail = e.response.json().get("detail", "Error del servidor.")
+        logger.error(f"Error de API al añadir nota para la cuenta {account_id_str}: {error_detail}")
+        await update.message.reply_text(f"No pude guardar la nota. Hubo un problema con el servidor: {error_detail}")
+    except Exception as e:
+        logger.error(f"Error inesperado en add_note_content_received: {e}", exc_info=True)
+        await update.message.reply_text("Lo siento, ocurrió un error inesperado al intentar guardar tu nota.")
+
     return ConversationHandler.END
 
 async def cancel_conversation(update: Update, context: CallbackContext) -> int:

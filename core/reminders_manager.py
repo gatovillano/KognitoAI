@@ -27,9 +27,9 @@ from sqlalchemy import select
 from telegram.ext import CallbackContext
 
 # Importaciones de la nueva arquitectura y del bot
-from telegram_bot.database import SessionLocal, Account, Recordatorio, PlatformIdentity
+from core.database import SessionLocal, Account, Recordatorio, PlatformIdentity
 from utils.db_session import DBSession
-from telegram_bot.bot_manager import bot_manager
+from telegram_client.bot_manager import bot_manager
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ async def set_simple_reminder(account_id: str, telegram_id: int, text: str, natu
             # zona horaria del usuario. dateparser los interpreta correctamente en UTC.
             # Le indicamos que el resultado debe estar en UTC.
             date_settings = {'RETURN_AS_TIMEZONE_AWARE': True, 'TO_TIMEZONE': 'UTC'}
-            due_datetime_utc = dateparser.parse(natural_language_time, settings=date_settings)
+            due_datetime_utc = dateparser.parse(natural_language_time, **date_settings)
 
             if not due_datetime_utc:
                 logger.warning(f"Dateparser no pudo entender '{natural_language_time}'.")

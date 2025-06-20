@@ -14,13 +14,13 @@ correcto, asegurando que el perfil se actualice en la cuenta correcta.
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Type
 
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de memoria.
-from telegram_bot.memory_manager import update_user_profile
+from core.memory_manager import update_user_profile
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)

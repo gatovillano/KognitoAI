@@ -1,21 +1,7 @@
-# telegram_bot/main.py
+# run_telegram_bot.py
 
 """
-Punto de Entrada Principal para el Servicio del Bot de Telegram.
-
-Este script es responsable de:
-1.  Configurar el logging para toda la aplicación.
-2.  Iniciar la conexión a la base de datos y crear las tablas si no existen (con
-    la nueva estructura de Account/PlatformIdentity).
-3.  Construir la instancia de la aplicación de `python-telegram-bot`.
-4.  Inicializar el `bot_manager` para el acceso global a la aplicación.
-5.  Registrar todos los handlers (comandos, mensajes, etc.) en grupos de prioridad.
-6.  Volver a programar los recordatorios de agenda y simples que hayan quedado
-    pendientes en la base de datos tras un reinicio.
-7.  Manejar un apagado ordenado y seguro del bot (graceful shutdown).
-
-Este módulo actúa como el "lanzador" del cliente de Telegram, que se comunica
-con el backend central (`web_server.py`).
+Punto de Entrada Principal para el Servicio del Cliente de Telegram.
 """
 
 import logging
@@ -27,21 +13,22 @@ import os
 from telegram import Update
 from telegram.ext import Application, CallbackContext, MessageHandler, filters, PicklePersistence
 
-# --- Importaciones del proyecto ---
-from telegram_bot.database import create_tables
-from telegram_bot.config import settings
-from telegram_bot.bot_manager import bot_manager
-# ¡NUEVO! Importar las funciones de reprogramación de los managers refactorizados.
-from telegram_bot.agenda_manager import reschedule_pending_reminders
-from telegram_bot.reminders_manager import reschedule_simple_reminders
+# --- ¡CAMBIOS CLAVE EN LAS IMPORTACIONES! ---
+# Ahora apuntamos a las nuevas ubicaciones de los módulos.
+from core.database import create_tables
+from core.config import settings
+from telegram_client.bot_manager import bot_manager
+from core.agenda_manager import reschedule_pending_reminders
+from core.reminders_manager import reschedule_simple_reminders
 
-# --- Importar los módulos de registro de handlers ---
-from telegram_bot.handlers.command_handlers import register_command_handlers
-from telegram_bot.handlers.message_handlers import register_message_handlers, register_callback_query_handler
-from telegram_bot.handlers.document_handlers import register_document_handlers
-from telegram_bot.handlers.admin_handlers import register_admin_handlers
+from telegram_client.handlers.command_handlers import register_command_handlers
+from telegram_client.handlers.message_handlers import register_message_handlers
+from telegram_client.handlers.document_handlers import register_document_handlers
+from telegram_client.handlers.admin_handlers import register_admin_handlers
+from telegram_client.handlers.callback_query_handlers import register_callback_query_handler
 
-# --- Configuración de Logging ---
+# --- El resto del código es igual, solo cambian las importaciones ---
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -52,7 +39,6 @@ logger = logging.getLogger(__name__)
 async def update_diagnostic_callback(update: Update, context: CallbackContext):
     """
     Handler de diagnóstico opcional que se ejecuta para CADA actualización.
-    Es útil para depurar el flujo de updates y el estado de las conversaciones.
     """
     try:
         if update.message:
@@ -66,34 +52,25 @@ async def update_diagnostic_callback(update: Update, context: CallbackContext):
 async def initialize_application_resources(application: Application):
     """
     Centraliza la inicialización de recursos y el registro de handlers.
-    Se ejecuta una sola vez antes de que el bot empiece a recibir actualizaciones.
     """
-    logger.info("🔧 Inicializando recursos de la aplicación...")
+    logger.info("🔧 Inicializando recursos del cliente de Telegram...")
 
     bot_manager.initialize(application)
     logger.info("✅ BotManager inicializado.")
     
-    # Grupos de prioridad: un número más bajo significa mayor prioridad.
-    # Grupo -1: Diagnóstico.
     if settings.debug_mode:
         application.add_handler(MessageHandler(filters.ALL, update_diagnostic_callback), group=-1)
 
-    # Grupo 0: Handlers de Administrador.
     register_admin_handlers(application)
-
-    # Grupo 1: Handlers de Conversación de Usuario (documentos, notas, etc.).
     register_document_handlers(application)
     register_message_handlers(application)
-
-    # Grupo 2: Handlers de Comandos y Callbacks no conversacionales.
     register_command_handlers(application)
     register_callback_query_handler(application)
 
-    # ¡NUEVO! Llamar a las funciones de reprogramación al iniciar.
     await reschedule_pending_reminders(application)
     await reschedule_simple_reminders(application)
     
-    logger.info("✅ Todos los handlers y recursos han sido inicializados.")
+    logger.info("✅ Todos los handlers y recursos del cliente han sido inicializados.")
 
 
 def main():
@@ -112,7 +89,6 @@ def main():
         asyncio.set_event_loop(loop)
 
     try:
-        # Se asegura de que las tablas (con la nueva estructura) existan.
         loop.run_until_complete(create_tables())
         logger.info("✅ Tablas de la base de datos verificadas/creadas exitosamente.")
     except Exception as e:

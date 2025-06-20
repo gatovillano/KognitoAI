@@ -39,12 +39,12 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.language_models.base import BaseLanguageModel
 
 # --- Módulos del Proyecto ---
-from telegram_bot.tools import get_all_langchain_tools
-from telegram_bot.memory_manager import get_user_profile, get_relevant_memories
-from telegram_bot.database import SessionLocal, Account
+from telegram_client.tools import get_all_langchain_tools
+from core.memory_manager import get_user_profile, get_relevant_memories
+from core.database import SessionLocal, Account
 from utils.db_session import DBSession
 from utils.helpers import sanitize_html
-from telegram_bot.config import settings
+from core.config import settings
 
 # --- Claves para estado temporal ---
 from utils.image_generation import GENERATED_IMAGE_KEY
@@ -198,27 +198,30 @@ async def create_and_run_agent(
     account_id: str,
     telegram_id: int,
     user_message: str,
-    # El servidor nos pasará estos objetos "mock"
-    update: Any,
-    context: Any,
     image_base64: Optional[str] = None,
 ) -> str:
     """
     Crea y ejecuta el agente de Langchain con manejo explícito de memoria.
     """
     logger.info(f"--- Ejecutando agente para account_id: {account_id} (desde telegram_id: {telegram_id}) ---")
-    
-    # 1. --- Gestión del Historial ---
-    session_id = str(telegram_id) # El historial de chat sigue atado a la sesión de Telegram
+
+    # 1. --- Obtener Datos del Usuario y Gestionar Historial ---
+    session_id = str(telegram_id)
     if settings.database_url is None:
         raise ValueError("DATABASE_URL no está configurada.")
+    
+    # Optimizamos haciendo una sola consulta a la BD para obtener todo lo que necesitamos de la cuenta.
+    async with DBSession(SessionLocal) as db:
+        account = await db.get(Account, account_id)
+        author_name = account.name if account and account.name else "Usuario"
+        custom_prompt = account.profile.custom_system_prompt if account and account.profile and account.profile.custom_system_prompt else None
+
     db_sync_url = settings.database_url.replace("+psycopg", "")
     chat_message_history = PostgresChatMessageHistory(
-        connection_string=db_sync_url,
-        session_id=session_id,
-        table_name="langchain_chat_history",
+        connection_string=db_sync_url, session_id=session_id, table_name="langchain_chat_history"
     )
     full_history = await chat_message_history.aget_messages()
+    
     summary_string = ""
     history_for_prompt = []
     for msg in full_history:
@@ -234,21 +237,19 @@ async def create_and_run_agent(
             {"type": "text", "text": user_message},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
         ]
+    
+    # ¡CORREGIDO! Ya no usamos `update`, sino el nombre que obtuvimos de la BD.
     current_human_message = HumanMessage(
         content=current_user_input_content,
-        additional_kwargs={"user_name": update.effective_user.first_name}
+        additional_kwargs={"user_name": author_name}
     )
     full_history_for_llm_prompt = history_for_prompt + [current_human_message]
 
     # 3. --- Construir el Prompt del Sistema ---
     user_context_string = await _get_user_context(account_id, user_message)
-    custom_prompt = None
-    async with DBSession(SessionLocal) as db:
-        account = await db.get(Account, account_id)
-        if account and account.profile and account.profile.custom_system_prompt:
-            custom_prompt = account.profile.custom_system_prompt
+    # Ya tenemos `custom_prompt` de la consulta anterior, no necesitamos volver a buscarlo.
     effective_system_prompt = custom_prompt or settings.default_system_prompt
-    
+
     tools = get_all_langchain_tools()
     tool_descriptions = "\n".join([f"- `{tool.name}`: {tool.description}" for tool in tools])
 

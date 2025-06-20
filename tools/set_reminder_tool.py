@@ -20,7 +20,7 @@ from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de recordatorios.
-from telegram_bot.reminders_manager import set_simple_reminder
+from core.reminders_manager import set_simple_reminder
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -45,6 +45,11 @@ class SetReminderInput(BaseModel):
         description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
     )
 
+    telegram_id: int = Field(
+        ...,
+        description="El ID numérico de Telegram del usuario. Es necesario para enviar el recordatorio."
+    )
+
 
 class SetReminderTool(BaseTool):
     """
@@ -60,7 +65,7 @@ class SetReminderTool(BaseTool):
     args_schema: Type[BaseModel] = SetReminderInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
 
-    async def _arun(self, text: str, natural_language_time: str, account_id: str, **kwargs: Any) -> str:
+    async def _arun(self, text: str, natural_language_time: str, account_id: str, telegram_id: int, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -68,6 +73,7 @@ class SetReminderTool(BaseTool):
             text: El contenido del recordatorio.
             natural_language_time: El texto con la descripción del tiempo.
             account_id: El ID universal de la cuenta del usuario.
+            telegram_id: El ID de Telegram para programar la notificación.
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
@@ -75,10 +81,10 @@ class SetReminderTool(BaseTool):
         """
         logger.info(f"Ejecutando SetReminderTool para la cuenta '{account_id}' con texto: '{text}'")
         try:
-            # Llama a la función de lógica de negocio, que ahora debe ser actualizada
-            # para aceptar 'account_id' en lugar de 'telegram_id'.
+            # ¡CORREGIDO! Pasamos el `telegram_id` que ahora requiere la función.
             success, message = await set_simple_reminder(
                 account_id=account_id,
+                telegram_id=telegram_id,
                 text=text,
                 natural_language_time=natural_language_time
             )

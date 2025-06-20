@@ -45,7 +45,7 @@ from sqlalchemy.dialects.postgresql import UUID
 
 # --- Importaciones de pgvector y del proyecto ---
 from pgvector.sqlalchemy import Vector
-from telegram_bot.config import settings
+from core.config import settings
 from utils.db_session import DBSession
 
 # --- Configuración del Logger e Instancias de SQLAlchemy ---
@@ -302,3 +302,21 @@ async def get_or_create_account_from_platform_id(
             logger.error(f"❌ Error al obtener o crear cuenta para {platform}:{platform_user_id}: {e}", exc_info=True)
             await db.rollback()
             return None
+        
+# En core/database.py, al final del archivo
+
+async def get_account_by_telegram_id(db_session, telegram_id: int) -> Optional[Account]:
+    """
+    Busca una cuenta de usuario universal utilizando su ID de plataforma de Telegram.
+    Esta es una función de solo lectura; no crea una cuenta si no existe.
+    """
+    stmt = (
+        select(Account)
+        .join(PlatformIdentity)
+        .where(
+            PlatformIdentity.platform == 'telegram',
+            PlatformIdentity.platform_user_id == str(telegram_id)
+        )
+    )
+    result = await db_session.execute(stmt)
+    return result.scalars().first()

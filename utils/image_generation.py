@@ -36,7 +36,7 @@ import google.auth
 import google.auth.transport.requests
 
 # Importaciones del proyecto
-from telegram_bot.config import settings
+from core.config import settings
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)

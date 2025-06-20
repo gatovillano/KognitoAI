@@ -25,7 +25,7 @@ from sqlalchemy import select, delete, update
 from sqlalchemy.orm import selectinload
 
 # Importaciones de la nueva estructura de la base de datos y sesión
-from telegram_bot.database import SessionLocal, Nota, Account
+from core.database import SessionLocal, Nota, Account
 from utils.db_session import DBSession
 
 # Configuración del logger para este módulo.

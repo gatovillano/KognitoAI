@@ -15,10 +15,11 @@ y la hace reutilizable y robusta dentro de un backend centralizado.
 import logging
 from typing import Type, Optional, Any
 from pydantic.v1 import BaseModel, Field
+from langchain.tools import BaseTool
 
 # Importa la función de lógica de notas. (Esta función también deberá ser
 # refactorizada para aceptar account_id en lugar de telegram_id).
-from telegram_bot.notes_manager import add_note
+from core.notes_manager import add_note
 
 # Configuración del logger para este módulo
 logger = logging.getLogger(__name__)

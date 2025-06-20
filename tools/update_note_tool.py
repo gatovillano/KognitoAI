@@ -21,8 +21,7 @@ from langchain_core.tools import BaseTool
 from pydantic.v1 import BaseModel, Field
 
 # --- Importaciones de la Lógica de Negocio ---
-# Esta función también deberá ser refactorizada para usar `account_id`
-from telegram_bot.notes_manager import update_note
+from core.notes_manager import update_note
 
 # Configuración del logger para este módulo
 logger = logging.getLogger(__name__)
