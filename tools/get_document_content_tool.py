@@ -17,7 +17,7 @@ título adecuado en la paginación.
 """
 
 import logging
-from typing import Any, Type
+from typing import Any, Type, Optional
 
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
@@ -48,11 +48,9 @@ class GetDocumentContentInput(BaseModel):
         ...,
         description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
     )
-    # NOTA: Aunque la herramienta usa account_id, la comunicación con bot_manager
-    # podría requerir el telegram_id original. Esta abstracción se maneja en un nivel superior.
-    telegram_id: int = Field(
-        ...,
-        description="El ID numérico original de Telegram del usuario. Es necesario para interactuar con sistemas de estado de sesión como `user_data`."
+    telegram_id: Optional[int] = Field(
+        None,
+        description="El ID numérico original de Telegram del usuario. Es necesario para interactuar con sistemas de estado de sesión como `user_data`. Puede ser None si no aplica."
     )
 
 
@@ -70,14 +68,14 @@ class GetDocumentContentTool(BaseTool):
     args_schema: Type[BaseModel] = GetDocumentContentInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
 
-    async def _arun(self, file_name: str, account_id: str, telegram_id: int, **kwargs: Any) -> str:
+    async def _arun(self, file_name: str, account_id: str, telegram_id: Optional[int] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
             file_name: El nombre del archivo a recuperar.
             account_id: El ID universal de la cuenta del usuario.
-            telegram_id: El ID de Telegram para la gestión de estado de sesión.
+            telegram_id: El ID de Telegram para la gestión de estado de sesión (opcional).
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
@@ -90,15 +88,11 @@ class GetDocumentContentTool(BaseTool):
 
             if full_content:
                 # Si se encuentra contenido, guardamos el nombre del archivo en user_data.
-                # Esto le indica al message_handler que la respuesta debe ser paginada.
-                # Usamos el telegram_id aquí, porque la clave de user_data es el ID de Telegram.
-                user_data = bot_manager.get_user_data(telegram_id)
-                user_data[DOCUMENT_NAME_KEY] = file_name
-                await bot_manager.flush_persistence()
-                logger.info(f"Guardado '{file_name}' en user_data para el usuario de Telegram {telegram_id} para paginación.")
-                
-                # Devolvemos el contenido completo al agente para que lo procese.
-                # Añadimos un encabezado claro para que el agente sepa qué es.
+                if telegram_id is not None:
+                    user_data = bot_manager.get_user_data(telegram_id)
+                    user_data[DOCUMENT_NAME_KEY] = file_name
+                    await bot_manager.flush_persistence()
+                    logger.info(f"Guardado '{file_name}' en user_data para el usuario de Telegram {telegram_id} para paginación.")
                 response_text = (
                     f"Contenido completo del documento '{file_name}':\n\n"
                     f"{full_content}"

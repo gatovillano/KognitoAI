@@ -186,15 +186,17 @@ document.addEventListener('DOMContentLoaded', function () {
                     const docEl = document.createElement('div');
                     docEl.className = 'doc-item';
                     docEl.innerHTML = `
-                        <div class="doc-item-header"><span class="doc-title">${doc.file_name}</span></div>
-                        <div class="doc-meta"><span>Tema: ${doc.topic || 'N/A'}</span></div>
+                        <div class="doc-item-header"><span class="doc-title editable" data-filename="${doc.file_name}">${doc.title || doc.file_name}</span></div>
+                        <div class="doc-meta"><span>Tema: <span class="doc-topic editable" data-filename="${doc.file_name}">${doc.topic || 'N/A'}</span></span></div>
                         <div class="doc-actions">
                             <button class="edit-btn" title="Editar" data-filename="${doc.file_name}">✏️</button>
                             <button class="delete-btn" title="Eliminar" data-filename="${doc.file_name}">🗑️</button>
                         </div>
                     `;
                     docEl.querySelector('.delete-btn').addEventListener('click', handleDeleteDocument);
-                    docEl.querySelector('.edit-btn').addEventListener('click', () => tg.showAlert('La edición estará disponible próximamente.'));
+                    docEl.querySelector('.edit-btn').addEventListener('click', () => handleEditDocument(doc));
+                    docEl.querySelector('.doc-title').addEventListener('click', () => handleEditDocument(doc, 'title'));
+                    docEl.querySelector('.doc-topic').addEventListener('click', () => handleEditDocument(doc, 'topic'));
                     elements.docListContainer.appendChild(docEl);
                 });
             }
@@ -215,6 +217,30 @@ document.addEventListener('DOMContentLoaded', function () {
                 } catch (e) { tg.showAlert('Error al eliminar: ' + e.message); }
             }
         });
+    }
+
+    async function handleEditDocument(doc, field) {
+        let newTitle = doc.title;
+        let newTopic = doc.topic;
+        if (!field || field === 'title') {
+            newTitle = prompt('Nuevo título para el documento:', doc.title || doc.file_name);
+            if (!newTitle || newTitle === doc.title) return;
+        }
+        if (!field || field === 'topic') {
+            newTopic = prompt('Nueva categoría/base de conocimiento:', doc.topic || '');
+            if (!newTopic || newTopic === doc.topic) return;
+        }
+        try {
+            const formData = new FormData();
+            formData.append('file_name', doc.file_name);
+            if (newTitle && newTitle !== doc.title) formData.append('new_title', newTitle);
+            if (newTopic && newTopic !== doc.topic) formData.append('new_topic', newTopic);
+            await apiPost('/api/update-document-metadata', formData);
+            tg.showAlert('Metadatos actualizados.');
+            await loadDocuments();
+        } catch (e) {
+            tg.showAlert('Error al actualizar metadatos: ' + e.message);
+        }
     }
 
     elements.fileInput.addEventListener('change', updateFileListUI);

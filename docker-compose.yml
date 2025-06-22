@@ -82,9 +82,27 @@ services:
     links:
       - core # ¡NUEVO! El frontend también necesita hablar con el core.
 
+  # 5. PGAdmin para administración visual de la base de datos
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: kognito_pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@kognito.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin123}
+    ports:
+      - "5056:80"
+    depends_on:
+      - db
+    networks:
+      - kognito_network
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
 networks:
   kognito_network:
     driver: bridge
 
 volumes:
   db_data:
+  pgadmin_data:

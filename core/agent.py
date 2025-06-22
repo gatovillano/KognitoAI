@@ -26,6 +26,8 @@ Arquitectura Clave:
 import logging
 import asyncio
 from typing import Optional, List, Any
+import uuid
+import os
 
 # --- Langchain Core ---
 from langchain.agents import AgentExecutor
@@ -37,11 +39,12 @@ from langchain.agents.output_parsers.tools import ToolsAgentOutputParser
 from langchain.agents.format_scratchpad.tools import format_to_tool_messages
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.language_models.base import BaseLanguageModel
+from sqlalchemy import update
 
 # --- Módulos del Proyecto ---
 from telegram_client.tools import get_all_langchain_tools
 from core.memory_manager import get_user_profile, get_relevant_memories
-from core.database import SessionLocal, Account
+from core.database import SessionLocal, Account, ChatThread
 from utils.db_session import DBSession
 from utils.helpers import sanitize_html
 from core.config import settings
@@ -80,6 +83,7 @@ async def initialize_llms():
             model=settings.google_main_model_name,
             temperature=settings.llm_temperature,
             google_api_key=settings.google_api_key,
+            streaming=True,  # Habilita streaming real
         )
         await main_llm.ainvoke("Test prompt")
         _main_agent_llm_instance = main_llm
@@ -94,6 +98,7 @@ async def initialize_llms():
             model=settings.google_summary_model_name,
             temperature=0.0,
             google_api_key=settings.google_api_key,
+            streaming=True,  # Habilita streaming real
         )
         await fast_llm.ainvoke("Test prompt")
         _fast_task_llm_instance = fast_llm
@@ -154,7 +159,8 @@ async def summarize_history_in_background(
     chat_message_history: PostgresChatMessageHistory
 ):
     """
-    Resume mensajes en segundo plano y reemplaza el historial antiguo por un resumen.
+    Resume mensajes en segundo plano y añade un resumen al historial, pero NO borra los mensajes previos.
+    El resumen se usará solo para el contexto del LLM, pero el historial completo se conserva para el frontend.
     """
     llm_for_summary = _fast_task_llm_instance or _main_agent_llm_instance
     if not llm_for_summary:
@@ -168,28 +174,81 @@ async def summarize_history_in_background(
             MessagesPlaceholder(variable_name="history"),
         ])
         summarization_chain = summarization_prompt | llm_for_summary
-        
         messages_for_summarization_input = [msg for msg in history_to_summarize if not (hasattr(msg, 'additional_kwargs') and msg.additional_kwargs.get("role") == "summary")]
         if not messages_for_summarization_input:
             return
-
         summary_response = await summarization_chain.ainvoke({"history": messages_for_summarization_input})
         summary_content = summary_response.content if hasattr(summary_response, 'content') else str(summary_response)
-        
         summary_message = HumanMessage(
             content=f"Resumen de la conversación anterior: {summary_content}",
             additional_kwargs={"role": "summary"}
         )
-        
-        messages_to_keep_recent = messages_for_summarization_input[-4:]
-        new_history_messages = [summary_message] + messages_to_keep_recent
-        
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, chat_message_history.clear)
-        await chat_message_history.aadd_messages(new_history_messages)
-        logger.info("✅ Sumarización en segundo plano completada y historial actualizado.")
+        # Guardar el resumen como un mensaje más, sin borrar el historial
+        await chat_message_history.aadd_messages([summary_message])
+        logger.info("✅ Sumarización en segundo plano completada y resumen añadido al historial.")
     except Exception as e:
         logger.error(f"❌ Error en la tarea de sumarización: {e}", exc_info=True)
+
+async def update_thread_title_if_needed(thread_id: str, messages: list):
+    """
+    Genera o actualiza el título del hilo usando el LLM de tareas rápidas.
+    Si el hilo tiene de título 'Nuevo Chat' y al menos 5 mensajes, lo asigna.
+    Si ya tiene título distinto y hay 20+ mensajes, lo actualiza.
+    """
+    if not messages:
+        logger.info(f"[TÍTULO] No hay mensajes para el hilo {thread_id}, no se genera título.")
+        return
+    # Obtener el título actual
+    async with DBSession(SessionLocal) as db:
+        thread = await db.get(ChatThread, uuid.UUID(thread_id))
+        current_title = thread.title if thread else None
+    # Log extra para depuración
+    logger.info(f"[TÍTULO][DEBUG] Hilo {thread_id} - Título actual: '{current_title}' - Mensajes reales (sin resumen): {len(messages)}")
+    # Si el título es 'Nuevo Chat' y hay al menos 5 mensajes, o si hay 20+ mensajes y el título es distinto
+    if (current_title == "Nuevo Chat" and len(messages) >= 5) or (current_title != "Nuevo Chat" and len(messages) >= 20 and len(messages) % 20 == 0):
+        conversation_text = '\n'.join([m.content if hasattr(m, 'content') else str(m) for m in messages[-20:]])
+        prompt = f"Resume la conversación en un título breve y descriptivo (máx 8 palabras):\n{conversation_text}"
+        llm = _fast_task_llm_instance or _main_agent_llm_instance
+        if not llm:
+            logger.warning(f"[TÍTULO] No hay LLM disponible para generar título del hilo {thread_id}.")
+            return
+        try:
+            logger.info(f"[TÍTULO] Solicitando título para hilo {thread_id} con {len(messages)} mensajes...")
+            response = await llm.ainvoke(prompt)
+            new_title = response.content.strip() if hasattr(response, 'content') else str(response).strip()
+            logger.info(f"[TÍTULO] Título generado para hilo {thread_id}: '{new_title}'")
+            async with DBSession(SessionLocal) as db:
+                await db.execute(update(ChatThread).where(ChatThread.id == uuid.UUID(thread_id)).values(title=new_title))
+        except Exception as e:
+            logger.error(f"[TÍTULO] Error actualizando título del hilo {thread_id}: {e}")
+    else:
+        logger.info(f"[TÍTULO] El hilo {thread_id} no cumple condiciones para actualizar título.")
+
+async def force_update_all_thread_titles():
+    """
+    Fuerza la actualización de títulos de todos los hilos de chat existentes usando el LLM de tareas rápidas.
+    Si el hilo tiene más de 5 mensajes y el título es 'Nuevo Chat', o si tiene más de 20 y el título es distinto, se actualiza.
+    """
+    from core.database import SessionLocal, ChatThread
+    logger.info("Forzando actualización de títulos de todos los hilos...")
+    async with DBSession(SessionLocal) as db:
+        threads = (await db.execute(select(ChatThread))).scalars().all()
+        for thread in threads:
+            session_id = str(thread.id)
+            db_url = settings.database_url or os.getenv("DATABASE_URL")
+            if not db_url:
+                logger.error("DATABASE_URL no está configurada para el historial de chat.")
+                continue
+            db_sync_url = db_url.replace("+psycopg", "")
+            from langchain_community.chat_message_histories import PostgresChatMessageHistory
+            chat_message_history = PostgresChatMessageHistory(
+                connection_string=db_sync_url,
+                session_id=session_id,
+                table_name="langchain_chat_history",
+            )
+            messages = await chat_message_history.aget_messages()
+            await update_thread_title_if_needed(str(thread.id), messages)
+    logger.info("Actualización de títulos completada.")
 
 # ==============================================================================
 # SECCIÓN 3: EJECUCIÓN PRINCIPAL DEL AGENTE
@@ -197,17 +256,17 @@ async def summarize_history_in_background(
 
 async def create_and_run_agent(
     account_id: str,
-    telegram_id: int,
+    thread_id: str,
+    telegram_id: Optional[int],
     user_message: str,
     image_base64: Optional[str] = None,
 ) -> str:
     """
     Crea y ejecuta el agente de Langchain con manejo explícito de memoria.
     """
-    logger.info(f"--- Ejecutando agente para account_id: {account_id} (desde telegram_id: {telegram_id}) ---")
-    
+    logger.info(f"--- Ejecutando agente para account_id: {account_id}, thread_id: {thread_id} (desde telegram_id: {telegram_id}) ---")
     # --- 1. Gestión del Historial de Chat ---
-    session_id = str(telegram_id)
+    session_id = thread_id  # Usar siempre el thread_id como session_id
     if not settings.database_url:
         raise ValueError("DATABASE_URL no está configurada para el historial de chat.")
     db_sync_url = settings.database_url.replace("+psycopg", "")
@@ -217,15 +276,57 @@ async def create_and_run_agent(
         table_name="langchain_chat_history",
     )
     full_history = await chat_message_history.aget_messages()
-    
-    # Extraer resumen y filtrar historial para el prompt
-    summary_string = ""
-    history_for_prompt = []
-    for msg in full_history:
-        if isinstance(msg, HumanMessage) and msg.additional_kwargs.get("role") == "summary":
-            summary_string = str(msg.content)
+
+    # --- NUEVO: Si el historial es muy corto (nuevo hilo), sumarizar hilos previos y sumar últimos 4 mensajes globales ---
+    if len(full_history) < 2:
+        # Buscar todos los hilos previos del usuario
+        from core.database import SessionLocal, ChatThread
+        from utils.db_session import DBSession
+        import uuid as uuidlib
+        async with DBSession(SessionLocal) as db:
+            threads = (await db.execute(select(ChatThread).where(ChatThread.account_id == uuidlib.UUID(account_id)).order_by(ChatThread.created_at.desc()))).scalars().all()
+        # Excluir el hilo actual
+        prev_threads = [t for t in threads if str(t.id) != thread_id]
+        prev_messages = []
+        for t in prev_threads:
+            prev_hist = PostgresChatMessageHistory(
+                connection_string=db_sync_url,
+                session_id=str(t.id),
+                table_name="langchain_chat_history",
+            )
+            msgs = await prev_hist.aget_messages()
+            prev_messages.extend(msgs)
+        # Sumarizar historial anterior si hay suficiente
+        if prev_messages:
+            
+            from core.agent import summarize_history_in_background
+            # Solo mensajes que no sean resumen
+            msgs_for_sum = [m for m in prev_messages if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
+            # Usar la función de sumarización ya implementada
+            llm_for_summary = _fast_task_llm_instance or _main_agent_llm_instance
+            summarization_prompt = ChatPromptTemplate.from_messages([
+                SystemMessage(content="Tu tarea es crear un resumen conciso de la siguiente conversación para mantener el contexto. Captura los puntos clave, decisiones y el estado actual de cualquier discusión. Ignora saludos genéricos."),
+                MessagesPlaceholder(variable_name="history"),
+            ])
+            summarization_chain = summarization_prompt | llm_for_summary
+            summary_response = await summarization_chain.ainvoke({"history": msgs_for_sum})
+            summary_content = summary_response.content if hasattr(summary_response, 'content') else str(summary_response)
+            summary_string = f"Resumen de la conversación anterior: {summary_content}"
         else:
-            history_for_prompt.append(msg)
+            summary_string = ""
+        # Agregar los últimos 4 mensajes recientes (de cualquier hilo)
+        last_msgs = [m for m in prev_messages if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
+        last_msgs = last_msgs[-4:] if len(last_msgs) >= 4 else last_msgs
+        history_for_prompt = last_msgs.copy()
+    else:
+        # Extraer resumen y filtrar historial para el prompt (lógica original)
+        summary_string = ""
+        history_for_prompt = []
+        for msg in full_history:
+            if isinstance(msg, HumanMessage) and msg.additional_kwargs.get("role") == "summary":
+                summary_string = str(msg.content)
+            else:
+                history_for_prompt.append(msg)
 
     # --- 2. Preparar el Mensaje Actual del Usuario ---
     account_name = "Usuario" # Valor por defecto
@@ -292,6 +393,8 @@ async def create_and_run_agent(
     <hr>
 {effective_system_prompt}
     <hr>
+<b>Instrucción crítica:</b> Si necesitas usar herramientas, hazlo de una en una. Nunca intentes usar más de una herramienta en una sola respuesta. Espera la siguiente interacción antes de usar otra herramienta.
+    <hr>
 {id_instructions}
     <hr>
     <b>Guía de Uso de Herramientas Obligatoria:</b>
@@ -354,11 +457,26 @@ async def create_and_run_agent(
     # Es importante añadir el `current_human_message` que creamos antes
     await chat_message_history.aadd_messages([current_human_message, AIMessage(content=final_output)])
     updated_full_history = await chat_message_history.aget_messages()
-    
+    # Sumarizar solo para el contexto, pero sin borrar historial
     if _main_agent_llm_instance.get_num_tokens_from_messages(updated_full_history) > 3000:
         asyncio.create_task(summarize_history_in_background(updated_full_history, chat_message_history))
-        
+    # Actualizar título si corresponde
+    await update_thread_title_if_needed(session_id, updated_full_history)
     return sanitize_html(final_output)
+
+async def create_thread_for_account(account_id: str, title: str = "Nuevo Chat") -> str:
+    """
+    Crea un nuevo hilo de chat para la cuenta dada y retorna el ID del hilo.
+    """
+    async with DBSession(SessionLocal) as db:
+        account = await db.get(Account, uuid.UUID(account_id))
+        if not account:
+            raise ValueError(f"No existe la cuenta {account_id}")
+        new_thread = ChatThread(account_id=account.id, title=title)
+        db.add(new_thread)
+        await db.commit()
+        await db.refresh(new_thread)
+        return str(new_thread.id)
 
 
 

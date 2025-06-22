@@ -52,6 +52,9 @@ class Config:
         # Temperatura para la generación de texto del LLM principal.
         self.llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", 0.4))
 
+        self.ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text") # Modelo de embedding de Ollama
+        self.ollama_api_url: str = os.getenv("OLLAMA_API_URL", "http://196.168.100.106:11434") # URL interna del servicio Ollama
+
 
         # --- Configuración de Telegram ---
         self.telegram_bot_token: Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -63,7 +66,7 @@ class Config:
         # IDs de administrador para comandos restringidos (separados por comas).
         admin_ids_str = os.getenv("ADMIN_TELEGRAM_IDS", "")
         self.admin_telegram_ids: List[int] = [int(id.strip()) for id in admin_ids_str.split(',') if id.strip().isdigit()]
-
+        self.telegram_bot_url: str = os.getenv("TELEGRAM_BOT_URL", "http://telegram_client:9090")
 
         # --- API Keys y Credenciales de Servicios ---
         # Clave principal para las APIs de Google (GenAI Studio, etc.).
@@ -94,7 +97,7 @@ class Config:
         # --- Configuración de RAG (Chunking) ---
         self.chunk_size: int = int(os.getenv("CHUNK_SIZE", 1000))
         self.chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", 200))
-
+        self.internal_api_key_for_bot: str = os.getenv("INTERNAL_API_KEY_FOR_BOT", "super-secret-internal-key")
 
         # --- Prompt de Sistema por Defecto ---
         self.default_system_prompt: str = os.getenv(

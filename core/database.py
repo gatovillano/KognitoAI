@@ -30,8 +30,9 @@ import asyncio
 import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
-
+import uuid
 import pytz
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 # --- Importaciones de SQLAlchemy ---
 from sqlalchemy import (
@@ -78,7 +79,11 @@ Base = declarative_base()
 # ==============================================================================
 
 # --- Nuevos Modelos de Identidad Universal ---
-
+engine = create_async_engine(
+    settings.database_url,
+    echo=False,
+    pool_pre_ping=True
+)
 class Account(Base):
     """
     Representa una cuenta de usuario universal en el sistema.
@@ -91,6 +96,7 @@ class Account(Base):
     
     name = Column(String(255), nullable=True, comment="Nombre principal de la cuenta, puede ser establecido por el usuario.")
     email = Column(String(255), unique=True, nullable=True, index=True, comment="Email opcional para inicio de sesión o notificaciones.")
+    hashed_password = Column(String(255), nullable=True)
     username = Column(String(255), unique=True, nullable=True, index=True) 
     timezone = Column(String(255), nullable=True, default="UTC", comment="Zona horaria preferida de la cuenta.")
     custom_system_prompt = Column(Text, nullable=True, comment="Prompt de sistema personalizado para la IA de esta cuenta.")
@@ -108,6 +114,7 @@ class Account(Base):
     notas = relationship("Nota", back_populates="account", cascade="all, delete-orphan")
     recordatorios = relationship("Recordatorio", back_populates="account", cascade="all, delete-orphan")
     agenda_events = relationship("AgendaEvent", back_populates="account", cascade="all, delete-orphan")
+    chat_threads = relationship("ChatThread", back_populates="account", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Account(id={self.id}, name='{self.name}')>"
@@ -236,6 +243,18 @@ class Recordatorio(Base):
 
     account = relationship("Account", back_populates="recordatorios")
 
+class ChatThread(Base):
+    __tablename__ = "chat_threads"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    
+    title = Column(String, default="Nuevo Chat")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # Usamos JSONB para almacenar una lista flexible de etiquetas.
+    tags = Column(JSONB, nullable=True) 
+
+    account = relationship("Account", back_populates="chat_threads")
 
 # ==============================================================================
 # SECCIÓN 2: FUNCIONES AUXILIARES DE LA BASE DE DATOS

@@ -28,7 +28,7 @@ KognitoAI/
 ├── run_telegram_bot.py  # Punto de entrada para el bot de Telegram
 ├── requirements.txt     # Dependencias principales (backend y bot)
 ├── requirements.telegram.txt # Dependencias mínimas para el cliente de Telegram ligero
-├── Dockerfile           # Dockerfile principal para backend/webapp y cliente Telegram
+├── Dockerfile*          # Archivos Docker para backend/webapp y cliente Telegram
 ├── .env.example         # Ejemplo de archivo de configuración de entorno
 └── ...                  # Otros archivos de configuración y scripts
 ```

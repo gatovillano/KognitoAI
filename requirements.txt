@@ -42,3 +42,5 @@ python-multipart
 faster-whisper
 pdfminer.six
 python-docx
+passlib[bcrypt]
+pydantic[email]

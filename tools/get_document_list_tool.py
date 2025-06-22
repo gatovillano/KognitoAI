@@ -17,7 +17,7 @@ correctamente si es necesario.
 """
 
 import logging
-from typing import Any, List, Dict, Type
+from typing import Any, List, Dict, Type, Optional
 
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
@@ -59,12 +59,13 @@ class GetDocumentListTool(BaseTool):
     args_schema: Type[BaseModel] = GetDocumentListInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
 
-    async def _arun(self, account_id: str, **kwargs: Any) -> str:
+    async def _arun(self, account_id: str, telegram_id: Optional[int] = None, **kwargs: Any) -> str:
         """
-        Ejecuta la lógica de la herramienta de forma asíncrona.
+        Lógica asíncrona para listar documentos del usuario.
 
         Args:
             account_id: El ID universal de la cuenta del usuario.
+            telegram_id: El ID de Telegram del usuario, si está disponible.
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
@@ -72,37 +73,23 @@ class GetDocumentListTool(BaseTool):
         """
         logger.info(f"Ejecutando GetDocumentListTool para la cuenta '{account_id}'.")
         try:
-            # Llama a la función de lógica de negocio, que ahora debe ser actualizada
-            # para aceptar 'account_id' en lugar de 'telegram_id'.
-            documents_list = await list_user_documents(account_id=account_id)
-
-            # Guardar la lista cruda en user_data para que el panel de control la use
-            # Esta es una comunicación indirecta entre la herramienta y la interfaz,
-            # mediada por el estado del usuario.
-            user_data = bot_manager.get_user_data(int(account_id)) # Asumiendo que el bot_manager puede usar el ID.
-                                                                  # NOTA: Esto podría necesitar un ajuste si el user_data
-                                                                  # sigue usando telegram_id como clave. Lo revisaremos.
-            user_data[RAW_DOCUMENT_LIST_KEY] = documents_list
-            await bot_manager.flush_persistence()
-            
+            documents_list = await list_user_documents(account_id)
+            # Solo accede a user_data si telegram_id está presente
+            if telegram_id is not None:
+                user_data = bot_manager.get_user_data(telegram_id)
+                user_data[RAW_DOCUMENT_LIST_KEY] = documents_list
+                await bot_manager.flush_persistence()
             if not documents_list:
                 logger.info(f"No se encontraron documentos para la cuenta '{account_id}'.")
                 return "No tienes ningún documento guardado en tu base de conocimiento todavía. ¡Puedes subir uno cuando quieras!"
-
-            # Formatear una respuesta amigable para el agente, que luego la adaptará para el usuario.
-            # No devolvemos la lista completa si es muy larga, solo un resumen.
-            # La interfaz se encargará de mostrarla completa.
             response_message = f"He encontrado {len(documents_list)} documento(s) en tu base de conocimiento. Aquí están los primeros:\n\n"
-            for doc in documents_list[:5]: # Mostrar solo los primeros 5 como vista previa
+            for doc in documents_list[:5]:
                 title = doc.get('title') or 'Sin título'
                 response_message += f"- Archivo: `{doc['file_name']}` (Título: {title})\n"
-            
             if len(documents_list) > 5:
                 response_message += "\n(Y otros más...)"
-
             logger.info(f"✅ Lista de documentos recuperada exitosamente para la cuenta '{account_id}'.")
             return response_message
-
         except Exception as e:
             logger.error(f"Error en GetDocumentListTool para la cuenta '{account_id}': {e}", exc_info=True)
             return "Ocurrió un error inesperado al intentar listar tus documentos."
