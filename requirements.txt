@@ -44,3 +44,9 @@ pdfminer.six
 python-docx
 passlib[bcrypt]
 pydantic[email]
+scipy
+spacy
+numpy
+textblob
+keybert
+transformers

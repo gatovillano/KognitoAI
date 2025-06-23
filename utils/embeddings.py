@@ -53,7 +53,7 @@ async def initialize_embeddings():
     try:
         # Ejecutar la inicialización en un hilo separado
         _embedding_model = await asyncio.to_thread(_init_model)
-        logger.info(f"✅ Modelo de embeddings de Ollama '{_embedding_model.model}' inicializado correctamente con base URL: {ollama_base_url_cleaned}")
+        logger.info(f"✅ Modelo de embeddings de Ollama '{_embedding_model.model}' inicializado correctamente con base URL: {ollama_base_url_cleaned}") # type: ignore
     except Exception as e:
         logger.error(f"❌ Error al inicializar el modelo de embeddings de Ollama: {e}", exc_info=True)
         

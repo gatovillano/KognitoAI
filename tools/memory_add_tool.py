@@ -15,6 +15,7 @@ la información se originó en Telegram, una interfaz web, etc.
 """
 
 import logging
+import asyncio # AGREGAR ESTA LÍNEA
 from typing import Any, Optional, Type
 
 from pydantic.v1 import BaseModel, Field
@@ -22,6 +23,7 @@ from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de memoria.
 from core.memory_manager import add_memory_to_vector_db
+from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -83,14 +85,20 @@ class MemoryAddTool(BaseTool):
         logger.info(f"Ejecutando MemoryAddTool para la cuenta '{account_id}' (Tipo: {type}): '{log_content}'")
 
         try:
-            # Llama a la función de lógica de negocio, que ahora debe ser actualizada
-            # para aceptar 'account_id' en lugar de 'telegram_id'.
             await add_memory_to_vector_db(
                 account_id=account_id,
                 content=content,
                 type=type or "general_memory"  # Asegura que el tipo no sea None
             )
             logger.info(f"Memoria añadida exitosamente para la cuenta '{account_id}'.")
+            # Llamada al trigger proactivo tras añadir la memoria
+            new_entry = {
+                'account_id': account_id,
+                'content': content,
+                'type': type or "general_memory"
+            }
+            # CORRECCIÓN: Programar como tarea en segundo plano
+            asyncio.create_task(proactive_knowledge_linker_trigger(new_entry))
             return "La información ha sido añadida a tu memoria a largo plazo."
         except Exception as e:
             logger.error(f"Error en MemoryAddTool para la cuenta '{account_id}': {e}", exc_info=True)

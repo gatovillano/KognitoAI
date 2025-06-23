@@ -17,6 +17,7 @@ título adecuado en la paginación.
 """
 
 import logging
+import asyncio # AGREGAR ESTA LÍNEA
 from typing import Any, Type, Optional
 
 from pydantic.v1 import BaseModel, Field
@@ -25,6 +26,7 @@ from langchain_core.tools import BaseTool
 # Importaciones de la lógica de negocio y gestión de estado
 from core.memory_manager import get_full_document_content
 from telegram_client.bot_manager import bot_manager
+from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -83,7 +85,6 @@ class GetDocumentContentTool(BaseTool):
         """
         logger.info(f"Ejecutando GetDocumentContentTool para la cuenta '{account_id}' y el archivo '{file_name}'.")
         try:
-            # Llama a la función de lógica de negocio, que ahora debe aceptar 'account_id'.
             full_content = await get_full_document_content(account_id=account_id, file_name=file_name)
 
             if full_content:
@@ -98,6 +99,17 @@ class GetDocumentContentTool(BaseTool):
                     f"{full_content}"
                 )
                 logger.info(f"✅ Contenido de '{file_name}' recuperado exitosamente. Longitud: {len(response_text)} caracteres.")
+
+                # Llamada al trigger proactivo tras obtener el contenido del documento
+                new_entry = {
+                    'account_id': account_id,
+                    'content': full_content,
+                    'title': file_name,
+                    'type': 'document'
+                }
+                # CORRECCIÓN: Programar como tarea en segundo plano
+                asyncio.create_task(proactive_knowledge_linker_trigger(new_entry))
+
                 return response_text
             else:
                 # Si la función no devuelve contenido, informamos al agente.

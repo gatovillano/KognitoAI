@@ -63,24 +63,28 @@ services:
     links:
       - core # ¡NUEVO! Creamos un enlace explícito al servicio core.
 
-  # 4. El Frontend de la Web App Pública
+  # 4. El Frontend de la Web App Pública <-- ¡AQUÍ ESTÁ EL CAMBIO!
   frontend:
+    # Usamos nuestro nuevo Dockerfile
     build:
-      context: .
+      context: . # Asume que el Dockerfile y el código de Next.js están en la raíz
       dockerfile: Dockerfile.frontend
-    container_name: kognito_frontend # Nombre explícito
+      args:
+        # Pasamos la URL del backend al proceso de build.
+        # Dentro de Docker, el frontend se comunica con el backend usando su nombre de servicio 'core'.
+        NEXT_PUBLIC_API_URL: http://core:8000 
+    container_name: kognito_frontend
     restart: always
+    # Mapeamos el puerto 8880 de tu máquina al puerto 3000 del contenedor (donde corre Next.js)
     ports:
-      - "${FRONTEND_PORT:-8880}:80"
-    volumes:
-      - ./public_chat_ui:/usr/share/nginx/html
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+      - "${FRONTEND_PORT:-8880}:3000"
     depends_on:
       - core
     networks:
       - kognito_network
+    # El 'links' es opcional en redes modernas, pero no hace daño
     links:
-      - core # ¡NUEVO! El frontend también necesita hablar con el core.
+      - core
 
   # 5. PGAdmin para administración visual de la base de datos
   pgadmin:

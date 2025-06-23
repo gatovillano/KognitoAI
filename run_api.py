@@ -390,25 +390,6 @@ async def handle_chat(request: ChatRequest, current_account_id: str = Depends(ge
         logger.error(f"Error al procesar petición de la cuenta {request.account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Ocurrió un error interno al procesar tu solicitud.")
 
-@app.post("/api/chat/stream", summary="Chat streaming con Gemini")
-async def chat_stream(request: Request, current_account_id: str = Depends(get_current_account_id)):
-    body = await request.json()
-    user_message = body.get("user_message")
-    thread_id = body.get("thread_id")
-    # Aquí puedes obtener el historial y contexto igual que en create_and_run_agent
-    # ...preparar prompt/contexto...
-    from core.agent import _main_agent_llm_instance
-    async def gemini_stream_async():
-        llm = _main_agent_llm_instance
-        if not llm:
-            yield "[ERROR: LLM no inicializado]"
-            return
-        # El método correcto para streaming es astream (async generator)
-        async for chunk in llm.astream(user_message):
-            # chunk puede ser un objeto con .content o un string
-            text = getattr(chunk, 'content', None) or str(chunk)
-            yield text
-    return StreamingResponse(gemini_stream_async(), media_type="text/plain")
 
 # ==============================================================================
 # SECCIÓN 5: API PARA EL PANEL DE CONTROL DE TELEGRAM (Protegida por initData)

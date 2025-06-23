@@ -1,8 +1,10 @@
 import logging
+import asyncio # AGREGAR ESTA LÍNEA
 from typing import Type, Optional, Any
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 from core.memory_manager import update_document_metadata
+from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,15 @@ class UpdateDocumentMetadataTool(BaseTool):
         try:
             success = await update_document_metadata(account_id, file_name, new_title, new_topic)
             if success:
+                # Llamada al trigger proactivo tras actualizar los metadatos del documento
+                new_entry = {
+                    'account_id': account_id,
+                    'title': new_title or file_name,
+                    'category': new_topic,
+                    'type': 'document_metadata_update'
+                }
+                # CORRECCIÓN: Programar como tarea en segundo plano
+                asyncio.create_task(proactive_knowledge_linker_trigger(new_entry))
                 return "Metadatos del documento actualizados correctamente."
             else:
                 return "No se encontró el documento o no se pudo actualizar."

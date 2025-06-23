@@ -17,6 +17,7 @@ LangChain (`add_note_tool`, `get_notes_tool`, etc.), que a su vez son invocadas
 por el agente de IA.
 """
 
+import asyncio
 import logging
 from typing import Optional, List, Dict, Tuple
 import uuid
@@ -27,14 +28,15 @@ from sqlalchemy.orm import selectinload
 # Importaciones de la nueva estructura de la base de datos y sesión
 from core.database import SessionLocal, Nota, Account
 from utils.db_session import DBSession
+from utils.embeddings import initialize_embeddings
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
 
 
-async def add_note(account_id: str, content: str, title: Optional[str] = None, category: Optional[str] = None) -> str:
+async def add_note(account_id: str, title: str, content: str, category: str = "general") -> Nota:
     """
-    Añade una nueva nota a la base de datos para una cuenta de usuario específica.
+    Añade una nueva nota a la base de datos para una cuenta de usuario específica. Añade los embedding de la nota
 
     Args:
         account_id: El ID universal (UUID en formato string) de la cuenta del usuario.
@@ -45,19 +47,44 @@ async def add_note(account_id: str, content: str, title: Optional[str] = None, c
     Returns:
         Un mensaje de confirmación para el usuario.
     """
-    logger.info(f"Añadiendo nota para la cuenta {account_id} con título: '{title or 'Sin título'}'.")
+    logger.info(f"Añadiendo nueva nota para la cuenta {account_id} con título '{title}'")
     async with DBSession(SessionLocal) as db:
+        # Generar el embedding de la nota
+        embeddings_model = await initialize_embeddings()
+        note_embedding = None
+        if embeddings_model:
+            try:
+                note_embedding = await embeddings_model.aembed_query(content)
+            except Exception as e:
+                logger.error(f"Error generando embedding para la nota: {e}", exc_info=True)
+
         new_note = Nota(
-            account_id=uuid.UUID(account_id),  # Convierte el string del account_id a un objeto UUID
+            account_id=uuid.UUID(account_id),
             title=title,
             content=content,
-            category=category or "General"  # Asigna una categoría por defecto si no se proporciona
+            category=category,
+            embedding=note_embedding # Guardar el embedding
         )
         db.add(new_note)
         await db.commit()
         await db.refresh(new_note)
-        logger.info(f"Nota {new_note.id} creada exitosamente para la cuenta {account_id}.")
-        return f"¡Nota guardada! (ID: {new_note.id}, Título: {title or 'Sin título'}, Categoría: {new_note.category})"
+        logger.info(f"Nota '{title}' añadida exitosamente con ID {new_note.id}.")
+
+        # Trigger the proactive knowledge linker in the background
+        # Asegúrate de que proactive_knowledge_linker_trigger esté importado
+        from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger
+        asyncio.create_task(proactive_knowledge_linker_trigger({
+            'id': str(new_note.id),
+            'account_id': account_id,
+            'content': new_note.content,
+            'title': new_note.title,
+            'type': 'note',
+            'category': new_note.category,
+            'timestamp': new_note.created_at,
+            'embedding': note_embedding # Pasa el embedding si ya lo tienes
+        }))
+
+        return new_note
 
 
 async def get_notes(account_id: str, category: Optional[str] = None, search_query: Optional[str] = None) -> str:
@@ -103,9 +130,9 @@ async def get_notes(account_id: str, category: Optional[str] = None, search_quer
         return "\n".join(response_lines)
 
 
-async def update_note(account_id: str, note_id: int, new_content: Optional[str] = None, new_title: Optional[str] = None, new_category: Optional[str] = None) -> str:
+async def update_note(account_id: str, note_id: int, new_title: Optional[str] = None, new_content: Optional[str] = None, new_category: Optional[str] = None) -> str:
     """
-    Actualiza una nota existente para una cuenta de usuario.
+    Actualiza una nota existente para una cuenta de usuario.     Regenera el embedding si el contenido cambia.
 
     Args:
         account_id: El ID universal de la cuenta.
@@ -117,24 +144,34 @@ async def update_note(account_id: str, note_id: int, new_content: Optional[str] 
     Returns:
         Un mensaje de confirmación o de error.
     """
-    if not any([new_content, new_title, new_category]):
-        return "Debes proporcionar al menos un campo para actualizar (contenido, título o categoría)."
-
-    logger.info(f"Actualizando nota {note_id} para la cuenta {account_id}.")
+    logger.info(f"Intentando actualizar la nota {note_id} para la cuenta {account_id}.")
     async with DBSession(SessionLocal) as db:
-        # Busca la nota asegurándose de que pertenezca a la cuenta correcta.
         stmt = select(Nota).where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
         result = await db.execute(stmt)
         note_to_update = result.scalars().first()
 
         if not note_to_update:
-            return f"No encontré ninguna nota con el ID {note_id} que te pertenezca."
-        
-        # Actualiza solo los campos que se proporcionaron.
-        if new_content is not None: note_to_update.content = new_content
-        if new_title is not None: note_to_update.title = new_title
-        if new_category is not None: note_to_update.category = new_category
-        
+            return f"No encontré ninguna nota con el ID {note_id} que te pertenezca para actualizar."
+
+        content_changed = False
+        if new_title is not None:
+            note_to_update.title = new_title
+        if new_content is not None:
+            if note_to_update.content != new_content: # Check if content actually changed
+                note_to_update.content = new_content
+                content_changed = True
+        if new_category is not None:
+            note_to_update.category = new_category
+
+        # Regenerar embedding si el contenido ha cambiado
+        if content_changed:
+            embeddings_model = await initialize_embeddings()
+            if embeddings_model:
+                try:
+                    note_to_update.embedding = await embeddings_model.aembed_query(note_to_update.content)
+                except Exception as e:
+                    logger.error(f"Error generando embedding para la nota: {e}", exc_info=True)
+
         await db.commit()
         logger.info(f"Nota {note_id} actualizada exitosamente para la cuenta {account_id}.")
         return f"¡Nota con ID {note_id} actualizada correctamente!"

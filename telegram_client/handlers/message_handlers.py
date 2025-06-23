@@ -47,7 +47,7 @@ from core.config import settings
 from core.database import get_or_create_account_from_platform_id, SessionLocal, AgendaEvent, ChatThread
 from utils.db_session import DBSession
 from telegram_client.bot_manager import bot_manager
-from utils.helpers import sanitize_html
+#from utils.helpers import sanitize_html
 from utils.paginator import Paginator, split_text_into_pages
 from utils.image_generation import GENERATED_IMAGE_KEY
 from tools.get_document_content_tool import DOCUMENT_NAME_KEY
@@ -196,16 +196,13 @@ async def handle_chat_response(update: Update, context: CallbackContext, respons
     pages = split_text_into_pages(response_text, 4096) # Telegram tiene un límite de 4096 caracteres.
     for i, page in enumerate(pages):
         try:
-            await context.bot.send_message(chat_id=chat_id, text=page, parse_mode=ParseMode.MARKDOWN_V2, disable_web_page_preview=True)
+            logger.info(f"[DEBUG TELEGRAM OUT] Texto enviado a Telegram (página {i+1}):\n{page}")
+            await context.bot.send_message(chat_id=chat_id, text=page, disable_web_page_preview=True)
             if i < len(pages) - 1:
                 await asyncio.sleep(0.5) # Pequeña pausa entre mensajes si hay múltiples páginas.
         except telegram_error.BadRequest as e:
-            if "can't parse entities" in str(e):
-                logger.warning(f"Error de parseo MarkdownV2, reintentando como texto plano. Error: {e}")
-                await context.bot.send_message(chat_id=chat_id, text=page)
-            else:
-                raise e # Si es otro tipo de BadRequest, relanzar.
-    
+            logger.warning(f"Error al enviar mensaje de texto plano: {e}")
+            # Si falla, no reintentamos con otro formato.
     return None # Importante: Retornar None para detener la propagación después de enviar la respuesta final.
 
 async def process_and_get_response(update: Update, context: CallbackContext, user_message: str, image_base64: Optional[str] = None) -> None:
@@ -237,7 +234,8 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
             username=user.username
         )
         if not result:
-            await update.message.reply_text("Lo siento, tuve un problema al identificar tu cuenta. No puedo procesar tu solicitud.", parse_mode="MarkdownV2")
+            error_msg = "Lo siento, tuve un problema al identificar tu cuenta. No puedo procesar tu solicitud."
+            await update.message.reply_text(error_msg)
             return None
         account, _ = result
         account_id_str = str(account.id) # Convertir UUID a string para el payload.
@@ -266,18 +264,18 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
                     current_thread_id = thread_data['thread_id']
                 else:
                     logger.error(f"La respuesta no contiene 'id' ni 'thread_id'. Respuesta: {thread_data}")
-                    await update.message.reply_text(f"No pude iniciar una nueva conversación. Respuesta inesperada del servidor: {thread_data}", parse_mode="MarkdownV2")
+                    await update.message.reply_text(f"No pude iniciar una nueva conversación. Respuesta inesperada del servidor: {thread_data}")
                     return None
                 context.chat_data[CURRENT_CHAT_THREAD_ID_KEY] = current_thread_id
                 logger.info(f"Nuevo hilo {current_thread_id} creado para la cuenta {account_id_str}.")
             except httpx.HTTPStatusError as e:
                 error_detail = e.response.json().get("detail", "Error del servidor al crear hilo.")
                 logger.error(f"Error al crear hilo para la cuenta {account_id_str}: {error_detail}")
-                await update.message.reply_text(f"No pude iniciar una nueva conversación. Problema: {error_detail}", parse_mode="MarkdownV2")
+                await update.message.reply_text(f"No pude iniciar una nueva conversación. Problema: {error_detail}")
                 return None
             except Exception as e:
                 logger.error(f"Error inesperado al crear hilo para la cuenta {account_id_str}: {e}", exc_info=True)
-                await update.message.reply_text("Ocurrió un error inesperado al iniciar la conversación.", parse_mode="MarkdownV2")
+                await update.message.reply_text("Ocurrió un error inesperado al iniciar la conversación.")
                 return None
         
         # Verificar si ha habido inactividad por más de 10 minutos
@@ -325,7 +323,7 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
                     context.chat_data["jwt_token"] = jwt_token
             except Exception as e:
                 logger.error(f"No se pudo obtener el token JWT para el usuario {user.id}: {e}", exc_info=True)
-                await update.message.reply_text("No se pudo autenticar tu sesión. Intenta de nuevo más tarde.", parse_mode="MarkdownV2")
+                await update.message.reply_text("No se pudo autenticar tu sesión. Intenta de nuevo más tarde.")
                 return None
         headers = {"Authorization": f"Bearer {jwt_token}"}
         async with httpx.AsyncClient() as client:
@@ -346,11 +344,14 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
         except json.JSONDecodeError:
             error_detail = e.response.text
         logger.error(f"Error de API al procesar mensaje para la cuenta {account_id_log}: {error_detail}")
-        await update.message.reply_text(f"No pude procesar tu mensaje. Hubo un problema con el servidor: {error_detail}", parse_mode="MarkdownV2")
+        error_msg = "No pude procesar tu mensaje. Hubo un problema con el servidor: {}".format(error_detail)
+        await update.message.reply_text(error_msg)
     except Exception as e:
         account_id_log = str(account.id) if account else "Desconocida"
         logger.error(f"Error inesperado en process_and_get_response para la cuenta {account_id_log}: {e}", exc_info=True)
-        await update.message.reply_text("Lo siento, ocurrió un error inesperado al procesar tu solicitud.", parse_mode="MarkdownV2")
+        error_msg = "Lo siento, ocurrió un error inesperado al procesar tu solicitud."
+        logger.error(f"[DEBUG TELEGRAM OUT][ERROR] Mensaje escapado a enviar: {repr(error_msg)}")
+        await update.message.reply_text(error_msg)
     finally:
         # Asegurarse de que el indicador "escribiendo..." siempre se detenga.
         typing_stop_event.set()
@@ -416,14 +417,14 @@ async def voice_message_handler(update: Update, context: CallbackContext) -> Non
         
         model = await get_whisper_model()
         if not model:
-            await message.reply_text("Lo siento, el servicio de transcripción de voz no está disponible.", parse_mode="MarkdownV2")
+            await message.reply_text("Lo siento, el servicio de transcripción de voz no está disponible.")
             return None
         
         segments, info = model.transcribe(voice_bytes_io)
         transcribed_text = " ".join([segment.text for segment in segments])
         
         if not transcribed_text.strip():
-            await message.reply_text("No pude entender lo que dijiste. ¿Puedes repetirlo o escribirlo?", parse_mode="MarkdownV2")
+            await message.reply_text("No pude entender lo que dijiste. ¿Puedes repetirlo o escribirlo?")
             return None
         
         logger.info(f"Voz transcrita de {message.from_user.id}: {transcribed_text[:50]}...")
@@ -431,7 +432,7 @@ async def voice_message_handler(update: Update, context: CallbackContext) -> Non
     
     except Exception as e:
         logger.error(f"Error procesando mensaje de voz de {message.from_user.id}: {e}", exc_info=True)
-        await message.reply_text("Hubo un error al procesar tu mensaje de voz. Por favor, intenta de nuevo.", parse_mode="MarkdownV2")
+        await message.reply_text("Hubo un error al procesar tu mensaje de voz. Por favor, intenta de nuevo.")
     
     return None # Importante: Retornar None para detener la propagación.
 
@@ -458,7 +459,7 @@ async def photo_message_handler(update: Update, context: CallbackContext) -> Non
     
     except Exception as e:
         logger.error(f"Error procesando foto de {message.from_user.id}: {e}", exc_info=True)
-        await message.reply_text("Hubo un error al procesar tu imagen. Por favor, intenta de nuevo.", parse_mode="MarkdownV2")
+        await message.reply_text("Hubo un error al procesar tu imagen. Por favor, intenta de nuevo.")
     
     return None # Importante: Retornar None para detener la propagación.
 
@@ -496,3 +497,4 @@ def calculate_telegram_login_hash(user, bot_token, auth_date):
     data_check_string = '\n'.join(data_check_arr)
     secret_key = hashlib.sha256(bot_token.encode()).digest()
     return hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+

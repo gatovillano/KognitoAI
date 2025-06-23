@@ -168,32 +168,39 @@ class Perfil(Base):
 class Memory(Base):
     """Almacena memorias vectoriales para RAG."""
     __tablename__ = "memories"
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     # Refactorizado: Se vincula a account_id
-    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False)
     
     content = Column(Text, nullable=False)
-    embedding = Column(Vector(768), nullable=True) # Ajustado a la dimensión de text-embedding-004 de Google
-    type = Column(String(50), default="general_memory")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    embedding = Column(Vector(384), nullable=False) # CORREGIDO: Si Memory también usa all-MiniLM-L6-v2
+    type = Column(String, default="general_memory") # Ej: 'general_memory', 'document_chunk', 'user_profile_fact'
+    created_at = Column(DateTime(timezone=True), default=func.now())
 
     account = relationship("Account", back_populates="memories")
+
+    def __repr__(self):
+        return f"<Memory(id={self.id}, type='{self.type}', content='{self.content[:50]}...')>"
 
 
 class Nota(Base):
     """Almacena las notas de un usuario."""
     __tablename__ = "notas"
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     # Refactorizado: Se vincula a account_id
-    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False)
     
-    title = Column(String(255), nullable=True)
+    title = Column(String, nullable=True)
     content = Column(Text, nullable=False)
-    category = Column(String(100), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    category = Column(String, default="General")
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    embedding = Column(Vector(384), nullable=True) # CORREGIDO: Tamaño del embedding para all-MiniLM-L6-v2
 
     account = relationship("Account", back_populates="notas")
+
+    def __repr__(self):
+        return f"<Nota(id={self.id}, title='{self.title}', account_id={self.account_id})>"
 
 
 class AgendaEvent(Base):

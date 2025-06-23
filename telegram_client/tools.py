@@ -48,6 +48,7 @@ from tools.image_generation_tool import ImageGenerationTool
 from tools.web_scraper_tool import WebScraperTool
 # Importar la FÁBRICA de la herramienta de búsqueda web
 from tools.web_search_tool import get_web_search_tool
+from tools.analyze_text_for_insights_tool import AnalyzeTextForInsightsTool
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ def get_all_langchain_tools() -> List[Tool]:
         # Documentos
         GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool,
         # Contenido y Web (excepto las que usan fábricas)
-        ImageGenerationTool, WebScraperTool
+        ImageGenerationTool, WebScraperTool, AnalyzeTextForInsightsTool
     ]
 
     # Instanciar cada herramienta basada en clase de forma segura.

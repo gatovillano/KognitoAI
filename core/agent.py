@@ -46,7 +46,7 @@ from telegram_client.tools import get_all_langchain_tools
 from core.memory_manager import get_user_profile, get_relevant_memories
 from core.database import SessionLocal, Account, ChatThread
 from utils.db_session import DBSession
-from utils.helpers import sanitize_html
+#from utils.helpers import sanitize_html
 from core.config import settings
 
 # --- Claves para estado temporal ---
@@ -277,47 +277,55 @@ async def create_and_run_agent(
     )
     full_history = await chat_message_history.aget_messages()
 
-    # --- NUEVO: Si el historial es muy corto (nuevo hilo), sumarizar hilos previos y sumar últimos 4 mensajes globales ---
+    # --- NUEVO: Si el historial es muy corto (nuevo hilo), sumarizar SOLO el hilo anterior y sumar últimos 4 mensajes de ese hilo ---
     if len(full_history) < 2:
-        # Buscar todos los hilos previos del usuario
-        from core.database import SessionLocal, ChatThread
-        from utils.db_session import DBSession
         import uuid as uuidlib
         async with DBSession(SessionLocal) as db:
             threads = (await db.execute(select(ChatThread).where(ChatThread.account_id == uuidlib.UUID(account_id)).order_by(ChatThread.created_at.desc()))).scalars().all()
         # Excluir el hilo actual
         prev_threads = [t for t in threads if str(t.id) != thread_id]
-        prev_messages = []
-        for t in prev_threads:
+        if prev_threads:
+            last_thread = prev_threads[0]
             prev_hist = PostgresChatMessageHistory(
                 connection_string=db_sync_url,
-                session_id=str(t.id),
+                session_id=str(last_thread.id),
                 table_name="langchain_chat_history",
             )
-            msgs = await prev_hist.aget_messages()
-            prev_messages.extend(msgs)
-        # Sumarizar historial anterior si hay suficiente
-        if prev_messages:
-            
-            from core.agent import summarize_history_in_background
-            # Solo mensajes que no sean resumen
-            msgs_for_sum = [m for m in prev_messages if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
-            # Usar la función de sumarización ya implementada
-            llm_for_summary = _fast_task_llm_instance or _main_agent_llm_instance
-            summarization_prompt = ChatPromptTemplate.from_messages([
-                SystemMessage(content="Tu tarea es crear un resumen conciso de la siguiente conversación para mantener el contexto. Captura los puntos clave, decisiones y el estado actual de cualquier discusión. Ignora saludos genéricos."),
-                MessagesPlaceholder(variable_name="history"),
-            ])
-            summarization_chain = summarization_prompt | llm_for_summary
-            summary_response = await summarization_chain.ainvoke({"history": msgs_for_sum})
-            summary_content = summary_response.content if hasattr(summary_response, 'content') else str(summary_response)
-            summary_string = f"Resumen de la conversación anterior: {summary_content}"
+            prev_messages = await prev_hist.aget_messages()
+            # Sumarizar historial anterior si hay suficiente
+            if prev_messages:
+                msgs_for_sum = [m for m in prev_messages if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
+                llm_for_summary = _fast_task_llm_instance or _main_agent_llm_instance
+                summarization_prompt = ChatPromptTemplate.from_messages([
+                    SystemMessage(content="Tu tarea es crear un resumen conciso de la siguiente conversación para mantener el contexto. Captura los puntos clave, decisiones y el estado actual de cualquier discusión. Ignora saludos genéricos."),
+                    MessagesPlaceholder(variable_name="history"),
+                ])
+                summarization_chain = summarization_prompt | llm_for_summary
+                summary_response = await summarization_chain.ainvoke({"history": msgs_for_sum})
+                summary_content = summary_response.content if hasattr(summary_response, 'content') else str(summary_response)
+                summary_string = f"Resumen de la conversación anterior: {summary_content}"
+                # --- GUARDAR EN MEMORIA VECTORIAL ---
+                try:
+                    from core.memory_manager import add_memory_to_vector_db
+                    # Guardar el embedding del resumen con metadata de tipo y categoría
+                    await add_memory_to_vector_db(
+                        account_id=account_id,
+                        content=summary_content,
+                        type="thread_summary"
+                    )
+                    logger.info(f"✅ Resumen del hilo {last_thread.id} guardado en memoria vectorial como 'thread_summary'.")
+                except Exception as e:
+                    logger.error(f"❌ Error al guardar el resumen del hilo {last_thread.id} en la memoria vectorial: {e}")
+            else:
+                summary_string = ""
+            # Agregar los últimos 4 mensajes recientes (de ese hilo)
+            last_msgs = [m for m in prev_messages if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
+            last_msgs = last_msgs[-4:] if len(last_msgs) >= 4 else last_msgs
+            # --- AGREGADO: incluir el mensaje actual del usuario como el último ---
+            history_for_prompt = last_msgs.copy()
         else:
             summary_string = ""
-        # Agregar los últimos 4 mensajes recientes (de cualquier hilo)
-        last_msgs = [m for m in prev_messages if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
-        last_msgs = last_msgs[-4:] if len(last_msgs) >= 4 else last_msgs
-        history_for_prompt = last_msgs.copy()
+            history_for_prompt = []
     else:
         # Extraer resumen y filtrar historial para el prompt (lógica original)
         summary_string = ""
@@ -342,8 +350,8 @@ async def create_and_run_agent(
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
         ]
     current_human_message = HumanMessage(content=current_user_input_content, additional_kwargs={"user_name": account_name})
-    
-    # Combinar historial filtrado con el mensaje actual para el prompt
+
+    # --- CORRECCIÓN: Siempre agregar el mensaje actual al final del historial para el modelo ---
     full_history_for_llm_prompt = history_for_prompt + [current_human_message]
 
     # --- 3. Construir el Prompt del Sistema Dinámicamente ---
@@ -402,6 +410,19 @@ async def create_and_run_agent(
 {tool_descriptions}
     """
 
+    # --- NUEVO: Instrucciones de formato MarkdownV2 para Telegram ---
+    # markdownv2_format_rules = (
+    #     "\n[Reglas de formato MarkdownV2 para Telegram]\n"
+    #     "Responde SIEMPRE usando solo MarkdownV2 de Telegram:\n"
+    #     "- Usa *texto* para negrita, _texto_ para cursiva, `texto` para código, [texto](url) para enlaces.\n"
+    #     "- Usa • para listas.\n"
+    #     "- Escapa todos los caracteres reservados de MarkdownV2 (_ * [ ] ( ) ~ ` > # + - = | {{ }} . !) con una barra invertida (\\) cuando no formen parte de la sintaxis.\n"
+    #     "- No uses HTML, encabezados, tablas, imágenes ni emojis.\n"
+    #     "- Un solo salto de línea por párrafo.\n"
+    #     "Ejemplo:\n*Texto en negrita*\\n_Ejemplo en cursiva_\\n`Código`\\n[Enlace](https://ejemplo.com)\\n• Lista uno\\n• Lista dos\n"
+    # )
+    # system_prompt_content += markdownv2_format_rules
+
     # 4. --- Configurar y Ejecutar el Agente ---
     prompt_template = ChatPromptTemplate.from_messages(
         [
@@ -441,7 +462,7 @@ async def create_and_run_agent(
         # `history_for_prompt` ya contiene los mensajes del historial en el formato correcto.
         input_data = {
             "input": user_message,
-            "chat_history": history_for_prompt,
+            "chat_history": full_history_for_llm_prompt,
         }
 
         response = await agent_executor.ainvoke(
@@ -462,7 +483,7 @@ async def create_and_run_agent(
         asyncio.create_task(summarize_history_in_background(updated_full_history, chat_message_history))
     # Actualizar título si corresponde
     await update_thread_title_if_needed(session_id, updated_full_history)
-    return sanitize_html(final_output)
+    return (final_output)
 
 async def create_thread_for_account(account_id: str, title: str = "Nuevo Chat") -> str:
     """

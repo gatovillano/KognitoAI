@@ -13,6 +13,7 @@ y la hace reutilizable y robusta dentro de un backend centralizado.
 """
 
 import logging
+import asyncio # AGREGAR ESTA LÍNEA
 from typing import Type, Optional, Any
 from pydantic.v1 import BaseModel, Field
 from langchain.tools import BaseTool
@@ -20,6 +21,7 @@ from langchain.tools import BaseTool
 # Importa la función de lógica de notas. (Esta función también deberá ser
 # refactorizada para aceptar account_id en lugar de telegram_id).
 from core.notes_manager import add_note
+from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger
 
 # Configuración del logger para este módulo
 logger = logging.getLogger(__name__)
@@ -83,21 +85,28 @@ class AddNoteTool(BaseTool):
             return "Error: Se requiere el ID de la cuenta y el contenido para guardar una nota."
         
         try:
-            # NOTA: La función `add_note` también necesita ser actualizada para
-            # buscar y guardar usando `account_id` en lugar de `telegram_id`.
-            # Asumimos que ese cambio ya está hecho en `notes_manager.py`.
             result_message = await add_note(
                 account_id=account_id,
                 content=content,
-                title=title,
-                category=category
+                title=title or "",
+                category=category or ""
             )
             logger.info(f"Nota añadida exitosamente para la cuenta {account_id}.")
+            # Llamada al trigger proactivo tras añadir la nota
+            new_entry = {
+                'account_id': account_id,
+                'content': content,
+                'title': title,
+                'category': category,
+                'type': 'note'
+            }
+            # CORRECCIÓN: Programar como tarea en segundo plano
+            asyncio.create_task(proactive_knowledge_linker_trigger(new_entry))
             return result_message
         except Exception as e:
             logger.error(f"Error en AddNoteTool para la cuenta {account_id}: {e}", exc_info=True)
-            return f"Ocurrió un error al intentar guardar la nota: {e}"
 
+            return f"Ocurrió un error al intentar guardar la nota: {e}"
     def _run(self, *args: Any, **kwargs: Any) -> Any:
         """La ejecución síncrona no está soportada en esta herramienta."""
         raise NotImplementedError("add_note_tool no soporta ejecución síncrona.")

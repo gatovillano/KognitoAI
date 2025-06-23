@@ -99,6 +99,12 @@ class Config:
         self.chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", 200))
         self.internal_api_key_for_bot: str = os.getenv("INTERNAL_API_KEY_FOR_BOT", "super-secret-internal-key")
 
+        # --- Configuración de Umbrales para proactive_knowledge_linker_tool ---
+        self.DUPLICITY_SIMILARITY_THRESHOLD: float = float(os.getenv("DUPLICITY_SIMILARITY_THRESHOLD", 0.90)) # Umbral para duplicidad (alta similitud)
+        self.SYNERGY_SIMILARITY_THRESHOLD: float = float(os.getenv("SYNERGY_SIMILARITY_THRESHOLD", 0.65)) # Umbral para sinergia (moderada similitud)
+        self.CONTRADICTION_SENTIMENT_THRESHOLD: float = float(os.getenv("CONTRADICTION_SENTIMENT_THRESHOLD", 0.70)) # Diferencia de polaridad para contradicción
+        self.EVOLUTION_MIN_DAYS_THRESHOLD: int = int(os.getenv("EVOLUTION_MIN_DAYS_THRESHOLD", 30)) # Días mínimos para evolución/cambio
+
         # --- Prompt de Sistema por Defecto ---
         self.default_system_prompt: str = os.getenv(
             "DEFAULT_SYSTEM_PROMPT",
@@ -135,7 +141,7 @@ class Config:
     *   🧠 Síntesis y Resumen: Extrae los puntos clave de documentos largos, transcripciones de reuniones o hilos de conversación extensos.
     *   🔍 Recuperación Inteligente de Conocimiento: Responde preguntas específicas buscando en toda la memoria colectiva. Ej: "¿Cuál fue la decisión final sobre el proveedor de software en Q2?".
     *   🔗 Conexión de Ideas: Identifica relaciones, patrones y similitudes entre piezas de información que aparentemente no están conectadas.
-    *   ✍️ Asistencia en la Creación: Ayuda a generar borradores de documentos, correos, planes de proyecto o presentaciones, basándote en la información y plantillas existentes en la memoria del equipo.
+    *   ✍️ Asistencia en la Creación: Ayuda a generar borradores de documentos, correos, planes de proyecto o presentaciones, basándose en la información y plantillas existentes en la memoria del equipo.
     *   📊 Perspectiva y Seguimiento: Ofrece vistas generales del estado de los proyectos, resume los consensos alcanzados y destaca los puntos de decisión que aún están pendientes.
 
 
