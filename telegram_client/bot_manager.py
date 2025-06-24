@@ -76,37 +76,52 @@ class BotManager:
         return self._application
 
     @property
-    def bot(self) -> ExtBot:
+    def bot(self) -> Optional[ExtBot]:
         """
         Propiedad de conveniencia para acceder directamente al objeto `bot`.
         """
+        if not self.is_initialized():
+            logger.warning("No se puede acceder al bot: BotManager no ha sido inicializado.")
+            return None
+            
         return self.application.bot
 
     @property
-    def job_queue(self) -> JobQueue:
+    def job_queue(self) -> Optional[JobQueue]:
         """
         Propiedad de conveniencia para acceder directamente al objeto `job_queue`.
         """
+        if not self.is_initialized():
+            logger.warning("No se puede acceder a job_queue: BotManager no ha sido inicializado.")
+            return None
+            
         if self.application.job_queue is None:
-            raise RuntimeError("La JobQueue no está disponible. Asegúrate de que no esté deshabilitada en la configuración.")
+            logger.error("La JobQueue no está disponible. Asegúrate de que no esté deshabilitada en la configuración.")
+            return None
+            
         return self.application.job_queue
 
     def get_user_data(self, user_id: int) -> Dict[Any, Any]:
         """
         Obtiene el `user_data` para un ID de usuario específico.
         """
+        if not self.is_initialized():
+            logger.warning(f"No se puede obtener user_data para {user_id}: BotManager no ha sido inicializado.")
+            return {}
+            
         return self.application.user_data.get(user_id, {})
     
     async def flush_persistence(self) -> None:
         """
         Fuerza el guardado de todos los datos de persistencia en el disco.
         """
+        if not self.is_initialized():
+            logger.warning("No se puede guardar la persistencia: BotManager no ha sido inicializado.")
+            return
+            
         if self.application.persistence:
             await self.application.persistence.flush()
             logger.info("Datos de persistencia guardados en el disco.")
 
 # Crear la instancia única que será importada por otros módulos.
-bot_manager = BotManager()
-
-# Se crea una única instancia global que será importada por otros módulos.
 bot_manager = BotManager()

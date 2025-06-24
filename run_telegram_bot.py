@@ -95,21 +95,6 @@ async def lifespan(app: FastAPI):
                 exc_info=task.exception()
             )
 
-    ptb_app = Application.builder().token(settings.telegram_bot_token).build()
-    bot_manager.initialize(ptb_app)
-    
-    register_admin_handlers(ptb_app)
-    register_document_handlers(ptb_app)
-    register_message_handlers(ptb_app)
-    register_command_handlers(ptb_app)
-    register_callback_query_handler(ptb_app)
-    
-    await ptb_app.initialize()
-    
-    app.state.ptb_app = ptb_app
-    
-    await reschedule_pending_reminders(ptb_app)
-
     if ptb_app.updater:
         # Iniciar polling y añadir el callback síncrono.
         polling_task = asyncio.create_task(ptb_app.updater.start_polling(drop_pending_updates=True))
@@ -165,12 +150,42 @@ async def send_message_endpoint(request: SendMessageRequest):
     """
     if not bot_manager.is_initialized():
         raise HTTPException(status_code=503, detail="El cliente de Telegram no está listo.")
+    bot_instance = bot_manager.bot
+    if bot_instance is None:
+        raise HTTPException(status_code=503, detail="El bot de Telegram no está inicializado.")
     try:
-        await bot_manager.bot.send_message(chat_id=request.chat_id, text=request.text, parse_mode='HTML')
+        await bot_instance.send_message(chat_id=request.chat_id, text=request.text, parse_mode='HTML')
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Error en endpoint interno /send-message: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error al enviar mensaje.")
+
+class StoreUserDataRequest(BaseModel):
+    """Define la estructura de datos para una solicitud de almacenamiento de datos de usuario."""
+    user_id: int
+    key: str
+    data: str  # Datos en base64 para la imagen
+
+@internal_api.post("/internal/store-user-data")
+async def store_user_data_endpoint(request: StoreUserDataRequest):
+    """
+    Endpoint de la API interna para almacenar datos en user_data de un usuario de Telegram.
+    """
+    if not bot_manager.is_initialized():
+        raise HTTPException(status_code=503, detail="El cliente de Telegram no está listo.")
+    try:
+        import base64
+        from io import BytesIO
+        user_data = bot_manager.get_user_data(request.user_id)
+        # Decodificar datos base64 a BytesIO para la imagen
+        image_data = base64.b64decode(request.data)
+        user_data[request.key] = BytesIO(image_data)
+        await bot_manager.flush_persistence()  # Asegura que se guarde el estado
+        logger.info(f"Datos almacenados en user_data para el usuario {request.user_id} con clave {request.key}.")
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Error en endpoint interno /store-user-data: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error al almacenar datos de usuario.")
 
 
 if __name__ == "__main__":

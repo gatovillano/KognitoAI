@@ -17,7 +17,7 @@ import numpy as np
 from scipy.spatial.distance import cosine # type: ignore
 
 # Importaciones de la base de datos y la configuración
-from core.database import SessionLocal, Nota, AgendaEvent, Recordatorio, Memory, Account
+from core.database import ProactiveInsight, SessionLocal, Nota, AgendaEvent, Recordatorio, Memory, Account
 from utils.db_session import DBSession
 from core.config import settings
 from utils.embeddings import initialize_embeddings
@@ -54,8 +54,12 @@ async def get_nlp_model() -> spacy.Language:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
         
-        _nlp_model = await loop.run_in_executor(None, lambda: spacy.load("en_core_web_sm"))
-        logger.info("Modelo spaCy cargado.")
+        try:
+            _nlp_model = await loop.run_in_executor(None, lambda: spacy.load("en_core_web_sm"))
+            logger.info("Modelo spaCy cargado.")
+        except Exception as e:
+            logger.error(f"Error al cargar el modelo spaCy 'en_core_web_sm': {e}", exc_info=True)
+            raise
     return _nlp_model
 
 async def get_keybert_model_instance() -> KeyBERT:
@@ -77,7 +81,7 @@ async def get_gemini_summarizer_model_instance() -> ChatGoogleGenerativeAI:
     global _gemini_summarizer_model
     if _gemini_summarizer_model is None:
         logger.info("Inicializando modelo Gemini 1.5 Flash para summarization...")
-        _gemini_summarizer_model = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.1)
+        _gemini_summarizer_model = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.1)
         logger.info("Modelo Gemini 1.5 Flash inicializado.")
     return _gemini_summarizer_model
 
@@ -117,11 +121,15 @@ def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
 
 async def extract_entities(text: str) -> List[Dict[str, str]]:
     """Extrae entidades nombradas de un texto usando spaCy."""
-    nlp = await get_nlp_model()
-    if not nlp:
+    try:
+        nlp = await get_nlp_model()
+        if not nlp:
+            return []
+        doc = nlp(text)
+        return [{"text": ent.text, "type": ent.label_} for ent in doc.ents]
+    except Exception as e:
+        logger.error(f"Error al extraer entidades con spaCy: {e}", exc_info=True)
         return []
-    doc = nlp(text)
-    return [{"text": ent.text, "type": ent.label_} for ent in doc.ents]
 
 async def summarize_text(text: str, max_length: int = 130) -> str:
     """Genera un resumen ejecutivo de un texto largo usando Gemini 1.5 Flash."""
@@ -206,11 +214,13 @@ async def get_all_knowledge(account_id: str) -> List[Dict[str, Any]]:
 
 async def store_proactive_insight(insight_data: Dict[str, Any]):
     """
-    Almacena o notifica un insight proactivo generado de forma persistente.
-    Para esta implementación, se limitará a imprimir en el log.
-    En un sistema real, esto implicaría guardar en una tabla de DB,
-    enviar una notificación al usuario (Telegram, email), etc.
+
+
+
+
+    Persiste un insight proactivo en la base de datos, además de loguearlo.
     """
+    # 1) Primero lo logeamos como antes
     logger.info(f"\n--- PROACTIVE INSIGHT DETECTADO ---")
     logger.info(f"  Cuenta: {insight_data.get('account_id', 'N/A')}")
     logger.info(f"  Tipo de Insight: {insight_data.get('type', 'N/A')}")
@@ -225,6 +235,32 @@ async def store_proactive_insight(insight_data: Dict[str, Any]):
             snippet = await summarize_text(snippet, max_length=150)
         logger.info(f"    - ID: {item.get('id', 'N/A')}, Título: '{item.get('title', 'Sin título')}' (Tipo: {item.get('type', 'N/A')}, Cat: {item.get('category', 'N/A')}), Fecha: {item.get('timestamp', 'N/A')}, Snippet: '{snippet}'")
     logger.info(f"-----------------------------------\n")
+
+    # 2) Ahora lo guardamos en la base de datos
+    try:
+        async with DBSession(SessionLocal) as db:
+            # Convert datetime objects in related_items to JSON-serializable format
+            related_items = insight_data.get("related_items", [])
+            serialized_items = []
+            for item in related_items:
+                serialized_item = item.copy()
+                if 'timestamp' in serialized_item and isinstance(serialized_item['timestamp'], datetime.datetime):
+                    serialized_item['timestamp'] = serialized_item['timestamp'].isoformat()
+                serialized_items.append(serialized_item)
+            
+            pi = ProactiveInsight(
+                account_id=uuid.UUID(insight_data["account_id"]),
+                type=insight_data.get("type", "N/A"),
+                insight_message=insight_data.get("insight_message", ""),
+                confidence_score=insight_data.get("confidence_score", 0.0),
+                action_suggestion=insight_data.get("action_suggestion"),
+                related_items=serialized_items  # se serializa automáticamente a JSONB
+            )
+            db.add(pi)
+            await db.commit()
+            logger.info(f"Insight guardado en DB con id={pi.id}.")
+    except Exception as e:
+        logger.error(f"Error guardando insight en BBDD: {e}", exc_info=True)
 
 # --- Main Analysis Logic ---
 

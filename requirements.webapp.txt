@@ -1,0 +1,32 @@
+# Dependencias para el servidor FastAPI
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Dependencias para la lógica de negocio que usa la API
+# Core de la base de datos y ORM
+sqlalchemy[asyncio]
+psycopg[async]
+pgvector         # Para el tipo Vector en el modelo
+
+# Dependencias de LangChain necesarias para RAG y embeddings
+langchain-core
+langchain
+langchain-postgres==0.0.4
+langchain-community
+# Dependencias para parseo de documentos
+pdfminer.six
+python-docx
+emoji
+python-dotenv 
+pytz
+dateparser
+asyncpg
+python-telegram-bot
+
+# Dependencias adicionales para modelos de datos y otras funcionalidades
+pydantic
+scipy
+numpy
+pandas
+spacy

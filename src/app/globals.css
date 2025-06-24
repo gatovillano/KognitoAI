@@ -1,0 +1,51 @@
+/* En: src/app/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root,
+  .dark {
+    --background: 240 10% 3.9%; /* Negro/Gris muy oscuro del fondo */
+    --foreground: 0 0% 98%;     /* Texto casi blanco */
+
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+
+    /* Color de acento principal (el azul claro brillante del logo) */
+    --primary: 204 88% 57%; /* #34B3F1 */
+    --primary-foreground: 240 10% 3.9%; /* Texto oscuro para que contraste sobre el azul */
+
+    /* Color secundario (el azul oscuro del logo) */
+    --secondary: 234 50% 35%; /* #2E3A87 */
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 204 88% 57%; /* El azul claro para el foco de los inputs */
+
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}

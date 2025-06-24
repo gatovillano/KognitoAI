@@ -23,17 +23,24 @@ import uuid
 from sqlalchemy import select, text, create_engine
 from typing import Optional, List, Union, Dict, Any
 import datetime
+from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger
 # No necesitamos urlparse, parse_qs aquí si usamos el engine directamente para PGVector
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import PGVector
+
 # Asegúrate de que tu versión de langchain-postgres sea compatible con este uso.
 # Si sigue fallando, podría ser un problema de versión específica.
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-from core.database import Perfil, SessionLocal, Account, engine # Importar el engine aquí
+from core.database import (
+    Perfil,
+    SessionLocal,
+    Account,
+    engine,
+)  # Importar el engine aquí
 from utils.db_session import DBSession
 from utils.embeddings import initialize_embeddings
 from core.config import settings
@@ -43,6 +50,7 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = settings.chunk_size
 CHUNK_OVERLAP = settings.chunk_overlap
 GLOBAL_COLLECTION_NAME = "global_knowledge_base"
+USER_MEMORIES_PREFIX = "user_memories_"
 
 # Engine síncrono solo para PGVector
 PGVECTOR_SYNC_ENGINE = create_engine(settings.database_url)
@@ -70,25 +78,44 @@ async def get_user_profile(account_id: str) -> Optional[Perfil]:
             result = await db.execute(stmt)
             perfil = result.scalars().first()
             if not perfil:
-                logger.warning(f"No se encontró perfil para la cuenta ID: {account_id}. Creando uno nuevo.")
-                account = await db.get(Account, uuid.UUID(account_id)) # Convertir a UUID
+                logger.warning(
+                    f"No se encontró perfil para la cuenta ID: {account_id}. Creando uno nuevo."
+                )
+                account = await db.get(
+                    Account, uuid.UUID(account_id)
+                )  # Convertir a UUID
                 if account:
-                    perfil = Perfil(account_id=uuid.UUID(account_id)) # Convertir a UUID
+                    perfil = Perfil(
+                        account_id=uuid.UUID(account_id)
+                    )  # Convertir a UUID
                     db.add(perfil)
                     await db.commit()
                     await db.refresh(perfil)
-                    logger.info(f"✅ Perfil vacío creado para la cuenta ID: {account_id}.")
+                    logger.info(
+                        f"✅ Perfil vacío creado para la cuenta ID: {account_id}."
+                    )
                 else:
-                    logger.error(f"❌ No se puede crear perfil porque la cuenta ID {account_id} no existe.")
+                    logger.error(
+                        f"❌ No se puede crear perfil porque la cuenta ID {account_id} no existe."
+                    )
                     return None
             return perfil
         except Exception as e:
-            logger.error(f"❌ Error al obtener/crear perfil para la cuenta ID {account_id}: {e}", exc_info=True)
+            logger.error(
+                f"❌ Error al obtener/crear perfil para la cuenta ID {account_id}: {e}",
+                exc_info=True,
+            )
             await db.rollback()
             return None
 
 
-async def update_user_profile(account_id: str, nombre: Optional[str] = None, gustos: Optional[str] = None, intereses: Optional[str] = None, otros_datos: Optional[str] = None):
+async def update_user_profile(
+    account_id: str,
+    nombre: Optional[str] = None,
+    gustos: Optional[str] = None,
+    intereses: Optional[str] = None,
+    otros_datos: Optional[str] = None,
+):
     """
     Actualiza los campos del perfil de un usuario.
     Args:
@@ -103,23 +130,36 @@ async def update_user_profile(account_id: str, nombre: Optional[str] = None, gus
         try:
             perfil = await get_user_profile(account_id)
             if not perfil:
-                logger.error(f"❌ No se pudo obtener o crear un perfil para la cuenta {account_id}. No se puede actualizar.")
+                logger.error(
+                    f"❌ No se pudo obtener o crear un perfil para la cuenta {account_id}. No se puede actualizar."
+                )
                 return
-            
+
             db.add(perfil)
-            if nombre is not None: perfil.nombre = nombre
-            if gustos is not None: perfil.gustos = gustos
-            if intereses is not None: perfil.intereses = intereses
-            if otros_datos is not None: perfil.otros_datos = otros_datos
-            
+            if nombre is not None:
+                perfil.nombre = nombre
+            if gustos is not None:
+                perfil.gustos = gustos
+            if intereses is not None:
+                perfil.intereses = intereses
+            if otros_datos is not None:
+                perfil.otros_datos = otros_datos
+
             await db.commit()
-            logger.info(f"✅ Perfil de la cuenta ID {account_id} actualizado exitosamente.")
+            logger.info(
+                f"✅ Perfil de la cuenta ID {account_id} actualizado exitosamente."
+            )
         except Exception as e:
-            logger.error(f"❌ Error al actualizar el perfil de la cuenta ID {account_id}: {e}", exc_info=True)
+            logger.error(
+                f"❌ Error al actualizar el perfil de la cuenta ID {account_id}: {e}",
+                exc_info=True,
+            )
             await db.rollback()
 
 
-async def add_memory_to_vector_db(account_id: str, content: str, type: str = "general_memory") -> None:
+async def add_memory_to_vector_db(
+    account_id: str, content: str, type: str = "general_memory"
+) -> None:
     """
     Genera embeddings para el contenido y lo guarda en la DB vectorial del usuario.
 
@@ -128,23 +168,30 @@ async def add_memory_to_vector_db(account_id: str, content: str, type: str = "ge
         content: El texto de la memoria a guardar.
         type: El tipo de memoria (ej: 'fact', 'idea').
     """
-    logger.info(f"Añadiendo memoria a la DB vectorial para la cuenta {account_id}: '{content[:50]}...'")
+    logger.info(
+        f"Añadiendo memoria a la DB vectorial para la cuenta {account_id}: '{content[:50]}...'"
+    )
     try:
-        embeddings: Embeddings = await initialize_embeddings() # Asegurarse de usar await
+        embeddings: Embeddings = (
+            await initialize_embeddings()
+        )  # Asegurarse de usar await
         if not embeddings:
-            logger.error("Los Embeddings no están inicializados. No se puede añadir memoria.")
+            logger.error(
+                "Los Embeddings no están inicializados. No se puede añadir memoria."
+            )
             return
 
         collection_name = f"user_memories_{account_id}"
-        
+
         # --- CORRECCIÓN CLAVE AQUÍ para PGVector ---
         # Ejecutar la operación de PGVector en un thread pool para no bloquear el event loop
         import asyncio
+
         vectorstore = await asyncio.to_thread(
             PGVector.from_existing_index,
             embedding=embeddings,
             collection_name=collection_name,
-            connection=PGVECTOR_SYNC_ENGINE
+            connection=PGVECTOR_SYNC_ENGINE,
         )
         # Si la colección no existe, afrom_existing_index podría fallar.
         # Una alternativa más robusta es crearla si no existe, o usar PGVector.from_documents
@@ -154,13 +201,25 @@ async def add_memory_to_vector_db(account_id: str, content: str, type: str = "ge
         # en la primera adición para una nueva colección.
 
         metadata = {"account_id": str(account_id), "type": type}
-        await vectorstore.aadd_documents(documents=[Document(page_content=content, metadata=metadata)])
-        logger.info(f"✅ Memoria añadida a la base de datos vectorial de la cuenta {account_id}.")
+        await vectorstore.aadd_documents(
+            documents=[Document(page_content=content, metadata=metadata)]
+        )
+        logger.info(
+            f"✅ Memoria añadida a la base de datos vectorial de la cuenta {account_id}."
+        )
     except Exception as e:
-        logger.error(f"❌ Error al añadir memoria a la DB vectorial para la cuenta {account_id}: {e}", exc_info=True)
+        logger.error(
+            f"❌ Error al añadir memoria a la DB vectorial para la cuenta {account_id}: {e}",
+            exc_info=True,
+        )
 
 
-async def get_relevant_memories(account_id: str, query: str, k: int = 10, metadata_filters: Optional[Dict[str, Any]] = None) -> str:
+async def get_relevant_memories(
+    account_id: str,
+    query: str,
+    k: int = 10,
+    metadata_filters: Optional[Dict[str, Any]] = None,
+) -> str:
     """
     Recupera memorias relevantes de la colección personal del usuario y de la global.
     Args:
@@ -172,54 +231,74 @@ async def get_relevant_memories(account_id: str, query: str, k: int = 10, metada
     Returns:
         Una cadena de texto formateada con las memorias relevantes encontradas.
     """
-    logger.info(f"Buscando memorias relevantes para la cuenta {account_id} con la consulta: '{query[:50]}...'")
+    logger.info(
+        f"Buscando memorias relevantes para la cuenta {account_id} con la consulta: '{query[:50]}...'"
+    )
     try:
-        embeddings: Embeddings = await initialize_embeddings() # Asegurarse de usar await
+        embeddings: Embeddings = (
+            await initialize_embeddings()
+        )  # Asegurarse de usar await
         if not embeddings:
             return "Error: El modelo de memoria no está disponible."
 
         # --- CORRECCIÓN CLAVE AQUÍ para PGVector ---
         # Ejecutar la operación de PGVector en un thread pool para no bloquear el event loop
         import asyncio
+
         user_vectorstore = await asyncio.to_thread(
             PGVector.from_existing_index,
             embedding=embeddings,
             collection_name=f"user_memories_{account_id}",
-            connection=PGVECTOR_SYNC_ENGINE
+            connection=PGVECTOR_SYNC_ENGINE,
         )
         global_vectorstore = await asyncio.to_thread(
             PGVector.from_existing_index,
             embedding=embeddings,
             collection_name=GLOBAL_COLLECTION_NAME,
-            connection=PGVECTOR_SYNC_ENGINE
+            connection=PGVECTOR_SYNC_ENGINE,
         )
 
         k_per_source = k // 2 if k > 1 else 1
         filters = metadata_filters if metadata_filters else {}
 
         # Ejecución asíncrona de búsquedas en paralelo
-        user_search_task = user_vectorstore.asimilarity_search(query, k=k_per_source, filter=filters)
-        global_search_task = global_vectorstore.asimilarity_search(query, k=k_per_source, filter=filters)
-        
-        user_results, global_results = await asyncio.gather(user_search_task, global_search_task, return_exceptions=True)
-        
+        user_search_task = user_vectorstore.asimilarity_search(
+            query, k=k_per_source, filter=filters
+        )
+        global_search_task = global_vectorstore.asimilarity_search(
+            query, k=k_per_source, filter=filters
+        )
+
+        user_results, global_results = await asyncio.gather(
+            user_search_task, global_search_task, return_exceptions=True
+        )
+
         all_docs = []
         if isinstance(user_results, list):
-            for doc in user_results: doc.metadata['source'] = 'Personal'
+            for doc in user_results:
+                doc.metadata["source"] = "Personal"
             all_docs.extend(user_results)
         else:
-            logger.warning(f"⚠️ No se pudo buscar en la memoria personal de la cuenta {account_id}: {user_results}")
+            logger.warning(
+                f"⚠️ No se pudo buscar en la memoria personal de la cuenta {account_id}: {user_results}"
+            )
 
         if isinstance(global_results, list):
-            for doc in global_results: doc.metadata['source'] = 'Global'
+            for doc in global_results:
+                doc.metadata["source"] = "Global"
             all_docs.extend(global_results)
         else:
-            logger.warning(f"⚠️ No se pudo buscar en la memoria global: {global_results}")
+            logger.warning(
+                f"⚠️ No se pudo buscar en la memoria global: {global_results}"
+            )
 
         if not all_docs:
             return "No se encontraron memorias relevantes."
 
-        memories_list = [f"- [Fuente: {d.metadata.get('source', 'N/A')}] (Tema: {d.metadata.get('topic', 'N/A')}): {d.page_content}" for d in all_docs]
+        memories_list = [
+            f"- [Fuente: {d.metadata.get('source', 'N/A')}] (Tema: {d.metadata.get('topic', 'N/A')}): {d.page_content}"
+            for d in all_docs
+        ]
         return "\n".join(memories_list)
     except Exception as e:
         logger.error(f"❌ Error al recuperar memorias relevantes: {e}", exc_info=True)
@@ -232,7 +311,7 @@ async def process_document_for_rag(
     topic: str = "general_documents",
     account_id: Optional[str] = None,
     is_global: bool = False,
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> int:
     """
     Divide, embebe y almacena el texto de un documento en la DB vectorial.
@@ -252,28 +331,38 @@ async def process_document_for_rag(
     elif account_id:
         collection_name = f"user_memories_{account_id}"
     else:
-        logger.error("❌ process_document_for_rag llamado sin account_id y sin is_global=True.")
+        logger.error(
+            "❌ process_document_for_rag llamado sin account_id y sin is_global=True."
+        )
         return 0
 
-    logger.info(f"📊 Iniciando procesamiento RAG para '{file_name}' en la colección '{collection_name}'.")
+    logger.info(
+        f"📊 Iniciando procesamiento RAG para '{file_name}' en la colección '{collection_name}'."
+    )
     if not extracted_text:
         return 0
     try:
-        embeddings = await initialize_embeddings() # Asegurarse de usar await
+        embeddings = await initialize_embeddings()  # Asegurarse de usar await
         if not embeddings:
-            logger.error("Los Embeddings no están inicializados. No se puede procesar el documento.")
+            logger.error(
+                "Los Embeddings no están inicializados. No se puede procesar el documento."
+            )
             return 0
 
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
+        )
         texts = text_splitter.split_text(extracted_text)
-        
+
         base_metadata = metadata if metadata else {}
-        base_metadata.update({
-            "file_name": file_name,
-            "topic": topic,
-            "type": "document_chunk",
-            "scope": "global" if is_global else "personal"
-        })
+        base_metadata.update(
+            {
+                "file_name": file_name,
+                "topic": topic,
+                "type": "document_chunk",
+                "scope": "global" if is_global else "personal",
+            }
+        )
         if account_id and not is_global:
             base_metadata["account_id"] = str(account_id)
 
@@ -285,69 +374,88 @@ async def process_document_for_rag(
             for k, v in chunk_metadata.items():
                 if isinstance(v, (datetime.datetime, datetime.date)):
                     chunk_metadata[k] = v.isoformat()
-            lc_documents.append(Document(page_content=text_content, metadata=chunk_metadata))
+            lc_documents.append(
+                Document(page_content=text_content, metadata=chunk_metadata)
+            )
 
         # --- CORRECCIÓN CLAVE AQUÍ para PGVector ---
         # Ejecutar la operación de PGVector en un thread pool para no bloquear el event loop
         import asyncio
+
         vectorstore = await PGVector.afrom_documents(
             documents=lc_documents,
             embedding=embeddings,
             collection_name=collection_name,
-            connection=PGVECTOR_SYNC_ENGINE
+            connection=PGVECTOR_SYNC_ENGINE,
         )
-        
-        logger.info(f"✅ Añadidos {len(lc_documents)} chunks a la colección '{collection_name}'.")
+        # // INICIO EDICIÓN
+        asyncio.create_task(
+            proactive_knowledge_linker_trigger({
+                "account_id": account_id,
+                "content": extracted_text,
+                "title": file_name,
+                "type": "document"
+            })
+        )
+        # // FIN EDICIÓN
+        logger.info(
+            f"✅ Añadidos {len(lc_documents)} chunks a la colección '{collection_name}'."
+        )
         return len(lc_documents)
     except Exception as e:
-        logger.error(f"❌ Error durante el procesamiento RAG para '{file_name}': {e}", exc_info=True)
-        return 0
-
-
-async def delete_document_chunks(account_id: str, file_name: Optional[str] = None, topic: Optional[str] = None) -> int:
-    """
-    Elimina los fragmentos de un documento de la base de datos vectorial del usuario.
-    Args:
-        account_id: El ID universal de la cuenta del usuario.
-        file_name: El nombre del archivo a eliminar (opcional).
-        topic: El tema de los documentos a eliminar (opcional).
-
-    Returns:
-        Un entero (1 si tuvo éxito, 0 si no).
-    """
-    logger.info(f"🗑️ Intentando eliminar chunks para la cuenta {account_id} (Archivo: '{file_name}', Tema: '{topic}')")
-    if not file_name and not topic:
-        return 0
-    try:
-        embeddings = await initialize_embeddings() # Asegurarse de usar await
-        if not embeddings:
-            return 0
-            
-        # --- CORRECCIÓN CLAVE AQUÍ para PGVector ---
-        # Para eliminar, necesitamos una instancia de PGVector conectada a la colección.
-        # Si la colección no existe, esta llamada podría fallar o devolver una instancia vacía.
-        # PGVector.afrom_existing_index es más apropiado para acceder a una colección existente.
-        vectorstore = await asyncio.to_thread(
-            PGVector.from_existing_index,
-            embedding=embeddings,
-            collection_name=f"user_memories_{account_id}",
-            connection=PGVECTOR_SYNC_ENGINE
+        logger.error(
+            f"❌ Error durante el procesamiento RAG para '{file_name}': {e}",
+            exc_info=True,
         )
-        
-        delete_filters = {"type": "document_chunk"}
-        if file_name:
-            delete_filters["file_name"] = file_name
-        if topic:
-            delete_filters["topic"] = topic
-            
-        # El método adelete puede no devolver el número de elementos eliminados,
-        # su éxito o fallo se maneja con excepciones.
-        await vectorstore.adelete(filter=delete_filters)
-        logger.info(f"✅ Operación de borrado completada para la cuenta {account_id}.")
-        return 1 # Asumimos éxito si no hubo excepción
-    except Exception as e:
-        logger.error(f"❌ Error eliminando chunks para la cuenta {account_id}: {e}", exc_info=True)
         return 0
+
+
+async def delete_document_chunks(
+    account_id: str,
+    file_name: Optional[str] = None,
+    topic: Optional[str] = None
+) -> int:
+    """
+    Elimina los chunks de la tabla langchain_pg_embedding que pertenecen a una colección de usuario.
+    La eliminación se puede filtrar por nombre de archivo o por tema.
+    Devuelve el número de filas borradas.
+    """
+    if not file_name and not topic:
+        logger.warning("Se llamó a delete_document_chunks sin file_name ni topic.")
+        return 0
+
+    # Inicializa embeddings para mantener compatibilidad (aunque no se usen aquí)
+    embeddings = await initialize_embeddings()
+    if not embeddings:
+        logger.warning("No pudo inicializar embeddings; abortando borrado.")
+        return 0
+
+    collection_name = f"user_memories_{account_id}"
+    async with DBSession(SessionLocal) as db:
+        # 1) Obtener UUID de la colección
+        col_q = text("SELECT uuid FROM langchain_pg_collection WHERE name = :cname")
+        res = await db.execute(col_q, {"cname": collection_name})
+        collection_uuid = res.scalar_one_or_none()
+        if not collection_uuid:
+            logger.info(f"No existe la colección '{collection_name}', nada que borrar.")
+            return 0
+
+        # 2) Construir cláusulas DELETE
+        clauses = ["collection_id = :col_id", "cmetadata->>'type' = 'document_chunk'"]
+        params: Dict[str, Any] = {"col_id": collection_uuid}
+        if file_name:
+            clauses.append("cmetadata->>'file_name' = :fname")
+            params["fname"] = file_name
+        if topic:
+            clauses.append("cmetadata->>'topic' = :tpc")
+            params["tpc"] = topic
+
+        delete_sql = text("DELETE FROM langchain_pg_embedding WHERE " + " AND ".join(clauses))
+        result = await db.execute(delete_sql, params)
+        deleted = result.rowcount or 0
+        await db.commit()
+        logger.info(f"🗑️ Borrados {deleted} chunks de '{collection_name}'.")
+        return deleted
 
 
 async def get_full_document_content(account_id: str, file_name: str) -> Optional[str]:
@@ -360,39 +468,49 @@ async def get_full_document_content(account_id: str, file_name: str) -> Optional
     Returns:
         El contenido completo del documento como una cadena, o None si no se encuentra.
     """
-    logger.info(f"Recuperando contenido completo de '{file_name}' para la cuenta {account_id}")
+    logger.info(
+        f"Recuperando contenido completo de '{file_name}' para la cuenta {account_id}"
+    )
     try:
-        embeddings: Embeddings = await initialize_embeddings() # Asegurarse de usar await
+        embeddings: Embeddings = (
+            await initialize_embeddings()
+        )  # Asegurarse de usar await
         if not embeddings:
             return None
-            
+
         # --- CORRECCIÓN CLAVE AQUÍ para PGVector ---
         vectorstore = await asyncio.to_thread(
             PGVector.from_existing_index,
             embedding=embeddings,
             collection_name=f"user_memories_{account_id}",
-            connection=PGVECTOR_SYNC_ENGINE
+            connection=PGVECTOR_SYNC_ENGINE,
         )
-        
+
         # Una búsqueda muy general para recuperar todos los chunks con el file_name dado.
         # Ajusta `k` a un número suficientemente grande para abarcar todos los chunks de un documento.
         retrieved_docs = await vectorstore.asimilarity_search(
-            query=" ", # Consulta vacía para obtener todos los documentos con el filtro
-            k=10000, # Un número muy alto para asegurar que se traigan todos los chunks
-            filter={"file_name": file_name, "type": "document_chunk"}
+            query=" ",  # Consulta vacía para obtener todos los documentos con el filtro
+            k=10000,  # Un número muy alto para asegurar que se traigan todos los chunks
+            filter={"file_name": file_name, "type": "document_chunk"},
         )
-        
+
         if not retrieved_docs:
             return None
-            
+
         # Ordenar los chunks por índice para reconstruir el documento correctamente
-        sorted_chunks = sorted(retrieved_docs, key=lambda d: d.metadata.get('chunk_index', 0))
+        sorted_chunks = sorted(
+            retrieved_docs, key=lambda d: d.metadata.get("chunk_index", 0)
+        )
         full_content = "".join([doc.page_content for doc in sorted_chunks])
-        
-        logger.info(f"✅ Reconstruido documento '{file_name}'. Longitud: {len(full_content)} chars.")
+
+        logger.info(
+            f"✅ Reconstruido documento '{file_name}'. Longitud: {len(full_content)} chars."
+        )
         return full_content
     except Exception as e:
-        logger.error(f"❌ Error recuperando contenido de '{file_name}': {e}", exc_info=True)
+        logger.error(
+            f"❌ Error recuperando contenido de '{file_name}': {e}", exc_info=True
+        )
         return None
 
 
@@ -410,13 +528,19 @@ async def list_user_documents(account_id: str) -> List[Dict[str, Any]]:
         collection_name = f"user_memories_{account_id}"
         async with DBSession(SessionLocal) as db:
             # Primero, verificar si la colección existe para evitar errores en la consulta pg_embedding
-            collection_uuid_query = text("SELECT uuid FROM langchain_pg_collection WHERE name = :collection_name")
-            collection_result = await db.execute(collection_uuid_query, {"collection_name": collection_name})
+            collection_uuid_query = text(
+                "SELECT uuid FROM langchain_pg_collection WHERE name = :collection_name"
+            )
+            collection_result = await db.execute(
+                collection_uuid_query, {"collection_name": collection_name}
+            )
             collection_uuid = collection_result.scalar_one_or_none()
-            
+
             if not collection_uuid:
-                logger.info(f"No se encontró la colección '{collection_name}' para listar documentos.")
-                return [] # No hay colección, no hay documentos
+                logger.info(
+                    f"No se encontró la colección '{collection_name}' para listar documentos."
+                )
+                return []  # No hay colección, no hay documentos
 
             document_list_query = text(
                 """
@@ -430,16 +554,26 @@ async def list_user_documents(account_id: str) -> List[Dict[str, Any]]:
                 ORDER BY cmetadata->>'file_name', id
                 """
             )
-            document_list_result = await db.execute(document_list_query, {"collection_uuid": collection_uuid})
+            document_list_result = await db.execute(
+                document_list_query, {"collection_uuid": collection_uuid}
+            )
             documents = [dict(row) for row in document_list_result.mappings()]
-            
-            logger.info(f"✅ Listados {len(documents)} documentos para la cuenta {account_id}.")
+
+            logger.info(
+                f"✅ Listados {len(documents)} documentos para la cuenta {account_id}."
+            )
             return documents
     except Exception as e:
-        logger.error(f"❌ Error listando documentos para la cuenta {account_id}: {e}", exc_info=True)
+        logger.error(
+            f"❌ Error listando documentos para la cuenta {account_id}: {e}",
+            exc_info=True,
+        )
         return []
 
-async def update_document_metadata(account_id: str, file_name: str, new_title: Optional[str], new_topic: Optional[str]) -> bool:
+
+async def update_document_metadata(
+    account_id: str, file_name: str, new_title: Optional[str], new_topic: Optional[str]
+) -> bool:
     """
     Actualiza el título y/o la categoría (topic) de todos los chunks de un documento.
     Args:
@@ -450,7 +584,9 @@ async def update_document_metadata(account_id: str, file_name: str, new_title: O
     Returns:
         True si al menos un chunk fue actualizado, False si no se encontró el documento.
     """
-    logger.info(f"Actualizando metadatos para '{file_name}' (cuenta {account_id}) - Título: {new_title}, Topic: {new_topic}")
+    logger.info(
+        f"Actualizando metadatos para '{file_name}' (cuenta {account_id}) - Título: {new_title}, Topic: {new_topic}"
+    )
     try:
         embeddings = await initialize_embeddings()
         if not embeddings:
@@ -459,20 +595,21 @@ async def update_document_metadata(account_id: str, file_name: str, new_title: O
             PGVector.from_existing_index,
             embedding=embeddings,
             collection_name=f"user_memories_{account_id}",
-            connection=PGVECTOR_SYNC_ENGINE
+            connection=PGVECTOR_SYNC_ENGINE,
         )
         # Buscar todos los chunks del documento
         chunks = await vectorstore.asimilarity_search(
             query=" ",
             k=10000,
-            filter={"file_name": file_name, "type": "document_chunk"}
+            filter={"file_name": file_name, "type": "document_chunk"},
         )
         if not chunks:
             return False
         # Actualizar metadatos en la base de datos
         async with DBSession(SessionLocal) as db:
             for chunk in chunks:
-                stmt = text("""
+                stmt = text(
+                    """
                     UPDATE langchain_pg_embedding
                     SET cmetadata = jsonb_set(
                         jsonb_set(cmetadata, '{title}', to_jsonb(:new_title), true),
@@ -483,16 +620,32 @@ async def update_document_metadata(account_id: str, file_name: str, new_title: O
                     )
                     AND cmetadata->>'file_name' = :file_name
                     AND cmetadata->>'type' = 'document_chunk'
-                """)
-                db.execute(stmt, {
-                    "new_title": new_title if new_title is not None else chunk.metadata.get("title", ""),
-                    "new_topic": new_topic if new_topic is not None else chunk.metadata.get("topic", ""),
-                    "collection_name": f"user_memories_{account_id}",
-                    "file_name": file_name
-                })
+                """
+                )
+                db.execute(
+                    stmt,
+                    {
+                        "new_title": (
+                            new_title
+                            if new_title is not None
+                            else chunk.metadata.get("title", "")
+                        ),
+                        "new_topic": (
+                            new_topic
+                            if new_topic is not None
+                            else chunk.metadata.get("topic", "")
+                        ),
+                        "collection_name": f"user_memories_{account_id}",
+                        "file_name": file_name,
+                    },
+                )
             await db.commit()
-        logger.info(f"✅ Metadatos actualizados para '{file_name}' (cuenta {account_id})")
+        logger.info(
+            f"✅ Metadatos actualizados para '{file_name}' (cuenta {account_id})"
+        )
         return True
     except Exception as e:
-        logger.error(f"❌ Error actualizando metadatos de '{file_name}': {e}", exc_info=True)
+        logger.error(
+            f"❌ Error actualizando metadatos de '{file_name}': {e}", exc_info=True
+        )
         return False

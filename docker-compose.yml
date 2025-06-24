@@ -56,6 +56,7 @@ services:
       - ./run_telegram_bot.py:/app/run_telegram_bot.py
       - ./core:/app/core
       - ./utils:/app/utils
+      - ./tmp:/app/tmp
     env_file:
       - ./.env
     networks:
@@ -72,7 +73,7 @@ services:
       args:
         # Pasamos la URL del backend al proceso de build.
         # Dentro de Docker, el frontend se comunica con el backend usando su nombre de servicio 'core'.
-        NEXT_PUBLIC_API_URL: http://core:8000 
+        NEXT_PUBLIC_API_URL: "https://apibase.gatoslibres.art" 
     container_name: kognito_frontend
     restart: always
     # Mapeamos el puerto 8880 de tu máquina al puerto 3000 del contenedor (donde corre Next.js)
@@ -80,6 +81,14 @@ services:
       - "${FRONTEND_PORT:-8880}:3000"
     depends_on:
       - core
+    volumes:
+      - ./src:/app/src
+      - ./public:/app/public
+      - ./package.json:/app/package.json
+      - ./next.config.mjs:/app/next.config.mjs
+      - ./tailwind.config.ts:/app/tailwind.config.ts
+      - ./postcss.config.js:/app/postcss.config.js
+      - ./tsconfig.json:/app/tsconfig.json
     networks:
       - kognito_network
     # El 'links' es opcional en redes modernas, pero no hace daño
@@ -103,10 +112,34 @@ services:
     volumes:
       - pgadmin_data:/var/lib/pgadmin
 
+
+  webapp:
+      build:
+        context: .
+        dockerfile: Dockerfile.webapp
+      restart: always
+      # <<--- AÑADIR DIRECTORIO DE TRABAJO ---<<
+      working_dir: /app
+      ports:
+        - "8010:8000"
+      volumes:
+        # Usar rutas absolutas dentro del contenedor basadas en el working_dir
+        - ./telegram_panel:/app/telegram_panel
+        - ./run_telegram_panel.py:/app/run_telegram_panel.py
+        - ./utils:/app/utils
+        - ./telegram_client:/app/telegram_client
+      environment:
+        DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-telegram_bot_db}
+      env_file:
+        - ./.env
+        
+      networks:
+        - kognito_network
 networks:
   kognito_network:
     driver: bridge
 
 volumes:
   db_data:
+
   pgadmin_data:

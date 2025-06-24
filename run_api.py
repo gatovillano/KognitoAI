@@ -493,7 +493,7 @@ async def list_notes_endpoint(current_account_id: str = Depends(get_current_acco
 @app.post("/api/add-note") # Cambiado a POST
 async def add_note_endpoint(current_account_id: str = Depends(get_current_account_id), title: Optional[str] = Form(None), content: str = Form(...), category: Optional[str] = Form(None), db: AsyncSession = Depends(get_db)):
     """Añade una nueva nota para el usuario. Protegido por JWT."""
-    result_message = await add_note(current_account_id, content, title, category)
+    result_message = await add_note(current_account_id, content, title or "", category or "")
     return {"message": result_message}
 
 @app.post("/api/update-note") # Cambiado a POST

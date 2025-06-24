@@ -37,14 +37,14 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 # --- Importaciones de SQLAlchemy ---
 from sqlalchemy import (
     Column, String, DateTime, Text, ForeignKey, BigInteger, Integer, Boolean,
-    UniqueConstraint, select, text
+    UniqueConstraint, select, text, Float
 )
 from sqlalchemy.orm import sessionmaker, relationship, selectinload
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 # Importar el tipo UUID de la extensión de PostgreSQL
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 # --- Importaciones de pgvector y del proyecto ---
 from pgvector.sqlalchemy import Vector
@@ -115,6 +115,11 @@ class Account(Base):
     recordatorios = relationship("Recordatorio", back_populates="account", cascade="all, delete-orphan")
     agenda_events = relationship("AgendaEvent", back_populates="account", cascade="all, delete-orphan")
     chat_threads = relationship("ChatThread", back_populates="account", cascade="all, delete-orphan")
+    proactive_insights = relationship(
+        "ProactiveInsight",
+        back_populates="account",
+        cascade="all, delete-orphan"
+    )
 
     def __repr__(self):
         return f"<Account(id={self.id}, name='{self.name}')>"
@@ -195,7 +200,7 @@ class Nota(Base):
     category = Column(String, default="General")
     created_at = Column(DateTime(timezone=True), default=func.now())
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
-    embedding = Column(Vector(384), nullable=True) # CORREGIDO: Tamaño del embedding para all-MiniLM-L6-v2
+    embedding = Column(Vector(384), nullable=True)
 
     account = relationship("Account", back_populates="notas")
 
@@ -262,6 +267,21 @@ class ChatThread(Base):
     tags = Column(JSONB, nullable=True) 
 
     account = relationship("Account", back_populates="chat_threads")
+
+class ProactiveInsight(Base):
+    __tablename__ = "proactive_insights"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    type = Column(String(50), nullable=False)
+    insight_message = Column(Text, nullable=False)
+    confidence_score = Column(Float, nullable=False)
+    action_suggestion = Column(Text, nullable=True)
+    related_items = Column(JSONB, nullable=True)  # Se almacena la lista de ítems como JSON
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    account = relationship("Account", back_populates="proactive_insights")
+
 
 # ==============================================================================
 # SECCIÓN 2: FUNCIONES AUXILIARES DE LA BASE DE DATOS

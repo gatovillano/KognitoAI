@@ -140,17 +140,29 @@ async def handle_chat_response(update: Update, context: CallbackContext, respons
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
 
-    # 1. Comprobar si hay una imagen generada para enviar
+    # 1. Comprobar si hay una imagen generada para enviar (desde BytesIO)
     if GENERATED_IMAGE_KEY in context.user_data:
         image_bytesio = context.user_data.pop(GENERATED_IMAGE_KEY)
-        logger.info(f"Enviando imagen generada al usuario {user_id}...")
+        logger.info(f"Enviando imagen generada al usuario {user_id} desde BytesIO...")
         image_bytesio.seek(0)
         try:
             await context.bot.send_photo(chat_id=chat_id, photo=image_bytesio, caption=response_text)
             return None # Importante: Retornar None para detener la propagación.
         except Exception as e:
-            logger.error(f"Error al enviar la imagen generada: {e}", exc_info=True)
+            logger.error(f"Error al enviar la imagen generada desde BytesIO: {e}", exc_info=True)
             # Si falla el envío de la imagen, enviamos el texto de todas formas (caerá al caso 4).
+
+    # 2. Comprobar si hay una ruta de imagen generada para enviar (desde archivo temporal)
+    if 'generated_image_path' in context.user_data:
+        image_path = context.user_data.pop('generated_image_path')
+        logger.info(f"Enviando imagen generada al usuario {user_id} desde archivo {image_path}...")
+        try:
+            with open(image_path, 'rb') as image_file:
+                await context.bot.send_photo(chat_id=chat_id, photo=image_file, caption=response_text)
+            return None # Importante: Retornar None para detener la propagación.
+        except Exception as e:
+            logger.error(f"Error al enviar la imagen generada desde archivo {image_path}: {e}", exc_info=True)
+            # Si falla el envío de la imagen, enviamos el texto de todas formas (caerá al caso 5).
 
     # 2. Comprobar si hay un documento para paginar
     document_title = context.user_data.pop(DOCUMENT_NAME_KEY, None)
@@ -334,6 +346,8 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
         response_text = api_response.get("response_text", "No recibí una respuesta válida del servidor.")
 
         # 5. Pasar la respuesta a la función que la envía al usuario.
+        # Antes de enviar la respuesta, esperar un breve momento para permitir que la imagen se almacene en user_data.
+        await asyncio.sleep(2)  # Esperar 2 segundos para que la API de almacenamiento de imagen complete.
         await handle_chat_response(update, context, response_text)
 
     except httpx.HTTPStatusError as e:
@@ -395,6 +409,9 @@ async def text_message_handler(update: Update, context: CallbackContext) -> None
             return None # No responder en grupo si no cumple las condiciones.
     
     await process_and_get_response(update, context, user_message=message.text)
+    # Después de procesar el mensaje, verificar si hay una imagen en user_data para enviar.
+    if GENERATED_IMAGE_KEY in context.user_data:
+        await handle_chat_response(update, context, response_text="¡Hecho! He generado la imagen.")
     return None # Importante: Retornar None para detener la propagación.
 
 async def voice_message_handler(update: Update, context: CallbackContext) -> None:
@@ -497,4 +514,3 @@ def calculate_telegram_login_hash(user, bot_token, auth_date):
     data_check_string = '\n'.join(data_check_arr)
     secret_key = hashlib.sha256(bot_token.encode()).digest()
     return hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-

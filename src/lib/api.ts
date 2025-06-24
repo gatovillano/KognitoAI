@@ -1,23 +1,23 @@
-// En: src/lib/api.ts
+// En: src/lib/api.ts (Versión para API Externa)
 import axios from 'axios';
 
-// Creamos una instancia de Axios con la configuración base
 const apiClient = axios.create({
-  // process.env.NEXT_PUBLIC_API_URL es cómo Next.js lee la variable
-  // de entorno que definimos en docker-compose.yml
-  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  // Next.js reemplazará esto con "https://apibase.gatoslibres.art"
+  // gracias a la configuración en docker-compose.yml
+  baseURL: process.env.NEXT_PUBLIC_API_URL, 
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Interceptor para añadir el token JWT a todas las peticiones
+// El interceptor para el token no cambia
 apiClient.interceptors.request.use(
   (config) => {
-    // Obtenemos el token de localStorage (lo guardaremos al hacer login)
-    const token = localStorage.getItem('authToken');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    if (typeof window !== 'undefined') {
+      const token = localStorage.getItem('authToken');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
     }
     return config;
   },

@@ -49,7 +49,9 @@ from tools.web_scraper_tool import WebScraperTool
 # Importar la FÁBRICA de la herramienta de búsqueda web
 from tools.web_search_tool import get_web_search_tool
 from tools.analyze_text_for_insights_tool import AnalyzeTextForInsightsTool
-
+from tools.github_repo_tool import GitHubRepoTool
+# Módulo de Insights Proactivos
+from tools.get_proactive_insights_tool import GetProactiveInsightsTool
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
 
@@ -75,7 +77,11 @@ def get_all_langchain_tools() -> List[Tool]:
         # Documentos
         GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool,
         # Contenido y Web (excepto las que usan fábricas)
-        ImageGenerationTool, WebScraperTool, AnalyzeTextForInsightsTool
+        ImageGenerationTool, WebScraperTool, AnalyzeTextForInsightsTool,
+        # Herramienta de GitHub
+        GitHubRepoTool,
+        # Insights Proactivos
+        GetProactiveInsightsTool,  # Asegúrate de que esta herramienta esté importada correctamente
     ]
 
     # Instanciar cada herramienta basada en clase de forma segura.
@@ -88,6 +94,7 @@ def get_all_langchain_tools() -> List[Tool]:
             # Si una herramienta falla, se loguea el error pero no se detiene el proceso.
             tool_name = getattr(ToolClass, 'name', 'NombreDesconocido')
             logger.error(f"❌ Fallo al instanciar la herramienta '{tool_name}': {e}", exc_info=True)
+            logger.error(f"Detalles de la excepción para '{tool_name}': {str(e)}", exc_info=True)
 
     # Instanciar herramientas que provienen de funciones de fábrica.
     try:
