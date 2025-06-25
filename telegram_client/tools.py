@@ -42,6 +42,7 @@ from tools.memory_add_tool import MemoryAddTool
 from tools.get_document_list_tool import GetDocumentListTool
 from tools.get_document_content_tool import GetDocumentContentTool
 from tools.delete_document_tool import DeleteDocumentTool
+from tools.document_rag_tool import DocumentRAGTool
 
 # Módulo de Creación de Contenido y Búsqueda
 from tools.image_generation_tool import ImageGenerationTool
@@ -52,6 +53,7 @@ from tools.analyze_text_for_insights_tool import AnalyzeTextForInsightsTool
 from tools.github_repo_tool import GitHubRepoTool
 # Módulo de Insights Proactivos
 from tools.get_proactive_insights_tool import GetProactiveInsightsTool
+from tools.proactive_knowledge_linker_tool import ProactiveKnowledgeLinkerTool
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
 
@@ -75,13 +77,14 @@ def get_all_langchain_tools() -> List[Tool]:
         # Perfil y Memoria
         UpdateProfileTool, MemoryAddTool,
         # Documentos
-        GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool,
+        GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
         # Contenido y Web (excepto las que usan fábricas)
         ImageGenerationTool, WebScraperTool, AnalyzeTextForInsightsTool,
         # Herramienta de GitHub
         GitHubRepoTool,
         # Insights Proactivos
-        GetProactiveInsightsTool,  # Asegúrate de que esta herramienta esté importada correctamente
+        GetProactiveInsightsTool,
+        ProactiveKnowledgeLinkerTool,  # Asegúrate de que esta herramienta esté importada correctamente
     ]
 
     # Instanciar cada herramienta basada en clase de forma segura.

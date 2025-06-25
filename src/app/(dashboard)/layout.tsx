@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useAuth } from "@/contexts/AuthContext";
+import { Toaster } from '@/components/ui/sonner';
 
 export default function DashboardLayout({
   children,
@@ -40,9 +41,10 @@ export default function DashboardLayout({
       </ResizablePanel>
       <ResizableHandle withHandle />
       <ResizablePanel defaultSize={80}>
-        <main className="h-full p-6">
-          {children}
-        </main>
+      <main className="h-full p-6">
+        {children}
+      </main>
+      <Toaster richColors />
       </ResizablePanel>
     </ResizablePanelGroup>
   )

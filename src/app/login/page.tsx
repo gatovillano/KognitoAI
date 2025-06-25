@@ -1,8 +1,7 @@
-// En: src/app/login/page.tsx
+// En: src/app/login/page.tsx (versión refactorizada y completa)
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import Script from 'next/script';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,141 +11,180 @@ import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import Image from 'next/image';
 
-// Definimos una interfaz para los datos que esperamos de Telegram
-interface TelegramUserData {
-  id: number;
-  first_name: string;
-  last_name?: string;
-  username?: string;
-  photo_url?: string;
-  auth_date: number;
-  hash: string;
-}
-
-// Extendemos la interfaz de Window para incluir la propiedad Telegram
-interface Window {
-  Telegram?: {
-    Login?: {
-      auth: (options: { bot_id: string; widget_version: string; request_access: string; onauth: (user: TelegramUserData) => void }, element: HTMLElement) => void;
-    };
-  };
-}
-
-export default function LoginPage() {
+// --- Sub-componente para el formulario de Email/Password ---
+const EmailLoginForm = ({ onLogin, isSubmitting, setParentError }: { onLogin: (token: string) => void; isSubmitting: boolean; setParentError: (error: string) => void }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const router = useRouter();
-  const { login } = useAuth();
-  const telegramLoginButtonRef = useRef<HTMLDivElement>(null); // Ref para el div del botón de Telegram
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    setIsSubmitting(true);
     try {
-      // Llamamos al endpoint de login del backend
       const response = await apiClient.post('/api/auth/login', { email, password });
-      // Si tiene éxito, el AuthContext se encarga de todo
-      await login(response.data.access_token);
-      // Y redirigimos a la página principal
-      router.push('/');
+      onLogin(response.data.access_token);
     } catch (err) {
-      setError('Email o contraseña incorrectos. Por favor, inténtalo de nuevo.');
+      setParentError('Email o contraseña incorrectos.');
       console.error(err);
-      setIsSubmitting(false);
-    }
-  };
-
-  // Esta función se llamará cuando el script de Telegram nos devuelva los datos del usuario
-  const handleTelegramLogin = async (user: TelegramUserData) => {
-    setIsSubmitting(true);
-    setError('');
-    try {
-      // Llamamos a nuestro endpoint de backend para verificar los datos y obtener el token JWT
-      const response = await apiClient.post('/api/auth/telegram/callback', user);
-      await login(response.data.access_token);
-      router.push('/');
-    } catch (err: any) {
-      console.error('Telegram login failed', err);
-      setError(err.response?.data?.detail || 'El login con Telegram falló.');
-      setIsSubmitting(false);
     }
   };
   
-  // Esto es para adjuntar la función de callback global que el script de Telegram espera
-  useEffect(() => {
-    (window as any).onTelegramAuth = handleTelegramLogin;
-    
-    // Limpieza al desmontar el componente
-    return () => {
-      delete (window as any).onTelegramAuth;
-    };
-  }, []);
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="email">Email</Label>
+        <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="password">Contraseña</Label>
+        <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+      </div>
+      <Button type="submit" className="w-full" disabled={isSubmitting}>
+        {isSubmitting ? 'Ingresando...' : 'Iniciar Sesión con Email'}
+      </Button>
+    </form>
+  );
+};
+
+// --- Sub-componente para el formulario de Código de Telegram ---
+const TelegramCodeForm = ({ setView }: { setView: (view: { type: string; identifier?: string }) => void }) => {
+  const [identifier, setIdentifier] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleRequestCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!identifier.trim()) {
+      setError('Por favor, introduce tu ID o @usuario de Telegram.');
+      return;
+    }
+    setError('');
+    setIsSubmitting(true);
+    try {
+      await apiClient.post('/api/auth/request-code', { identifier });
+      setView({ type: 'verifyCode', identifier }); // Pasa a la siguiente vista con el identificador
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'No se pudo enviar el código.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
-    <>
-      {/* NUEVO SCRIPT */}
-      <Script
-        src="https://telegram.org/js/telegram-widget.js?22"
-        strategy="afterInteractive"
-        onLoad={() => {
-          // Esta función se ejecuta cuando el script ha cargado
-          const telegramWindow = window as any;
-          if (telegramWindow.Telegram && telegramLoginButtonRef.current) {
-            telegramWindow.Telegram.Login.auth(
-              {
-                bot_id: '7308374590',
-                widget_version: '22',
-                request_access: 'write',
-                onauth: (user: TelegramUserData) => (window as any).onTelegramAuth(user),
-              },
-              telegramLoginButtonRef.current
-            );
-          }
-        }}
-      />
-      <main className="flex items-center justify-center min-h-screen bg-background p-4">
-        <Card className="w-full max-w-sm border-primary/20">
-          <CardHeader className="text-center space-y-2">
-            <Image src="/logo-completo.png" alt="Kognito AI Labs" width={120} height={120} className="mx-auto" />
-            <CardTitle className="text-2xl">Bienvenido</CardTitle>
-            <CardDescription>Ingresa a tu exocerebro digital</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {/* NUEVO BOTÓN DE TELEGRAM */}
-            <div ref={telegramLoginButtonRef} className="mb-4 min-h-[50px]">
-              {/* El script de Telegram reemplazará este div con el botón */}
-              <p className="text-sm text-muted-foreground">Iniciar sesión con Telegram</p>
-            </div>
-            
-            <div className="relative my-4">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-card px-2 text-muted-foreground">O continúa con</span>
-              </div>
-            </div>
+    <form onSubmit={handleRequestCode} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="telegram-id">ID o @usuario de Telegram</Label>
+        <Input id="telegram-id" value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder="@tu_usuario" />
+      </div>
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      <Button type="submit" className="w-full" variant="secondary" disabled={isSubmitting}>
+        {isSubmitting ? 'Enviando...' : 'Enviar Código a Telegram'}
+      </Button>
+    </form>
+  );
+};
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+// --- Sub-componente para el formulario de Verificación de Código ---
+const VerifyCodeForm = ({ identifier, onVerify, setView }: { identifier: string; onVerify: (token: string) => void; setView: (view: { type: string; identifier?: string }) => void }) => {
+    const [code, setCode] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleVerifyCode = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!code.trim()) {
+          setError('Por favor, introduce el código de 6 dígitos.');
+          return;
+        }
+        setError('');
+        setIsSubmitting(true);
+        try {
+          const response = await apiClient.post('/api/auth/verify-code', { identifier, code });
+          onVerify(response.data.access_token);
+        } catch (err: any) {
+          setError(err.response?.data?.detail || 'Código incorrecto o expirado.');
+        } finally {
+            setIsSubmitting(false);
+        }
+      };
+
+    return (
+        <form onSubmit={handleVerifyCode} className="space-y-4">
+          <p className="text-sm text-center text-muted-foreground">
+            Enviamos un código a <strong>{identifier}</strong>. Revisa tu chat de Telegram.
+          </p>
+          <div className="space-y-2">
+            <Label htmlFor="code">Código de Verificación</Label>
+            <Input id="code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" maxLength={6} autoFocus />
+          </div>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <Button type="submit" className="w-full" disabled={isSubmitting}>
+            {isSubmitting ? 'Verificando...' : 'Verificar e Ingresar'}
+          </Button>
+          <Button variant="link" onClick={() => setView({ type: 'login' })} className="w-full h-auto p-1">
+            Volver
+          </Button>
+        </form>
+    );
+}
+
+// --- Componente Principal de la Página de Login ---
+export default function LoginPage() {
+  const [view, setView] = useState<{ type: string; identifier?: string }>({ type: 'login', identifier: '' });
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [globalError, setGlobalError] = useState('');
+  const router = useRouter();
+  const { login } = useAuth();
+
+  const handleSuccessfulLogin = async (token: string) => {
+    setIsProcessing(true);
+    setGlobalError('');
+    await login(token);
+    router.push('/');
+  };
+
+  return (
+    <main className="flex items-center justify-center min-h-screen bg-background p-4">
+      <Card className="w-full max-w-sm border-primary/20">
+        <CardHeader className="text-center space-y-2">
+          <Image src="/logo-completo.png" alt="Kognito AI Labs" width={120} height={120} className="mx-auto" />
+          <CardTitle className="text-2xl">Bienvenido</CardTitle>
+          <CardDescription>
+            {view.type === 'login' ? 'Ingresa a tu exocerebro digital' : 'Introduce el código que recibiste'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {globalError && <p className="text-sm text-destructive text-center mb-4">{globalError}</p>}
+
+          {view.type === 'login' && (
+            <div className="space-y-4">
+              {/* Aquí iría el botón de Telegram Widget si se reactiva */}
+              
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">Login con Telegram</span>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Contraseña</Label>
-                <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+              <TelegramCodeForm setView={setView} />
+              
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">O con Email</span>
+                </div>
               </div>
-              {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting ? 'Ingresando...' : 'Iniciar Sesión'}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </main>
-    </>
+              <EmailLoginForm onLogin={handleSuccessfulLogin} isSubmitting={isProcessing} setParentError={setGlobalError} />
+            </div>
+          )}
+
+          {view.type === 'verifyCode' && view.identifier && (
+            <VerifyCodeForm
+              identifier={view.identifier}
+              onVerify={handleSuccessfulLogin}
+              setView={setView}
+            />
+          )}
+        </CardContent>
+      </Card>
+    </main>
   );
 }

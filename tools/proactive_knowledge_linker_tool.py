@@ -1,7 +1,6 @@
 # tools/proactive_knowledge_linker_tool.py
 
 """
-proactive_knowledge_linker_tool.py
 Herramienta de Vinculación Proactiva de Conocimiento para KAI
 
 Esta herramienta se activa automáticamente cada vez que se añade nueva información (nota, memoria, documento).
@@ -12,10 +11,10 @@ import json
 import logging
 import asyncio
 import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Type
 import uuid
 import numpy as np
-from scipy.spatial.distance import cosine # type: ignore
+from scipy.spatial.distance import cosine  # type: ignore
 
 # Importaciones de la base de datos y la configuración
 from core.database import ProactiveInsight, SessionLocal, Nota, AgendaEvent, Recordatorio, Memory, Account
@@ -23,13 +22,14 @@ from utils.db_session import DBSession
 from core.config import settings
 from utils.embeddings import initialize_embeddings
 from langchain_core.embeddings import Embeddings
+from pydantic.v1 import BaseModel, Field
+from langchain_core.tools import BaseTool
 
 # Modelos para NLP y summarization - cargados de forma singleton
 import spacy
-from textblob import TextBlob # type: ignore
-from keybert import KeyBERT # type: ignore
-# from transformers import pipeline # Ya no necesitamos esto para el resumen local
-from sqlalchemy import select, text # Import text for raw SQL if needed
+from textblob import TextBlob  # type: ignore
+from keybert import KeyBERT  # type: ignore
+from sqlalchemy import select, text  # Import text for raw SQL if needed
 
 # Importar el modelo de Google Gemini
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -65,8 +65,7 @@ def update_last_run_timestamp(run_time: datetime.datetime):
 # --- Singleton Models for NLP and Embeddings ---
 _nlp_model: Optional[spacy.Language] = None
 _keybert_model: Optional[KeyBERT] = None
-# _summarizer_pipeline: Optional[pipeline] = None # Ya no necesitamos el pipeline de transformers
-_gemini_summarizer_model: Optional[ChatGoogleGenerativeAI] = None # Nuevo para Gemini
+_gemini_summarizer_model: Optional[ChatGoogleGenerativeAI] = None
 _embedding_model: Optional[Embeddings] = None
 
 async def get_nlp_model() -> spacy.Language:
@@ -115,12 +114,10 @@ async def get_embedding_model_instance() -> Embeddings:
     """Obtiene y devuelve la instancia del modelo de embeddings, inicializándola si es necesario."""
     global _embedding_model
     if _embedding_model is None:
-        _embedding_model = await initialize_embeddings() # Esta función ya es asíncrona
+        _embedding_model = await initialize_embeddings()  # Esta función ya es asíncrona
     return _embedding_model
 
 # --- Helper Functions for Semantic Analysis ---
-
-# NUEVA FUNCIÓN DE AYUDA para encontrar los mejores candidatos
 async def find_top_k_similar_items(
     new_embedding: List[float],
     knowledge_pool: List[Dict[str, Any]],
@@ -183,7 +180,6 @@ async def extract_entities(text: str) -> List[Dict[str, str]]:
         logger.error(f"Error al extraer entidades con spaCy: {e}", exc_info=True)
         return []
 
-# NUEVA FUNCIÓN DE ANÁLISIS CON LLM
 async def analyze_relationship_with_llm(
     item_a: Dict[str, Any],
     item_b: Dict[str, Any]
@@ -191,7 +187,7 @@ async def analyze_relationship_with_llm(
     """
     Usa Gemini para analizar la relación semántica profunda entre dos ítems.
     """
-    llm = await get_gemini_summarizer_model_instance() # Podemos reusar la instancia de Gemini
+    llm = await get_gemini_summarizer_model_instance()  # Podemos reusar la instancia de Gemini
     if not llm:
         return None
 
@@ -246,7 +242,6 @@ async def analyze_relationship_with_llm(
         logger.error(f"Respuesta del LLM que causó el error: {response.content if 'response' in locals() else 'N/A'}")
         return None
 
-# NUEVA FUNCIÓN para interpretar solicitudes del usuario
 async def interpret_user_request_for_analysis(user_query: str) -> Dict[str, Any]:
     """
     Usa un LLM para interpretar la solicitud del usuario en lenguaje natural y la traduce
@@ -304,7 +299,7 @@ async def summarize_text(text: str, max_length: int = 130) -> str:
         return ""
 
     # Si el texto es muy corto, no es necesario resumir.
-    if len(text) < 100: # Ajusta este umbral según necesites
+    if len(text) < 100:  # Ajusta este umbral según necesites
         return text
 
     gemini_model = await get_gemini_summarizer_model_instance()
@@ -331,7 +326,6 @@ async def summarize_text(text: str, max_length: int = 130) -> str:
     return text[:max_length] + "..." if len(text) > max_length else text
 
 # --- Knowledge Retrieval and Standardization ---
-
 async def get_all_knowledge(account_id: str) -> List[Dict[str, Any]]:
     """
     Recupera el conocimiento relevante del usuario (notas, memorias/documentos)
@@ -346,7 +340,6 @@ async def get_all_knowledge(account_id: str) -> List[Dict[str, Any]]:
         for note in notes:
             # Si las notas ya tienen embedding persistente, úsalo.
             # De lo contrario, se generará aquí (menos eficiente).
-            # Ver punto 2 para cómo persistir el embedding de las notas.
             note_embedding = note.embedding if hasattr(note, 'embedding') and note.embedding else await get_text_embedding(note.content)
             all_items.append({
                 'id': str(note.id),
@@ -373,7 +366,7 @@ async def get_all_knowledge(account_id: str) -> List[Dict[str, Any]]:
                 'type': mem.type,
                 'category': category,
                 'timestamp': mem.created_at,
-                'embedding': mem.embedding, # Memory objects should already have embeddings
+                'embedding': mem.embedding,  # Memory objects should already have embeddings
                 'related_to_id': None
             })
     logger.info(f"Retrieved {len(all_items)} knowledge items for account {account_id}")
@@ -381,10 +374,6 @@ async def get_all_knowledge(account_id: str) -> List[Dict[str, Any]]:
 
 async def store_proactive_insight(insight_data: Dict[str, Any]):
     """
-
-
-
-
     Persiste un insight proactivo en la base de datos, además de loguearlo.
     """
     # 1) Primero lo logeamos como antes
@@ -430,7 +419,6 @@ async def store_proactive_insight(insight_data: Dict[str, Any]):
         logger.error(f"Error guardando insight en BBDD: {e}", exc_info=True)
 
 # --- Main Analysis Logic (REFACTORIZADO) ---
-
 async def analyze_new_entry(new_entry: Dict[str, Any]):
     """
     Analiza la nueva entrada encontrando los ítems más similares y usando un LLM
@@ -485,7 +473,7 @@ async def analyze_new_entry(new_entry: Dict[str, Any]):
             relationship_type = analysis.get("relationship_type", None)
             if relationship_type and isinstance(relationship_type, str) and relationship_type != "Sin Relación Significativa":
                 # Usamos la respuesta estructurada del LLM para crear el insight
-                insight_type = relationship_type.lower() # ej. "duplicidad", "sinergia"
+                insight_type = relationship_type.lower()  # ej. "duplicidad", "sinergia"
                 
                 # Mapeamos a tus tipos de insight si es necesario
                 type_mapping = {
@@ -494,7 +482,7 @@ async def analyze_new_entry(new_entry: Dict[str, Any]):
                     "evolución": "evolution",
                     "contradicción": "contradiction"
                 }
-                mapped_type = type_mapping.get(insight_type, "synergy") # Default a sinergia
+                mapped_type = type_mapping.get(insight_type, "synergy")  # Default a sinergia
                 
                 insight_message = f"Análisis de IA detectó: {relationship_type}. {analysis.get('explanation', '')}"
 
@@ -502,7 +490,7 @@ async def analyze_new_entry(new_entry: Dict[str, Any]):
                     'account_id': account_id,
                     'type': mapped_type,
                     'insight_message': insight_message,
-                    'confidence_score': analysis.get('confidence_score', 0.8), # Tomamos la confianza del LLM
+                    'confidence_score': analysis.get('confidence_score', 0.8),  # Tomamos la confianza del LLM
                     'action_suggestion': analysis.get('action_suggestion', 'Revisa ambos ítems.'),
                     'related_items': [new_entry, candidate_item]
                 })
@@ -537,7 +525,6 @@ async def analyze_new_entry(new_entry: Dict[str, Any]):
 
     logger.info(f"[Proactive Linker] Análisis profundo completado. Se generaron {len(insights_to_store)} insights.")
 
-
 # run_batch_analysis_job MODIFICADA
 from sqlalchemy import or_, and_, func
 
@@ -547,47 +534,63 @@ async def run_batch_analysis_job(
     topic_keywords: Optional[List[str]] = None
 ):
     """
-    Función principal para el trabajo de análisis. Ahora acepta filtros.
-    - account_id_filter: Ejecuta solo para una cuenta.
-    - since_timestamp: Analiza ítems más nuevos que esta fecha.
-    - topic_keywords: Analiza ítems que contengan estas palabras clave.
-    """
-    logger.info(f"--- [ANALYSIS JOB] Iniciando trabajo de vinculación proactiva ---")
+    Función principal para el trabajo de análisis. Acepta filtros para ejecuciones manuales o programadas.
+    - account_id_filter: Ejecuta el análisis solo para una cuenta específica.
+    - since_timestamp: Analiza ítems creados o modificados después de esta fecha.
+    - topic_keywords: Filtra los ítems a analizar para que contengan estas palabras clave.
     
-    # Si no se provee un timestamp, se usa el de la última ejecución (comportamiento del scheduler)
+    Depende de las siguientes funciones auxiliares:
+    - get_last_run_timestamp, update_last_run_timestamp
+    - get_all_knowledge, get_text_embedding, find_top_k_similar_items
+    - analyze_relationship_with_llm, store_proactive_insight
+    """
+    logger.info(f"--- [ANALYSIS JOB] Iniciando trabajo de vinculación proactiva de conocimiento ---")
+    
+    # Determinar si es una ejecución programada o manual.
+    # Si es programada, se usa el timestamp de la última ejecución.
     is_scheduled_run = since_timestamp is None
     if is_scheduled_run:
         since_timestamp = get_last_run_timestamp()
     
-    logger.info(f"Analizando ítems desde: {since_timestamp}")
+    logger.info(f"Analizando ítems desde: {since_timestamp.isoformat() if since_timestamp else 'N/A'}")
 
     async with DBSession(SessionLocal) as db:
-        # Obtener IDs de cuenta
+        # Obtener los IDs de las cuentas a procesar
         if account_id_filter:
-            account_ids = [uuid.UUID(account_id_filter)]
+            # Si se especifica una cuenta, procesar solo esa
+            try:
+                account_ids = [uuid.UUID(account_id_filter)]
+            except ValueError:
+                logger.error(f"El account_id_filter '{account_id_filter}' no es un UUID válido. Abortando.")
+                return
         else:
+            # Si no, procesar todas las cuentas en el sistema
             account_ids_stmt = select(Account.id).distinct()
             account_ids = (await db.execute(account_ids_stmt)).scalars().all()
 
         for account_id_uuid in account_ids:
             account_id = str(account_id_uuid)
-            logger.info(f"Procesando cuenta: {account_id}")
+            logger.info(f"==> Procesando cuenta: {account_id} <==")
 
-            # 1. Obtener el POOL de conocimiento completo para esta cuenta
+            # 1. Obtener el POOL de conocimiento completo para esta cuenta.
+            # Este pool sirve como el universo de comparación.
             knowledge_pool = await get_all_knowledge(account_id)
-            if not knowledge_pool: continue
+            if not knowledge_pool:
+                logger.info(f"La cuenta {account_id} no tiene conocimiento para analizar. Saltando.")
+                continue
 
-            # 2. Identificar los ítems a ANALIZAR basados en los filtros
+            # 2. Identificar los ítems a ANALIZAR basados en los filtros aplicados.
+            # Estos son los ítems "nuevos" o de interés.
             items_to_analyze = []
             
-            # Construir la lista de ítems que cumplen las condiciones
-            candidate_items = [item for item in knowledge_pool if item['timestamp'] > since_timestamp]
+            # Primero, filtrar por fecha.
+            candidate_items = [item for item in knowledge_pool if item.get('timestamp') and item['timestamp'] > since_timestamp]
             
             if topic_keywords:
-                # Si hay palabras clave, filtramos más
+                # Si se proveen palabras clave, filtrar aún más la lista de candidatos.
                 keyword_filtered_items = []
                 for item in candidate_items:
-                    content_lower = item['content'].lower()
+                    content_lower = item.get('content', '').lower()
                     if any(keyword.lower() in content_lower for keyword in topic_keywords):
                         keyword_filtered_items.append(item)
                 items_to_analyze = keyword_filtered_items
@@ -595,25 +598,149 @@ async def run_batch_analysis_job(
                 items_to_analyze = candidate_items
 
             if not items_to_analyze:
-                logger.info(f"No se encontraron ítems que cumplan los criterios para la cuenta {account_id}.")
+                logger.info(f"No se encontraron ítems que cumplan los criterios de análisis para la cuenta {account_id}.")
                 continue
             
-            logger.info(f"Encontrados {len(items_to_analyze)} ítems para analizar en la cuenta {account_id}.")
+            logger.info(f"Encontrados {len(items_to_analyze)} ítems para analizar en profundidad en la cuenta {account_id}.")
 
-            # 3. El resto de la lógica de análisis es la misma
+            # 3. Iniciar el análisis profundo para cada ítem de interés.
             for item_to_analyze in items_to_analyze:
-                # ... (exactamente la misma lógica que antes: find_top_k_similar_items, analyze_relationship_with_llm, etc.)
-                # ...
-                # ...
-                pass # Tu lógica de análisis va aquí
-    
-    # Actualizar el timestamp solo si fue una ejecución programada
+                logger.debug(f"Analizando ítem: {item_to_analyze.get('id')} - '{item_to_analyze.get('title', '')[:50]}...'")
+                
+                # Paso 3.1: Asegurar que tenemos un embedding para el ítem a analizar.
+                item_embedding = item_to_analyze.get('embedding')
+                if not item_embedding:
+                    item_embedding = await get_text_embedding(item_to_analyze.get('content', ''))
+                    if not item_embedding:
+                        logger.warning(f"No se pudo generar embedding para el ítem {item_to_analyze.get('id')}. Saltando análisis para este ítem.")
+                        continue
+                
+                # Paso 3.2: Encontrar los 'k' candidatos más prometedores del pool de conocimiento.
+                # Excluimos el ítem actual de la piscina de candidatos para que no se compare consigo mismo.
+                candidate_pool = [item for item in knowledge_pool if item.get('id') != item_to_analyze.get('id')]
+                top_candidates = await find_top_k_similar_items(item_embedding, candidate_pool, k=10)
+
+                if not top_candidates:
+                    logger.debug(f"No se encontraron candidatos similares para el ítem {item_to_analyze.get('id')}.")
+                    continue
+
+                # Paso 3.3: Iterar sobre los mejores candidatos y usar el LLM para el análisis semántico.
+                for candidate in top_candidates:
+                    logger.debug(f"  -> Comparando con candidato: {candidate.get('id')} - '{candidate.get('title', '')[:50]}...'")
+                    
+                    # Llamada al LLM para que determine la relación.
+                    analysis = await analyze_relationship_with_llm(item_to_analyze, candidate)
+
+                    # Si el LLM encuentra una relación significativa, la procesamos.
+                    if analysis and analysis.get("relationship_type") != "Sin Relación Significativa":
+                        
+                        # Mapear el tipo de relación a los tipos de insight de nuestro sistema.
+                        relationship_type = analysis.get("relationship_type", "synergy").lower()
+                        type_mapping = {"duplicidad": "duplicity", "sinergia": "synergy", "evolución": "evolution", "contradicción": "contradiction"}
+                        mapped_type = type_mapping.get(relationship_type, "synergy")
+
+                        # Preparar los datos para almacenar el insight.
+                        insight_data = {
+                            'account_id': account_id,
+                            'type': mapped_type,
+                            'insight_message': analysis.get('explanation', 'Análisis de IA detectó una conexión.'),
+                            'confidence_score': analysis.get('confidence_score', 0.75),
+                            'action_suggestion': analysis.get('action_suggestion', 'Considera revisar estos dos ítems juntos.'),
+                            'related_items': [item_to_analyze, candidate]
+                        }
+                        
+                        # Almacenar el insight en la base de datos (esta función debería manejar la prevención de duplicados).
+                        await store_proactive_insight(insight_data)
+
+    # 4. Actualizar el timestamp de la última ejecución solo si fue una ejecución programada completa.
     if is_scheduled_run:
-        # TODO: Implement update_last_run_timestamp() to save the timestamp of the current run
-        pass
-        logger.info("--- [BATCH JOB] Timestamp de ejecución automática actualizado. ---")
+        update_last_run_timestamp(datetime.datetime.now(datetime.timezone.utc))
+        logger.info("--- [BATCH JOB] Timestamp de ejecución automática actualizado exitosamente. ---")
     
-    logger.info("--- [ANALYSIS JOB] Trabajo de vinculación completado. ---")
+    logger.info("--- [ANALYSIS JOB] Trabajo de vinculación de conocimiento completado. ---")
+
+# --- Tool Input Schema and Class ---
+class ProactiveKnowledgeLinkerInput(BaseModel):
+    """
+    Define el esquema de entrada para la herramienta de vinculación proactiva de conocimiento.
+    Valida que el argumento necesario sea proporcionado por el LLM.
+    """
+    account_id: str = Field(
+        ...,
+        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
+    )
+    new_entry_content: str = Field(
+        ...,
+        description="El contenido de la nueva entrada (nota, memoria, documento) a analizar para generar insights proactivos."
+    )
+    new_entry_title: Optional[str] = Field(
+        None,
+        description="El título de la nueva entrada, si está disponible."
+    )
+    new_entry_type: Optional[str] = Field(
+        "general",
+        description="El tipo de la nueva entrada (por ejemplo, 'note', 'memory', 'document')."
+    )
+    new_entry_category: Optional[str] = Field(
+        None,
+        description="La categoría de la nueva entrada, si aplica."
+    )
+
+class ProactiveKnowledgeLinkerTool(BaseTool):
+    """
+    Una herramienta de LangChain que analiza nuevas entradas de información y genera insights proactivos
+    sobre conexiones, sinergias, duplicidades, contradicciones y brechas de conocimiento.
+    """
+    name: str = "proactive_knowledge_linker_tool"
+    description: str = (
+        "Útil para analizar nuevas entradas de información (notas, memorias, documentos) y generar insights "
+        "proactivos sobre conexiones, sinergias, duplicidades, contradicciones y brechas de conocimiento. "
+        "Esta herramienta se activa automáticamente cuando se añade nueva información."
+    )
+    args_schema: Type[BaseModel] = ProactiveKnowledgeLinkerInput
+    return_direct: bool = False  # El agente debe procesar la respuesta.
+
+    def __init__(self, **kwargs):
+        """Inicializa la herramienta con cualquier configuración necesaria."""
+        super().__init__(**kwargs)
+        logger.info("Inicializando ProactiveKnowledgeLinkerTool")
+
+    async def _arun(self, account_id: str, new_entry_content: str, new_entry_title: Optional[str] = None, new_entry_type: Optional[str] = "general", new_entry_category: Optional[str] = None, **kwargs: Any) -> str:
+        """
+        Ejecuta la lógica de la herramienta de forma asíncrona.
+
+        Args:
+            account_id: El ID universal de la cuenta del usuario.
+            new_entry_content: El contenido de la nueva entrada a analizar.
+            new_entry_title: El título de la nueva entrada (opcional).
+            new_entry_type: El tipo de la nueva entrada (opcional, por defecto 'general').
+            new_entry_category: La categoría de la nueva entrada (opcional).
+            **kwargs: Argumentos adicionales (no utilizados).
+
+        Returns:
+            Un mensaje de texto indicando el resultado de la operación.
+        """
+        logger.info(f"Ejecutando ProactiveKnowledgeLinkerTool para la cuenta '{account_id}' con nueva entrada.")
+        try:
+            new_entry = {
+                'account_id': account_id,
+                'content': new_entry_content,
+                'title': new_entry_title,
+                'type': new_entry_type,
+                'category': new_entry_category,
+                'timestamp': datetime.datetime.now(datetime.timezone.utc)
+            }
+            # Programar el análisis como tarea en segundo plano para no bloquear
+            asyncio.create_task(analyze_new_entry(new_entry))
+            logger.info(f"Análisis proactivo programado para la cuenta '{account_id}'.")
+            return "Análisis proactivo de la nueva entrada iniciado. Se generarán insights en segundo plano."
+        except Exception as e:
+            logger.error(f"Error en ProactiveKnowledgeLinkerTool para la cuenta '{account_id}': {e}", exc_info=True)
+            return f"Ocurrió un error inesperado al iniciar el análisis proactivo: {e}"
+
+    def _run(self, *args: Any, **kwargs: Any) -> Any:
+        """La ejecución síncrona no está soportada en nuestra arquitectura asíncrona."""
+        raise NotImplementedError("proactive_knowledge_linker_tool no soporta ejecución síncrona.")
 
 # Función para ser llamada automáticamente tras añadir nueva información
 async def proactive_knowledge_linker_trigger(new_entry: Dict[str, Any]):
@@ -635,7 +762,6 @@ async def proactive_knowledge_linker_trigger(new_entry: Dict[str, Any]):
     except RuntimeError:
         # Si no hay un bucle ejecutándose (ej. llamada desde un contexto síncrono
         # en desarrollo o pruebas), creamos uno temporal para ejecutar la tarea.
-        # En un entorno de servidor como FastAPI, un bucle ya estará ejecutándose.
         logger.warning("No hay un bucle de eventos ejecutándose. Creando uno para proactive_knowledge_linker_trigger.")
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)

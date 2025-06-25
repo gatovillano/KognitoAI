@@ -234,11 +234,11 @@ async def delete_note_endpoint(initData: str = Form(...), note_id: int = Form(..
         raise HTTPException(status_code=404, detail=message)
 
 # --- Servir Archivos ---
-app.mount("/static", StaticFiles(directory="webapp"), name="static")
+app.mount("/static", StaticFiles(directory="telegram_panel"), name="static")
 @app.get("/", response_class=HTMLResponse)
 async def read_index():
     headers = {"Cache-Control": "no-cache, no-store, must-revalidate"}
-    return FileResponse(os.path.join("webapp", "index.html"), headers=headers)
+    return FileResponse(os.path.join("telegram_panel", "index.html"), headers=headers)
 
 if __name__ == "__main__":
     uvicorn.run("run_telegram_panel:app", host="0.0.0.0", port=8000, reload=True)

@@ -1,8 +1,4 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {
-  experimental: {
-    allowedDevOrigins: ["kognito.gatoslibres.art"]
-  }
-};
+const nextConfig = {};
 
 export default nextConfig;

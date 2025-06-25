@@ -283,6 +283,18 @@ class ProactiveInsight(Base):
     account = relationship("Account", back_populates="proactive_insights")
 
 
+class VerificationCode(Base):
+    __tablename__ = "verification_codes"
+
+    id = Column(Integer, primary_key=True)
+    # Usamos el account_id para vincular el código a una cuenta
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    code = Column(String(6), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    account = relationship("Account")
+
 # ==============================================================================
 # SECCIÓN 2: FUNCIONES AUXILIARES DE LA BASE DE DATOS
 # ==============================================================================

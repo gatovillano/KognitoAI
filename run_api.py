@@ -25,8 +25,9 @@ from core.config import settings
 from core.database import (
     create_tables, SessionLocal, Account, PlatformIdentity, Perfil,
     get_or_create_account_from_platform_id, get_account_by_telegram_id,
-    find_telegram_identity, ChatThread
+    find_telegram_identity, ChatThread, VerificationCode
 )
+from datetime import datetime, timedelta, timezone
 from core.agent import initialize_llms, create_and_run_agent, create_thread_for_account
 from utils.db_session import DBSession
 from utils.document_parser import extract_text_and_metadata_from_document
@@ -73,6 +74,26 @@ async def startup_event():
         logger.error(f"ERROR FATAL DURANTE EL ARRANQUE: {e}", exc_info=True)
         raise
 
+# --- NUEVO MIDDLEWARE DE DEPURACIÓN ---
+async def log_headers_middleware(request: Request, call_next):
+    # Imprime información crucial sobre la petición entrante
+    logger.info(f"--- INCOMING REQUEST ---")
+    logger.info(f"Method: {request.method}")
+    logger.info(f"URL: {request.url.path}")
+    # El header 'origin' es la clave para CORS
+    logger.info(f"Header 'Origin': {request.headers.get('origin')}")
+    logger.info(f"Client Host: {request.client.host}")
+    logger.info(f"All Headers: {dict(request.headers)}")
+    logger.info(f"------------------------")
+    
+    response = await call_next(request)
+    return response
+
+# --- AÑADE EL MIDDLEWARE A LA APLICACIÓN ---
+# ¡¡¡IMPORTANTE: AÑÁDELO ANTES DEL MIDDLEWARE DE CORS!!!
+app.middleware("http")(log_headers_middleware)
+
+# Tu CORSMiddleware existente
 origins = [
     "http://localhost:8880",
     "http://localhost:8000",
@@ -82,6 +103,10 @@ origins = [
     "https://api.telegram.org",
     "https://web.telegram.org",
     "https://t.me",
+    "https://kognito.gatoslibres.art",
+    "https://apibase.gatoslibres.art",
+    "http://localhost:8880",
+    "http://192.168.100.106:8880", # La IP desde la que pruebas
 ]
 
 app.add_middleware(
@@ -253,7 +278,6 @@ async def handle_telegram_login(login_data: TelegramLoginRequest, db: AsyncSessi
     return TokenResponse(access_token=access_token)
 
 # --- Endpoints de Login con Código (Legado y Específico de Telegram) ---
-verification_codes: Dict[str, Dict[str, Any]] = {} # Almacenamiento temporal en memoria
 
 class AuthRequestCode(BaseModel):
     """Define la estructura para solicitar un código de verificación."""
@@ -264,44 +288,85 @@ class AuthVerifyCode(BaseModel):
     identifier: str
     code: str
 
-@app.post("/api/auth/request-code", summary="Solicitar código de verificación (legado)")
-async def request_verification_code(request_data: AuthRequestCode):
-    """Solicita un código de verificación para Telegram y lo envía al chat del usuario."""
-    async with DBSession(SessionLocal) as db:
-        identity = await find_telegram_identity(db, request_data.identifier)
-        if not identity:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No se encontró usuario con identificador '{request_data.identifier}'.")
-        telegram_id = int(identity.platform_user_id)
+@app.options("/api/auth/request-code", summary=" Manejar preflight para solicitar código de verificación")
+async def request_verification_code_options():
+    """Responde a las solicitudes OPTIONS para el endpoint de solicitud de código."""
+    return JSONResponse(
+        status_code=200,
+        content={"message": "OK"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
 
+@app.post("/api/auth/request-code", summary="Solicitar código de verificación")
+async def request_verification_code(request_data: AuthRequestCode, db: AsyncSession = Depends(get_db)):
+    """Busca al usuario, genera un código, lo guarda en la BD y lo envía a Telegram vía HTTP."""
+    identity = await find_telegram_identity(db, request_data.identifier)
+    if not identity:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No se encontró usuario con identificador '{request_data.identifier}'.")
+    
+    telegram_id = int(identity.platform_user_id)
+    account_id = identity.account_id
+
+    # Genera el código y la fecha de expiración
     code = str(random.randint(100000, 999999))
-    verification_codes[request_data.identifier.lower()] = {"code": code, "exp": datetime.now(timezone.utc) + timedelta(minutes=10)}
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+
+    # Guarda el código en la base de datos primero
+    new_code = VerificationCode(account_id=account_id, code=code, expires_at=expires_at)
+    db.add(new_code)
+    await db.commit()
+
+    # Ahora, intenta enviar el mensaje haciendo una llamada HTTP al servicio del bot
+    telegram_service_url = "http://kognito_telegram_client:9090/internal/send-message"
+    message_payload = {
+        "chat_id": telegram_id,
+        "text": f"Tu código de acceso para Kognito es: <b>{code}</b>"
+    }
 
     try:
-        # Aquí se llama al servicio del bot de Telegram para enviar el mensaje.
-        # Hardcodeado para Docker Compose, se podría externalizar en settings.
         async with httpx.AsyncClient() as client:
-            await client.post("http://telegram_client:9090/internal/send-message", json={"chat_id": telegram_id, "text": f"Tu código de Kognito AI es: <b>{code}</b>"})
+            response = await client.post(telegram_service_url, json=message_payload, timeout=10)
+            response.raise_for_status() # Lanza un error para respuestas 4xx o 5xx
+        
+        logger.info(f"Petición de envío de código a {telegram_service_url} exitosa para chat_id {telegram_id}")
         return {"message": "Código de verificación enviado a tu chat de Telegram."}
-    except Exception as e:
-        logger.error(f"Error al enviar código a {telegram_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="No se pudo contactar al servicio de mensajería.")
+    
+    except httpx.RequestError as e:
+        logger.error(f"Error de red al contactar el servicio de Telegram en '{telegram_service_url}': {e}", exc_info=True)
+        raise HTTPException(status_code=503, detail="Servicio de mensajería no disponible.")
+    except httpx.HTTPStatusError as e:
+        logger.error(f"El servicio de Telegram devolvió un error {e.response.status_code}: {e.response.text}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Fallo al enviar el mensaje a través del servicio interno.")
 
-@app.post("/api/auth/verify-code", response_model=TokenResponse, summary="Verificar código (legado)")
-async def verify_code_and_get_token(request_data: AuthVerifyCode):
-    """Verifica un código de verificación y devuelve un token de acceso si es válido."""
-    identifier = request_data.identifier.lower()
-    stored_code = verification_codes.get(identifier)
-    if not stored_code or stored_code["code"] != request_data.code or datetime.now(timezone.utc) > stored_code["exp"]:
+@app.post("/api/auth/verify-code", response_model=TokenResponse, summary="Verificar código")
+async def verify_code_and_get_token(request_data: AuthVerifyCode, db: AsyncSession = Depends(get_db)):
+    """Verifica un código contra la BD y devuelve un token si es válido."""
+    identity = await find_telegram_identity(db, request_data.identifier)
+    if not identity:
+        raise HTTPException(status_code=404, detail="No se pudo encontrar la cuenta asociada.")
+
+    # Busca el código en la base de datos
+    stmt = select(VerificationCode).where(
+        VerificationCode.account_id == identity.account_id,
+        VerificationCode.code == request_data.code,
+        VerificationCode.expires_at > datetime.now(timezone.utc)
+    ).order_by(VerificationCode.created_at.desc())
+    
+    result = await db.execute(stmt)
+    valid_code = result.scalars().first()
+
+    if not valid_code:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Código incorrecto o expirado.")
 
-    async with DBSession(SessionLocal) as db:
-        identity = await find_telegram_identity(db, identifier)
-        if not identity:
-            raise HTTPException(status_code=404, detail="No se pudo encontrar la cuenta asociada.")
+    # Si el código es válido, lo eliminamos para que no se pueda reusar
+    await db.delete(valid_code)
+    await db.commit()
 
-    if identifier in verification_codes:
-        del verification_codes[identifier]
-
+    # Creamos el token de acceso
     access_token = create_access_token(data={"sub": str(identity.account_id)})
     return TokenResponse(access_token=access_token)
 
@@ -549,6 +614,26 @@ async def update_document_metadata_endpoint(
     if not success:
         raise HTTPException(status_code=404, detail="Documento no encontrado o no actualizado.")
     return {"message": "Metadatos actualizados correctamente."}
+
+class DocumentContentRequest(BaseModel):
+    file_name: str
+
+@app.post("/api/get-document-content", summary="Obtener el contenido de un documento")
+async def get_document_content_endpoint(
+    request: DocumentContentRequest,
+    current_account_id: str = Depends(get_current_account_id)
+):
+    """
+    Recupera el contenido textual completo de un documento específico.
+    """
+    content = await get_full_document_content(
+        account_id=current_account_id,
+        file_name=request.file_name
+    )
+    if content is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado o sin contenido.")
+    
+    return {"content": content}
 
 # ==============================================================================
 # SECCIÓN 6: ENDPOINTS PARA INTERFAZ WEB

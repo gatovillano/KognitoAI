@@ -77,6 +77,17 @@ def extract_text_and_metadata_from_document(file_name: str, file_bytes: bytes) -
                 logger.warning("Fallo al decodificar TXT como UTF-8, intentando con latin-1.")
                 text = file_bytes.decode('latin-1', errors='replace')
             logger.info(f"Texto extraído de TXT exitosamente. Longitud: {len(text)} caracteres.")
+            
+        elif file_name_lower.endswith(".md"):
+            metadata["file_type"] = "markdown"
+            logger.debug("Detectado archivo Markdown, decodificando...")
+            # Decodificar el archivo Markdown, manejando posibles errores de codificación.
+            try:
+                text = file_bytes.decode('utf-8')
+            except UnicodeDecodeError:
+                logger.warning("Fallo al decodificar MD como UTF-8, intentando con latin-1.")
+                text = file_bytes.decode('latin-1', errors='replace')
+            logger.info(f"Texto extraído de MD exitosamente. Longitud: {len(text)} caracteres.")
 
         else:
             logger.warning(f"Tipo de archivo no soportado para extracción de texto: '{file_name}'")

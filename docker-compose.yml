@@ -73,7 +73,7 @@ services:
       args:
         # Pasamos la URL del backend al proceso de build.
         # Dentro de Docker, el frontend se comunica con el backend usando su nombre de servicio 'core'.
-        NEXT_PUBLIC_API_URL: "https://apibase.gatoslibres.art" 
+        NEXT_PUBLIC_API_URL: "" 
     container_name: kognito_frontend
     restart: always
     # Mapeamos el puerto 8880 de tu máquina al puerto 3000 del contenedor (donde corre Next.js)
@@ -113,7 +113,7 @@ services:
       - pgadmin_data:/var/lib/pgadmin
 
 
-  webapp:
+  telegram_panel:
       build:
         context: .
         dockerfile: Dockerfile.webapp
@@ -133,8 +133,6 @@ services:
       env_file:
         - ./.env
         
-      networks:
-        - kognito_network
 networks:
   kognito_network:
     driver: bridge

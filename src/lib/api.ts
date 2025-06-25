@@ -2,9 +2,8 @@
 import axios from 'axios';
 
 const apiClient = axios.create({
-  // Next.js reemplazará esto con "https://apibase.gatoslibres.art"
-  // gracias a la configuración en docker-compose.yml
-  baseURL: process.env.NEXT_PUBLIC_API_URL, 
+  // Hardcoding the base URL to ensure it's used correctly
+  baseURL: 'https://apibase.gatoslibres.art', 
   headers: {
     'Content-Type': 'application/json',
   },
@@ -18,6 +17,8 @@ apiClient.interceptors.request.use(
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
+      // Log the full URL of the request to verify the base URL
+      console.log('Request URL:', `${config.baseURL || ''}${config.url || ''}`);
     }
     return config;
   },

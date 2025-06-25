@@ -82,6 +82,14 @@ export function Sidebar() {
         </div>
       </ScrollArea>
 
+      {/* RAG Management Link */}
+      <Link href="/rag" passHref>
+        <Button variant={pathname.startsWith('/rag') ? 'secondary' : 'ghost'} className="w-full justify-start text-muted-foreground hover:text-foreground mb-2">
+          <BrainCircuit className="mr-2 h-4 w-4" />
+          Gestión RAG
+        </Button>
+      </Link>
+
       {/* Menú inferior */}
       <div className="mt-auto pt-4 border-t">
         {user && (

@@ -100,15 +100,7 @@ class GetDocumentContentTool(BaseTool):
                 )
                 logger.info(f"✅ Contenido de '{file_name}' recuperado exitosamente. Longitud: {len(response_text)} caracteres.")
 
-                # Llamada al trigger proactivo tras obtener el contenido del documento
-                new_entry = {
-                    'account_id': account_id,
-                    'content': full_content,
-                    'title': file_name,
-                    'type': 'document'
-                }
-                # CORRECCIÓN: Programar como tarea en segundo plano
-                asyncio.create_task(proactive_knowledge_linker_trigger(new_entry))
+               
 
                 return response_text
             else:
