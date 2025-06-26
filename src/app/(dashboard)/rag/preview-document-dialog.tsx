@@ -23,7 +23,7 @@ export function PreviewDocumentDialog({ document, isOpen, onOpenChange }: Previe
         setIsLoading(true);
         setContent('');
         try {
-          const response = await apiClient.post('/get-document-content', {
+          const response = await apiClient.post('/api/get-document-content', {
             file_name: document.file_name,
           });
           setContent(response.data.content);

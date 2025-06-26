@@ -54,13 +54,18 @@ from tools.github_repo_tool import GitHubRepoTool
 # Módulo de Insights Proactivos
 from tools.get_proactive_insights_tool import GetProactiveInsightsTool
 from tools.proactive_knowledge_linker_tool import ProactiveKnowledgeLinkerTool
+from tools.knowledge_analysis_tool import KnowledgeAnalysisTool
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
 
 
-def get_all_langchain_tools() -> List[Tool]:
+def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List[Tool]:
     """
     Recoge, instancia y devuelve una lista de todas las herramientas LangChain disponibles.
+
+    Args:
+        account_id (str): The account ID of the user, used for tools that require user-specific data.
+        telegram_id (str): The Telegram ID of the user, used for specific tools that interact with Telegram.
 
     Returns:
         Una lista de objetos `Tool` que el agente podrá utilizar.
@@ -78,23 +83,68 @@ def get_all_langchain_tools() -> List[Tool]:
         UpdateProfileTool, MemoryAddTool,
         # Documentos
         GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
-        # Contenido y Web (excepto las que usan fábricas)
+        # Creación de Contenido y Búsqueda (excepto WebSearchTool que usa fábrica)
         ImageGenerationTool, WebScraperTool, AnalyzeTextForInsightsTool,
         # Herramienta de GitHub
         GitHubRepoTool,
         # Insights Proactivos
         GetProactiveInsightsTool,
-        ProactiveKnowledgeLinkerTool,  # Asegúrate de que esta herramienta esté importada correctamente
+        ProactiveKnowledgeLinkerTool,
+        KnowledgeAnalysisTool
     ]
 
-    # Instanciar cada herramienta basada en clase de forma segura.
     for ToolClass in tool_classes_to_instantiate:
         try:
-            tool_instance = ToolClass()
-            available_tools.append(tool_instance)
-            logger.debug(f"  [+] Herramienta de clase cargada: {tool_instance.name}")
+            tool_instance = None # Inicializar a None
+
+            # Manejo especial para GitHubRepoTool (por el github_token)
+            if ToolClass.__name__ == "GitHubRepoTool":
+                import os
+                token = os.environ.get("GITHUB_TOKEN")
+                tool_instance = ToolClass(github_token=token) if token else ToolClass()
+            # Manejo para herramientas que requieren account_id y/o telegram_id en su constructor
+            elif ToolClass in [
+                AddNoteTool, GetNotesTool, UpdateNoteTool, DeleteNoteTool,
+                ScheduleEventTool, GetAgendaTool, CancelEventTool, SetReminderTool,
+                UpdateProfileTool, MemoryAddTool, GetDocumentListTool,
+                GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
+                ImageGenerationTool, GetProactiveInsightsTool,
+                ProactiveKnowledgeLinkerTool, KnowledgeAnalysisTool
+            ]:
+                kwargs = {"account_id": account_id}
+                if ToolClass in [SetReminderTool, ImageGenerationTool, GetDocumentContentTool]:
+                    kwargs["telegram_id"] = telegram_id
+                tool_instance = ToolClass(**kwargs)
+                if ToolClass.__name__ == "KnowledgeAnalysisTool":
+                    logger.debug(f"  [DEBUG] Intentando instanciar KnowledgeAnalysisTool con kwargs: {kwargs}")
+                elif ToolClass.__name__ == "ProactiveKnowledgeLinkerTool":
+                    logger.debug(f"  [DEBUG] Intentando instanciar ProactiveKnowledgeLinkerTool con kwargs: {kwargs}")
+            # Para herramientas generales que no requieren argumentos específicos de usuario en su constructor
+            else:
+                tool_instance = ToolClass()
+            
+            if tool_instance: # Asegúrate de que la instancia se creó
+                try:
+                    # Check if the tool supports synchronous execution
+                    if hasattr(tool_instance, '_run') and callable(getattr(tool_instance, '_run')):
+                        available_tools.append(tool_instance)
+                        logger.debug(f"  [+] Herramienta de clase cargada: {tool_instance.name}")
+                        if ToolClass.__name__ == "KnowledgeAnalysisTool":
+                            logger.debug(f"  [DEBUG] KnowledgeAnalysisTool añadida a la lista de herramientas disponibles")
+                        elif ToolClass.__name__ == "ProactiveKnowledgeLinkerTool":
+                            logger.debug(f"  [DEBUG] ProactiveKnowledgeLinkerTool añadida a la lista de herramientas disponibles")
+                    else:
+                        logger.error(f"  [ERROR] Herramienta {tool_instance.name} no soporta ejecución síncrona y no será añadida")
+                        if ToolClass.__name__ == "KnowledgeAnalysisTool":
+                            logger.error(f"  [ERROR] KnowledgeAnalysisTool no soporta ejecución síncrona")
+                        elif ToolClass.__name__ == "ProactiveKnowledgeLinkerTool":
+                            logger.error(f"  [ERROR] ProactiveKnowledgeLinkerTool no soporta ejecución síncrona")
+                except Exception as e:
+                    logger.error(f"  [ERROR] Error al verificar soporte síncrono para {tool_instance.name}: {e}")
+            else:
+                logger.debug(f"  [DEBUG] No se creó instancia para {ToolClass.__name__}")
+
         except Exception as e:
-            # Si una herramienta falla, se loguea el error pero no se detiene el proceso.
             tool_name = getattr(ToolClass, 'name', 'NombreDesconocido')
             logger.error(f"❌ Fallo al instanciar la herramienta '{tool_name}': {e}", exc_info=True)
             logger.error(f"Detalles de la excepción para '{tool_name}': {str(e)}", exc_info=True)

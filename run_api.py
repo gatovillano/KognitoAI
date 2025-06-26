@@ -14,7 +14,7 @@ from typing import Optional, List, Dict, Any
 from urllib.parse import unquote, parse_qs
 import uuid
 
-from fastapi import FastAPI, Request, HTTPException, Depends, File, UploadFile, Form, Query, status
+from fastapi import FastAPI, Request, HTTPException, Depends, File, UploadFile, Form, Query, status, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,19 +25,20 @@ from core.config import settings
 from core.database import (
     create_tables, SessionLocal, Account, PlatformIdentity, Perfil,
     get_or_create_account_from_platform_id, get_account_by_telegram_id,
-    find_telegram_identity, ChatThread, VerificationCode
+    find_telegram_identity, ChatThread, VerificationCode, AnalysisTask
 )
 from datetime import datetime, timedelta, timezone
 from core.agent import initialize_llms, create_and_run_agent, create_thread_for_account
 from utils.db_session import DBSession
 from utils.document_parser import extract_text_and_metadata_from_document
-from core.memory_manager import process_document_for_rag, list_user_documents, delete_document_chunks, get_full_document_content, update_document_metadata
-from core.notes_manager import get_notes, add_note, update_note, delete_note
+from core.memory_manager import process_document_for_rag, list_user_documents, delete_document_chunks, get_full_document_content, update_document_metadata, list_user_collections
+from core.notes_manager import get_notes, add_note, update_note, delete_note, get_notes_as_dicts
 from core.agenda_manager import get_events_as_dicts, schedule_event, cancel_event, get_agenda_for_day
 from telegram_client.bot_manager import bot_manager
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import update
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain_core.messages import HumanMessage, AIMessage
 
@@ -48,6 +49,9 @@ from utils.security import (
     get_current_account_id,
 )
 from fastapi.security import APIKeyHeader
+from fastapi.responses import StreamingResponse
+import httpx
+import io
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -74,24 +78,6 @@ async def startup_event():
         logger.error(f"ERROR FATAL DURANTE EL ARRANQUE: {e}", exc_info=True)
         raise
 
-# --- NUEVO MIDDLEWARE DE DEPURACIÓN ---
-async def log_headers_middleware(request: Request, call_next):
-    # Imprime información crucial sobre la petición entrante
-    logger.info(f"--- INCOMING REQUEST ---")
-    logger.info(f"Method: {request.method}")
-    logger.info(f"URL: {request.url.path}")
-    # El header 'origin' es la clave para CORS
-    logger.info(f"Header 'Origin': {request.headers.get('origin')}")
-    logger.info(f"Client Host: {request.client.host}")
-    logger.info(f"All Headers: {dict(request.headers)}")
-    logger.info(f"------------------------")
-    
-    response = await call_next(request)
-    return response
-
-# --- AÑADE EL MIDDLEWARE A LA APLICACIÓN ---
-# ¡¡¡IMPORTANTE: AÑÁDELO ANTES DEL MIDDLEWARE DE CORS!!!
-app.middleware("http")(log_headers_middleware)
 
 # Tu CORSMiddleware existente
 origins = [
@@ -502,22 +488,14 @@ async def save_system_prompt(user_id: int = Depends(get_validated_user_id), syst
     await db.commit()
     return {"message": "Prompt del sistema actualizado."}
 
+
 @app.post("/api/upload-document")
 async def upload_document_endpoint(
-    current_account_id: str = Depends(get_current_account_id), # Protegido por JWT para el frontend web
+    current_account_id: str = Depends(get_current_account_id),
     files: List[UploadFile] = File(...),
-    topic: str = Form(...)
+    topic: str = Form(...) # El topic se recibe correctamente aquí
 ):
-    """
-    Sube y procesa documentos para la base de conocimiento de un usuario.
-    Protegido por JWT (para frontend web) o `initData` de Telegram (para panel Telegram WebApp, si se llama así).
-    Nota: Para `initData`, el `user_id` se extrae de `get_validated_user_id`
-          y luego se busca el `account_id` asociado. Aquí usamos JWT directamente.
-          Si quieres que este endpoint sea llamado por initData, necesitas otro endpoint
-          o un middleware que maneje ambas autenticaciones.
-          Por ahora, este está con JWT para el frontend general.
-    """
-    account_id_uuid = uuid.UUID(current_account_id) # Convertir a UUID
+    account_id_uuid = uuid.UUID(current_account_id)
     processed_files = 0
     for file in files:
         try:
@@ -526,16 +504,25 @@ async def upload_document_endpoint(
             if not extracted_text:
                 logger.warning(f"No se pudo extraer texto del archivo '{file.filename}'. Omitiendo.")
                 continue
-            metadata.update({"file_name": file.filename, "topic": topic})
-            await process_document_for_rag(account_id=str(account_id_uuid), file_name=file.filename, extracted_text=extracted_text, metadata=metadata)
+
+            # --- LA LÍNEA DEL PROBLEMA ESTABA AQUÍ ---
+            # Antes, 'metadata' no contenía el topic de forma explícita para la función de abajo.
+            # Ahora, pasamos el 'topic' directamente a la función de lógica.
+            
+            await process_document_for_rag(
+                account_id=str(account_id_uuid),
+                file_name=file.filename,
+                extracted_text=extracted_text,
+                topic=topic,  # <-- ¡AQUÍ ESTÁ LA CORRECCIÓN!
+                metadata={"original_filename": file.filename} # Pasamos otros metadatos si es necesario
+            )
             processed_files += 1
         except Exception as e:
             logger.error(f"Fallo al procesar el archivo {file.filename} para la cuenta {account_id_uuid}: {e}", exc_info=True)
 
     if processed_files == 0 and files:
         raise HTTPException(status_code=500, detail="No se pudo procesar ninguno de los archivos.")
-    return {"message": f"{processed_files}/{len(files)} archivo(s) procesado(s) y añadido(s) a tu base de conocimiento."}
-
+    return {"message": f"{processed_files}/{len(files)} archivo(s) procesado(s) y añadido(s) a tu base de conocimiento en la categoría '{topic}'."}
 @app.post("/api/list-documents") # Cambiado a POST porque el frontend web lo usa con FormData
 async def list_documents_endpoint(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
     """Lista los documentos subidos por el usuario. Protegido por JWT."""
@@ -550,27 +537,51 @@ async def delete_document_endpoint(current_account_id: str = Depends(get_current
     if not success: raise HTTPException(status_code=404, detail="Documento no encontrado o ya eliminado.")
     return {"message": f"El documento '{file_name}' ha sido eliminado."}
 
-@app.post("/api/list-notes") # Cambiado a POST
-async def list_notes_endpoint(current_account_id: str = Depends(get_current_account_id), search_term: Optional[str] = Form(None), db: AsyncSession = Depends(get_db)):
-    """Lista las notas de un usuario. Protegido por JWT."""
-    return await get_notes(current_account_id, search_query=search_term)
+class ListNotesRequest(BaseModel):
+    search_term: Optional[str] = None
 
-@app.post("/api/add-note") # Cambiado a POST
-async def add_note_endpoint(current_account_id: str = Depends(get_current_account_id), title: Optional[str] = Form(None), content: str = Form(...), category: Optional[str] = Form(None), db: AsyncSession = Depends(get_db)):
+# --- ENDPOINT DE NOTAS ACTUALIZADO ---
+# Cambiamos el nombre del endpoint para que sea más claro
+@app.post("/api/list-notes")
+async def list_notes_endpoint(
+    request: ListNotesRequest, # Usamos el modelo
+    current_account_id: str = Depends(get_current_account_id)
+):
+    """Devuelve las notas de un usuario como una lista de objetos JSON."""
+    notes_list = await get_notes_as_dicts(
+        account_id=current_account_id, 
+        search_query=request.search_term
+    )
+    return notes_list
+# --- MODELOS PYDANTIC PARA NOTAS ---
+class NoteRequest(BaseModel):
+    title: Optional[str] = None
+    content: str
+    category: Optional[str] = None
+
+@app.post("/api/add-note")
+async def add_note_endpoint(note: NoteRequest, current_account_id: str = Depends(get_current_account_id)):
     """Añade una nueva nota para el usuario. Protegido por JWT."""
-    result_message = await add_note(current_account_id, content, title or "", category or "")
-    return {"message": result_message}
+    new_note = await add_note(current_account_id, note.title or "", note.content, note.category or "")
+    # Devolvemos la nota creada para poder añadirla al estado del frontend sin re-fetchear
+    return new_note 
 
-@app.post("/api/update-note") # Cambiado a POST
-async def update_note_endpoint(current_account_id: str = Depends(get_current_account_id), note_id: int = Form(...), content: str = Form(...), title: Optional[str] = Form(None), category: Optional[str] = Form(None), db: AsyncSession = Depends(get_db)):
+class NoteUpdateRequest(NoteRequest):
+    note_id: int
+
+@app.post("/api/update-note")
+async def update_note_endpoint(note: NoteUpdateRequest, current_account_id: str = Depends(get_current_account_id)):
     """Actualiza una nota existente del usuario. Protegido por JWT."""
-    result_message = await update_note(current_account_id, note_id, content, title, category)
+    result_message = await update_note(current_account_id, note.note_id, note.title, note.content, note.category)
     return {"message": result_message}
 
-@app.post("/api/delete-note") # Cambiado a POST
-async def delete_note_endpoint(current_account_id: str = Depends(get_current_account_id), note_id: int = Form(...), db: AsyncSession = Depends(get_db)):
+class NoteDeleteRequest(BaseModel):
+    note_id: int
+
+@app.post("/api/delete-note")
+async def delete_note_endpoint(note: NoteDeleteRequest, current_account_id: str = Depends(get_current_account_id)):
     """Elimina una nota del usuario. Protegido por JWT."""
-    result_message = await delete_note(current_account_id, note_id)
+    result_message = await delete_note(current_account_id, note.note_id)
     return {"message": result_message}
 
 @app.post("/api/list-events") # Cambiado a POST
@@ -578,43 +589,59 @@ async def list_events_endpoint(current_account_id: str = Depends(get_current_acc
     """Lista los eventos de la agenda del usuario. Protegido por JWT."""
     return await get_events_as_dicts(current_account_id)
 
-@app.post("/api/add-event") # Cambiado a POST
-async def add_event_endpoint(current_account_id: str = Depends(get_current_account_id), description: str = Form(...), event_datetime: str = Form(...), db: AsyncSession = Depends(get_db)):
+# --- MODELOS PYDANTIC PARA AGENDA ---
+class EventRequest(BaseModel):
+    description: str
+    event_datetime: str # "mañana a las 3pm"
+
+@app.post("/api/add-event")
+async def add_event_endpoint(event: EventRequest, current_account_id: str = Depends(get_current_account_id)):
     """Añade un nuevo evento a la agenda del usuario. Protegido por JWT."""
     success, message, new_event = await schedule_event(
         account_id=current_account_id,
-        description=description,
-        natural_language_datetime=event_datetime
+        description=event.description,
+        natural_language_datetime=event.event_datetime
     )
     if not success:
         raise HTTPException(status_code=400, detail=message)
-    # Aquí podríamos programar la notificación de Telegram si tuviéramos el telegram_id
-    return {"message": message}
+    # Devolvemos el evento creado para añadirlo al estado del frontend
+    return new_event.to_dict() if new_event else {}
 
-@app.post("/api/cancel-event") # Cambiado a POST
-async def cancel_event_endpoint(current_account_id: str = Depends(get_current_account_id), event_id: int = Form(...), db: AsyncSession = Depends(get_db)):
+class EventCancelRequest(BaseModel):
+    event_id: int
+
+@app.post("/api/cancel-event")
+async def cancel_event_endpoint(event: EventCancelRequest, current_account_id: str = Depends(get_current_account_id)):
     """Cancela un evento de la agenda del usuario. Protegido por JWT."""
-    success, message = await cancel_event(current_account_id, event_id)
+    success, message = await cancel_event(current_account_id, event.event_id)
     if not success:
         raise HTTPException(status_code=404, detail=message)
-    # Aquí también se cancelaría el job de notificación de Telegram si existiera.
     return {"message": message}
+
+class UpdateMetadataRequest(BaseModel):
+    """Define la estructura de datos para actualizar los metadatos de un documento."""
+    file_name: str
+    new_title: Optional[str] = None
+    new_topic: Optional[str] = None
 
 @app.post("/api/update-document-metadata")
 async def update_document_metadata_endpoint(
+    request: UpdateMetadataRequest,
     current_account_id: str = Depends(get_current_account_id),
-    file_name: str = Form(...),
-    new_title: Optional[str] = Form(None),
-    new_topic: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db)
 ):
     """Actualiza el título y/o la categoría de un documento del usuario."""
     account_id_uuid = uuid.UUID(current_account_id)
-    success = await update_document_metadata(str(account_id_uuid), file_name, new_title, new_topic)
+    # Usa los datos del objeto 'request'
+    success = await update_document_metadata(
+        str(account_id_uuid), 
+        request.file_name, 
+        request.new_title, 
+        request.new_topic
+    )
     if not success:
         raise HTTPException(status_code=404, detail="Documento no encontrado o no actualizado.")
     return {"message": "Metadatos actualizados correctamente."}
-
 class DocumentContentRequest(BaseModel):
     file_name: str
 
@@ -634,6 +661,247 @@ async def get_document_content_endpoint(
         raise HTTPException(status_code=404, detail="Documento no encontrado o sin contenido.")
     
     return {"content": content}
+
+from fastapi import BackgroundTasks
+from core.memory_manager import get_full_document_content
+from utils.analyze_text_for_insights import analyze_text_for_insights
+from core.database import ProactiveInsight
+
+# Modelo para la petición
+class AnalyzeDocumentRequest(BaseModel):
+    file_name: str
+
+# Esta función se ejecutará en segundo plano
+async def run_document_analysis_and_save(task_id: str, account_id: str, file_name: str):
+    """Función pesada que se ejecuta en segundo plano."""
+    # Crea su propia sesión de DB para ser independiente
+    async with SessionLocal() as db_session:
+        try:
+            # 1. Marcar la tarea como 'processing'
+            stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
+            await db_session.execute(stmt_processing)
+            await db_session.commit()
+            
+            logger.info(f"Iniciando análisis para tarea {task_id}...")
+            text_content = await get_full_document_content(account_id, file_name)
+            if not text_content: raise ValueError("Contenido del documento no encontrado.")
+
+            # 2. Realizar el análisis pesado
+            analysis_result = await analyze_text_for_insights(text_content)
+            
+            # 3. Guardar el resultado y marcar como 'completed'
+            stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="completed", result_payload=analysis_result)
+            await db_session.execute(stmt_completed)
+            await db_session.commit()
+            logger.info(f"Análisis para tarea {task_id} completado.")
+
+        except Exception as e:
+            logger.error(f"Fallo en tarea de análisis {task_id}: {e}", exc_info=True)
+            stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="failed", error_message=str(e))
+            await db_session.execute(stmt_failed)
+            await db_session.commit()
+
+@app.post("/api/start-document-analysis", status_code=202)
+async def start_document_analysis_endpoint(
+    req: AnalyzeDocumentRequest,
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Inicia una tarea de análisis de documento y devuelve un ID de tarea."""
+    # Verificar que el documento existe antes de crear la tarea
+    content_check = await get_full_document_content(current_account_id, req.file_name)
+    if content_check is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado.")
+
+    new_task = AnalysisTask(
+        account_id=uuid.UUID(current_account_id),
+        file_name=req.file_name,
+        status="pending"
+    )
+    db.add(new_task)
+    await db.commit()
+    await db.refresh(new_task)
+    
+    background_tasks.add_task(run_analysis_and_save, str(new_task.id), current_account_id, req.file_name)
+    
+    return {"task_id": str(new_task.id)}
+
+
+@app.get("/api/get-analysis-result/{task_id}")
+async def get_analysis_result_endpoint(
+    task_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Consulta el estado y el resultado de una tarea de análisis."""
+    task = await db.get(AnalysisTask, uuid.UUID(task_id))
+    if not task or str(task.account_id) != current_account_id:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada.")
+    return {"status": task.status, "result": task.result_payload, "error": task.error_message}
+
+
+# Esta función se ejecutará en segundo plano
+async def run_analysis_and_save(task_id: str, account_id: str, file_name: str):
+    """
+    Función pesada que se ejecuta en segundo plano.
+    Crea su propia sesión de base de datos para ser independiente.
+    """
+    db_session = SessionLocal()
+    try:
+        # 1. Marcar la tarea como 'processing'
+        stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
+        await db_session.execute(stmt_processing)
+        await db_session.commit()
+        
+        logger.info(f"Iniciando análisis en segundo plano para la tarea {task_id} (archivo: {file_name})")
+
+        # 2. Obtener el contenido del documento
+        text_content = await get_full_document_content(account_id, file_name)
+        if not text_content:
+            raise ValueError("No se pudo recuperar el contenido del documento.")
+
+        # 3. Realizar el análisis pesado
+        analysis_result = await analyze_text_for_insights(text_content)
+        
+        # 4. Guardar el resultado y marcar como 'completed'
+        stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+            status="completed",
+            result_payload=analysis_result
+        )
+        await db_session.execute(stmt_completed)
+        await db_session.commit()
+        logger.info(f"Análisis para la tarea {task_id} completado y guardado.")
+
+    except Exception as e:
+        logger.error(f"Fallo en la tarea de análisis en segundo plano {task_id}: {e}", exc_info=True)
+        # 5. Si falla, guardar el error
+        stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+            status="failed",
+            error_message=str(e)
+        )
+        await db_session.execute(stmt_failed)
+        await db_session.commit()
+    finally:
+        await db_session.close()
+
+
+@app.post("/api/analyze-document", status_code=202)
+async def analyze_document_endpoint(
+    req: AnalyzeDocumentRequest,
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Inicia un análisis de documento y devuelve un ID de tarea."""
+    # Verificar que el documento existe antes de crear la tarea
+    content_check = await get_full_document_content(current_account_id, req.file_name)
+    if content_check is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado.")
+
+    new_task = AnalysisTask(
+        account_id=uuid.UUID(current_account_id),
+        file_name=req.file_name,
+        status="pending"
+    )
+    db.add(new_task)
+    await db.commit()
+    await db.refresh(new_task)
+    
+    background_tasks.add_task(run_document_analysis_and_save, str(new_task.id), current_account_id, req.file_name)
+    
+    return {"task_id": str(new_task.id)}
+
+@app.post("/api/list-collections", summary="Listar las colecciones de conocimiento")
+async def list_collections_endpoint(current_account_id: str = Depends(get_current_account_id)):
+    """
+    Devuelve una lista de todas las colecciones (temas) únicas de un usuario
+    y el número de documentos en cada una.
+    """
+    collections = await list_user_collections(current_account_id)
+    return collections
+
+from utils.analyze_text_for_insights import analyze_entire_collection  # Importar la nueva función
+
+# --- Modelo para la petición de análisis de colección ---
+class AnalyzeCollectionRequest(BaseModel):
+    topic: str
+
+# --- Nueva función que se ejecutará en segundo plano ---
+async def run_collection_analysis_and_save(task_id: str, account_id: str, topic: str):
+    """
+    Obtiene todos los documentos de una colección, los analiza y guarda el resultado.
+    """
+    db_session = SessionLocal()
+    try:
+        # Marcar la tarea como 'processing'
+        await db_session.execute(update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing"))
+        await db_session.commit()
+        
+        logger.info(f"Iniciando análisis de colección para tarea {task_id} (tema: {topic})")
+
+        # 1. Obtener todos los documentos de la colección
+        all_docs_in_topic = []
+        # (Aquí usamos la lógica de list_user_documents, pero necesitamos el contenido)
+        from core.memory_manager import list_user_documents, get_full_document_content
+        doc_list = await list_user_documents(account_id)
+        filtered_doc_list = [doc for doc in doc_list if doc.get('topic') == topic]
+        
+        for doc_meta in filtered_doc_list:
+            content = await get_full_document_content(account_id, doc_meta['file_name'])
+            if content:
+                all_docs_in_topic.append({
+                    "title": doc_meta.get('title'),
+                    "file_name": doc_meta['file_name'],
+                    "content": content
+                })
+
+        if not all_docs_in_topic:
+            raise ValueError(f"No se encontraron documentos con contenido en la colección '{topic}'.")
+
+        # 2. Realizar el análisis de la colección
+        analysis_result = await analyze_entire_collection(all_docs_in_topic)
+        
+        # 3. Guardar el resultado y marcar como 'completed'
+        stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+            status="completed", result_payload=analysis_result)
+        await db_session.execute(stmt_completed)
+        await db_session.commit()
+        logger.info(f"Análisis de colección para tarea {task_id} completado.")
+
+    except Exception as e:
+        logger.error(f"Fallo en tarea de análisis de colección {task_id}: {e}", exc_info=True)
+        stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+            status="failed", error_message=str(e))
+        await db_session.execute(stmt_failed)
+        await db_session.commit()
+    finally:
+        await db_session.close()
+
+# --- ENDPOINT PARA INICIAR EL ANÁLISIS DE COLECCIÓN ---
+@app.post("/api/start-collection-analysis", status_code=202)
+async def start_collection_analysis_endpoint(
+    req: AnalyzeCollectionRequest,
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Inicia un análisis de una colección completa y devuelve un ID de tarea."""
+    new_task = AnalysisTask(
+        account_id=uuid.UUID(current_account_id),
+        # Usamos el nombre del topic como referencia en lugar de un file_name
+        file_name=f"Colección: {req.topic}",
+        status="pending"
+    )
+    db.add(new_task)
+    await db.commit()
+    await db.refresh(new_task)
+    
+    background_tasks.add_task(run_collection_analysis_and_save, str(new_task.id), current_account_id, req.topic)
+    
+    return {"task_id": str(new_task.id)}
 
 # ==============================================================================
 # SECCIÓN 6: ENDPOINTS PARA INTERFAZ WEB
@@ -781,6 +1049,45 @@ async def transcribe_audio_endpoint(file: UploadFile = File(...)):
     segments, info = model.transcribe(audio_io)
     transcribed_text = " ".join([segment.text for segment in segments])
     return {"transcription": transcribed_text}
+
+# Modelo Pydantic para la petición de TTS
+class TTSRequest(BaseModel):
+    text: str
+
+# Usamos el nombre del servicio Docker y el puerto interno correcto.
+TTS_SERVICE_URL = "http://openai-edge-tts:5050/v1/audio/speech"
+
+@app.post("/api/text-to-speech", summary="Generar audio desde texto")
+async def text_to_speech_endpoint(request: TTSRequest):
+    """
+    Recibe texto, lo envía al servicio interno de TTS y devuelve el audio como un stream.
+    """
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="El texto no puede estar vacío.")
+
+    # Parámetros para open-edgetts. Ajusta la voz, etc., según necesites.
+    tts_payload = {
+        'input': request.text,
+        'voice': 'es-MX-DaliaNeural',
+        'model': 'edge-tts', # O el modelo que use tu wrapper
+        'speed': 1.1, # El wrapper parece esperar un número, no "+10%"
+    }
+
+
+    try:
+        async with httpx.AsyncClient() as client:
+            # Hacemos una petición GET al servicio de TTS
+            response = await client.post(TTS_SERVICE_URL, json=tts_payload, timeout=30.0)     
+            response.raise_for_status()
+            # Devolvemos el contenido de audio directamente como un stream
+            return StreamingResponse(io.BytesIO(response.content), media_type="audio/wav")
+
+    except httpx.RequestError as e:
+        logger.error(f"Error de red contactando el servicio TTS: {e}")
+        raise HTTPException(status_code=503, detail="El servicio de voz no está disponible.")
+    except httpx.HTTPStatusError as e:
+        logger.error(f"El servicio TTS devolvió un error {e.response.status_code}: {e.response.text}")
+        raise HTTPException(status_code=502, detail="Error en el servicio de generación de voz.")
 
 # ==============================================================================
 # SECCIÓN 7: Bloque de Ejecución para Desarrollo Local

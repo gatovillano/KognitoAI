@@ -62,8 +62,8 @@ def extract_text_and_metadata_from_document(file_name: str, file_bytes: bytes) -
             metadata["file_type"] = "docx"
             logger.debug("Detectado archivo DOCX, usando python-docx...")
             document = docx.Document(file_stream)
-            # Unir el texto de todos los párrafos del documento.
-            paragraphs = [p.text for p in document.paragraphs]
+            # Unir el texto de todos los párrafos del documento, ignorando los vacíos.
+            paragraphs = [p.text for p in document.paragraphs if p.text.strip()]
             text = "\n".join(paragraphs)
             logger.info(f"Texto extraído de DOCX exitosamente. Longitud: {len(text)} caracteres.")
 

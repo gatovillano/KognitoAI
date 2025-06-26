@@ -57,9 +57,16 @@ async def schedule_event(account_id: str, description: str, natural_language_dat
             user_tz_str = account.timezone
             user_tz = pytz.timezone(user_tz_str)
             
-            # ¡CORREGIDO! Usamos **date_settings en lugar de settings=...
-            date_settings = {'TO_TIMEZONE': 'UTC', 'RETURN_AS_TIMEZONE_AWARE': True, 'RELATIVE_BASE': datetime.now(user_tz)}
-            event_datetime_utc = dateparser.parse(natural_language_datetime, **date_settings)
+            # ¡CORREGIDO! Usamos un diccionario date_settings pasado como settings=... y ignoramos el error de tipo
+            date_settings = {
+                'TO_TIMEZONE': 'UTC', 
+                'RETURN_AS_TIMEZONE_AWARE': True, 
+                'RELATIVE_BASE': datetime.now(user_tz)
+            }
+            event_datetime_utc = dateparser.parse(
+                natural_language_datetime, 
+                settings=date_settings  # type: ignore
+            )
 
             if not event_datetime_utc:
                 logger.warning(f"Dateparser no pudo entender '{natural_language_datetime}'.")

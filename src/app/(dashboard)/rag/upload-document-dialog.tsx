@@ -1,7 +1,7 @@
 // En: src/app/(dashboard)/rag/upload-document-dialog.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -21,7 +21,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import apiClient from '@/lib/api';
 
 const formSchema = z.object({
-  topic: z.string().min(3, { message: 'La base de conocimiento debe tener al menos 3 caracteres.' }),
+  topic: z.string().min(3, { message: 'La base de conocimiento debe tener al menos 3 caracteres.' }).optional(),
   files: z.instanceof(FileList).refine((files) => files.length > 0, 'Debes seleccionar al menos un archivo.'),
 });
 
@@ -29,9 +29,10 @@ interface UploadDocumentDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onUploadSuccess: () => void;
+  defaultTopic?: string; // <-- NUEVA PROP OPCIONAL
 }
 
-export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess }: UploadDocumentDialogProps) {
+export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, defaultTopic }: UploadDocumentDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
@@ -41,21 +42,35 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess }: 
       files: undefined,
     },
   });
+  
+  // Rellenamos el formulario cuando cambia el estado de apertura o el defaultTopic
+  useEffect(() => {
+    if (isOpen) {
+      form.reset({
+        // Si hay un defaultTopic, lo usamos; si no, el usuario debe escribirlo.
+        topic: defaultTopic || 'General', 
+        files: undefined,
+      });
+    }
+  }, [isOpen, defaultTopic, form]);
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     setIsSubmitting(true);
+    
+    // ---- CAMBIO LÓGICO: Usamos el defaultTopic si existe, si no, el del formulario ----
+    const topicForUpload = defaultTopic || values.topic || 'General';
     const formData = new FormData();
-    formData.append('topic', values.topic);
+    formData.append('topic', topicForUpload);
     for (let i = 0; i < values.files.length; i++) {
       formData.append('files', values.files[i]);
     }
 
     toast.info('Subiendo documentos...', {
-      description: 'Esto puede tardar unos momentos.',
+      description: `A la colección: ${topicForUpload}`,
     });
 
     try {
-      await apiClient.post('/upload-document', formData, {
+      await apiClient.post('/api/upload-document', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -80,24 +95,30 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess }: 
         <DialogHeader>
           <DialogTitle>Subir Nuevo Documento</DialogTitle>
           <DialogDescription>
-            Añade archivos a tu base de conocimiento. Formatos soportados: PDF, DOCX, TXT.
+            {defaultTopic 
+              ? `Los archivos se añadirán a la colección "${defaultTopic}".`
+              : "Crea o selecciona una base de conocimiento para tus nuevos archivos."
+            }
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <FormField
-              control={form.control}
-              name="topic"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Base de Conocimiento (Tema)</FormLabel>
-                  <FormControl>
-                    <Input placeholder="Ej: Investigacion Q3, Apuntes Legales..." {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            {/* ---- CAMBIO DE RENDERIZADO: El campo 'topic' solo se muestra si NO hay defaultTopic ---- */}
+            {!defaultTopic && (
+              <FormField
+                control={form.control}
+                name="topic"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Base de Conocimiento (Tema)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Ej: Investigacion Q3, Apuntes Legales..." {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
             <FormField
               control={form.control}
               name="files"
@@ -108,6 +129,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess }: 
                     <Input 
                       type="file" 
                       multiple 
+                      accept=".pdf,.docx,.txt,.md"
                       onChange={(e) => field.onChange(e.target.files)}
                     />
                   </FormControl>
@@ -116,8 +138,15 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess }: 
               )}
             />
             <DialogFooter>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Subiendo...' : 'Subir'}
+              <Button type="submit" disabled={isSubmitting} className="relative">
+                {isSubmitting ? (
+                  <>
+                    <span className="absolute left-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    Subiendo...
+                  </>
+                ) : (
+                  'Subir'
+                )}
               </Button>
             </DialogFooter>
           </form>

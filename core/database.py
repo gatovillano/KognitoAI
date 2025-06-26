@@ -295,6 +295,23 @@ class VerificationCode(Base):
 
     account = relationship("Account")
 
+
+class AnalysisTask(Base):
+    """Guarda el estado y resultado de las tareas de análisis de documentos."""
+    __tablename__ = "analysis_tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    
+    file_name = Column(String, nullable=False) # Guardamos el nombre del archivo analizado
+    status = Column(String, default="pending", index=True, nullable=False) # pending, processing, completed, failed
+    
+    result_payload = Column(JSONB, nullable=True) # Aquí guardamos el JSON completo del análisis
+    error_message = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
 # ==============================================================================
 # SECCIÓN 2: FUNCIONES AUXILIARES DE LA BASE DE DATOS
 # ==============================================================================

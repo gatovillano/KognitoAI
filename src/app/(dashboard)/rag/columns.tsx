@@ -1,12 +1,10 @@
-// En: src/app/(dashboard)/rag/columns.tsx
 'use client';
 
 import { type ColumnDef } from '@tanstack/react-table';
 import { Button } from '@/components/ui/button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { MoreHorizontal } from 'lucide-react';
 
-// Este es el tipo de dato que esperamos de la API
 export type Document = {
   file_name: string;
   topic: string;
@@ -14,13 +12,17 @@ export type Document = {
   author: string | null;
 };
 
-export const columns: ColumnDef<Document>[] = [
+// La función ahora recibe los handlers para cada acción
+export const getColumns = (
+    onPreview: (doc: Document) => void,
+    onEdit: (doc: Document) => void,
+    onDelete: (doc: Document) => void,
+    onAnalyze?: (doc: Document) => void
+): ColumnDef<Document>[] => [
   {
     accessorKey: 'title',
     header: 'Título',
-    cell: ({ row }: { row: any }) => {
-        return <div className="font-medium">{row.original.title || 'Sin título'}</div>
-    }
+    cell: ({ row }) => <div className="font-medium">{row.original.title || <span className="text-muted-foreground italic">Sin título</span>}</div>,
   },
   {
     accessorKey: 'file_name',
@@ -44,11 +46,21 @@ export const columns: ColumnDef<Document>[] = [
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Acciones</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => navigator.clipboard.writeText(document.file_name)}>
-              Copiar nombre
+            <DropdownMenuItem onClick={() => onPreview(document)}>
+              Previsualizar
             </DropdownMenuItem>
-            <DropdownMenuItem>Editar Metadatos</DropdownMenuItem>
-            <DropdownMenuItem className="text-destructive">Eliminar Documento</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onEdit(document)}>
+              Editar Metadatos
+            </DropdownMenuItem>
+            {onAnalyze && (
+              <DropdownMenuItem onClick={() => onAnalyze(document)}>
+                Analizar Documento
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onDelete(document)} className="text-destructive focus:bg-destructive/30">
+              Eliminar
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       );

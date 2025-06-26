@@ -1,17 +1,16 @@
-// En: src/app/(dashboard)/layout.tsx
 'use client';
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { Sidebar } from "@/components/Sidebar";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { useAuth } from "@/contexts/AuthContext";
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
+import { AppShell } from '@/components/AppShell';
 import { Toaster } from '@/components/ui/sonner';
+import Image from 'next/image';
 
 export default function DashboardLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
   const { user, isLoading } = useAuth();
   const router = useRouter();
@@ -22,30 +21,21 @@ export default function DashboardLayout({
     }
   }, [user, isLoading, router]);
 
-  // Mientras carga, o si no hay usuario, muestra un loader o nada
   if (isLoading || !user) {
     return (
-      <div className="flex h-screen w-full items-center justify-center">
-        <p>Cargando...</p> {/* O un spinner bonito */}
+      <div className="flex h-screen w-full items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-2">
+            <Image src="/logo-simple.png" alt="Kognito" width={40} height={40} className="animate-pulse" />
+            <p className="text-muted-foreground">Cargando Kognito...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <ResizablePanelGroup
-      direction="horizontal"
-      className="min-h-screen w-full"
-    >
-      <ResizablePanel defaultSize={20} minSize={15} maxSize={25}>
-        <Sidebar />
-      </ResizablePanel>
-      <ResizableHandle withHandle />
-      <ResizablePanel defaultSize={80}>
-      <main className="h-full p-6">
-        {children}
-      </main>
-      <Toaster richColors />
-      </ResizablePanel>
-    </ResizablePanelGroup>
-  )
+    <>
+      <AppShell>{children}</AppShell>
+      <Toaster richColors position="top-right" />
+    </>
+  );
 }

@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KognitoBot: Tu Exocerebro Digital de Productividad</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #4A90E2; /* Azul vibrante */
+            --secondary-color: #50E3C2; /* Verde azulado */
+            --accent-color: #F5A623; /* Naranja */
+            --text-dark: #2C3E50;
+            --text-light: #ECF0F1;
+            --bg-light: #F8F9FA;
+            --bg-dark: #34495E;
+            --shadow: rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            line-height: 1.8;
+            margin: 0;
+            padding: 0;
+            background: var(--bg-light);
+            color: var(--text-dark);
+            overflow-x: hidden; /* Evita scroll horizontal */
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, #3498DB 100%);
+            color: var(--text-light);
+            padding: 60px 20px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+            border-bottom-left-radius: 50px;
+            border-bottom-right-radius: 50px;
+            box-shadow: 0 4px 20px var(--shadow);
+        }
+
+        header h1 {
+            font-size: 3.5em;
+            margin-bottom: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        header p {
+            font-size: 1.4em;
+            font-weight: 300;
+            opacity: 0.9;
+        }
+
+        .hero-section {
+            text-align: center;
+            padding: 60px 20px;
+            background: var(--bg-light);
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero-section h2 {
+            font-size: 2.8em;
+            color: var(--primary-color);
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+
+        .hero-section p {
+            font-size: 1.2em;
+            max-width: 700px;
+            margin: 0 auto 40px auto;
+            color: #555;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            padding: 50px 20px;
+            background: #fff;
+            border-radius: 15px;
+            box-shadow: 0 8px 30px var(--shadow);
+            margin-top: -80px; /* Superpone un poco con la sección hero */
+            position: relative;
+            z-index: 2;
+        }
+
+        .feature-card {
+            background: var(--bg-light);
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+            text-align: center;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            border: 1px solid #eee;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        .feature-card .icon {
+            font-size: 3em;
+            color: var(--primary-color);
+            margin-bottom: 15px;
+        }
+
+        .feature-card h4 {
+            font-size: 1.5em;
+            color: var(--text-dark);
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        .feature-card p {
+            font-size: 1em;
+            color: #666;
+        }
+
+        .tech-section {
+            background: var(--bg-dark);
+            color: var(--text-light);
+            padding: 60px 20px;
+            text-align: center;
+            margin-top: 50px;
+            border-top-left-radius: 50px;
+            border-top-right-radius: 50px;
+            box-shadow: 0 -4px 20px var(--shadow);
+        }
+
+        .tech-section h3 {
+            font-size: 2.5em;
+            color: var(--secondary-color);
+            margin-bottom: 30px;
+            font-weight: 700;
+        }
+
+        .tech-list {
+            list-style: none;
+            padding: 0;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .tech-list li {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px 25px;
+            border-radius: 30px;
+            font-size: 1.1em;
+            font-weight: 400;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: background 0.3s ease;
+        }
+
+        .tech-list li:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .cta-section {
+            text-align: center;
+            padding: 80px 20px;
+            background: linear-gradient(45deg, var(--secondary-color) 0%, #2ECC71 100%);
+            color: var(--text-light);
+            border-radius: 15px;
+            margin: 50px auto;
+            box-shadow: 0 8px 30px var(--shadow);
+        }
+
+        .cta-section h3 {
+            font-size: 2.8em;
+            margin-bottom: 20px;
+            font-weight: 700;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .cta-section p {
+            font-size: 1.3em;
+            max-width: 700px;
+            margin: 0 auto 40px auto;
+            opacity: 0.9;
+        }
+
+        .cta-button {
+            display: inline-block;
+            background: var(--accent-color);
+            color: var(--text-light);
+            padding: 18px 40px;
+            text-decoration: none;
+            border-radius: 50px;
+            font-size: 1.4em;
+            font-weight: 600;
+            transition: background 0.3s ease, transform 0.3s ease;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .cta-button:hover {
+            background: #E67E22; /* Un poco más oscuro */
+            transform: translateY(-3px);
+        }
+
+        footer {
+            text-align: center;
+            padding: 30px;
+            margin-top: 50px;
+            color: #777;
+            font-size: 0.9em;
+            border-top: 1px solid #eee;
+        }
+
+        /* Responsive adjustments for PDF */
+        @media print {
+            body {
+                font-size: 12pt;
+                -webkit-print-color-adjust: exact; /* For better color printing */
+                print-color-adjust: exact;
+            }
+            header, .tech-section, .cta-section {
+                background-image: none !important; /* Remove gradients for print */
+                background-color: var(--primary-color) !important; /* Use solid color */
+            }
+            .features-grid, .cta-section {
+                box-shadow: none; /* Remove shadows for cleaner print */
+            }
+            .feature-card {
+                box-shadow: none;
+                border: 1px solid #ddd;
+            }
+            .container {
+                width: 95%;
+                padding: 10px;
+            }
+            header h1 { font-size: 2.5em; }
+            .hero-section h2 { font-size: 2em; }
+            .feature-card h4 { font-size: 1.2em; }
+            .cta-section h3 { font-size: 2em; }
+            .cta-button { padding: 10px 25px; font-size: 1.1em; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>KognitoBot</h1>
+            <p>Tu <b>Exocerebro Digital</b> y Asistente Personal de IA en Telegram</p>
+        </header>
+
+        <section class="hero-section">
+            <h2>Potencia tu Productividad y Memoria con KognitoBot</h2>
+            <p>Transforma tu experiencia en Telegram. KognitoBot es más que un bot; es tu <b>segundo cerebro digital</b>, diseñado para aumentar tu inteligencia colectiva, gestionar tu conocimiento y simplificar tu día a día, permitiéndote enfocarte en lo que realmente importa.</p>
+        </section>
+
+        <section class="features-grid">
+            <div class="feature-card">
+                <div class="icon">🧠</div>
+                <h4>Memoria Viva Personalizada</h4>
+                <p>KognitoBot aprende de tus interacciones y documentos, almacenando y recuperando información clave. Nunca olvides una idea, un dato o una decisión importante.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">📚</div>
+                <h4>Gestión Documental Inteligente (RAG)</h4>
+                <p>Sube tus PDFs y archivos de texto. KognitoBot los indexa y te permite hacer preguntas directamente, extrayendo respuestas precisas de tu propia base de conocimiento.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🗓️</div>
+                <h4>Agenda y Recordatorios Eficaces</h4>
+                <p>Organiza tus eventos, citas y tareas. KognitoBot te enviará recordatorios puntuales, asegurando que siempre estés al tanto de tus compromisos.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">📝</div>
+                <h4>Notas y Apuntes al Instante</h4>
+                <p>Captura ideas, listas o cualquier pensamiento fugaz. KognitoBot te ayuda a organizar y acceder a tus notas de forma rápida y sencilla.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">📸</div>
+                <h4>Entrada Multimodal y Visual</h4>
+                <p>Envía imágenes con descripciones y KognitoBot procesará el contenido visual, integrándolo en tu memoria y enriqueciendo sus respuestas contextuales.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🌐</div>
+                <h4>Interfaz Web Complementaria</h4>
+                <p>Accede a una plataforma web intuitiva para una gestión más visual y avanzada de tu agenda, documentos y notas, sincronizada con tu bot de Telegram.</p>
+            </div>
+        </section>
+
+        <section class="tech-section">
+            <h3>Construido sobre una Base Tecnológica Sólida</h3>
+            <ul class="tech-list">
+                <li><b>Inteligencia Artificial Avanzada:</b> Potenciado por Grandes Modelos de Lenguaje (LLMs) para una comprensión natural y respuestas precisas.</li>
+                <li><b>Bases de Datos Vectoriales:</b> Para una recuperación de información ultrarrápida y contextual de tus documentos.</li>
+                <li><b>Arquitectura Robusta:</b> Desarrollado con Python, python-telegram-bot, FastAPI, SQLAlchemy y PostgreSQL para garantizar escalabilidad y fiabilidad.</li>
+                <li><b>Seguridad y Privacidad:</b> Diseñado con un enfoque en la protección de tus datos.</li>
+            </ul>
+        </section>
+
+        <section class="cta-section">
+            <h3>¿Listo para Transformar tu Gestión Personal?</h3>
+            <p>KognitoBot no es solo una herramienta, es tu socio estratégico para una vida más organizada y productiva. ¡Descubre el poder de tu propio exocerebro digital!</p>
+            <a href="#contacto" class="cta-button">¡Quiero mi KognitoBot!</a>
+        </section>
+
+        <footer>
+            <p>&copy; 2023 KognitoBot. Todos los derechos reservados.</p>
+            <p>Para más información, visita nuestro repositorio en GitHub.</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -26,9 +26,11 @@ import datetime
 from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger
 # No necesitamos urlparse, parse_qs aquí si usamos el engine directamente para PGVector
 
+import uuid
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import PGVector
+from sqlalchemy import Table, MetaData, update, and_
 
 # Asegúrate de que tu versión de langchain-postgres sea compatible con este uso.
 # Si sigue fallando, podría ser un problema de versión específica.
@@ -54,6 +56,11 @@ USER_MEMORIES_PREFIX = "user_memories_"
 
 # Engine síncrono solo para PGVector
 PGVECTOR_SYNC_ENGINE = create_engine(settings.database_url)
+
+# Define tables for LangChain PostgreSQL integration
+metadata = MetaData()
+langchain_pg_collection = Table('langchain_pg_collection', metadata, autoload_with=PGVECTOR_SYNC_ENGINE)
+langchain_pg_embedding = Table('langchain_pg_embedding', metadata, autoload_with=PGVECTOR_SYNC_ENGINE)
 
 
 # Ya no necesitamos _get_pgvector_connection_args
@@ -366,8 +373,12 @@ async def process_document_for_rag(
         if account_id and not is_global:
             base_metadata["account_id"] = str(account_id)
 
+        ids = []
         lc_documents = []
         for i, text_content in enumerate(texts):
+            if not text_content.strip():  # Skip empty or whitespace-only chunks
+                logger.warning(f"Skipping empty chunk at index {i} for file '{file_name}'")
+                continue
             chunk_metadata = base_metadata.copy()
             chunk_metadata["chunk_index"] = i
             # Asegurar que todos los valores de metadatos sean serializables
@@ -377,6 +388,8 @@ async def process_document_for_rag(
             lc_documents.append(
                 Document(page_content=text_content, metadata=chunk_metadata)
             )
+            ids.append(str(uuid.uuid4()))
+        logger.info(f"Prepared {len(lc_documents)} valid chunks for file '{file_name}'")
 
         # --- CORRECCIÓN CLAVE AQUÍ para PGVector ---
         # Ejecutar la operación de PGVector en un thread pool para no bloquear el event loop
@@ -387,6 +400,11 @@ async def process_document_for_rag(
             embedding=embeddings,
             collection_name=collection_name,
             connection=PGVECTOR_SYNC_ENGINE,
+        )
+
+        await vectorstore.aadd_documents(documents=lc_documents, ids=ids)
+        logger.info(
+            f"✅ Procesado y añadido {len(lc_documents)} chunks a la colección '{collection_name}'."
         )
         # // INICIO EDICIÓN
         asyncio.create_task(
@@ -572,80 +590,131 @@ async def list_user_documents(account_id: str) -> List[Dict[str, Any]]:
 
 
 async def update_document_metadata(
-    account_id: str, file_name: str, new_title: Optional[str], new_topic: Optional[str]
+    account_id: str, 
+    file_name: str, 
+    new_title: Optional[str], 
+    new_topic: Optional[str]
 ) -> bool:
     """
     Actualiza el título y/o la categoría (topic) de todos los chunks de un documento.
+    
+    Esta función construye y ejecuta una consulta SQL de actualización directamente
+    sobre la tabla de embeddings de LangChain para modificar el campo JSONB `cmetadata`.
+    
     Args:
         account_id: El ID universal de la cuenta del usuario.
         file_name: El nombre del archivo a actualizar.
-        new_title: El nuevo título (opcional).
-        new_topic: La nueva categoría/base de conocimiento (opcional).
+        new_title: El nuevo título (si se proporciona).
+        new_topic: La nueva categoría/base de conocimiento (si se proporciona).
+        
     Returns:
-        True si al menos un chunk fue actualizado, False si no se encontró el documento.
+        True si la operación fue exitosa, False en caso contrario.
     """
-    logger.info(
-        f"Actualizando metadatos para '{file_name}' (cuenta {account_id}) - Título: {new_title}, Topic: {new_topic}"
-    )
-    try:
-        embeddings = await initialize_embeddings()
-        if not embeddings:
-            return False
-        vectorstore = await asyncio.to_thread(
-            PGVector.from_existing_index,
-            embedding=embeddings,
-            collection_name=f"user_memories_{account_id}",
-            connection=PGVECTOR_SYNC_ENGINE,
-        )
-        # Buscar todos los chunks del documento
-        chunks = await vectorstore.asimilarity_search(
-            query=" ",
-            k=10000,
-            filter={"file_name": file_name, "type": "document_chunk"},
-        )
-        if not chunks:
-            return False
-        # Actualizar metadatos en la base de datos
-        async with DBSession(SessionLocal) as db:
-            for chunk in chunks:
-                stmt = text(
-                    """
-                    UPDATE langchain_pg_embedding
-                    SET cmetadata = jsonb_set(
-                        jsonb_set(cmetadata, '{title}', to_jsonb(:new_title), true),
-                        '{topic}', to_jsonb(:new_topic), true
-                    )
-                    WHERE collection_id = (
-                        SELECT uuid FROM langchain_pg_collection WHERE name = :collection_name
-                    )
-                    AND cmetadata->>'file_name' = :file_name
-                    AND cmetadata->>'type' = 'document_chunk'
-                """
-                )
-                db.execute(
-                    stmt,
-                    {
-                        "new_title": (
-                            new_title
-                            if new_title is not None
-                            else chunk.metadata.get("title", "")
-                        ),
-                        "new_topic": (
-                            new_topic
-                            if new_topic is not None
-                            else chunk.metadata.get("topic", "")
-                        ),
-                        "collection_name": f"user_memories_{account_id}",
-                        "file_name": file_name,
-                    },
-                )
-            await db.commit()
-        logger.info(
-            f"✅ Metadatos actualizados para '{file_name}' (cuenta {account_id})"
-        )
-        return True
-    except Exception as e:
-        logger.error(
-            f"❌ Error actualizando metadatos de '{file_name}': {e}", exc_info=True
-        )
+    if not new_title and not new_topic:
+        logger.warning(f"Se llamó a update_document_metadata para '{file_name}' sin nuevos datos para actualizar.")
         return False
+
+    logger.info(f"Actualizando metadatos para '{file_name}' (cuenta {account_id}) -> Título: {new_title}, Tema: {new_topic}")
+    
+    collection_name = f"user_memories_{account_id}"
+
+    async with DBSession(SessionLocal) as db:
+        try:
+            # 1. Obtener el ID de la colección para este usuario
+            collection_stmt = select(langchain_pg_collection.c.uuid).where(langchain_pg_collection.c.name == collection_name)
+            collection_id_result = await db.execute(collection_stmt)
+            collection_id = collection_id_result.scalar_one_or_none()
+
+            if not collection_id:
+                logger.error(f"No se encontró la colección '{collection_name}' para actualizar metadatos.")
+                return False
+
+            # 2. Construir la actualización del JSONB
+            # Empezamos con el cmetadata existente
+            stmt = select(langchain_pg_embedding.c.cmetadata).where(
+                and_(
+                    langchain_pg_embedding.c.collection_id == collection_id,
+                    langchain_pg_embedding.c.cmetadata['file_name'].astext == file_name
+                )
+            ).limit(1)
+            
+            cmetadata_result = await db.execute(stmt)
+            current_cmetadata = cmetadata_result.scalar_one_or_none()
+            
+            if not current_cmetadata:
+                logger.warning(f"No se encontraron chunks para el archivo '{file_name}' en la colección '{collection_name}'.")
+                return False
+
+            # Partimos del cmetadata actual y sobreescribimos los valores
+            values_to_update = current_cmetadata.copy()
+            if new_title is not None:
+                values_to_update['title'] = new_title
+            if new_topic is not None:
+                values_to_update['topic'] = new_topic
+
+            # 3. Construir y ejecutar la consulta de actualización
+            update_stmt = (
+                update(langchain_pg_embedding)
+                .where(
+                    and_(
+                        langchain_pg_embedding.c.collection_id == collection_id,
+                        langchain_pg_embedding.c.cmetadata['file_name'].astext == file_name
+                    )
+                )
+                .values(cmetadata=values_to_update)
+            )
+
+            result = await db.execute(update_stmt)
+            await db.commit()
+            
+            # result.rowcount nos dice cuántas filas fueron afectadas
+            if result.rowcount > 0:
+                logger.info(f"✅ Se actualizaron {result.rowcount} chunks para el archivo '{file_name}'.")
+                return True
+            else:
+                logger.warning(f"La consulta de actualización para '{file_name}' no afectó ninguna fila, aunque el documento fue encontrado.")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ Error actualizando metadatos de '{file_name}': {e}", exc_info=True)
+            await db.rollback()
+            return False
+
+
+async def list_user_collections(account_id: str) -> List[Dict[str, Any]]:
+    """
+    Obtiene una lista de todas las colecciones (temas) únicas de un usuario
+    y cuenta cuántos documentos hay en cada una.
+    """
+    logger.info(f"Listando colecciones para la cuenta {account_id}")
+    collection_name = f"user_memories_{account_id}"
+    
+    async with DBSession(SessionLocal) as db:
+        try:
+            # Primero, obtener el ID de la colección para este usuario
+            collection_uuid_query = text("SELECT uuid FROM langchain_pg_collection WHERE name = :collection_name")
+            collection_result = await db.execute(collection_uuid_query, {"collection_name": collection_name})
+            collection_uuid = collection_result.scalar_one_or_none()
+            
+            if not collection_uuid:
+                logger.info(f"No se encontró la colección '{collection_name}' para listar.")
+                return []
+
+            # Consulta para agrupar por 'topic' y contar los 'file_name' únicos
+            collections_query = text(
+                """
+                SELECT 
+                    cmetadata->>'topic' AS topic,
+                    COUNT(DISTINCT cmetadata->>'file_name') as document_count
+                FROM langchain_pg_embedding
+                WHERE collection_id = :collection_uuid AND cmetadata->>'type' = 'document_chunk'
+                GROUP BY cmetadata->>'topic'
+                ORDER BY topic;
+                """
+            )
+            result = await db.execute(collections_query, {"collection_uuid": collection_uuid})
+            collections = [dict(row) for row in result.mappings()]
+            return collections
+        except Exception as e:
+            logger.error(f"❌ Error listando colecciones para la cuenta {account_id}: {e}", exc_info=True)
+            return []

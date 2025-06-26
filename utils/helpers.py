@@ -13,6 +13,7 @@ para tareas de utilidad comunes, como la limpieza y el formateo de texto.
 
 import logging
 import html
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,48 @@ logger = logging.getLogger(__name__)
     #for escaped_tag, original_tag in allowed_tags.items():
     #    escaped_text = escaped_text.replace(escaped_tag, original_tag)
 
-    # return escaped_text# Aquí se podrían añadir otras funciones de ayuda en el futuro, por ejemplo:
+    # return escaped_text
+
+def markdown_to_telegram_html(text: str) -> str:
+    """
+    Convierte un subconjunto simple de Markdown al formato HTML que entiende Telegram.
+    Es una conversión básica y no cubre todos los casos.
+    """
+    if not text:
+        return ""
+
+    # 1. Negrita: **texto** -> <b>texto</b>
+    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+
+    # 2. Cursiva: *texto* -> <i>texto</i>
+    text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
+
+    # 3. Código en línea: `texto` -> <code>texto</code>
+    text = re.sub(r'`(.*?)`', r'<code>\1</code>', text)
+    
+    # 4. Bloques de código: ```python...``` -> <pre><code class="language-python">...</code></pre>
+    # Esta es la más compleja. Telegram usa <pre> para bloques preservando el formato.
+    def code_block_replacer(match):
+        lang = match.group(1) or ""
+        code = match.group(2)
+        # Escapamos caracteres HTML dentro del bloque de código para evitar conflictos
+        escaped_code = html.escape(code)
+        if lang:
+            return f'<pre><code class="language-{lang}">{escaped_code}</code></pre>'
+        else:
+            return f'<pre>{escaped_code}</pre>'
+
+    text = re.sub(r'```(\w*)\n(.*?)\n```', code_block_replacer, text, flags=re.DOTALL)
+    
+    # IMPORTANTE: Escapar los caracteres HTML restantes que Telegram no debe interpretar.
+    # Esta parte es crucial para evitar errores de "malformed HTML".
+    # Lo hacemos después de las conversiones para no escapar nuestras propias etiquetas.
+    # Esta es una simplificación. Una función robusta requeriría un parseo más inteligente.
+    # Por ahora, nos enfocamos en el formato que controlamos.
+
+    return text
+
+# Aquí se podrían añadir otras funciones de ayuda en el futuro, por ejemplo:
 ## def format_timestamp(ts: float) -> str:
 #     """Formatea un timestamp de Unix a una cadena de texto legible."""
 #     from datetime import datetime

@@ -47,7 +47,7 @@ from core.config import settings
 from core.database import get_or_create_account_from_platform_id, SessionLocal, AgendaEvent, ChatThread
 from utils.db_session import DBSession
 from telegram_client.bot_manager import bot_manager
-#from utils.helpers import sanitize_html
+from utils.helpers import markdown_to_telegram_html
 from utils.paginator import Paginator, split_text_into_pages
 from utils.image_generation import GENERATED_IMAGE_KEY
 from tools.get_document_content_tool import DOCUMENT_NAME_KEY
@@ -204,16 +204,17 @@ async def handle_chat_response(update: Update, context: CallbackContext, respons
                 logger.warning(f"Se intentó programar un job para el evento {event_id_to_schedule}, pero no se encontró o está inactivo.")
         # No se retorna None aquí, porque la programación del job no impide enviar la respuesta de texto del agente.
 
-    # 4. Si no hay nada de lo anterior o falló, enviar como texto simple.
-    pages = split_text_into_pages(response_text, 4096) # Telegram tiene un límite de 4096 caracteres.
+    # 4. Si no hay nada de lo anterior o falló, enviar como texto simple con formato HTML.
+    formatted_text = markdown_to_telegram_html(response_text)
+    pages = split_text_into_pages(formatted_text, 4096) # Telegram tiene un límite de 4096 caracteres.
     for i, page in enumerate(pages):
         try:
             logger.info(f"[DEBUG TELEGRAM OUT] Texto enviado a Telegram (página {i+1}):\n{page}")
-            await context.bot.send_message(chat_id=chat_id, text=page, disable_web_page_preview=True)
+            await context.bot.send_message(chat_id=chat_id, text=page, parse_mode='HTML', disable_web_page_preview=True)
             if i < len(pages) - 1:
                 await asyncio.sleep(0.5) # Pequeña pausa entre mensajes si hay múltiples páginas.
         except telegram_error.BadRequest as e:
-            logger.warning(f"Error al enviar mensaje de texto plano: {e}")
+            logger.warning(f"Error al enviar mensaje de texto con HTML: {e}")
             # Si falla, no reintentamos con otro formato.
     return None # Importante: Retornar None para detener la propagación después de enviar la respuesta final.
 

@@ -19,7 +19,7 @@ por el agente de IA.
 
 import asyncio
 import logging
-from typing import Optional, List, Dict, Tuple
+from typing import Any, Optional, List, Dict, Tuple
 import uuid
 
 from sqlalchemy import select, delete, update
@@ -34,7 +34,7 @@ from utils.embeddings import initialize_embeddings
 logger = logging.getLogger(__name__)
 
 
-async def add_note(account_id: str, title: str, content: str, category: str = "general") -> Nota:
+async def add_note(account_id: str, title: Optional[str], content: str, category: Optional[str] = None) -> Dict[str, Any]:
     """
     Añade una nueva nota a la base de datos para una cuenta de usuario específica. Añade los embedding de la nota
 
@@ -45,9 +45,13 @@ async def add_note(account_id: str, title: str, content: str, category: str = "g
         category: Una categoría opcional para la nota.
 
     Returns:
-        Un mensaje de confirmación para el usuario.
+        Un diccionario con los datos de la nota.
     """
     logger.info(f"Añadiendo nueva nota para la cuenta {account_id} con título '{title}'")
+    
+    # Asignamos un valor por defecto si la categoría es None o vacía
+    effective_category = category if category and category.strip() else "General"
+
     async with DBSession(SessionLocal) as db:
         # Generar el embedding de la nota
         embeddings_model = await initialize_embeddings()
@@ -62,14 +66,22 @@ async def add_note(account_id: str, title: str, content: str, category: str = "g
             account_id=uuid.UUID(account_id),
             title=title,
             content=content,
-            category=category,
+            category=effective_category, # Usamos el valor efectivo
             embedding=note_embedding # Guardar el embedding
         )
         db.add(new_note)
         await db.commit()
         await db.refresh(new_note)
         logger.info(f"Nota '{title}' añadida exitosamente con ID {new_note.id}.")
-
+        
+        note_dict = {
+        "id": new_note.id,
+        "title": new_note.title,
+        "content": new_note.content,
+        "category": new_note.category,
+        "created_at": new_note.created_at.isoformat(),
+        # No devolvemos el embedding, es muy grande
+    }
         # Trigger the proactive knowledge linker in the background
         # Asegúrate de que proactive_knowledge_linker_trigger esté importado
         from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger
@@ -84,7 +96,7 @@ async def add_note(account_id: str, title: str, content: str, category: str = "g
             'embedding': note_embedding # Pasa el embedding si ya lo tienes
         }))
 
-        return new_note
+        return note_dict
 
 
 async def get_notes(account_id: str, category: Optional[str] = None, search_query: Optional[str] = None) -> str:
@@ -170,7 +182,10 @@ async def update_note(account_id: str, note_id: int, new_title: Optional[str] = 
                 try:
                     note_to_update.embedding = await embeddings_model.aembed_query(note_to_update.content)
                 except Exception as e:
-                    logger.error(f"Error generando embedding para la nota: {e}", exc_info=True)
+                    # Añadimos un log más específico para depurar
+                    logger.error(f"Error al actualizar embedding para la nota {note_id} de la cuenta {account_id}: {e}", exc_info=True)
+                    # Re-lanzamos la excepción para que FastAPI la capture como un 500 claro
+                    raise
 
         await db.commit()
         logger.info(f"Nota {note_id} actualizada exitosamente para la cuenta {account_id}.")
@@ -202,3 +217,31 @@ async def delete_note(account_id: str, note_id: int) -> str:
         await db.commit()
         logger.info(f"Nota {note_id} eliminada exitosamente para la cuenta {account_id}.")
         return f"¡Nota con ID {note_id} eliminada!"
+
+async def get_notes_as_dicts(account_id: str, search_query: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Recupera todas las notas de un usuario y las devuelve como una lista de diccionarios.
+    Diseñada para ser usada por endpoints de API para interfaces web.
+    """
+    logger.info(f"Obteniendo notas como diccionarios para la cuenta {account_id} (Búsqueda: {search_query}).")
+    async with DBSession(SessionLocal) as db:
+        stmt = select(Nota).where(Nota.account_id == uuid.UUID(account_id)).order_by(Nota.created_at.desc())
+        
+        if search_query:
+            stmt = stmt.where(Nota.title.ilike(f"%{search_query}%") | Nota.content.ilike(f"%{search_query}%"))
+
+        result = await db.execute(stmt)
+        notes = result.scalars().all()
+        
+        # Convertimos cada objeto Nota a un diccionario
+        return [
+            {
+                "id": note.id,
+                "title": note.title,
+                "content": note.content,
+                "category": note.category,
+                "created_at": note.created_at.isoformat(),
+                "updated_at": note.updated_at.isoformat(),
+            }
+            for note in notes
+        ]

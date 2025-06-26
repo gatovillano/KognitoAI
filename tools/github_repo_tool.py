@@ -78,15 +78,22 @@ class GitHubRepoTool(BaseTool):
         try:
             if self.session is None:
                 self.session = requests.Session()
-            api_url = self._get_api_url(repo_url) + "/git/trees/main?recursive=1"
-            response = self.session.get(api_url)
+            # First, get the default branch
+            api_url = self._get_api_url(repo_url)
+            repo_info_response = self.session.get(api_url)
+            repo_info_response.raise_for_status()
+            default_branch = repo_info_response.json().get("default_branch", "main")
+            
+            # Now, get the tree for the default branch
+            tree_url = f"{api_url}/git/trees/{default_branch}?recursive=1"
+            response = self.session.get(tree_url)
             response.raise_for_status()
             tree = response.json()["tree"]
             file_list = "\n".join([f"- {item['path']} ({item['type']})" for item in tree])
             return f"Árbol de archivos:\n{file_list}"
         except Exception as e:
             logger.error(f"Error al listar el árbol de archivos del repositorio {repo_url}: {e}", exc_info=True)
-            return f"Error al listar el árbol de archivos: {e}"
+            return f"Error al listar el árbol de archivos: {e}. Asegúrate de que el repositorio existe y que el token tiene los permisos necesarios."
     def _read_file(self, repo_url: str, file_path: str) -> str:
         """
         Lee el contenido de un archivo del repositorio.
