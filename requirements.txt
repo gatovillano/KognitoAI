@@ -38,11 +38,13 @@ dateparser
 emoji
 aiofiles
 python-multipart
+fake-useragent
 # --- Procesamiento de Audio y Documentos ---
 faster-whisper
 pdfminer.six
 python-docx
-passlib[bcrypt]
+passlib==1.7.4
+bcrypt==4.0.1
 pydantic[email]
 scipy
 spacy

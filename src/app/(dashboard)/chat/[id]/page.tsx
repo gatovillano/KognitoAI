@@ -15,7 +15,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { toast } from 'sonner';
 
-import { Send, User, Copy, Play, Loader2, Square } from 'lucide-react';
+import { Send, User, Copy, Play, Loader2, Square, Search, BookMarked, BrainCircuit, Upload } from 'lucide-react';
 
 interface Message {
   text: string;
@@ -36,6 +36,10 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isResponding, setIsResponding] = useState(false);
+  const [isKnowledgeAnalysisActive, setIsKnowledgeAnalysisActive] = useState(false);
+  const [isWebSearchActive, setIsWebSearchActive] = useState(false);
+  const [isComprehensiveAnalysisActive, setIsComprehensiveAnalysisActive] = useState(false);
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
   
   // --- NUEVOS ESTADOS PARA EL AUDIO ---
   const [isAudioLoading, setIsAudioLoading] = useState(false);
@@ -66,6 +70,38 @@ export default function ChatPage() {
       fetchChatData();
     }
   }, [threadId, user]);
+
+  // Real-time title update with animation
+  const [animatedTitle, setAnimatedTitle] = useState(threadDetails?.title || 'Nuevo Chat');
+  useEffect(() => {
+    if (threadDetails && threadDetails.title !== animatedTitle) {
+      let newTitle = threadDetails.title;
+      let currentTitle = animatedTitle;
+      let newChars = '';
+      let i = 0;
+      const animate = setInterval(() => {
+        if (i < newTitle.length) {
+          newChars += newTitle[i];
+          setAnimatedTitle(newChars);
+          i++;
+        } else {
+          clearInterval(animate);
+        }
+      }, 100); // Adjust speed of animation here
+      return () => clearInterval(animate);
+    }
+  }, [threadDetails, animatedTitle]);
+
+  // Update title based on messages
+  useEffect(() => {
+    if (messages.length > 0 && threadDetails && threadDetails.title === 'Nuevo Chat') {
+      const lastMessage = messages[messages.length - 1].text;
+      if (lastMessage.length > 10) {
+        const newTitle = lastMessage.substring(0, 10) + '...';
+        setThreadDetails({ ...threadDetails, title: newTitle });
+      }
+    }
+  }, [messages, threadDetails]);
   
   useEffect(() => {
     const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');
@@ -81,6 +117,56 @@ export default function ChatPage() {
     }
   }, [newMessage]);
 
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (items) {
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type.indexOf('image') !== -1) {
+            e.preventDefault();
+            const blob = items[i].getAsFile();
+            if (blob) {
+              const formData = new FormData();
+              formData.append('thread_id', threadId);
+              formData.append('files', blob, 'pasted-image.png');
+              uploadPastedImage(formData);
+            }
+          }
+        }
+      }
+    };
+
+    const textArea = textAreaRef.current;
+    if (textArea) {
+      textArea.addEventListener('paste', handlePaste);
+    }
+    return () => {
+      if (textArea) {
+        textArea.removeEventListener('paste', handlePaste);
+      }
+    };
+  }, [threadId]);
+
+  const uploadPastedImage = async (formData: FormData) => {
+    if (isUploadingFile) return;
+    setIsUploadingFile(true);
+    try {
+      await apiClient.post('/api/upload-chat-file', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      toast.success('Imagen pegada subida con éxito al contexto del chat.');
+      const uploadMessage: Message = { text: 'Imagen pegada subida al contexto del chat.', sender: 'user' };
+      setMessages((prev) => [...prev, uploadMessage]);
+    } catch (error) {
+      console.error('Error uploading pasted image:', error);
+      toast.error('Error al subir imagen pegada. Inténtalo de nuevo.');
+    } finally {
+      setIsUploadingFile(false);
+    }
+  };
+
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!newMessage.trim() || !user || isResponding) return;
@@ -89,20 +175,45 @@ export default function ChatPage() {
     const messageToSend = newMessage;
     setNewMessage('');
     setIsResponding(true);
+    // Guardar el estado actual de los modos para mantener el indicador visual correcto
+    const currentComprehensiveAnalysisActive = isComprehensiveAnalysisActive;
     try {
+      const mode = isKnowledgeAnalysisActive
+        ? 'knowledgeAnalysis'
+        : isWebSearchActive
+        ? 'webSearch'
+        : isComprehensiveAnalysisActive
+        ? 'comprehensiveAnalysis'
+        : '';
+      // Configurar un timeout extendido para tareas largas como análisis comprensivo
+      const timeout = isComprehensiveAnalysisActive ? 240000 : 60000; // 4 minutos para análisis comprensivo, 1 minuto para otros
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+      
       const response = await apiClient.post('/api/chat', {
         thread_id: threadId,
         account_id: user.id,
         user_message: messageToSend,
-      });
+        mode: mode,
+      }, { signal: controller.signal });
+      
+      clearTimeout(timeoutId);
       const aiMessage: Message = { text: response.data.response_text, sender: 'ai' };
       setMessages((prev) => [...prev, aiMessage]);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending message:', error);
-      const errorMessage: Message = { text: 'Lo siento, ocurrió un error al procesar tu mensaje.', sender: 'ai' };
+      let errorText = 'Lo siento, ocurrió un error al procesar tu mensaje.';
+      if (error && error.name === 'AbortError') {
+        errorText = 'La solicitud ha tardado demasiado en completarse. Por favor, intenta de nuevo o reduce el alcance de la consulta.';
+      }
+      const errorMessage: Message = { text: errorText, sender: 'ai' };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
-        setIsResponding(false);
+      setIsResponding(false);
+      // No restaurar el estado del modo de análisis comprensivo automáticamente, mantenerlo para la próxima interacción si es necesario
+      if (currentComprehensiveAnalysisActive) {
+        setIsComprehensiveAnalysisActive(false);
+      }
     }
   };
   
@@ -111,6 +222,51 @@ export default function ChatPage() {
       e.preventDefault();
       handleSendMessage();
     }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0 || isUploadingFile) return;
+    setIsUploadingFile(true);
+    const formData = new FormData();
+    formData.append('thread_id', threadId);
+    for (let i = 0; i < e.target.files.length; i++) {
+      formData.append('files', e.target.files[i]);
+    }
+    try {
+      await apiClient.post('/api/upload-chat-file', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      toast.success('Archivo(s) subido(s) con éxito al contexto del chat.');
+      // Optionally, add a message to the chat indicating a file was uploaded
+      const uploadMessage: Message = { text: 'Archivo(s) subido(s) al contexto del chat.', sender: 'user' };
+      setMessages((prev) => [...prev, uploadMessage]);
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      toast.error('Error al subir archivo(s). Inténtalo de nuevo.');
+    } finally {
+      setIsUploadingFile(false);
+      e.target.value = ''; // Reset file input
+    }
+  };
+
+  const toggleKnowledgeAnalysis = () => {
+    setIsKnowledgeAnalysisActive(!isKnowledgeAnalysisActive);
+    if (isWebSearchActive) setIsWebSearchActive(false);
+    if (isComprehensiveAnalysisActive) setIsComprehensiveAnalysisActive(false);
+  };
+
+  const toggleWebSearch = () => {
+    setIsWebSearchActive(!isWebSearchActive);
+    if (isKnowledgeAnalysisActive) setIsKnowledgeAnalysisActive(false);
+    if (isComprehensiveAnalysisActive) setIsComprehensiveAnalysisActive(false);
+  };
+
+  const toggleComprehensiveAnalysis = () => {
+    setIsComprehensiveAnalysisActive(!isComprehensiveAnalysisActive);
+    if (isKnowledgeAnalysisActive) setIsKnowledgeAnalysisActive(false);
+    if (isWebSearchActive) setIsWebSearchActive(false);
   };
 
   const handleCopyMessage = (text: string) => {
@@ -184,22 +340,28 @@ export default function ChatPage() {
                 
                 {/* VISTA PARA EL MENSAJE DEL USUARIO */}
                 {msg.sender === 'user' && (
-                  <div className="flex items-start gap-4 justify-end">
-                    <div className="rounded-lg p-3 max-w-3xl bg-primary text-primary-foreground">
-                      <p className="text-base whitespace-pre-wrap">{msg.text}</p>
+                  <div className="flex flex-col items-center">
+                    <div className="w-full max-w-4xl mx-auto">
+                      <div className="flex items-start gap-4 justify-end">
+                        <div className="rounded-lg p-3 bg-secondary text-secondary-foreground max-w-[70%]">
+                          <div className="text-base whitespace-pre-wrap">
+                            <MarkdownRenderer content={msg.text} />
+                          </div>
+                        </div>
+                        <Avatar className="h-8 w-8">
+                          <AvatarFallback><User className="h-5 w-5"/></AvatarFallback>
+                        </Avatar>
+                      </div>
                     </div>
-                    <Avatar className="h-8 w-8">
-                      <AvatarFallback><User className="h-5 w-5"/></AvatarFallback>
-                    </Avatar>
                   </div>
                 )}
 
                 {/* VISTA PARA EL MENSAJE DE LA IA */}
                 {msg.sender === 'ai' && (
                   <div className="flex flex-col items-center">
-                    <div className="w-full max-w-3xl mx-auto">
+                    <div className="w-full max-w-4xl mx-auto">
                       <div className="flex items-start gap-4">
-                        <Avatar className="h-8 w-8 border">
+                        <Avatar className="h-12 w-12 border">
                           <AvatarImage src="/logo-simple.png" alt="Kognito" />
                           <AvatarFallback>K</AvatarFallback>
                         </Avatar>
@@ -228,70 +390,126 @@ export default function ChatPage() {
               </motion.div>
             ))}
             {isResponding && 
-              <div className="flex justify-center w-full">
-                <div className="w-full max-w-3xl mx-auto">
-                  <div className="flex items-start gap-4">
-                    <Avatar className="h-8 w-8 border">
-                      <AvatarImage src="/logo-simple.png" alt="Kognito" />
-                      <AvatarFallback>K</AvatarFallback>
-                    </Avatar>
-                    <div className="rounded-lg p-3 bg-secondary flex justify-center items-center">
+              <>
+                {(isComprehensiveAnalysisActive || isKnowledgeAnalysisActive) ? (
+                  <div className="flex justify-center w-full py-4">
+                    <div className="flex flex-col items-center">
                       <motion.div
-                        className="flex space-x-1"
-                        animate={{
-                          opacity: [1, 0.5, 1],
-                        }}
-                        transition={{
-                          duration: 1.5,
-                          repeat: Infinity,
-                          ease: "easeInOut",
-                        }}
-                      >
-                        <motion.div
-                          className="h-2 w-6 bg-gray-600 rounded-full"
-                          style={{ borderRadius: '10px' }}
-                        />
-                        <motion.div
-                          className="h-2 w-6 bg-gray-600 rounded-full"
-                          style={{ borderRadius: '10px' }}
-                          animate={{ y: [0, -2, 0] }}
-                          transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut", delay: 0.3 }}
-                        />
-                        <motion.div
-                          className="h-2 w-6 bg-gray-600 rounded-full"
-                          style={{ borderRadius: '10px' }}
-                          animate={{ y: [0, -2, 0] }}
-                          transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut", delay: 0.6 }}
-                        />
-                      </motion.div>
+                        className="h-12 w-12 border-4 border-t-primary border-b-primary border-l-transparent border-r-transparent rounded-full"
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      />
+                      <span className="mt-2 text-sm text-muted-foreground">
+                        {isComprehensiveAnalysisActive ? "Buscando y analizando..." : "Analizando conocimientos..."}
+                      </span>
                     </div>
                   </div>
-                </div>
-              </div>
+                ) : (
+                  <div className="flex justify-center w-full">
+                    <div className="w-full max-w-3xl mx-auto">
+                      <div className="flex items-start gap-4">
+                        <Avatar className="h-8 w-8 border">
+                          <AvatarImage src="/logo-simple.png" alt="Kognito" />
+                          <AvatarFallback>K</AvatarFallback>
+                        </Avatar>
+                        <div className="rounded-lg p-3 bg-secondary flex justify-center items-center">
+                          <motion.div
+                            className="flex space-x-1"
+                            animate={{
+                              opacity: [1, 0.5, 1],
+                            }}
+                            transition={{
+                              duration: 1.5,
+                              repeat: Infinity,
+                              ease: "easeInOut",
+                            }}
+                          >
+                            <motion.div
+                              className="h-2 w-6 bg-gray-600 rounded-full"
+                              style={{ borderRadius: '10px' }}
+                            />
+                            <motion.div
+                              className="h-2 w-6 bg-gray-600 rounded-full"
+                              style={{ borderRadius: '10px' }}
+                              animate={{ y: [0, -2, 0] }}
+                              transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut", delay: 0.3 }}
+                            />
+                            <motion.div
+                              className="h-2 w-6 bg-gray-600 rounded-full"
+                              style={{ borderRadius: '10px' }}
+                              animate={{ y: [0, -2, 0] }}
+                              transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut", delay: 0.6 }}
+                            />
+                          </motion.div>
+                          <span className="ml-2 text-sm text-muted-foreground">
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
             }
           </div>
         </ScrollArea>
       </div>
 
-      <footer className="p-4 border-t shrink-0 bg-background/95 backdrop-blur-sm">
-        <form onSubmit={handleSendMessage} className="relative flex items-end gap-2">
-          <Textarea
-            ref={textAreaRef}
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Escribe un mensaje a Kognito... (Shift + Enter para nueva línea)"
-            autoComplete="off"
-            disabled={isResponding}
-            className="flex-grow resize-none overflow-y-auto pr-12 text-sm"
-            rows={1}
-            style={{ maxHeight: '200px' }}
-          />
+      <footer className="p-4 w-full flex justify-center shrink-0 bg-transparent">
+        <form onSubmit={handleSendMessage} className="relative w-full max-w-3xl">
+          <div className="rounded-2xl bg-card p-4 shadow-lg">
+            <Textarea
+              ref={textAreaRef}
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="¿Cómo puedo ayudarte hoy?"
+              autoComplete="off"
+              disabled={isResponding}
+              className="w-full resize-none bg-transparent border-0 focus:ring-0 p-0 text-base"
+              rows={1}
+            />
+            <div className="mt-3 flex items-center gap-4">
+              <div 
+                onClick={toggleKnowledgeAnalysis}
+                className={`cursor-pointer flex items-center gap-1.5 text-sm ${isKnowledgeAnalysisActive ? 'text-primary' : 'text-muted-foreground'}`}
+              >
+                <BookMarked className="h-4 w-4" />
+                Análisis de Conocimientos
+              </div>
+              <div 
+                onClick={toggleWebSearch}
+                className={`cursor-pointer flex items-center gap-1.5 text-sm ${isWebSearchActive ? 'text-primary' : 'text-muted-foreground'}`}
+              >
+                <Search className="h-4 w-4" />
+                Búsqueda Web
+              </div>
+              <div
+                onClick={toggleComprehensiveAnalysis}
+                className={`cursor-pointer flex items-center gap-1.5 text-sm ${isComprehensiveAnalysisActive ? 'text-primary' : 'text-muted-foreground'}`}
+              >
+                <BrainCircuit className="h-4 w-4" />
+                Busqueda y Analisis
+              </div>
+              <div className="cursor-pointer flex items-center gap-1.5 text-sm text-muted-foreground">
+                <Upload className="h-4 w-4" />
+                <label htmlFor="file-upload" className="cursor-pointer">Subir Archivo</label>
+                <input
+                  id="file-upload"
+                  type="file"
+                  multiple
+                  accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.gif"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                  disabled={isUploadingFile}
+                />
+              </div>
+            </div>
+          </div>
           <Button 
             type="submit" 
             size="icon" 
             disabled={isResponding || !newMessage.trim()}
-            className="absolute bottom-2 right-2"
+            className="absolute bottom-4 right-4"
           >
             <Send className="h-4 w-4" />
           </Button>

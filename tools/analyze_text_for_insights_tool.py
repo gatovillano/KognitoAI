@@ -1,109 +1,99 @@
+# tools/analyze_text_for_insights_tool.py
+
 import logging
-from typing import Any, Optional, Type
+import asyncio
+from typing import Any, Type
+
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
-from utils.analyze_text_for_insights import analyze_text_for_insights, analyze_text_for_insights_sync
+
+# Importamos la INSTANCIA del analizador, no la función.
+# Y también el modelo de datos para type hinting.
+from utils.advanced_text_analyzer import text_analyzer, SingleTextAnalysis
 
 logger = logging.getLogger(__name__)
 
+# El esquema de entrada sigue siendo el mismo.
 class AnalyzeTextInput(BaseModel):
-    """
-    Define el esquema de entrada para la herramienta de análisis de texto.
-    """
+    """Define el esquema de entrada para la herramienta de análisis de texto."""
     text: str = Field(
         ...,
-        description="El texto a analizar para extraer temas clave, entidades, sentimiento y resumen."
+        description="El texto que se va a analizar en profundidad."
     )
 
 class AnalyzeTextForInsightsTool(BaseTool):
     """
-    Herramienta de LangChain que analiza texto para extraer insights profundos como temas clave, entidades, sentimiento y un resumen ejecutivo.
+    Herramienta de LangChain que realiza un análisis profundo de un texto para extraer
+    resumen, temas, sentimiento, tono y posibles brechas de conocimiento.
     """
     name: str = "analyze_text_for_insights"
     description: str = (
-        "Útil para analizar un texto y extraer temas clave, entidades nombradas, análisis de sentimiento, un resumen ejecutivo y conexiones semánticas. "
-        "Esta herramienta procesa el texto proporcionado y devuelve un análisis estructurado."
+        "Útil para un análisis exhaustivo de un fragmento de texto. Devuelve un resumen ejecutivo, "
+        "los temas clave, el sentimiento general, el tono del autor y preguntas que invitan a la reflexión "
+        "sobre las brechas de conocimiento del texto."
     )
     args_schema: Type[BaseModel] = AnalyzeTextInput
-    return_direct: bool = False  # El agente debe procesar la respuesta.
+    # La respuesta es rica y estructurada, mejor que el agente la procese.
+    return_direct: bool = False
 
-    def __init__(self, **kwargs):
-        """Inicializa la herramienta."""
-        super().__init__(**kwargs)
-        logger.info("Inicializando AnalyzeTextForInsightsTool")
+    # El __init__ ya no es necesario, BaseTool se encarga.
 
     async def _arun(self, text: str, **kwargs: Any) -> str:
         """
-        Ejecuta la lógica de la herramienta de forma asíncrona.
+        Ejecuta la lógica de la herramienta de forma asíncrona, delegando en el analizador.
         """
-        logger.info(f"Ejecutando análisis de texto")
+        logger.info(f"Delegando análisis de texto al AdvancedTextAnalyzer...")
         try:
-            result = await analyze_text_for_insights(text)
+            # La llamada es ahora a un método de la instancia del analizador.
+            analysis_result = await text_analyzer.analyze_single_text(text)
             logger.info("Análisis de texto completado exitosamente.")
-            return self._format_result(result)
+            # El formateo ahora usa el nuevo objeto de resultado.
+            return self._format_result(analysis_result)
         except Exception as e:
             logger.error(f"Error durante el análisis de texto: {e}", exc_info=True)
-            return f"Ocurrió un error durante el análisis de texto: {str(e)}"
+            return f"Ocurrió un error al intentar analizar el texto: {str(e)}"
 
     def _run(self, text: str, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma síncrona.
+        Este es el patrón recomendado por LangChain para envolver una función async.
         """
-        logger.info(f"Ejecutando análisis de texto sincrónico")
+        logger.info("Ejecutando análisis de texto en modo síncrono...")
         try:
-            task = analyze_text_for_insights_sync(text)
-            import asyncio
-            import inspect
-            if inspect.iscoroutine(task):
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        result = asyncio.run_coroutine_threadsafe(task, loop).result()
-                    else:
-                        result = loop.run_until_complete(task)
-                except RuntimeError:
-                    # Fallback if no event loop is running and can't create one
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    result = loop.run_until_complete(task)
-                    loop.close()
-            elif isinstance(task, asyncio.tasks.Task) or isinstance(task, asyncio.Future):
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        result = loop.run_until_complete(task)
-                    else:
-                        result = loop.run_until_complete(task)
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    result = loop.run_until_complete(task)
-                    loop.close()
-            else:
-                result = task
-            logger.info("Análisis de texto sincrónico completado exitosamente.")
-            return self._format_result(result)
+            # asyncio.run() es la forma más segura de ejecutar una corutina desde un contexto síncrono.
+            # Nota: Esto solo funciona si no hay un loop de eventos ya corriendo en el hilo actual.
+            # LangChain a menudo maneja esto internamente.
+            result = asyncio.run(self._arun(text=text, **kwargs))
+            return result
+        except RuntimeError as e:
+             # Si ya hay un loop corriendo (ej. en un entorno Jupyter), este error puede ocurrir.
+             logger.warning(f"RuntimeError en _run, podría indicar un loop de eventos activo: {e}. "
+                            "El uso asíncrono (_arun) es preferido.")
+             return "Error: No se pudo ejecutar el análisis en modo síncrono debido a un conflicto de loop de eventos. Intente en un contexto asíncrono."
         except Exception as e:
-            logger.error(f"Error durante el análisis de texto sincrónico: {e}", exc_info=True)
-            return f"Ocurrió un error durante el análisis de texto sincrónico: {str(e)}"
+            logger.error(f"Error durante la ejecución síncrona del análisis de texto: {e}", exc_info=True)
+            return f"Ocurrió un error durante el análisis de texto: {str(e)}"
 
-    def _format_result(self, result: dict) -> str:
-        """
-        Formatea el resultado del análisis en una cadena legible para el usuario.
-        """
-        temas = ", ".join(result.get("temas_clave", []))
-        entidades = ", ".join([f"{e['texto']} ({e['tipo']})" for e in result.get("entidades", [])])
-        sentimiento = f"Polaridad: {result.get('sentimiento', {}).get('polarity', 0.0):.2f}, Subjetividad: {result.get('sentimiento', {}).get('subjectivity', 0.0):.2f}"
-        resumen = result.get("resumen_ejecutivo", "")
-        conexiones = "\n- ".join(result.get("conexiones_semanticas", []))
 
+    def _format_result(self, result: SingleTextAnalysis) -> str:
+        """
+        Formatea el resultado del análisis (un objeto SingleTextAnalysis) en una cadena legible.
+        """
+        # Usamos .join para manejar listas vacías de forma elegante.
+        themes = ", ".join(result.key_themes) if result.key_themes else "No se identificaron temas clave."
+        
+        # Construimos las preguntas con viñetas para mayor claridad.
+        questions_list = [f"- {q}" for q in result.knowledge_gaps]
+        questions = "\n".join(questions_list) if questions_list else "No se identificaron brechas de conocimiento."
+
+        # Ensamblamos el informe final.
         formatted_result = (
-            f"Análisis de Texto:\n"
-            f"Temas Clave: {temas}\n"
-            f"Entidades: {entidades}\n"
-            f"Sentimiento: {sentimiento}\n"
-            f"Resumen Ejecutivo: {resumen}\n"
+            f"**Informe de Análisis de Texto**\n\n"
+            f"**Resumen Ejecutivo:**\n{result.executive_summary}\n\n"
+            f"**Análisis General:**\n"
+            f"- **Temas Clave:** {themes}\n"
+            f"- **Sentimiento Detectado:** {result.sentiment_analysis}\n"
+            f"- **Tono del Autor:** {result.authorial_tone}\n\n"
+            f"**Preguntas para Explorar (Brechas de Conocimiento):**\n{questions}"
         )
-        if conexiones:
-            formatted_result += f"Conexiones Semánticas:\n- {conexiones}\n"
         return formatted_result

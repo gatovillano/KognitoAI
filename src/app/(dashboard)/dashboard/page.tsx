@@ -9,7 +9,7 @@ import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { InsightDetailDialog } from '@/components/InsightDetailDialog'; // Importamos el nuevo diálogo
-import { HelpCircle, Bot, Library, FileText, FolderKanban, Notebook, Calendar, Search, ScanSearch } from 'lucide-react';
+import { HelpCircle, Bot, Library, FileText, FolderKanban, Notebook, Calendar, Search, ScanSearch, BrainCircuit } from 'lucide-react';
 
 // Tipos para los datos que esperamos de la API
 interface DashboardData {
@@ -99,14 +99,29 @@ export default function DashboardPage() {
               <CardDescription>Tópicos más frecuentes en tu base de conocimiento. Nota: Actualmente no agrupados por similitud semántica.</CardDescription>
             </CardHeader>
             <CardContent className="pt-6">
-              <div className="flex justify-end mb-4">
+              <div className="flex justify-end mb-4 space-x-2">
+                <input
+                  type="number"
+                  min="1"
+                  defaultValue="20"
+                  className="px-2 py-1 w-20 border border-gray-300 rounded-md text-sm"
+                  id="maxTermsInput"
+                  placeholder="Max términos"
+                />
                 <button 
                   className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors flex items-center gap-2"
                   onClick={async () => {
                     setIsLoading(true);
                     try {
-                      // Trigger semantic analysis process
-                      const triggerResponse = await apiClient.post('/api/update-semantic-topics');
+                      // Get the max terms value from input
+                      const maxTermsInput = document.getElementById('maxTermsInput') as HTMLInputElement;
+                      const maxTerms = maxTermsInput.value ? parseInt(maxTermsInput.value) : undefined;
+                      // Trigger semantic analysis process with optional max_terms parameter
+                      const formData = new FormData();
+                      if (maxTerms && maxTerms > 0) {
+                        formData.append('max_terms', maxTerms.toString());
+                      }
+                      const triggerResponse = await apiClient.post('/api/update-semantic-topics', formData);
                       const taskId = triggerResponse.data.task_id;
                       toast.info('Análisis semántico iniciado. Esto puede tomar unos momentos...');
                       
@@ -178,7 +193,11 @@ export default function DashboardPage() {
                   </div>
                    <div>
                       <p className="font-semibold flex items-center gap-2"><ScanSearch className="h-4 w-4" /> Análisis de Conocimiento</p>
-                      <p className="text-muted-foreground pl-6">Usa los botones en "Gestión de Documentos" para iniciar un análisis profundo de un archivo o una colección completa. Los resultados se guardarán y podrás consultarlos aquí.</p>
+                      <p className="text-muted-foreground pl-6">Activa esta herramienta en el chat para analizar profundamente tu base de conocimientos personal y obtener respuestas basadas en tus documentos y notas.</p>
+                  </div>
+                   <div>
+                      <p className="font-semibold flex items-center gap-2"><BrainCircuit className="h-4 w-4" /> Búsqueda y Análisis</p>
+                      <p className="text-muted-foreground pl-6">Utiliza esta herramienta en el chat para realizar investigaciones exhaustivas que combinan búsquedas en la web con tu base de conocimientos personal, proporcionando un análisis completo y detallado.</p>
                   </div>
               </CardContent>
           </Card>

@@ -16,6 +16,13 @@ interface AnalysisResultDialogProps {
 export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange }: AnalysisResultDialogProps) {
   if (!analysis) return null;
 
+  // Map backend field names to frontend expected field names
+  const mappedAnalysis = {
+    resumen_ejecutivo: analysis.executive_summary || 'No summary available',
+    temas_clave_avanzados: analysis.key_themes || [],
+    preguntas_para_explorar: analysis.knowledge_gaps || []
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
@@ -29,18 +36,18 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
             <div className="space-y-6">
                 <div>
                     <h3 className="font-semibold mb-2">Resumen Ejecutivo por IA</h3>
-                    <p className="text-sm text-muted-foreground p-3 bg-muted rounded-md whitespace-pre-wrap">{analysis.resumen_ejecutivo}</p>
+                    <p className="text-sm text-muted-foreground p-3 bg-muted rounded-md whitespace-pre-wrap">{mappedAnalysis.resumen_ejecutivo}</p>
                 </div>
                 <div>
                     <h3 className="font-semibold mb-2">Temas Clave Avanzados</h3>
                     <div className="flex flex-wrap gap-2">
-                        {analysis.temas_clave_avanzados?.map((topic: string) => <Badge key={topic}>{topic}</Badge>)}
+                        {mappedAnalysis.temas_clave_avanzados?.map((topic: string) => <Badge key={topic}>{topic}</Badge>)}
                     </div>
                 </div>
                 <div>
                     <h3 className="font-semibold mb-2">Preguntas para Explorar</h3>
                     <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                       {analysis.preguntas_para_explorar?.map((question: string, i: number) => <li key={i}>{question}</li>)}
+                       {mappedAnalysis.preguntas_para_explorar?.map((question: string, i: number) => <li key={i}>{question}</li>)}
                     </ul>
                 </div>
             </div>

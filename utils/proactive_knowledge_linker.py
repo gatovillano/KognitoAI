@@ -330,9 +330,9 @@ async def run_batch_analysis_job(
     topic_keywords: Optional[List[str]] = None
 ):
     """
-    Función principal para el trabajo de análisis basado en CLUSTERING o ANÁLISIS DE PARES.
+    Función principal para el trabajo de análisis basado en CLUSTERING.
     """
-    logger.info(f"--- [ANALYSIS JOB] Iniciando trabajo de vinculación proactiva ---")
+    logger.info(f"--- [ANALYSIS JOB] Iniciando trabajo de vinculación proactiva con CLUSTERING JERÁRQUICO AGLOMERATIVO ---")
     
     async with DBSession(SessionLocal) as db:
         if account_id_filter:
@@ -349,88 +349,56 @@ async def run_batch_analysis_job(
             
             items_with_embeddings = [item for item in knowledge_pool if item.get('embedding') is not None and len(item['embedding']) > 0]
             
-            # --- LÓGICA DE DECISIÓN: ANÁLISIS DE PARES VS. CLUSTERING ---
-            MIN_ITEMS_FOR_CLUSTERING = 20 # Umbral para decidir entre clustering y análisis de pares
+            # El clustering aglomerativo necesita al menos 2 puntos para formar un cluster significativo
+            if len(items_with_embeddings) < 2:
+                logger.info(f"No hay suficiente conocimiento ({len(items_with_embeddings)} items) para clustering aglomerativo en la cuenta {account_id}. Saltando.")
+                continue
             
-            if len(items_with_embeddings) < MIN_ITEMS_FOR_CLUSTERING:
-                logger.info(f"Pocos ítems ({len(items_with_embeddings)}) para clustering. Realizando análisis de pares para la cuenta {account_id}.")
-                # Realizar análisis de pares para cada ítem contra el resto
-                for i, item_a in enumerate(items_with_embeddings):
-                    for j, item_b in enumerate(items_with_embeddings):
-                        if i < j: # Evitar duplicados y auto-comparaciones
-                            sim = 1 - cosine(np.array(item_a['embedding']), np.array(item_b['embedding']))
-                            if sim > 0.7: # Umbral de similitud para considerar análisis LLM
-                                logger.info(f"Analizando relación entre '{item_a.get('title')}' y '{item_b.get('title')}' (Similitud: {sim:.2f}).")
-                                relationship_insight = await analyze_relationship_with_llm(item_a, item_b)
-                                if relationship_insight and relationship_insight.get("confidence_score", 0) > 0.7:
-                                    insight_data = {
-                                        'account_id': account_id,
-                                        'type': relationship_insight.get('relationship_type', 'pair_insight'),
-                                        'insight_message': relationship_insight.get('explanation'),
-                                        'confidence_score': relationship_insight.get('confidence_score'),
-                                        'action_suggestion': relationship_insight.get('action_suggestion'),
-                                        'related_items': [
-                                            {k: (v.isoformat() if isinstance(v, datetime.datetime) else v) for k, v in item_a.items() if k != 'embedding'},
-                                            {k: (v.isoformat() if isinstance(v, datetime.datetime) else v) for k, v in item_b.items() if k != 'embedding'}
-                                        ],
-                                        'metadata': {
-                                            "item_a_title": item_a.get('title'),
-                                            "item_b_title": item_b.get('title')
-                                        }
-                                    }
-                                    await store_proactive_insight(insight_data)
-            else:
-                logger.info(f"Suficientes ítems ({len(items_with_embeddings)}) para clustering. Realizando clustering aglomerativo para la cuenta {account_id}.")
-                # El clustering aglomerativo necesita al menos 2 puntos para formar un cluster significativo
-                if len(items_with_embeddings) < 2:
-                    logger.info(f"No hay suficiente conocimiento ({len(items_with_embeddings)} items) para clustering aglomerativo en la cuenta {account_id}. Saltando.")
-                    continue
-                
-                embeddings = np.array([item['embedding'] for item in items_with_embeddings])
+            embeddings = np.array([item['embedding'] for item in items_with_embeddings])
 
-                # 2. Ejecutar Clustering Jerárquico Aglomerativo
-                logger.info(f"Ejecutando clustering Aglomerativo sobre {len(embeddings)} embeddings...")
+            # 2. Ejecutar Clustering Jerárquico Aglomerativo
+            logger.info(f"Ejecutando clustering Aglomerativo sobre {len(embeddings)} embeddings...")
+            
+            # Determinar n_clusters dinámicamente para baja cantidad de información y grupos amplios
+            # Aseguramos que n_clusters no sea mayor que el número de items - 1
+            # y que sea al menos 2 si hay suficientes items.
+            n_clusters_to_use = min(4, len(items_with_embeddings) - 1)
+            if n_clusters_to_use < 2:
+                logger.info(f"No hay suficientes items para formar al menos 2 clusters con AgglomerativeClustering. Saltando.")
+                continue
+
+            clusterer = AgglomerativeClustering(n_clusters=n_clusters_to_use, metric='euclidean', linkage='ward')
+            cluster_labels = clusterer.fit_predict(embeddings)
+            
+            num_clusters = len(set(cluster_labels)) # AgglomerativeClustering no produce -1 para ruido por defecto
+            
+            logger.info(f"Encontrados {num_clusters} cúmulos temáticos con AgglomerativeClustering.")
+
+            # 3. Analizar cada cúmulo
+            unique_labels = set(cluster_labels)
+            for label in unique_labels:
+                # AgglomerativeClustering no produce la etiqueta -1 para ruido con n_clusters definido
+                cluster_indices = np.where(cluster_labels == label)[0]
+                cluster_items = [items_with_embeddings[i] for i in cluster_indices]
                 
-                # Determinar n_clusters dinámicamente para baja cantidad de información y grupos amplios
-                # Aseguramos que n_clusters no sea mayor que el número de items - 1
-                # y que sea al menos 2 si hay suficientes items.
-                n_clusters_to_use = min(4, len(items_with_embeddings) - 1)
-                if n_clusters_to_use < 2:
-                    logger.info(f"No hay suficientes items para formar al menos 2 clusters con AgglomerativeClustering. Saltando.")
+                # Aseguramos que el cluster tenga al menos 2 ítems para un insight significativo
+                if len(cluster_items) < 2:
+                    logger.info(f"Cúmulo #{label} tiene solo {len(cluster_items)} item(s). Ignorando para insight.")
                     continue
 
-                clusterer = AgglomerativeClustering(n_clusters=n_clusters_to_use, metric='euclidean', linkage='ward')
-                cluster_labels = clusterer.fit_predict(embeddings)
+                logger.info(f"Analizando Cúmulo #{label} con {len(cluster_items)} items.")
                 
-                num_clusters = len(set(cluster_labels)) # AgglomerativeClustering no produce -1 para ruido por defecto
+                # 4. Sintetizar Insight con LLM
+                insight = await analyze_cluster_with_llm(cluster_items)
                 
-                logger.info(f"Encontrados {num_clusters} cúmulos temáticos con AgglomerativeClustering.")
-
-                # 3. Analizar cada cúmulo
-                unique_labels = set(cluster_labels)
-                for label in unique_labels:
-                    # AgglomerativeClustering no produce la etiqueta -1 para ruido con n_clusters definido
-                    cluster_indices = np.where(cluster_labels == label)[0]
-                    cluster_items = [items_with_embeddings[i] for i in cluster_indices]
-                    
-                    # Aseguramos que el cluster tenga al menos 2 ítems para un insight significativo
-                    if len(cluster_items) < 2:
-                        logger.info(f"Cúmulo #{label} tiene solo {len(cluster_items)} item(s). Ignorando para insight.")
-                        continue
-
-                    logger.info(f"Analizando Cúmulo #{label} con {len(cluster_items)} items.")
-                    
-                    # 4. Sintetizar Insight con LLM
-                    insight = await analyze_cluster_with_llm(cluster_items)
-                    
-                    if insight and insight.get("confidence_score", 0) > 0.6: # Umbral de confianza
-                        insight_data = {
-                            'account_id': account_id,
-                            'type': 'cluster_insight',
-                            'related_items': cluster_items,
-                            **insight # Desempaqueta todo el diccionario del insight
-                        }
-                        await store_proactive_insight(insight_data)
+                if insight and insight.get("confidence_score", 0) > 0.6: # Umbral de confianza
+                    insight_data = {
+                        'account_id': account_id,
+                        'type': 'cluster_insight',
+                        'related_items': cluster_items,
+                        **insight # Desempaqueta todo el diccionario del insight
+                    }
+                    await store_proactive_insight(insight_data)
 
     logger.info("--- [ANALYSIS JOB] Trabajo de vinculación de conocimiento completado. ---")
 

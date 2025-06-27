@@ -2,13 +2,36 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { Button } from '@/components/ui/button';
 import { Check, Copy } from 'lucide-react';
 import { toast } from 'sonner';
+// Import Prism for syntax highlighting
+import Prism from 'prismjs';
+import 'prismjs/themes/prism-tomorrow.css'; // Use a theme suitable for dark mode
+import 'prismjs/components/prism-python'; // Include Python language support
+import 'prismjs/components/prism-javascript';
+import 'prismjs/components/prism-typescript';
+import 'prismjs/components/prism-jsx';
+import 'prismjs/components/prism-tsx';
+import 'prismjs/components/prism-json';
+import 'prismjs/components/prism-bash';
+import 'prismjs/components/prism-sql';
+import 'prismjs/components/prism-java';
+import 'prismjs/components/prism-c';
+import 'prismjs/components/prism-cpp';
+import 'prismjs/components/prism-csharp';
+import 'prismjs/components/prism-go';
+import 'prismjs/components/prism-kotlin';
+import 'prismjs/components/prism-markdown';
+import 'prismjs/components/prism-php';
+import 'prismjs/components/prism-ruby';
+import 'prismjs/components/prism-rust';
+import 'prismjs/components/prism-swift';
+import 'prismjs/components/prism-yaml';
 
 interface MarkdownRendererProps {
   content: string;
@@ -24,6 +47,16 @@ interface CustomCodeProps extends React.HTMLAttributes<HTMLElement> {
 
 export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   const [copiedStates, setCopiedStates] = useState<Record<number, boolean>>({});
+
+  useEffect(() => {
+    // Ensure Prism highlights code on content change
+    try {
+      Prism.highlightAll();
+    } catch (error) {
+      console.error("Error highlighting syntax in content:", error);
+      console.error("Problematic content snippet:", content.length > 200 ? content.substring(0, 200) + "..." : content);
+    }
+  }, [content]);
 
   const handleCopy = (text: string, index: number) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -55,10 +88,11 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
 
             if (!inline && match) {
               const isCopied = copiedStates[codeBlockIndex];
+              const language = match[1];
               return (
                 <div className="bg-zinc-900 rounded-md border">
                   <div className="flex items-center justify-between px-4 py-1.5 border-b">
-                    <span className="text-xs text-muted-foreground">{match[1]}</span>
+                    <span className="text-xs text-muted-foreground">{language}</span>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -69,7 +103,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
                     </Button>
                   </div>
                   <pre className="p-4 text-sm overflow-x-auto">
-                    <code {...rest}>{children}</code>
+                    <code {...rest} className={`language-${language}`}>{children}</code>
                   </pre>
                 </div>
               );

@@ -34,15 +34,16 @@ from utils.embeddings import initialize_embeddings
 logger = logging.getLogger(__name__)
 
 
-async def add_note(account_id: str, title: Optional[str], content: str, category: Optional[str] = None) -> Dict[str, Any]:
+async def add_note(account_id: str, title: Optional[str], content: str, category: Optional[str] = None, team_id: Optional[str] = None) -> Dict[str, Any]:
     """
-    Añade una nueva nota a la base de datos para una cuenta de usuario específica. Añade los embedding de la nota
+    Añade una nueva nota a la base de datos para una cuenta de usuario específica o un equipo. Añade los embedding de la nota
 
     Args:
         account_id: El ID universal (UUID en formato string) de la cuenta del usuario.
         content: El contenido principal de la nota.
         title: Un título opcional para la nota.
         category: Una categoría opcional para la nota.
+        team_id: El ID del equipo (UUID en formato string) al que se asocia la nota, si aplica.
 
     Returns:
         Un diccionario con los datos de la nota.
@@ -64,6 +65,7 @@ async def add_note(account_id: str, title: Optional[str], content: str, category
 
         new_note = Nota(
             account_id=uuid.UUID(account_id),
+            team_id=uuid.UUID(team_id) if team_id else None,
             title=title,
             content=content,
             category=effective_category, # Usamos el valor efectivo
@@ -75,13 +77,14 @@ async def add_note(account_id: str, title: Optional[str], content: str, category
         logger.info(f"Nota '{title}' añadida exitosamente con ID {new_note.id}.")
         
         note_dict = {
-        "id": new_note.id,
-        "title": new_note.title,
-        "content": new_note.content,
-        "category": new_note.category,
-        "created_at": new_note.created_at.isoformat(),
-        # No devolvemos el embedding, es muy grande
-    }
+            "id": new_note.id,
+            "title": new_note.title,
+            "content": new_note.content,
+            "category": new_note.category,
+            "created_at": new_note.created_at.isoformat(),
+            "team_id": str(new_note.team_id) if new_note.team_id else None,
+            # No devolvemos el embedding, es muy grande
+        }
         # Trigger the proactive knowledge linker in the background
         # Asegúrate de que proactive_knowledge_linker_trigger esté importado
         from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger
@@ -99,14 +102,15 @@ async def add_note(account_id: str, title: Optional[str], content: str, category
         return note_dict
 
 
-async def get_notes(account_id: str, category: Optional[str] = None, search_query: Optional[str] = None) -> str:
+async def get_notes(account_id: str, category: Optional[str] = None, search_query: Optional[str] = None, team_id: Optional[str] = None) -> str:
     """
-    Obtiene una lista de notas para una cuenta de usuario, con filtros opcionales.
+    Obtiene una lista de notas para una cuenta de usuario o un equipo, con filtros opcionales.
 
     Args:
         account_id: El ID universal (UUID en formato string) de la cuenta del usuario.
         category: Filtra las notas por una categoría específica.
         search_query: Busca un texto en el título o contenido de las notas.
+        team_id: El ID del equipo (UUID en formato string) para filtrar notas del equipo, si aplica.
 
     Returns:
         Una cadena de texto formateada con la lista de notas o un mensaje indicando que no se encontraron.
@@ -114,9 +118,14 @@ async def get_notes(account_id: str, category: Optional[str] = None, search_quer
     logger.info(f"Consultando notas para la cuenta {account_id} (Categoría: {category}, Búsqueda: {search_query}).")
     async with DBSession(SessionLocal) as db:
         # Construye la consulta base, ordenando por fecha de creación descendente.
-        stmt = select(Nota).where(Nota.account_id == uuid.UUID(account_id)).order_by(Nota.created_at.desc())
-        
-        filter_descriptions = []
+        stmt = select(Nota).where(Nota.account_id == uuid.UUID(account_id))
+        if team_id:
+            stmt = stmt.where(Nota.team_id == uuid.UUID(team_id))
+            filter_descriptions = [f"equipo ID {team_id}"]
+        else:
+            stmt = stmt.where(Nota.team_id.is_(None))
+            filter_descriptions = []
+        stmt = stmt.order_by(Nota.created_at.desc())
         if category:
             stmt = stmt.where(Nota.category.ilike(f"%{category}%"))
             filter_descriptions.append(f"categoría '{category}'")
@@ -142,9 +151,9 @@ async def get_notes(account_id: str, category: Optional[str] = None, search_quer
         return "\n".join(response_lines)
 
 
-async def update_note(account_id: str, note_id: int, new_title: Optional[str] = None, new_content: Optional[str] = None, new_category: Optional[str] = None) -> str:
+async def update_note(account_id: str, note_id: int, new_title: Optional[str] = None, new_content: Optional[str] = None, new_category: Optional[str] = None, team_id: Optional[str] = None) -> str:
     """
-    Actualiza una nota existente para una cuenta de usuario.     Regenera el embedding si el contenido cambia.
+    Actualiza una nota existente para una cuenta de usuario o equipo. Regenera el embedding si el contenido cambia.
 
     Args:
         account_id: El ID universal de la cuenta.
@@ -152,6 +161,7 @@ async def update_note(account_id: str, note_id: int, new_title: Optional[str] = 
         new_content: El nuevo contenido (opcional).
         new_title: El nuevo título (opcional).
         new_category: La nueva categoría (opcional).
+        team_id: El ID del equipo (UUID en formato string) para verificar la pertenencia, si aplica.
 
     Returns:
         Un mensaje de confirmación o de error.
@@ -159,6 +169,10 @@ async def update_note(account_id: str, note_id: int, new_title: Optional[str] = 
     logger.info(f"Intentando actualizar la nota {note_id} para la cuenta {account_id}.")
     async with DBSession(SessionLocal) as db:
         stmt = select(Nota).where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
+        if team_id:
+            stmt = stmt.where(Nota.team_id == uuid.UUID(team_id))
+        else:
+            stmt = stmt.where(Nota.team_id.is_(None))
         result = await db.execute(stmt)
         note_to_update = result.scalars().first()
 
@@ -192,21 +206,26 @@ async def update_note(account_id: str, note_id: int, new_title: Optional[str] = 
         return f"¡Nota con ID {note_id} actualizada correctamente!"
 
 
-async def delete_note(account_id: str, note_id: int) -> str:
+async def delete_note(account_id: str, note_id: int, team_id: Optional[str] = None) -> str:
     """
-    Elimina una nota existente de una cuenta de usuario.
+    Elimina una nota existente de una cuenta de usuario o equipo.
 
     Args:
         account_id: El ID universal de la cuenta.
         note_id: El ID de la nota a eliminar.
+        team_id: El ID del equipo (UUID en formato string) para verificar la pertenencia, si aplica.
 
     Returns:
         Un mensaje de confirmación o de error.
     """
     logger.info(f"Intentando eliminar la nota {note_id} para la cuenta {account_id}.")
     async with DBSession(SessionLocal) as db:
-        # Busca la nota asegurándose de que pertenezca a la cuenta correcta antes de eliminarla.
+        # Busca la nota asegurándose de que pertenezca a la cuenta correcta y al equipo (si aplica) antes de eliminarla.
         stmt = select(Nota).where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
+        if team_id:
+            stmt = stmt.where(Nota.team_id == uuid.UUID(team_id))
+        else:
+            stmt = stmt.where(Nota.team_id.is_(None))
         result = await db.execute(stmt)
         note_to_delete = result.scalars().first()
         
@@ -218,14 +237,19 @@ async def delete_note(account_id: str, note_id: int) -> str:
         logger.info(f"Nota {note_id} eliminada exitosamente para la cuenta {account_id}.")
         return f"¡Nota con ID {note_id} eliminada!"
 
-async def get_notes_as_dicts(account_id: str, search_query: Optional[str] = None) -> List[Dict[str, Any]]:
+async def get_notes_as_dicts(account_id: str, search_query: Optional[str] = None, team_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Recupera todas las notas de un usuario y las devuelve como una lista de diccionarios.
+    Recupera todas las notas de un usuario o equipo y las devuelve como una lista de diccionarios.
     Diseñada para ser usada por endpoints de API para interfaces web.
     """
     logger.info(f"Obteniendo notas como diccionarios para la cuenta {account_id} (Búsqueda: {search_query}).")
     async with DBSession(SessionLocal) as db:
-        stmt = select(Nota).where(Nota.account_id == uuid.UUID(account_id)).order_by(Nota.created_at.desc())
+        stmt = select(Nota).where(Nota.account_id == uuid.UUID(account_id))
+        if team_id:
+            stmt = stmt.where(Nota.team_id == uuid.UUID(team_id))
+        else:
+            stmt = stmt.where(Nota.team_id.is_(None))
+        stmt = stmt.order_by(Nota.created_at.desc())
         
         if search_query:
             stmt = stmt.where(Nota.title.ilike(f"%{search_query}%") | Nota.content.ilike(f"%{search_query}%"))
@@ -242,6 +266,7 @@ async def get_notes_as_dicts(account_id: str, search_query: Optional[str] = None
                 "category": note.category,
                 "created_at": note.created_at.isoformat(),
                 "updated_at": note.updated_at.isoformat(),
+                "team_id": str(note.team_id) if note.team_id else None,
             }
             for note in notes
         ]

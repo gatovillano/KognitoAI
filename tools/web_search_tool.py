@@ -59,7 +59,7 @@ async def search_and_summarize_web(query: str) -> str:
         return "Error: La funcionalidad de búsqueda web no está configurada en el servidor."
 
     brave_api_url = "https://api.search.brave.com/res/v1/web/search"
-    params = {"q": query, "count": 5, "safesearch": "moderate"}
+    params = {"q": query, "count": 10, "safesearch": "moderate"}
     headers = {
         "Accept": "application/json",
         "X-Subscription-Token": brave_api_key,

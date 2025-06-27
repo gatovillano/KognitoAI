@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime
 import pytz
 import dateparser
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, Optional
 
 from sqlalchemy import select
 
@@ -31,9 +31,9 @@ from utils.db_session import DBSession
 logger = logging.getLogger(__name__)
 
 
-async def schedule_event(account_id: str, description: str, natural_language_datetime: str) -> Tuple[bool, str, AgendaEvent | None]:
+async def schedule_event(account_id: str, description: str, natural_language_datetime: str, team_id: Optional[str] = None) -> Tuple[bool, str, AgendaEvent | None]:
     """
-    Crea un nuevo evento y lo guarda en la base de datos.
+    Crea un nuevo evento y lo guarda en la base de datos para un usuario o equipo.
 
     Esta versión pura NO interactúa con la JobQueue. Solo se encarga de la
     lógica de la base de datos y devuelve el objeto del evento creado para que
@@ -43,6 +43,7 @@ async def schedule_event(account_id: str, description: str, natural_language_dat
         account_id: El ID universal de la cuenta del usuario.
         description: La descripción del evento.
         natural_language_datetime: La descripción en lenguaje natural del tiempo.
+        team_id: El ID del equipo (UUID en formato string) al que se asocia el evento, si aplica.
 
     Returns:
         Una tupla (bool, str, AgendaEvent | None) indicando éxito, un mensaje
@@ -78,6 +79,7 @@ async def schedule_event(account_id: str, description: str, natural_language_dat
 
             new_event = AgendaEvent(
                 account_id=account_id,
+                team_id=uuid.UUID(team_id) if team_id else None,
                 description=description,
                 event_datetime_utc=event_datetime_utc,
                 is_active=True
@@ -99,14 +101,15 @@ async def schedule_event(account_id: str, description: str, natural_language_dat
             await db.rollback()
             return False, "Ocurrió un error inesperado al guardar tu evento.", None
 
-async def get_agenda_for_day(account_id: str, target_day: str) -> str:
+async def get_agenda_for_day(account_id: str, target_day: str, team_id: Optional[str] = None) -> str:
     """
-    Obtiene los eventos de un usuario para un día específico y los formatea como texto.
+    Obtiene los eventos de un usuario o equipo para un día específico y los formatea como texto.
     Esta función está diseñada para ser llamada por el agente de IA.
 
     Args:
         account_id: El ID universal de la cuenta del usuario.
         target_day: Una cadena en lenguaje natural que representa el día a consultar.
+        team_id: El ID del equipo (UUID en formato string) para filtrar eventos del equipo, si aplica.
 
     Returns:
         Una cadena de texto formateada con la lista de eventos.
@@ -139,8 +142,12 @@ async def get_agenda_for_day(account_id: str, target_day: str) -> str:
                 AgendaEvent.event_datetime_utc >= start_of_day_utc,
                 AgendaEvent.event_datetime_utc <= end_of_day_utc
             )
-            .order_by(AgendaEvent.event_datetime_utc)
         )
+        if team_id:
+            stmt = stmt.where(AgendaEvent.team_id == uuid.UUID(team_id))
+        else:
+            stmt = stmt.where(AgendaEvent.team_id.is_(None))
+        stmt = stmt.order_by(AgendaEvent.event_datetime_utc)
         result = await db.execute(stmt)
         events = result.scalars().all()
 
@@ -155,9 +162,9 @@ async def get_agenda_for_day(account_id: str, target_day: str) -> str:
         return "\n".join(event_list)
 
 
-async def get_events_as_dicts(account_id: str) -> List[Dict[str, Any]]:
+async def get_events_as_dicts(account_id: str, team_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Recupera todos los eventos futuros de un usuario y los devuelve como una lista de diccionarios.
+    Recupera todos los eventos futuros de un usuario o equipo y los devuelve como una lista de diccionarios.
     Esta función está diseñada para ser utilizada por endpoints de API que sirven a interfaces web.
     """
     async with DBSession(SessionLocal) as db:
@@ -168,16 +175,24 @@ async def get_events_as_dicts(account_id: str) -> List[Dict[str, Any]]:
         now_utc = datetime.now(pytz.utc)
         stmt = (
             select(AgendaEvent)
-            .where(AgendaEvent.account_id == account_id, AgendaEvent.event_datetime_utc > now_utc, AgendaEvent.is_active == True)
-            .order_by(AgendaEvent.event_datetime_utc)
+            .where(
+                AgendaEvent.account_id == account_id,
+                AgendaEvent.event_datetime_utc > now_utc,
+                AgendaEvent.is_active == True
+            )
         )
+        if team_id:
+            stmt = stmt.where(AgendaEvent.team_id == uuid.UUID(team_id))
+        else:
+            stmt = stmt.where(AgendaEvent.team_id.is_(None))
+        stmt = stmt.order_by(AgendaEvent.event_datetime_utc)
         result = await db.execute(stmt)
         events = result.scalars().all()
         # Usa el método to_dict que definimos en el modelo AgendaEvent
         return [event.to_dict(account.timezone) for event in events]
 
 
-async def cancel_event(account_id: str, event_id: int) -> Tuple[bool, str]:
+async def cancel_event(account_id: str, event_id: int, team_id: Optional[str] = None) -> Tuple[bool, str]:
     """
     Cancela un evento marcándolo como inactivo en la base de datos.
     NO se encarga de cancelar el job en la JobQueue, eso debe hacerlo el llamador.
@@ -185,12 +200,17 @@ async def cancel_event(account_id: str, event_id: int) -> Tuple[bool, str]:
     Args:
         account_id: El ID universal de la cuenta del usuario.
         event_id: El ID del evento a cancelar.
+        team_id: El ID del equipo (UUID en formato string) para verificar la pertenencia, si aplica.
 
     Returns:
         Una tupla (bool, str) indicando éxito y un mensaje para el usuario.
     """
     async with DBSession(SessionLocal) as db:
         stmt = select(AgendaEvent).where(AgendaEvent.id == event_id, AgendaEvent.account_id == account_id)
+        if team_id:
+            stmt = stmt.where(AgendaEvent.team_id == uuid.UUID(team_id))
+        else:
+            stmt = stmt.where(AgendaEvent.team_id.is_(None))
         result = await db.execute(stmt)
         event_to_cancel = result.scalars().first()
 

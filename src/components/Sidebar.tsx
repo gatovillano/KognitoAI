@@ -177,6 +177,12 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               {!isCollapsed && "Notas"}
             </Button>
           </Link>
+          <Link href="/chat" passHref onClick={onLinkClick} title="Chat">
+            <Button variant={pathname.startsWith('/chat') ? 'secondary' : 'ghost'} className={cn("w-full", isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start")}>
+              <MessageSquare className={cn("h-4 w-4", !isCollapsed && "mr-2")}/>
+              {!isCollapsed && "Chat"}
+            </Button>
+          </Link>
         </nav>
         {!isCollapsed && (
           <div className="flex items-center justify-between mb-2 px-2 mt-4">

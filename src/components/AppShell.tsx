@@ -30,7 +30,7 @@ export function AppShell({ children }: AppShellProps) {
     return (
       <div className="h-screen max-h-screen overflow-hidden flex bg-background">
         <div
-          className={`bg-card border-r transition-all duration-300 ease-in-out ${isSidebarCollapsed ? 'w-20' : 'w-80'}`}
+          className={`bg-card transition-all duration-300 ease-in-out ${isSidebarCollapsed ? 'w-20' : 'w-80'}`}
         >
           <Sidebar isCollapsed={isSidebarCollapsed} />
         </div>
@@ -44,7 +44,7 @@ export function AppShell({ children }: AppShellProps) {
               <ThemeToggle />
             </div>
           </header>
-          <main className="flex-grow overflow-y-auto bg-zinc-950 dark:bg-zinc-950">
+          <main className="flex-grow overflow-y-auto bg-background">
             {children}
           </main>
         </div>

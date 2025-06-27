@@ -41,7 +41,7 @@ class Config:
         self.google_main_model_name: str = os.getenv("GOOGLE_MAIN_MODEL_NAME", "gemini-2.0-flash")
         
         # El LLM para tareas rápidas y económicas como la sumarización.
-        self.google_summary_model_name: str = os.getenv("GOOGLE_SUMMARY_MODEL_NAME", "gemini-2.0-flash")
+        self.google_summary_model_name: str = os.getenv("GOOGLE_SUMMARY_MODEL_NAME", "gemini-2.5-flash")
         
         # El modelo de Vertex AI para la generación de imágenes (ej. Imagen 3).
         self.google_image_generation_model_name: str = os.getenv("GOOGLE_IMAGE_GENERATION_MODEL_NAME", "imagegeneration@006")

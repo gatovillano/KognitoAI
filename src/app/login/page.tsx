@@ -173,6 +173,12 @@ export default function LoginPage() {
                 </div>
               </div>
               <EmailLoginForm onLogin={handleSuccessfulLogin} isSubmitting={isProcessing} setParentError={setGlobalError} />
+              <div className="text-center text-sm text-muted-foreground">
+                ¿No tienes una cuenta?{' '}
+                <a href="/register" className="text-primary hover:underline">
+                  Regístrate
+                </a>
+              </div>
             </div>
           )}
 

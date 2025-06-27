@@ -55,6 +55,7 @@ from tools.github_repo_tool import GitHubRepoTool
 from tools.get_proactive_insights_tool import GetProactiveInsightsTool
 from tools.proactive_knowledge_linker_tool import ProactiveKnowledgeLinkerTool
 from tools.knowledge_analysis_tool import KnowledgeAnalysisTool
+from tools.comprehensive_web_analysis_tool import ComprehensiveWebAnalysisTool
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,8 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
         # Insights Proactivos
         GetProactiveInsightsTool,
         ProactiveKnowledgeLinkerTool,
-        KnowledgeAnalysisTool
+        KnowledgeAnalysisTool,
+        ComprehensiveWebAnalysisTool
     ]
 
     for ToolClass in tool_classes_to_instantiate:
@@ -109,7 +111,7 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
                 UpdateProfileTool, MemoryAddTool, GetDocumentListTool,
                 GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
                 ImageGenerationTool, GetProactiveInsightsTool,
-                ProactiveKnowledgeLinkerTool, KnowledgeAnalysisTool
+                ProactiveKnowledgeLinkerTool, KnowledgeAnalysisTool, ComprehensiveWebAnalysisTool
             ]:
                 kwargs = {"account_id": account_id}
                 if ToolClass in [SetReminderTool, ImageGenerationTool, GetDocumentContentTool]:

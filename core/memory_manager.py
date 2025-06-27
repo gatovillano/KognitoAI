@@ -165,15 +165,16 @@ async def update_user_profile(
 
 
 async def add_memory_to_vector_db(
-    account_id: str, content: str, type: str = "general_memory"
+    account_id: str, content: str, type: str = "general_memory", team_id: Optional[str] = None
 ) -> None:
     """
-    Genera embeddings para el contenido y lo guarda en la DB vectorial del usuario.
+    Genera embeddings para el contenido y lo guarda en la DB vectorial del usuario o equipo.
 
     Args:
         account_id: El ID universal de la cuenta a la que pertenece la memoria.
         content: El texto de la memoria a guardar.
         type: El tipo de memoria (ej: 'fact', 'idea').
+        team_id: El ID del equipo (UUID en formato string) al que se asocia la memoria, si aplica.
     """
     logger.info(
         f"Añadiendo memoria a la DB vectorial para la cuenta {account_id}: '{content[:50]}...'"
@@ -188,7 +189,7 @@ async def add_memory_to_vector_db(
             )
             return
 
-        collection_name = f"user_memories_{account_id}"
+        collection_name = f"user_memories_{account_id}" if not team_id else f"team_memories_{team_id}"
 
         # --- CORRECCIÓN CLAVE AQUÍ para PGVector ---
         # Ejecutar la operación de PGVector en un thread pool para no bloquear el event loop
@@ -208,6 +209,8 @@ async def add_memory_to_vector_db(
         # en la primera adición para una nueva colección.
 
         metadata = {"account_id": str(account_id), "type": type}
+        if team_id:
+            metadata["team_id"] = str(team_id)
         await vectorstore.aadd_documents(
             documents=[Document(page_content=content, metadata=metadata)]
         )
@@ -226,14 +229,16 @@ async def get_relevant_memories(
     query: str,
     k: int = 10,
     metadata_filters: Optional[Dict[str, Any]] = None,
+    team_id: Optional[str] = None
 ) -> str:
     """
-    Recupera memorias relevantes de la colección personal del usuario y de la global.
+    Recupera memorias relevantes de la colección personal del usuario, de un equipo y de la global.
     Args:
         account_id: El ID universal de la cuenta del usuario.
         query: La consulta del usuario para buscar memorias similares.
         k: El número total de memorias a recuperar.
         metadata_filters: Filtros adicionales para aplicar a la búsqueda.
+        team_id: El ID del equipo (UUID en formato string) para buscar en la colección del equipo, si aplica.
 
     Returns:
         Una cadena de texto formateada con las memorias relevantes encontradas.
@@ -264,8 +269,16 @@ async def get_relevant_memories(
             collection_name=GLOBAL_COLLECTION_NAME,
             connection=PGVECTOR_SYNC_ENGINE,
         )
+        team_vectorstore = None
+        if team_id:
+            team_vectorstore = await asyncio.to_thread(
+                PGVector.from_existing_index,
+                embedding=embeddings,
+                collection_name=f"team_memories_{team_id}",
+                connection=PGVECTOR_SYNC_ENGINE,
+            )
 
-        k_per_source = k // 2 if k > 1 else 1
+        k_per_source = k // (3 if team_id else 2) if k > 1 else 1
         filters = metadata_filters if metadata_filters else {}
 
         # Ejecución asíncrona de búsquedas en paralelo
@@ -275,12 +288,16 @@ async def get_relevant_memories(
         global_search_task = global_vectorstore.asimilarity_search(
             query, k=k_per_source, filter=filters
         )
+        team_search_task = team_vectorstore.asimilarity_search(
+            query, k=k_per_source, filter=filters
+        ) if team_id and team_vectorstore else asyncio.sleep(0, result=[])
 
-        user_results, global_results = await asyncio.gather(
-            user_search_task, global_search_task, return_exceptions=True
+        results = await asyncio.gather(
+            user_search_task, global_search_task, team_search_task, return_exceptions=True
         )
 
         all_docs = []
+        user_results, global_results, team_results = results
         if isinstance(user_results, list):
             for doc in user_results:
                 doc.metadata["source"] = "Personal"
@@ -297,6 +314,15 @@ async def get_relevant_memories(
         else:
             logger.warning(
                 f"⚠️ No se pudo buscar en la memoria global: {global_results}"
+            )
+
+        if team_id and isinstance(team_results, list):
+            for doc in team_results:
+                doc.metadata["source"] = "Team"
+            all_docs.extend(team_results)
+        elif team_id:
+            logger.warning(
+                f"⚠️ No se pudo buscar en la memoria del equipo {team_id}: {team_results}"
             )
 
         if not all_docs:
@@ -318,6 +344,7 @@ async def process_document_for_rag(
     topic: str = "general_documents",
     account_id: Optional[str] = None,
     is_global: bool = False,
+    team_id: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> int:
     """
@@ -328,6 +355,7 @@ async def process_document_for_rag(
         topic: La categoría del documento.
         account_id: El ID universal de la cuenta del usuario (si no es global).
         is_global: Si es True, el documento se guarda en la colección global.
+        team_id: El ID del equipo (UUID en formato string) al que se asocia el documento, si aplica.
         metadata: Metadatos adicionales sobre el documento.
 
     Returns:
@@ -335,8 +363,10 @@ async def process_document_for_rag(
     """
     if is_global:
         collection_name = GLOBAL_COLLECTION_NAME
-    elif account_id:
+    elif account_id and not team_id:
         collection_name = f"user_memories_{account_id}"
+    elif team_id:
+        collection_name = f"team_memories_{team_id}"
     else:
         logger.error(
             "❌ process_document_for_rag llamado sin account_id y sin is_global=True."
@@ -372,6 +402,8 @@ async def process_document_for_rag(
         )
         if account_id and not is_global:
             base_metadata["account_id"] = str(account_id)
+        if team_id:
+            base_metadata["team_id"] = str(team_id)
 
         ids = []
         lc_documents = []
@@ -407,12 +439,22 @@ async def process_document_for_rag(
             f"✅ Procesado y añadido {len(lc_documents)} chunks a la colección '{collection_name}'."
         )
         # // INICIO EDICIÓN
+        # Generate an embedding for the entire document or a summary if the text is too long
+        doc_embedding = None
+        if len(extracted_text) > 10000:  # If text is very long, use a summary for embedding
+            summary = extracted_text[:10000] + "..."  # Truncate for embedding
+            doc_embedding = await embeddings.aembed_query(summary)
+        else:
+            doc_embedding = await embeddings.aembed_query(extracted_text)
+            
         asyncio.create_task(
             proactive_knowledge_linker_trigger({
                 "account_id": account_id,
+                "team_id": team_id if team_id else None,
                 "content": extracted_text,
                 "title": file_name,
-                "type": "document"
+                "type": "document",
+                "embedding": doc_embedding
             })
         )
         # // FIN EDICIÓN
@@ -431,10 +473,11 @@ async def process_document_for_rag(
 async def delete_document_chunks(
     account_id: str,
     file_name: Optional[str] = None,
-    topic: Optional[str] = None
+    topic: Optional[str] = None,
+    team_id: Optional[str] = None
 ) -> int:
     """
-    Elimina los chunks de la tabla langchain_pg_embedding que pertenecen a una colección de usuario.
+    Elimina los chunks de la tabla langchain_pg_embedding que pertenecen a una colección de usuario o equipo.
     La eliminación se puede filtrar por nombre de archivo o por tema.
     Devuelve el número de filas borradas.
     """
@@ -448,7 +491,7 @@ async def delete_document_chunks(
         logger.warning("No pudo inicializar embeddings; abortando borrado.")
         return 0
 
-    collection_name = f"user_memories_{account_id}"
+    collection_name = f"user_memories_{account_id}" if not team_id else f"team_memories_{team_id}"
     async with DBSession(SessionLocal) as db:
         # 1) Obtener UUID de la colección
         col_q = text("SELECT uuid FROM langchain_pg_collection WHERE name = :cname")
@@ -476,12 +519,13 @@ async def delete_document_chunks(
         return deleted
 
 
-async def get_full_document_content(account_id: str, file_name: str) -> Optional[str]:
+async def get_full_document_content(account_id: str, file_name: str, team_id: Optional[str] = None) -> Optional[str]:
     """
     Reconstruye y devuelve el contenido completo de un documento desde sus chunks.
     Args:
         account_id: El ID universal de la cuenta del usuario.
         file_name: El nombre del archivo a reconstruir.
+        team_id: El ID del equipo (UUID en formato string) para buscar en la colección del equipo, si aplica.
 
     Returns:
         El contenido completo del documento como una cadena, o None si no se encuentra.
@@ -497,10 +541,11 @@ async def get_full_document_content(account_id: str, file_name: str) -> Optional
             return None
 
         # --- CORRECCIÓN CLAVE AQUÍ para PGVector ---
+        collection_name = f"user_memories_{account_id}" if not team_id else f"team_memories_{team_id}"
         vectorstore = await asyncio.to_thread(
             PGVector.from_existing_index,
             embedding=embeddings,
-            collection_name=f"user_memories_{account_id}",
+            collection_name=collection_name,
             connection=PGVECTOR_SYNC_ENGINE,
         )
 
@@ -532,18 +577,19 @@ async def get_full_document_content(account_id: str, file_name: str) -> Optional
         return None
 
 
-async def list_user_documents(account_id: str) -> List[Dict[str, Any]]:
+async def list_user_documents(account_id: str, team_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Obtiene una lista de todos los documentos únicos subidos por un usuario.
+    Obtiene una lista de todos los documentos únicos subidos por un usuario o equipo.
     Args:
         account_id: El ID universal de la cuenta del usuario.
+        team_id: El ID del equipo (UUID en formato string) para listar documentos del equipo, si aplica.
 
     Returns:
         Una lista de diccionarios, donde cada diccionario representa un documento.
     """
     logger.info(f"Listando documentos para la cuenta {account_id}")
     try:
-        collection_name = f"user_memories_{account_id}"
+        collection_name = f"user_memories_{account_id}" if not team_id else f"team_memories_{team_id}"
         async with DBSession(SessionLocal) as db:
             # Primero, verificar si la colección existe para evitar errores en la consulta pg_embedding
             collection_uuid_query = text(
@@ -593,7 +639,8 @@ async def update_document_metadata(
     account_id: str, 
     file_name: str, 
     new_title: Optional[str], 
-    new_topic: Optional[str]
+    new_topic: Optional[str],
+    team_id: Optional[str] = None
 ) -> bool:
     """
     Actualiza el título y/o la categoría (topic) de todos los chunks de un documento.
@@ -606,6 +653,7 @@ async def update_document_metadata(
         file_name: El nombre del archivo a actualizar.
         new_title: El nuevo título (si se proporciona).
         new_topic: La nueva categoría/base de conocimiento (si se proporciona).
+        team_id: El ID del equipo (UUID en formato string) para actualizar en la colección del equipo, si aplica.
         
     Returns:
         True si la operación fue exitosa, False en caso contrario.
@@ -616,7 +664,7 @@ async def update_document_metadata(
 
     logger.info(f"Actualizando metadatos para '{file_name}' (cuenta {account_id}) -> Título: {new_title}, Tema: {new_topic}")
     
-    collection_name = f"user_memories_{account_id}"
+    collection_name = f"user_memories_{account_id}" if not team_id else f"team_memories_{team_id}"
 
     async with DBSession(SessionLocal) as db:
         try:
@@ -681,13 +729,13 @@ async def update_document_metadata(
             return False
 
 
-async def list_user_collections(account_id: str) -> List[Dict[str, Any]]:
+async def list_user_collections(account_id: str, team_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Obtiene una lista de todas las colecciones (temas) únicas de un usuario
+    Obtiene una lista de todas las colecciones (temas) únicas de un usuario o equipo
     y cuenta cuántos documentos hay en cada una.
     """
     logger.info(f"Listando colecciones para la cuenta {account_id}")
-    collection_name = f"user_memories_{account_id}"
+    collection_name = f"user_memories_{account_id}" if not team_id else f"team_memories_{team_id}"
     
     async with DBSession(SessionLocal) as db:
         try:

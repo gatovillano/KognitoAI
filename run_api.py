@@ -28,7 +28,8 @@ from core.database import (
     find_telegram_identity, ChatThread, VerificationCode, AnalysisTask
 )
 from datetime import datetime, timedelta, timezone
-from core.agent import initialize_llms, create_and_run_agent, create_thread_for_account
+from core.llm_manager import initialize_llms
+from core.agent import create_and_run_agent, create_thread_for_account
 from utils.db_session import DBSession
 from utils.document_parser import extract_text_and_metadata_from_document
 from core.memory_manager import process_document_for_rag, list_user_documents, delete_document_chunks, get_full_document_content, update_document_metadata, list_user_collections
@@ -414,6 +415,7 @@ class ChatRequest(BaseModel):
     telegram_id: Optional[int] = None # Hacemos telegram_id opcional
     user_message: str
     image_base64: Optional[str] = None
+    mode: Optional[str] = None
 
 class ChatResponse(BaseModel):
     """Define la estructura de datos para la respuesta del agente de chat."""
@@ -428,14 +430,15 @@ async def handle_chat(request: ChatRequest, current_account_id: str = Depends(ge
     if str(uuid.UUID(request.account_id)) != current_account_id: # Validar que el account_id coincida con el del token
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="El account_id proporcionado no coincide con el token de autenticación.")
 
-    logger.info(f"Petición de chat recibida de la cuenta: {request.account_id}")
+    logger.info(f"Petición de chat recibida de la cuenta: {request.account_id} con modo: {request.mode}")
     try:
         final_response_text = await create_and_run_agent(
             account_id=request.account_id,
             thread_id=request.thread_id,
             telegram_id=request.telegram_id, # telegram_id ahora es Optional[int]
             user_message=request.user_message,
-            image_base64=request.image_base64
+            image_base64=request.image_base64,
+            mode=request.mode
         )
         return ChatResponse(response_text=final_response_text)
     except Exception as e:
@@ -524,6 +527,31 @@ async def upload_document_endpoint(
     if processed_files == 0 and files:
         raise HTTPException(status_code=500, detail="No se pudo procesar ninguno de los archivos.")
     return {"message": f"{processed_files}/{len(files)} archivo(s) procesado(s) y añadido(s) a tu base de conocimiento en la categoría '{topic}'."}
+
+@app.post("/api/upload-chat-file")
+async def upload_chat_file_endpoint(
+    current_account_id: str = Depends(get_current_account_id),
+    files: List[UploadFile] = File(...),
+    thread_id: str = Form(...)
+):
+    """
+    Endpoint para subir archivos al contexto de un hilo de chat específico.
+    """
+    account_id_uuid = uuid.UUID(current_account_id)
+    processed_files = 0
+    for file in files:
+        try:
+            content_bytes = await file.read()
+            # Aquí puedes procesar el archivo según sea necesario para el contexto del chat
+            # Por ahora, simplemente registramos que se ha subido el archivo
+            logger.info(f"Archivo {file.filename} subido al hilo {thread_id} por la cuenta {account_id_uuid}")
+            processed_files += 1
+        except Exception as e:
+            logger.error(f"Fallo al procesar el archivo {file.filename} para el hilo {thread_id} de la cuenta {account_id_uuid}: {e}", exc_info=True)
+
+    if processed_files == 0 and files:
+        raise HTTPException(status_code=500, detail="No se pudo procesar ninguno de los archivos.")
+    return {"message": f"{processed_files}/{len(files)} archivo(s) subido(s) al contexto del hilo {thread_id}."}
 @app.post("/api/list-documents") # Cambiado a POST porque el frontend web lo usa con FormData
 async def list_documents_endpoint(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
     """Lista los documentos subidos por el usuario. Protegido por JWT."""
@@ -665,7 +693,7 @@ async def get_document_content_endpoint(
 
 from fastapi import BackgroundTasks
 from core.memory_manager import get_full_document_content
-from utils.analyze_text_for_insights import analyze_text_for_insights, analyze_entire_collection
+from utils.advanced_text_analyzer import text_analyzer
 from core.database import ProactiveInsight
 
 # Modelo para la petición
@@ -675,7 +703,6 @@ class AnalyzeDocumentRequest(BaseModel):
 # Esta función se ejecutará en segundo plano
 async def run_document_analysis_and_save(task_id: str, account_id: str, file_name: str):
     """Función pesada que se ejecuta en segundo plano."""
-    # Crea su propia sesión de DB para ser independiente
     async with SessionLocal() as db_session:
         try:
             # 1. Marcar la tarea como 'processing'
@@ -688,11 +715,11 @@ async def run_document_analysis_and_save(task_id: str, account_id: str, file_nam
             if not text_content: raise ValueError("Contenido del documento no encontrado.")
 
             # 2. Realizar el análisis pesado
-            analysis_result = await analyze_text_for_insights(text_content)
-            
+            analysis_result = await text_analyzer.analyze_single_text(text_content)
+
             # 3. Guardar el resultado y marcar como 'completed'
             stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-                status="completed", result_payload=analysis_result)
+                status="completed", result_payload=analysis_result.dict())
             await db_session.execute(stmt_completed)
             await db_session.commit()
             logger.info(f"Análisis para tarea {task_id} completado.")
@@ -754,7 +781,7 @@ async def list_collections_endpoint(current_account_id: str = Depends(get_curren
     collections = await list_user_collections(current_account_id)
     return collections
 
-from utils.analyze_text_for_insights import analyze_entire_collection  # Importar la nueva función
+from utils.advanced_text_analyzer import CollectionAnalysis, AdvancedTextAnalyzer  # Importar la nueva función
 
 # --- Modelo para la petición de análisis de colección ---
 class AnalyzeCollectionRequest(BaseModel):
@@ -784,8 +811,7 @@ async def run_collection_analysis_and_save(task_id: str, account_id: str, topic:
             content = await get_full_document_content(account_id, doc_meta['file_name'])
             if content:
                 all_docs_in_topic.append({
-                    "title": doc_meta.get('title'),
-                    "file_name": doc_meta['file_name'],
+                    "title": doc_meta.get('title', doc_meta['file_name']),
                     "content": content
                 })
 
@@ -793,11 +819,12 @@ async def run_collection_analysis_and_save(task_id: str, account_id: str, topic:
             raise ValueError(f"No se encontraron documentos con contenido en la colección '{topic}'.")
 
         # 2. Realizar el análisis de la colección
-        analysis_result = await analyze_entire_collection(all_docs_in_topic)
+        analysis_result = await text_analyzer.analyze_collection(all_docs_in_topic)
+        logger.info(f"Collection analysis result generated for topic '{topic}': {analysis_result.dict()}")
         
         # 3. Guardar el resultado y marcar como 'completed'
         stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-            status="completed", result_payload=analysis_result)
+            status="completed", result_payload=analysis_result.dict())
         await db_session.execute(stmt_completed)
         await db_session.commit()
         logger.info(f"Análisis de colección para tarea {task_id} completado.")
@@ -884,10 +911,8 @@ async def get_saved_analyses_endpoint(
         # Si se pide 'all', no aplicamos más filtros.
         final_stmt = base_stmt
     else:
-        # Comportamiento por defecto (vista de colecciones): no muestra nada
-        # O podríamos hacer que muestre los que no son de colección
-        # Por ahora, para ser claros, devolvemos una lista vacía si no es 'all' o un 'topic'.
-        return []
+        # Comportamiento por defecto: devolver todos los análisis completados si no se especifica un 'topic'.
+        final_stmt = base_stmt
 
     # Ordenamos y limitamos la consulta final
     final_stmt = final_stmt.order_by(desc(AnalysisTask.created_at)).limit(50)
@@ -1145,11 +1170,13 @@ async def get_dashboard_insights(
 async def update_semantic_topics_endpoint(
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    max_terms: Optional[int] = Form(default=20, ge=1, description="Número máximo de términos a analizar para el análisis semántico")
 ):
     """
     Dispara manualmente el proceso de análisis semántico para agrupar temas por similitud.
     Este proceso se ejecuta en segundo plano y actualiza los datos para el endpoint /api/dashboard-insights.
+    Opcionalmente, se puede limitar el número de términos analizados con max_terms.
     """
     account_uuid = uuid.UUID(current_account_id)
     new_task = AnalysisTask(
@@ -1161,15 +1188,16 @@ async def update_semantic_topics_endpoint(
     await db.commit()
     await db.refresh(new_task)
     
-    logger.info(f"Iniciando tarea de análisis semántico con ID {str(new_task.id)} para la cuenta {current_account_id}")
-    background_tasks.add_task(run_semantic_topic_analysis, str(new_task.id), current_account_id)
+    logger.info(f"Iniciando tarea de análisis semántico con ID {str(new_task.id)} para la cuenta {current_account_id} con límite de {max_terms if max_terms else 'todos'} términos")
+    background_tasks.add_task(run_semantic_topic_analysis, str(new_task.id), current_account_id, max_terms)
     
-    return {"task_id": str(new_task.id), "message": "Análisis semántico iniciado en segundo plano."}
+    return {"task_id": str(new_task.id), "message": f"Análisis semántico iniciado en segundo plano con límite de {max_terms if max_terms else 'todos los'} términos."}
 
-async def run_semantic_topic_analysis(task_id: str, account_id: str):
+async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: Optional[int] = None):
     """
     Proceso en segundo plano para realizar análisis semántico y agrupación de temas.
     Este es un placeholder para la integración con Gemini API.
+    Se puede limitar el número de términos analizados con max_terms.
     """
     async with SessionLocal() as db_session:
         try:
@@ -1193,11 +1221,15 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str):
             for payload in analysis_payloads:
                 if isinstance(payload, dict):
                     all_topics.extend(payload.get("temas_clave_avanzados", []))
-            logger.info(f"Procesando {len(all_topics)} temas para análisis semántico.")
+            if max_terms is not None and len(all_topics) > max_terms:
+                all_topics = all_topics[:max_terms]
+                logger.info(f"Limitando análisis semántico a {max_terms} términos de un total de {len(all_topics)}.")
+            else:
+                logger.info(f"Procesando {len(all_topics)} temas para análisis semántico sin límite.")
 
             # 2. Integrar Gemini API para obtener embebidos semánticos usando el LLM ya configurado
-            from core.agent import _fast_task_llm_instance, _main_agent_llm_instance
-            llm_for_embeddings = _fast_task_llm_instance or _main_agent_llm_instance
+            from core.llm_manager import get_fast_llm
+            llm_for_embeddings = get_fast_llm()
             if not llm_for_embeddings:
                 logger.error("No hay LLM disponible para generar embeddings.")
                 raise ValueError("LLM no disponible para análisis semántico.")

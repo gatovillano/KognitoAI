@@ -82,10 +82,13 @@ class WebScraperTool(BaseTool):
             loader = WebBaseLoader(url)
             loop = asyncio.get_event_loop()
             
-            # Ejecuta la función bloqueante en el pool de hilos por defecto.
-            docs: List[Document] = await loop.run_in_executor(
-                None,  # None usa el ThreadPoolExecutor por defecto.
-                loader.load
+            # Ejecuta la función bloqueante en el pool de hilos por defecto con un timeout.
+            docs: List[Document] = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,  # None usa el ThreadPoolExecutor por defecto.
+                    loader.load
+                ),
+                timeout=15.0  # 15 segundos de timeout
             )
 
             if not docs:
@@ -103,6 +106,9 @@ class WebScraperTool(BaseTool):
             
             logger.info(f"✅ Contenido extraído exitosamente de '{url}'. Longitud: {len(content)} caracteres.")
             return content
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout en WebScraperTool para la URL '{url}'")
+            return f"Ocurrió un error de timeout al intentar leer el contenido de la URL: {url}"
         except Exception as e:
             logger.error(f"Error en WebScraperTool para la URL '{url}': {e}", exc_info=True)
             return f"Ocurrió un error al intentar leer el contenido de la URL: {e}"

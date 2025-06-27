@@ -33,12 +33,10 @@ import os
 from langchain.agents import AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain.agents.output_parsers.tools import ToolsAgentOutputParser
 from langchain.agents.format_scratchpad.tools import format_to_tool_messages
 from langchain_core.runnables import RunnablePassthrough
-from langchain_core.language_models.base import BaseLanguageModel
 from sqlalchemy import update
 
 # --- Módulos del Proyecto ---
@@ -46,8 +44,8 @@ from core.tools import get_all_langchain_tools
 from core.memory_manager import get_user_profile, get_relevant_memories
 from core.database import SessionLocal, Account, ChatThread
 from utils.db_session import DBSession
-#from utils.helpers import sanitize_html
 from core.config import settings
+from core.llm_manager import get_main_llm, get_fast_llm, initialize_llms
 
 # --- Claves para estado temporal ---
 from utils.image_generation import GENERATED_IMAGE_KEY
@@ -56,56 +54,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 # --- Configuración del Logger ---
 logger = logging.getLogger(__name__)
-
-# --- Instancias Globales de LLM ---
-# Se inicializan en `initialize_llms` al arrancar el servidor.
-_main_agent_llm_instance: Optional[BaseLanguageModel] = None
-_fast_task_llm_instance: Optional[BaseLanguageModel] = None
-
-# ==============================================================================
-# SECCIÓN 1: INICIALIZACIÓN DE MODELOS
-# ==============================================================================
-
-async def initialize_llms():
-    """
-    Inicializa las instancias globales de los LLMs (principal y de tareas rápidas).
-    Esta función se llama una vez al arrancar el `web_server`.
-    """
-    global _main_agent_llm_instance, _fast_task_llm_instance
-    
-    if not settings.google_api_key:
-        logger.error("¡ERROR FATAL! GOOGLE_API_KEY no está configurada. El agente no puede funcionar.")
-        raise ValueError("No se ha configurado la API key de Google.")
-
-    try:
-        logger.info(f"🛠️ Inicializando LLM principal del agente (ChatGoogleGenerativeAI - {settings.google_main_model_name})...")
-        main_llm = ChatGoogleGenerativeAI(
-            model=settings.google_main_model_name,
-            temperature=settings.llm_temperature,
-            google_api_key=settings.google_api_key,
-            streaming=True,  # Habilita streaming real
-        )
-        await main_llm.ainvoke("Test prompt")
-        _main_agent_llm_instance = main_llm
-        logger.info("✅ LLM principal del agente inicializado.")
-    except Exception as e:
-        logger.error(f"❌ FATAL: Fallo al inicializar el LLM principal: {e}", exc_info=True)
-        raise
-
-    try:
-        logger.info(f"🛠️ Inicializando LLM para tareas rápidas (ChatGoogleGenerativeAI - {settings.google_summary_model_name})...")
-        fast_llm = ChatGoogleGenerativeAI(
-            model=settings.google_summary_model_name,
-            temperature=0.0,
-            google_api_key=settings.google_api_key,
-            streaming=True,  # Habilita streaming real
-        )
-        await fast_llm.ainvoke("Test prompt")
-        _fast_task_llm_instance = fast_llm
-        logger.info("✅ LLM para tareas rápidas inicializado.")
-    except Exception as e:
-        logger.warning(f"⚠️ Fallo al inicializar el LLM para tareas rápidas. Se usará el principal como fallback: {e}")
-        _fast_task_llm_instance = _main_agent_llm_instance
 
 # ==============================================================================
 # SECCIÓN 2: MANEJO DE CONTEXTO Y MEMORIA
@@ -162,7 +110,7 @@ async def summarize_history_in_background(
     Resume mensajes en segundo plano y añade un resumen al historial, pero NO borra los mensajes previos.
     El resumen se usará solo para el contexto del LLM, pero el historial completo se conserva para el frontend.
     """
-    llm_for_summary = _fast_task_llm_instance or _main_agent_llm_instance
+    llm_for_summary = get_fast_llm()
     if not llm_for_summary:
         logger.warning("⚠️ No hay LLM disponible para la sumarización en segundo plano.")
         return
@@ -208,7 +156,7 @@ async def update_thread_title_if_needed(thread_id: str, messages: list):
     if (current_title == "Nuevo Chat" and len(messages) >= 5) or (current_title != "Nuevo Chat" and len(messages) >= 20 and len(messages) % 20 == 0):
         conversation_text = '\n'.join([m.content if hasattr(m, 'content') else str(m) for m in messages[-20:]])
         prompt = f"Resume la conversación en un título breve y descriptivo (máx 8 palabras):\n{conversation_text}"
-        llm = _fast_task_llm_instance or _main_agent_llm_instance
+        llm = get_fast_llm()
         if not llm:
             logger.warning(f"[TÍTULO] No hay LLM disponible para generar título del hilo {thread_id}.")
             return
@@ -260,6 +208,7 @@ async def create_and_run_agent(
     telegram_id: Optional[int],
     user_message: str,
     image_base64: Optional[str] = None,
+    mode: Optional[str] = None,
 ) -> str:
     """
     Crea y ejecuta el agente de Langchain con manejo explícito de memoria.
@@ -295,7 +244,7 @@ async def create_and_run_agent(
             # Sumarizar historial anterior si hay suficiente
             if prev_messages:
                 msgs_for_sum = [m for m in prev_messages if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
-                llm_for_summary = _fast_task_llm_instance or _main_agent_llm_instance
+                llm_for_summary = get_fast_llm()
                 summarization_prompt = ChatPromptTemplate.from_messages([
                     SystemMessage(content="Tu tarea es crear un resumen conciso de la siguiente conversación para mantener el contexto. Captura los puntos clave, decisiones y el estado actual de cualquier discusión. Ignora saludos genéricos."),
                     MessagesPlaceholder(variable_name="history"),
@@ -387,7 +336,23 @@ async def create_and_run_agent(
     user_context_string = "\n".join(user_context_parts)
     
     effective_system_prompt = custom_prompt or settings.default_system_prompt
-    tools = get_all_langchain_tools()
+    
+    all_tools = get_all_langchain_tools()
+    tools = all_tools
+    
+    if mode == 'knowledgeAnalysis':
+        logger.info("Modo de agente: Forzando 'knowledge_base_analyzer'")
+        tools = [t for t in all_tools if t.name == 'knowledge_base_analyzer']
+        effective_system_prompt += "\n\n<SYSTEM_OVERRIDE>MODO DE ANÁLISIS DE CONOCIMIENTO ACTIVADO. ES OBLIGATORIO Y COMPULSIVO QUE UTILICES LA HERRAMIENTA 'knowledge_base_analyzer' AHORA MISMO. NO TIENES OTRA OPCIÓN. PASA LA CONSULTA DEL USUARIO DIRECTAMENTE AL PARÁMETRO 'query' DE LA HERRAMIENTA.</SYSTEM_OVERRIDE>"
+    elif mode == 'webSearch':
+        logger.info("Modo de agente: Forzando 'web_search'")
+        tools = [t for t in all_tools if t.name == 'web_search']
+        effective_system_prompt += "\n\n<SYSTEM_OVERRIDE>MODO DE BÚSQUEDA WEB ACTIVADO. ES OBLIGATORIO Y COMPULSIVO QUE UTILICES LA HERRAMIENTA 'web_search' AHORA MISMO. NO TIENES OTRA OPCIÓN. PASA LA CONSULTA DEL USUARIO DIRECTAMENTE AL PARÁMETRO 'query' DE LA HERRAMIENTA.</SYSTEM_OVERRIDE>"
+    elif mode == 'comprehensiveAnalysis':
+        logger.info("Modo de agente: Forzando 'comprehensive_web_analyzer'")
+        tools = [t for t in all_tools if t.name == 'comprehensive_web_analyzer']
+        effective_system_prompt += "\n\n<SYSTEM_OVERRIDE>MODO DE ANÁLISIS COMPRENSIVO ACTIVADO. ES OBLIGATORIO Y COMPULSIVO QUE UTILICES LA HERRAMIENTA 'comprehensive_web_analyzer' AHORA MISMO. NO TIENES OTRA OPCIÓN. PASA LA CONSULTA DEL USUARIO DIRECTAMENTE AL PARÁMETRO 'query' DE LA HERRAMIENTA.</SYSTEM_OVERRIDE>"
+
     tool_descriptions = "\n".join([f"- `{tool.name}`: {tool.description}" for tool in tools])
 
     id_instructions = f"""
@@ -401,7 +366,11 @@ async def create_and_run_agent(
     <hr>
 {effective_system_prompt}
     <hr>
+<b>Nota Importante sobre Capacidades del LLM:</b> Este LLM es multimodal, lo que significa que puede procesar y responder a una variedad de tipos de entrada, incluyendo texto, imágenes y posiblemente otros formatos de datos. Además, tiene la capacidad de producir código en múltiples lenguajes de programación, ofrecer explicaciones detalladas sobre conceptos técnicos, y asistir en la resolución de problemas de programación. Puedes aprovechar estas capacidades para solicitar ayuda con desarrollo de software, análisis de datos, creación de contenido visual (si está dentro de las herramientas disponibles), y más. Si necesitas asistencia con código o interpretación de contenido multimedia, no dudes en pedírmelo, y utilizaré mis habilidades para proporcionarte soluciones precisas y útiles.
+    <hr>
 <b>Instrucción crítica:</b> Si necesitas usar herramientas, hazlo de una en una. Nunca intentes usar más de una herramienta en una sola respuesta. Espera la siguiente interacción antes de usar otra herramienta.
+    <hr>
+<b>Instrucción de Memoria Importante:</b> Es muy importante que analices cada mensaje del usuario para identificar información relevante que deba ser guardada automáticamente en la memoria. Esto incluye datos personales, preferencias, eventos importantes, o cualquier detalle que pueda ser útil para futuras interacciones. Utiliza la herramienta adecuada para almacenar esta información cuando la detectes.
     <hr>
 {id_instructions}
     <hr>
@@ -433,10 +402,11 @@ async def create_and_run_agent(
         ]
     )
 
-    if not _main_agent_llm_instance:
+    main_llm = get_main_llm()
+    if not main_llm:
         raise RuntimeError("El LLM principal no está inicializado.")
 
-    llm_with_tools = _main_agent_llm_instance.bind_tools(tools)
+    llm_with_tools = main_llm.bind_tools(tools)
 
     # ¡CADENA CORREGIDA! La estructura es más estándar y clara.
     agent_chain = (
@@ -452,7 +422,8 @@ async def create_and_run_agent(
         agent=agent_chain, 
         tools=tools, 
         verbose=True, 
-        handle_parsing_errors=True
+        handle_parsing_errors=True,
+        max_iterations=5  # Aumentar a 5 iteraciones para permitir más ciclos de búsqueda y síntesis
     )
 
     final_output = ""
@@ -478,8 +449,9 @@ async def create_and_run_agent(
     # Es importante añadir el `current_human_message` que creamos antes
     await chat_message_history.aadd_messages([current_human_message, AIMessage(content=final_output)])
     updated_full_history = await chat_message_history.aget_messages()
+    main_llm = get_main_llm()
     # Sumarizar solo para el contexto, pero sin borrar historial
-    if _main_agent_llm_instance.get_num_tokens_from_messages(updated_full_history) > 3000:
+    if main_llm and main_llm.get_num_tokens_from_messages(updated_full_history) > 3000:
         asyncio.create_task(summarize_history_in_background(updated_full_history, chat_message_history))
     # Actualizar título si corresponde
     await update_thread_title_if_needed(session_id, updated_full_history)

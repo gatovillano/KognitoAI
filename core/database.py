@@ -79,11 +79,6 @@ Base = declarative_base()
 # ==============================================================================
 
 # --- Nuevos Modelos de Identidad Universal ---
-engine = create_async_engine(
-    settings.database_url,
-    echo=False,
-    pool_pre_ping=True
-)
 class Account(Base):
     """
     Representa una cuenta de usuario universal en el sistema.
@@ -149,7 +144,52 @@ class PlatformIdentity(Base):
         return f"<PlatformIdentity(platform='{self.platform}', platform_user_id='{self.platform_user_id}')>"
 
 
-# --- Modelos de Datos Refactorizados (ahora vinculados a Account) ---
+# --- Modelos de Identidad de Equipos ---
+class Team(Base):
+    """
+    Representa un equipo en el sistema, permitiendo la memoria colectiva y la colaboración entre usuarios.
+    """
+    __tablename__ = "teams"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False, comment="Nombre del equipo.")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    admin_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, comment="ID del administrador del equipo.")
+
+    # Relaciones
+    admin = relationship("Account", backref="administered_teams")
+    members = relationship("TeamMember", back_populates="team", cascade="all, delete-orphan")
+    notas = relationship("Nota", back_populates="team", cascade="all, delete-orphan")
+    agenda_events = relationship("AgendaEvent", back_populates="team", cascade="all, delete-orphan")
+    memories = relationship("Memory", back_populates="team", cascade="all, delete-orphan")
+    proactive_insights = relationship("ProactiveInsight", back_populates="team", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Team(id={self.id}, name='{self.name}')>"
+
+
+class TeamMember(Base):
+    """
+    Tabla de relación que vincula a los usuarios (accounts) con los equipos (teams).
+    """
+    __tablename__ = "team_members"
+
+    id = Column(Integer, primary_key=True)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False, index=True)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    joined_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relaciones
+    team = relationship("Team", back_populates="members")
+    account = relationship("Account", backref="team_memberships")
+
+    __table_args__ = (UniqueConstraint('team_id', 'account_id', name='_team_account_uc'),)
+
+    def __repr__(self):
+        return f"<TeamMember(team_id={self.team_id}, account_id={self.account_id})>"
+
+
+# --- Modelos de Datos Refactorizados (ahora vinculados a Account y opcionalmente a Team) ---
 
 class Perfil(Base):
     """Modelo para el perfil estructurado del usuario."""
@@ -176,6 +216,7 @@ class Memory(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     # Refactorizado: Se vincula a account_id
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True, index=True)
     
     content = Column(Text, nullable=False)
     embedding = Column(Vector(384), nullable=False) # CORREGIDO: Si Memory también usa all-MiniLM-L6-v2
@@ -183,17 +224,19 @@ class Memory(Base):
     created_at = Column(DateTime(timezone=True), default=func.now())
 
     account = relationship("Account", back_populates="memories")
+    team = relationship("Team", back_populates="memories")
 
     def __repr__(self):
         return f"<Memory(id={self.id}, type='{self.type}', content='{self.content[:50]}...')>"
 
 
 class Nota(Base):
-    """Almacena las notas de un usuario."""
+    """Almacena las notas de un usuario o equipo."""
     __tablename__ = "notas"
     id = Column(Integer, primary_key=True, autoincrement=True)
     # Refactorizado: Se vincula a account_id
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True, index=True)
     
     title = Column(String, nullable=True)
     content = Column(Text, nullable=False)
@@ -203,17 +246,19 @@ class Nota(Base):
     embedding = Column(Vector(384), nullable=True)
 
     account = relationship("Account", back_populates="notas")
+    team = relationship("Team", back_populates="notas")
 
     def __repr__(self):
         return f"<Nota(id={self.id}, title='{self.title}', account_id={self.account_id})>"
 
 
 class AgendaEvent(Base):
-    """Modelo para los eventos de la agenda del usuario."""
+    """Modelo para los eventos de la agenda del usuario o equipo."""
     __tablename__ = "agenda_events"
 
     id = Column(Integer, primary_key=True)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True, index=True)
     description = Column(String, nullable=False)
     event_datetime_utc = Column(DateTime(timezone=True), nullable=False)
     
@@ -223,6 +268,7 @@ class AgendaEvent(Base):
     job_name = Column(String, nullable=True, unique=True) # Para poder cancelar los jobs de Telegram
 
     account = relationship("Account", back_populates="agenda_events")
+    team = relationship("Team", back_populates="agenda_events")
 
     def to_dict(self, timezone_str: str | None = "UTC") -> Dict[str, Any]:
         """Convierte el objeto a un diccionario para su uso en APIs."""
@@ -232,6 +278,7 @@ class AgendaEvent(Base):
         return {
             "id": self.id,
             "account_id": str(self.account_id),
+            "team_id": str(self.team_id) if self.team_id else None,
             "description": self.description,
             "event_datetime_utc": self.event_datetime_utc.isoformat(),
             "event_datetime_local": local_datetime.isoformat(),
@@ -274,6 +321,7 @@ class ProactiveInsight(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True, index=True)
     type = Column(String(50), nullable=False)
     insight_message = Column(Text, nullable=False)
     confidence_score = Column(Float, nullable=False)
@@ -282,6 +330,7 @@ class ProactiveInsight(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     account = relationship("Account", back_populates="proactive_insights")
+    team = relationship("Team", back_populates="proactive_insights")
 
 
 class VerificationCode(Base):
