@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Plus, MessageSquare, BookMarked, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin } from 'lucide-react';
+import { Plus, MessageSquare, BookMarked, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users } from 'lucide-react';
 import Image from 'next/image';
 import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -175,6 +175,12 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
             <Button variant={pathname.startsWith('/notes') ? 'secondary' : 'ghost'} className={cn("w-full", isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start")}>
               <Notebook className={cn("h-4 w-4", !isCollapsed && "mr-2")}/>
               {!isCollapsed && "Notas"}
+            </Button>
+          </Link>
+          <Link href="/teams" passHref onClick={onLinkClick} title="Equipos">
+            <Button variant={pathname.startsWith('/teams') ? 'secondary' : 'ghost'} className={cn("w-full", isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start")}>
+              <Users className={cn("h-4 w-4", !isCollapsed && "mr-2")}/>
+              {!isCollapsed && "Equipos"}
             </Button>
           </Link>
           <Link href="/chat" passHref onClick={onLinkClick} title="Chat">
