@@ -10,7 +10,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-export const columns: ColumnDef<any>[] = [
+export const getColumns = (
+  onShareDocuments?: (team: any) => void,
+  onShareEvents?: (team: any) => void,
+  onShareNotes?: (team: any) => void
+): ColumnDef<any>[] => [
   {
     accessorKey: "name",
     header: "Nombre",
@@ -53,9 +57,33 @@ export const columns: ColumnDef<any>[] = [
             >
               Eliminar
             </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                if (onShareDocuments) onShareDocuments(team);
+              }}
+            >
+              Compartir Documentos
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                if (onShareEvents) onShareEvents(team);
+              }}
+            >
+              Compartir Eventos
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                if (onShareNotes) onShareNotes(team);
+              }}
+            >
+              Compartir Notas
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       );
     },
   },
 ];
+
+// Default export for when handlers are not provided
+export const columns = getColumns();

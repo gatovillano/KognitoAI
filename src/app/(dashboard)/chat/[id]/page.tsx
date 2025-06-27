@@ -15,7 +15,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { toast } from 'sonner';
 
-import { Send, User, Copy, Play, Loader2, Square, Search, BookMarked, BrainCircuit, Upload } from 'lucide-react';
+import { ArrowUp, User, Copy, Play, Loader2, Square, Search, BookMarked, BrainCircuit, Upload, Mic } from 'lucide-react';
 
 interface Message {
   text: string;
@@ -36,6 +36,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isResponding, setIsResponding] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const [isKnowledgeAnalysisActive, setIsKnowledgeAnalysisActive] = useState(false);
   const [isWebSearchActive, setIsWebSearchActive] = useState(false);
   const [isComprehensiveAnalysisActive, setIsComprehensiveAnalysisActive] = useState(false);
@@ -48,6 +49,8 @@ export default function ChatPage() {
   
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
     if (threadId && user) {
@@ -116,6 +119,56 @@ export default function ChatPage() {
       textAreaRef.current.style.height = `${textAreaRef.current.scrollHeight}px`;
     }
   }, [newMessage]);
+
+  const startRecording = async () => {
+    if (isRecording) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorderRef.current.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const formData = new FormData();
+        formData.append('file', audioBlob, 'recording.webm');
+
+        try {
+          const response = await apiClient.post('/api/transcribe-audio', formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+            },
+          });
+          const transcribedText = response.data.transcription;
+          setNewMessage(transcribedText);
+          toast.success('Transcripción completada con éxito.');
+        } catch (error) {
+          console.error('Error transcribing audio:', error);
+          toast.error('Error al transcribir el audio. Inténtalo de nuevo.');
+        } finally {
+          setIsRecording(false);
+          stream.getTracks().forEach(track => track.stop());
+        }
+      };
+
+      mediaRecorderRef.current.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error('Error accessing microphone:', error);
+      toast.error('Error al acceder al micrófono. Verifica los permisos.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
+  };
 
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
@@ -468,51 +521,61 @@ export default function ChatPage() {
               className="w-full resize-none bg-transparent border-0 focus:ring-0 p-0 text-base"
               rows={1}
             />
-            <div className="mt-3 flex items-center gap-4">
-              <div 
-                onClick={toggleKnowledgeAnalysis}
-                className={`cursor-pointer flex items-center gap-1.5 text-sm ${isKnowledgeAnalysisActive ? 'text-primary' : 'text-muted-foreground'}`}
-              >
-                <BookMarked className="h-4 w-4" />
-                Análisis de Conocimientos
+            <div className="mt-3 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div 
+                  onClick={toggleKnowledgeAnalysis}
+                  className={`cursor-pointer flex items-center gap-1.5 text-sm ${isKnowledgeAnalysisActive ? 'text-primary' : 'text-muted-foreground'}`}
+                >
+                  <BookMarked className="h-4 w-4" />
+                  Análisis de Conocimientos
+                </div>
+                <div 
+                  onClick={toggleWebSearch}
+                  className={`cursor-pointer flex items-center gap-1.5 text-sm ${isWebSearchActive ? 'text-primary' : 'text-muted-foreground'}`}
+                >
+                  <Search className="h-4 w-4" />
+                  Búsqueda Web
+                </div>
+                <div
+                  onClick={toggleComprehensiveAnalysis}
+                  className={`cursor-pointer flex items-center gap-1.5 text-sm ${isComprehensiveAnalysisActive ? 'text-primary' : 'text-muted-foreground'}`}
+                >
+                  <BrainCircuit className="h-4 w-4" />
+                  Busqueda y Analisis
+                </div>
               </div>
-              <div 
-                onClick={toggleWebSearch}
-                className={`cursor-pointer flex items-center gap-1.5 text-sm ${isWebSearchActive ? 'text-primary' : 'text-muted-foreground'}`}
-              >
-                <Search className="h-4 w-4" />
-                Búsqueda Web
-              </div>
-              <div
-                onClick={toggleComprehensiveAnalysis}
-                className={`cursor-pointer flex items-center gap-1.5 text-sm ${isComprehensiveAnalysisActive ? 'text-primary' : 'text-muted-foreground'}`}
-              >
-                <BrainCircuit className="h-4 w-4" />
-                Busqueda y Analisis
-              </div>
-              <div className="cursor-pointer flex items-center gap-1.5 text-sm text-muted-foreground">
-                <Upload className="h-4 w-4" />
-                <label htmlFor="file-upload" className="cursor-pointer">Subir Archivo</label>
-                <input
-                  id="file-upload"
-                  type="file"
-                  multiple
-                  accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.gif"
-                  className="hidden"
-                  onChange={handleFileUpload}
-                  disabled={isUploadingFile}
-                />
+              <div className="flex items-center gap-3">
+                <div className="cursor-pointer flex items-center text-sm text-muted-foreground">
+                  <Upload className="h-4 w-4" />
+                  <label htmlFor="file-upload" className="cursor-pointer sr-only">Subir Archivo</label>
+                  <input
+                    id="file-upload"
+                    type="file"
+                    multiple
+                    accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.gif"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                    disabled={isUploadingFile}
+                  />
+                </div>
+                <div
+                  onClick={isRecording ? stopRecording : startRecording}
+                  className={`cursor-pointer flex items-center text-sm ${isRecording ? 'text-red-500' : 'text-muted-foreground'}`}
+                >
+                  <Mic className="h-4 w-4" />
+                </div>
+                <Button 
+                  type="submit" 
+                  size="icon" 
+                  variant="ghost"
+                  disabled={isResponding || !newMessage.trim()}
+                >
+                  <ArrowUp className="h-5 w-5" />
+                </Button>
               </div>
             </div>
           </div>
-          <Button 
-            type="submit" 
-            size="icon" 
-            disabled={isResponding || !newMessage.trim()}
-            className="absolute bottom-4 right-4"
-          >
-            <Send className="h-4 w-4" />
-          </Button>
         </form>
       </footer>
     </div>
