@@ -10,6 +10,7 @@ import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { PlusCircle, MoreVertical } from 'lucide-react';
 import { NoteDialog } from './note-dialog';
+import { ViewNoteDialog } from './view-note-dialog';
 
 export interface Note {
   id: number;
@@ -27,6 +28,8 @@ export default function NotesPage() {
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [deletingNote, setDeletingNote] = useState<Note | null>(null);
   const [isNoteDialogOpen, setIsNoteDialogOpen] = useState(false);
+  const [viewingNote, setViewingNote] = useState<Note | null>(null);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
 
   const fetchNotes = async () => {
     setIsLoading(true);
@@ -98,7 +101,10 @@ export default function NotesPage() {
       {isLoading ? <p>Cargando notas...</p> : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {notes.map((note) => (
-            <Card key={note.id} className="flex flex-col">
+            <Card key={note.id} className="flex flex-col cursor-pointer" onClick={() => {
+              setViewingNote(note);
+              setIsViewDialogOpen(true);
+            }}>
               <CardHeader className="flex flex-row items-start justify-between">
                 <div>
                   <CardTitle>{note.title || 'Nota sin título'}</CardTitle>
@@ -136,6 +142,12 @@ export default function NotesPage() {
         onOpenChange={setIsNoteDialogOpen}
         note={editingNote}
         onSaveSuccess={handleSaveSuccess}
+      />
+
+      <ViewNoteDialog
+        isOpen={isViewDialogOpen}
+        onOpenChange={setIsViewDialogOpen}
+        note={viewingNote}
       />
 
       <AlertDialog open={!!deletingNote} onOpenChange={(open) => !open && setDeletingNote(null)}>

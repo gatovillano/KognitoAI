@@ -38,16 +38,10 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                     </div>
                 </div>
                 <div>
-                    <h3 className="font-semibold mb-2">Conexiones Semánticas</h3>
+                    <h3 className="font-semibold mb-2">Preguntas para Explorar</h3>
                     <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                       {analysis.conexiones_semanticas?.map((conn: string, i: number) => <li key={i}>{conn}</li>)}
+                       {analysis.preguntas_para_explorar?.map((question: string, i: number) => <li key={i}>{question}</li>)}
                     </ul>
-                </div>
-                <div>
-                    <h3 className="font-semibold mb-2">Entidades Nombradas</h3>
-                    <div className="flex flex-wrap gap-2">
-                        {analysis.entidades?.map((ent: any) => <Badge key={ent.texto} variant="secondary">{ent.texto} ({ent.tipo})</Badge>)}
-                    </div>
                 </div>
             </div>
         </ScrollArea>

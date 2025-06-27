@@ -211,12 +211,12 @@ export default function ChatPage() {
                           {/* Barra de acciones para la IA */}
                           <div className="mt-2 flex items-center gap-2">
                             <Button variant="ghost" size="sm" onClick={() => handleCopyMessage(msg.text)}>
-                              <Copy className="h-4 w-4 mr-2" /> Copiar
+                              <Copy className="h-4 w-4 mr-2 text-gray-600" /> Copiar
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => handlePlayAudio(msg.text, index)} disabled={isAudioLoading && playingMessageIndex === index}>
-                              {isAudioLoading && playingMessageIndex === index && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                              {playingMessageIndex === index && !isAudioLoading && <Square className="h-4 w-4 mr-2" />}
-                              {playingMessageIndex !== index && <Play className="h-4 w-4 mr-2" />}
+                              {isAudioLoading && playingMessageIndex === index && <Loader2 className="h-4 w-4 mr-2 animate-spin text-gray-600" />}
+                              {playingMessageIndex === index && !isAudioLoading && <Square className="h-4 w-4 mr-2 text-gray-600" />}
+                              {playingMessageIndex !== index && <Play className="h-4 w-4 mr-2 text-gray-600" />}
                               Escuchar
                             </Button>
                           </div>
@@ -228,13 +228,44 @@ export default function ChatPage() {
               </motion.div>
             ))}
             {isResponding && 
-              <div className="flex items-start gap-4 animate-pulse">
-                 <Avatar className="h-8 w-8 border">
-                    <AvatarImage src="/logo-simple.png" alt="Kognito" />
-                    <AvatarFallback>K</AvatarFallback>
-                  </Avatar>
-                <div className="rounded-lg p-3 bg-secondary">
-                    <p className="text-sm text-muted-foreground">Kognito está pensando...</p>
+              <div className="flex justify-center w-full">
+                <div className="w-full max-w-3xl mx-auto">
+                  <div className="flex items-start gap-4">
+                    <Avatar className="h-8 w-8 border">
+                      <AvatarImage src="/logo-simple.png" alt="Kognito" />
+                      <AvatarFallback>K</AvatarFallback>
+                    </Avatar>
+                    <div className="rounded-lg p-3 bg-secondary flex justify-center items-center">
+                      <motion.div
+                        className="flex space-x-1"
+                        animate={{
+                          opacity: [1, 0.5, 1],
+                        }}
+                        transition={{
+                          duration: 1.5,
+                          repeat: Infinity,
+                          ease: "easeInOut",
+                        }}
+                      >
+                        <motion.div
+                          className="h-2 w-6 bg-gray-600 rounded-full"
+                          style={{ borderRadius: '10px' }}
+                        />
+                        <motion.div
+                          className="h-2 w-6 bg-gray-600 rounded-full"
+                          style={{ borderRadius: '10px' }}
+                          animate={{ y: [0, -2, 0] }}
+                          transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut", delay: 0.3 }}
+                        />
+                        <motion.div
+                          className="h-2 w-6 bg-gray-600 rounded-full"
+                          style={{ borderRadius: '10px' }}
+                          animate={{ y: [0, -2, 0] }}
+                          transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut", delay: 0.6 }}
+                        />
+                      </motion.div>
+                    </div>
+                  </div>
                 </div>
               </div>
             }

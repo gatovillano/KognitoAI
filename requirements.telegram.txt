@@ -1,0 +1,6 @@
+# Dependencias para el cliente de Telegram
+python-telegram-bot
+httpx
+python-dotenv
+faster-whisper
+uvicorn

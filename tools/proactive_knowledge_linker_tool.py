@@ -99,7 +99,7 @@ class ProactiveKnowledgeLinkerTool(BaseTool):
         try:
             if user_query:
                 # Análisis bajo demanda basado en la consulta del usuario
-                analysis_request = await interpret_user_request_for_analysis(user_query)
+                analysis_request = await interpret_user_request_for_analysis(user_query, account_id=account_id)
                 action = analysis_request.get("action", "no_action")
                 params = analysis_request.get("parameters", {})
                 

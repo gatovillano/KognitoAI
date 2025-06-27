@@ -3,333 +3,412 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Documentación Completa de KognitoAI - Modo Oscuro</title>
+    <title>Documentación Completa de Kognito AI - Tema Oscuro</title>
     <style>
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
+            background-color: #121212;
             color: #e0e0e0;
-            margin: 0;
+            font-family: 'Arial', sans-serif;
+            line-height: 1.6;
+            margin: 40px;
             padding: 0;
-            background-color: #1a1a1a;
         }
-        header {
-            background: linear-gradient(to right, #2c3e50, #3498db);
-            color: #ffffff;
-            text-align: center;
-            padding: 5rem 0;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-            min-height: 60vh;
+        .cover-page {
+            background-color: #2d2d2d;
+            height: 100vh;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
+            text-align: center;
+            margin: -30px -30px 40px -30px;
+            border-radius: 8px 8px 0 0;
+        }
+        .cover-page img {
+            max-width: 400px;
+            height: auto;
+            margin-bottom: 20px;
+        }
+        .cover-page h1 {
+            color: #00A0A0;
+            font-size: 3em;
+            margin: 0;
+        }
+        .cover-page p {
+            color: #b0b0b0;
+            font-size: 1.5em;
+            margin: 10px 0 0;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 20px;
         }
         header img {
-            max-width: 600px;
-            margin-bottom: 1rem;
+            max-width: 200px;
+            height: auto;
+            margin-bottom: 10px;
         }
         header h1 {
+            color: #00A0A0;
             margin: 0;
-            font-size: 2.5rem;
+            font-size: 2.5em;
         }
-        header h2 {
-            margin: 0.5rem 0 0 0;
-            font-size: 1.5rem;
-            font-weight: normal;
+        header p {
+            color: #a0a0a0;
+            font-size: 1.2em;
         }
         .container {
             max-width: 900px;
             margin: 0 auto;
-            padding: 0 1.5rem;
-        }
-        section {
-            background-color: #2d2d2d;
+            background-color: #1e1e1e;
+            padding: 30px;
             border-radius: 8px;
-            padding: 2rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         }
         h2 {
-            color: #4da6ff;
-            border-bottom: 2px solid #4da6ff;
-            padding-bottom: 0.5rem;
-            margin-top: 0;
+            color: #00A0A0;
+            border-bottom: 2px solid #333;
+            padding-bottom: 10px;
+            margin-top: 30px;
+            font-size: 1.8em;
         }
         h3 {
-            color: #66b3ff;
-            margin-top: 1.5rem;
+            color: #00BABA;
+            margin-top: 20px;
+            font-size: 1.5em;
+        }
+        h4 {
+            color: #00CACA;
+            margin-top: 15px;
+            font-size: 1.2em;
         }
         p {
-            margin: 1rem 0;
+            margin: 10px 0;
+            text-align: justify;
         }
-        ul {
-            list-style-type: disc;
-            margin: 1rem 0;
-            padding-left: 2rem;
+        ul, ol {
+            margin: 10px 0 10px 20px;
         }
-        ul ul {
-            list-style-type: circle;
+        li {
+            margin: 5px 0;
         }
         code {
-            background-color: #3a3a3a;
-            padding: 0.2rem 0.4rem;
-            border-radius: 4px;
-            font-family: 'Courier New', Courier, monospace;
+            background-color: #2d2d2d;
             color: #f0f0f0;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
         }
-        .note {
-            background-color: #3f3f3f;
-            padding: 1rem;
-            border-left: 4px solid #4da6ff;
-            margin: 1rem 0;
-            border-radius: 4px;
+        pre {
+            background-color: #2d2d2d;
+            color: #f0f0f0;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            border: 1px solid #444;
         }
-        footer {
-            text-align: center;
-            padding: 2rem 0;
-            background-color: #242424;
-            margin-top: 2rem;
-            font-size: 0.9rem;
-            color: #a0a0a0;
+        blockquote {
+            border-left: 4px solid #00A0A0;
+            padding-left: 15px;
+            margin: 10px 0;
+            color: #b0b0b0;
+            font-style: italic;
+        }
+        @media print {
+            body {
+                background-color: #ffffff;
+                color: #000000;
+                margin: 0;
+            }
+            .container {
+                box-shadow: none;
+                padding: 0;
+            }
+            header {
+                border-bottom: 1px solid #000;
+            }
+            header h1, h2, h3, h4 {
+                color: #000000;
+            }
+            header img {
+                max-width: 150px;
+            }
+            code, pre {
+                background-color: #f0f0f0;
+                color: #000000;
+            }
+            blockquote {
+                border-left: 4px solid #000000;
+                color: #333333;
+            }
+            @page {
+                size: A4;
+                margin: 10mm;
+            }
         }
     </style>
 </head>
 <body>
-    <header>
-        <img src="public/logo-completo.png" alt="Logo de KognitoAI">
-        <h1>Documentación Completa de KognitoAI</h1>
-        <h2>Un proyecto de Kognito AI Labs</h2>
-    </header>
-
-    <div class="container">
-        <section>
-            <p>Este documento ofrece una explicación exhaustiva sobre las funciones, estructura, lógica y espíritu del proyecto KognitoAI. KognitoAI es un sistema modular de asistente inteligente diseñado para integrar diversas funcionalidades de inteligencia artificial y gestión de información personal a través de múltiples plataformas, como Telegram y una aplicación web. El objetivo de esta documentación es detallar la arquitectura del proyecto, sus componentes clave, la lógica operativa detrás de su construcción y la visión que impulsa su desarrollo.</p>
-        </section>
-
-        <section>
-            <h2>Espíritu de KognitoAI</h2>
-            <p>KognitoAI se fundamenta en los principios de modularidad e independencia de plataforma, buscando proporcionar una experiencia unificada y extensible para los usuarios sin importar la interfaz que utilicen. El sistema centraliza la gestión de datos del usuario —que incluye notas, agendas, documentos y memoria— y expone estas funcionalidades a través de una API robusta. Esta API actúa como la columna vertebral para las interacciones mediante un bot de Telegram, una aplicación web y, potencialmente, otras plataformas en el futuro.</p>
-            <p>La visión detrás de KognitoAI es crear un asistente seguro, escalable y centrado en el usuario que recuerde interacciones previas, gestione datos personales de manera efectiva y aproveche la inteligencia artificial para ofrecer insights proactivos y asistencia personalizada. Un elemento clave de esta visión es el concepto de identidad universal para cada usuario (a través de un <code>account_id</code> único), garantizando consistencia de datos entre plataformas. El proyecto enfatiza una arquitectura desacoplada donde la lógica de negocio principal permanece independiente de la interfaz de usuario, permitiendo flexibilidad y facilidad de expansión.</p>
-        </section>
-
-        <section>
-            <h2>Características Principales</h2>
-            <ul>
-                <li><strong>Identidad Universal</strong>: Cada usuario recibe un <code>account_id</code> único (UUID), independiente de la plataforma, asegurando una gestión de datos coherente en Telegram, web y otros interfaces.</li>
-                <li><strong>Bot de Telegram</strong>: Una interfaz conversacional completa con soporte para comandos, gestión de documentos (subida, consulta, eliminación), notas, agenda y recordatorios.</li>
-                <li><strong>API Centralizada (FastAPI)</strong>: Un backend que expone endpoints para chat, autenticación JWT, gestión de documentos, notas, agenda y más, funcionando como el cerebro central del sistema.</li>
-                <li><strong>WebApp / Panel de Usuario</strong>: Una interfaz web para interactuar con el asistente, gestionar documentos y ver notas, autenticada mediante JWT o login con Telegram.</li>
-                <li><strong>Memoria a Largo Plazo y RAG</strong>: Utiliza PostgreSQL con la extensión <code>pgvector</code> para almacenar memorias vectoriales y perfiles estructurados, permitiendo al agente de IA recordar conversaciones y documentos relevantes.</li>
-                <li><strong>Herramientas LangChain</strong>: Un conjunto de herramientas personalizadas para el agente de IA, incluyendo operaciones CRUD para notas, gestión de agenda, scraping web, generación de imágenes y manejo de documentos, todas operando con el <code>account_id</code> universal.</li>
-                <li><strong>Autenticación Universal</strong>: Soporte para login vía Telegram (para el bot) y autenticación JWT para la webapp y la API.</li>
-                <li><strong>Arquitectura Modular</strong>: Separación clara de responsabilidades en directorios clave como <code>core/</code> (lógica de negocio), <code>telegram_client/</code> (lógica específica de Telegram), <code>tools/</code> (herramientas LangChain), <code>utils/</code> (utilidades generales) y la aplicación web frontend.</li>
-            </ul>
-        </section>
-
-        <section>
-            <h2>Estructura del Proyecto</h2>
-            <p>El proyecto KognitoAI está organizado en directorios específicos, cada uno con un rol definido en el sistema general. A continuación, se presenta una visión detallada de la estructura y propósito de cada componente principal, con un enfoque en cómo está construido el sistema.</p>
-
-            <h3>Archivos del Directorio Raíz</h3>
-            <ul>
-                <li><strong>.env.local</strong>: Contiene variables de configuración específicas del entorno para desarrollo local, como claves de API, URLs de bases de datos y otros ajustes sensibles.</li>
-                <li><strong>docker-compose.yml</strong>: Define y ejecuta aplicaciones Docker multi-contenedor, especificando servicios, redes y volúmenes para los componentes del proyecto (backend, bot de Telegram, etc.).</li>
-                <li><strong>Dockerfile.core</strong>, <strong>Dockerfile.frontend</strong>, <strong>Dockerfile.telegram</strong>, <strong>Dockerfile.webapp</strong>: Archivos de configuración Docker para construir imágenes de las diferentes partes de la aplicación (backend principal, frontend, bot de Telegram y webapp respectivamente). Cada Dockerfile detalla cómo se empaqueta cada componente, incluyendo dependencias y configuraciones específicas.</li>
-                <li><strong>next.config.mjs</strong>: Archivo de configuración para Next.js, el framework de React utilizado en el frontend, que permite personalizar ajustes de compilación, runtime y desarrollo.</li>
-                <li><strong>nginx.conf</strong>: Configuración para Nginx, utilizado probablemente como proxy inverso o servidor web en el despliegue del proyecto.</li>
-                <li><strong>package.json</strong>, <strong>package-lock.json</strong>: Manifiestos del proyecto Node.js que detallan dependencias, scripts y metadatos del proyecto, esenciales para la gestión del frontend.</li>
-                <li><strong>postcss.config.js</strong>: Configuración para PostCSS, una herramienta para transformar CSS con plugins de JavaScript, frecuentemente usada con Tailwind CSS en el frontend.</li>
-                <li><strong>requirements.txt</strong>, <strong>requirements.webapp.txt</strong>: Listas de dependencias de Python para el proyecto completo y específicamente para el componente webapp, asegurando que el entorno backend esté correctamente configurado.</li>
-                <li><strong>run_api.py</strong>, <strong>run_telegram_bot.py</strong>, <strong>run_telegram_panel.py</strong>: Scripts de Python que actúan como puntos de entrada para iniciar el servidor API (FastAPI), el bot de Telegram y el panel de Telegram, respectivamente. Estos scripts son cruciales para arrancar los servicios del sistema.</li>
-                <li><strong>tailwind.config.ts</strong>: Configuración para Tailwind CSS, un framework de CSS basado en utilidades, definiendo estilos personalizados, temas y plugins para el frontend.</li>
-                <li><strong>tsconfig.json</strong>: Archivo de configuración de TypeScript, especificando opciones del compilador y estructura del proyecto para los archivos TypeScript del frontend.</li>
-            </ul>
-
-            <h3>Directorio Core (<code>core/</code>)</h3>
-            <p>Este directorio contiene la lógica de negocio principal del sistema, diseñada para ser independiente de cualquier interfaz específica. Aquí se gestionan los datos del usuario y las funcionalidades clave del asistente.</p>
-            <ul>
-                <li><strong>agenda_manager.py</strong>: Gestiona funcionalidades relacionadas con la agenda, como la programación y seguimiento de eventos. Este módulo interactúa con la base de datos para almacenar y recuperar información de eventos del usuario.</li>
-                <li><strong>agent.py</strong>: Contiene la lógica central del agente de IA, que es el núcleo de las capacidades de automatización e inteligencia del sistema. Este archivo probablemente define cómo el agente procesa entradas, utiliza herramientas LangChain y genera respuestas basadas en el contexto y la memoria.</li>
-                <li><strong>config.py</strong>: Almacena configuraciones del sistema, como conexiones a bases de datos, claves de API y otros parámetros esenciales para el funcionamiento del backend.</li>
-                <li><strong>database.py</strong>: Maneja las interacciones con la base de datos, incluyendo la configuración de conexiones, ejecución de consultas y gestión de datos. Este módulo es fundamental para la persistencia de datos del usuario.</li>
-                <li><strong>memory_manager.py</strong>: Gestiona la memoria o estado de la aplicación, posiblemente para mantener el contexto en conversaciones o procesos de IA. Utiliza probablemente <code>pgvector</code> para almacenar y buscar vectores de memoria, permitiendo al agente recordar interacciones pasadas.</li>
-                <li><strong>notes_manager.py</strong>: Administra funcionalidades de toma de notas, permitiendo la creación, recuperación y modificación de notas asociadas al <code>account_id</code> del usuario.</li>
-                <li><strong>reminders_manager.py</strong>: Maneja la configuración y activación de recordatorios, integrándose con otros módulos para notificar a los usuarios en el momento adecuado.</li>
-            </ul>
-
-            <h3>Directorio Público (<code>public/</code>)</h3>
-            <ul>
-                <li><strong>logo-completo.png</strong>, <strong>logo-simple.png</strong>: Archivos de imagen para los logotipos del proyecto, utilizados en la interfaz de usuario y branding.</li>
-            </ul>
-
-            <h3>Directorio Fuente (<code>src/</code>)</h3>
-            <p>Este directorio contiene el código fuente del frontend de la aplicación web, construido con Next.js, un framework de React.</p>
-
-            <h4>Subdirectorio App (<code>src/app/</code>)</h4>
-            <ul>
-                <li><strong>globals.css</strong>: Estilos CSS globales para la aplicación, definiendo la apariencia general y consistencia visual.</li>
-                <li><strong>layout.tsx</strong>: Define la estructura de diseño general para la aplicación Next.js, sirviendo como base para todas las páginas.</li>
-                <li><strong>(dashboard)/layout.tsx</strong>: Diseño específico para la sección del dashboard de la aplicación, organizando componentes como barras laterales y áreas de contenido.</li>
-                <li><strong>(dashboard)/page.tsx</strong>: Componente de la página principal del dashboard, que probablemente renderiza la vista inicial del usuario autenticado.</li>
-                <li><strong>(dashboard)/chat/[id]/page.tsx</strong>: Página para vistas de chat individuales dentro del dashboard, permitiendo a los usuarios interactuar con el asistente de IA en un contexto específico.</li>
-                <li><strong>(dashboard)/rag/columns.tsx</strong>: Define estructuras de columnas, probablemente para una tabla de datos en la funcionalidad de RAG (Retrieval-Augmented Generation), que permite buscar y gestionar documentos.</li>
-                <li><strong>(dashboard)/rag/data-table.tsx</strong>: Componente para renderizar una tabla de datos en la sección RAG, mostrando información de documentos o resultados de búsqueda.</li>
-                <li><strong>(dashboard)/rag/page.tsx</strong>: Página principal para la funcionalidad RAG dentro del dashboard, integrando componentes para subir, ver y gestionar documentos.</li>
-                <li><strong>(dashboard)/rag/upload-document-dialog.tsx</strong>, <strong>preview-document-dialog.tsx</strong>, <strong>edit-document-dialog.tsx</strong>, <strong>delete-confirmation-dialog.tsx</strong>: Componentes de diálogo para interactuar con documentos (subida, vista previa, edición y eliminación), mejorando la experiencia de usuario en la gestión de documentos.</li>
-                <li><strong>login/page.tsx</strong>: Componente de la página de inicio de sesión para autenticación de usuarios, probablemente integrando opciones de login con Telegram o credenciales.</li>
-            </ul>
-
-            <h4>Subdirectorio Components (<code>src/components/</code>)</h4>
-            <ul>
-                <li><strong>AppShell.tsx</strong>: Probablemente un componente de carcasa de la aplicación que organiza la estructura general de la interfaz de usuario.</li>
-                <li><strong>Sidebar.tsx</strong>: Componente de interfaz para la barra lateral, utilizado para navegación dentro del dashboard.</li>
-                <li><strong>ThemeProvider.tsx</strong>, <strong>ThemeToggle.tsx</strong>: Componentes para gestionar y alternar temas visuales (claro/oscuro) en la aplicación.</li>
-                <li><strong>MarkdownRenderer.tsx</strong>, <strong>InlineMarkdownRenderer.tsx</strong>: Componentes para renderizar contenido en formato Markdown, útiles para mostrar respuestas del asistente o documentación.</li>
-                <li><strong>ui/</strong>: Contiene componentes de interfaz reutilizables de una librería como shadcn/ui, incluyendo <code>alert-dialog.tsx</code>, <code>button.tsx</code>, <code>card.tsx</code>, <code>dialog.tsx</code>, <code>dropdown-menu.tsx</code>, <code>form.tsx</code>, <code>input.tsx</code>, <code>label.tsx</code>, <code>resizable.tsx</code>, <code>scroll-area.tsx</code>, <code>sonner.tsx</code>, <code>table.tsx</code>, <code>textarea.tsx</code>, <code>toast.tsx</code>, <code>toaster.tsx</code>, entre otros, que estandarizan la interfaz de usuario.</li>
-            </ul>
-
-            <h4>Subdirectorio Contexts (<code>src/contexts/</code>)</h4>
-            <ul>
-                <li><strong>AuthContext.tsx</strong>: Proporciona contexto de autenticación para gestionar el estado de login del usuario y permisos a través de la aplicación, esencial para la seguridad y personalización.</li>
-            </ul>
-
-            <h4>Subdirectorio Hooks (<code>src/hooks/</code>)</h4>
-            <ul>
-                <li><strong>use-toast.ts</strong>: Hook personalizado para gestionar notificaciones toast en la aplicación, mejorando la retroalimentación al usuario.</li>
-            </ul>
-
-            <h4>Subdirectorio Lib (<code>src/lib/</code>)</h4>
-            <ul>
-                <li><strong>api.ts</strong>: Contiene funciones o configuraciones para interacciones con la API, facilitando la comunicación entre el frontend y el backend FastAPI.</li>
-                <li><strong>utils.ts</strong>: Funciones de utilidad usadas a lo largo de la aplicación frontend, como formateo de datos o helpers de UI.</li>
-            </ul>
-
-            <h3>Directorio Telegram Client (<code>telegram_client/</code>)</h3>
-            <p>Este directorio implementa la interfaz específica para Telegram, traduciendo interacciones de usuarios a llamadas a la lógica central o herramientas.</p>
-            <ul>
-                <li><strong>bot_manager.py</strong>: Gestiona las operaciones e interacciones del bot de Telegram, inicializando el bot y coordinando handlers.</li>
-                <li><strong>notification_scheduler.py</strong>: Programa notificaciones para ser enviadas a través del bot de Telegram, integrándose con módulos como <code>reminders_manager.py</code>.</li>
-                <li><strong>tools.py</strong>: Funciones o herramientas de utilidad específicas para el cliente de Telegram.</li>
-                <li><strong>handlers/</strong>: Contiene scripts de manejo para diferentes tipos de interacciones en Telegram:
-                    <ul>
-                        <li><strong>admin_handlers.py</strong>: Maneja comandos o acciones específicas de administradores.</li>
-                        <li><strong>callback_query_handler.py</strong>: Gestiona consultas de callback desde botones inline o menús.</li>
-                        <li><strong>command_handlers.py</strong>: Procesa entradas de comandos de los usuarios.</li>
-                        <li><strong>document_handlers.py</strong>: Maneja subidas o interacciones con documentos.</li>
-                        <li><strong>message_handlers.py</strong>: Procesa mensajes entrantes de los usuarios, traduciéndolos a acciones del sistema.</li>
-                    </ul>
-                </li>
-            </ul>
-
-            <h3>Directorio Telegram Panel (<code>telegram_panel/</code>)</h3>
-            <ul>
-                <li><strong>index.html</strong>, <strong>script.js</strong>, <strong>style.css</strong>: Archivos para un panel de control basado en web o interfaz para gestionar el bot de Telegram, proporcionando una alternativa visual a la interacción por comandos.</li>
-            </ul>
-
-            <h3>Directorio Tools (<code>tools/</code>)</h3>
-            <p>Este directorio contiene scripts de Python para funcionalidades específicas o integraciones, utilizados por el agente de IA o el sistema central. Cada herramienta está diseñada para ser agnóstica a la plataforma, operando con el <code>account_id</code> universal.</p>
-            <ul>
-                <li><strong>add_note_tool.py</strong>, <strong>delete_note_tool.py</strong>, <strong>update_note_tool.py</strong>, <strong>get_notes_tool.py</strong>: Herramientas para la gestión de notas (crear, eliminar, actualizar y obtener).</li>
-                <li><strong>analyze_text_for_insights_tool.py</strong>: Analiza texto para derivar insights, probablemente para características impulsadas por IA.</li>
-                <li><strong>cancel_event_tool.py</strong>, <strong>schedule_event_tool.py</strong>, <strong>get_agenda_tool.py</strong>: Herramientas para la gestión de eventos y agenda.</li>
-                <li><strong>delete_document_tool.py</strong>, <strong>get_document_content_tool.py</strong>, <strong>get_document_list_tool.py</strong>, <strong>update_document_metadata_tool.py</strong>: Herramientas para la gestión de documentos.</li>
-                <li><strong>get_proactive_insights_tool.py</strong>, <strong>proactive_knowledge_linker_tool.py</strong>: Herramientas para generar insights proactivos y vincular conocimiento.</li>
-                <li><strong>github_repo_tool.py</strong>: Integración con GitHub para interacciones con repositorios.</li>
-                <li><strong>image_generation_tool.py</strong>: Herramienta para generar imágenes, posiblemente usando modelos de IA.</li>
-                <li><strong>knowledge_analysis_tool.py</strong>: Analiza conocimiento almacenado para proporcionar respuestas o insights.</li>
-                <li><strong>memory_add_tool.py</strong>: Añade datos a la memoria o contexto de la aplicación para el agente de IA.</li>
-                <li><strong>set_reminder_tool.py</strong>: Configura recordatorios para los usuarios.</li>
-                <li><strong>update_user_profile.py</strong>: Actualiza información del perfil del usuario.</li>
-                <li><strong>web_scraper_tool.py</strong>, <strong>web_search_tool.py</strong>: Herramientas para scraping de contenido web y realización de búsquedas en la web.</li>
-            </ul>
-
-            <h3>Directorio Utils (<code>utils/</code>)</h3>
-            <ul>
-                <li><strong>analyze_text_for_insights.py</strong>: Utilidad para análisis de texto, similar a la herramienta pero posiblemente más genérica.</li>
-                <li><strong>db_session.py</strong>: Gestiona sesiones o conexiones a la base de datos, facilitando interacciones seguras y eficientes.</li>
-                <li><strong>document_parser.py</strong>: Parsea documentos para extracción o procesamiento de contenido.</li>
-                <li><strong>embeddings.py</strong>: Maneja embeddings, probablemente para tareas de machine learning o procesamiento de lenguaje natural (NLP).</li>
-                <li><strong>helpers.py</strong>: Funciones de ayuda generales usadas a través del proyecto.</li>
-                <li><strong>image_generation.py</strong>: Utilidad para procesos de generación de imágenes.</li>
-                <li><strong>paginator.py</strong>: Proporciona funcionalidad de paginación para listas o conjuntos de datos.</li>
-                <li><strong>security.py</strong>: Contiene funciones relacionadas con seguridad, como encriptación o verificaciones de autenticación.</li>
-            </ul>
-        </section>
-
-        <section>
-            <h2>Lógica y Construcción del Sistema</h2>
-            <p>La lógica de KognitoAI se basa en una arquitectura desacoplada donde la lógica de negocio principal (en <code>core/</code>) maneja la gestión de datos y funcionalidades de IA de manera independiente a la interfaz de usuario. Esta separación permite operaciones agnósticas a la plataforma, con la misma lógica backend sirviendo tanto al bot de Telegram como a la aplicación web a través de un backend centralizado FastAPI.</p>
-
-            <h3>Gestión de Datos del Usuario</h3>
-            <p>Todos los datos del usuario (notas, documentos, agenda, memoria) están vinculados a un <code>account_id</code> universal, asegurando consistencia entre plataformas. Los módulos en <code>core/</code> como <code>notes_manager.py</code>, <code>agenda_manager.py</code> y <code>memory_manager.py</code> manejan operaciones CRUD para estos datos, interactuando con una base de datos PostgreSQL mejorada con <code>pgvector</code> para almacenamiento y recuperación de vectores. Esta capacidad de vectorización permite búsquedas semánticas avanzadas, esenciales para funcionalidades como RAG (Retrieval-Augmented Generation).</p>
-
-            <h3>Agente de IA</h3>
-            <p>El archivo <code>agent.py</code> en el directorio <code>core/</code> es el corazón de la funcionalidad de IA, definiendo cómo el agente procesa entradas del usuario, utiliza herramientas LangChain (definidas en <code>tools/</code>) y genera respuestas basadas en contexto y memoria a largo plazo. El agente probablemente emplea modelos de lenguaje (como los de Google Gemini, configurados mediante variables de entorno) para entender y responder a las consultas del usuario, integrando datos de memoria para personalizar las interacciones.</p>
-
-            <h3>Capa de API</h3>
-            <p>El servidor FastAPI, iniciado mediante <code>run_api.py</code>, expone endpoints para todas las funcionalidades del sistema, desde interacciones de chat hasta subidas de documentos, asegurados mediante autenticación JWT. Esta API es consumida tanto por el bot de Telegram como por el frontend web, actuando como un punto central de comunicación. Los endpoints probablemente están estructurados para manejar solicitudes específicas como <code>/chat</code>, <code>/documents</code>, <code>/notes</code>, etc., cada uno mapeado a funciones en los módulos <code>core/</code>.</p>
-
-            <h3>Interacción en el Frontend</h3>
-            <p>El frontend basado en Next.js (<code>src/app/</code>) proporciona una interfaz amigable para interactuar con el sistema, con dashboards, interfaces de chat y capacidades RAG para consulta de documentos. Los componentes están estilizados con Tailwind CSS y utilizan elementos de UI reutilizables del directorio <code>ui/</code>. La comunicación con el backend se realiza a través de funciones definidas en <code>api.ts</code>, que envían solicitudes HTTP a los endpoints de FastAPI.</p>
-
-            <h3>Integración con Telegram</h3>
-            <p>El directorio <code>telegram_client/</code> maneja la lógica específica de la plataforma Telegram, traduciendo interacciones del usuario (mensajes, comandos, subidas de archivos) a llamadas a la lógica central o a la API. Esto asegura una experiencia conversacional fluida, donde los usuarios pueden interactuar con el asistente mediante texto o comandos, y recibir respuestas formateadas adecuadamente para Telegram (por ejemplo, con Markdown o botones inline).</p>
-
-            <h3>Flujo de Datos y Comunicación</h3>
-            <ol>
-                <li><strong>Entrada del Usuario</strong>: Un usuario interactúa con el sistema ya sea a través del bot de Telegram (enviando un mensaje o comando) o mediante la webapp (haciendo clic en un botón o enviando un formulario).</li>
-                <li><strong>Procesamiento de la Entrada</strong>: 
-                    <ul>
-                        <li>En Telegram, los handlers en <code>telegram_client/handlers/</code> capturan la entrada y la traducen a una acción, como una llamada a una herramienta en <code>tools/</code> o una solicitud a la API.</li>
-                        <li>En la webapp, el frontend envía una solicitud HTTP a la API FastAPI mediante funciones en <code>api.ts</code>.</li>
-                    </ul>
-                </li>
-                <li><strong>Lógica de Negocio</strong>: La API FastAPI, respaldada por módulos en <code>core/</code>, procesa la solicitud, interactuando con la base de datos si es necesario (a través de <code>database.py</code>) y utilizando el agente de IA (<code>agent.py</code>) para generar respuestas o realizar acciones.</li>
-                <li><strong>Memoria y Contexto</strong>: Durante el procesamiento, <code>memory_manager.py</code> recupera contexto relevante (como conversaciones pasadas o documentos) para personalizar la respuesta.</li>
-                <li><strong>Respuesta al Usuario</strong>: La API devuelve la respuesta al cliente (Telegram o webapp), que la formatea y presenta al usuario.</li>
-            </ol>
-
-            <h3>Tecnologías y Dependencias</h3>
-            <ul>
-                <li><strong>Backend</strong>: Python, FastAPI, PostgreSQL con <code>pgvector</code>, LangChain para herramientas de IA.</li>
-                <li><strong>Frontend</strong>: Next.js (React), TypeScript, Tailwind CSS, componentes de shadcn/ui.</li>
-                <li><strong>Integración de Plataforma</strong>: Telegram Bot API.</li>
-                <li><strong>Despliegue</strong>: Docker, Docker Compose, Nginx como proxy inverso.</li>
-                <li><strong>Modelos de IA</strong>: Probablemente modelos de Google Gemini u otros configurados mediante <code>GOOGLE_API_KEY</code> y variables relacionadas.</li>
-            </ul>
-        </section>
-
-        <section>
-            <h2>Instalación y Despliegue</h2>
-            <p>KognitoAI puede ser desplegado localmente o mediante Docker. Los pasos clave incluyen:</p>
-            <ol>
-                <li>Clonar el repositorio y configurar variables de entorno en un archivo <code>.env</code>.</li>
-                <li>Instalar dependencias de Python (<code>requirements.txt</code>) y Node.js (<code>package.json</code>).</li>
-                <li>Inicializar una base de datos PostgreSQL con <code>pgvector</code>.</li>
-                <li>Ejecutar el servidor FastAPI (<code>run_api.py</code>) y el bot de Telegram (<code>run_telegram_bot.py</code>).</li>
-                <li>Opcionalmente, usar <code>docker-compose up --build</code> para un despliegue contenerizado.</li>
-            </ol>
-            <p>Variables de entorno críticas incluyen <code>TELEGRAM_BOT_TOKEN</code>, <code>GOOGLE_API_KEY</code>, <code>DATABASE_URL</code>, y <code>JWT_SECRET_KEY</code>, entre otras, que configuran las conexiones y seguridad del sistema.</p>
-        </section>
-
-        <section>
-            <h2>Contribución y Licencia</h2>
-            <p>Las contribuciones son bienvenidas, con guías para crear ramas de características y enviar pull requests. El proyecto está bajo la Licencia MIT, promoviendo colaboración y uso abierto.</p>
-        </section>
-
-        <section>
-            <h2>Conclusión</h2>
-            <p>KognitoAI representa un enfoque innovador para la asistencia inteligente, combinando modularidad, insights impulsados por IA y accesibilidad multiplataforma. Su arquitectura asegura escalabilidad y adaptabilidad, mientras que su enfoque en la gestión de datos del usuario y la interacción personalizada subraya su compromiso con mejorar la productividad y el compromiso del usuario.</p>
-            <div class="note">
-                <p>Este documento será actualizado con detalles de implementación más específicos a medida que se revisen archivos clave para obtener insights más profundos sobre la lógica operativa de componentes individuales.</p>
-            </div>
-        </section>
+    <div class="cover-page">
+        <img src="public/logo-completo.png" alt="Logo de Kognito AI Labs">
+        <h1>Documentación Completa de Kognito</h1>
+        <p>Por Kognito AI Labs</p>
     </div>
-
-    <footer>
-        <p>Documentación generada para KognitoAI - © 2025</p>
-    </footer>
-</body>
-</html>
+    <header>
+        <img src="public/logo-simple.png" alt="Logo de Kognito AI Labs">
+        <h1>Documentación Completa de Kognito</h1>
+        <p>Por Kognito AI Labs</p>
+    </header>
+    <div class="container">
+        <h2>1. Introducción y Visión General del Proyecto</h2>
+        <h3>Nombre del Proyecto</h3>
+        <p>Kognito</p>
+        <h3>Propósito y Objetivo Principal</h3>
+        <p>Kognito es una plataforma avanzada de inteligencia artificial diseñada para diversos tipos de equipos, empresas, sector público, investigación y más, con el propósito de abordar los desafíos críticos relacionados con la integración de datos y la toma de decisiones en entornos operativos complejos. El objetivo principal de Kognito es centralizar datos provenientes de múltiples departamentos y fuentes, transformándolos en información accionable mediante el uso de tecnologías de procesamiento de lenguaje natural (PLN) y análisis predictivo.</p>
+        <p>El problema que Kognito resuelve es la fragmentación de datos y la falta de visibilidad integral en operaciones complejas. En entornos donde los datos están dispersos en diferentes sistemas y formatos (bases de datos relacionales, documentos manuales, APIs externas), los gerentes y analistas enfrentan dificultades para obtener una visión unificada que les permita tomar decisiones informadas. Kognito elimina estos silos de datos al integrar información de diversas fuentes, permitiendo a los usuarios realizar consultas en lenguaje natural (por ejemplo, "¿Cuáles son los retrasos esperados en un proyecto debido a factores externos?") y recibir respuestas detalladas, informes personalizados y visualizaciones interactivas en dashboards. Esto no solo mejora la velocidad de la toma de decisiones, sino que también incrementa la precisión al basarse en datos consolidados y análisis de IA.</p>
+        <p>Además, Kognito automatiza procesos repetitivos como la generación de informes, la gestión de agendas y el envío de notificaciones, liberando tiempo valioso para que el personal se enfoque en tareas estratégicas. Su capacidad para ofrecer insights proactivos —como identificar patrones en fallos de equipos o vincular conocimiento entre documentos mediante herramientas como <code>proactive_knowledge_linker_tool.py</code>— añade un valor adicional al anticipar problemas antes de que se conviertan en crisis. Por ejemplo, Kognito puede alertar a un gerente de mantenimiento sobre un posible fallo en una grúa basándose en datos históricos y patrones detectados, permitiendo una intervención preventiva.</p>
+        <p>Kognito también se destaca por su enfoque en la personalización y la accesibilidad. Los usuarios pueden adaptar dashboards y consultas a sus necesidades específicas, mientras que la integración con Telegram permite recibir notificaciones y realizar consultas rápidas desde dispositivos móviles, ideal para personal operativo en campo. Este enfoque integral asegura que todos los niveles de la organización, desde gerentes hasta técnicos, puedan beneficiarse de la plataforma.</p>
+        <h3>Visión a Largo Plazo</h3>
+        <p>La visión a largo plazo de Kognito es convertirse en una solución líder para diversas industrias y sectores a nivel global. Se proyecta como una plataforma integral que impulse la digitalización y automatización de procesos operativos y administrativos en organizaciones de diferentes tamaños y contextos regulatorios. Entre los objetivos futuros se incluyen:</p>
+        <ul>
+            <li><strong>Expansión de Capacidades de IA</strong>: Integrar modelos avanzados de aprendizaje automático para ofrecer predicciones más precisas, como mantenimiento predictivo de equipos portuarios (identificando fallos antes de que ocurran mediante análisis de datos históricos y en tiempo real), estimaciones de flujo de carga basadas en datos históricos y externos (como condiciones climáticas o tendencias de mercado), y optimización de rutas logísticas para minimizar costos y tiempos de espera.</li>
+            <li><strong>Soporte Multilingüe</strong>: Adaptar la interfaz y el procesamiento de lenguaje natural para soportar múltiples idiomas, facilitando su uso en puertos internacionales con personal diverso. Esto incluye la capacidad de procesar consultas en español, inglés, y otros idiomas relevantes para la industria marítima.</li>
+            <li><strong>Adaptabilidad Regulatoria</strong>: Incorporar módulos que permitan la personalización de flujos de trabajo y reportes para cumplir con regulaciones aduaneras y operativas de diferentes países. Por ejemplo, generar automáticamente documentación compatible con normativas específicas de la Unión Europea o de países asiáticos.</li>
+            <li><strong>Integración con IoT y Sensores</strong>: Conectar Kognito con dispositivos IoT en tiempo real (como sensores en grúas, contenedores o vehículos) para monitorear condiciones y actualizar datos dinámicamente, mejorando la capacidad de respuesta ante eventos imprevistos como fallos mecánicos o cambios en las condiciones climáticas.</li>
+            <li><strong>Escalabilidad y Personalización</strong>: Diseñar la arquitectura para manejar volúmenes crecientes de datos y usuarios, permitiendo a cada cliente personalizar la plataforma según sus necesidades específicas, ya sea un puerto pequeño con operaciones limitadas o una red logística internacional con múltiples puntos de operación.</li>
+            <li><strong>Sostenibilidad y Eficiencia Energética</strong>: Incorporar análisis de datos para optimizar el consumo energético en operaciones portuarias, como la gestión eficiente de grúas y vehículos, contribuyendo a los objetivos de sostenibilidad de la industria.</li>
+            <li><strong>Colaboración Interorganizacional</strong>: Desarrollar funcionalidades que permitan la colaboración segura entre diferentes entidades (puertos, proveedores, clientes) mediante el intercambio controlado de datos y reportes, fomentando una red logística más integrada.</li>
+        </ul>
+        <p>Kognito aspira a ser una herramienta indispensable en la transformación digital de la industria marítima, promoviendo operaciones más eficientes, sostenibles y seguras mediante el uso de inteligencia artificial. Su visión incluye no solo la mejora operativa, sino también la creación de un ecosistema donde los datos se conviertan en un activo estratégico para la competitividad de sus usuarios.</p>
+        <h3>Público Objetivo</h3>
+        <p>Kognito está diseñado para satisfacer las necesidades de una amplia gama de usuarios en diversos sectores, como empresas, sector público e investigación, cada uno con roles y requerimientos específicos que la plataforma aborda de manera personalizada:</p>
+        <ul>
+            <li><strong>Gerentes</strong>: Responsables de la planificación estratégica y la supervisión general de las operaciones portuarias. Necesitan una visión integral de los datos para tomar decisiones basadas en métricas clave (KPIs) como tiempos de inactividad de equipos, volúmenes de carga procesados, costos operativos y cumplimiento normativo. Kognito les proporciona dashboards personalizados y respuestas rápidas a consultas complejas como "¿Qué impacto tendrá el pronóstico del clima en las operaciones de la próxima semana?".</li>
+            <li><strong>Analistas</strong>: Profesionales que trabajan con datos para identificar tendencias, patrones y anomalías. Requieren herramientas avanzadas de análisis y visualización para explorar datos en profundidad, generar informes detallados y proporcionar recomendaciones basadas en evidencia. Kognito les permite realizar análisis predictivos y acceder a herramientas como <code>analyze_text_for_insights_tool.py</code> para extraer insights de documentos extensos.</li>
+            <li><strong>Desarrolladores e Ingenieros de Sistemas</strong>: Encargados de integrar Kognito con sistemas existentes, personalizar funcionalidades y mantener la plataforma operativa. Necesitan documentación técnica detallada, acceso a APIs (como las definidas en <code>run_api.py</code>), y herramientas para extender las capacidades del sistema, como la integración con GitHub mediante <code>github_repo_tool.py</code>.</li>
+            <li><strong>Usuarios Operativos</strong>: Personal de departamentos específicos como Mantenimiento (técnicos que monitorean el estado de grúas y equipos), Operaciones (coordinadores de muelles que gestionan tiempos de carga/descarga), Comercial (gestores de contratos y relaciones con clientes) y Aduanas (inspectores que verifican documentación y cumplimiento). Utilizan Kognito para consultas diarias, como verificar el estado de equipos o documentos pendientes, y para recibir notificaciones en tiempo real a través de Telegram (<code>telegram_client/notification_scheduler.py</code>).</li>
+            <li><strong>Stakeholders Externos</strong>: Incluyen socios comerciales, clientes, proveedores y entidades reguladoras que pueden beneficiarse de informes generados por Kognito, como resúmenes de operaciones, certificaciones de cumplimiento o análisis de rendimiento. Kognito asegura que estos informes sean exportables en formatos estándar (PDF, CSV) para facilitar su uso en presentaciones o auditorías.</li>
+        </ul>
+        <p>La plataforma está diseñada para ser intuitiva para usuarios no técnicos, mientras que ofrece profundidad técnica para aquellos con conocimientos avanzados, asegurando que todos los roles dentro de la organización puedan aprovechar sus capacidades al máximo.</p>
+        <h3>Beneficios Clave</h3>
+        <p>Kognito ofrece una serie de beneficios que impactan directamente en la eficiencia operativa, la toma de decisiones y la competitividad de organizaciones en diversos sectores. Estos beneficios se derivan de su arquitectura avanzada y de las tecnologías de IA integradas:</p>
+        <ul>
+            <li><strong>Integración de Datos sin Precedentes</strong>: Unifica información de múltiples fuentes (bases de datos internas como PostgreSQL gestionadas por <code>core/database.py</code>, APIs externas como datos meteorológicos, documentos manuales subidos por usuarios) en una sola plataforma, eliminando silos de datos y proporcionando una visión holística de las operaciones portuarias. Esto permite, por ejemplo, correlacionar datos de mantenimiento con retrasos operativos para identificar causas raíz.</li>
+            <li><strong>Toma de Decisiones Mejorada</strong>: Transforma datos complejos y voluminosos en insights accionables mediante análisis de IA, permitiendo a los usuarios tomar decisiones informadas rápidamente. Por ejemplo, un gerente puede identificar cuellos de botella en tiempo real y reasignar recursos con un solo clic, basándose en respuestas generadas por el agente de IA en <code>core/agent.py</code>.</li>
+            <li><strong>Eficiencia Operativa</strong>: Automatiza tareas repetitivas como la generación de informes (mediante <code>tools/analyze_text_for_insights_tool.py</code>), la gestión de agendas (<code>core/agenda_manager.py</code>), y el envío de notificaciones (<code>telegram_client/notification_scheduler.py</code>), reduciendo significativamente el esfuerzo manual y los errores humanos. Esto permite al personal centrarse en actividades de mayor valor estratégico.</li>
+            <li><strong>Interacción Intuitiva con PLN</strong>: Gracias al procesamiento de lenguaje natural implementado en <code>core/agent.py</code> con modelos como Google Gemini (<code>gemini-2.0-flash</code>), los usuarios pueden interactuar con Kognito haciendo preguntas en un lenguaje cotidiano, sin necesidad de conocimientos técnicos avanzados. Esto democratiza el acceso a datos y análisis, permitiendo que incluso personal operativo pueda obtener información crítica sin formación especializada.</li>
+            <li><strong>Personalización Avanzada</strong>: Ofrece la capacidad de adaptar dashboards, consultas e informes a las necesidades específicas de cada usuario o departamento, asegurando que cada rol obtenga la información más relevante para su trabajo. Por ejemplo, un técnico de mantenimiento puede configurar un dashboard para monitorear solo el estado de equipos específicos, mientras que un gerente puede ver un resumen de todos los departamentos.</li>
+            <li><strong>Insights Proactivos</strong>: Mediante herramientas como <code>analyze_text_for_insights</code> y <code>proactive_knowledge_linker_tool.py</code>, Kognito identifica patrones y conexiones en los datos antes de que los usuarios las soliciten, anticipándose a problemas y sugiriendo soluciones. Por ejemplo, puede detectar una correlación entre fallos de equipos y condiciones climáticas pasadas, alertando al equipo de mantenimiento antes de que ocurra un problema similar.</li>
+            <li><strong>Escalabilidad y Robustez</strong>: Diseñado para manejar grandes volúmenes de datos y un número creciente de usuarios, Kognito puede adaptarse a las necesidades futuras de cualquier organización sin comprometer el rendimiento. Su arquitectura basada en Docker (<code>docker-compose.yml</code>) y configuraciones para Kubernetes asegura que pueda escalar horizontalmente en entornos de producción.</li>
+            <li><strong>Accesibilidad Multiplataforma</strong>: Disponible tanto en interfaces web (con diseño responsivo para móvil y escritorio en <code>src/components/AppShell.tsx</code>) como a través de un bot de Telegram (<code>run_telegram_bot.py</code>), permitiendo a los usuarios acceder a información crítica desde cualquier lugar, ya sea en la oficina o en el campo. Esto es especialmente útil para personal operativo que necesita actualizaciones en tiempo real mientras está en los muelles.</li>
+            <li><strong>Seguridad y Confidencialidad</strong>: Implementa principios estrictos de seguridad, como autenticación mediante JWT (<code>core/config.py</code> con <code>jwt_secret_key</code>), encriptación de datos sensibles, y control de acceso basado en roles, asegurando que la información confidencial esté protegida y solo accesible para usuarios autorizados.</li>
+            <li><strong>Mejora Continua del Contexto</strong>: A través de la gestión de memoria en <code>core/memory_manager.py</code> y la sumarización de historiales en <code>core/agent.py</code> (<code>summarize_history_in_background</code>), Kognito aprende de las interacciones pasadas para ofrecer respuestas más relevantes y personalizadas con el tiempo, mejorando la experiencia del usuario de manera continua.</li>
+        </ul>
+        <p>Estos beneficios posicionan a Kognito como una herramienta transformadora que no solo resuelve problemas operativos inmediatos, sino que también prepara a las organizaciones de diversos sectores para los desafíos futuros en sus respectivas industrias.</p>
+        <h2>2. Arquitectura y Diseño del Sistema</h2>
+        <h3>Componentes Principales</h3>
+        <p>Kognito está estructurado como un sistema modular, donde cada componente tiene una función específica pero trabaja en conjunto para ofrecer una experiencia fluida y potente. La arquitectura está diseñada para ser escalable, mantenible y adaptable a las necesidades cambiantes de un entorno portuario. A continuación, se describen los módulos principales identificados a partir de la estructura del código en los directorios <code>core/</code>, <code>tools/</code>, <code>src/</code>, y otros, con referencias específicas a archivos y funcionalidades:</p>
+        <ul>
+            <li><strong>Módulo de Ingesta de Datos</strong>:
+                <ul>
+                    <li><strong>Función</strong>: Recolecta datos de diversas fuentes internas y externas para centralizar la información en Kognito. Las fuentes internas incluyen bases de datos relacionales de departamentos como Mantenimiento (estado de equipos, historial de reparaciones), Operaciones (tiempos de carga/descarga, asignación de muelles), Comercial (contratos, volúmenes de carga, análisis de clientes) y Aduanas (documentación, cumplimiento normativo). Las fuentes externas abarcan APIs de terceros (por ejemplo, datos meteorológicos o de tráfico marítimo) y documentos manuales subidos por usuarios (PDF, DOCX, TXT).</li>
+                    <li><strong>Implementación</strong>: Utiliza conectores personalizados para bases de datos y APIs, así como herramientas de scraping web definidas en <code>tools/web_scraper_tool.py</code> (con clase <code>WebScraperTool</code> para extraer contenido de URLs específicas). Los documentos subidos se procesan mediante <code>utils/document_parser.py</code>, que extrae texto y metadatos para su posterior análisis. Los datos crudos se limpian y estructuran antes de ser almacenados en bases de datos optimizadas para búsqueda y análisis.</li>
+                    <li><strong>Archivos Relevantes</strong>: <code>utils/document_parser.py</code> (procesamiento de documentos), <code>tools/web_scraper_tool.py</code> (scraping de datos externos), <code>tools/web_search_tool.py</code> (búsqueda web para enriquecer datos con información externa mediante <code>Brave Search API</code> configurada en <code>core/config.py</code>).</li>
+                    <li><strong>Detalles Técnicos</strong>: La ingesta de datos es un proceso asíncrono que asegura un impacto mínimo en el rendimiento del sistema, permitiendo la actualización en tiempo real de datos críticos como el estado de equipos o retrasos operativos. La configuración de APIs externas, como <code>BRAVE_SEARCH_API_KEY</code> en <code>core/config.py</code>, permite integrar datos de búsqueda web cuando los datos internos no son suficientes para responder a una consulta.</li>
+                </ul>
+            </li>
+            <li><strong>Módulo de Procesamiento de Lenguaje Natural (PLN)</strong>:
+                <ul>
+                    <li><strong>Función</strong>: Permite a los usuarios interactuar con Kognito mediante preguntas en lenguaje natural, traduciendo estas consultas a comandos estructurados que el sistema puede procesar. Genera respuestas comprensibles y contextuales, adaptadas al dominio portuario, asegurando que incluso usuarios no técnicos puedan obtener información compleja sin necesidad de aprender sintaxis o interfaces técnicas.</li>
+                    <li><strong>Implementación</strong>: Basado en modelos de IA como Google Gemini (<code>gemini-2.0-flash</code> configurado en <code>core/config.py</code> como <code>GOOGLE_MAIN_MODEL_NAME</code>), integrados en <code>core/agent.py</code> mediante funciones como <code>initialize_llms</code> (que carga los modelos al iniciar el servidor) y <code>create_and_run_agent</code> (que procesa las consultas de los usuarios). Utiliza contexto del usuario mediante <code>_get_user_context</code> para personalizar respuestas, incorporando información de perfil y memorias relevantes obtenidas de <code>core/memory_manager.py</code>. La biblioteca LangChain (<code>langchain_google_genai.ChatGoogleGenerativeAI</code>) es central para orquestar la interacción entre el modelo de lenguaje, las herramientas y la memoria.</li>
+                    <li><strong>Archivos Relevantes</strong>: <code>core/agent.py</code> (núcleo del procesamiento de consultas con <code>create_and_run_agent</code>), <code>core/config.py</code> (configuración de modelos de lenguaje y temperatura con <code>llm_temperature</code>), <code>tools/knowledge_analysis_tool.py</code> (análisis semántico de consultas mediante <code>KnowledgeAnalysisTool</code>).</li>
+                    <li><strong>Detalles Técnicos</strong>: El módulo de PLN utiliza un enfoque de "prompt dinámico centralizado" (como se describe en los comentarios de <code>core/agent.py</code>), donde un único <code>SystemMessage</code> se construye al inicio de cada interacción, integrando el perfil del usuario, memorias relevantes, instrucciones de identificación (<code>account_id</code>, <code>telegram_id</code>), y guías para el uso de herramientas. Esto asegura que las respuestas sean contextuales y precisas. Además, el sistema maneja errores de parsing (<code>handle_parsing_errors=True</code> en <code>AgentExecutor</code>) para garantizar robustez ante entradas inesperadas del usuario.</li>
+                </ul>
+            </li>
+            <li><strong>Módulo de Análisis y Generación de Informes</strong>:
+                <ul>
+                    <li><strong>Función</strong>: Procesa datos ingeridos mediante algoritmos de análisis descriptivo (resúmenes históricos de operaciones), predictivo (predicciones de fallos de equipos o retrasos basados en patrones) y prescriptivo (recomendaciones de acción como reasignación de recursos). Produce informes detallados y personalizados que pueden exportarse a formatos como PDF o CSV para uso interno o externo.</li>
+                    <li><strong>Implementación</strong>: Incluye herramientas específicas como <code>analyze_text_for_insights_tool.py</code> (con clase <code>AnalyzeTextForInsightsTool</code> para análisis de texto y extracción de insights) y <code>proactive_knowledge_linker_tool.py</code> (con <code>ProactiveKnowledgeLinkerTool</code> para vincular conocimiento entre documentos y datos, utilizando umbrales de similitud definidos en <code>core/config.py</code> como <code>DUPLICITY_SIMILARITY_THRESHOLD</code> y <code>SYNERGY_SIMILARITY_THRESHOLD</code>). Los resultados se formatean para ser legibles y accionables mediante métodos como <code>_format_result</code> en <code>analyze_text_for_insights_tool.py</code>.</li>
+                    <li><strong>Archivos Relevantes</strong>: <code>tools/analyze_text_for_insights_tool.py</code> (análisis de texto), <code>utils/analyze_text_for_insights.py</code> (lógica subyacente de análisis), <code>tools/proactive_knowledge_linker_tool.py</code> (vinculación de conocimiento), <code>core/config.py</code> (parámetros de umbrales para análisis).</li>
+                    <li><strong>Detalles Técnicos</strong>: El análisis se realiza de manera asíncrona para manejar grandes volúmenes de datos sin bloquear la interfaz del usuario. Por ejemplo, <code>AnalyzeTextForInsightsTool</code> utiliza <code>_arun</code> para procesar texto de forma asíncrona y devolver resultados formateados. Los umbrales configurables en <code>core/config.py</code> permiten ajustar la sensibilidad del análisis, como detectar duplicidad (similitud > 0.90) o sinergia (similitud > 0.65), lo que asegura que los insights sean relevantes y no redundantes. La generación de informes puede integrarse con dashboards para visualización inmediata o exportarse para presentaciones.</li>
+                </ul>
+            </li>
+            <li><strong>Módulo de Dashboards e Interfaz de Usuario</strong>:
+                <ul>
+                    <li><strong>Función</strong>: Proporciona una interfaz web intuitiva para visualizar datos, personalizar dashboards, realizar consultas en lenguaje natural y gestionar tareas operativas como notas y agendas. Soporta diseño responsivo para acceso desde dispositivos móviles y de escritorio, asegurando accesibilidad para todos los usuarios, ya sea en la oficina o en el campo.</li>
+                    <li><strong>Implementación</strong>: Construido con React y Next.js, con componentes clave como <code>AppShell.tsx</code> (estructura principal de la aplicación con un sidebar colapsable y header con toggle de tema en <code>src/components/AppShell.tsx</code>), <code>Sidebar.tsx</code> (navegación entre secciones como Agenda, Notas, RAG en <code>src/components/Sidebar.tsx</code>), y páginas específicas como <code>rag/page.tsx</code> (análisis de documentos y colecciones en <code>src/app/(dashboard)/rag/page.tsx</code>) y <code>chat/[id]/page.tsx</code> (interacción conversacional con IA en <code>src/app/(dashboard)/chat/[id]/page.tsx</code>). Utiliza Tailwind CSS para estilos (<code>tailwind.config.ts</code>) y componentes de <code>shadcn/ui</code> (<code>src/components/ui/</code>) para una experiencia de usuario consistente con elementos como botones, diálogos y tablas.</li>
+                    <li><strong>Archivos Relevantes</strong>: <code>src/components/AppShell.tsx</code> (estructura responsiva de la aplicación), <code>src/components/Sidebar.tsx</code> (navegación entre módulos), <code>src/app/(dashboard)/rag/page.tsx</code> (interfaz para análisis RAG), <code>src/app/(dashboard)/chat/[id]/page.tsx</code> (chat con IA), <code>tailwind.config.ts</code> (estilos).</li>
+                    <li><strong>Detalles Técnicos</strong>: La interfaz utiliza un diseño responsivo que adapta el layout según el tamaño de la pantalla (<code>useMediaQuery</code> en <code>AppShell.tsx</code> para detectar desktop vs móvil). En desktop, el sidebar es persistente y colapsable (<code>isSidebarCollapsed</code> toggle), mientras que en móvil se presenta como un menú deslizante (<code>Sheet</code> component). La integración con el backend se realiza mediante APIs RESTful (<code>src/lib/api.ts</code>), permitiendo la actualización en tiempo real de datos en dashboards. Componentes como <code>ThemeToggle</code> (<code>src/components/ThemeToggle.tsx</code>) permiten alternar entre temas claro y oscuro, mejorando la usabilidad en diferentes condiciones de iluminación.</li>
+                </ul>
+            </li>
+            <li><strong>Módulo de Integración con Telegram</strong>:
+                <ul>
+                    <li><strong>Función</strong>: Permite notificaciones en tiempo real, recordatorios y consultas rápidas desde dispositivos móviles a través de un bot de Telegram, ideal para usuarios operativos en campo que no tienen acceso constante a la interfaz web. Esto asegura que el personal pueda recibir alertas críticas (como fallos de equipos) o responder a consultas simples sin necesidad de una computadora.</li>
+                    <li><strong>Implementación</strong>: Gestionado por <code>telegram_client/bot_manager.py</code> (orquestación del bot) y <code>telegram_client/notification_scheduler.py</code> (programación de notificaciones y recordatorios), con manejadores específicos para diferentes tipos de interacciones: comandos (<code>telegram_client/handlers/command_handlers.py</code>), mensajes de texto (<code>telegram_client/handlers/message_handlers.py</code>), y documentos (<code>telegram_client/handlers/document_handlers.py</code>). Las credenciales y configuraciones del bot se gestionan en <code>core/config.py</code> (<code>TELEGRAM_BOT_TOKEN</code>, <code>BOT_USERNAME</code>).</li>
+                    <li><strong>Archivos Relevantes</strong>: <code>telegram_client/handlers/message_handlers.py</code> (procesamiento de mensajes de usuarios), <code>telegram_client/handlers/command_handlers.py</code> (manejo de comandos como /start), <code>telegram_client/notification_scheduler.py</code> (envío de recordatorios), <code>run_telegram_bot.py</code> (script de inicio del bot).</li>
+                    <li><strong>Detalles Técnicos</strong>: La integración utiliza la biblioteca Telethon para interactuar con la API de Telegram, permitiendo funcionalidades como el envío de mensajes formateados y la gestión de callbacks (<code>telegram_client/handlers/callback_query_handler.py</code>). Los IDs de administrador (<code>ADMIN_TELEGRAM_IDS</code> en <code>core/config.py</code>) restringen ciertas funcionalidades a usuarios autorizados. La URL del panel web (<code>TELEGRAM_WEBAPP_URL</code>) permite a los usuarios acceder a la interfaz completa desde Telegram si necesitan más funcionalidades.</li>
+                </ul>
+            </li>
+            <li><strong>Módulo de Gestión de Base de Datos y Memoria</strong>:
+                <ul>
+                    <li><strong>Función</strong>: Administra el almacenamiento, recuperación y búsqueda de datos estructurados (como agendas, notas, perfiles de usuario) y no estructurados (como textos de documentos y embeddings para búsqueda semántica). Mantiene el contexto de las interacciones del usuario para respuestas personalizadas, asegurando que Kognito "recuerde" conversaciones pasadas y preferencias.</li>
+                    <li><strong>Implementación</strong>: Utiliza bases de datos relacionales como PostgreSQL (definidas en <code>core/database.py</code> con modelos como <code>Account</code>, <code>Memory</code>, <code>Nota</code>, <code>AgendaEvent</code>, <code>ChatThread</code>) para datos estructurados, y bases de datos vectoriales como Pinecone o Weaviate para embeddings (<code>utils/embeddings.py</code>, configurado con <code>GOOGLE_EMBEDDING_MODEL_NAME</code> como <code>text-embedding-004</code> en <code>core/config.py</code>). Incluye funcionalidades como <code>memory_manager.py</code> para gestionar recuerdos y documentos (<code>get_relevant_memories</code> para buscar memorias relevantes, <code>process_document_for_rag</code> para procesar documentos para RAG). El historial de chat se almacena mediante <code>PostgresChatMessageHistory</code> en <code>core/agent.py</code>.</li>
+                    <li><strong>Archivos Relevantes</strong>: <code>core/database.py</code> (modelos de datos relacionales), <code>core/memory_manager.py</code> (gestión de contexto y documentos), <code>utils/embeddings.py</code> (generación de embeddings), <code>core/agent.py</code> (almacenamiento de historial con <code>PostgresChatMessageHistory</code>).</li>
+                    <li><strong>Detalles Técnicos</strong>: La base de datos PostgreSQL se configura mediante variables de entorno como <code>DATABASE_URL</code> en <code>core/config.py</code>, asegurando flexibilidad para diferentes entornos (desarrollo, producción). La gestión de memoria utiliza un enfoque de "manejo manual" (como se describe en <code>core/agent.py</code>), cargando y guardando explícitamente el historial para mayor control. Los embeddings permiten búsquedas semánticas rápidas, esenciales para funcionalidades como RAG (<code>tools/document_rag_tool.py</code>), donde los fragmentos de documentos más relevantes se recuperan basados en la similitud con la consulta del usuario (parámetros como <code>CHUNK_SIZE</code> y <code>CHUNK_OVERLAP</code> en <code>core/config.py</code> controlan la segmentación de textos).</li>
+                </ul>
+            </li>
+            <li><strong>Módulo de Herramientas y Agentes de IA</strong>:
+                <ul>
+                    <li><strong>Función</strong>: Proporciona herramientas específicas para automatizar tareas y extender las capacidades de Kognito, como análisis de documentos, gestión de notas, integración con servicios externos (GitHub, búsqueda web), generación de imágenes, y programación de eventos. Estas herramientas son invocadas por el agente de IA para responder a consultas de usuarios de manera precisa y funcional.</li>
+                    <li><strong>Implementación</strong>: Definido en el directorio <code>tools/</code>, con clases como <code>BaseTool</code> extendidas para cada funcionalidad específica. Ejemplos incluyen <code>AddNoteTool</code> (<code>tools/add_note_tool.py</code>) para agregar notas, <code>DocumentRAGTool</code> (<code>tools/document_rag_tool.py</code>) para búsqueda y generación de respuestas basadas en documentos, <code>GitHubRepoTool</code> (<code>tools/github_repo_tool.py</code>) para interactuar con repositorios de GitHub, y <code>ImageGenerationTool</code> (<code>tools/image_generation_tool.py</code>) para crear imágenes basadas en texto. Estas herramientas son invocadas por agentes de IA en <code>core/agent.py</code> (<code>create_and_run_agent</code>), que utiliza LangChain para orquestar su uso (<code>get_all_langchain_tools</code> en <code>core/tools.py</code>).</li>
+                    <li><strong>Archivos Relevantes</strong>: <code>tools/add_note_tool.py</code> (gestión de notas), <code>tools/document_rag_tool.py</code> (RAG para documentos), <code>tools/github_repo_tool.py</code> (integración con GitHub), <code>tools/image_generation_tool.py</code> (generación de imágenes), <code>core/tools.py</code> (lista de herramientas disponibles), <code>core/agent.py</code> (ejecución de agentes).</li>
+                    <li><strong>Detalles Técnicos</strong>: Cada herramienta implementa métodos asíncronos (<code>_arun</code>) para garantizar un rendimiento óptimo, permitiendo operaciones no bloqueantes. Las herramientas reciben parámetros de identificación como <code>account_id</code> y <code>telegram_id</code> (pasados mediante <code>config</code> en <code>AgentExecutor</code> de <code>core/agent.py</code>) para asegurar que las operaciones sean específicas del usuario. La configuración de modelos de IA para herramientas específicas, como <code>GOOGLE_IMAGE_GENERATION_MODEL_NAME</code> (<code>imagegeneration@006</code> en <code>core/config.py</code>), asegura que cada tarea utilice el modelo más adecuado. El agente sigue una "instrucción crítica" de usar solo una herramienta por interacción (como se define en el prompt del sistema en <code>core/agent.py</code>), esperando la siguiente interacción del usuario antes de invocar otra herramienta, lo que evita respuestas sobrecargadas.</li>
+                </ul>
+            </li>
+        </ul>
+        <h3>Flujo de Datos</h3>
+        <p>El flujo de datos en Kognito sigue un ciclo bien definido que asegura que la información se recolecte, procese, analice y presente de manera eficiente. Este flujo está diseñado para minimizar la latencia, maximizar la relevancia de las respuestas y mantener un contexto coherente para los usuarios. A continuación, se detalla cada etapa del flujo, con referencias a los componentes y archivos relevantes:</p>
+        <ol>
+            <li><strong>Ingesta de Datos</strong>:
+                <ul>
+                    <li><strong>Descripción</strong>: Los datos se recolectan de fuentes internas (bases de datos SQL de departamentos gestionadas por <code>core/database.py</code>, documentos subidos por usuarios) y externas (APIs de clima, tráfico marítimo, búsquedas web mediante <code>tools/web_search_tool.py</code>).</li>
+                    <li><strong>Proceso</strong>: Herramientas como <code>document_parser.py</code> procesan documentos en formatos variados (PDF, DOCX, TXT) para extraer texto y metadatos. Los conectores personalizados (implícitos en la arquitectura) acceden a bases de datos relacionales y APIs externas. Los datos crudos se limpian y estructuran para su almacenamiento, asegurando consistencia y calidad.</li>
+                    <li><strong>Archivos Clave</strong>: <code>utils/document_parser.py</code>, <code>tools/web_scraper_tool.py</code>, <code>tools/web_search_tool.py</code>.</li>
+                    <li><strong>Detalles</strong>: La ingesta puede ser en tiempo real (para datos de sensores o APIs) o por lotes (para documentos subidos), dependiendo de la fuente. La API key para búsqueda web (<code>BRAVE_SEARCH_API_KEY</code> en <code>core/config.py</code>) permite enriquecer datos internos con información externa cuando sea necesario.</li>
+                </ul>
+            </li>
+            <li><strong>Almacenamiento y Procesamiento</strong>:
+                <ul>
+                    <li><strong>Descripción</strong>: Los datos estructurados (eventos de agenda, notas, perfiles) se guardan en bases de datos relacionales, mientras que los datos no estructurados (textos de documentos, consultas de usuarios) se convierten en embeddings para búsqueda semántica.</li>
+                    <li><strong>Proceso</strong>: Los datos estructurados se almacenan en PostgreSQL (<code>core/database.py</code> con modelos como <code>Nota</code>, <code>AgendaEvent</code>), configurado mediante <code>DATABASE_URL</code> en <code>core/config.py</code>. Los datos no estructurados se procesan en embeddings mediante <code>utils/embeddings.py</code> (usando el modelo <code>text-embedding-004</code> definido en <code>core/config.py</code>) y se almacenan en bases de datos vectoriales. El contexto del usuario se mantiene mediante <code>memory_manager.py</code> (<code>add_memory_to_vector_db</code>, <code>get_relevant_memories</code>) para personalizar interacciones futuras.</li>
+                    <li><strong>Archivos Clave</strong>: <code>core/database.py</code>, <code>core/memory_manager.py</code>, <code>utils/embeddings.py</code>.</li>
+                    <li><strong>Detalles</strong>: La segmentación de textos para RAG se controla mediante parámetros como <code>CHUNK_SIZE</code> (1000 caracteres por defecto) y <code>CHUNK_OVERLAP</code> (200 caracteres) en <code>core/config.py</code>, asegurando que los fragmentos sean lo suficientemente grandes para mantener contexto pero lo suficientemente pequeños para búsquedas precisas. El almacenamiento de embeddings permite búsquedas semánticas rápidas, esenciales para responder consultas basadas en documentos.</li>
+                </ul>
+            </li>
+            <li><strong>Análisis de Datos</strong>:
+                <ul>
+                    <li><strong>Descripción</strong>: Los datos procesados se analizan mediante modelos de IA para identificar patrones, tendencias y predicciones, generando insights accionables.</li>
+                    <li><strong>Proceso</strong>: Herramientas como <code>analyze_text_for_insights_tool.py</code> extraen insights de textos largos (método <code>_arun</code> para análisis asíncrono), mientras que <code>proactive_knowledge_linker_tool.py</code> vincula información relacionada entre documentos y datos (usando umbrales de similitud como <code>DUPLICITY_SIMILARITY_THRESHOLD</code> de <code>core/config.py</code>). Los resultados del análisis se formatean para ser legibles, ya sea como texto narrativo, tablas o visualizaciones, mediante métodos como <code>_format_result</code>.</li>
+                    <li><strong>Archivos Clave</strong>: <code>tools/analyze_text_for_insights_tool.py</code>, <code>tools/proactive_knowledge_linker_tool.py</code>, <code>core/config.py</code>.</li>
+                    <li><strong>Detalles</strong>: El análisis predictivo puede identificar, por ejemplo, un aumento en fallos de grúas y sugerir mantenimiento preventivo. Los umbrales configurables permiten ajustar la sensibilidad del análisis (por ejemplo, detectar contradicciones con <code>CONTRADICTION_SENTIMENT_THRESHOLD</code> de 0.70), asegurando que los insights sean relevantes. El análisis se realiza de manera asíncrona para no bloquear la interfaz del usuario.</li>
+                </ul>
+            </li>
+            <li><strong>Interacción del Usuario</strong>:
+                <ul>
+                    <li><strong>Descripción</strong>: Los usuarios interactúan con Kognito a través de la interfaz web o el bot de Telegram, realizando consultas en lenguaje natural que son procesadas por el agente de IA.</li>
+                    <li><strong>Proceso</strong>: Las consultas se reciben mediante la interfaz web (<code>src/app/(dashboard)/chat/[id]/page.tsx</code>) o Telegram (<code>telegram_client/handlers/message_handlers.py</code>). El agente en <code>core/agent.py</code> (<code>create_and_run_agent</code>) procesa la consulta, invocando herramientas relevantes del directorio <code>tools/</code> (como <code>DocumentRAGTool</code> para búsqueda en documentos). Las respuestas se personalizan según el contexto del usuario almacenado en <code>memory_manager.py</code> (<code>get_relevant_memories</code>).</li>
+                    <li><strong>Archivos Clave</strong>: <code>core/agent.py</code>, <code>src/app/(dashboard)/chat/[id]/page.tsx</code>, <code>telegram_client/handlers/message_handlers.py</code>, <code>core/memory_manager.py</code>.</li>
+                    <li><strong>Detalles</strong>: El agente utiliza un prompt dinámico que incluye el contexto del usuario, instrucciones de identificación (<code>account_id</code>, <code>telegram_id</code>), y guías para herramientas (como se ve en <code>core/agent.py</code>). La interacción sigue un principio de "una herramienta por vez", esperando la siguiente entrada del usuario antes de invocar otra herramienta, lo que asegura claridad en las respuestas. El historial de chat se guarda mediante <code>PostgresChatMessageHistory</code> para mantener continuidad.</li>
+                </ul>
+            </li>
+            <li><strong>Presentación de Resultados</strong>:
+                <ul>
+                    <li><strong>Descripción</strong>: Los resultados del análisis y las respuestas del agente se presentan al usuario en formatos accesibles y personalizables.</li>
+                    <li><strong>Proceso</strong>: Los resultados se muestran en dashboards interactivos (<code>src/app/(dashboard)/rag/page.tsx</code> para análisis de documentos), informes exportables (PDF, CSV generados por herramientas como <code>analyze_text_for_insights</code>), o notificaciones push a través de Telegram (<code>telegram_client/notification_scheduler.py</code>). Los usuarios pueden personalizar visualizaciones y filtros desde la interfaz web para adaptar la información a sus necesidades.</li>
+                    <li><strong>Archivos Clave</strong>: <code>src/app/(dashboard)/rag/page.tsx</code>, <code>tools/analyze_text_for_insights_tool.py</code>, <code>telegram_client/notification_scheduler.py</code>.</li>
+                    <li><strong>Detalles</strong>: Los dashboards permiten arrastrar y soltar widgets para métricas clave (como KPIs de operaciones), mientras que las notificaciones de Telegram se programan mediante <code>set_simple_reminder</code> en <code>core/reminders_manager.py</code>. La exportación de informes es compatible con formatos estándar para facilitar su uso en presentaciones o auditorías.</li>
+                </ul>
+            </li>
+            <li><strong>Retroalimentación y Mejora Continua</strong>:
+                <ul>
+                    <li><strong>Descripción</strong>: Las interacciones del usuario se utilizan para mejorar el contexto y la precisión de futuras respuestas, creando un ciclo de aprendizaje continuo.</li>
+                    <li><strong>Proceso</strong>: Las interacciones (consultas, feedback implícito) se almacenan como recuerdos en <code>core/memory_manager.py</code> (<code>add_memory_to_vector_db</code>) para enriquecer el contexto. El historial de chat se resume periódicamente mediante <code>summarize_history_in_background</code> en <code>core/agent.py</code> para mantener el contexto sin sobrecargar el modelo de lenguaje (si los tokens exceden 3000, se genera un resumen). Los modelos de IA pueden reentrenarse con nuevos datos mediante pipelines en el backend (aunque no explícito en el código, es una práctica estándar).</li>
+                    <li><strong>Archivos Clave</strong>: <code>core/memory_manager.py</code>, <code>core/agent.py</code>.</li>
+                    <li><strong>Detalles</strong>: La sumarización del historial no elimina mensajes originales, preservando el historial completo para el frontend mientras usa resúmenes para el contexto del LLM (<code>core/agent.py</code>). Los títulos de hilos de chat se actualizan dinámicamente mediante <code>update_thread_title_if_needed</code> (por ejemplo, después de 5 mensajes si el título es "Nuevo Chat"), mejorando la organización de las conversaciones.</li>
+                </ul>
+            </li>
+        </ol>
+        <p>Este flujo de datos asegura que Kognito sea un sistema reactivo y adaptable, capaz de manejar consultas complejas y datos en tiempo real mientras mantiene un contexto coherente para cada usuario.</p>
+        <h3>Tecnologías Utilizadas</h3>
+        <p>Kognito utiliza un stack tecnológico moderno y robusto, diseñado para maximizar el rendimiento, la escalabilidad y la facilidad de mantenimiento. La selección de tecnologías refleja un enfoque en la integración de IA avanzada con interfaces de usuario intuitivas y una infraestructura confiable. A continuación, se detalla el conjunto de herramientas, frameworks y servicios empleados, basado en la estructura de archivos y configuraciones observadas en el código:</p>
+        <ul>
+            <li><strong>Lenguajes de Programación</strong>:
+                <ul>
+                    <li><strong>Python</strong>: Utilizado para el backend, herramientas de IA y procesamiento de datos. Es el lenguaje principal para módulos como <code>core/agent.py</code>, <code>tools/</code>, y <code>utils/</code>, debido a su amplio soporte para bibliotecas de machine learning y su facilidad para manejar tareas asíncronas.</li>
+                    <li><strong>TypeScript/JavaScript</strong>: Usado para el frontend con React y Next.js, proporcionando una interfaz de usuario dinámica y responsiva (<code>src/app/</code>, <code>src/components/</code>), con TypeScript añadiendo tipado estático para mayor robustez en el desarrollo.</li>
+                </ul>
+            </li>
+            <li><strong>Frameworks y Librerías</strong>:
+                <ul>
+                    <li><strong>Frontend</strong>:
+                        <ul>
+                            <li><strong>Next.js</strong>: Framework de React para aplicaciones web con renderizado del lado del servidor (SSR) y optimización de rutas (<code>next.config.mjs</code>, <code>src/app/</code>), permitiendo una carga rápida y SEO mejorado para la interfaz de Kognito.</li>
+                            <li><strong>React</strong>: Biblioteca para construir componentes de interfaz de usuario reutilizables (<code>src/components/</code> como <code>AppShell.tsx</code>), facilitando la creación de una experiencia de usuario interactiva y modular.</li>
+                            <li><strong>Tailwind CSS</strong>: Framework de estilos basado en utilidades para un diseño rápido y consistente (<code>tailwind.config.ts</code>, usado en todos los componentes de <code>src/</code>), permitiendo personalización de temas (claro/oscuro mediante <code>ThemeToggle</code>).</li>
+                            <li><strong>shadcn/ui</strong>: Conjunto de componentes UI personalizables para formularios, diálogos y tablas (<code>src/components/ui/</code>), asegurando una interfaz coherente y accesible con elementos como <code>Button</code>, <code>Dialog</code>, y <code>Table</code>.</li>
+                        </ul>
+                    </li>
+                    <li><strong>Backend</strong>:
+                        <ul>
+                            <li><strong>FastAPI</strong>: Framework de Python para construir APIs RESTful de alto rendimiento, utilizado como puente entre frontend y backend (<code>run_api.py</code>), permitiendo endpoints rápidos y documentados automáticamente para la comunicación con la interfaz web.</li>
+                            <li><strong>Telethon</strong>: Biblioteca de Python para interactuar con la API de Telegram, usada en <code>telegram_client/</code> para el bot y notificaciones, asegurando una integración robusta con Telegram para notificaciones y consultas móviles.</li>
+                        </ul>
+                    </li>
+                    <li><strong>IA y Machine Learning</strong>:
+                        <ul>
+                            <li><strong>TensorFlow o PyTorch</strong>: Frameworks probables para modelos de aprendizaje automático subyacentes, aunque no explícitamente visibles en el código, son estándar para tareas como la generación de embeddings en <code>utils/embeddings.py</code>.</li>
+                            <li><strong>Hugging Face Transformers</strong>: Biblioteca para modelos de lenguaje preentrenados, utilizada implícitamente en <code>core/agent.py</code> para PLN (<code>initialize_llms</code>), proporcionando capacidades de procesamiento de texto avanzadas.</li>
+                            <li><strong>LangChain</strong>: Framework para construir aplicaciones de IA conversacional, integrado en <code>core/agent.py</code> (<code>AgentExecutor</code>, <code>ChatPromptTemplate</code>) y <code>tools/document_rag_tool.py</code> para RAG (Retrieval-Augmented Generation), permitiendo la orquestación de modelos de lenguaje con herramientas y memoria.</li>
+                            <li><strong>Google Generative AI</strong>: Usado explícitamente en <code>core/agent.py</code> (<code>ChatGoogleGenerativeAI</code>) y <code>tools/knowledge_analysis_tool.py</code> (<code>get_interpreter_llm</code>) para análisis de conocimiento y generación de texto, con modelos como <code>gemini-2.0-flash</code> (configurado en <code>core/config.py</code> como <code>GOOGLE_MAIN_MODEL_NAME</code>) y <code>imagegeneration@006</code> para imágenes (<code>GOOGLE_IMAGE_GENERATION_MODEL_NAME</code>).</li>
+                        </ul>
+                    </li>
+                </ul>
+            </li>
+            <li><strong>Bases de Datos</strong>:
+                <ul>
+                    <li><strong>PostgreSQL</strong>: Base de datos relacional para datos estructurados como cuentas de usuario, notas, eventos de agenda y historial de chat (<code>core/database.py</code> con modelos como <code>Account</code>, <code>Nota</code>, <code>ChatThread</code>), configurada mediante <code>DATABASE_URL</code> en <code>core/config.py</code> para flexibilidad entre entornos.</li>
+                    <li><strong>Bases de Datos Vectoriales (Pinecone, Weaviate o similar)</strong>: Para almacenar embeddings y realizar búsquedas semánticas, gestionado por <code>utils/embeddings.py</code> y <code>core/memory_manager.py</code>, con el modelo de embeddings <code>text-embedding-004</code> (<code>GOOGLE_EMBEDDING_MODEL_NAME</code> en <code>core/config.py</code>), esencial para funcionalidades como RAG.</li>
+                </ul>
+            </li>
+            <li><strong>Infraestructura y Despliegue</strong>:
+                <ul>
+                    <li><strong>Docker</strong>: Para contenerización de servicios, con múltiples Dockerfiles (<code>Dockerfile.core</code>, <code>Dockerfile.frontend</code>, <code>Dockerfile.telegram</code>) y configuración en <code>docker-compose.yml</code>, permitiendo un despliegue consistente y portátil de todos los componentes de Kognito.</li>
+                    <li><strong>Kubernetes</strong>: Recomendado para orquestación en producción, aunque no explícito en el código, es una práctica estándar para sistemas como Kognito con múltiples servicios, asegurando escalabilidad y alta disponibilidad mediante pods y balanceo de carga.</li>
+                    <li><strong>NGINX</strong>: Configurado como proxy inverso y balanceador de carga (<code>nginx.conf</code>), asegurando un acceso eficiente y seguro a la aplicación, con soporte para HTTPS y distribución de tráfico entre instancias.</li>
+                </ul>
+            </li>
+            <li><strong>Otras Herramientas y APIs</strong>:
+                <ul>
+                    <li><strong>GitHub API</strong>: Integrada mediante <code>tools/github_repo_tool.py</code> (<code>GitHubRepoTool</code> con métodos como <code>_list_tree</code>, <code>_read_file</code>), permitiendo a desarrolladores interactuar con repositorios de código o documentación directamente desde Kognito.</li>
+                    <li><strong>Brave Search API</strong>: Configurada en <code>core/config.py</code> (<code>BRAVE_SEARCH_API_KEY</code>) y utilizada en <code>tools/web_search_tool.py</code> para búsquedas web, enriqueciendo respuestas con información externa cuando los datos internos no son suficientes.</li>
+                    <li><strong>Herramientas de Generación de Imágenes</strong>: Implementadas en <code>tools/image_generation_tool.py</code> (<code>ImageGenerationTool</code>), utilizando el modelo <code>imagegeneration@006</code> de Vertex AI (<code>GOOGLE_IMAGE_GENERATION_MODEL_NAME</code> en <code>core/config.py</code>), para crear visualizaciones basadas en texto, útil para diagramas o ilustraciones operativas.</li>
+                    <li><strong>Ollama</strong>: Configurado como alternativa para embeddings locales (<code>OLLAMA_EMBEDDING_MODEL</code> como <code>nomic-embed-text</code> y <code>OLLAMA_API_URL</code> en <code>core/config.py</code>), proporcionando una opción de procesamiento local para entornos con restricciones de nube.</li>
+                </ul>
+            </li>
+        </ul>
+        <p>Este stack tecnológico asegura que Kognito sea una plataforma de vanguardia, combinando lo mejor de la inteligencia artificial, interfaces de usuario modernas y una infraestructura escalable para satisfacer las demandas de un entorno portuario dinámico.</p>
+        <h3>Diagramas de Arquitectura (Descripción Textual)</h3>
+        <p>Para facilitar la visualización de la arquitectura de Kognito, se describen dos diagramas conceptuales que pueden ser implementados con herramientas como Mermaid o software de diagramación. Estos diagramas no están codificados en el documento, pero se proporcionan instrucciones detalladas para su creación, con el objetivo de que los desarrolladores y stakeholders comprendan la estructura y el flujo del sistema.</p>
+        <ul>
+            <li><strong>Diagrama de Alto Nivel del Sistema</strong>:
+                <ul>
+                    <li><strong>Estructura</strong>: Un diagrama de bloques que muestra los componentes principales de Kognito y sus interacciones, proporcionando una visión general de la arquitectura.</li>
+                    <li><strong>Elementos</strong>:
+                        <ul>
+                            <li>Un rectángulo central etiquetado como "Core de Kognito", dividido en submódulos: "Ingesta de Datos", "Procesamiento PLN", "Análisis y Reportes", "Interfaz de Usuario", "Integración Telegram", "Gestión de Datos". Cada submódulo representa un componente descrito anteriormente.</li>
+                            <li>Flechas entrantes desde bloques externos etiquetados como "Fuentes de Datos Internas" (Bases de Datos Departamentales de Mantenimiento, Operaciones, Comercial, Aduanas; Documentos Subidos) y "Fuentes de Datos Externas" (APIs de Clima, Tráfico Marítimo, Búsqueda Web mediante <code>Brave Search API</code>) hacia el submódulo "Ingesta de Datos", indicando el flujo de entrada de información.</li>
+                            <li>Flechas salientes desde "Core de Kognito" hacia bloques etiquetados como "Usuarios" (Gerentes, Analistas, Operativos, con subetiquetas para Interfaz Web y Telegram) y "Sistemas Externos" (Exportación de Informes PDF/CSV, Notificaciones Push), mostrando los canales de salida de datos procesados.</li>
+                            <li>Nubes alrededor del "Core de Kognito" etiquetadas como "Infraestructura Docker/Kubernetes" (representando la contenerización y orquestación definida en <code>docker-compose.yml</code>) y "Seguridad (Autenticación JWT, Encriptación)" (reflejando configuraciones como <code>jwt_secret_key</code> en <code>core/config.py</code>), destacando los aspectos de despliegue y protección.</li>
+                        </ul>
+                    </li>
+                    <li><strong>Propósito</strong>: Mostrar cómo Kognito actúa como un núcleo central que integra datos de múltiples fuentes y los entrega a diferentes usuarios y sistemas, con un enfoque en la infraestructura y seguridad que lo soportan. Este diagrama es útil para stakeholders no técnicos que necesitan entender el sistema a alto nivel.</li>
+                </ul>
+            </li>
+            <li><strong>Diagrama de Flujo de Datos</strong>:
+                <ul>
+                    <li><strong>Estructura</strong>: Un diagrama de flujo lineal que ilustra el recorrido de los datos desde su ingesta hasta la presentación al usuario, detallando cada etapa del proceso descrito en la sección "Flujo de Datos".</li>
+                    <li><strong>Elementos</strong>:
+                        <ul>
+                            <li>Una secuencia lineal de rectángulos conectados por flechas: "Fuentes de Datos" (Internas y Externas) -> "Ingesta de Datos" (con referencia a <code>document_parser.py</code>, <code>web_scraper_tool.py</code>) -> "Almacenamiento y Procesamiento" (con subetiquetas para PostgreSQL en <code>database.py</code> y Embeddings en <code>embeddings.py</code>) -> "Análisis y Modelos de IA" (referenciando <code>analyze_text_for_insights_tool.py</code>, <code>proactive_knowledge_linker_tool.py</code>) -> "Interfaz de Usuario/Dashboards" (referenciando <code>AppShell.tsx</code>, <code>rag/page.tsx</code>) -> "Respuesta al Usuario" (Web y Telegram).</li>
+                            <li>Ramificaciones en "Análisis y Modelos de IA" hacia nodos adicionales etiquetados como "Generación de Informes" (exportación PDF/CSV) y "Notificaciones Telegram" (mediante <code>notification_scheduler.py</code>), mostrando salidas alternativas de datos.</li>
+                            <li>Un ciclo de retroalimentación desde "Respuesta al Usuario" de vuelta a "Almacenamiento y Procesamiento" etiquetado como "Memoria y Contexto" (referenciando <code>memory_manager.py</code>, <code>summarize_history_in_background</code> en <code>agent.py</code>), indicando cómo las interacciones del usuario enriquecen el contexto para futuras respuestas.</li>
+                        </ul>
+                    </li>
+                    <li><strong>Propósito</strong>: Detallar el recorrido de los datos a través de Kognito, destacando los componentes y archivos clave en cada etapa. Este diagrama es útil para desarrolladores y analistas técnicos que necesitan entender cómo fluye la información y cómo se integran los diferentes módulos.</li>
+                </ul>
+            </li>
+        </ul>
+        <p>Estos diagramas, una vez implementados visualmente, proporcionarán una representación clara y comprensible de la arquitectura de Kognito, facilitando la comunicación entre equipos técnicos y no técnicos, y sirviendo como referencia para futuras expansiones o modificaciones del sistema.</p>

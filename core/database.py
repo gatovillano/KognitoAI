@@ -263,6 +263,7 @@ class ChatThread(Base):
     
     title = Column(String, default="Nuevo Chat")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_pinned = Column(Boolean, default=False, nullable=False)
     # Usamos JSONB para almacenar una lista flexible de etiquetas.
     tags = Column(JSONB, nullable=True) 
 

@@ -23,7 +23,7 @@ async def get_interpreter_llm() -> ChatGoogleGenerativeAI:
     global _interpreter_llm
     if _interpreter_llm is None:
         logger.info("Inicializando modelo Gemini para la herramienta de análisis...")
-        _interpreter_llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.0)
+        _interpreter_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.0)
     return _interpreter_llm
 
 
@@ -71,7 +71,14 @@ class KnowledgeAnalysisTool(BaseTool):
         try:
             response = await llm.ainvoke([HumanMessage(content=prompt)])
             import json
-            return json.loads(response.content)
+            import re
+            
+            # Extract JSON from response content if it's embedded in text
+            content = response.content
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                content = json_match.group(0)
+            return json.loads(content)
         except Exception as e:
             logger.error(f"Error interpretando la petición del usuario: {e}", exc_info=True)
             return {"action": "error", "details": str(e)}

@@ -42,7 +42,7 @@ from langchain_core.language_models.base import BaseLanguageModel
 from sqlalchemy import update
 
 # --- Módulos del Proyecto ---
-from telegram_client.tools import get_all_langchain_tools
+from core.tools import get_all_langchain_tools
 from core.memory_manager import get_user_profile, get_relevant_memories
 from core.database import SessionLocal, Account, ChatThread
 from utils.db_session import DBSession
@@ -498,6 +498,3 @@ async def create_thread_for_account(account_id: str, title: str = "Nuevo Chat") 
         await db.commit()
         await db.refresh(new_thread)
         return str(new_thread.id)
-
-
-

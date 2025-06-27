@@ -38,10 +38,11 @@ from telegram_client.bot_manager import bot_manager
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import update
+from collections import Counter
+from sqlalchemy import update, select, desc 
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain_core.messages import HumanMessage, AIMessage
-
+from sqlalchemy import or_
 from utils.security import (
     get_password_hash,
     verify_password,
@@ -664,7 +665,7 @@ async def get_document_content_endpoint(
 
 from fastapi import BackgroundTasks
 from core.memory_manager import get_full_document_content
-from utils.analyze_text_for_insights import analyze_text_for_insights
+from utils.analyze_text_for_insights import analyze_text_for_insights, analyze_entire_collection
 from core.database import ProactiveInsight
 
 # Modelo para la petición
@@ -725,7 +726,7 @@ async def start_document_analysis_endpoint(
     await db.commit()
     await db.refresh(new_task)
     
-    background_tasks.add_task(run_analysis_and_save, str(new_task.id), current_account_id, req.file_name)
+    background_tasks.add_task(run_document_analysis_and_save, str(new_task.id), current_account_id, req.file_name)
     
     return {"task_id": str(new_task.id)}
 
@@ -743,76 +744,6 @@ async def get_analysis_result_endpoint(
     return {"status": task.status, "result": task.result_payload, "error": task.error_message}
 
 
-# Esta función se ejecutará en segundo plano
-async def run_analysis_and_save(task_id: str, account_id: str, file_name: str):
-    """
-    Función pesada que se ejecuta en segundo plano.
-    Crea su propia sesión de base de datos para ser independiente.
-    """
-    db_session = SessionLocal()
-    try:
-        # 1. Marcar la tarea como 'processing'
-        stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
-        await db_session.execute(stmt_processing)
-        await db_session.commit()
-        
-        logger.info(f"Iniciando análisis en segundo plano para la tarea {task_id} (archivo: {file_name})")
-
-        # 2. Obtener el contenido del documento
-        text_content = await get_full_document_content(account_id, file_name)
-        if not text_content:
-            raise ValueError("No se pudo recuperar el contenido del documento.")
-
-        # 3. Realizar el análisis pesado
-        analysis_result = await analyze_text_for_insights(text_content)
-        
-        # 4. Guardar el resultado y marcar como 'completed'
-        stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-            status="completed",
-            result_payload=analysis_result
-        )
-        await db_session.execute(stmt_completed)
-        await db_session.commit()
-        logger.info(f"Análisis para la tarea {task_id} completado y guardado.")
-
-    except Exception as e:
-        logger.error(f"Fallo en la tarea de análisis en segundo plano {task_id}: {e}", exc_info=True)
-        # 5. Si falla, guardar el error
-        stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-            status="failed",
-            error_message=str(e)
-        )
-        await db_session.execute(stmt_failed)
-        await db_session.commit()
-    finally:
-        await db_session.close()
-
-
-@app.post("/api/analyze-document", status_code=202)
-async def analyze_document_endpoint(
-    req: AnalyzeDocumentRequest,
-    background_tasks: BackgroundTasks,
-    current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """Inicia un análisis de documento y devuelve un ID de tarea."""
-    # Verificar que el documento existe antes de crear la tarea
-    content_check = await get_full_document_content(current_account_id, req.file_name)
-    if content_check is None:
-        raise HTTPException(status_code=404, detail="Documento no encontrado.")
-
-    new_task = AnalysisTask(
-        account_id=uuid.UUID(current_account_id),
-        file_name=req.file_name,
-        status="pending"
-    )
-    db.add(new_task)
-    await db.commit()
-    await db.refresh(new_task)
-    
-    background_tasks.add_task(run_document_analysis_and_save, str(new_task.id), current_account_id, req.file_name)
-    
-    return {"task_id": str(new_task.id)}
 
 @app.post("/api/list-collections", summary="Listar las colecciones de conocimiento")
 async def list_collections_endpoint(current_account_id: str = Depends(get_current_account_id)):
@@ -902,6 +833,68 @@ async def start_collection_analysis_endpoint(
     background_tasks.add_task(run_collection_analysis_and_save, str(new_task.id), current_account_id, req.topic)
     
     return {"task_id": str(new_task.id)}
+
+class GetSavedAnalysesRequest(BaseModel):
+    topic: Optional[str] = None # Para filtrar por colección
+    all: bool = False # Para obtener todos los análisis sin filtrar por colección
+
+@app.post("/api/get-saved-analyses")
+async def get_saved_analyses_endpoint(
+    req: GetSavedAnalysesRequest,
+    current_account_id: str = Depends(get_current_account_id), 
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Recupera la lista de análisis completados.
+    Si se proporciona un 'topic', devuelve los análisis de esa colección Y de sus documentos.
+    Si 'all' es True, devuelve todos los análisis.
+    Si no, devuelve solo los análisis de documentos individuales.
+    """
+    account_uuid = uuid.UUID(current_account_id)
+    
+    # Construimos la consulta base
+    base_stmt = select(AnalysisTask).where(
+        AnalysisTask.account_id == account_uuid,
+        AnalysisTask.status == "completed"
+    )
+
+    if req.topic:
+        # --- LÓGICA MEJORADA PARA COLECCIONES ---
+        
+        # 1. Obtenemos los nombres de los archivos que pertenecen a este topic.
+        #    (Reutilizamos la lógica de list_user_documents)
+        all_user_docs = await list_user_documents(current_account_id)
+        files_in_topic = [
+            doc['file_name'] for doc in all_user_docs if doc.get('topic') == req.topic
+        ]
+        
+        # 2. Construimos la condición del WHERE
+        #    Queremos análisis cuyo 'file_name' sea uno de los archivos de la colección,
+        #    O que sea el análisis de la propia colección.
+        collection_reference_name = f"Colección: {req.topic}"
+        
+        # Usamos or_() para combinar las condiciones
+        final_stmt = base_stmt.where(
+            or_(
+                AnalysisTask.file_name.in_(files_in_topic),
+                AnalysisTask.file_name == collection_reference_name
+            )
+        )
+    elif req.all:
+        # Si se pide 'all', no aplicamos más filtros.
+        final_stmt = base_stmt
+    else:
+        # Comportamiento por defecto (vista de colecciones): no muestra nada
+        # O podríamos hacer que muestre los que no son de colección
+        # Por ahora, para ser claros, devolvemos una lista vacía si no es 'all' o un 'topic'.
+        return []
+
+    # Ordenamos y limitamos la consulta final
+    final_stmt = final_stmt.order_by(desc(AnalysisTask.created_at)).limit(50)
+    
+    results = await db.execute(final_stmt)
+    return results.scalars().all()
+
 
 # ==============================================================================
 # SECCIÓN 6: ENDPOINTS PARA INTERFAZ WEB
@@ -1027,6 +1020,22 @@ async def get_thread_by_id(thread_id: str, current_account_id: str = Depends(get
         raise HTTPException(status_code=404, detail="Hilo de chat no encontrado o no pertenece al usuario.")
     return ThreadResponse(id=str(thread.id), title=thread.title, created_at=thread.created_at)
 
+class ThreadPinRequest(BaseModel):
+    isPinned: bool
+
+@app.put("/api/threads/{thread_id}/pin", response_model=ThreadResponse, summary="Actualizar estado de fijado de un hilo de chat")
+async def update_thread_pin_status(thread_id: str, request: ThreadPinRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Actualiza el estado de fijado de un hilo de chat para el usuario autenticado.
+    """
+    thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
+    if not thread:
+        raise HTTPException(status_code=404, detail="Hilo de chat no encontrado o no pertenece al usuario.")
+    thread.is_pinned = request.isPinned
+    await db.commit()
+    await db.refresh(thread)
+    return ThreadResponse(id=str(thread.id), title=thread.title, created_at=thread.created_at)
+
 @app.post("/internal/bot-create-thread")
 async def bot_create_thread(account_id: str = Form(...), title: str = Form("Nuevo Chat")):
     """Permite al bot de Telegram crear un hilo de chat para una cuenta dada."""
@@ -1057,6 +1066,218 @@ class TTSRequest(BaseModel):
 # Usamos el nombre del servicio Docker y el puerto interno correcto.
 TTS_SERVICE_URL = "http://openai-edge-tts:5050/v1/audio/speech"
 
+@app.post("/api/dashboard-insights")
+async def get_dashboard_insights(
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Agrega y devuelve datos de análisis (manuales) y insights (proactivos)
+    para el dashboard principal.
+    """
+    account_uuid = uuid.UUID(current_account_id)
+
+    # 1. Obtener todos los resultados de análisis manuales completados de la tabla AnalysisTask
+    analysis_stmt = select(AnalysisTask.result_payload).where(
+        AnalysisTask.account_id == account_uuid,
+        AnalysisTask.status == "completed",
+        AnalysisTask.result_payload.isnot(None)
+    )
+    analysis_results = await db.execute(analysis_stmt)
+    analysis_payloads = analysis_results.scalars().all()
+
+    # 2. Procesar y agregar los datos de esos análisis para los gráficos
+    all_topics = []
+
+    for payload in analysis_payloads:
+        if isinstance(payload, dict):
+            # Usamos los temas avanzados si existen, que son de mayor calidad
+            all_topics.extend(payload.get("temas_clave_avanzados", []))
+    
+    # Contar y obtener el Top 10 de temas clave para el gráfico de barras
+    # TODO: Reemplazar con análisis semántico una vez que Gemini esté integrado
+    topic_counts = Counter(all_topics)
+    top_topics_for_chart = [{"topic": topic, "mentions": count} for topic, count in topic_counts.most_common(10)]
+
+    # 3. Verificar si hay un análisis semántico reciente completado
+    semantic_analysis_stmt = select(AnalysisTask.result_payload).where(
+        AnalysisTask.account_id == account_uuid,
+        AnalysisTask.status == "completed",
+        AnalysisTask.file_name == "Semantic Topic Analysis",
+        AnalysisTask.result_payload.isnot(None)
+    ).order_by(desc(AnalysisTask.created_at)).limit(1)
+    
+    semantic_analysis_result = await db.execute(semantic_analysis_stmt)
+    semantic_payload = semantic_analysis_result.scalars().first()
+    
+    if semantic_payload and "grouped_topics" in semantic_payload:
+        # Usar los temas agrupados por análisis semántico si están disponibles
+        top_topics_for_chart = semantic_payload["grouped_topics"]
+        logger.info(f"Usando temas agrupados por análisis semántico para account {current_account_id}.")
+
+    # 4. Obtener los últimos insights proactivos (sinergias, contradicciones, etc.)
+    # Estos son los descubrimientos que la IA hace por sí sola.
+    proactive_stmt = select(ProactiveInsight).where(
+        ProactiveInsight.account_id == account_uuid
+    ).order_by(desc(ProactiveInsight.created_at)).limit(10)
+    
+    proactive_results = await db.execute(proactive_stmt)
+    recent_proactive_insights = proactive_results.scalars().all()
+
+    # 5. Construir y devolver la respuesta final en el formato que el frontend espera
+    return {
+        "key_topics": top_topics_for_chart, # Para el gráfico de barras
+        "proactive_insights": [
+            {
+                "id": str(insight.id),
+                "type": insight.type,
+                "summary": insight.insight_message,
+                "created_at": insight.created_at.isoformat(),
+                "related_items": insight.related_items,
+                "action_suggestion": insight.action_suggestion,
+                # No necesitamos devolver result_payload aquí, ya que el insight es el resultado
+            } for insight in recent_proactive_insights
+        ]
+        # Ya no devolvemos 'top_entities' ni 'exploration_questions' para este diseño
+    }
+
+@app.post("/api/update-semantic-topics", status_code=202, summary="Actualizar temas con análisis semántico")
+async def update_semantic_topics_endpoint(
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Dispara manualmente el proceso de análisis semántico para agrupar temas por similitud.
+    Este proceso se ejecuta en segundo plano y actualiza los datos para el endpoint /api/dashboard-insights.
+    """
+    account_uuid = uuid.UUID(current_account_id)
+    new_task = AnalysisTask(
+        account_id=account_uuid,
+        file_name="Semantic Topic Analysis",
+        status="pending"
+    )
+    db.add(new_task)
+    await db.commit()
+    await db.refresh(new_task)
+    
+    logger.info(f"Iniciando tarea de análisis semántico con ID {str(new_task.id)} para la cuenta {current_account_id}")
+    background_tasks.add_task(run_semantic_topic_analysis, str(new_task.id), current_account_id)
+    
+    return {"task_id": str(new_task.id), "message": "Análisis semántico iniciado en segundo plano."}
+
+async def run_semantic_topic_analysis(task_id: str, account_id: str):
+    """
+    Proceso en segundo plano para realizar análisis semántico y agrupación de temas.
+    Este es un placeholder para la integración con Gemini API.
+    """
+    async with SessionLocal() as db_session:
+        try:
+            # Marcar la tarea como 'processing'
+            stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
+            await db_session.execute(stmt_processing)
+            await db_session.commit()
+            
+            logger.info(f"Iniciando análisis semántico para tarea {task_id} para la cuenta {account_id}...")
+            
+            # 1. Obtener todos los temas de análisis previos
+            analysis_stmt = select(AnalysisTask.result_payload).where(
+                AnalysisTask.account_id == uuid.UUID(account_id),
+                AnalysisTask.status == "completed",
+                AnalysisTask.result_payload.isnot(None)
+            )
+            analysis_results = await db_session.execute(analysis_stmt)
+            analysis_payloads = analysis_results.scalars().all()
+
+            all_topics = []
+            for payload in analysis_payloads:
+                if isinstance(payload, dict):
+                    all_topics.extend(payload.get("temas_clave_avanzados", []))
+            logger.info(f"Procesando {len(all_topics)} temas para análisis semántico.")
+
+            # 2. Integrar Gemini API para obtener embebidos semánticos usando el LLM ya configurado
+            from core.agent import _fast_task_llm_instance, _main_agent_llm_instance
+            llm_for_embeddings = _fast_task_llm_instance or _main_agent_llm_instance
+            if not llm_for_embeddings:
+                logger.error("No hay LLM disponible para generar embeddings.")
+                raise ValueError("LLM no disponible para análisis semántico.")
+                
+            embeddings = []
+            for topic in all_topics:
+                try:
+                    logger.info(f"Generando embedding para el tema: {topic}")
+                    # Usar un prompt más específico para obtener una representación numérica precisa
+                    prompt = f"Convert the topic '{topic}' into a dense numerical vector of 768 dimensions for semantic clustering. Provide the vector as a space-separated list of numbers."
+                    response = await llm_for_embeddings.ainvoke(prompt)
+                    logger.info(f"Respuesta recibida para el tema: {topic}")
+                    # Extraer el contenido como texto y convertir a lista de números
+                    response_text = response.content if hasattr(response, 'content') else str(response)
+                    # Parsear la respuesta para obtener un vector de números
+                    vector = []
+                    for val in response_text.split():
+                        try:
+                            num_val = float(val)
+                            vector.append(num_val)
+                        except ValueError:
+                            continue  # Ignorar valores no numéricos
+                    # Ajustar el tamaño del vector a 768 dimensiones
+                    while len(vector) < 768:
+                        vector.append(0.0)
+                    if len(vector) > 768:
+                        vector = vector[:768]
+                    embeddings.append(vector)
+                    logger.info(f"Embedding generado exitosamente para: {topic}")
+                except Exception as e:
+                    logger.error(f"Error al obtener embedding para {topic}: {e}", exc_info=True)
+                    embeddings.append([0.0] * 768)  # Fallback en caso de error
+            logger.info(f"Obtenidos embeddings para {len(embeddings)} temas.")
+
+            # 3. Implementar clustering (e.g., K-Means) para agrupar temas por similitud semántica
+            from sklearn.cluster import KMeans
+            import numpy as np
+            if len(embeddings) > 5:  # Solo hacer clustering si hay suficientes temas
+                kmeans = KMeans(n_clusters=min(5, len(embeddings) // 2 + 1), random_state=42)
+                clusters = kmeans.fit_predict(np.array(embeddings))
+            else:
+                clusters = list(range(len(embeddings)))  # Asignar un cluster por tema si hay pocos
+
+            # 4. Agrupar temas por cluster y contar menciones
+            cluster_dict = {}
+            for topic, cluster_id, _ in zip(all_topics, clusters, embeddings):
+                if cluster_id not in cluster_dict:
+                    cluster_dict[cluster_id] = {"topics": [], "mentions": 0}
+                cluster_dict[cluster_id]["topics"].append(topic)
+                cluster_dict[cluster_id]["mentions"] += all_topics.count(topic)
+
+            # 5. Generar un término representativo para cada cluster usando el mismo LLM
+            grouped_topics = []
+            for cluster_id, data in cluster_dict.items():
+                try:
+                    topics_str = ", ".join(data["topics"][:5])  # Limitar a 5 temas para el prompt
+                    prompt = f"Generate a representative term or phrase for the following group of topics: {topics_str}"
+                    response = await llm_for_embeddings.ainvoke(prompt)
+                    representative_term = response.content.strip() if hasattr(response, 'content') else f"Grupo {cluster_id + 1}"
+                except Exception as e:
+                    logger.error(f"Error al generar término representativo para cluster {cluster_id}: {e}")
+                    representative_term = f"Grupo {cluster_id + 1}"
+                grouped_topics.append({"topic": representative_term, "mentions": data["mentions"]})
+
+            # Ordenar por menciones descendentes
+            simulated_grouped_topics = sorted(grouped_topics, key=lambda x: x["mentions"], reverse=True)[:10]
+
+            # 4. Guardar el resultado y marcar como 'completed'
+            stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="completed", result_payload={"grouped_topics": simulated_grouped_topics})
+            await db_session.execute(stmt_completed)
+            await db_session.commit()
+            logger.info(f"Análisis semántico para tarea {task_id} completado con {len(simulated_grouped_topics)} grupos de temas.")
+        except Exception as e:
+            logger.error(f"Fallo en tarea de análisis semántico {task_id}: {e}", exc_info=True)
+            stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="failed", error_message=str(e))
+            await db_session.execute(stmt_failed)
+            await db_session.commit()
+
 @app.post("/api/text-to-speech", summary="Generar audio desde texto")
 async def text_to_speech_endpoint(request: TTSRequest):
     """
@@ -1070,7 +1291,7 @@ async def text_to_speech_endpoint(request: TTSRequest):
         'input': request.text,
         'voice': 'es-MX-DaliaNeural',
         'model': 'edge-tts', # O el modelo que use tu wrapper
-        'speed': 1.1, # El wrapper parece esperar un número, no "+10%"
+        'speed': 1.0, # El wrapper parece esperar un número, no "+10%"
     }
 
 

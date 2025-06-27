@@ -105,28 +105,29 @@ async def deep_analysis_with_gemini(text):
 
 async def analyze_text_for_insights(text: str) -> dict:
     """
-    Ejecuta un análisis COMPLETO (básico + profundo con Gemini) y devuelve un único objeto de resultado.
+    Ejecuta un análisis profundo con Gemini para extraer un resumen, temas clave,
+    y preguntas que inviten a la reflexión (brechas de conocimiento).
     """
-    logger.info("Iniciando análisis completo del texto...")
+    logger.info("Iniciando análisis profundo de texto para insights y brechas de conocimiento...")
     
-    # --- Tareas Locales y Rápidas (pueden ejecutarse en paralelo) ---
-    nlp = get_spacy_model()
-    doc = nlp(text)
-    entidades = [{"texto": ent.text, "tipo": ent.label_} for ent in doc.ents]
-    
-    blob = TextBlob(text)
-    sentimiento = {"polarity": blob.sentiment.polarity, "subjectivity": blob.sentiment.subjectivity}
-    
-    # --- Tareas Pesadas con Gemini (se ejecutan en paralelo) ---
+    if not text or len(text.split()) < 30:
+        logger.warning("Texto demasiado corto para un análisis significativo.")
+        return {
+            "resumen_ejecutivo": text,
+            "temas_clave_avanzados": [],
+            "preguntas_para_explorar": []
+        }
+
     gemini_model = await get_gemini_model()
-    
-    # Prompt para obtener todo de una vez de Gemini
+    if not gemini_model:
+        raise ValueError("El modelo Gemini no está inicializado.")
+
     prompt = f"""
-    Eres un analista experto. Analiza el siguiente texto y responde ÚNICAMENTE en formato JSON con la siguiente estructura:
+    Eres un analista estratégico y un experto en identificar vacíos de información. Analiza el siguiente texto y responde ÚNICAMENTE en formato JSON con la siguiente estructura:
     {{
-      "resumen_ejecutivo": "Un resumen conciso de 2-4 párrafos capturando las ideas principales.",
-      "temas_clave_avanzados": ["Lista de hasta 8 temas clave semánticos, no solo palabras sueltas."],
-      "conexiones_semanticas": ["Lista de hasta 5 insights o conexiones profundas encontradas en el texto."]
+      "resumen_ejecutivo": "Un resumen conciso que capture la esencia del texto.",
+      "temas_clave_avanzados": ["Una lista de hasta 8 conceptos o temas centrales del texto."],
+      "preguntas_para_explorar": ["Una lista de 3 a 5 preguntas inteligentes y abiertas que el texto inspira pero no responde. Estas preguntas deben invitar a una mayor investigación o reflexión. Deben ser preguntas, no afirmaciones."]
     }}
 
     Texto a analizar:
@@ -134,26 +135,19 @@ async def analyze_text_for_insights(text: str) -> dict:
     {text}
     ---
     """
-    
-    deep_analysis_result = {}
     try:
         response = await gemini_model.ainvoke([HumanMessage(content=prompt)])
         content = response.content
+        # Limpieza robusta del JSON
         json_match = re.search(r'\{[\s\S]*\}', content)
         if json_match:
             clean_json_str = json_match.group(0)
-            import json
-            deep_analysis_result = json.loads(clean_json_str)
+            return json.loads(clean_json_str)
+        else:
+            raise ValueError("La respuesta del LLM no contenía un JSON válido.")
     except Exception as e:
-        logger.error(f"Fallo en el análisis profundo con Gemini: {e}", exc_info=True)
-
-    return {
-        "entidades": entidades,
-        "sentimiento": sentimiento,
-        "resumen_ejecutivo": deep_analysis_result.get("resumen_ejecutivo", "No se pudo generar el resumen."),
-        "temas_clave_avanzados": deep_analysis_result.get("temas_clave_avanzados", []),
-        "conexiones_semanticas": deep_analysis_result.get("conexiones_semanticas", [])
-    }
+        logger.error(f"Fallo en el análisis de insights con Gemini: {e}", exc_info=True)
+        raise
 
 def analyze_text_for_insights_sync(text: str):
     """

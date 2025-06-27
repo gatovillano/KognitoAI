@@ -1,4 +1,4 @@
-# telegram_bot/tools.py
+# core/tools.py
 
 """
 Módulo de Ensamblaje de Herramientas de LangChain.

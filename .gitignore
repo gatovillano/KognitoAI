@@ -1,4 +1,4 @@
-.env
+
 node_modules/
 __pycache__/
 *.pyc
@@ -10,3 +10,5 @@ build/
 *.log
 *.sqlite3
 credentials
+.env
+.env.local

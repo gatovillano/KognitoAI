@@ -2,12 +2,14 @@
 
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Upload } from 'lucide-react';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { ArrowLeft, Upload, History, FileText, FolderKanban } from 'lucide-react';
 import { toast } from 'sonner';
 
+// Importaciones de componentes del directorio padre 'rag'
 import { DataTable } from '../data-table';
 import { getColumns, type Document } from '../columns';
 import apiClient from '@/lib/api';
@@ -16,41 +18,57 @@ import { PreviewDocumentDialog } from '../preview-document-dialog';
 import { EditDocumentDialog } from '../edit-document-dialog';
 import { DeleteConfirmationDialog } from '../delete-confirmation-dialog';
 import { AnalysisResultDialog } from '../analysis-result-dialog';
+import { CollectionAnalysisDialog } from '../collection-analysis-dialog'; // Aunque no lo iniciamos aquí, lo necesitamos por si el usuario abre un análisis guardado de colección
 
 export default function AllDocumentsPage() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
+  // Estados para los diálogos
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [documentToPreview, setDocumentToPreview] = useState<Document | null>(null);
   const [documentToEdit, setDocumentToEdit] = useState<Document | null>(null);
   const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null);
-  const [documentToAnalyze, setDocumentToAnalyze] = useState<Document | null>(null); // Guardamos el doc entero
+  
+  // Estados para el análisis
+  const [documentToAnalyze, setDocumentToAnalyze] = useState<Document | null>(null);
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [isAnalysisDialogOpen, setIsAnalysisDialogOpen] = useState(false);
+  const [isCollectionAnalysisOpen, setIsCollectionAnalysisOpen] = useState(false); // Necesario para el diálogo
 
-  const fetchDocuments = async () => {
+  // Estado para el historial
+  const [savedAnalyses, setSavedAnalyses] = useState([]);
+
+  const fetchPageData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await apiClient.post('/api/list-documents');
-      setDocuments(response.data);
+      const [docsRes, analysesRes] = await Promise.all([
+        apiClient.post('/api/list-documents'),
+        // --- CAMBIO CLAVE: Pedimos TODOS los análisis guardados ---
+        apiClient.post('/api/get-saved-analyses', { all: true })
+      ]);
+      setDocuments(docsRes.data);
+      setSavedAnalyses(analysesRes.data);
     } catch (error) {
-      toast.error('Error al cargar los documentos.');
+      toast.error('Error al cargar los datos.');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { fetchDocuments(); }, []);
+  useEffect(() => {
+    fetchPageData();
+  }, [fetchPageData]);
 
   const handleAnalyzeDocument = async (doc: Document) => {
-    setDocumentToAnalyze(doc); // Guardamos el documento que se está analizando
     const toastId = toast.loading(`Analizando "${doc.file_name}"...`);
+    setDocumentToAnalyze(doc);
     try {
         const response = await apiClient.post('/api/analyze-document', { file_name: doc.file_name });
         setAnalysisResult(response.data);
         setIsAnalysisDialogOpen(true);
         toast.success("¡Análisis completado!", { id: toastId });
+        fetchPageData(); // Refresca la lista de análisis guardados
     } catch (error) {
         toast.error("Fallo en el análisis del documento.", { id: toastId });
     }
@@ -61,7 +79,7 @@ export default function AllDocumentsPage() {
       (doc) => setDocumentToEdit(doc),
       (doc) => setDocumentToDelete(doc),
       handleAnalyzeDocument
-  ), []);
+  ), [handleAnalyzeDocument]); // useCallback envuelve el handler para que no cambie
 
   return (
     <div className="h-full flex flex-col p-6">
@@ -82,19 +100,52 @@ export default function AllDocumentsPage() {
       <div className="flex-grow">
         {isLoading ? <p>Cargando documentos...</p> : <DataTable columns={columns} data={documents} />}
       </div>
-
-      <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={fetchDocuments} />
-      <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
-      <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchDocuments} document={documentToEdit} />
-      <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchDocuments} document={documentToDelete} />
       
-      {/* --- CORRECCIÓN: Quitamos la prop 'title' que no existe --- */}
-      <AnalysisResultDialog 
-        isOpen={isAnalysisDialogOpen} 
-        onOpenChange={setIsAnalysisDialogOpen} 
-        analysis={analysisResult} 
-        document={documentToAnalyze} // <-- Pasamos el documento entero
-      />
+      {/* --- NUEVA SECCIÓN DE HISTORIAL --- */}
+      <div className="mt-8 pt-6 border-t">
+        <h2 className="text-2xl font-bold flex items-center gap-2 mb-4">
+          <History className="h-6 w-6" />
+          Historial de Análisis Recientes
+        </h2>
+        {savedAnalyses.length > 0 ? (
+          <Accordion type="single" collapsible className="w-full">
+            {savedAnalyses.map((analysis: any) => (
+              <AccordionItem value={`item-${analysis.id}`} key={analysis.id}>
+                <AccordionTrigger>
+                  <div className="flex items-center gap-2 text-left flex-1 min-w-0">
+                    {analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                    <span className="font-medium truncate">{analysis.file_name}</span>
+                    <span className="ml-auto text-xs text-muted-foreground pr-4">{new Date(analysis.created_at).toLocaleDateString()}</span>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent>
+                  <Button variant="link" className="p-0 h-auto" onClick={() => {
+                    setAnalysisResult(analysis.result_payload);
+                    if (analysis.file_name.startsWith('Colección:')) {
+                      setIsCollectionAnalysisOpen(true);
+                    } else {
+                      setDocumentToAnalyze({ file_name: analysis.file_name, topic: '', title: '', author: '' });
+                      setIsAnalysisDialogOpen(true);
+                    }
+                  }}>
+                    Ver Resultados Detallados
+                  </Button>
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+        ) : (
+          !isLoading && <p className="text-sm text-muted-foreground text-center py-4">No hay análisis guardados.</p>
+        )}
+      </div>
+
+      {/* Diálogos */}
+      <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={fetchPageData} />
+      <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
+      <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchPageData} document={documentToEdit} />
+      <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />
+      <AnalysisResultDialog isOpen={isAnalysisDialogOpen} onOpenChange={setIsAnalysisDialogOpen} analysis={analysisResult} document={documentToAnalyze} />
+      <CollectionAnalysisDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={analysisResult} topic={documentToAnalyze?.file_name?.replace('Colección: ', '') ?? ''} />
     </div>
   );
 }
