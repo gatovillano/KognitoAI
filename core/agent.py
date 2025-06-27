@@ -172,6 +172,49 @@ async def update_thread_title_if_needed(thread_id: str, messages: list):
     else:
         logger.info(f"[TÍTULO] El hilo {thread_id} no cumple condiciones para actualizar título.")
 
+async def force_update_thread_title(thread_id: str):
+    """
+    Fuerza la actualización del título de un hilo de chat específico.
+    """
+    async with DBSession(SessionLocal) as db:
+        thread = await db.get(ChatThread, uuid.UUID(thread_id))
+        if not thread:
+            logger.error(f"No se encontró el hilo {thread_id} para forzar la actualización del título.")
+            return
+
+        db_url = settings.database_url or os.getenv("DATABASE_URL")
+        if not db_url:
+            logger.error("DATABASE_URL no está configurada para el historial de chat.")
+            return
+
+        db_sync_url = db_url.replace("+psycopg", "")
+        chat_message_history = PostgresChatMessageHistory(
+            connection_string=db_sync_url,
+            session_id=thread_id,
+            table_name="langchain_chat_history",
+        )
+        messages = await chat_message_history.aget_messages()
+        
+        if not messages:
+            logger.info(f"No hay mensajes en el hilo {thread_id} para generar un título.")
+            return
+
+        conversation_text = '\n'.join([m.content if hasattr(m, 'content') else str(m) for m in messages[-20:]])
+        prompt = f"Resume la conversación en un título breve y descriptivo (máx 8 palabras):\n{conversation_text}"
+        llm = get_fast_llm()
+        if not llm:
+            logger.warning(f"No hay LLM disponible para generar título del hilo {thread_id}.")
+            return
+        try:
+            logger.info(f"Forzando la generación de título para el hilo {thread_id}...")
+            response = await llm.ainvoke(prompt)
+            new_title = response.content.strip() if hasattr(response, 'content') else str(response).strip()
+            logger.info(f"Nuevo título generado para el hilo {thread_id}: '{new_title}'")
+            await db.execute(update(ChatThread).where(ChatThread.id == uuid.UUID(thread_id)).values(title=new_title))
+            await db.commit()
+        except Exception as e:
+            logger.error(f"Error al forzar la actualización del título del hilo {thread_id}: {e}")
+
 async def force_update_all_thread_titles():
     """
     Fuerza la actualización de títulos de todos los hilos de chat existentes usando el LLM de tareas rápidas.
@@ -335,8 +378,13 @@ async def create_and_run_agent(
     user_context_parts.append("---------------------------------------------------------")
     user_context_string = "\n".join(user_context_parts)
     
+    # Filtrar variables no deseadas del custom_prompt para evitar errores de variables no definidas
     effective_system_prompt = custom_prompt or settings.default_system_prompt
-    
+    if custom_prompt:
+        logger.info("Aplicando prompt personalizado, filtrando variables no soportadas.")
+        # Reemplazar referencias a variables problemáticas como row['energy'] o index
+        effective_system_prompt = custom_prompt.replace("row['energy']", "valor_energia").replace("index", "indice")
+
     all_tools = get_all_langchain_tools()
     tools = all_tools
     
@@ -435,6 +483,7 @@ async def create_and_run_agent(
             "input": user_message,
             "chat_history": full_history_for_llm_prompt,
         }
+        logger.info(f"Datos de entrada pasados al agente: {input_data.keys()}")
 
         response = await agent_executor.ainvoke(
             input_data,

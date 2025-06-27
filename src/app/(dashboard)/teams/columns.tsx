@@ -13,7 +13,10 @@ import {
 export const getColumns = (
   onShareDocuments?: (team: any) => void,
   onShareEvents?: (team: any) => void,
-  onShareNotes?: (team: any) => void
+  onShareNotes?: (team: any) => void,
+  onEditTeam?: (team: any) => void,
+  onDeleteTeam?: (team: any) => void,
+  onManageMembers?: (team: any) => void
 ): ColumnDef<any>[] => [
   {
     accessorKey: "name",
@@ -43,16 +46,14 @@ export const getColumns = (
           <DropdownMenuContent align="end">
             <DropdownMenuItem
               onClick={() => {
-                // Placeholder for edit action
-                console.log(`Editar equipo ${team.id}`);
+                if (onEditTeam) onEditTeam(team);
               }}
             >
               Editar
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
-                // Placeholder for delete action
-                console.log(`Eliminar equipo ${team.id}`);
+                if (onDeleteTeam) onDeleteTeam(team);
               }}
             >
               Eliminar
@@ -77,6 +78,13 @@ export const getColumns = (
               }}
             >
               Compartir Notas
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                if (onManageMembers) onManageMembers(team);
+              }}
+            >
+              Gestionar Miembros
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

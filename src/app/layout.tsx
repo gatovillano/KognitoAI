@@ -7,7 +7,13 @@ import { ThemeProvider } from "@/components/ThemeProvider"; // <-- IMPORTAR
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
-export const metadata: Metadata = { /* ... */ };
+export const metadata: Metadata = {
+  title: "Kognito AI",
+  description: "Plataforma de IA para productividad y colaboración",
+  icons: {
+    icon: "/favicon.ico",
+  },
+};
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode; }>) {
   return (

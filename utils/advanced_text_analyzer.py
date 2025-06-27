@@ -18,6 +18,7 @@ class SingleTextAnalysis(BaseModel):
     """Define la estructura de salida para el análisis de un único texto."""
     executive_summary: str = Field(description="Un resumen conciso que captura la esencia y las conclusiones principales del texto.")
     key_themes: List[str] = Field(description="Una lista de hasta 8 conceptos o temas centrales del texto.")
+    central_concepts: List[str] = Field(description="Una lista de hasta 5 conceptos centrales del texto en el formato 'CONCEPTO: DEFINICIÓN'.")
     sentiment_analysis: str = Field(description="El sentimiento general del texto (ej. 'Positivo', 'Negativo', 'Neutral', 'Ambivalente').")
     authorial_tone: str = Field(description="El tono o la voz del autor (ej. 'Formal y Académico', 'Informal y Conversacional', 'Urgente y Directo', 'Escéptico y Crítico').")
     knowledge_gaps: List[str] = Field(description="Una lista de 3 a 5 preguntas inteligentes y abiertas que el texto inspira pero no responde. Deben ser preguntas, no afirmaciones.")
@@ -27,10 +28,22 @@ class CollectionConnection(BaseModel):
     document_titles: List[str] = Field(description="Los títulos de los documentos entre los que se encontró la conexión.")
     insight: str = Field(description="Descripción de la sinergia, evolución o contradicción encontrada entre estos documentos.")
 
+class ThemeQuote(BaseModel):
+    """Define una cita o referencia relacionada con un tema transversal en un documento."""
+    document_title: str = Field(description="El título del documento de donde se extrajo la cita.")
+    quote: str = Field(description="La cita o fragmento relevante del documento relacionado con el tema.")
+
+class ThemeReference(BaseModel):
+    """Define un tema transversal con citas relacionadas de los documentos."""
+    theme: str = Field(description="El nombre del tema transversal.")
+    related_quotes: List[ThemeQuote] = Field(description="Lista de citas o fragmentos de los documentos relacionados con este tema.")
+
 class CollectionAnalysis(BaseModel):
     """Define la estructura de salida para el análisis de una colección de textos."""
     collection_summary: str = Field(description="Un resumen ejecutivo que sintetiza la información de TODOS los documentos como un todo.")
-    cross_cutting_themes: List[str] = Field(description="Lista de hasta 10 temas que aparecen repetidamente en varios documentos.")
+    cross_cutting_themes: List[ThemeReference] = Field(description="Lista de hasta 10 temas que aparecen repetidamente en varios documentos, cada uno con citas relacionadas de los documentos.")
+    central_concepts: List[str] = Field(description="Una lista de hasta 5 conceptos, ideas o tesis centrales de la colección en el formato 'CONCEPTO: DEFINICIÓN'.")
+    concept_relationships: List[str] = Field(description="Una lista de hasta 5 descripciones de cómo los conceptos centrales se relacionan entre sí en la colección.")
     identified_connections: List[CollectionConnection] = Field(description="Lista de insights específicos que conectan dos o más documentos.")
     emergent_knowledge_gaps: List[str] = Field(description="Lista de preguntas o áreas que la colección en su conjunto no responde o deja abiertas.")
 
@@ -74,13 +87,14 @@ class AdvancedTextAnalyzer:
         """
         if not text or len(text.split()) < 30:
             return SingleTextAnalysis(
-                executive_summary=text, key_themes=[], sentiment_analysis="Neutral",
-                authorial_tone="N/A", knowledge_gaps=[]
+                executive_summary=text, key_themes=[], central_concepts=[],
+                sentiment_analysis="Neutral", authorial_tone="N/A", knowledge_gaps=[]
             )
 
         prompt = f"""
         Eres un analista estratégico. Analiza el siguiente texto en profundidad.
-        Extrae el resumen, los temas clave, el sentimiento, el tono del autor y las brechas de conocimiento que revela.
+        Extrae el resumen, los temas clave, los conceptos centrales con sus definiciones, el sentimiento, el tono del autor y las brechas de conocimiento que revela.
+        Para los temas clave y conceptos centrales, utiliza nombres precisos y relevantes al contexto del texto, priorizando términos específicos del dominio o categorías reconocibles por el usuario. Los conceptos centrales deben estar en el formato 'CONCEPTO: DEFINICIÓN'.
 
         Texto a analizar:
         ---
@@ -105,7 +119,8 @@ class AdvancedTextAnalyzer:
 
         prompt = f"""
         Eres un analista de investigación experto en síntesis de conocimiento. Analiza esta colección de documentos.
-        Tu tarea es encontrar las conexiones, patrones, y temas emergentes que existen **entre** ellos.
+        Tu tarea es encontrar las conexiones, patrones, temas emergentes con citas relacionadas de los documentos, conceptos centrales con sus definiciones y las relaciones entre estos conceptos que existen **entre** ellos.
+        Para los temas emergentes y conceptos centrales, utiliza nombres claros y específicos que reflejen el contenido y el contexto de los documentos, asegurándote de que sean relevantes para el usuario. Los conceptos centrales deben estar en el formato 'CONCEPTO: DEFINICIÓN'. Para cada tema transversal, incluye citas o fragmentos relevantes de los documentos que lo ilustran.
 
         Colección de documentos:
         {full_context_text}

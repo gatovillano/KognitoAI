@@ -7,7 +7,8 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Plus, MessageSquare, BookMarked, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Plus, MessageSquare, BookMarked, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical } from 'lucide-react';
 import Image from 'next/image';
 import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -86,7 +87,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
     }
   };
 
-  const ThreadItem = ({ thread, isPinned }: { thread: ChatThread; isPinned: boolean }) => {
+    const ThreadItem = ({ thread, isPinned }: { thread: ChatThread; isPinned: boolean }) => {
     const [{ isDragging }, drag] = useDrag({
       type: 'THREAD',
       item: { thread, isPinned },
@@ -94,6 +95,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
         isDragging: monitor.isDragging(),
       }),
     });
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
 
     return (
       <div ref={drag as any} className={cn('opacity-100', isDragging && 'opacity-50')}>
@@ -112,15 +114,59 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               </div>
             )}
             {!isCollapsed && (
-              <div
-                className="h-6 w-6 ml-auto cursor-pointer"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  isPinned ? handleUnpinThread(thread) : handlePinThread(thread);
-                }}
-              >
-                <Pin className={cn("h-4 w-4", isPinned && "text-primary")} />
+              <div className="ml-auto relative">
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <div
+                        className="h-6 w-6 p-0 cursor-pointer flex items-center justify-center"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                      >
+                        <MoreVertical className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                    </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        isPinned ? handleUnpinThread(thread) : handlePinThread(thread);
+                      }}
+                    >
+                      <Pin className={cn("h-4 w-4 mr-2", isPinned && "text-primary")} />
+                      {isPinned ? "Desfijar" : "Fijar"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        try {
+                          const response = await apiClient.post(`/api/threads/${thread.id}/generate-title`);
+                          const newTitle = response.data.title;
+                          if (newTitle) {
+                            const updatedThread = { ...thread, title: newTitle };
+                            if (isPinned) {
+                              setPinnedThreads((prev) => 
+                                prev.map(t => t.id === thread.id ? updatedThread : t)
+                              );
+                            } else {
+                              setThreads((prev) => 
+                                prev.map(t => t.id === thread.id ? updatedThread : t)
+                              );
+                            }
+                          }
+                        } catch (error) {
+                          console.error('Error generating title for thread:', error);
+                        }
+                      }}
+                    >
+                      <Sparkles className="h-4 w-4 mr-2 text-yellow-500" />
+                      <span>Nombrar</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             )}
           </Button>
@@ -143,7 +189,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
   return (
     <div className={cn("flex flex-col h-full p-2", isCollapsed ? "items-center" : "p-4")}>
       <div className={cn("flex items-center w-full pb-2 mb-2 border-b", isCollapsed ? "justify-center" : "justify-between")}>
-        <Image src="/logo-simple.png" alt="Kognito Logo" width={30} height={30} className={cn(!isCollapsed && "mr-2")} />
+        <Image src="/logo-simple.png" alt="Kognito Logo" width={50} height={50} className={cn(!isCollapsed && "mr-2")} />
         {!isCollapsed && <span className="font-bold text-lg whitespace-nowrap">Kognito</span>}
         <Button onClick={handleNewChat} variant="ghost" size="icon" className={cn("hover:bg-primary/20", isCollapsed ? "hidden" : "ml-auto")}>
           <Plus className="h-5 w-5 text-primary" />

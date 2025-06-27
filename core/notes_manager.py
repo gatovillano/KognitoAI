@@ -239,16 +239,15 @@ async def delete_note(account_id: str, note_id: int, team_id: Optional[str] = No
 
 async def get_notes_as_dicts(account_id: str, search_query: Optional[str] = None, team_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Recupera todas las notas de un usuario o equipo y las devuelve como una lista de diccionarios.
+    Recupera todas las notas de un usuario y las devuelve como una lista de diccionarios.
     Diseñada para ser usada por endpoints de API para interfaces web.
+    Incluye notas compartidas con equipos.
     """
     logger.info(f"Obteniendo notas como diccionarios para la cuenta {account_id} (Búsqueda: {search_query}).")
     async with DBSession(SessionLocal) as db:
         stmt = select(Nota).where(Nota.account_id == uuid.UUID(account_id))
         if team_id:
             stmt = stmt.where(Nota.team_id == uuid.UUID(team_id))
-        else:
-            stmt = stmt.where(Nota.team_id.is_(None))
         stmt = stmt.order_by(Nota.created_at.desc())
         
         if search_query:
@@ -267,6 +266,7 @@ async def get_notes_as_dicts(account_id: str, search_query: Optional[str] = None
                 "created_at": note.created_at.isoformat(),
                 "updated_at": note.updated_at.isoformat(),
                 "team_id": str(note.team_id) if note.team_id else None,
+                "team_shared": bool(note.team_id)
             }
             for note in notes
         ]

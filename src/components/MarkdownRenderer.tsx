@@ -27,6 +27,7 @@ import 'prismjs/components/prism-csharp';
 import 'prismjs/components/prism-go';
 import 'prismjs/components/prism-kotlin';
 import 'prismjs/components/prism-markdown';
+import 'prismjs/components/prism-markup-templating';
 import 'prismjs/components/prism-php';
 import 'prismjs/components/prism-ruby';
 import 'prismjs/components/prism-rust';
@@ -49,13 +50,17 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   const [copiedStates, setCopiedStates] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
-    // Ensure Prism highlights code on content change
-    try {
-      Prism.highlightAll();
-    } catch (error) {
-      console.error("Error highlighting syntax in content:", error);
-      console.error("Problematic content snippet:", content.length > 200 ? content.substring(0, 200) + "..." : content);
-    }
+    // Ensure Prism highlights code on component mount and content change
+    const highlight = () => {
+      try {
+        Prism.highlightAll();
+      } catch (error) {
+        console.error("Error highlighting syntax in content:", error);
+        console.error("Problematic content snippet:", content.length > 200 ? content.substring(0, 200) + "..." : content);
+      }
+    };
+    highlight();
+    return () => {};
   }, [content]);
 
   const handleCopy = (text: string, index: number) => {
@@ -84,13 +89,14 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
           code: ({ node, inline, className, children, ...rest }: CustomCodeProps) => {
             const match = /language-(\w+)/.exec(className || '');
             const codeText = String(children).replace(/\n$/, '');
-            const codeBlockIndex = Math.random();
+            // Use a stable identifier based on content hash to prevent re-render issues
+            const codeBlockIndex = codeText.length > 0 ? codeText.split('').reduce((a, c) => a + c.charCodeAt(0), 0) : 0;
 
             if (!inline && match) {
               const isCopied = copiedStates[codeBlockIndex];
               const language = match[1];
               return (
-                <div className="bg-zinc-900 rounded-md border">
+                <div className="bg-zinc-900 rounded-md border" style={{ backgroundColor: '#2d3748 !important' }}>
                   <div className="flex items-center justify-between px-4 py-1.5 border-b">
                     <span className="text-xs text-muted-foreground">{language}</span>
                     <Button
@@ -102,8 +108,8 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
                       {isCopied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4 text-muted-foreground" />}
                     </Button>
                   </div>
-                  <pre className="p-4 text-sm overflow-x-auto">
-                    <code {...rest} className={`language-${language}`}>{children}</code>
+                  <pre className="p-4 text-sm overflow-x-auto" style={{ backgroundColor: '#2d3748 !important' }}>
+                    <code {...rest} className={`language-${language}`} style={{ backgroundColor: '#2d3748 !important' }}>{children}</code>
                   </pre>
                 </div>
               );
@@ -121,4 +127,4 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
       </ReactMarkdown>
     </div>
   );
-}
+};

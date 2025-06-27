@@ -6,28 +6,41 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useForm } from "react-hook-form";
+import apiClient from "@/lib/api";
 
 interface TeamDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onTeamCreated: (team: any) => void;
+  onTeamUpdated?: (team: any) => void; // Optional callback for when a team is updated
   team?: any; // Optional team object for editing
 }
 
-export function TeamDialog({ open, onOpenChange, onTeamCreated, team }: TeamDialogProps) {
+export function TeamDialog({ open, onOpenChange, onTeamCreated, onTeamUpdated, team }: TeamDialogProps) {
   const form = useForm({
     defaultValues: {
       name: team?.name || "",
     },
   });
 
-  const handleSubmit = (data: any) => {
-    const newTeam = {
-      id: team?.id || Date.now().toString(), // Temporary ID, replace with actual ID from API
-      name: data.name,
-      created_at: team?.created_at || new Date().toISOString(),
-    };
-    onTeamCreated(newTeam);
+  const handleSubmit = async (data: any) => {
+    try {
+      let response;
+      if (team) {
+        // Update existing team
+        response = await apiClient.put(`/api/teams/${team.id}`, { name: data.name });
+        if (onTeamUpdated) {
+          onTeamUpdated(response.data);
+        }
+      } else {
+        // Create new team
+        response = await apiClient.post('/api/teams', { name: data.name });
+        onTeamCreated(response.data);
+      }
+    } catch (error) {
+      console.error("Error saving team:", error);
+      // Optionally, show an error message to the user
+    }
   };
 
   return (

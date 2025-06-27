@@ -362,6 +362,25 @@ class AnalysisTask(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
 
+class MindmapTask(Base):
+    """Guarda el estado y resultado de las tareas de generación de mapas mentales."""
+    __tablename__ = "mindmap_tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    
+    topic = Column(String, nullable=False) # Tema central del mapa mental
+    ideas_input = Column(Text, nullable=True) # Ideas iniciales proporcionadas por el usuario
+    document_name = Column(String, nullable=True) # Nombre del documento del cual extraer conceptos
+    concept_query = Column(String, nullable=True) # Tipo de información a extraer del documento
+    status = Column(String, default="pending", index=True, nullable=False) # pending, processing, completed, failed
+    
+    result_payload = Column(JSONB, nullable=True) # Aquí guardamos el resultado del mapa mental
+    error_message = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
 # ==============================================================================
 # SECCIÓN 2: FUNCIONES AUXILIARES DE LA BASE DE DATOS
 # ==============================================================================

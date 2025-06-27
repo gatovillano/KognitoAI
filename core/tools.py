@@ -51,11 +51,13 @@ from tools.web_scraper_tool import WebScraperTool
 from tools.web_search_tool import get_web_search_tool
 from tools.analyze_text_for_insights_tool import AnalyzeTextForInsightsTool
 from tools.github_repo_tool import GitHubRepoTool
+from tools.mindmap_tool import MindmapTool
 # Módulo de Insights Proactivos
 from tools.get_proactive_insights_tool import GetProactiveInsightsTool
 from tools.proactive_knowledge_linker_tool import ProactiveKnowledgeLinkerTool
 from tools.knowledge_analysis_tool import KnowledgeAnalysisTool
 from tools.comprehensive_web_analysis_tool import ComprehensiveWebAnalysisTool
+from tools.get_analysis_results_tool import GetAnalysisResultsTool
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
 
@@ -88,11 +90,14 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
         ImageGenerationTool, WebScraperTool, AnalyzeTextForInsightsTool,
         # Herramienta de GitHub
         GitHubRepoTool,
+        # Mapa Mental
+        MindmapTool,
         # Insights Proactivos
         GetProactiveInsightsTool,
         ProactiveKnowledgeLinkerTool,
         KnowledgeAnalysisTool,
-        ComprehensiveWebAnalysisTool
+        ComprehensiveWebAnalysisTool,
+        GetAnalysisResultsTool
     ]
 
     for ToolClass in tool_classes_to_instantiate:
@@ -111,7 +116,8 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
                 UpdateProfileTool, MemoryAddTool, GetDocumentListTool,
                 GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
                 ImageGenerationTool, GetProactiveInsightsTool,
-                ProactiveKnowledgeLinkerTool, KnowledgeAnalysisTool, ComprehensiveWebAnalysisTool
+                ProactiveKnowledgeLinkerTool, KnowledgeAnalysisTool, ComprehensiveWebAnalysisTool,
+                GetAnalysisResultsTool
             ]:
                 kwargs = {"account_id": account_id}
                 if ToolClass in [SetReminderTool, ImageGenerationTool, GetDocumentContentTool]:

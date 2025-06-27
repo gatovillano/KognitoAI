@@ -25,11 +25,12 @@ from core.config import settings
 from core.database import (
     create_tables, SessionLocal, Account, PlatformIdentity, Perfil,
     get_or_create_account_from_platform_id, get_account_by_telegram_id,
-    find_telegram_identity, ChatThread, VerificationCode, AnalysisTask
+    find_telegram_identity, ChatThread, VerificationCode, AnalysisTask,
+    Memory, AgendaEvent, Nota, Team, MindmapTask
 )
 from datetime import datetime, timedelta, timezone
 from core.llm_manager import initialize_llms
-from core.agent import create_and_run_agent, create_thread_for_account
+from core.agent import create_and_run_agent, create_thread_for_account, force_update_thread_title
 from utils.db_session import DBSession
 from utils.document_parser import extract_text_and_metadata_from_document
 from core.memory_manager import process_document_for_rag, list_user_documents, delete_document_chunks, get_full_document_content, update_document_metadata, list_user_collections
@@ -407,6 +408,38 @@ async def read_users_me(current_account_id: str = Depends(get_current_account_id
         telegram_id=telegram_id
     )
 
+@app.get("/api/users/search", summary="Buscar usuario por email o nombre de usuario")
+async def search_user(identifier: str = Query(...), current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Busca un usuario por email o nombre de usuario de Telegram. Devuelve el account_id si se encuentra.
+    Solo accesible para usuarios autenticados.
+    """
+    logger.info(f"Buscando usuario con identificador: {identifier} por la cuenta: {current_account_id}")
+    
+    # Buscar por email
+    account_by_email = await db.scalar(select(Account).where(Account.email == identifier))
+    if account_by_email:
+        return {"account_id": str(account_by_email.id)}
+    
+    # Buscar por username
+    account_by_username = await db.scalar(select(Account).where(Account.username == identifier))
+    if account_by_username:
+        return {"account_id": str(account_by_username.id)}
+    
+    # Buscar por platform_user_id en PlatformIdentity si es un ID de Telegram
+    try:
+        telegram_id = int(identifier)
+        identity = await db.scalar(select(PlatformIdentity).where(
+            PlatformIdentity.platform == 'telegram',
+            PlatformIdentity.platform_user_id == str(telegram_id)
+        ))
+        if identity:
+            return {"account_id": str(identity.account_id)}
+    except ValueError:
+        pass  # No es un ID numérico, ignorar esta búsqueda
+    
+    raise HTTPException(status_code=404, detail="Usuario no encontrado con el identificador proporcionado.")
+
 # --- Modelos para el Chat ---
 class ChatRequest(BaseModel):
     """Define la estructura de datos para una solicitud de mensaje de chat al agente."""
@@ -770,6 +803,23 @@ async def get_analysis_result_endpoint(
         raise HTTPException(status_code=404, detail="Tarea no encontrada.")
     return {"status": task.status, "result": task.result_payload, "error": task.error_message}
 
+@app.get("/api/get-mindmap-result/{task_id}")
+async def get_mindmap_result_endpoint(
+    task_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Consulta el estado y el resultado de una tarea de mapa mental, incluyendo la imagen Base64 si está disponible."""
+    task = await db.get(MindmapTask, uuid.UUID(task_id))
+    if not task or str(task.account_id) != current_account_id:
+        raise HTTPException(status_code=404, detail="Tarea de mapa mental no encontrada.")
+    return {
+        "status": task.status,
+        "result": task.result_payload if task.result_payload else {},
+        "topic": task.topic,
+        "created_at": task.created_at.isoformat()
+    }
+
 
 
 @app.post("/api/list-collections", summary="Listar las colecciones de conocimiento")
@@ -920,6 +970,29 @@ async def get_saved_analyses_endpoint(
     results = await db.execute(final_stmt)
     return results.scalars().all()
 
+class DeleteAnalysisRequest(BaseModel):
+    task_id: str
+
+@app.post("/api/delete-analysis", summary="Eliminar un análisis guardado")
+async def delete_analysis_endpoint(
+    req: DeleteAnalysisRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Elimina un análisis guardado por su ID de tarea, si pertenece al usuario autenticado.
+    """
+    account_uuid = uuid.UUID(current_account_id)
+    task_uuid = uuid.UUID(req.task_id)
+    
+    task = await db.get(AnalysisTask, task_uuid)
+    if not task or task.account_id != account_uuid:
+        raise HTTPException(status_code=404, detail="Análisis no encontrado o no pertenece al usuario.")
+    
+    await db.delete(task)
+    await db.commit()
+    return {"message": f"Análisis con ID {req.task_id} eliminado correctamente."}
+
 
 # ==============================================================================
 # SECCIÓN 6: ENDPOINTS PARA INTERFAZ WEB
@@ -1061,6 +1134,17 @@ async def update_thread_pin_status(thread_id: str, request: ThreadPinRequest, cu
     await db.refresh(thread)
     return ThreadResponse(id=str(thread.id), title=thread.title, created_at=thread.created_at)
 
+@app.post("/api/threads/{thread_id}/generate-title", response_model=ThreadResponse, summary="Forzar la generación de un nuevo título para un hilo de chat")
+async def force_generate_thread_title(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Fuerza la generación de un nuevo título para un hilo de chat específico.
+    """
+    await force_update_thread_title(thread_id)
+    thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
+    if not thread:
+        raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
+    return ThreadResponse(id=str(thread.id), title=thread.title, created_at=thread.created_at)
+
 @app.post("/internal/bot-create-thread")
 async def bot_create_thread(account_id: str = Form(...), title: str = Form("Nuevo Chat")):
     """Permite al bot de Telegram crear un hilo de chat para una cuenta dada."""
@@ -1171,7 +1255,7 @@ async def update_semantic_topics_endpoint(
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db),
-    max_terms: Optional[int] = Form(default=20, ge=1, description="Número máximo de términos a analizar para el análisis semántico")
+    max_terms: Optional[int] = Form(default=15, ge=1, description="Número máximo de términos a analizar para el análisis semántico")
 ):
     """
     Dispara manualmente el proceso de análisis semántico para agrupar temas por similitud.
@@ -1201,13 +1285,13 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
     """
     async with SessionLocal() as db_session:
         try:
-            # Marcar la tarea como 'processing'
+            # Marcar la tarea como 'processing' y notificar al usuario
             stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
             await db_session.execute(stmt_processing)
             await db_session.commit()
-            
             logger.info(f"Iniciando análisis semántico para tarea {task_id} para la cuenta {account_id}...")
-            
+            # Aquí se podría enviar una notificación de inicio a través de un WebSocket o similar
+
             # 1. Obtener todos los temas de análisis previos
             analysis_stmt = select(AnalysisTask.result_payload).where(
                 AnalysisTask.account_id == uuid.UUID(account_id),
@@ -1286,7 +1370,7 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
             for cluster_id, data in cluster_dict.items():
                 try:
                     topics_str = ", ".join(data["topics"][:5])  # Limitar a 5 temas para el prompt
-                    prompt = f"Generate a representative term or phrase for the following group of topics: {topics_str}"
+                    prompt = f"Generate a concise tag or term -not phrase, only term-for the following group of topics: {topics_str}. The tag should be a short, specific label (1-3 words) that captures the essence of these topics without any explanation or description. Ensure it is relevant and recognizable to the user."
                     response = await llm_for_embeddings.ainvoke(prompt)
                     representative_term = response.content.strip() if hasattr(response, 'content') else f"Grupo {cluster_id + 1}"
                 except Exception as e:
@@ -1303,12 +1387,14 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
             await db_session.execute(stmt_completed)
             await db_session.commit()
             logger.info(f"Análisis semántico para tarea {task_id} completado con {len(simulated_grouped_topics)} grupos de temas.")
+            # Aquí se podría enviar una notificación de finalización a través de un WebSocket o similar
         except Exception as e:
             logger.error(f"Fallo en tarea de análisis semántico {task_id}: {e}", exc_info=True)
             stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 status="failed", error_message=str(e))
             await db_session.execute(stmt_failed)
             await db_session.commit()
+            # Aquí se podría enviar una notificación de error a través de un WebSocket o similar
 
 @app.post("/api/text-to-speech", summary="Generar audio desde texto")
 async def text_to_speech_endpoint(request: TTSRequest):
@@ -1343,7 +1429,331 @@ async def text_to_speech_endpoint(request: TTSRequest):
         raise HTTPException(status_code=502, detail="Error en el servicio de generación de voz.")
 
 # ==============================================================================
-# SECCIÓN 7: Bloque de Ejecución para Desarrollo Local
+# SECCIÓN 7: API para Gestión de Equipos
+# ==============================================================================
+
+# --- Modelos Pydantic para Equipos ---
+class TeamCreateRequest(BaseModel):
+    """Define la estructura de datos para crear un nuevo equipo."""
+    name: str
+
+class TeamUpdateRequest(BaseModel):
+    """Define la estructura de datos para actualizar un equipo existente."""
+    name: Optional[str] = None
+
+class TeamShareRequest(BaseModel):
+    """Define la estructura de datos para compartir recursos con un equipo."""
+    documentIds: List[str] = []
+    eventIds: List[int] = []
+    noteIds: List[int] = []
+
+class TeamResponse(BaseModel):
+    """Define la estructura de datos para la respuesta de un equipo."""
+    id: str
+    name: str
+    created_at: datetime
+
+from core.database import Team
+
+@app.get("/api/teams", response_model=List[TeamResponse], summary="Listar equipos del usuario")
+async def list_teams(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Lista todos los equipos de un usuario autenticado, incluyendo aquellos donde es administrador o miembro.
+    """
+    logger.info(f"Listando equipos para la cuenta: {current_account_id}")
+    account_uuid = uuid.UUID(current_account_id)
+    # Obtener equipos donde el usuario es administrador
+    admin_teams_result = await db.execute(select(Team).where(Team.admin_id == account_uuid).order_by(Team.created_at.desc()))
+    admin_teams = admin_teams_result.scalars().all()
+    # Obtener equipos donde el usuario es miembro
+    member_teams_result = await db.execute(
+        select(Team)
+        .join(TeamMember, Team.id == TeamMember.team_id)
+        .where(TeamMember.account_id == account_uuid)
+        .order_by(Team.created_at.desc())
+    )
+    member_teams = member_teams_result.scalars().all()
+    # Combinar y eliminar duplicados
+    teams = list(set(admin_teams + member_teams))
+    # Ordenar por fecha de creación descendente
+    teams.sort(key=lambda x: x.created_at, reverse=True)
+    return [TeamResponse(id=str(team.id), name=team.name, created_at=team.created_at) for team in teams]
+
+@app.get("/api/teams/{team_id}", response_model=TeamResponse, summary="Obtener detalles de un equipo")
+async def get_team(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Obtiene los detalles de un equipo específico si pertenece al usuario autenticado.
+    """
+    logger.info(f"Obteniendo detalles del equipo {team_id} para la cuenta: {current_account_id}")
+    account_uuid = uuid.UUID(current_account_id)
+    team_uuid = uuid.UUID(team_id)
+    team = await db.scalar(select(Team).where(Team.id == team_uuid, Team.admin_id == account_uuid))
+    if not team:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado o no pertenece al usuario.")
+    return TeamResponse(id=str(team.id), name=team.name, created_at=team.created_at)
+
+@app.post("/api/teams", response_model=TeamResponse, status_code=status.HTTP_201_CREATED, summary="Crear un nuevo equipo")
+async def create_team(team: TeamCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Crea un nuevo equipo para el usuario autenticado.
+    """
+    logger.info(f"Creando nuevo equipo para la cuenta: {current_account_id}")
+    account_uuid = uuid.UUID(current_account_id)
+    new_team = Team(admin_id=account_uuid, name=team.name)
+    db.add(new_team)
+    await db.commit()
+    await db.refresh(new_team)
+    return TeamResponse(id=str(new_team.id), name=new_team.name, created_at=new_team.created_at)
+
+@app.put("/api/teams/{team_id}", response_model=TeamResponse, summary="Actualizar un equipo existente")
+async def update_team(team_id: str, team_update: TeamUpdateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Actualiza un equipo existente si pertenece al usuario autenticado.
+    """
+    logger.info(f"Actualizando equipo {team_id} para la cuenta: {current_account_id}")
+    account_uuid = uuid.UUID(current_account_id)
+    team_uuid = uuid.UUID(team_id)
+    team = await db.scalar(select(Team).where(Team.id == team_uuid, Team.admin_id == account_uuid))
+    if not team:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado o no pertenece al usuario.")
+    if team_update.name:
+        team.name = team_update.name
+    await db.commit()
+    await db.refresh(team)
+    return TeamResponse(id=str(team.id), name=team.name, created_at=team.created_at)
+
+@app.post("/api/teams/{team_id}/share/documents", summary="Compartir documentos con un equipo")
+async def share_documents_with_team(team_id: str, share_request: TeamShareRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Comparte documentos con un equipo específico.
+    """
+    logger.info(f"Compartiendo documentos con equipo {team_id} para la cuenta: {current_account_id}")
+    account_uuid = uuid.UUID(current_account_id)
+    team_uuid = uuid.UUID(team_id)
+    team = await db.scalar(select(Team).where(Team.id == team_uuid, Team.admin_id == account_uuid))
+    if not team:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado o no pertenece al usuario.")
+    
+    updated_count = 0
+    for file_name in share_request.documentIds:
+        # Update Memory table to associate documents with the team
+        # We check for documents where the content or related metadata might match the file_name
+        result = await db.execute(
+            update(Memory)
+            .where(
+                Memory.account_id == account_uuid, 
+                Memory.type == "document_chunk",
+                Memory.content.like(f"%{file_name}%")
+            )
+            .values(team_id=team_uuid)
+        )
+        if result.rowcount > 0:
+            updated_count += result.rowcount
+            logger.info(f"Documento {file_name} compartido con equipo {team_id}, actualizadas {result.rowcount} entradas.")
+        else:
+            logger.warning(f"No se encontraron entradas para el documento {file_name} con account_id {account_uuid}.")
+    
+    await db.commit()
+    if updated_count == 0:
+        logger.warning(f"No se compartieron documentos con el equipo {team_id} para la cuenta {current_account_id}.")
+        return {"message": "No se encontraron documentos para compartir. Verifica los IDs de los documentos."}
+    return {"message": f"{updated_count} documentos compartidos con equipo {team_id}"}
+
+@app.post("/api/teams/{team_id}/share/events", summary="Compartir eventos con un equipo")
+async def share_events_with_team(team_id: str, share_request: TeamShareRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Comparte eventos con un equipo específico.
+    """
+    logger.info(f"Compartiendo eventos con equipo {team_id} para la cuenta: {current_account_id}")
+    account_uuid = uuid.UUID(current_account_id)
+    team_uuid = uuid.UUID(team_id)
+    team = await db.scalar(select(Team).where(Team.id == team_uuid, Team.admin_id == account_uuid))
+    if not team:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado o no pertenece al usuario.")
+    
+    updated_count = 0
+    for event_id in share_request.eventIds:
+        # Update AgendaEvent table to associate events with the team
+        result = await db.execute(
+            update(AgendaEvent)
+            .where(AgendaEvent.account_id == account_uuid, AgendaEvent.id == event_id)
+            .values(team_id=team_uuid)
+        )
+        if result.rowcount > 0:
+            updated_count += result.rowcount
+    
+    await db.commit()
+    return {"message": f"{updated_count} eventos compartidos con equipo {team_id}"}
+
+@app.post("/api/teams/{team_id}/share/notes", summary="Compartir notas con un equipo")
+async def share_notes_with_team(team_id: str, share_request: TeamShareRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Comparte notas con un equipo específico.
+    """
+    logger.info(f"Compartiendo notas con equipo {team_id} para la cuenta: {current_account_id}")
+    account_uuid = uuid.UUID(current_account_id)
+    team_uuid = uuid.UUID(team_id)
+    team = await db.scalar(select(Team).where(Team.id == team_uuid, Team.admin_id == account_uuid))
+    if not team:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado o no pertenece al usuario.")
+    
+    updated_count = 0
+    for note_id in share_request.noteIds:
+        # Update Nota table to associate notes with the team
+        result = await db.execute(
+            update(Nota)
+            .where(Nota.account_id == account_uuid, Nota.id == note_id)
+            .values(team_id=team_uuid)
+        )
+        if result.rowcount > 0:
+            updated_count += result.rowcount
+    
+    await db.commit()
+    return {"message": f"{updated_count} notas compartidas con equipo {team_id}"}
+
+# --- Endpoints para Gestión de Miembros de Equipo ---
+
+from core.database import TeamMember
+
+class TeamMemberAddRequest(BaseModel):
+    """Define la estructura de datos para añadir un miembro a un equipo."""
+    account_id: str
+
+class TeamMemberRemoveRequest(BaseModel):
+    """Define la estructura de datos para eliminar un miembro de un equipo."""
+    account_id: str
+
+@app.post("/api/teams/{team_id}/members", response_model=dict, status_code=status.HTTP_201_CREATED, summary="Añadir miembro a un equipo")
+async def add_team_member(team_id: str, request: TeamMemberAddRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Añade un miembro a un equipo específico. Solo el administrador del equipo puede realizar esta acción.
+    """
+    logger.info(f"Añadiendo miembro al equipo {team_id} por la cuenta: {current_account_id}")
+    account_uuid = uuid.UUID(current_account_id)
+    team_uuid = uuid.UUID(team_id)
+    team = await db.scalar(select(Team).where(Team.id == team_uuid, Team.admin_id == account_uuid))
+    if not team:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado o no tienes permisos para gestionar miembros.")
+    
+    member_uuid = uuid.UUID(request.account_id)
+    # Verificar si el miembro ya está en el equipo
+    existing_member = await db.scalar(select(TeamMember).where(TeamMember.team_id == team_uuid, TeamMember.account_id == member_uuid))
+    if existing_member:
+        raise HTTPException(status_code=409, detail="El usuario ya es miembro de este equipo.")
+    
+    new_member = TeamMember(team_id=team_uuid, account_id=member_uuid)
+    db.add(new_member)
+    await db.commit()
+    await db.refresh(new_member)
+    return {"message": f"Miembro {request.account_id} añadido al equipo {team_id}"}
+
+@app.delete("/api/teams/{team_id}/members", response_model=dict, summary="Eliminar miembro de un equipo")
+async def remove_team_member(team_id: str, request: TeamMemberRemoveRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Elimina un miembro de un equipo específico. Solo el administrador del equipo puede realizar esta acción.
+    """
+    logger.info(f"Eliminando miembro del equipo {team_id} por la cuenta: {current_account_id}")
+    account_uuid = uuid.UUID(current_account_id)
+    team_uuid = uuid.UUID(team_id)
+    team = await db.scalar(select(Team).where(Team.id == team_uuid, Team.admin_id == account_uuid))
+    if not team:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado o no tienes permisos para gestionar miembros.")
+    
+    member_uuid = uuid.UUID(request.account_id)
+    member = await db.scalar(select(TeamMember).where(TeamMember.team_id == team_uuid, TeamMember.account_id == member_uuid))
+    if not member:
+        raise HTTPException(status_code=404, detail="Miembro no encontrado en este equipo.")
+    
+    await db.delete(member)
+    await db.commit()
+    return {"message": f"Miembro {request.account_id} eliminado del equipo {team_id}"}
+
+@app.get("/api/teams/{team_id}/members", response_model=List[dict], summary="Listar miembros de un equipo")
+async def list_team_members(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Lista todos los miembros de un equipo específico. Accesible para cualquier miembro del equipo.
+    """
+    logger.info(f"Listando miembros del equipo {team_id} para la cuenta: {current_account_id}")
+    account_uuid = uuid.UUID(current_account_id)
+    team_uuid = uuid.UUID(team_id)
+    # Verificar si el usuario es administrador o miembro del equipo
+    team_as_admin = await db.scalar(select(Team).where(Team.id == team_uuid, Team.admin_id == account_uuid))
+    if not team_as_admin:
+        team_as_member = await db.scalar(
+            select(TeamMember).where(TeamMember.team_id == team_uuid, TeamMember.account_id == account_uuid)
+        )
+        if not team_as_member:
+            raise HTTPException(status_code=404, detail="Equipo no encontrado o no tienes permisos para ver los miembros.")
+    
+    members_result = await db.execute(select(TeamMember).where(TeamMember.team_id == team_uuid))
+    members = members_result.scalars().all()
+    return [{"account_id": str(member.account_id), "joined_at": member.joined_at} for member in members]
+
+@app.get("/api/teams/{team_id}/documents", response_model=List[dict], summary="Listar documentos compartidos con un equipo")
+async def list_team_documents(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Lista todos los documentos compartidos con un equipo específico. Accesible para cualquier miembro del equipo.
+    """
+    logger.info(f"Listando documentos del equipo {team_id} para la cuenta: {current_account_id}")
+    account_uuid = uuid.UUID(current_account_id)
+    team_uuid = uuid.UUID(team_id)
+    # Verificar si el usuario es administrador o miembro del equipo
+    team_as_admin = await db.scalar(select(Team).where(Team.id == team_uuid, Team.admin_id == account_uuid))
+    if not team_as_admin:
+        team_as_member = await db.scalar(
+            select(TeamMember).where(TeamMember.team_id == team_uuid, TeamMember.account_id == account_uuid)
+        )
+        if not team_as_member:
+            raise HTTPException(status_code=404, detail="Equipo no encontrado o no tienes permisos para ver los documentos.")
+    
+    documents_result = await db.execute(select(Memory).where(Memory.team_id == team_uuid, Memory.type == "document_chunk"))
+    documents = documents_result.scalars().all()
+    return [{"file_name": doc.content, "title": doc.content, "shared_at": doc.created_at} for doc in documents]
+
+@app.get("/api/teams/{team_id}/notes", response_model=List[dict], summary="Listar notas compartidas con un equipo")
+async def list_team_notes(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Lista todas las notas compartidas con un equipo específico. Accesible para cualquier miembro del equipo.
+    """
+    logger.info(f"Listando notas del equipo {team_id} para la cuenta: {current_account_id}")
+    account_uuid = uuid.UUID(current_account_id)
+    team_uuid = uuid.UUID(team_id)
+    # Verificar si el usuario es administrador o miembro del equipo
+    team_as_admin = await db.scalar(select(Team).where(Team.id == team_uuid, Team.admin_id == account_uuid))
+    if not team_as_admin:
+        team_as_member = await db.scalar(
+            select(TeamMember).where(TeamMember.team_id == team_uuid, TeamMember.account_id == account_uuid)
+        )
+        if not team_as_member:
+            raise HTTPException(status_code=404, detail="Equipo no encontrado o no tienes permisos para ver las notas.")
+    
+    notes_result = await db.execute(select(Nota).where(Nota.team_id == team_uuid))
+    notes = notes_result.scalars().all()
+    return [{"id": note.id, "title": note.title, "updated_at": note.updated_at} for note in notes]
+
+@app.post("/api/notes/{note_id}/unshare", summary="Eliminar compartición de una nota")
+async def unshare_note(note_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Elimina la asociación de una nota con cualquier equipo, dejándola como no compartida.
+    """
+    logger.info(f"Eliminando compartición de nota {note_id} para la cuenta: {current_account_id}")
+    account_uuid = uuid.UUID(current_account_id)
+    note_id_int = int(note_id)
+    
+    result = await db.execute(
+        update(Nota)
+        .where(Nota.account_id == account_uuid, Nota.id == note_id_int)
+        .values(team_id=None)
+    )
+    
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Nota no encontrada o no pertenece al usuario.")
+    
+    await db.commit()
+    return {"message": "Nota ya no está compartida con ningún equipo."}
+
+# ==============================================================================
+# SECCIÓN 8: Bloque de Ejecución para Desarrollo Local
 # ==============================================================================
 if __name__ == "__main__":
     import uvicorn

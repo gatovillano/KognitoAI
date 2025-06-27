@@ -1,8 +1,11 @@
 'use client';
 
+import React from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import { Bold, Italic, Strikethrough, Code, Heading1, Heading2, List, ListOrdered, Quote } from 'lucide-react';
+import TaskList from '@tiptap/extension-task-list';
+import TaskItem from '@tiptap/extension-task-item';
+import { Bold, Italic, Strikethrough, Code, Heading1, Heading2, List, ListOrdered, Quote, CheckSquare } from 'lucide-react';
 import { Button } from './ui/button';
 
 // --- La Barra de Herramientas ---
@@ -19,6 +22,7 @@ const Toolbar = ({ editor }: { editor: any }) => {
       <Button variant={editor.isActive('heading', { level: 2 }) ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}><Heading2 className="h-4 w-4" /></Button>
       <Button variant={editor.isActive('bulletList') ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleBulletList().run()}><List className="h-4 w-4" /></Button>
       <Button variant={editor.isActive('orderedList') ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered className="h-4 w-4" /></Button>
+      <Button variant={editor.isActive('taskList') ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleTaskList().run()}><CheckSquare className="h-4 w-4" /></Button>
       <Button variant={editor.isActive('blockquote') ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleBlockquote().run()}><Quote className="h-4 w-4" /></Button>
     </div>
   );
@@ -26,8 +30,16 @@ const Toolbar = ({ editor }: { editor: any }) => {
 
 // --- El Editor Principal ---
 export function TiptapEditor({ content, onChange }: { content: string; onChange: (html: string) => void }) {
+  const debounceTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
   const editor = useEditor({
-    extensions: [StarterKit],
+    extensions: [
+      StarterKit,
+      TaskList,
+      TaskItem.configure({
+        nested: true,
+      }),
+    ],
     content: content,
     editorProps: {
       attributes: {
@@ -35,7 +47,18 @@ export function TiptapEditor({ content, onChange }: { content: string; onChange:
       },
     },
     onUpdate({ editor }) {
-      onChange(editor.getHTML()); // Tiptap trabaja con HTML, no con Markdown
+      // Debounce the onChange call to prevent performance issues on frequent updates
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+      debounceTimeoutRef.current = setTimeout(() => {
+        onChange(editor.getHTML()); // Tiptap trabaja con HTML, no con Markdown
+      }, 250);
+    },
+    onDestroy() {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
     },
   });
 

@@ -123,7 +123,9 @@ export default function DashboardPage() {
                       }
                       const triggerResponse = await apiClient.post('/api/update-semantic-topics', formData);
                       const taskId = triggerResponse.data.task_id;
-                      toast.info('Análisis semántico iniciado. Esto puede tomar unos momentos...');
+                      toast.info('Análisis semántico iniciado en segundo plano.', {
+                        description: 'Recibirás una notificación cuando haya terminado.',
+                      });
                       
                       // Poll for task status
                       let taskStatus = 'pending';
@@ -135,10 +137,14 @@ export default function DashboardPage() {
                           // Refresh dashboard data after analysis is complete
                           const dataResponse = await apiClient.post('/api/dashboard-insights');
                           setData(dataResponse.data);
-                          toast.success('Análisis semántico completado. Los temas se han actualizado.');
+                          toast.success('Análisis semántico completado.', {
+                            description: 'Los temas principales han sido actualizados con éxito.',
+                          });
                           break;
                         } else if (taskStatus === 'failed') {
-                          toast.error('Error en el análisis semántico: ' + statusResponse.data.error || 'Error desconocido');
+                          toast.error('Error en el análisis semántico.', {
+                            description: statusResponse.data.error || 'Ocurrió un error desconocido durante el análisis.',
+                          });
                           break;
                         }
                       }

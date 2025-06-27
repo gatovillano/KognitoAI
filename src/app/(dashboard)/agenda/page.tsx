@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { PlusCircle, Clock, Trash2 } from 'lucide-react';
+import { PlusCircle, Clock, Trash2, Users } from 'lucide-react';
 import { EventDialog } from './event-dialog';
 import { Calendar } from '@/components/ui/calendar';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -19,6 +19,7 @@ export interface AgendaEvent {
   event_datetime_utc: string;
   event_datetime_local: string;
   user_timezone: string;
+  team_shared?: boolean | string; // Indicates if shared with a team, can be boolean or team name/id
 }
 
 export default function AgendaPage() {
@@ -133,7 +134,14 @@ export default function AgendaPage() {
                             eventsForSelectedPeriod.map((event) => (
                             <div key={event.id} className="p-4 border rounded-lg flex items-center justify-between hover:border-primary/50">
                                 <div>
-                                    <p className="font-semibold">{event.description}</p>
+                                    <p className="font-semibold flex items-center">
+                                        {event.description}
+                                        {event.team_shared && (
+                                            <span title="Compartido con equipo">
+                                                <Users className="ml-2 h-4 w-4 text-blue-500" />
+                                            </span>
+                                        )}
+                                    </p>
                                     <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
                                         <Clock className="h-4 w-4" /> 
                                         {new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}

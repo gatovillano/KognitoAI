@@ -2,20 +2,20 @@
 
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import apiClient from '@/lib/api';
 import { motion } from 'framer-motion';
 
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { toast } from 'sonner';
 
-import { ArrowUp, User, Copy, Play, Loader2, Square, Search, BookMarked, BrainCircuit, Upload, Mic } from 'lucide-react';
+import { User, Copy, Play, Loader2, Square, Clock } from 'lucide-react';
+import { ChatInputBar } from '@/components/ChatInputBar';
 
 interface Message {
   text: string;
@@ -41,13 +41,13 @@ export default function ChatPage() {
   const [isWebSearchActive, setIsWebSearchActive] = useState(false);
   const [isComprehensiveAnalysisActive, setIsComprehensiveAnalysisActive] = useState(false);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
+  const [backgroundTasks, setBackgroundTasks] = useState<{ taskId: string, type: string }[]>([]);
   
   // --- NUEVOS ESTADOS PARA EL AUDIO ---
   const [isAudioLoading, setIsAudioLoading] = useState(false);
   const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   
-  const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -113,14 +113,38 @@ export default function ChatPage() {
     }
   }, [messages, isResponding]);
 
+  // Polling for background tasks status
   useEffect(() => {
-    if (textAreaRef.current) {
-      textAreaRef.current.style.height = 'auto';
-      textAreaRef.current.style.height = `${textAreaRef.current.scrollHeight}px`;
-    }
-  }, [newMessage]);
+    const checkTaskStatus = async () => {
+      if (backgroundTasks.length === 0) return;
+      
+      for (const task of backgroundTasks) {
+        try {
+          const response = await apiClient.get(`/api/get-mindmap-result/${task.taskId}`);
+          if (response.data.status === 'completed') {
+            const result = response.data.result.mindmap;
+            const completionMessage: Message = { text: `Mapa mental completado:\n\n${result}`, sender: 'ai' };
+            setMessages((prev) => [...prev, completionMessage]);
+            setBackgroundTasks((prev) => prev.filter(t => t.taskId !== task.taskId));
+            toast.success('Mapa mental completado', { description: 'La generación del mapa mental ha finalizado.' });
+          } else if (response.data.status === 'failed') {
+            const errorMsg = response.data.error || 'Error desconocido al generar el mapa mental.';
+            const errorMessage: Message = { text: `Error al generar el mapa mental: ${errorMsg}`, sender: 'ai' };
+            setMessages((prev) => [...prev, errorMessage]);
+            setBackgroundTasks((prev) => prev.filter(t => t.taskId !== task.taskId));
+            toast.error('Error en mapa mental', { description: errorMsg });
+          }
+        } catch (error) {
+          console.error('Error checking task status:', error);
+        }
+      }
+    };
+    
+    const intervalId = setInterval(checkTaskStatus, 5000); // Check every 5 seconds
+    return () => clearInterval(intervalId);
+  }, [backgroundTasks]);
 
-  const startRecording = async () => {
+  const startRecording = useCallback(async () => {
     if (isRecording) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -162,43 +186,13 @@ export default function ChatPage() {
       console.error('Error accessing microphone:', error);
       toast.error('Error al acceder al micrófono. Verifica los permisos.');
     }
-  };
+  }, [isRecording]);
 
-  const stopRecording = () => {
+  const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
     }
-  };
-
-  useEffect(() => {
-    const handlePaste = (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (items) {
-        for (let i = 0; i < items.length; i++) {
-          if (items[i].type.indexOf('image') !== -1) {
-            e.preventDefault();
-            const blob = items[i].getAsFile();
-            if (blob) {
-              const formData = new FormData();
-              formData.append('thread_id', threadId);
-              formData.append('files', blob, 'pasted-image.png');
-              uploadPastedImage(formData);
-            }
-          }
-        }
-      }
-    };
-
-    const textArea = textAreaRef.current;
-    if (textArea) {
-      textArea.addEventListener('paste', handlePaste);
-    }
-    return () => {
-      if (textArea) {
-        textArea.removeEventListener('paste', handlePaste);
-      }
-    };
-  }, [threadId]);
+  }, []);
 
   const uploadPastedImage = async (formData: FormData) => {
     if (isUploadingFile) return;
@@ -253,6 +247,15 @@ export default function ChatPage() {
       clearTimeout(timeoutId);
       const aiMessage: Message = { text: response.data.response_text, sender: 'ai' };
       setMessages((prev) => [...prev, aiMessage]);
+      
+      // Check for background task initiation in the response
+      const responseText = response.data.response_text;
+      if (responseText.includes("Tarea de generación de mapa mental iniciada. ID de tarea:")) {
+        const taskIdMatch = responseText.match(/ID de tarea: ([a-f0-9-]+)\./);
+        if (taskIdMatch && taskIdMatch[1]) {
+          setBackgroundTasks((prev) => [...prev, { taskId: taskIdMatch[1], type: 'mindmap' }]);
+        }
+      }
     } catch (error: any) {
       console.error('Error sending message:', error);
       let errorText = 'Lo siento, ocurrió un error al procesar tu mensaje.';
@@ -373,6 +376,24 @@ export default function ChatPage() {
     }
   };
 
+  const handlePaste = useCallback((e: ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          e.preventDefault();
+          const blob = items[i].getAsFile();
+          if (blob) {
+            const formData = new FormData();
+            formData.append('thread_id', threadId);
+            formData.append('files', blob, 'pasted-image.png');
+            uploadPastedImage(formData);
+          }
+        }
+      }
+    }
+  }, [threadId, uploadPastedImage]);
+
   if (!user && !isResponding) {
     return <div className="flex h-full items-center justify-center"><p>Cargando conversación...</p></div>;
   }
@@ -414,7 +435,7 @@ export default function ChatPage() {
                   <div className="flex flex-col items-center">
                     <div className="w-full max-w-4xl mx-auto">
                       <div className="flex items-start gap-4">
-                        <Avatar className="h-12 w-12 border">
+                        <Avatar className="h-16 w-16 border">
                           <AvatarImage src="/logo-simple.png" alt="Kognito" />
                           <AvatarFallback>K</AvatarFallback>
                         </Avatar>
@@ -461,7 +482,7 @@ export default function ChatPage() {
                   <div className="flex justify-center w-full">
                     <div className="w-full max-w-3xl mx-auto">
                       <div className="flex items-start gap-4">
-                        <Avatar className="h-8 w-8 border">
+                        <Avatar className="h-12 w-12 border">
                           <AvatarImage src="/logo-simple.png" alt="Kognito" />
                           <AvatarFallback>K</AvatarFallback>
                         </Avatar>
@@ -503,81 +524,43 @@ export default function ChatPage() {
                 )}
               </>
             }
+            {backgroundTasks.length > 0 && backgroundTasks.map((task) => (
+              <div key={task.taskId} className="flex justify-center w-full py-4">
+                <div className="flex flex-col items-center">
+                  <motion.div
+                    className="h-12 w-12 border-4 border-t-blue-500 border-b-blue-500 border-l-transparent border-r-transparent rounded-full"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  />
+                  <span className="mt-2 text-sm text-muted-foreground">
+                    Procesando {task.type === 'mindmap' ? 'Mapa Mental' : 'Tarea'}...
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
         </ScrollArea>
       </div>
 
-      <footer className="p-4 w-full flex justify-center shrink-0 bg-transparent">
-        <form onSubmit={handleSendMessage} className="relative w-full max-w-3xl">
-          <div className="rounded-2xl bg-card p-4 shadow-lg">
-            <Textarea
-              ref={textAreaRef}
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="¿Cómo puedo ayudarte hoy?"
-              autoComplete="off"
-              disabled={isResponding}
-              className="w-full resize-none bg-transparent border-0 focus:ring-0 p-0 text-base"
-              rows={1}
-            />
-            <div className="mt-3 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div 
-                  onClick={toggleKnowledgeAnalysis}
-                  className={`cursor-pointer flex items-center gap-1.5 text-sm ${isKnowledgeAnalysisActive ? 'text-primary' : 'text-muted-foreground'}`}
-                >
-                  <BookMarked className="h-4 w-4" />
-                  Análisis de Conocimientos
-                </div>
-                <div 
-                  onClick={toggleWebSearch}
-                  className={`cursor-pointer flex items-center gap-1.5 text-sm ${isWebSearchActive ? 'text-primary' : 'text-muted-foreground'}`}
-                >
-                  <Search className="h-4 w-4" />
-                  Búsqueda Web
-                </div>
-                <div
-                  onClick={toggleComprehensiveAnalysis}
-                  className={`cursor-pointer flex items-center gap-1.5 text-sm ${isComprehensiveAnalysisActive ? 'text-primary' : 'text-muted-foreground'}`}
-                >
-                  <BrainCircuit className="h-4 w-4" />
-                  Busqueda y Analisis
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="cursor-pointer flex items-center text-sm text-muted-foreground">
-                  <Upload className="h-4 w-4" />
-                  <label htmlFor="file-upload" className="cursor-pointer sr-only">Subir Archivo</label>
-                  <input
-                    id="file-upload"
-                    type="file"
-                    multiple
-                    accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.gif"
-                    className="hidden"
-                    onChange={handleFileUpload}
-                    disabled={isUploadingFile}
-                  />
-                </div>
-                <div
-                  onClick={isRecording ? stopRecording : startRecording}
-                  className={`cursor-pointer flex items-center text-sm ${isRecording ? 'text-red-500' : 'text-muted-foreground'}`}
-                >
-                  <Mic className="h-4 w-4" />
-                </div>
-                <Button 
-                  type="submit" 
-                  size="icon" 
-                  variant="ghost"
-                  disabled={isResponding || !newMessage.trim()}
-                >
-                  <ArrowUp className="h-5 w-5" />
-                </Button>
-              </div>
-            </div>
-          </div>
-        </form>
-      </footer>
+      <ChatInputBar
+        newMessage={newMessage}
+        isResponding={isResponding}
+        isRecording={isRecording}
+        isUploadingFile={isUploadingFile}
+        isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+        isWebSearchActive={isWebSearchActive}
+        isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+        onMessageChange={setNewMessage}
+        onSendMessage={handleSendMessage}
+        onKeyDown={handleKeyDown}
+        onToggleKnowledgeAnalysis={toggleKnowledgeAnalysis}
+        onToggleWebSearch={toggleWebSearch}
+        onToggleComprehensiveAnalysis={toggleComprehensiveAnalysis}
+        onStartRecording={startRecording}
+        onStopRecording={stopRecording}
+        onFileUpload={handleFileUpload}
+        onPaste={handlePaste}
+      />
     </div>
   );
 }

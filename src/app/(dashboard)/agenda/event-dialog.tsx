@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { toast } from 'sonner';
+import { useState, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -17,6 +18,7 @@ const formSchema = z.object({
   description: z.string().min(3, "La descripción es muy corta."),
   date: z.string().min(1, "Debes seleccionar una fecha."),
   time: z.string().min(1, "Debes especificar una hora."),
+  team_id: z.string().optional(), // Optional field for sharing with a team
 });
 
 interface EventDialogProps {
@@ -26,10 +28,31 @@ interface EventDialogProps {
 }
 
 export function EventDialog({ isOpen, onOpenChange, onSaveSuccess }: EventDialogProps) {
+  const [teams, setTeams] = useState<any[]>([]);
+  const [loadingTeams, setLoadingTeams] = useState(false);
+
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: { description: '' },
   });
+
+  useEffect(() => {
+    const fetchTeams = async () => {
+      setLoadingTeams(true);
+      try {
+        const response = await apiClient.get('/api/teams');
+        setTeams(response.data);
+      } catch (error) {
+        console.error("Error fetching teams:", error);
+        toast.error('Error al cargar los equipos.');
+      } finally {
+        setLoadingTeams(false);
+      }
+    };
+    if (isOpen) {
+      fetchTeams();
+    }
+  }, [isOpen]);
 
 async function onSubmit(values: z.infer<typeof formSchema>) {
     // --- CAMBIO CLAVE: Combinamos fecha y hora en un formato estándar ---
@@ -40,7 +63,8 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
     try {
       const response = await apiClient.post('/api/add-event', {
         description: values.description,
-        event_datetime: standardDateTime, // <-- Enviamos la nueva cadena
+        event_datetime: standardDateTime,
+        team_id: values.team_id ? parseInt(values.team_id) : null, // Send team ID if selected
       });
       toast.success('¡Evento agendado!', { id: toastId });
       onSaveSuccess(response.data);
@@ -70,6 +94,27 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
                 <FormItem><FormLabel>Hora</FormLabel><FormControl><Input type="time" {...field} /></FormControl><FormMessage /></FormItem>
                 )} />
             </div>
+            <FormField control={form.control} name="team_id" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Compartir con Equipo</FormLabel>
+                <FormControl>
+                  <select 
+                    className="w-full border rounded-md p-2"
+                    onChange={field.onChange} 
+                    value={field.value || ''}
+                    disabled={loadingTeams}
+                  >
+                    <option value="">{loadingTeams ? "Cargando equipos..." : "Seleccionar equipo (opcional)"}</option>
+                    {teams.map(team => (
+                      <option key={team.id} value={team.id.toString()}>
+                        {team.name}
+                      </option>
+                    ))}
+                  </select>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
             <DialogFooter>
               <Button type="submit" disabled={form.formState.isSubmitting}>
                 {form.formState.isSubmitting ? 'Agendando...' : 'Agendar'}

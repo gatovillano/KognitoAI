@@ -10,6 +10,7 @@ export type Document = {
   topic: string;
   title: string | null;
   author: string | null;
+  team_shared?: boolean | string; // Indicates if shared with a team, can be boolean or team name/id
 };
 
 // La función ahora recibe los handlers para cada acción
@@ -22,7 +23,14 @@ export const getColumns = (
   {
     accessorKey: 'title',
     header: 'Título',
-    cell: ({ row }) => <div className="font-medium">{row.original.title || <span className="text-muted-foreground italic">Sin título</span>}</div>,
+    cell: ({ row }) => (
+      <div className="font-medium flex items-center">
+        {row.original.title || <span className="text-muted-foreground italic">Sin título</span>}
+        {row.original.team_shared && (
+          <span className="ml-2 text-blue-500" title="Compartido con equipo">👥</span>
+        )}
+      </div>
+    ),
   },
   {
     accessorKey: 'file_name',

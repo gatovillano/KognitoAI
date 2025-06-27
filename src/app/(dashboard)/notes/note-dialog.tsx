@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -37,6 +37,7 @@ const formSchema = z.object({
   title: z.string().optional(),
   category: z.string().min(2, "La categoría es muy corta.").optional(),
   content: z.string().min(1, "El contenido no puede estar vacío."),
+  team_id: z.string().optional(), // Optional field for sharing with a team
 });
 
 interface NoteDialogProps {
@@ -48,9 +49,30 @@ interface NoteDialogProps {
 
 export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess }: NoteDialogProps) {
   const router = useRouter();
+  const [teams, setTeams] = useState<any[]>([]);
+  const [loadingTeams, setLoadingTeams] = useState(false);
+
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
   });
+
+  useEffect(() => {
+    const fetchTeams = async () => {
+      setLoadingTeams(true);
+      try {
+        const response = await apiClient.get('/api/teams');
+        setTeams(response.data);
+      } catch (error) {
+        console.error("Error fetching teams:", error);
+        toast.error('Error al cargar los equipos.');
+      } finally {
+        setLoadingTeams(false);
+      }
+    };
+    if (isOpen) {
+      fetchTeams();
+    }
+  }, [isOpen]);
 
   const isEditing = !!note;
 
@@ -70,17 +92,38 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess }: NoteDi
     const toastId = toast.loading(isEditing ? 'Actualizando nota...' : 'Creando nota...');
 
     try {
-      let response;
       const endpoint = isEditing ? '/api/update-note' : '/api/add-note';
       const payload = isEditing ? { note_id: note.id, ...values } : values;
+      // team_id is included in the payload as per schema
 
-      response = await apiClient.post(endpoint, payload);
-      
+      const response = await apiClient.post(endpoint, payload);
       toast.success(isEditing ? '¡Nota actualizada!' : '¡Nota creada!', { id: toastId });
       
+      const noteId = isEditing ? note.id : response.data.id;
+      // Si hay un team_id seleccionado, compartimos la nota con el equipo
+      if (values.team_id) {
+        await apiClient.post(`/api/teams/${values.team_id}/share/notes`, {
+          noteIds: [noteId]
+        });
+        toast.success('Nota compartida con equipo!');
+      } else {
+        // Si no hay team_id seleccionado, eliminamos la compartición
+        try {
+          await apiClient.post(`/api/notes/${noteId}/unshare`, {});
+          toast.success('Nota ya no está compartida con ningún equipo.');
+        } catch (error) {
+          console.error("Error al descompartir la nota:", error);
+          toast.error('Error al descompartir la nota.');
+        }
+      }
+
       // Llamamos al callback para actualizar la UI de la página principal
       // Si estamos editando, fusionamos los datos viejos y nuevos. Si no, usamos la respuesta de la API.
-      onSaveSuccess(isEditing ? { ...note, ...values } : response.data);
+      // Aseguramos que team_shared se actualice basado en si hay un team_id seleccionado.
+      const updatedNote = isEditing 
+        ? { ...note, ...values, team_shared: !!values.team_id } 
+        : { ...response.data, team_shared: !!values.team_id };
+      onSaveSuccess(updatedNote);
       onOpenChange(false);
     } catch (error) {
       toast.error(isEditing ? 'Error al actualizar la nota.' : 'Error al crear la nota.', { id: toastId });
@@ -117,6 +160,27 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess }: NoteDi
             </div>
             <FormField control={form.control} name="content" render={({ field }) => (
               <FormItem><FormLabel>Contenido (soporta Markdown)</FormLabel><FormControl><Textarea placeholder="Escribe tu nota aquí..." className="min-h-[200px] resize-y" {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
+            <FormField control={form.control} name="team_id" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Compartir con Equipo</FormLabel>
+                <FormControl>
+                  <select 
+                    className="w-full border rounded-md p-2"
+                    onChange={field.onChange} 
+                    value={field.value || ''}
+                    disabled={loadingTeams}
+                  >
+                    <option value="">{loadingTeams ? "Cargando equipos..." : "Ninguno"}</option>
+                    {teams.map(team => (
+                      <option key={team.id} value={team.id.toString()}>
+                        {team.name}
+                      </option>
+                    ))}
+                  </select>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
             )} />
             <DialogFooter className="flex-col-reverse sm:flex-row sm:justify-between sm:space-x-2">
               <Button type="button" variant="outline" onClick={handleGoToAdvancedEditor}>
