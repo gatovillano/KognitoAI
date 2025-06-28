@@ -588,13 +588,38 @@ async def upload_chat_file_endpoint(
     return {"message": f"{processed_files}/{len(files)} archivo(s) subido(s) al contexto del hilo {thread_id}."}
 @app.post("/api/list-documents") # Cambiado a POST porque el frontend web lo usa con FormData
 async def list_documents_endpoint(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
-    """Lista los documentos subidos por el usuario. Protegido por JWT."""
+    """Lista los documentos subidos por el usuario, incluyendo documentos compartidos con equipos. Protegido por JWT."""
     account_id_uuid = uuid.UUID(current_account_id)
-    return await list_user_documents(str(account_id_uuid))
+    
+    # Obtener documentos personales
+    personal_docs = await list_user_documents(str(account_id_uuid))
+    
+    # Obtener equipos del usuario
+    member_teams_result = await db.execute(
+        select(TeamMember).where(TeamMember.account_id == account_id_uuid)
+    )
+    member_teams = member_teams_result.scalars().all()
+    team_ids = [str(team.team_id) for team in member_teams]
+    
+    # Obtener documentos de equipos
+    team_docs = []
+    for team_id in team_ids:
+        team_docs.extend(await list_user_documents(
+            account_id=str(account_id_uuid),
+            team_id=team_id
+        ))
+    
+    # Combinar documentos personales y de equipos, eliminando duplicados por file_name
+    combined_docs = {doc['file_name']: doc for doc in personal_docs + team_docs}.values()
+    return list(combined_docs)
 
 @app.post("/api/delete-document") # Cambiado a POST porque el frontend web lo usa con FormData
 async def delete_document_endpoint(current_account_id: str = Depends(get_current_account_id), file_name: str = Form(...), db: AsyncSession = Depends(get_db)):
     """Elimina documentos de la base de conocimiento del usuario. Protegido por JWT."""
+    logger.info(f"Received delete request for file_name: '{file_name}' from account: {current_account_id}")
+    if not file_name or file_name.strip() == "":
+        logger.warning(f"Validation failed: file_name is empty for account: {current_account_id}")
+        raise HTTPException(status_code=422, detail="El nombre del archivo no puede estar vacío.")
     account_id_uuid = uuid.UUID(current_account_id)
     success = await delete_document_chunks(str(account_id_uuid), file_name)
     if not success: raise HTTPException(status_code=404, detail="Documento no encontrado o ya eliminado.")
@@ -608,14 +633,37 @@ class ListNotesRequest(BaseModel):
 @app.post("/api/list-notes")
 async def list_notes_endpoint(
     request: ListNotesRequest, # Usamos el modelo
-    current_account_id: str = Depends(get_current_account_id)
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
 ):
-    """Devuelve las notas de un usuario como una lista de objetos JSON."""
-    notes_list = await get_notes_as_dicts(
+    """Devuelve las notas de un usuario como una lista de objetos JSON, incluyendo notas compartidas con equipos."""
+    account_uuid = uuid.UUID(current_account_id)
+    
+    # Obtener notas personales
+    personal_notes = await get_notes_as_dicts(
         account_id=current_account_id, 
         search_query=request.search_term
     )
-    return notes_list
+    
+    # Obtener equipos del usuario
+    member_teams_result = await db.execute(
+        select(TeamMember).where(TeamMember.account_id == account_uuid)
+    )
+    member_teams = member_teams_result.scalars().all()
+    team_ids = [str(team.team_id) for team in member_teams]
+    
+    # Obtener notas de equipos
+    team_notes = []
+    for team_id in team_ids:
+        team_notes.extend(await get_notes_as_dicts(
+            account_id=current_account_id,
+            search_query=request.search_term,
+            team_id=team_id
+        ))
+    
+    # Combinar notas personales y de equipos, eliminando duplicados por ID
+    combined_notes = {note['id']: note for note in personal_notes + team_notes}.values()
+    return list(combined_notes)
 # --- MODELOS PYDANTIC PARA NOTAS ---
 class NoteRequest(BaseModel):
     title: Optional[str] = None
@@ -649,8 +697,30 @@ async def delete_note_endpoint(note: NoteDeleteRequest, current_account_id: str 
 
 @app.post("/api/list-events") # Cambiado a POST
 async def list_events_endpoint(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
-    """Lista los eventos de la agenda del usuario. Protegido por JWT."""
-    return await get_events_as_dicts(current_account_id)
+    """Lista los eventos de la agenda del usuario, incluyendo eventos compartidos con equipos. Protegido por JWT."""
+    account_uuid = uuid.UUID(current_account_id)
+    
+    # Obtener eventos personales
+    personal_events = await get_events_as_dicts(current_account_id)
+    
+    # Obtener equipos del usuario
+    member_teams_result = await db.execute(
+        select(TeamMember).where(TeamMember.account_id == account_uuid)
+    )
+    member_teams = member_teams_result.scalars().all()
+    team_ids = [str(team.team_id) for team in member_teams]
+    
+    # Obtener eventos de equipos
+    team_events = []
+    for team_id in team_ids:
+        team_events.extend(await get_events_as_dicts(
+            account_id=current_account_id,
+            team_id=team_id
+        ))
+    
+    # Combinar eventos personales y de equipos, eliminando duplicados por ID
+    combined_events = {event['id']: event for event in personal_events + team_events}.values()
+    return list(combined_events)
 
 # --- MODELOS PYDANTIC PARA AGENDA ---
 class EventRequest(BaseModel):
@@ -820,6 +890,50 @@ async def get_mindmap_result_endpoint(
         "topic": task.topic,
         "created_at": task.created_at.isoformat()
     }
+
+# Modelo para la petición de generación de mapa mental
+class MindmapRequest(BaseModel):
+    topic: str
+    ideas_input: str = ""
+    document_name: str = ""
+    concept_query: str = "conceptos clave"
+
+@app.post("/api/start-mindmap", status_code=202, summary="Iniciar generación de mapa mental")
+async def start_mindmap_endpoint(
+    request: MindmapRequest,
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Inicia una tarea de generación de mapa mental y devuelve un ID de tarea."""
+    from tools.mindmap_generator_tool import MindmapGeneratorTool
+    from core.memory_manager import get_full_document_content
+    
+    mindmap_tool = MindmapGeneratorTool()
+    
+    # Obtener el contenido del documento si se proporciona un nombre de documento
+    document_content = ""
+    if request.document_name:
+        document_content = await get_full_document_content(
+            account_id=current_account_id,
+            file_name=request.document_name
+        )
+        if not document_content:
+            return {"task_id": "error", "message": f"No se encontró contenido para el documento {request.document_name}"}
+    
+    result = await mindmap_tool._arun(
+        document_content=document_content,
+        concept_query=request.concept_query,
+        topic_hint=request.topic,
+        account_id=current_account_id
+    )
+    
+    # Extraer el task_id del resultado del mensaje
+    import re
+    task_id_match = re.search(r"ID de tarea: (\S+)", result)
+    task_id = task_id_match.group(1) if task_id_match else "desconocido"
+    
+    return {"task_id": task_id, "message": result}
 
 
 
@@ -1752,6 +1866,24 @@ async def unshare_note(note_id: str, current_account_id: str = Depends(get_curre
     
     await db.commit()
     return {"message": "Nota ya no está compartida con ningún equipo."}
+
+# ==============================================================================
+# SECCIÓN 7.1: Endpoint para Enviar Imágenes Base64
+# ==============================================================================
+
+from utils.send_image import send_base64_image
+
+class ImageRequest(BaseModel):
+    """Define la estructura de datos para una solicitud de envío de imagen base64."""
+    base64_string: str
+    media_type: Optional[str] = "image/png"
+
+@app.post("/api/send-image", summary="Enviar imagen base64 al frontend")
+async def send_image(request: ImageRequest):
+    """
+    Endpoint para enviar una imagen codificada en base64 al frontend como respuesta de streaming.
+    """
+    return send_base64_image(request.base64_string, request.media_type or "image/png")
 
 # ==============================================================================
 # SECCIÓN 8: Bloque de Ejecución para Desarrollo Local

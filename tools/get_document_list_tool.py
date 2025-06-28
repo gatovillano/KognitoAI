@@ -83,7 +83,7 @@ class GetDocumentListTool(BaseTool):
                 logger.info(f"No se encontraron documentos para la cuenta '{account_id}'.")
                 return "No tienes ningún documento guardado en tu base de conocimiento todavía. ¡Puedes subir uno cuando quieras!"
             response_message = f"He encontrado {len(documents_list)} documento(s) en tu base de conocimiento. Aquí están los primeros:\n\n"
-            for doc in documents_list[:5]:
+            for doc in documents_list[:100]:
                 title = doc.get('title') or 'Sin título'
                 response_message += f"- Archivo: `{doc['file_name']}` (Título: {title})\n"
             if len(documents_list) > 5:

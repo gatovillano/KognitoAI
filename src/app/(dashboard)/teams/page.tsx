@@ -117,17 +117,24 @@ export default function TeamsPage() {
   const { toast } = useToast();
 
   const handleTeamCreated = async (newTeam: any) => {
+    setTeams([...teams, newTeam]); // Update local state immediately
     try {
       const response = await apiClient.get('/api/teams');
-      setTeams(response.data);
+      // Preserve the members_count from newTeam if it exists
+      const updatedTeams = response.data.map((team: any) => 
+        team.id === newTeam.id ? { ...team, members_count: newTeam.members_count } : team
+      );
+      // If the new team isn't in the response, add it
+      if (!response.data.some((team: any) => team.id === newTeam.id)) {
+        updatedTeams.push(newTeam);
+      }
+      setTeams(updatedTeams);
       toast({
         title: "Éxito",
         description: "Equipo creado correctamente.",
       });
     } catch (error) {
       console.error("Error refreshing teams:", error);
-      // Fallback to adding the new team locally if refresh fails
-      setTeams([...teams, newTeam]);
       toast({
         title: "Error",
         description: "Error al actualizar la lista de equipos. Se ha añadido localmente.",
@@ -138,16 +145,20 @@ export default function TeamsPage() {
   };
 
   const handleTeamUpdated = async (updatedTeam: any) => {
+    setTeams(teams.map(t => t.id === updatedTeam.id ? updatedTeam : t)); // Update local state immediately
     try {
       const response = await apiClient.get('/api/teams');
-      setTeams(response.data);
+      // Preserve the members_count from updatedTeam if it exists
+      const updatedTeams = response.data.map((team: any) => 
+        team.id === updatedTeam.id ? { ...team, members_count: updatedTeam.members_count } : team
+      );
+      setTeams(updatedTeams);
       toast({
         title: "Éxito",
         description: "Equipo actualizado correctamente.",
       });
     } catch (error) {
       console.error("Error refreshing teams:", error);
-      setTeams(teams.map(t => t.id === updatedTeam.id ? updatedTeam : t));
       toast({
         title: "Error",
         description: "Error al actualizar la lista de equipos. Se ha actualizado localmente.",
@@ -306,18 +317,19 @@ export default function TeamsPage() {
               <Button variant="outline" onClick={() => setShareDocumentsOpen(false)}>Cancelar</Button>
               <Button onClick={async () => {
                 try {
-                  await apiClient.post(`/api/teams/${selectedTeam?.id}/share/documents`, { documentIds: selectedDocuments });
+                  const response = await apiClient.post(`/api/teams/${selectedTeam?.id}/share/documents`, { documentIds: selectedDocuments });
                   toast({
                     title: "Éxito",
                     description: `${selectedDocuments.length} documento(s) compartido(s) con ${selectedTeam?.name}.`,
                   });
                   setShareDocumentsOpen(false);
                   setSelectedDocuments([]);
-                } catch (error) {
-                  console.error("Error sharing documents:", error);
+                  console.log("Documents shared successfully:", response.data);
+                } catch (error: any) {
+                  console.error("Error sharing documents:", error.response?.data || error.message || error);
                   toast({
                     title: "Error",
-                    description: "No se pudieron compartir los documentos. Inténtalo de nuevo.",
+                    description: "No se pudieron compartir los documentos. Revisa la consola para más detalles.",
                     variant: "destructive",
                   });
                 }
@@ -360,18 +372,19 @@ export default function TeamsPage() {
               <Button variant="outline" onClick={() => setShareEventsOpen(false)}>Cancelar</Button>
               <Button onClick={async () => {
                 try {
-                  await apiClient.post(`/api/teams/${selectedTeam?.id}/share/events`, { eventIds: selectedEvents });
+                  const response = await apiClient.post(`/api/teams/${selectedTeam?.id}/share/events`, { eventIds: selectedEvents });
                   toast({
                     title: "Éxito",
                     description: `${selectedEvents.length} evento(s) compartido(s) con ${selectedTeam?.name}.`,
                   });
                   setShareEventsOpen(false);
                   setSelectedEvents([]);
-                } catch (error) {
-                  console.error("Error sharing events:", error);
+                  console.log("Events shared successfully:", response.data);
+                } catch (error: any) {
+                  console.error("Error sharing events:", error.response?.data || error.message || error);
                   toast({
                     title: "Error",
-                    description: "No se pudieron compartir los eventos. Inténtalo de nuevo.",
+                    description: "No se pudieron compartir los eventos. Revisa la consola para más detalles.",
                     variant: "destructive",
                   });
                 }
@@ -414,18 +427,19 @@ export default function TeamsPage() {
               <Button variant="outline" onClick={() => setShareNotesOpen(false)}>Cancelar</Button>
               <Button onClick={async () => {
                 try {
-                  await apiClient.post(`/api/teams/${selectedTeam?.id}/share/notes`, { noteIds: selectedNotes });
+                  const response = await apiClient.post(`/api/teams/${selectedTeam?.id}/share/notes`, { noteIds: selectedNotes });
                   toast({
                     title: "Éxito",
                     description: `${selectedNotes.length} nota(s) compartida(s) con ${selectedTeam?.name}.`,
                   });
                   setShareNotesOpen(false);
                   setSelectedNotes([]);
-                } catch (error) {
-                  console.error("Error sharing notes:", error);
+                  console.log("Notes shared successfully:", response.data);
+                } catch (error: any) {
+                  console.error("Error sharing notes:", error.response?.data || error.message || error);
                   toast({
                     title: "Error",
-                    description: "No se pudieron compartir las notas. Inténtalo de nuevo.",
+                    description: "No se pudieron compartir las notas. Revisa la consola para más detalles.",
                     variant: "destructive",
                   });
                 }

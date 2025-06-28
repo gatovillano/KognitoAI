@@ -34,11 +34,11 @@ export default function TeamDetailPage() {
         setTeam(teamResponse.data);
         const membersResponse = await apiClient.get(`/api/teams/${teamId}/members`);
         setMembers(membersResponse.data);
-      } catch (error) {
-        console.error("Error fetching team details:", error);
+      } catch (error: any) {
+        console.error("Error fetching team details:", error.response?.data || error.message || error);
         toast({
           title: "Error",
-          description: "No se pudieron cargar los detalles del equipo. Inténtalo de nuevo.",
+          description: "No se pudieron cargar los detalles del equipo. Revisa la consola para más detalles.",
           variant: "destructive",
         });
       } finally {
@@ -57,11 +57,11 @@ export default function TeamDetailPage() {
         setDocuments(documentsResponse.data);
         const notesResponse = await apiClient.get(`/api/teams/${teamId}/notes`);
         setNotes(notesResponse.data);
-      } catch (error) {
-        console.error("Error fetching team resources:", error);
+      } catch (error: any) {
+        console.error("Error fetching team resources:", error.response?.data || error.message || error);
         toast({
           title: "Error",
-          description: "No se pudieron cargar los recursos compartidos del equipo. Inténtalo de nuevo.",
+          description: "No se pudieron cargar los recursos compartidos del equipo. Revisa la consola para más detalles.",
           variant: "destructive",
         });
       } finally {
@@ -95,7 +95,7 @@ export default function TeamDetailPage() {
         });
       }
     } catch (error: any) {
-      console.error("Error adding member:", error);
+      console.error("Error adding member:", error.response?.data || error.message || error);
       if (error.response && error.response.status === 404) {
         toast({
           title: "Error",
@@ -105,7 +105,7 @@ export default function TeamDetailPage() {
       } else {
         toast({
           title: "Error",
-          description: "No se pudo añadir el miembro. Inténtalo de nuevo.",
+          description: "No se pudo añadir el miembro. Revisa la consola para más detalles.",
           variant: "destructive",
         });
       }
@@ -125,11 +125,11 @@ export default function TeamDetailPage() {
         title: "Éxito",
         description: "Miembro eliminado correctamente.",
       });
-    } catch (error) {
-      console.error("Error removing member:", error);
+    } catch (error: any) {
+      console.error("Error removing member:", error.response?.data || error.message || error);
       toast({
         title: "Error",
-        description: "No se pudo eliminar el miembro. Inténtalo de nuevo.",
+        description: "No se pudo eliminar el miembro. Revisa la consola para más detalles.",
         variant: "destructive",
       });
     }

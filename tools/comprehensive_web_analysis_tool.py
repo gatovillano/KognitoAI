@@ -33,7 +33,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
     description: str = (
         "Use this tool for in-depth research requests. It searches the web, reads relevant pages, "
         "cross-references the findings with the user's personal knowledge base, and provides a "
-        "synthesized analysis. Ideal for queries like 'research the latest trends in AI and "
+        "extended analysis. Ideal for queries like 'research the latest trends in AI and "
         "compare them to my notes on the topic'."
     )
     args_schema: Type[BaseModel] = ComprehensiveWebAnalysisInput
@@ -97,14 +97,14 @@ class ComprehensiveWebAnalysisTool(BaseTool):
 
         synthesis_prompt = f"""
         Eres un analista de investigación. A continuación se presenta el contenido extraído de varias páginas web sobre el tema '{query}'.
-        Tu tarea es crear un resumen ejecutivo claro y conciso de esta información.
+        Tu tarea es crear un analisis claro y profundo de esta información.
         Identifica los puntos clave, las conclusiones principales y cualquier dato relevante.
 
         --- INICIO DEL CONTENIDO WEB ---
         {combined_web_content}
         --- FIN DEL CONTENIDO WEB ---
 
-        Por favor, genera el resumen ejecutivo:
+        Por favor, genera el analisis:
         """
         web_summary_response = await synthesis_llm.ainvoke([HumanMessage(content=synthesis_prompt)])
         web_summary = web_summary_response.content

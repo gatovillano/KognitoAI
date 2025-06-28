@@ -38,25 +38,20 @@ export default function TeamDashboardPage() {
           return;
         }
         
-        // Fetch shared items by querying existing endpoints
-        // Since specific endpoint for shared items might not exist, we'll simulate it by fetching all items
-        // and filtering based on team sharing status if possible
-        const documentsResponse = await apiClient.post('/api/list-documents');
-        const eventsResponse = await apiClient.post('/api/list-events');
-        const notesResponse = await apiClient.post('/api/list-notes', { search_term: '' });
+        // Fetch shared items for this specific team using team_id
+        const documentsResponse = await apiClient.post('/api/list-documents', { team_id: teamId });
+        const eventsResponse = await apiClient.post('/api/list-events', { team_id: teamId });
+        const notesResponse = await apiClient.post('/api/list-notes', { search_term: '', team_id: teamId });
         
-        // Combine items with a placeholder for shared status
-        // In a real implementation, backend should provide shared status or a dedicated endpoint
+        // Combine items, marking them with their type and shared date
         const combinedItems = [
           ...(documentsResponse.data || []).map((doc: any) => ({ ...doc, type: 'Documento', shared_at: doc.updated_at || doc.created_at })),
           ...(eventsResponse.data || []).map((event: any) => ({ ...event, type: 'Evento', title: event.description, shared_at: event.updated_at || event.created_at })),
           ...(notesResponse.data || []).map((note: any) => ({ ...note, type: 'Nota', shared_at: note.updated_at || note.created_at }))
         ];
         
-        // Filter or mark items as shared with this team (placeholder logic)
-        // This is a simulation; actual implementation depends on backend support
-        // Ensure all types of items are included, prioritizing those marked as team_shared
-        setSharedItems(combinedItems.filter(item => item.team_shared || Math.random() > 0.5)); // Adjusted filter to include more items
+        // Set the shared items for this team
+        setSharedItems(combinedItems);
       } catch (error) {
         toast.error("Error al cargar los datos del equipo.");
         console.error(error);

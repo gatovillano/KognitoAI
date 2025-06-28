@@ -72,7 +72,7 @@ export function ChatInputBar({
 
   return (
     <footer className="p-4 w-full flex justify-center shrink-0 bg-transparent">
-      <form onSubmit={onSendMessage} className="relative w-full max-w-3xl">
+      <form onSubmit={onSendMessage} className="relative w-full max-w-4xl">
         <div className="rounded-2xl bg-card p-4 shadow-lg">
           <Textarea
             ref={textAreaRef}

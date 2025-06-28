@@ -488,7 +488,7 @@ async def create_and_run_agent(
 
         response = await agent_executor.ainvoke(
             input_data,
-            config={"configurable": {"account_id": account_id, "telegram_id": telegram_id}}
+            config={"configurable": {"account_id": account_id, "telegram_id": telegram_id, "background_tasks": background_tasks}}
         )
         final_output = response.get("output", "No pude procesar tu solicitud.")
 

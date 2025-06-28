@@ -51,7 +51,7 @@ from tools.web_scraper_tool import WebScraperTool
 from tools.web_search_tool import get_web_search_tool
 from tools.analyze_text_for_insights_tool import AnalyzeTextForInsightsTool
 from tools.github_repo_tool import GitHubRepoTool
-from tools.mindmap_tool import MindmapTool
+from tools.mindmap_generator_tool import MindmapGeneratorTool
 # Módulo de Insights Proactivos
 from tools.get_proactive_insights_tool import GetProactiveInsightsTool
 from tools.proactive_knowledge_linker_tool import ProactiveKnowledgeLinkerTool
@@ -91,7 +91,7 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
         # Herramienta de GitHub
         GitHubRepoTool,
         # Mapa Mental
-        MindmapTool,
+        MindmapGeneratorTool,
         # Insights Proactivos
         GetProactiveInsightsTool,
         ProactiveKnowledgeLinkerTool,
@@ -117,7 +117,7 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
                 GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
                 ImageGenerationTool, GetProactiveInsightsTool,
                 ProactiveKnowledgeLinkerTool, KnowledgeAnalysisTool, ComprehensiveWebAnalysisTool,
-                GetAnalysisResultsTool, MindmapTool
+                GetAnalysisResultsTool, MindmapGeneratorTool
             ]:
                 kwargs = {"account_id": account_id}
                 if ToolClass in [SetReminderTool, ImageGenerationTool, GetDocumentContentTool]:
@@ -134,11 +134,11 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
             if tool_instance: # Asegúrate de que la instancia se creó
                 try:
                     # Check if the tool supports synchronous execution or is explicitly allowed
-                    if hasattr(tool_instance, '_run') and callable(getattr(tool_instance, '_run')) or ToolClass.__name__ == "MindmapTool":
+                    if hasattr(tool_instance, '_run') and callable(getattr(tool_instance, '_run')) or ToolClass.__name__ == "MindmapGeneratorTool":
                         available_tools.append(tool_instance)
                         logger.debug(f"  [+] Herramienta de clase cargada: {tool_instance.name}")
-                        if ToolClass.__name__ == "MindmapTool":
-                            logger.debug(f"  [DEBUG] MindmapTool añadida a la lista de herramientas disponibles, permitiendo ejecución asíncrona")
+                        if ToolClass.__name__ == "MindmapGeneratorTool":
+                            logger.debug(f"  [DEBUG] MindmapGeneratorTool añadida a la lista de herramientas disponibles, permitiendo ejecución asíncrona")
                         elif ToolClass.__name__ == "KnowledgeAnalysisTool":
                             logger.debug(f"  [DEBUG] KnowledgeAnalysisTool añadida a la lista de herramientas disponibles")
                         elif ToolClass.__name__ == "ProactiveKnowledgeLinkerTool":
@@ -147,6 +147,8 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
                         logger.error(f"  [ERROR] Herramienta {tool_instance.name} no soporta ejecución síncrona y no será añadida")
                         if ToolClass.__name__ == "KnowledgeAnalysisTool":
                             logger.error(f"  [ERROR] KnowledgeAnalysisTool no soporta ejecución síncrona")
+                        elif ToolClass.__name__ == "MindmapGeneratorTool":
+                            logger.error(f"  [ERROR] MindmapGeneratorTool no soporta ejecución síncrona")
                         elif ToolClass.__name__ == "ProactiveKnowledgeLinkerTool":
                             logger.error(f"  [ERROR] ProactiveKnowledgeLinkerTool no soporta ejecución síncrona")
                 except Exception as e:
