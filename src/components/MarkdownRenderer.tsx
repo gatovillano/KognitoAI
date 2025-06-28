@@ -2,10 +2,8 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
+import { useState, useEffect, useMemo } from 'react';
+import { marked } from 'marked';
 import { Button } from '@/components/ui/button';
 import { Check, Copy } from 'lucide-react';
 import { toast } from 'sonner';
@@ -38,16 +36,22 @@ interface MarkdownRendererProps {
   content: string;
 }
 
-// --- NUEVA INTERFAZ PARA TIPAR LAS PROPS DEL COMPONENTE 'code' ---
-// Heredamos de las props HTML estándar y añadimos 'inline'.
-interface CustomCodeProps extends React.HTMLAttributes<HTMLElement> {
-    inline?: boolean;
-    node?: any; // El tipo 'node' es complejo, lo dejamos como 'any' por simplicidad
-}
-
-
 export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   const [copiedStates, setCopiedStates] = useState<Record<number, boolean>>({});
+
+  // Parse markdown to HTML using marked
+  const htmlContent = useMemo(() => {
+    try {
+      return marked.parse(content, {
+        gfm: true, // Enable GitHub Flavored Markdown
+        breaks: true, // Convert line breaks to <br>
+        async: false // Use synchronous parsing for simplicity
+      });
+    } catch (error) {
+      console.error("Error parsing markdown:", error);
+      return "<p>Error rendering content.</p>";
+    }
+  }, [content]);
 
   useEffect(() => {
     // Ensure Prism highlights code on component mount and content change
@@ -76,55 +80,43 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
     });
   };
 
+  // Function to inject copy buttons into code blocks after DOM rendering
+  useEffect(() => {
+    const codeBlocks = document.querySelectorAll('pre code');
+    codeBlocks.forEach((block, index) => {
+      const wrapper = block.parentElement;
+      if (wrapper && !wrapper.dataset.copyButtonAdded) {
+        const language = block.className.split('-')[1] || 'code';
+        const codeText = block.textContent || '';
+        const codeBlockIndex = codeText.length > 0 ? codeText.split('').reduce((a, c) => a + c.charCodeAt(0), 0) : index;
+        const isCopied = copiedStates[codeBlockIndex];
+
+        // Create header with language and copy button
+        const header = document.createElement('div');
+        header.className = 'flex items-center justify-between px-4 py-1.5 border-b';
+        header.innerHTML = `
+          <span class="text-xs text-muted-foreground">${language}</span>
+          <button id="copy-btn-${codeBlockIndex}" class="h-7 w-7 inline-flex items-center justify-center bg-transparent border-none cursor-pointer">
+            ${isCopied ? '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgb(22 101 52)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>' : '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgb(142 156 173)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>'}
+          </button>
+        `;
+
+        wrapper.insertBefore(header, block);
+        wrapper.className = 'bg-zinc-900 rounded-md border my-4';
+        wrapper.style.backgroundColor = '#2d3748 !important';
+        block.parentElement.dataset.copyButtonAdded = 'true';
+
+        const copyBtn = document.getElementById(`copy-btn-${codeBlockIndex}`);
+        if (copyBtn) {
+          copyBtn.onclick = () => handleCopy(codeText, codeBlockIndex);
+        }
+      }
+    });
+  }, [content, copiedStates]);
+
   return (
     <div className="prose prose-invert prose-sm max-w-none">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeRaw]}
-        components={{
-          pre: ({ node, children, ...props }) => (
-            <div className="relative my-4">{children}</div>
-          ),
-          // --- APLICAMOS NUESTRO TIPO PERSONALIZADO AQUÍ ---
-          code: ({ node, inline, className, children, ...rest }: CustomCodeProps) => {
-            const match = /language-(\w+)/.exec(className || '');
-            const codeText = String(children).replace(/\n$/, '');
-            // Use a stable identifier based on content hash to prevent re-render issues
-            const codeBlockIndex = codeText.length > 0 ? codeText.split('').reduce((a, c) => a + c.charCodeAt(0), 0) : 0;
-
-            if (!inline && match) {
-              const isCopied = copiedStates[codeBlockIndex];
-              const language = match[1];
-              return (
-                <div className="bg-zinc-900 rounded-md border" style={{ backgroundColor: '#2d3748 !important' }}>
-                  <div className="flex items-center justify-between px-4 py-1.5 border-b">
-                    <span className="text-xs text-muted-foreground">{language}</span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => handleCopy(codeText, codeBlockIndex)}
-                    >
-                      {isCopied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4 text-muted-foreground" />}
-                    </Button>
-                  </div>
-                  <pre className="p-4 text-sm overflow-x-auto" style={{ backgroundColor: '#2d3748 !important' }}>
-                    <code {...rest} className={`language-${language}`} style={{ backgroundColor: '#2d3748 !important' }}>{children}</code>
-                  </pre>
-                </div>
-              );
-            }
-            
-            return (
-              <code className="bg-zinc-700/50 rounded-sm px-1 py-0.5 text-sm font-mono" {...rest}>
-                {children}
-              </code>
-            );
-          }
-        }}
-      >
-        {content}
-      </ReactMarkdown>
+      <div dangerouslySetInnerHTML={{ __html: htmlContent }} />
     </div>
   );
 };

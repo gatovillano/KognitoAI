@@ -455,7 +455,7 @@ class ChatResponse(BaseModel):
     response_text: str
 
 @app.post("/api/chat", response_model=ChatResponse, summary="Procesar Mensaje de Chat")
-async def handle_chat(request: ChatRequest, current_account_id: str = Depends(get_current_account_id)) -> ChatResponse:
+async def handle_chat(request: ChatRequest, background_tasks: BackgroundTasks, current_account_id: str = Depends(get_current_account_id)) -> ChatResponse:
     """
     Endpoint principal para procesar mensajes de chat con el agente de IA.
     Requiere autenticación JWT.
@@ -471,7 +471,8 @@ async def handle_chat(request: ChatRequest, current_account_id: str = Depends(ge
             telegram_id=request.telegram_id, # telegram_id ahora es Optional[int]
             user_message=request.user_message,
             image_base64=request.image_base64,
-            mode=request.mode
+            mode=request.mode,
+            background_tasks=background_tasks
         )
         return ChatResponse(response_text=final_response_text)
     except Exception as e:

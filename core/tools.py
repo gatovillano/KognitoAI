@@ -117,7 +117,7 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
                 GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
                 ImageGenerationTool, GetProactiveInsightsTool,
                 ProactiveKnowledgeLinkerTool, KnowledgeAnalysisTool, ComprehensiveWebAnalysisTool,
-                GetAnalysisResultsTool
+                GetAnalysisResultsTool, MindmapTool
             ]:
                 kwargs = {"account_id": account_id}
                 if ToolClass in [SetReminderTool, ImageGenerationTool, GetDocumentContentTool]:
@@ -133,11 +133,13 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
             
             if tool_instance: # Asegúrate de que la instancia se creó
                 try:
-                    # Check if the tool supports synchronous execution
-                    if hasattr(tool_instance, '_run') and callable(getattr(tool_instance, '_run')):
+                    # Check if the tool supports synchronous execution or is explicitly allowed
+                    if hasattr(tool_instance, '_run') and callable(getattr(tool_instance, '_run')) or ToolClass.__name__ == "MindmapTool":
                         available_tools.append(tool_instance)
                         logger.debug(f"  [+] Herramienta de clase cargada: {tool_instance.name}")
-                        if ToolClass.__name__ == "KnowledgeAnalysisTool":
+                        if ToolClass.__name__ == "MindmapTool":
+                            logger.debug(f"  [DEBUG] MindmapTool añadida a la lista de herramientas disponibles, permitiendo ejecución asíncrona")
+                        elif ToolClass.__name__ == "KnowledgeAnalysisTool":
                             logger.debug(f"  [DEBUG] KnowledgeAnalysisTool añadida a la lista de herramientas disponibles")
                         elif ToolClass.__name__ == "ProactiveKnowledgeLinkerTool":
                             logger.debug(f"  [DEBUG] ProactiveKnowledgeLinkerTool añadida a la lista de herramientas disponibles")

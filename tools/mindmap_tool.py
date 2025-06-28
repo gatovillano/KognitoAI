@@ -16,7 +16,7 @@ from utils.document_analysis import extract_concepts_from_document
 from utils.generate_map_mind import generate_visual_mindmap # Asegúrate de que esta utilidad exista y sea accesible
 
 # Importar para tareas en segundo plano y base de datos
-from fastapi import BackgroundTasks # Esto se usará en el endpoint que invoca la herramienta, no directamente en la clase Tool
+from fastapi import BackgroundTasks # Necesitamos esto para el tipo de dato
 from core.database import SessionLocal, MindmapTask
 from sqlalchemy import update
 
@@ -38,26 +38,33 @@ class MindmapInput(BaseModel):
 
 # 2. Clase de la Herramienta (Tool Class)
 class MindmapTool(BaseTool):
-    name: str = "mindmap_tool"
-    description = "Util para generar un mapa mental en formato de texto a partir de un tema, un conjunto de ideas, o extrayendo conceptos clave de un documento. Puede expandir ideas usando inteligencia artificial."
-    args_schema: type[BaseModel] = MindmapInput
+    name = "mindmap_tool"
+    description = "Useful for generating a mind map in text format from a topic, a set of ideas, or extracting key concepts from a document. It can expand ideas using artificial intelligence."
+    args_schema = MindmapInput
     
-    # MODIFICACIÓN CLAVE AQUÍ: Aceptar account_id y otros kwargs
     def __init__(self, account_id: Optional[str] = None, **kwargs):
         super().__init__(**kwargs)
-        self.account_id = account_id # Almacenar account_id si es necesario para la instancia de la herramienta
+        self.account_id = account_id
 
-    # Implementación SÍNCRONA requerida por BaseTool
     def _run(self, *args: Any, **kwargs: Any) -> Any:
-        """Síncrono run no implementado, usar _arun."""
-        raise NotImplementedError("MindmapTool solo soporta ejecución asíncrona (_arun).")
+        logger.warning(f"MindmapTool fue llamado de manera síncrona con args: {args}, kwargs: {kwargs}. Esto no está completamente soportado. Use ejecución asíncrona (_arun) para funcionalidad completa.")
+        return "Esta herramienta requiere ejecución asíncrona para generar mapas mentales. Por favor, intente de nuevo en un contexto que soporte operaciones asíncronas."
 
-    async def _arun(self, account_id: str, topic: str, ideas_input: str = "", document_name: str = "", concept_query: str = "conceptos clave") -> str:
+    # MODIFICACIÓN CLAVE AQUÍ: Aceptar background_tasks
+    async def _arun(self, account_id: str, topic: str, ideas_input: str = "", document_name: str = "", concept_query: str = "conceptos clave", background_tasks: BackgroundTasks = None, **kwargs: Any) -> str:
         """
         Inicia la generación del mapa mental en segundo plano y devuelve un ID de tarea.
+        Ahora usa BackgroundTasks de FastAPI para una gestión robusta.
         """
-        logger.info(f"MindmapTool._arun llamado para account_id: {account_id}, topic: {topic}")
+        logger.info(f"MindmapTool._arun INVOCADO para account_id: {account_id}, topic: {topic}. Argumentos adicionales: {kwargs if kwargs else 'Ninguno'}")
         
+        if background_tasks is None:
+            logger.warning("MindmapTool._arun fue llamado SIN un objeto BackgroundTasks. Esto puede causar problemas de ejecución en segundo plano. Por favor, asegúrate de que el endpoint de FastAPI pase BackgroundTasks al invocar esta herramienta. Esto podría ser la razón por la que la herramienta no se activa cuando es llamada por el LLM.")
+            use_background_tasks = False
+        else:
+            logger.info("BackgroundTasks recibido correctamente para la ejecución en segundo plano.")
+            use_background_tasks = True
+
         # Crear una nueva tarea en la base de datos
         async with SessionLocal() as db_session:
             new_task = MindmapTask(
@@ -75,17 +82,20 @@ class MindmapTool(BaseTool):
         
         logger.info(f"Tarea de mapa mental creada con ID: {task_id}. Programando en segundo plano.")
         
-        # IMPORTANTE: BackgroundTasks se maneja en el endpoint de FastAPI, no directamente aquí.
-        # Aquí, simplemente programamos la corrutina para que se ejecute en el bucle de eventos.
-        # El framework de FastAPI (o similar) es el que se encarga de pasarla a BackgroundTasks.
-        asyncio.create_task(self._run_mindmap_background(task_id, account_id, topic, ideas_input, document_name, concept_query))
+        # Usar BackgroundTasks si está disponible, de lo contrario, ejecutar de manera síncrona como solución temporal
+        if use_background_tasks:
+            background_tasks.add_task(
+                self._run_mindmap_background,
+                task_id, account_id, topic, ideas_input, document_name, concept_query
+            )
+            logger.info(f"Tarea {task_id} añadida a BackgroundTasks de FastAPI.")
+        else:
+            logger.warning(f"Tarea {task_id} no tiene BackgroundTasks disponible. Ejecutando de manera síncrona como solución temporal (esto puede bloquear la respuesta).")
+            await self._run_mindmap_background(task_id, account_id, topic, ideas_input, document_name, concept_query)
         
         return f"Tarea de generación de mapa mental iniciada. ID de tarea: {task_id}. Recibirás una notificación cuando esté listo."
 
     async def _generate_expanded_ideas(self, topic: str, ideas_input: str) -> Dict[str, List[str]]:
-        """
-        Genera ideas expandidas utilizando un LLM real, estructuradas para el mapa mental.
-        """
         llm = get_fast_llm()
         if llm is None:
             logger.warning("LLM no disponible para _generate_expanded_ideas. Usando ideas por defecto.")
@@ -122,10 +132,9 @@ Formato de salida requerido (JSON):
             llm_response = await llm.ainvoke(prompt)
             response_content = llm_response.content.strip()
             
-            # Limpiar la respuesta si contiene etiquetas de código markdown
             if response_content.startswith("```json"):
                 response_content = response_content[7:-3].strip()
-            elif response_content.startswith("```"): # Para el caso de ```python, ```text, etc.
+            elif response_content.startswith("```"):
                 response_content = response_content.split("\n", 1)[1].rsplit("\n", 1)[0].strip()
 
             return json.loads(response_content)
@@ -143,13 +152,8 @@ Formato de salida requerido (JSON):
             }
 
     async def _run_mindmap_background(self, task_id: str, account_id: str, topic: str, ideas_input: str, document_name: str, concept_query: str):
-        """
-        Ejecuta la generación del mapa mental (incluyendo la visualización) en segundo plano
-        y actualiza el estado de la tarea en la base de datos.
-        """
         async with SessionLocal() as db_session:
             try:
-                # Marcar la tarea como 'processing'
                 stmt_processing = update(MindmapTask).where(MindmapTask.id == uuid.UUID(task_id)).values(status="processing")
                 await db_session.execute(stmt_processing)
                 await db_session.commit()
@@ -198,7 +202,6 @@ Formato de salida requerido (JSON):
                     logger.info("Generando ideas expandidas con LLM a partir de las ideas recopiladas.")
                     llm_generated_ideas = await self._generate_expanded_ideas(topic, final_ideas_to_process)
 
-                # Generar el mapa mental visual (Base64)
                 visual_map_base64 = ""
                 if llm_generated_ideas:
                     visual_map_base64 = await generate_visual_mindmap(llm_generated_ideas, topic)
@@ -207,7 +210,6 @@ Formato de salida requerido (JSON):
                 else:
                     logger.warning("No se generaron ideas para el mapa mental. No se creará visualización.")
 
-                # Generar la representación en texto (siempre útil como fallback o complemento)
                 mindmap_text_output = f"# Mapa Mental: {topic}\n\n"
                 if llm_generated_ideas:
                     mindmap_text_output += "## Ideas Principales (Generadas/Expandidas por IA)\n"
@@ -221,7 +223,6 @@ Formato de salida requerido (JSON):
                     mindmap_text_output += "## Subtema 2\n- Idea C\n  - Detalle C1\n"
                 mindmap_text_output += "\n*Este es un prototipo de mapa mental en texto, con ideas expandidas por IA. Puedes copiarlo y usarlo como base para herramientas de visualización o para organizar tus pensamientos.*"
 
-                # Guardar el resultado y marcar como 'completed'
                 result_payload = {
                     "text_mindmap": mindmap_text_output,
                     "visual_mindmap_base64": visual_map_base64 if visual_map_base64 else None,
@@ -233,12 +234,7 @@ Formato de salida requerido (JSON):
                 await db_session.commit()
                 logger.info(f"Mapa mental para tarea {task_id} completado y resultado guardado en DB.")
                 
-                # NOTIFICACIÓN AL USUARIO FINAL
-                # Se necesita un mecanismo para notificar al usuario que la tarea ha terminado
-                # y enviarle el resultado (la imagen Base64). Esto puede ser a través de un endpoint API
-                # que el frontend consulte para obtener los resultados de tareas completadas,
-                # o mediante un sistema de notificaciones WebSocket.
-                logger.info(f"Tarea de mapa mental {task_id} completada. Se requiere notificar al frontend con el resultado (imagen Base64). Considera implementar un endpoint en run_api.py para obtener resultados de MindmapTask con estado 'completed'.")
+                logger.info(f"Notificación al usuario sobre el mapa mental {task_id} pendiente de implementación.")
 
             except Exception as e:
                 logger.error(f"Fallo crítico en tarea de mapa mental {task_id}: {e}", exc_info=True)

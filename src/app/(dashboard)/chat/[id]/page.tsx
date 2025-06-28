@@ -417,8 +417,8 @@ export default function ChatPage() {
                   <div className="flex flex-col items-center">
                     <div className="w-full max-w-4xl mx-auto">
                       <div className="flex items-start gap-4 justify-end">
-                        <div className="rounded-lg p-3 bg-secondary text-secondary-foreground max-w-[70%]">
-                          <div className="text-base whitespace-pre-wrap">
+                        <div className="rounded-lg p-3 bg-secondary text-secondary-foreground max-w-[70%] overflow-hidden">
+                          <div className="text-base whitespace-pre-wrap overflow-hidden">
                             <MarkdownRenderer content={msg.text} />
                           </div>
                         </div>

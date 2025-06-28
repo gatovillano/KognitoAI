@@ -252,6 +252,7 @@ async def create_and_run_agent(
     user_message: str,
     image_base64: Optional[str] = None,
     mode: Optional[str] = None,
+    background_tasks: Optional[Any] = None
 ) -> str:
     """
     Crea y ejecuta el agente de Langchain con manejo explícito de memoria.
