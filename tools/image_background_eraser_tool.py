@@ -3,27 +3,44 @@ import os
 import io
 from PIL import Image
 from rembg import remove # Se requiere la instalación de 'rembg' y 'Pillow'
+from typing import Type, Any
 
-from langchain_core.tools import Tool
+from pydantic.v1 import BaseModel, Field
+from langchain_core.tools import BaseTool
 
 logger = logging.getLogger(__name__)
 
-class ImageBackgroundEraserTool(Tool):
-    name = "image_background_eraser"
-    description = (
+class ImageBackgroundEraserInput(BaseModel):
+    """
+    Define el esquema de entrada para la herramienta de eliminación de fondo de imágenes.
+    Valida que el argumento necesario sea proporcionado por el LLM.
+    """
+    image_path: str = Field(
+        ...,
+        description="La ruta del archivo de imagen local del cual se desea eliminar el fondo."
+    )
+
+class ImageBackgroundEraserTool(BaseTool):
+    name: str = "image_background_eraser"
+    description: str = (
         "Útil para eliminar el fondo de una imagen. "
         "Recibe la ruta de un archivo de imagen local y devuelve la ruta de la imagen con el fondo eliminado. "
-        "La imagen de salida se guardará en el mismo directorio que la entrada con '_no_bg' añadido al nombre. "
-        "Ejemplo: image_background_eraser(image_path='/path/to/image.png')"
+        "La imagen de salida se guardará en el mismo directorio que la entrada con '_no_bg' añadido al nombre."
     )
-    func = None  # Se define como atributo para compatibilidad con LangChain
+    args_schema: Type[BaseModel] = ImageBackgroundEraserInput
+    return_direct: bool = False  # El agente debe procesar la respuesta.
 
-    def _run(self, image_path: str) -> str:
+    async def _arun(self, image_path: str, **kwargs: Any) -> str:
         """
-        Elimina el fondo de una imagen.
+        Ejecuta la lógica de la herramienta de forma asíncrona para eliminar el fondo de una imagen.
+        
+        Args:
+            image_path: La ruta del archivo de imagen local.
+            **kwargs: Argumentos adicionales (no utilizados).
+            
+        Returns:
+            Un mensaje de texto indicando el resultado de la operación.
         """
-        # Asignar _run a func para compatibilidad con LangChain
-        self.func = self._run
         if not os.path.exists(image_path):
             return f"Error: El archivo de imagen no existe en la ruta especificada: {image_path}"
 
@@ -46,11 +63,9 @@ class ImageBackgroundEraserTool(Tool):
             logger.error(f"Error al eliminar el fondo de la imagen: {e}", exc_info=True)
             return f"Error al eliminar el fondo de la imagen: {str(e)}"
 
-    async def _arun(self, image_path: str) -> str:
-        """
-        Método asíncrono para eliminar el fondo de una imagen (no implementado, usa _run).
-        """
-        return self._run(image_path)
+    def _run(self, *args: Any, **kwargs: Any) -> Any:
+        """La ejecución síncrona no está soportada en nuestra arquitectura asíncrona."""
+        raise NotImplementedError("image_background_eraser no soporta ejecución síncrona.")
 
 if __name__ == "__main__":
     # Ejemplo de uso (requiere una imagen de prueba)
