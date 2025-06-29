@@ -4,6 +4,8 @@ Kognito AI es un sistema modular de asistente inteligente diseñado para integra
 
 El sistema centraliza la gestión de datos del usuario (notas, agenda, documentos, memoria) y expone estas funcionalidades a través de una API robusta, utilizada tanto por el bot de Telegram como por la webapp.
 
+DEMO http://kognito.gatoslibres.art
+
 ## Características principales
 
 *   **Identidad Universal:** Cada usuario tiene un `account_id` único (UUID), independiente de la plataforma (Telegram, web, etc.), permitiendo una gestión de datos coherente.
