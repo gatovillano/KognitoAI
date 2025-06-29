@@ -30,9 +30,11 @@ services:
       - "${API_PORT:-8889}:8000" # Usamos una variable de entorno para el puerto
     volumes:
       - ./core:/app/core
+      - .:/app
       - ./tools:/app/tools
       - ./utils:/app/utils
       - ./run_api.py:/app/run_api.py
+      - ./telegram_panel:/app/telegram_panel # Añadir este volumen
       - ./credentials/gen-lang-client-0283065579-d517663d377f.json:/app/credentials/gen-lang-client-0283065579-d517663d377f.json:ro
     env_file:
       - ./.env

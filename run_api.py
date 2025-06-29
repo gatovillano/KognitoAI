@@ -26,7 +26,7 @@ from core.database import (
     create_tables, SessionLocal, Account, PlatformIdentity, Perfil,
     get_or_create_account_from_platform_id, get_account_by_telegram_id,
     find_telegram_identity, ChatThread, VerificationCode, AnalysisTask,
-    Memory, AgendaEvent, Nota, Team, MindmapTask
+    Memory, AgendaEvent, Nota, Team, MindmapTask, Workspace
 )
 from datetime import datetime, timedelta, timezone
 from core.llm_manager import initialize_llms
@@ -37,11 +37,11 @@ from core.memory_manager import process_document_for_rag, list_user_documents, d
 from core.notes_manager import get_notes, add_note, update_note, delete_note, get_notes_as_dicts
 from core.agenda_manager import get_events_as_dicts, schedule_event, cancel_event, get_agenda_for_day
 from telegram_client.bot_manager import bot_manager
-from sqlalchemy import select
+from sqlalchemy import select, desc, func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from collections import Counter
-from sqlalchemy import update, select, desc 
+from sqlalchemy import update, or_
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain_core.messages import HumanMessage, AIMessage
 from sqlalchemy import or_
@@ -64,6 +64,21 @@ app = FastAPI(
     description="Procesa la lógica de la IA, sirve el panel de Telegram y gestiona la autenticación universal.",
     version="1.0.0"
 )
+
+async def get_db() -> AsyncSession:
+    """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
+    async with SessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
+
+# Dependencia para verificar si el usuario es administrador
+async def get_current_admin_account(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)) -> Account:
+    account = await db.get(Account, uuid.UUID(current_account_id))
+    if not account or not account.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes permisos de administrador.")
+    return account
 
 @app.on_event("startup")
 async def startup_event():
@@ -105,14 +120,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-async def get_db() -> AsyncSession:
-    """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
 
 api_key_header = APIKeyHeader(name="X-Internal-API-Key", auto_error=False)
 
@@ -363,7 +370,7 @@ async def verify_code_and_get_token(request_data: AuthVerifyCode, db: AsyncSessi
 # SECCIÓN 4: API DEL AGENTE Y ENDPOINTS PROTEGIDOS
 # ==============================================================================
 
-# --- Modelo de Respuesta para el Perfil de Usuario ---
+# --- Modelos de Respuesta para el Perfil de Usuario ---
 class UserProfileResponse(BaseModel):
     """Define la estructura de datos para la respuesta del perfil de usuario."""
     id: str
@@ -371,6 +378,7 @@ class UserProfileResponse(BaseModel):
     email: Optional[EmailStr]
     username: Optional[str]
     telegram_id: Optional[int] = None # Añadimos para el frontend
+    is_admin: bool = False # Añadimos el campo is_admin
 
     class Config:
         orm_mode = True # Habilita compatibilidad con ORM de SQLAlchemy
@@ -405,8 +413,83 @@ async def read_users_me(current_account_id: str = Depends(get_current_account_id
         name=account.name,
         email=account.email,
         username=account.username,
-        telegram_id=telegram_id
+        telegram_id=telegram_id,
+        is_admin=account.is_admin
     )
+
+# --- Endpoints de Administración de Usuarios (Solo para Admins) ---
+
+@app.get("/api/admin/users", response_model=List[UserProfileResponse], summary="Listar todos los usuarios (solo admin)")
+async def list_all_users(
+    admin_account: Account = Depends(get_current_admin_account),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Lista todos los usuarios registrados en el sistema. Requiere privilegios de administrador.
+    """
+    logger.info(f"Admin {admin_account.id} listando todos los usuarios.")
+    stmt = select(Account).order_by(Account.created_at.desc())
+    result = await db.execute(stmt)
+    accounts = result.scalars().all()
+    
+    users_data = []
+    for account in accounts:
+        telegram_identity = await db.execute(
+            select(PlatformIdentity).where(
+                PlatformIdentity.account_id == account.id,
+                PlatformIdentity.platform == 'telegram'
+            )
+        )
+        telegram_id = None
+        identity_obj = telegram_identity.scalars().first()
+        if identity_obj and identity_obj.platform_user_id:
+            try:
+                telegram_id = int(identity_obj.platform_user_id)
+            except ValueError:
+                pass # No es un ID numérico válido
+
+        users_data.append(UserProfileResponse(
+            id=str(account.id),
+            name=account.name,
+            email=account.email,
+            username=account.username,
+            telegram_id=telegram_id,
+            is_admin=account.is_admin
+        ))
+    return users_data
+
+class DeleteUsersRequest(BaseModel):
+    """Define la estructura de datos para eliminar usuarios."""
+    account_ids: List[str] # Lista de UUIDs de cuentas a eliminar
+
+@app.post("/api/admin/users/delete", summary="Eliminar usuarios por ID (solo admin)")
+async def delete_users_by_ids_endpoint(
+    request: DeleteUsersRequest,
+    admin_account: Account = Depends(get_current_admin_account),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Elimina una o varias cuentas de usuario por sus IDs. Requiere privilegios de administrador.
+    IMPORTANTE: Esta acción es irreversible.
+    """
+    logger.warning(f"Admin {admin_account.id} solicitando eliminación de cuentas: {request.account_ids}")
+    
+    # Convertir los IDs de string a UUID
+    uuids_to_delete = [uuid.UUID(aid) for aid in request.account_ids]
+
+    # Prevenir la eliminación de la propia cuenta del administrador si está en la lista
+    if admin_account.id in uuids_to_delete:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No puedes eliminar tu propia cuenta de administrador.")
+    
+    # Llamar a la función de la base de datos para eliminar las cuentas
+    from core.database import delete_accounts_by_ids # Importar la función
+    
+    try:
+        deleted_count = await delete_accounts_by_ids(db, uuids_to_delete)
+        return {"message": f"Se eliminaron {deleted_count} cuentas correctamente."}
+    except Exception as e:
+        logger.error(f"Error al intentar eliminar cuentas por admin {admin_account.id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno al eliminar cuentas.")
 
 @app.get("/api/users/search", summary="Buscar usuario por email o nombre de usuario")
 async def search_user(identifier: str = Query(...), current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
@@ -586,6 +669,28 @@ async def upload_chat_file_endpoint(
     if processed_files == 0 and files:
         raise HTTPException(status_code=500, detail="No se pudo procesar ninguno de los archivos.")
     return {"message": f"{processed_files}/{len(files)} archivo(s) subido(s) al contexto del hilo {thread_id}."}
+
+@app.post("/api/process-image-background", summary="Procesar imagen para eliminar fondo")
+async def process_image_background_endpoint(
+    current_account_id: str = Depends(get_current_account_id),
+    file: UploadFile = File(...)
+):
+    """
+    Recibe una imagen, elimina su fondo y devuelve la imagen resultante.
+    """
+    logger.info(f"Petición de eliminación de fondo de imagen recibida de la cuenta: {current_account_id}")
+    try:
+        from utils.image_processing import process_image_with_background_eraser
+        
+        output_path = await process_image_with_background_eraser(file)
+        
+        # Devolver la imagen procesada como FileResponse
+        return FileResponse(output_path, media_type="image/png", filename=os.path.basename(output_path))
+    except Exception as e:
+        logger.error(f"Error al procesar la imagen para eliminar el fondo: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error al procesar la imagen: {str(e)}")
+
+
 @app.post("/api/list-documents") # Cambiado a POST porque el frontend web lo usa con FormData
 async def list_documents_endpoint(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
     """Lista los documentos subidos por el usuario, incluyendo documentos compartidos con equipos. Protegido por JWT."""
@@ -593,6 +698,7 @@ async def list_documents_endpoint(current_account_id: str = Depends(get_current_
     
     # Obtener documentos personales
     personal_docs = await list_user_documents(str(account_id_uuid))
+    logger.info(f"Personal documents for account {current_account_id}: {len(personal_docs)} documents found")
     
     # Obtener equipos del usuario
     member_teams_result = await db.execute(
@@ -600,17 +706,21 @@ async def list_documents_endpoint(current_account_id: str = Depends(get_current_
     )
     member_teams = member_teams_result.scalars().all()
     team_ids = [str(team.team_id) for team in member_teams]
+    logger.info(f"Teams for account {current_account_id}: {team_ids}")
     
     # Obtener documentos de equipos
     team_docs = []
     for team_id in team_ids:
-        team_docs.extend(await list_user_documents(
+        team_docs_for_id = await list_user_documents(
             account_id=str(account_id_uuid),
             team_id=team_id
-        ))
+        )
+        logger.info(f"Team documents for team {team_id} and account {current_account_id}: {len(team_docs_for_id)} documents found")
+        team_docs.extend(team_docs_for_id)
     
     # Combinar documentos personales y de equipos, eliminando duplicados por file_name
     combined_docs = {doc['file_name']: doc for doc in personal_docs + team_docs}.values()
+    logger.info(f"Total combined documents for account {current_account_id}: {len(combined_docs)} documents")
     return list(combined_docs)
 
 @app.post("/api/delete-document") # Cambiado a POST porque el frontend web lo usa con FormData
@@ -644,6 +754,7 @@ async def list_notes_endpoint(
         account_id=current_account_id, 
         search_query=request.search_term
     )
+    logger.info(f"Personal notes for account {current_account_id}: {len(personal_notes)} notes found")
     
     # Obtener equipos del usuario
     member_teams_result = await db.execute(
@@ -651,18 +762,22 @@ async def list_notes_endpoint(
     )
     member_teams = member_teams_result.scalars().all()
     team_ids = [str(team.team_id) for team in member_teams]
+    logger.info(f"Teams for account {current_account_id} (notes): {team_ids}")
     
     # Obtener notas de equipos
     team_notes = []
     for team_id in team_ids:
-        team_notes.extend(await get_notes_as_dicts(
+        team_notes_for_id = await get_notes_as_dicts(
             account_id=current_account_id,
             search_query=request.search_term,
             team_id=team_id
-        ))
+        )
+        logger.info(f"Team notes for team {team_id} and account {current_account_id}: {len(team_notes_for_id)} notes found")
+        team_notes.extend(team_notes_for_id)
     
     # Combinar notas personales y de equipos, eliminando duplicados por ID
     combined_notes = {note['id']: note for note in personal_notes + team_notes}.values()
+    logger.info(f"Total combined notes for account {current_account_id}: {len(combined_notes)} notes")
     return list(combined_notes)
 # --- MODELOS PYDANTIC PARA NOTAS ---
 class NoteRequest(BaseModel):
@@ -702,6 +817,7 @@ async def list_events_endpoint(current_account_id: str = Depends(get_current_acc
     
     # Obtener eventos personales
     personal_events = await get_events_as_dicts(current_account_id)
+    logger.info(f"Personal events for account {current_account_id}: {len(personal_events)} events found")
     
     # Obtener equipos del usuario
     member_teams_result = await db.execute(
@@ -709,17 +825,21 @@ async def list_events_endpoint(current_account_id: str = Depends(get_current_acc
     )
     member_teams = member_teams_result.scalars().all()
     team_ids = [str(team.team_id) for team in member_teams]
+    logger.info(f"Teams for account {current_account_id} (events): {team_ids}")
     
     # Obtener eventos de equipos
     team_events = []
     for team_id in team_ids:
-        team_events.extend(await get_events_as_dicts(
+        team_events_for_id = await get_events_as_dicts(
             account_id=current_account_id,
             team_id=team_id
-        ))
+        )
+        logger.info(f"Team events for team {team_id} and account {current_account_id}: {len(team_events_for_id)} events found")
+        team_events.extend(team_events_for_id)
     
     # Combinar eventos personales y de equipos, eliminando duplicados por ID
     combined_events = {event['id']: event for event in personal_events + team_events}.values()
+    logger.info(f"Total combined events for account {current_account_id}: {len(combined_events)} events")
     return list(combined_events)
 
 # --- MODELOS PYDANTIC PARA AGENDA ---
@@ -1119,6 +1239,7 @@ class ThreadResponse(BaseModel):
     id: str
     title: str
     created_at: datetime
+    workspace_id: Optional[str] = None
 
 class MessageResponse(BaseModel):
     """Define la estructura de datos para un mensaje individual en el chat."""
@@ -1126,28 +1247,127 @@ class MessageResponse(BaseModel):
     sender: str  # antes 'type', valores: 'human' o 'ai'
     created_at: datetime
 
+# --- Modelos Pydantic para Workspaces ---
+class WorkspaceResponse(BaseModel):
+    id: str
+    name: str
+    system_prompt: Optional[str]
+    created_at: datetime
+
+class WorkspaceCreateRequest(BaseModel):
+    name: str
+    system_prompt: Optional[str] = None
+
+class WorkspaceUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    system_prompt: Optional[str] = None
+
+# --- Endpoints para Workspaces ---
+@app.get("/api/workspaces", response_model=List[WorkspaceResponse], summary="Listar workspaces del usuario")
+async def list_workspaces(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    stmt = select(Workspace).where(Workspace.account_id == uuid.UUID(current_account_id)).order_by(Workspace.created_at.desc())
+    result = await db.execute(stmt)
+    workspaces = result.scalars().all()
+    return [WorkspaceResponse(id=str(w.id), name=w.name, system_prompt=w.system_prompt, created_at=w.created_at) for w in workspaces]
+
+@app.get("/api/workspaces/{workspace_id}", response_model=WorkspaceResponse, summary="Obtener detalles de un workspace")
+async def get_workspace(workspace_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado o no pertenece al usuario.")
+    return WorkspaceResponse(id=str(workspace.id), name=workspace.name, system_prompt=workspace.system_prompt, created_at=workspace.created_at)
+
+@app.post("/api/workspaces", response_model=WorkspaceResponse, status_code=status.HTTP_201_CREATED, summary="Crear un nuevo workspace")
+async def create_workspace(request: WorkspaceCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    new_workspace = Workspace(
+        account_id=uuid.UUID(current_account_id),
+        name=request.name,
+        system_prompt=request.system_prompt
+    )
+    db.add(new_workspace)
+    await db.commit()
+    await db.refresh(new_workspace)
+    return WorkspaceResponse(id=str(new_workspace.id), name=new_workspace.name, system_prompt=new_workspace.system_prompt, created_at=new_workspace.created_at)
+
+@app.put("/api/workspaces/{workspace_id}", response_model=WorkspaceResponse, summary="Actualizar un workspace")
+async def update_workspace(workspace_id: str, request: WorkspaceUpdateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado.")
+    
+    if request.name is not None:
+        workspace.name = request.name
+    if request.system_prompt is not None:
+        workspace.system_prompt = request.system_prompt
+        
+    await db.commit()
+    await db.refresh(workspace)
+    return WorkspaceResponse(id=str(workspace.id), name=workspace.name, system_prompt=workspace.system_prompt, created_at=workspace.created_at)
+
+@app.delete("/api/workspaces/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Eliminar un workspace")
+async def delete_workspace(workspace_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado.")
+    
+    await db.delete(workspace)
+    await db.commit()
+    return
+
 @app.get("/api/threads", response_model=List[ThreadResponse], summary="Listar hilos de chat del usuario")
-async def list_chat_threads(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def list_chat_threads(
+    current_account_id: str = Depends(get_current_account_id), 
+    db: AsyncSession = Depends(get_db),
+    workspace_id: Optional[str] = Query(None)
+):
     """
-    Lista todos los hilos de chat de un usuario autenticado, ordenados por fecha de creación descendente.
+    Lista los hilos de chat de un usuario.
+    - Si se proporciona workspace_id, filtra por ese workspace.
+    - Si no se proporciona workspace_id, muestra solo los hilos sin workspace.
     """
-    logger.info(f"Listando hilos de chat para la cuenta: {current_account_id}")
-    stmt = select(ChatThread).where(ChatThread.account_id == uuid.UUID(current_account_id)).order_by(ChatThread.created_at.desc())
+    account_uuid = uuid.UUID(current_account_id)
+    logger.info(f"Listando hilos para cuenta: {account_uuid}, workspace: {workspace_id}")
+    
+    stmt = select(ChatThread).where(ChatThread.account_id == account_uuid)
+    
+    if workspace_id:
+        try:
+            workspace_uuid = uuid.UUID(workspace_id)
+            stmt = stmt.where(ChatThread.workspace_id == workspace_uuid)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="workspace_id inválido.")
+    else:
+        stmt = stmt.where(ChatThread.workspace_id.is_(None))
+        
+    stmt = stmt.order_by(ChatThread.created_at.desc())
     result = await db.execute(stmt)
     threads = result.scalars().all()
-    return [ThreadResponse(id=str(t.id), title=t.title, created_at=t.created_at) for t in threads]
+    
+    return [ThreadResponse(id=str(t.id), title=t.title, created_at=t.created_at, workspace_id=str(t.workspace_id) if t.workspace_id else None) for t in threads]
+
+class ThreadCreateRequest(BaseModel):
+    workspace_id: Optional[str] = None
 
 @app.post("/api/threads", response_model=ThreadResponse, status_code=status.HTTP_201_CREATED, summary="Crear un nuevo hilo de chat")
-async def create_new_thread(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def create_new_thread(request: ThreadCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
     """
     Crea un nuevo hilo de chat para el usuario autenticado.
     """
     logger.info(f"Creando nuevo hilo de chat para la cuenta: {current_account_id}")
-    new_thread = ChatThread(account_id=uuid.UUID(current_account_id))
+    try:
+        account_uuid = uuid.UUID(current_account_id)
+    except ValueError:
+        logger.error(f"Invalid UUID for account_id: {current_account_id}")
+        raise HTTPException(status_code=422, detail="Invalid account ID format.")
+
+    new_thread = ChatThread(
+        account_id=account_uuid,
+        workspace_id=uuid.UUID(request.workspace_id) if request.workspace_id else None
+    )
     db.add(new_thread)
     await db.commit()
     await db.refresh(new_thread)
-    return ThreadResponse(id=str(new_thread.id), title=new_thread.title, created_at=new_thread.created_at)
+    return ThreadResponse(id=str(new_thread.id), title=new_thread.title, created_at=new_thread.created_at, workspace_id=str(new_thread.workspace_id) if new_thread.workspace_id else None)
 
 @app.get("/api/threads/{thread_id}/messages", response_model=List[MessageResponse], summary="Obtener mensajes de un hilo de chat")
 async def get_thread_messages(
@@ -1650,29 +1870,62 @@ async def share_documents_with_team(team_id: str, share_request: TeamShareReques
         raise HTTPException(status_code=404, detail="Equipo no encontrado o no pertenece al usuario.")
     
     updated_count = 0
-    for file_name in share_request.documentIds:
-        # Update Memory table to associate documents with the team
-        # We check for documents where the content or related metadata might match the file_name
-        result = await db.execute(
-            update(Memory)
-            .where(
-                Memory.account_id == account_uuid, 
-                Memory.type == "document_chunk",
-                Memory.content.like(f"%{file_name}%")
-            )
-            .values(team_id=team_uuid)
+    # Importar las tablas necesarias de memory_manager
+    from core.memory_manager import langchain_pg_embedding, langchain_pg_collection
+
+    async with DBSession(SessionLocal) as db_session:
+        # Obtener el UUID de la colección del usuario
+        collection_uuid_query = select(langchain_pg_collection.c.uuid).where(
+            langchain_pg_collection.c.name == f"user_memories_{current_account_id}"
         )
-        if result.rowcount > 0:
-            updated_count += result.rowcount
-            logger.info(f"Documento {file_name} compartido con equipo {team_id}, actualizadas {result.rowcount} entradas.")
-        else:
-            logger.warning(f"No se encontraron entradas para el documento {file_name} con account_id {account_uuid}.")
-    
-    await db.commit()
-    if updated_count == 0:
-        logger.warning(f"No se compartieron documentos con el equipo {team_id} para la cuenta {current_account_id}.")
-        return {"message": "No se encontraron documentos para compartir. Verifica los IDs de los documentos."}
-    return {"message": f"{updated_count} documentos compartidos con equipo {team_id}"}
+        collection_result = await db_session.execute(collection_uuid_query)
+        collection_uuid = collection_result.scalar_one_or_none()
+
+        if not collection_uuid:
+            logger.warning(f"No se encontró la colección de memoria para la cuenta {current_account_id}. No se pueden compartir documentos.")
+            raise HTTPException(status_code=404, detail="Colección de memoria del usuario no encontrada.")
+
+        for file_name in share_request.documentIds:
+            # 1. Obtener el cmetadata actual de los chunks del documento
+            #    Necesitamos hacer esto para no sobrescribir otros metadatos existentes.
+            select_stmt = select(langchain_pg_embedding.c.cmetadata).where(
+                langchain_pg_embedding.c.collection_id == collection_uuid,
+                langchain_pg_embedding.c.cmetadata['file_name'].astext == file_name,
+                langchain_pg_embedding.c.cmetadata['type'].astext == 'document_chunk'
+            ).limit(1) # Solo necesitamos un chunk para obtener la estructura de metadatos
+
+            cmetadata_result = await db_session.execute(select_stmt)
+            current_cmetadata = cmetadata_result.scalar_one_or_none()
+
+            if not current_cmetadata:
+                logger.warning(f"No se encontraron chunks para el documento '{file_name}' en la colección personal de {current_account_id}. No se puede compartir.")
+                continue
+
+            # 2. Actualizar el cmetadata para incluir el team_id
+            updated_cmetadata = current_cmetadata.copy()
+            updated_cmetadata['team_id'] = str(team_uuid) # Asegurarse de que sea string
+
+            # 3. Ejecutar la actualización en todos los chunks de ese documento
+            result = await db_session.execute(
+                update(langchain_pg_embedding)
+                .where(
+                    langchain_pg_embedding.c.collection_id == collection_uuid,
+                    langchain_pg_embedding.c.cmetadata['file_name'].astext == file_name,
+                    langchain_pg_embedding.c.cmetadata['type'].astext == 'document_chunk'
+                )
+                .values(cmetadata=updated_cmetadata)
+            )
+            if result.rowcount > 0:
+                updated_count += result.rowcount
+                logger.info(f"Documento '{file_name}' compartido con equipo {team_id}, actualizadas {result.rowcount} entradas.")
+            else:
+                logger.warning(f"No se actualizaron entradas para el documento '{file_name}' con account_id {current_account_id}.")
+        
+        await db_session.commit()
+        if updated_count == 0:
+            logger.warning(f"No se compartieron documentos con el equipo {team_id} para la cuenta {current_account_id}.")
+            return {"message": "No se encontraron documentos para compartir o ya estaban compartidos. Verifica los IDs de los documentos."}
+        return {"message": f"{updated_count} documentos compartidos con equipo {team_id}"}
 
 @app.post("/api/teams/{team_id}/share/events", summary="Compartir eventos con un equipo")
 async def share_events_with_team(team_id: str, share_request: TeamShareRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
@@ -1812,6 +2065,7 @@ async def list_team_documents(team_id: str, current_account_id: str = Depends(ge
     logger.info(f"Listando documentos del equipo {team_id} para la cuenta: {current_account_id}")
     account_uuid = uuid.UUID(current_account_id)
     team_uuid = uuid.UUID(team_id)
+    
     # Verificar si el usuario es administrador o miembro del equipo
     team_as_admin = await db.scalar(select(Team).where(Team.id == team_uuid, Team.admin_id == account_uuid))
     if not team_as_admin:
@@ -1821,9 +2075,39 @@ async def list_team_documents(team_id: str, current_account_id: str = Depends(ge
         if not team_as_member:
             raise HTTPException(status_code=404, detail="Equipo no encontrado o no tienes permisos para ver los documentos.")
     
-    documents_result = await db.execute(select(Memory).where(Memory.team_id == team_uuid, Memory.type == "document_chunk"))
-    documents = documents_result.scalars().all()
-    return [{"file_name": doc.content, "title": doc.content, "shared_at": doc.created_at} for doc in documents]
+    # Importar las tablas necesarias de memory_manager
+    from core.memory_manager import langchain_pg_embedding, langchain_pg_collection
+    
+    # Obtener el UUID de la colección del usuario
+    collection_uuid_query = select(langchain_pg_collection.c.uuid).where(
+        langchain_pg_collection.c.name == f"user_memories_{current_account_id}"
+    )
+    collection_result = await db.execute(collection_uuid_query)
+    collection_uuid = collection_result.scalar_one_or_none()
+
+    if not collection_uuid:
+        logger.info(f"No se encontró la colección de memoria para la cuenta {current_account_id}. No hay documentos de equipo para listar.")
+        return []
+
+    # Consulta para obtener documentos de equipo desde langchain_pg_embedding
+    # Filtrar por collection_id y por team_id en cmetadata
+    document_list_query = select(
+        langchain_pg_embedding.c.cmetadata['file_name'].astext.label('file_name'),
+        langchain_pg_embedding.c.cmetadata['title'].astext.label('title'),
+        func.now().label('shared_at') # Usar created_at del embedding como shared_at
+    ).where(
+        langchain_pg_embedding.c.collection_id == collection_uuid,
+        langchain_pg_embedding.c.cmetadata['type'].astext == 'document_chunk',
+        langchain_pg_embedding.c.cmetadata['team_id'].astext == str(team_uuid) # Filtrar por el team_id
+    ).distinct(langchain_pg_embedding.c.cmetadata['file_name']).order_by(
+        langchain_pg_embedding.c.cmetadata['file_name']
+    )
+    
+    documents_result = await db.execute(document_list_query)
+    documents = [dict(row) for row in documents_result.mappings()]
+    
+    logger.info(f"Listados {len(documents)} documentos compartidos con el equipo {team_id} para la cuenta: {current_account_id}")
+    return documents
 
 @app.get("/api/teams/{team_id}/notes", response_model=List[dict], summary="Listar notas compartidas con un equipo")
 async def list_team_notes(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
@@ -1845,6 +2129,177 @@ async def list_team_notes(team_id: str, current_account_id: str = Depends(get_cu
     notes_result = await db.execute(select(Nota).where(Nota.team_id == team_uuid))
     notes = notes_result.scalars().all()
     return [{"id": note.id, "title": note.title, "updated_at": note.updated_at} for note in notes]
+
+@app.get("/api/teams/{team_id}/shared-items", response_model=List[dict], summary="Listar todos los elementos compartidos con un equipo")
+async def list_team_shared_items(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Lista todos los elementos (documentos, eventos y notas) compartidos con un equipo específico.
+    Accesible para cualquier miembro del equipo.
+    """
+    logger.info(f"Listando elementos compartidos del equipo {team_id} para la cuenta: {current_account_id}")
+    account_uuid = uuid.UUID(current_account_id)
+    team_uuid = uuid.UUID(team_id)
+    
+    # Verificar si el usuario es administrador o miembro del equipo
+    team_as_admin = await db.scalar(select(Team).where(Team.id == team_uuid, Team.admin_id == account_uuid))
+    if not team_as_admin:
+        team_as_member = await db.scalar(
+            select(TeamMember).where(TeamMember.team_id == team_uuid, TeamMember.account_id == account_uuid)
+        )
+        if not team_as_member:
+            raise HTTPException(status_code=404, detail="Equipo no encontrado o no tienes permisos para ver los elementos compartidos.")
+    
+    # Obtener documentos compartidos con el equipo
+    from core.memory_manager import langchain_pg_embedding, langchain_pg_collection
+    collection_uuid_query = select(langchain_pg_collection.c.uuid).where(
+        langchain_pg_collection.c.name == f"user_memories_{current_account_id}"
+    )
+    collection_result = await db.execute(collection_uuid_query)
+    collection_uuid = collection_result.scalar_one_or_none()
+
+    shared_documents = []
+    if collection_uuid:
+        document_list_query = select(
+            langchain_pg_embedding.c.cmetadata['file_name'].astext.label('file_name'),
+            langchain_pg_embedding.c.cmetadata['title'].astext.label('title'),
+            func.now().label('shared_at')
+        ).where(
+            langchain_pg_embedding.c.collection_id == collection_uuid,
+            langchain_pg_embedding.c.cmetadata['type'].astext == 'document_chunk',
+            langchain_pg_embedding.c.cmetadata['team_id'].astext == str(team_uuid)
+        ).distinct(text("file_name")).order_by(
+            text("file_name"),
+            langchain_pg_embedding.c.cmetadata['title'].astext
+        )
+        
+        documents_result = await db.execute(document_list_query)
+        shared_documents = [dict(row) for row in documents_result.mappings()]
+        for doc in shared_documents:
+            doc['type'] = 'document'
+            doc['id'] = doc['file_name']  # Usamos file_name como ID para documentos
+    
+    # Obtener eventos compartidos con el equipo
+    events_result = await db.execute(select(AgendaEvent).where(AgendaEvent.team_id == team_uuid))
+    shared_events = events_result.scalars().all()
+    events_list = [{"id": event.id, "description": event.description, "event_datetime": event.event_datetime, "type": 'event', "shared_at": event.created_at} for event in shared_events]
+    
+    # Obtener notas compartidas con el equipo
+    notes_result = await db.execute(select(Nota).where(Nota.team_id == team_uuid))
+    shared_notes = notes_result.scalars().all()
+    notes_list = []
+    for note in shared_notes:
+        # Obtener información del usuario que compartió la nota
+        account = await db.get(Account, note.account_id)
+        shared_by = account.name if account and account.name else (account.email if account else "Usuario desconocido")
+        notes_list.append({
+            "id": note.id,
+            "title": note.title,
+            "content": note.content,
+            "type": 'note',
+            "shared_at": note.updated_at or note.created_at,
+            "shared_by": shared_by
+        })
+    
+    # Obtener eventos compartidos con el equipo
+    events_result = await db.execute(select(AgendaEvent).where(AgendaEvent.team_id == team_uuid))
+    shared_events = events_result.scalars().all()
+    events_list_updated = []
+    for event in shared_events:
+        # Obtener información del usuario que compartió el evento
+        account = await db.get(Account, event.account_id)
+        shared_by = account.name if account and account.name else (account.email if account else "Usuario desconocido")
+        events_list_updated.append({
+            "id": event.id,
+            "description": event.description,
+            "event_datetime": event.event_datetime,
+            "type": 'event',
+            "shared_at": event.created_at,
+            "shared_by": shared_by
+        })
+    
+    # Obtener documentos compartidos con el equipo (ya procesado anteriormente)
+    for doc in shared_documents:
+        # Obtener el account_id del propietario del documento desde la base de datos
+        if collection_uuid:
+            chunk_query = select(
+                langchain_pg_embedding.c.cmetadata['account_id'].astext.label('account_id')
+            ).where(
+                langchain_pg_embedding.c.collection_id == collection_uuid,
+                langchain_pg_embedding.c.cmetadata['file_name'].astext == doc['file_name'],
+                langchain_pg_embedding.c.cmetadata['type'].astext == 'document_chunk'
+            ).limit(1)
+            
+            chunk_result = await db.execute(chunk_query)
+            account_id = chunk_result.scalar_one_or_none()
+            
+            if account_id:
+                account = await db.get(Account, uuid.UUID(account_id))
+                doc['shared_by'] = account.name if account and account.name else (account.email if account else "Usuario desconocido")
+            else:
+                doc['shared_by'] = "Usuario desconocido"
+        else:
+            doc['shared_by'] = "Usuario desconocido"
+    
+    # Combinar todos los elementos compartidos
+    combined_items = shared_documents + events_list_updated + notes_list
+    logger.info(f"Total de elementos compartidos con el equipo {team_id}: {len(combined_items)}")
+    return combined_items
+
+class SharedItemUpdateRequest(BaseModel):
+    """Define la estructura de datos para actualizar un elemento compartido."""
+    itemId: str
+    type: str
+    title: Optional[str] = None
+    content: Optional[str] = None
+
+@app.post("/api/teams/{team_id}/shared-items/update", response_model=dict, summary="Actualizar un elemento compartido")
+async def update_shared_item(team_id: str, request: SharedItemUpdateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Actualiza un elemento compartido (nota o documento) con un equipo específico.
+    Accesible para cualquier miembro del equipo.
+    """
+    logger.info(f"Actualizando elemento compartido {request.itemId} de tipo {request.type} en el equipo {team_id} para la cuenta: {current_account_id}")
+    account_uuid = uuid.UUID(current_account_id)
+    team_uuid = uuid.UUID(team_id)
+    
+    # Verificar si el usuario es administrador o miembro del equipo
+    team_as_admin = await db.scalar(select(Team).where(Team.id == team_uuid, Team.admin_id == account_uuid))
+    if not team_as_admin:
+        team_as_member = await db.scalar(
+            select(TeamMember).where(TeamMember.team_id == team_uuid, TeamMember.account_id == account_uuid)
+        )
+        if not team_as_member:
+            raise HTTPException(status_code=404, detail="Equipo no encontrado o no tienes permisos para actualizar elementos compartidos.")
+    
+    if request.type == 'note':
+        item_id_int = int(request.itemId)
+        # Verificar que la nota está compartida con el equipo
+        note = await db.scalar(select(Nota).where(Nota.id == item_id_int, Nota.team_id == team_uuid))
+        if not note:
+            raise HTTPException(status_code=404, detail="Nota no encontrada o no está compartida con este equipo.")
+        
+        # Actualizar la nota
+        update_data = {}
+        if request.title is not None:
+            update_data['title'] = request.title
+        if request.content is not None:
+            update_data['content'] = request.content
+        
+        if update_data:
+            result = await db.execute(
+                update(Nota)
+                .where(Nota.id == item_id_int)
+                .values(**update_data)
+            )
+            if result.rowcount > 0:
+                await db.commit()
+                return {"message": f"Nota {request.itemId} actualizada con éxito en el equipo {team_id}"}
+            else:
+                raise HTTPException(status_code=500, detail="Error al actualizar la nota.")
+        else:
+            return {"message": "No se proporcionaron datos para actualizar la nota."}
+    else:
+        raise HTTPException(status_code=400, detail="Tipo de elemento no soportado para actualización.")
 
 @app.post("/api/notes/{note_id}/unshare", summary="Eliminar compartición de una nota")
 async def unshare_note(note_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):

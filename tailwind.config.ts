@@ -80,6 +80,10 @@ const config: Config = {
   		}
   	}
   },
-  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
+  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")({
+    // Desactivar estilos de color para permitir que el tema Tailwind CSS los controle
+    // Esto asegura que `text-foreground` funcione como se espera
+    colors: false,
+  })],
 };
 export default config;

@@ -8,22 +8,12 @@ import { sentImage } from '@/lib/imageUtils';
 import { toast } from 'sonner';
 import Prism from 'prismjs';
 import 'prismjs/themes/prism-tomorrow.css';
+import 'prismjs/components/prism-docker'; // Importar el lenguaje Docker
 
 interface MarkdownRendererProps {
   content: string;
   fontSize?: string;
 }
-
-// Función para cargar lenguajes de Prism de forma condicional
-const loadPrismLanguage = (language: string) => {
-  if (!Prism.languages[language]) {
-    try {
-      require(`prismjs/components/prism-${language}`);
-    } catch (error) {
-      console.error(`Failed to load Prism language: ${language}`, error);
-    }
-  }
-};
 
 export function MarkdownRenderer({ content, fontSize = 'text-base' }: MarkdownRendererProps) {
   const [copiedStates, setCopiedStates] = useState<Record<string, boolean>>({});
@@ -35,9 +25,12 @@ export function MarkdownRenderer({ content, fontSize = 'text-base' }: MarkdownRe
       // Configure marked with a custom highlighter
       const renderer = new marked.Renderer();
       renderer.code = function({ text, lang }) {
-        const language = lang || 'markup';
-        loadPrismLanguage(language);
-        const highlightedCode = Prism.highlight(text, Prism.languages[language], language);
+        let language = lang || 'markup';
+        // Mapear 'dockerfile' a 'docker' para Prism.js
+        if (language === 'dockerfile') {
+          language = 'docker';
+        }
+        const highlightedCode = Prism.highlight(text, Prism.languages[language] || Prism.languages.markup, language);
         return `<pre><code class="language-${language}">${highlightedCode}</code></pre>`;
       };
       marked.setOptions({
@@ -126,8 +119,8 @@ export function MarkdownRenderer({ content, fontSize = 'text-base' }: MarkdownRe
   }, [htmlContent, copiedStates, handleCopy]);
 
   return (
-    <div className={`prose prose-invert prose-sm max-w-none ${fontSize}`} style={{ overflowWrap: 'break-word' }} ref={containerRef}>
-      <div dangerouslySetInnerHTML={{ __html: htmlContent }} style={{ overflowWrap: 'break-word' }} />
+    <div className={`prose prose-sm max-w-none ${fontSize} text-foreground`} style={{ overflowWrap: 'break-word', margin: 0, padding: 0 }} ref={containerRef}>
+      <div dangerouslySetInnerHTML={{ __html: htmlContent }} style={{ overflowWrap: 'break-word', margin: 0, padding: 0 }} />
     </div>
   );
 }

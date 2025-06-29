@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { PlusCircle, FolderKanban, MoreVertical, ScanSearch, Loader2, Library } from 'lucide-react';
+import { PlusCircle, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked } from 'lucide-react';
 
 import { UploadDocumentDialog } from './upload-document-dialog';
 import { CreateCollectionDialog } from './create-collection-dialog';
@@ -113,7 +113,10 @@ export default function RagCollectionsPage() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold">Gestión de Documentos</h1>
+          <h1 className="text-3xl font-bold flex items-center">
+            <BookMarked className="mr-2 h-8 w-8 text-primary" />
+            Gestión de Documentos
+          </h1>
           <p className="text-muted-foreground">Organiza tus documentos en bases de conocimiento.</p>
         </div>
         <Button onClick={() => setIsUploadOpen(true)}>

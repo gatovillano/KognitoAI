@@ -54,3 +54,6 @@ keybert
 transformers
 hdbscan
 graphviz
+# Dependencias para eliminación de fondo de imagen
+rembg
+Pillow

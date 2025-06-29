@@ -36,9 +36,9 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
         <div className="flex flex-col items-center">
           <div className="w-full max-w-4xl mx-auto">
             <div className="flex items-start gap-4 justify-end">
-                <div className="rounded-lg py-1 px-1 bg-secondary text-secondary-foreground min-w-10 max-w-[80%] overflow-hidden">
-                <div className="text-lg whitespace-pre-wrap overflow-hidden leading-tight">
-                  <div className="chat-markdown-content">
+                <div className="rounded-lg py-0 px-4 bg-[hsl(var(--user-bubble))] min-w-5 max-w-[80%] overflow-hidden">
+                <div className="text-sm whitespace-pre-wrap overflow-hidden leading-none [&>p]:my-0 [&>*:last-child]:mb-0 [&>*:first-child]:mt-0 py-0">
+                  <div className="chat-markdown-content text-foreground">
                     <MarkdownRenderer content={msg.text} />
                   </div>
                 </div>
@@ -53,9 +53,9 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
           <div className="w-full max-w-4xl mx-auto">
             <div className="flex items-start gap-4">
               <ChatAvatar sender="ai" />
-              <div className="flex-1 min-w-0">
+              <div className="flex-0 min-w-0">
                 <div className="font-bold">Kognito</div>
-                <div className="break-words mt-1 text-lg leading-tight">
+                <div className="break-words mt-0 text-sm text-gray-200 leading-none [&>p]:my-0 [&>*:last-child]:mb-0 [&>*:first-child]:mt-0">
                   <div className="chat-markdown-content">
                     <MarkdownRenderer content={msg.text} />
                   </div>

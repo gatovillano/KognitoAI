@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { PlusCircle, Clock, Trash2, Users } from 'lucide-react';
+import { PlusCircle, Clock, Trash2, Users, Calendar as CalendarIcon } from 'lucide-react';
 import { EventDialog } from './event-dialog';
 import { Calendar } from '@/components/ui/calendar';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -91,7 +91,10 @@ export default function AgendaPage() {
       <div className="p-6 h-full flex flex-col">
         <div className="flex items-center justify-between mb-6 shrink-0">
           <div>
-            <h1 className="text-3xl font-bold">Agenda</h1>
+            <h1 className="text-3xl font-bold flex items-center">
+                <CalendarIcon className="mr-2 h-8 w-8 text-primary" />
+                Agenda
+            </h1>
             <p className="text-muted-foreground">Tus próximos eventos y recordatorios.</p>
           </div>
           <div className="flex gap-2">

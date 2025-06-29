@@ -8,6 +8,8 @@ interface User {
   id: string;
   name: string | null;
   email: string | null;
+  username: string | null;
+  is_admin: boolean;
 }
 
 interface AuthContextType {

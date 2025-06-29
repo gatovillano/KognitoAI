@@ -15,8 +15,8 @@ export const ChatAvatar: React.FC<ChatAvatarProps> = ({ sender }) => {
     );
   } else {
     return (
-      <Avatar className="h-16 w-16 border">
-        <AvatarImage src="/logo-simple.png" alt="Kognito" />
+      <Avatar className="h-16 w-16">
+        <AvatarImage src="/logo-simple.png" alt="Kognito" style={{ width: '90%', height: '90%', objectFit: 'contain' }} />
         <AvatarFallback>K</AvatarFallback>
       </Avatar>
     );

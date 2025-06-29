@@ -579,7 +579,7 @@ async def get_full_document_content(account_id: str, file_name: str, team_id: Op
 
 async def list_user_documents(account_id: str, team_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Obtiene una lista de todos los documentos únicos subidos por un usuario o equipo.
+    Obtiene una lista de todos los documentos únicos subidos por un usuario o asociados a un equipo.
     Args:
         account_id: El ID universal de la cuenta del usuario.
         team_id: El ID del equipo (UUID en formato string) para listar documentos del equipo, si aplica.
@@ -606,21 +606,45 @@ async def list_user_documents(account_id: str, team_id: Optional[str] = None) ->
                 )
                 return []  # No hay colección, no hay documentos
 
-            document_list_query = text(
-                """
-                SELECT DISTINCT ON (cmetadata->>'file_name')
-                       cmetadata->>'file_name' AS file_name,
-                       cmetadata->>'topic' AS topic,
-                       cmetadata->>'title' AS title,
-                       cmetadata->>'author' AS author
-                FROM langchain_pg_embedding
-                WHERE collection_id = :collection_uuid AND cmetadata->>'type' = 'document_chunk'
-                ORDER BY cmetadata->>'file_name', id
-                """
-            )
-            document_list_result = await db.execute(
-                document_list_query, {"collection_uuid": collection_uuid}
-            )
+            if team_id:
+                # Query for team documents by checking team_id in metadata
+                document_list_query = text(
+                    """
+                    SELECT DISTINCT ON (cmetadata->>'file_name')
+                           cmetadata->>'file_name' AS file_name,
+                           cmetadata->>'topic' AS topic,
+                           cmetadata->>'title' AS title,
+                           cmetadata->>'author' AS author
+                    FROM langchain_pg_embedding
+                    WHERE collection_id = :collection_uuid 
+                    AND cmetadata->>'type' = 'document_chunk'
+                    AND cmetadata->>'team_id' = :team_id
+                    ORDER BY cmetadata->>'file_name', id
+                    """
+                )
+                document_list_result = await db.execute(
+                    document_list_query, {"collection_uuid": collection_uuid, "team_id": team_id}
+                )
+            else:
+                # Query for personal documents
+                document_list_query = text(
+                    """
+                    SELECT DISTINCT ON (cmetadata->>'file_name')
+                           cmetadata->>'file_name' AS file_name,
+                           cmetadata->>'topic' AS topic,
+                           cmetadata->>'title' AS title,
+                           cmetadata->>'author' AS author
+                    FROM langchain_pg_embedding
+                    WHERE collection_id = :collection_uuid 
+                    AND cmetadata->>'type' = 'document_chunk'
+                    AND (cmetadata->>'team_id' IS NULL OR cmetadata->>'team_id' = '')
+                    ORDER BY cmetadata->>'file_name', id
+                    """
+                )
+                document_list_result = await db.execute(
+                    document_list_query, {"collection_uuid": collection_uuid}
+                )
+
             documents = [dict(row) for row in document_list_result.mappings()]
 
             logger.info(

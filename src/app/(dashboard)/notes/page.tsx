@@ -8,7 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { PlusCircle, MoreVertical, Users } from 'lucide-react';
+import { PlusCircle, MoreVertical, Users, Notebook } from 'lucide-react';
 import { NoteDialog } from './note-dialog';
 import { ViewNoteDialog } from './view-note-dialog';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
@@ -167,7 +167,10 @@ export default function NotesPage() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold">Mis Notas</h1>
+            <h1 className="text-3xl font-bold flex items-center">
+                <Notebook className="mr-2 h-8 w-8 text-primary" />
+                Mis Notas
+            </h1>
           <p className="text-muted-foreground">Captura tus ideas, pensamientos y recordatorios.</p>
         </div>
         <Button onClick={handleOpenCreate}>

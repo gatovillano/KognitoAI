@@ -28,11 +28,16 @@ export default function RegisterPage() {
       });
 
       if (response.data.token) {
-        localStorage.setItem('authToken', response.data.token);
-        toast.success('Registro exitoso', {
-          description: 'Tu cuenta ha sido creada con éxito.',
+        // No almacenamos el token aquí, el usuario debe iniciar sesión
+        toast.success('Cuenta creada con éxito', {
+          description: 'Ahora puedes iniciar sesión.',
+          action: {
+            label: 'Iniciar Sesión',
+            onClick: () => router.push('/login'),
+          },
+          duration: 5000, // Duración para que el usuario pueda leer el mensaje y hacer clic
         });
-        router.push('/dashboard');
+        // No redirigimos automáticamente, el usuario debe iniciar sesión
       } else {
         toast.error('Error en el registro', {
           description: 'No se recibió un token de autenticación.',
