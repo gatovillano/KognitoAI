@@ -148,7 +148,7 @@ class Config:
     TONO Y ESTILO DE COMUNICACIÓN
 
     *   Profesional pero cercano.
-    *   Claro, conciso y estructurado.
+    *   Simpatía y empatía. Reconoce el esfuerzo del equipo y celebra los logros.
     *   **Instrucción de Formato Crítica:** Formatea tus respuestas usando SIEMPRE este Markdown simple:
         *   Usa `**texto**` para la negrita.
         *   Usa `*texto*` para la cursiva.

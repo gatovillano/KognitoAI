@@ -43,5 +43,5 @@ COPY --from=builder /app/package.json ./package.json
 # Exponemos el puerto 3000 (el puerto por defecto de Next.js)
 EXPOSE 3000
 
-# El comando para iniciar el servidor de Next.js en modo desarrollo para live-reloading
+# El comando para iniciar el servidor de Next.js en modo producción
 CMD ["npm", "run", "dev"]

@@ -148,7 +148,18 @@ export default function ChatPage() {
   const handleSendMessage = useCallback(
     async (e?: React.FormEvent) => {
       if (e) e.preventDefault();
-      if (!newMessage.trim() || !user || isResponding) return;
+      if (!newMessage.trim() || isResponding) return;
+
+      if (!user || !user.id) {
+        toast.error("Error: Usuario no autenticado o ID de usuario faltante.");
+        setIsResponding(false);
+        return;
+      }
+      if (!threadId) {
+        toast.error("Error: ID del hilo de chat faltante.");
+        setIsResponding(false);
+        return;
+      }
 
       const userMessage: Message = { text: newMessage, sender: 'user' };
       setMessages((prev) => [...prev, userMessage]);
@@ -233,27 +244,38 @@ export default function ChatPage() {
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (!e.target.files || e.target.files.length === 0 || isUploadingFile) return;
       setIsUploadingFile(true);
+      const file = e.target.files[0]; // Solo procesamos un archivo a la vez para la eliminación de fondo
+      if (!file) return;
+
       const formData = new FormData();
-      formData.append('thread_id', threadId);
-      for (let i = 0; i < e.target.files.length; i++) {
-        formData.append('files', e.target.files[i]);
-      }
-      try {
-        await apiClient.post('/api/upload-chat-file', formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        });
-        toast.success('Archivo(s) subido(s) con éxito al contexto del chat.');
-        const uploadMessage: Message = { text: 'Archivo(s) subido(s) al contexto del chat.', sender: 'user' };
-        setMessages((prev) => [...prev, uploadMessage]);
-      } catch (error) {
-        console.error('Error uploading file:', error);
-        toast.error('Error al subir archivo(s). Inténtalo de nuevo.');
-      } finally {
-        setIsUploadingFile(false);
-        e.target.value = '';
-      }
+      formData.append('file', file); // El endpoint espera 'file'
+
+        try {
+          const response = await apiClient.post('/api/process-image-background', formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+            },
+            responseType: 'blob', // Esperamos un blob como respuesta (la imagen)
+          });
+
+          // Crear una URL para la imagen blob
+          const imageUrl = URL.createObjectURL(response.data);
+          
+          // Añadir un mensaje al chat con la imagen procesada
+          const processedImageMessage: Message = { 
+            text: `¡Fondo eliminado! Aquí tienes tu imagen: ![Imagen sin fondo](${imageUrl})`, 
+            sender: 'ai' 
+          };
+          setMessages((prev) => [...prev, processedImageMessage]);
+          toast.success('Fondo de la imagen eliminado con éxito.');
+
+        } catch (error) {
+          console.error('Error al eliminar el fondo de la imagen:', error);
+          toast.error('Error al eliminar el fondo de la imagen. Inténtalo de nuevo.');
+        } finally {
+          setIsUploadingFile(false);
+          e.target.value = ''; // Limpiar el input de archivo
+        }
     },
     [threadId, isUploadingFile]
   );

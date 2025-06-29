@@ -42,21 +42,52 @@ export default function EditNotePage() {
       const fetchNote = async () => {
         setIsLoading(true);
         try {
-          // Usamos /api/list-notes y filtramos por ID ya que no hay un endpoint específico para una sola nota
-          const response = await apiClient.post('/api/list-notes', { search_term: '' });
-          const note = response.data.find((n: { id: number }) => n.id === parseInt(noteId));
+          let response;
+          if (fromTeam) {
+            // Para notas compartidas, buscamos en los elementos compartidos del equipo
+            response = await apiClient.get(`/api/teams/${fromTeam}/shared-items`);
+            console.log("Datos de elementos compartidos recibidos:", response.data);
+          } else {
+            // Usamos /api/list-notes y filtramos por ID para notas personales
+            response = await apiClient.post('/api/list-notes', { search_term: '' });
+            console.log("Datos de notas personales recibidos:", response.data);
+          }
+          // Filtramos por ID y tipo 'note' para notas compartidas
+          const note = fromTeam 
+            ? response.data.find((n: { id: number, type: string }) => n.id === parseInt(noteId) && n.type === 'note')
+            : response.data.find((n: { id: number }) => n.id === parseInt(noteId));
+          console.log("Nota encontrada:", note);
           if (note) {
             setTitle(note.title || '');
             setCategory(note.category || 'General');
             setIsShared(note.team_shared || false);
             // Convert Markdown content from API to HTML for the editor
-            try {
-              const htmlContent = await marked.parse(note.content || '');
-              setContent(htmlContent);
-            } catch (error) {
-              console.error("Error converting Markdown to HTML:", error);
-              setContent(note.content || '');
-              toast.error("Error al convertir el contenido de Markdown a HTML.");
+            if (note.content) {
+              try {
+                const htmlContent = await marked.parse(note.content);
+                setContent(htmlContent);
+              } catch (error) {
+                console.error("Error converting Markdown to HTML:", error);
+                setContent(note.content);
+                toast.error("Error al convertir el contenido de Markdown a HTML.");
+              }
+            } else {
+              console.warn("No content field found in note object, attempting to fetch full note:", note);
+              try {
+                const fullNoteResponse = await apiClient.get(`/api/notes/${noteId}`);
+                console.log("Full note data received:", fullNoteResponse.data);
+                if (fullNoteResponse.data && fullNoteResponse.data.content) {
+                  const htmlContent = await marked.parse(fullNoteResponse.data.content);
+                  setContent(htmlContent);
+                } else {
+                  setContent('');
+                  toast.error("El contenido de la nota no está disponible incluso después de intentar cargarlo.");
+                }
+              } catch (error) {
+                console.error("Error fetching full note content:", error);
+                setContent('');
+                toast.error("Error al intentar cargar el contenido completo de la nota.");
+              }
             }
           } else {
             toast.error("Nota no encontrada.");
@@ -71,7 +102,7 @@ export default function EditNotePage() {
     } else {
       setIsLoading(false);
     }
-  }, [noteId]);
+  }, [noteId, fromTeam]);
 
   // Ensure content is properly set when switching between notes
   useEffect(() => {
@@ -142,7 +173,7 @@ export default function EditNotePage() {
   return (
     <div className="p-6 h-full flex flex-col">
       <header className="flex items-center justify-between mb-4">
-        <Button variant="ghost" onClick={() => router.push(fromTeam ? `/teams/${fromTeam}` : '/notes')}>
+        <Button variant="ghost" onClick={() => router.push(fromTeam ? `/teams/${fromTeam}/dashboard` : '/notes')}>
           <ArrowLeft className="mr-2 h-4 w-4" /> {fromTeam ? 'Volver a Equipo' : 'Volver a Notas'}
         </Button>
         <div className="flex gap-2">

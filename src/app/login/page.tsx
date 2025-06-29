@@ -138,7 +138,7 @@ export default function LoginPage() {
     setIsProcessing(true);
     setGlobalError('');
     await login(token);
-    router.push('/');
+    router.push('/chat');
   };
 
   return (

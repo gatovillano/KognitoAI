@@ -38,17 +38,23 @@ export default function TeamDashboardPage() {
           return;
         }
         
-        // Fetch shared items for this specific team using team_id
-        const documentsResponse = await apiClient.post('/api/list-documents', { team_id: teamId });
-        const eventsResponse = await apiClient.post('/api/list-events', { team_id: teamId });
-        const notesResponse = await apiClient.post('/api/list-notes', { search_term: '', team_id: teamId });
+        // Fetch shared items directly associated with this team using the new endpoint
+        const sharedItemsResponse = await apiClient.get(`/api/teams/${teamId}/shared-items`);
+        
+        // Log response data for debugging
+        console.log("Using new endpoint to fetch shared items for Team ID " + teamId + ":", sharedItemsResponse.data);
         
         // Combine items, marking them with their type and shared date
-        const combinedItems = [
-          ...(documentsResponse.data || []).map((doc: any) => ({ ...doc, type: 'Documento', shared_at: doc.updated_at || doc.created_at })),
-          ...(eventsResponse.data || []).map((event: any) => ({ ...event, type: 'Evento', title: event.description, shared_at: event.updated_at || event.created_at })),
-          ...(notesResponse.data || []).map((note: any) => ({ ...note, type: 'Nota', shared_at: note.updated_at || note.created_at }))
-        ];
+        const combinedItems = (sharedItemsResponse.data || []).map((item: any) => {
+          if (item.type === 'document') {
+            return { ...item, type: 'Documento', shared_at: item.updated_at || item.created_at };
+          } else if (item.type === 'event') {
+            return { ...item, type: 'Evento', title: item.description, shared_at: item.updated_at || item.created_at };
+          } else if (item.type === 'note') {
+            return { ...item, type: 'Nota', shared_at: item.updated_at || item.created_at };
+          }
+          return item;
+        });
         
         // Set the shared items for this team
         setSharedItems(combinedItems);
@@ -181,8 +187,8 @@ export default function TeamDashboardPage() {
           <p className="text-muted-foreground">Cargando elementos compartidos...</p>
         </div>
       ) : sharedItems.length === 0 ? (
-        <div className="rounded-md border mt-6 p-8 text-center">
-          <p className="text-muted-foreground">No hay elementos compartidos con este equipo.</p>
+        <div className="rounded-md border-0 mt-6 p-8 text-center">
+          <p className="text-muted-foreground">No hay elementos compartidos con este equipo. Es posible que aún no se hayan compartido recursos o que no estén disponibles para tu usuario.</p>
         </div>
       ) : (
         <div className="space-y-8">
@@ -193,8 +199,8 @@ export default function TeamDashboardPage() {
               <Calendar className="ml-2 h-5 w-5 text-green-500" />
             </h2>
             {sharedItems.filter(item => item.type === 'Evento').length === 0 ? (
-              <div className="rounded-md border p-6 text-center">
-                <p className="text-muted-foreground">No hay eventos compartidos con este equipo.</p>
+              <div className="rounded-md border-0 p-6 text-center">
+                <p className="text-muted-foreground">No hay rueventos compartidos con este equipo. Es posible que aún no se hayan compartido eventos o que no estén disponibles para tu usuario.</p>
               </div>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -240,8 +246,8 @@ export default function TeamDashboardPage() {
               <Notebook className="ml-2 h-5 w-5 text-yellow-500" />
             </h2>
             {sharedItems.filter(item => item.type === 'Nota').length === 0 ? (
-              <div className="rounded-md border p-6 text-center">
-                <p className="text-muted-foreground">No hay notas compartidas con este equipo.</p>
+              <div className="rounded-md border-0 p-6 text-center">
+                <p className="text-muted-foreground">No hay notas compartidas con este equipo. Es posible que aún no se hayan compartido notas o que no estén disponibles para tu usuario.</p>
               </div>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -273,7 +279,7 @@ export default function TeamDashboardPage() {
                     </CardContent>
                     <CardFooter className="flex justify-between items-center">
                       <p className="text-xs text-muted-foreground">
-                        Compartido: {new Date(item.shared_at || item.created_at).toLocaleDateString()}
+                        Compartido por: {item.shared_by || "Usuario desconocido"}
                       </p>
                       <div className="ml-2">
                         <Notebook className="h-4 w-4 text-yellow-500" />
@@ -292,8 +298,8 @@ export default function TeamDashboardPage() {
               <BookMarked className="ml-2 h-5 w-5 text-blue-500" />
             </h2>
             {sharedItems.filter(item => item.type === 'Documento').length === 0 ? (
-              <div className="rounded-md border p-6 text-center">
-                <p className="text-muted-foreground">No hay documentos compartidos con este equipo.</p>
+              <div className="rounded-md border-0 p-6 text-center">
+                <p className="text-muted-foreground">No hay documentos compartidos con este equipo. Es posible que aún no se hayan compartido documentos o que no estén disponibles para tu usuario.</p>
               </div>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -319,9 +325,17 @@ export default function TeamDashboardPage() {
                         {item.content || item.summary || 'Sin contenido disponible'}
                       </p>
                     </CardContent>
+                      <CardFooter className="flex justify-between items-center">
+                        <p className="text-xs text-muted-foreground">
+                          Compartido por: {item.shared_by || "Usuario desconocido"}
+                        </p>
+                        <div className="ml-2">
+                          <Calendar className="h-4 w-4 text-green-500" />
+                        </div>
+                      </CardFooter>
                     <CardFooter className="flex justify-between items-center">
                       <p className="text-xs text-muted-foreground">
-                        Compartido: {new Date(item.shared_at || item.created_at).toLocaleDateString()}
+                        Compartido por: {item.shared_by || "Usuario desconocido"}
                       </p>
                       <div className="ml-2">
                         <BookMarked className="h-4 w-4 text-blue-500" />

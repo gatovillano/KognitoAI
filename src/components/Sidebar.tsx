@@ -7,8 +7,9 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Plus, MessageSquare, BookMarked, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Plus, MessageSquare, BookMarked, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical, FolderKanban, Settings } from 'lucide-react';
 import Image from 'next/image';
 import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -26,6 +27,7 @@ interface ChatThread {
   id: string;
   title: string;
   isPinned?: boolean;
+  workspace_id?: string | null;
 }
 
 export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
@@ -37,25 +39,73 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
 
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState<string>("");
+
+  useEffect(() => {
+    const updateActiveWorkspace = async () => {
+      const threadIdMatch = pathname.match(/\/chat\/([a-f0-9-]+)/);
+      if (threadIdMatch) {
+        try {
+          const response = await apiClient.get<ChatThread>(`/api/threads/${threadIdMatch[1]}`);
+          setActiveWorkspaceId(response.data.workspace_id || null);
+        } catch (error) {
+          console.error('Error fetching thread details for workspace context:', error);
+          setActiveWorkspaceId(null);
+        }
+      } else {
+        const workspaceIdMatch = pathname.match(/\/workspaces\/([a-f0-9-]+)/);
+        if (workspaceIdMatch) {
+          setActiveWorkspaceId(workspaceIdMatch[1]);
+        } else {
+          setActiveWorkspaceId(null);
+        }
+      }
+    };
+
+    updateActiveWorkspace();
+  }, [pathname]);
+
   useEffect(() => {
     const fetchThreads = async () => {
       if (user) {
         try {
-          const response = await apiClient.get<ChatThread[]>('/api/threads');
+          let url = '/api/threads';
+          if (activeWorkspaceId) {
+            url = `/api/threads?workspace_id=${activeWorkspaceId}`;
+          }
+          const response = await apiClient.get<ChatThread[]>(url);
           const allThreads = response.data;
-          setThreads(allThreads.filter(thread => !thread.isPinned));
-          setPinnedThreads(allThreads.filter(thread => thread.isPinned));
+          // Filtrado adicional para asegurar que solo se muestren hilos del workspace activo
+          const filteredThreads = activeWorkspaceId 
+            ? allThreads.filter(thread => thread.workspace_id === activeWorkspaceId)
+            : allThreads.filter(thread => !thread.workspace_id);
+          setThreads(filteredThreads.filter(thread => !thread.isPinned));
+          setPinnedThreads(filteredThreads.filter(thread => thread.isPinned));
         } catch (error) {
           console.error('Error fetching threads:', error);
         }
       }
     };
     fetchThreads();
-  }, [user]);
+  }, [user, activeWorkspaceId]);
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(e.target.value);
+  };
+
+  const filteredThreadsBySearch = searchTerm 
+    ? threads.filter(thread => thread.title.toLowerCase().includes(searchTerm.toLowerCase()))
+    : threads;
+  
+  const filteredPinnedThreadsBySearch = searchTerm 
+    ? pinnedThreads.filter(thread => thread.title.toLowerCase().includes(searchTerm.toLowerCase()))
+    : pinnedThreads;
 
   const handleNewChat = async () => {
     try {
-      const response = await apiClient.post<ChatThread>('/api/threads');
+      const payload = { workspace_id: activeWorkspaceId };
+      const response = await apiClient.post<ChatThread>('/api/threads', payload);
       const newThread = response.data;
       setThreads((prevThreads) => [newThread, ...prevThreads]);
       router.push(`/chat/${newThread.id}`);
@@ -229,6 +279,12 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               {!isCollapsed && "Equipos"}
             </Button>
           </Link>
+          <Link href="/workspaces" passHref onClick={onLinkClick} title="Workspaces">
+            <Button variant={pathname.startsWith('/workspaces') ? 'secondary' : 'ghost'} className={cn("w-full", isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start")}>
+              <FolderKanban className={cn("h-4 w-4", !isCollapsed && "mr-2")}/>
+              {!isCollapsed && "Workspaces"}
+            </Button>
+          </Link>
           <Link href="/chat" passHref onClick={onLinkClick} title="Chat">
             <Button variant={pathname.startsWith('/chat') ? 'secondary' : 'ghost'} className={cn("w-full", isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start")}>
               <MessageSquare className={cn("h-4 w-4", !isCollapsed && "mr-2")}/>
@@ -237,8 +293,20 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           </Link>
         </nav>
         {!isCollapsed && (
-          <div className="flex items-center justify-between mb-2 px-2 mt-4">
+          <div className="flex items-center justify-between mb-4 px-2 mt-4">
             <p className="font-semibold text-muted-foreground whitespace-nowrap">Conversaciones</p>
+          </div>
+        )}
+        {!isCollapsed && (
+          <div className="mb-4 px-2 mt-2">
+            <input
+              type="text"
+              placeholder="Buscar conversaciones..."
+              value={searchTerm}
+              onChange={handleSearchChange}
+              className="w-full p-2 rounded-full focus:outline-none focus:ring-2 focus:ring-primary text-sm text-gray-300"
+              style={{ backgroundColor: '#1d1e20' }}
+            />
           </div>
         )}
         {isCollapsed && (
@@ -265,14 +333,16 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           )}
           {!isCollapsed && !isPinnedCollapsed && (
             <DropArea onDrop={(thread, isPinned) => !isPinned && handlePinThread(thread)}>
-              {pinnedThreads.length > 0 ? (
+              {filteredPinnedThreadsBySearch.length > 0 ? (
                 <div className="space-y-1">
-                  {pinnedThreads.map((thread) => (
+                  {filteredPinnedThreadsBySearch.map((thread) => (
                     <ThreadItem key={thread.id} thread={thread} isPinned={true} />
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground px-2 mb-2">No hay conversaciones fijadas.</p>
+                <p className="text-xs text-muted-foreground px-2 mb-2">
+                  {searchTerm ? "No se encontraron conversaciones fijadas que coincidan con la búsqueda." : "No hay conversaciones fijadas."}
+                </p>
               )}
             </DropArea>
           )}
@@ -292,7 +362,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           {!isRecentCollapsed && (
             <DropArea onDrop={(thread, isPinned) => isPinned && handleUnpinThread(thread)}>
               <div className="space-y-1">
-                {threads.map((thread) => (
+                {filteredThreadsBySearch.map((thread) => (
                   <ThreadItem key={thread.id} thread={thread} isPinned={false} />
                 ))}
               </div>
@@ -302,10 +372,44 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
       </ScrollArea>
 
       <div className={cn("mt-auto w-full pt-2 border-t", isCollapsed && "flex flex-col items-center")}>
-        <Button onClick={logout} variant="outline" className={cn("w-full mt-4", isCollapsed ? "h-10 w-10 p-0" : "justify-start gap-2")}>
-          <LogOut className="h-4 w-4" />
-          {!isCollapsed && "Cerrar Sesión"}
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" className={cn("w-full mt-4 h-auto py-2", isCollapsed ? "h-10 w-10 p-0" : "justify-start gap-2")}>
+              <Avatar className={cn("h-8 w-8", !isCollapsed && "mr-2")}>
+                <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" /> {/* Placeholder image */}
+                <AvatarFallback>CN</AvatarFallback>
+              </Avatar>
+              {!isCollapsed && (
+                <div className="flex flex-col items-start overflow-hidden">
+                  <span className="font-semibold text-sm truncate w-full text-left">{user?.username || "Usuario"}</span>
+                  <span className="text-xs text-muted-foreground truncate w-full text-left">{user?.email || "Sin Email"}</span>
+                </div>
+              )}
+              {!isCollapsed && <Settings className="h-4 w-4 ml-auto" />}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <div className="flex items-center justify-start gap-2 p-2">
+              <div className="flex flex-col space-y-1 leading-none">
+                {user?.username && <p className="font-medium">{user.username}</p>}
+                {user?.email && <p className="w-[200px] truncate text-sm text-muted-foreground">{user.email}</p>}
+              </div>
+            </div>
+            <DropdownMenuSeparator />
+            {user?.is_admin && (
+              <DropdownMenuItem asChild>
+                <Link href="/admin" onClick={onLinkClick}>
+                  <Users className="mr-2 h-4 w-4" />
+                  <span>Administración</span>
+                </Link>
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onClick={logout}>
+              <LogOut className="mr-2 h-4 w-4" />
+              <span>Cerrar Sesión</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
   );

@@ -42,7 +42,7 @@ from sqlalchemy import update
 # --- Módulos del Proyecto ---
 from core.tools import get_all_langchain_tools
 from core.memory_manager import get_user_profile, get_relevant_memories
-from core.database import SessionLocal, Account, ChatThread
+from core.database import SessionLocal, Account, ChatThread, Workspace
 from utils.db_session import DBSession
 from core.config import settings
 from core.llm_manager import get_main_llm, get_fast_llm, initialize_llms
@@ -358,13 +358,19 @@ async def create_and_run_agent(
     # Construir la parte del perfil del prompt
     profile_info = []
     custom_prompt = None
+    async with DBSession(SessionLocal) as db:
+        thread = await db.scalar(select(ChatThread).options(selectinload(ChatThread.workspace)).where(ChatThread.id == uuid.UUID(thread_id)))
+        if thread and thread.workspace and thread.workspace.system_prompt:
+            custom_prompt = thread.workspace.system_prompt
+        elif user_profile:
+            # ¡CORREGIDO! Usamos el nombre correcto del atributo: system_prompt
+            custom_prompt = user_profile.system_prompt
+
     if user_profile:
         if user_profile.nombre: profile_info.append(f"- Nombre: {user_profile.nombre}")
         if user_profile.gustos: profile_info.append(f"- Gustos: {user_profile.gustos}")
         if user_profile.intereses: profile_info.append(f"- Intereses: {user_profile.intereses}")
         if user_profile.otros_datos: profile_info.append(f"- Otros datos: {user_profile.otros_datos}")
-        # ¡CORREGIDO! Usamos el nombre correcto del atributo: system_prompt
-        custom_prompt = user_profile.system_prompt
         
     user_context_parts = [
         "--- Información Relevante sobre el Usuario y su Contexto ---",

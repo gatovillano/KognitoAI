@@ -95,6 +95,7 @@ class Account(Base):
     username = Column(String(255), unique=True, nullable=True, index=True) 
     timezone = Column(String(255), nullable=True, default="UTC", comment="Zona horaria preferida de la cuenta.")
     custom_system_prompt = Column(Text, nullable=True, comment="Prompt de sistema personalizado para la IA de esta cuenta.")
+    is_admin = Column(Boolean, default=False, nullable=False, comment="Indica si esta cuenta tiene privilegios de administrador.")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # --- Relaciones con otros modelos ---
@@ -105,6 +106,7 @@ class Account(Base):
     profile = relationship("Perfil", uselist=False, back_populates="account", cascade="all, delete-orphan")
     
     # Relaciones uno a muchos con los datos del usuario.
+    workspaces = relationship("Workspace", back_populates="account", cascade="all, delete-orphan")
     memories = relationship("Memory", back_populates="account", cascade="all, delete-orphan")
     notas = relationship("Nota", back_populates="account", cascade="all, delete-orphan")
     recordatorios = relationship("Recordatorio", back_populates="account", cascade="all, delete-orphan")
@@ -187,6 +189,27 @@ class TeamMember(Base):
 
     def __repr__(self):
         return f"<TeamMember(team_id={self.team_id}, account_id={self.account_id})>"
+
+
+class Workspace(Base):
+    """
+    Representa un espacio de trabajo para separar proyectos y lógicas.
+    Cada espacio de trabajo puede tener su propio prompt de sistema.
+    """
+    __tablename__ = "workspaces"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    system_prompt = Column(Text, nullable=True, comment="Prompt de sistema específico para este espacio de trabajo.")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relaciones
+    account = relationship("Account", back_populates="workspaces")
+    chat_threads = relationship("ChatThread", back_populates="workspace", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Workspace(id={self.id}, name='{self.name}')>"
 
 
 # --- Modelos de Datos Refactorizados (ahora vinculados a Account y opcionalmente a Team) ---
@@ -307,6 +330,7 @@ class ChatThread(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=True, index=True)
     
     title = Column(String, default="Nuevo Chat")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -315,6 +339,7 @@ class ChatThread(Base):
     tags = Column(JSONB, nullable=True) 
 
     account = relationship("Account", back_populates="chat_threads")
+    workspace = relationship("Workspace", back_populates="chat_threads")
 
 class ProactiveInsight(Base):
     __tablename__ = "proactive_insights"
@@ -485,6 +510,39 @@ async def get_account_by_telegram_id(db_session, telegram_id: int) -> Optional[A
     )
     result = await db_session.execute(stmt)
     return result.scalars().first()
+
+
+from sqlalchemy import delete
+
+async def delete_accounts_by_ids(db_session: AsyncSession, account_ids: list[uuid.UUID]) -> int:
+    """
+    Elimina cuentas de la base de datos por sus IDs.
+    Retorna el número de filas eliminadas.
+    """
+    try:
+        # Eliminar las identidades de plataforma asociadas primero
+        # Aunque cascade="all, delete-orphan" debería manejar esto,
+        # una eliminación explícita puede ser útil para claridad o si hay problemas de cascada.
+        delete_platform_identities_stmt = (
+            delete(PlatformIdentity)
+            .where(PlatformIdentity.account_id.in_(account_ids))
+        )
+        await db_session.execute(delete_platform_identities_stmt)
+        
+        # Eliminar las cuentas
+        delete_accounts_stmt = (
+            delete(Account)
+            .where(Account.id.in_(account_ids))
+        )
+        result = await db_session.execute(delete_accounts_stmt)
+        
+        await db_session.commit()
+        logger.info(f"✅ Eliminadas {result.rowcount} cuentas con IDs: {account_ids}")
+        return result.rowcount
+    except Exception as e:
+        logger.error(f"❌ Error al eliminar cuentas con IDs {account_ids}: {e}", exc_info=True)
+        await db_session.rollback()
+        raise
 
 
 # Al final de core/database.py

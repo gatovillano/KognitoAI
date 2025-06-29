@@ -212,7 +212,7 @@ export default function TeamDetailPage() {
           {resourcesLoading ? (
             <p className="text-muted-foreground">Cargando documentos compartidos...</p>
           ) : documents.length === 0 ? (
-            <p className="text-muted-foreground">No hay documentos compartidos con este equipo.</p>
+            <p className="text-muted-foreground border-0">No hay documentos compartidos con este equipo.</p>
           ) : (
             <div className="space-y-2">
               {documents.map((doc) => (
@@ -234,7 +234,7 @@ export default function TeamDetailPage() {
           {resourcesLoading ? (
             <p className="text-muted-foreground">Cargando notas compartidas...</p>
           ) : notes.length === 0 ? (
-            <p className="text-muted-foreground">No hay notas compartidas con este equipo.</p>
+            <p className="text-muted-foreground border-0">No hay notas compartidas con este equipo.</p>
           ) : (
             <div className="space-y-2">
               {notes.map((note) => (

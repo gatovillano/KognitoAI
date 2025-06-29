@@ -17,6 +17,7 @@ export default function TeamsPage() {
   const [open, setOpen] = useState(false);
   const [teams, setTeams] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [memberCounts, setMemberCounts] = useState<{ [key: string]: number }>({});
   const [shareDocumentsOpen, setShareDocumentsOpen] = useState(false);
   const [shareEventsOpen, setShareEventsOpen] = useState(false);
   const [shareNotesOpen, setShareNotesOpen] = useState(false);
@@ -35,7 +36,21 @@ export default function TeamsPage() {
     const fetchTeams = async () => {
       try {
         const response = await apiClient.get('/api/teams');
-        setTeams(response.data);
+        const teamsData = response.data;
+        setTeams(teamsData);
+        
+        // Fetch member count for each team
+        const counts: { [key: string]: number } = {};
+        for (const team of teamsData) {
+          try {
+            const membersResponse = await apiClient.get(`/api/teams/${team.id}/members`);
+            counts[team.id] = membersResponse.data.length;
+          } catch (error) {
+            console.error(`Error fetching members for team ${team.id}:`, error);
+            counts[team.id] = 0;
+          }
+        }
+        setMemberCounts(counts);
       } catch (error) {
         console.error("Error fetching teams:", error);
       } finally {
@@ -216,12 +231,12 @@ export default function TeamsPage() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center">
-          <Users className="mr-2 h-6 w-6 text-blue-500" />
-          <div>
-            <h1 className="text-3xl font-bold mb-2">Equipos</h1>
+        <div>
+            <h1 className="text-3xl font-bold mb-2 flex items-center">
+                <Users className="mr-2 h-8 w-8 text-primary" />
+                Equipos
+            </h1>
             <p className="text-muted-foreground">Gestiona tus equipos y colaboradores.</p>
-          </div>
         </div>
         <Button onClick={() => setOpen(true)} className="mt-4">
           <Plus className="mr-2 h-4 w-4" />
@@ -274,9 +289,9 @@ export default function TeamsPage() {
                   </DropdownMenuContent>
                 </DropdownMenu>
               </CardHeader>
-              <CardContent className="p-4 pt-2">
-                <p className="text-sm text-muted-foreground">{team.members_count || 0} miembro(s)</p>
-              </CardContent>
+                <CardContent className="p-4 pt-2">
+                  <p className="text-sm text-muted-foreground">{memberCounts[team.id] || 0} miembro(s)</p>
+                </CardContent>
             </Card>
           ))}
         </div>

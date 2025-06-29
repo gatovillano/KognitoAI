@@ -10,7 +10,6 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban } from 'lucide-react';
 import { toast } from 'sonner';
 
-// Importaciones de componentes del directorio padre 'rag'
 import { DataTable } from '../data-table';
 import { getColumns, type Document } from '../columns';
 import apiClient from '@/lib/api';
@@ -20,6 +19,7 @@ import { EditDocumentDialog } from '../edit-document-dialog';
 import { DeleteConfirmationDialog } from '../delete-confirmation-dialog';
 import { AnalysisResultDialog } from '../analysis-result-dialog';
 import { CollectionAnalysisDialog } from '../collection-analysis-dialog';
+import { ShareDocumentDialog } from '../share-document-dialog';
 
 export default function CollectionDetailPage() {
   const params = useParams();
@@ -33,6 +33,8 @@ export default function CollectionDetailPage() {
   const [documentToPreview, setDocumentToPreview] = useState<Document | null>(null);
   const [documentToEdit, setDocumentToEdit] = useState<Document | null>(null);
   const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null);
+  const [documentToShare, setDocumentToShare] = useState<Document | null>(null);
+  const [isShareOpen, setIsShareOpen] = useState(false);
   
   // Estados para análisis de documento individual
   const [documentToAnalyze, setDocumentToAnalyze] = useState<Document | null>(null);
@@ -131,7 +133,11 @@ export default function CollectionDetailPage() {
       (doc) => setDocumentToPreview(doc),
       (doc) => setDocumentToEdit(doc),
       (doc) => setDocumentToDelete(doc),
-      handleAnalyzeDocument
+      handleAnalyzeDocument,
+      (doc) => {
+        setDocumentToShare(doc);
+        setIsShareOpen(true);
+      }
   ), [handleAnalyzeDocument]);
   
   return (
@@ -214,6 +220,7 @@ export default function CollectionDetailPage() {
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />
       <AnalysisResultDialog isOpen={isDocAnalysisOpen} onOpenChange={setIsDocAnalysisOpen} analysis={docAnalysisResult} document={documentToAnalyze ?? { file_name: '', topic: topic, title: '', author: '' }} />
       <CollectionAnalysisDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} topic={topic} />
+      <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={fetchPageData} document={documentToShare} />
     </div>
   );
 }

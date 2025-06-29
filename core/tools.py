@@ -37,6 +37,7 @@ from tools.set_reminder_tool import SetReminderTool
 # Módulo de Perfil y Memoria
 from tools.update_user_profile import UpdateProfileTool
 from tools.memory_add_tool import MemoryAddTool
+from tools.conversation_history_analyzer_tool import ConversationHistoryAnalyzerTool
 
 # Módulo de Gestión de Documentos
 from tools.get_document_list_tool import GetDocumentListTool
@@ -52,6 +53,8 @@ from tools.web_search_tool import get_web_search_tool
 from tools.analyze_text_for_insights_tool import AnalyzeTextForInsightsTool
 from tools.github_repo_tool import GitHubRepoTool
 from tools.mindmap_generator_tool import MindmapGeneratorTool
+# Módulo de Procesamiento de Imágenes
+from tools.image_background_eraser_tool import ImageBackgroundEraserTool
 # Módulo de Insights Proactivos
 from tools.get_proactive_insights_tool import GetProactiveInsightsTool
 from tools.proactive_knowledge_linker_tool import ProactiveKnowledgeLinkerTool
@@ -83,7 +86,7 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
         # Agenda y Recordatorios
         ScheduleEventTool, GetAgendaTool, CancelEventTool, SetReminderTool,
         # Perfil y Memoria
-        UpdateProfileTool, MemoryAddTool,
+        UpdateProfileTool, MemoryAddTool, ConversationHistoryAnalyzerTool,
         # Documentos
         GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
         # Creación de Contenido y Búsqueda (excepto WebSearchTool que usa fábrica)
@@ -92,6 +95,8 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
         GitHubRepoTool,
         # Mapa Mental
         MindmapGeneratorTool,
+        # Procesamiento de Imágenes
+        ImageBackgroundEraserTool,
         # Insights Proactivos
         GetProactiveInsightsTool,
         ProactiveKnowledgeLinkerTool,
@@ -113,11 +118,11 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
             elif ToolClass in [
                 AddNoteTool, GetNotesTool, UpdateNoteTool, DeleteNoteTool,
                 ScheduleEventTool, GetAgendaTool, CancelEventTool, SetReminderTool,
-                UpdateProfileTool, MemoryAddTool, GetDocumentListTool,
+                UpdateProfileTool, MemoryAddTool, ConversationHistoryAnalyzerTool, GetDocumentListTool,
                 GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
                 ImageGenerationTool, GetProactiveInsightsTool,
                 ProactiveKnowledgeLinkerTool, KnowledgeAnalysisTool, ComprehensiveWebAnalysisTool,
-                GetAnalysisResultsTool, MindmapGeneratorTool
+                GetAnalysisResultsTool, MindmapGeneratorTool, ImageBackgroundEraserTool
             ]:
                 kwargs = {"account_id": account_id}
                 if ToolClass in [SetReminderTool, ImageGenerationTool, GetDocumentContentTool]:
@@ -127,14 +132,16 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
                     logger.debug(f"  [DEBUG] Intentando instanciar KnowledgeAnalysisTool con kwargs: {kwargs}")
                 elif ToolClass.__name__ == "ProactiveKnowledgeLinkerTool":
                     logger.debug(f"  [DEBUG] Intentando instanciar ProactiveKnowledgeLinkerTool con kwargs: {kwargs}")
+                elif ToolClass.__name__ == "ImageBackgroundEraserTool":
+                    logger.debug(f"  [DEBUG] Intentando instanciar ImageBackgroundEraserTool con kwargs: {kwargs}")
             # Para herramientas generales que no requieren argumentos específicos de usuario en su constructor
             else:
                 tool_instance = ToolClass()
             
             if tool_instance: # Asegúrate de que la instancia se creó
                 try:
-                    # Check if the tool supports synchronous execution or is explicitly allowed
-                    if hasattr(tool_instance, '_run') and callable(getattr(tool_instance, '_run')) or ToolClass.__name__ == "MindmapGeneratorTool":
+                    # Verificar si la herramienta tiene los atributos requeridos
+                    if hasattr(tool_instance, 'name') and hasattr(tool_instance, '_run') and callable(getattr(tool_instance, '_run')) or ToolClass.__name__ in ["MindmapGeneratorTool", "ImageBackgroundEraserTool"]:
                         available_tools.append(tool_instance)
                         logger.debug(f"  [+] Herramienta de clase cargada: {tool_instance.name}")
                         if ToolClass.__name__ == "MindmapGeneratorTool":
@@ -143,16 +150,20 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
                             logger.debug(f"  [DEBUG] KnowledgeAnalysisTool añadida a la lista de herramientas disponibles")
                         elif ToolClass.__name__ == "ProactiveKnowledgeLinkerTool":
                             logger.debug(f"  [DEBUG] ProactiveKnowledgeLinkerTool añadida a la lista de herramientas disponibles")
+                        elif ToolClass.__name__ == "ImageBackgroundEraserTool":
+                            logger.debug(f"  [DEBUG] ImageBackgroundEraserTool añadida a la lista de herramientas disponibles")
                     else:
-                        logger.error(f"  [ERROR] Herramienta {tool_instance.name} no soporta ejecución síncrona y no será añadida")
+                        logger.error(f"  [ERROR] Herramienta {getattr(tool_instance, 'name', 'NombreDesconocido')} no tiene los atributos requeridos o no soporta ejecución síncrona y no será añadida")
                         if ToolClass.__name__ == "KnowledgeAnalysisTool":
-                            logger.error(f"  [ERROR] KnowledgeAnalysisTool no soporta ejecución síncrona")
+                            logger.error(f"  [ERROR] KnowledgeAnalysisTool no tiene los atributos requeridos o no soporta ejecución síncrona")
                         elif ToolClass.__name__ == "MindmapGeneratorTool":
-                            logger.error(f"  [ERROR] MindmapGeneratorTool no soporta ejecución síncrona")
+                            logger.error(f"  [ERROR] MindmapGeneratorTool no tiene los atributos requeridos o no soporta ejecución síncrona")
                         elif ToolClass.__name__ == "ProactiveKnowledgeLinkerTool":
-                            logger.error(f"  [ERROR] ProactiveKnowledgeLinkerTool no soporta ejecución síncrona")
+                            logger.error(f"  [ERROR] ProactiveKnowledgeLinkerTool no tiene los atributos requeridos o no soporta ejecución síncrona")
+                        elif ToolClass.__name__ == "ImageBackgroundEraserTool":
+                            logger.error(f"  [ERROR] ImageBackgroundEraserTool no tiene los atributos requeridos o no soporta ejecución síncrona")
                 except Exception as e:
-                    logger.error(f"  [ERROR] Error al verificar soporte síncrono para {tool_instance.name}: {e}")
+                    logger.error(f"  [ERROR] Error al verificar soporte síncrono para {getattr(tool_instance, 'name', 'NombreDesconocido')}: {e}")
             else:
                 logger.debug(f"  [DEBUG] No se creó instancia para {ToolClass.__name__}")
 

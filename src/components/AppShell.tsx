@@ -30,13 +30,13 @@ export function AppShell({ children }: AppShellProps) {
     return (
       <div className="h-screen max-h-screen overflow-hidden flex bg-background">
         <div
-          className={`bg-card transition-all duration-300 ease-in-out ${isSidebarCollapsed ? 'w-20' : 'w-80'}`}
+          className={`bg-card transition-all duration-300 ease-in-out rounded-tr-lg ${isSidebarCollapsed ? 'w-20' : 'w-80'}`}
         >
           <Sidebar isCollapsed={isSidebarCollapsed} />
         </div>
 
         <div className="flex-grow flex flex-col">
-          <header className="flex h-14 items-center gap-4 border-b bg-card px-4 shrink-0">
+          <header className="flex h-14 items-center gap-4 bg-card px-4 shrink-0 rounded-none">
             <Button variant="ghost" size="icon" onClick={toggleSidebar}>
               {isSidebarCollapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
             </Button>
@@ -55,7 +55,7 @@ export function AppShell({ children }: AppShellProps) {
   // Layout para Móvil
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      <header className="flex h-14 items-center gap-4 border-b bg-card px-4 sticky top-0 z-10">
+      <header className="flex h-14 items-center gap-4 bg-card px-4 sticky top-0 z-10 rounded-none">
         <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
           <SheetTrigger asChild>
             <Button variant="outline" size="icon">
@@ -66,8 +66,9 @@ export function AppShell({ children }: AppShellProps) {
             <Sidebar isCollapsed={false} onLinkClick={() => setIsMobileMenuOpen(false)} />
           </SheetContent>
         </Sheet>
-        <div className="w-full flex-1">
-          <Image src="/logo-simple.png" alt="Kognito Logo" width={30} height={30} />
+        <div className="w-full flex-1 flex items-center"> {/* Añadido flex y items-center para centrado vertical */}
+          <Image src="/logo-simple.png" alt="Kognito Logo" width={50} height={50} className="mr-2" /> {/* Aumentado tamaño y añadido margen derecho */}
+          {/* El texto que sigue al logo se beneficiaría de estar aquí o en un span para control de espaciado */}
         </div>
         <div className="ml-auto">
           <ThemeToggle />

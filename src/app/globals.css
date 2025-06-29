@@ -10,7 +10,7 @@
     --background: 0 0% 100%; /* Fondo principal blanco */
     --foreground: 222.2 84% 4.9%; /* Texto principal casi negro */
 
-    --card: 0 0% 100%; /* Las tarjetas son del mismo color que el fondo */
+    --card: 210 40% 96.1%; /* Gris claro para sidebar y barra superior en tema claro */
     --card-foreground: 222.2 84% 4.9%;
 
     --popover: 0 0% 100%;
@@ -38,13 +38,14 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
 
-    --radius: 0.75rem; /* Mantenemos los bordes redondeados */
+    --radius: 0.5rem; /* Valor de radio de borde predeterminado */
+    --user-bubble: 210 40% 96.1%; /* Gris claro para la burbuja del usuario en modo claro */
   }
 
   .dark {
     /* --- MODO OSCURO - Paleta de Grises Sofisticada (Estilo ChatGPT) --- */
     --background: 220 5% 12%; /* Fondo principal casi negro (#1d1e20) */
-    --foreground: 210 40% 98%;     /* Texto principal casi blanco */
+    --foreground: 210 20% 70%;     /* Texto principal gris muy claro (antes casi blanco) */
 
     /* Las tarjetas tienen un color ligeramente diferente para destacar */
     --card: 220 5% 7%; /* Color para sidebar y recadros (#111213) */
@@ -71,11 +72,12 @@
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 220 5% 12%; /* Bordes del mismo color que el fondo para eliminar visibilidad (#1d1e20) */
+    --border: 220 5% 7%; /* Bordes del mismo color que el fondo para eliminar visibilidad (#1d1e20) */
     --input: 217.2 32.6% 17.5%;
     --ring: 204 88% 57%;
 
-    --radius: 0.75rem;
+    --radius: 0.5rem;
+    --user-bubble: 220 5% 15%; /* Gris muy oscuro para la burbuja del usuario en modo oscuro */
   }
 }
 
@@ -87,4 +89,22 @@
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+}
+
+/* Aggressive override for strong, code, and headings in dark mode */
+.dark strong,
+.dark code {
+  color: hsl(var(--card-foreground)) !important;
+  background-color: transparent !important;
+}
+
+.dark .prose h1,
+.dark .prose h2,
+.dark .prose h3,
+.dark .prose h4 {
+  color: hsl(var(--card-foreground)) !important;
+}
+
+.dark .prose a {
+  color: #7dd3fc !important;
 }

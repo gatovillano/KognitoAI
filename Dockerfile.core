@@ -5,6 +5,7 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
+ENV PYTHONPATH /app
 
 # ¡IMPORTANTE! Instala TODAS las dependencias del sistema necesarias.
 RUN apt-get update && apt-get install -y --no-install-recommends \
