@@ -52,6 +52,9 @@ async def _send_event_reminder_callback(context: CallbackContext):
 
     logger.info(f"Enviando recordatorio de evento {event_id} al usuario de Telegram {telegram_id}")
     try:
+        if bot_manager.bot is None:
+            logger.error("El bot no está inicializado en bot_manager. No se puede enviar el recordatorio.")
+            return
         await bot_manager.bot.send_message(
             chat_id=telegram_id,
             text=f"🔔⏰ ¡Recordatorio de Evento! ⏰🔔\n\n<b>{description}</b>",
@@ -123,8 +126,11 @@ async def reschedule_pending_reminders(application):
         count = 0
         for event, telegram_id_str in pending_events:
             if not event.job_name:
-                logger.warning(f"El evento {event.id} no tiene job_name, no se puede re-programar de forma segura.")
-                continue
+                # Asignar un nuevo job_name si no existe
+                event.job_name = f"event_reminder_{event.id}_{uuid.uuid4()}"
+                db.add(event)
+                await db.commit()
+                logger.info(f"Se asignó un nuevo job_name al evento {event.id} para reprogramación.")
 
             try:
                 telegram_id = int(telegram_id_str)

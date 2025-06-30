@@ -120,8 +120,8 @@ export default function ChatLandingPage() {
       console.error('Error creating new chat thread or sending message:', error);
       let errorMessage = 'Error al iniciar el chat. Inténtalo de nuevo.';
       if (error.response && error.response.status === 422) {
-        errorMessage = 'Error de validación: Asegúrate de que los datos sean correctos. Revisa la consola para más detalles.';
-        console.error('Validation errors:', error.response.data.detail);
+        errorMessage = 'Error de validación al crear el hilo de chat. Por favor, intenta de nuevo o contacta al soporte.';
+        console.error('Validation errors:', error.response?.data?.detail || 'No details available');
       }
       toast.error(errorMessage);
     } finally {
@@ -159,26 +159,22 @@ export default function ChatLandingPage() {
     setIsUploadingFile(true);
     try {
       toast.info('Iniciando subida de archivo(s)...');
-      const response = await apiClient.post('/api/threads');
-      const newThread = response.data;
-      console.log('Nuevo hilo creado:', newThread);
-      if (!newThread.id) {
-        throw new Error('ID del hilo no encontrado en la respuesta de la API');
-      }
-      toast.info('Hilo de chat creado, preparando archivos...');
       const formData = new FormData();
-      formData.append('thread_id', newThread.id);
       for (let i = 0; i < e.target.files.length; i++) {
         formData.append('files', e.target.files[i]);
       }
       console.log('Datos del formulario a enviar:', formData);
       toast.info('Enviando archivo(s) al servidor...');
-      const uploadResponse = await apiClient.post('/api/upload-chat-file', formData, {
+      const response = await apiClient.post('/api/threads', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
       });
-      console.log('Respuesta de subida de archivo:', uploadResponse);
+      const newThread = response.data;
+      console.log('Nuevo hilo creado con subida de archivos:', newThread);
+      if (!newThread.id) {
+        throw new Error('ID del hilo no encontrado en la respuesta de la API');
+      }
       toast.success('Archivo(s) subido(s) con éxito al contexto del chat.');
       router.push(`/chat/${newThread.id}`);
     } catch (error: unknown) {

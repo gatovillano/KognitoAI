@@ -7,7 +7,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban } from 'lucide-react';
+import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { DataTable } from '../data-table';
@@ -129,6 +129,26 @@ export default function CollectionDetailPage() {
     return () => clearInterval(poller);
   }, [collectionPollingId, fetchPageData]);
 
+  // --- Handler para Extraer Títulos de la Colección ---
+  const handleExtractTitles = async () => {
+    if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
+    try {
+      const response = await apiClient.post('/api/extract-title', { topic });
+      toast.info(`Extracción de títulos para la colección "${topic}" iniciada.`);
+      fetchPageData();
+    } catch (error) { toast.error("No se pudo iniciar la extracción de títulos."); }
+  };
+
+  // --- Handler para Extraer Título de un Documento Individual ---
+  const handleExtractTitleForDocument = async (doc: Document) => {
+    if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
+    try {
+      const response = await apiClient.post('/api/extract-title', { file_name: doc.file_name });
+      toast.info(`Extracción de título para "${doc.file_name}" iniciada.`);
+      fetchPageData();
+    } catch (error) { toast.error(`No se pudo iniciar la extracción de título para "${doc.file_name}".`); }
+  };
+
   const columns = useMemo(() => getColumns(
       (doc) => setDocumentToPreview(doc),
       (doc) => setDocumentToEdit(doc),
@@ -137,8 +157,9 @@ export default function CollectionDetailPage() {
       (doc) => {
         setDocumentToShare(doc);
         setIsShareOpen(true);
-      }
-  ), [handleAnalyzeDocument]);
+      },
+      handleExtractTitleForDocument
+  ), [handleAnalyzeDocument, handleExtractTitleForDocument]);
   
   return (
     <div className="h-full flex flex-col p-6">
@@ -158,6 +179,10 @@ export default function CollectionDetailPage() {
             <Button onClick={() => setIsUploadOpen(true)}>
                 <Upload className="mr-2 h-4 w-4" />
                 Subir a esta Colección
+            </Button>
+            <Button onClick={handleExtractTitles} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
+                <Text className="mr-2 h-4 w-4" />
+                Extraer Títulos
             </Button>
         </div>
       </div>

@@ -1,0 +1,311 @@
+# api/workspaces.py
+
+import logging
+import uuid
+from datetime import datetime, timezone
+from typing import List, Optional
+
+from fastapi import File, UploadFile
+
+from fastapi import APIRouter, HTTPException, Depends, status, Form, Query
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from sqlalchemy import select, desc, update, or_
+
+from core.database import SessionLocal, Account, Workspace, ChatThread
+from utils.security import get_current_account_id
+from sqlalchemy.ext.asyncio import AsyncSession
+from core.agent import create_thread_for_account, force_update_thread_title
+from langchain_community.chat_message_histories import PostgresChatMessageHistory
+from langchain_core.messages import HumanMessage, AIMessage
+from core.config import settings
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+async def get_db() -> AsyncSession:
+    """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
+    async with SessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
+
+# --- Modelos Pydantic para Workspaces ---
+class WorkspaceResponse(BaseModel):
+    id: str
+    name: str
+    system_prompt: Optional[str]
+    created_at: datetime
+
+class WorkspaceCreateRequest(BaseModel):
+    name: str
+    system_prompt: Optional[str] = None
+
+class WorkspaceUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    system_prompt: Optional[str] = None
+
+# --- Endpoints para Workspaces ---
+@router.get("/workspaces", response_model=List[WorkspaceResponse], summary="Listar workspaces del usuario")
+async def list_workspaces(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    stmt = select(Workspace).where(Workspace.account_id == uuid.UUID(current_account_id)).order_by(Workspace.created_at.desc())
+    result = await db.execute(stmt)
+    workspaces = result.scalars().all()
+    return [WorkspaceResponse(id=str(w.id), name=w.name, system_prompt=w.system_prompt, created_at=w.created_at) for w in workspaces]
+
+@router.get("/workspaces/{workspace_id}", response_model=WorkspaceResponse, summary="Obtener detalles de un workspace")
+async def get_workspace(workspace_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado o no pertenece al usuario.")
+    return WorkspaceResponse(id=str(workspace.id), name=workspace.name, system_prompt=workspace.system_prompt, created_at=workspace.created_at)
+
+@router.post("/workspaces", response_model=WorkspaceResponse, status_code=status.HTTP_201_CREATED, summary="Crear un nuevo workspace")
+async def create_workspace(request: WorkspaceCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    new_workspace = Workspace(
+        account_id=uuid.UUID(current_account_id),
+        name=request.name,
+        system_prompt=request.system_prompt
+    )
+    db.add(new_workspace)
+    await db.commit()
+    await db.refresh(new_workspace)
+    return WorkspaceResponse(id=str(new_workspace.id), name=new_workspace.name, system_prompt=new_workspace.system_prompt, created_at=new_workspace.created_at)
+
+@router.put("/workspaces/{workspace_id}", response_model=WorkspaceResponse, summary="Actualizar un workspace")
+async def update_workspace(workspace_id: str, request: WorkspaceUpdateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado.")
+    
+    if request.name is not None:
+        workspace.name = request.name
+    if request.system_prompt is not None:
+        workspace.system_prompt = request.system_prompt
+        
+    await db.commit()
+    await db.refresh(workspace)
+    return WorkspaceResponse(id=str(workspace.id), name=workspace.name, system_prompt=workspace.system_prompt, created_at=workspace.created_at)
+
+@router.delete("/workspaces/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Eliminar un workspace")
+async def delete_workspace(workspace_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado.")
+    
+    await db.delete(workspace)
+    await db.commit()
+    return
+
+# --- Modelos Pydantic para Hilos de Chat ---
+class ThreadResponse(BaseModel):
+    """Define la estructura de datos para la respuesta de un hilo de chat."""
+    id: str
+    title: str
+    created_at: datetime
+    workspace_id: Optional[str] = None
+
+class MessageResponse(BaseModel):
+    """Define la estructura de datos para un mensaje individual en el chat."""
+    text: str  # antes 'content'
+    sender: str  # antes 'type', valores: 'human' o 'ai'
+    created_at: datetime
+
+@router.get("/threads", response_model=List[ThreadResponse], summary="Listar hilos de chat del usuario")
+async def list_chat_threads(
+    current_account_id: str = Depends(get_current_account_id), 
+    db: AsyncSession = Depends(get_db),
+    workspace_id: Optional[str] = Query(None)
+):
+    """
+    Lista los hilos de chat de un usuario.
+    - Si se proporciona workspace_id, filtra por ese workspace.
+    - Si no se proporciona workspace_id, muestra solo los hilos sin workspace.
+    """
+    account_uuid = uuid.UUID(current_account_id)
+    logger.info(f"Listando hilos para cuenta: {account_uuid}, workspace: {workspace_id}")
+    
+    stmt = select(ChatThread).where(ChatThread.account_id == account_uuid)
+    
+    if workspace_id:
+        try:
+            workspace_uuid = uuid.UUID(workspace_id)
+            stmt = stmt.where(ChatThread.workspace_id == workspace_uuid)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="workspace_id inválido.")
+    else:
+        stmt = stmt.where(ChatThread.workspace_id.is_(None))
+        
+    stmt = stmt.order_by(ChatThread.created_at.desc())
+    result = await db.execute(stmt)
+    threads = result.scalars().all()
+    
+    return [ThreadResponse(id=str(t.id), title=t.title, created_at=t.created_at, workspace_id=str(t.workspace_id) if t.workspace_id else None) for t in threads]
+
+class ThreadCreateRequest(BaseModel):
+    workspace_id: Optional[str] = None
+
+@router.post("/threads", response_model=ThreadResponse, status_code=status.HTTP_201_CREATED, summary="Crear un nuevo hilo de chat")
+async def create_new_thread(
+    workspace_id: Optional[str] = Form(None),
+    files: List[UploadFile] = File(default=[]),
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Crea un nuevo hilo de chat para el usuario autenticado, con la opción de subir archivos.
+    """
+    logger.info(f"Creando nuevo hilo de chat para la cuenta: {current_account_id}")
+    try:
+        account_uuid = uuid.UUID(current_account_id)
+    except ValueError:
+        logger.error(f"Invalid UUID for account_id: {current_account_id}")
+        raise HTTPException(status_code=422, detail="Invalid account ID format.")
+
+    new_thread = ChatThread(
+        account_id=account_uuid,
+        workspace_id=uuid.UUID(workspace_id) if workspace_id else None
+    )
+    db.add(new_thread)
+    await db.commit()
+    await db.refresh(new_thread)
+
+    if files:
+        processed_files = 0
+        for file in files:
+            try:
+                content_bytes = await file.read()
+                # Aquí puedes procesar el archivo según sea necesario para el contexto del chat
+                logger.info(f"Archivo {file.filename} subido al hilo {new_thread.id} por la cuenta {account_uuid}")
+                processed_files += 1
+            except Exception as e:
+                logger.error(f"Fallo al procesar el archivo {file.filename} para el hilo {new_thread.id} de la cuenta {account_uuid}: {e}", exc_info=True)
+
+        if processed_files == 0 and files:
+            raise HTTPException(status_code=500, detail="No se pudo procesar ninguno de los archivos.")
+
+    return ThreadResponse(id=str(new_thread.id), title=new_thread.title, created_at=new_thread.created_at, workspace_id=str(new_thread.workspace_id) if new_thread.workspace_id else None)
+
+@router.get("/threads/{thread_id}/messages", response_model=List[MessageResponse], summary="Obtener mensajes de un hilo de chat")
+async def get_thread_messages(
+    thread_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Obtiene el historial de mensajes para un hilo de chat específico.
+    """
+    logger.info(f"Obteniendo mensajes para el hilo: {thread_id} de la cuenta: {current_account_id}")
+
+    # Verificar que el hilo pertenzca a la cuenta actual
+    thread_exists = await db.scalar(
+        select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id))
+    )
+    if not thread_exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Hilo de chat no encontrado o no pertenece al usuario.")
+
+    # Asegurarse de que database_url no es None antes de usar .replace()
+    if settings.database_url is None:
+        raise HTTPException(status_code=500, detail="Configuración de base de datos faltante.")
+
+    db_sync_url = settings.database_url.replace("+psycopg", "")
+    history = PostgresChatMessageHistory(
+        connection_string=db_sync_url,
+        session_id=thread_id,  # El session_id para LangChain es el thread_id
+        table_name="langchain_chat_history",
+    )
+
+    try:
+        # ¡CORRECCIÓN CLAVE! Usar aget_messages() y esperar directamente
+        messages = await history.aget_messages()
+        # Filtrar mensajes de resumen si los hay y mapear a MessageResponse
+        response_messages = []
+        for msg in messages:
+            if hasattr(msg, 'additional_kwargs') and msg.additional_kwargs.get("role") == "summary":
+                continue  # Ignorar mensajes de resumen internos
+
+            msg_content = msg.content if hasattr(msg, 'content') else str(msg)
+            # Determinar el sender de forma robusta
+            if isinstance(msg, HumanMessage):
+                sender = "user"
+            elif isinstance(msg, AIMessage):
+                sender = "ai"
+            else:
+                sender = "ai"  # fallback seguro
+            msg_created_at = datetime.now(timezone.utc)  # Placeholder si no hay un 'created_at' en BaseMessage
+
+            response_messages.append(MessageResponse(
+                text=msg_content,
+                sender=sender,
+                created_at=msg_created_at
+            ))
+        logger.info(f"Mensajes recuperados para el hilo {thread_id}.")
+        return response_messages
+    except Exception as e:
+        logger.error(f"Error al obtener historial de chat para el hilo {thread_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error al obtener mensajes del hilo: {e}")
+
+@router.delete("/threads/{thread_id}", status_code=204, summary="Eliminar un hilo de chat")
+async def delete_chat_thread(
+    thread_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Elimina un hilo de chat si pertenece al usuario autenticado.
+    """
+    thread = await db.scalar(
+        select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id))
+    )
+    if not thread:
+        raise HTTPException(status_code=404, detail="Hilo de chat no encontrado o no pertenece al usuario.")
+    await db.delete(thread)
+    await db.commit()
+    return JSONResponse(status_code=204, content=None)
+
+@router.get("/threads/{thread_id}", response_model=ThreadResponse, summary="Obtener un hilo de chat por ID")
+async def get_thread_by_id(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
+    if not thread:
+        raise HTTPException(status_code=404, detail="Hilo de chat no encontrado o no pertenece al usuario.")
+    return ThreadResponse(id=str(thread.id), title=thread.title, created_at=thread.created_at)
+
+class ThreadPinRequest(BaseModel):
+    isPinned: bool
+
+@router.put("/threads/{thread_id}/pin", response_model=ThreadResponse, summary="Actualizar estado de fijado de un hilo de chat")
+async def update_thread_pin_status(thread_id: str, request: ThreadPinRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Actualiza el estado de fijado de un hilo de chat para el usuario autenticado.
+    """
+    thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
+    if not thread:
+        raise HTTPException(status_code=404, detail="Hilo de chat no encontrado o no pertenece al usuario.")
+    thread.is_pinned = request.isPinned
+    await db.commit()
+    await db.refresh(thread)
+    return ThreadResponse(id=str(thread.id), title=thread.title, created_at=thread.created_at)
+
+@router.post("/threads/{thread_id}/generate-title", response_model=ThreadResponse, summary="Forzar la generación de un nuevo título para un hilo de chat")
+async def force_generate_thread_title(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Fuerza la generación de un nuevo título para un hilo de chat específico.
+    """
+    await force_update_thread_title(thread_id)
+    thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
+    if not thread:
+        raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
+    return ThreadResponse(id=str(thread.id), title=thread.title, created_at=thread.created_at)
+
+@router.post("/internal/bot-create-thread")
+async def bot_create_thread(account_id: str = Form(...), title: str = Form("Nuevo Chat")):
+    """Permite al bot de Telegram crear un hilo de chat para una cuenta dada."""
+    try:
+        thread_id = await create_thread_for_account(account_id, title)
+        return {"thread_id": thread_id}
+    except Exception as e:
+        logger.error(f"Error creando hilo para la cuenta {account_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

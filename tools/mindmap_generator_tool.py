@@ -46,7 +46,7 @@ class MindmapGeneratorTool(BaseTool):
         super().__init__(**kwargs)
         self.account_id = account_id
 
-    async def _arun(self, document_content: str, account_id: str, concept_query: str = "temas clave", topic_hint: str = "") -> str:
+    async def _arun(self, document_content: str, account_id: str = "", concept_query: str = "temas clave", topic_hint: str = "") -> str:
         """
         Ejecuta la herramienta de generación de mapas mentales de forma asíncrona.
         """
@@ -74,8 +74,8 @@ class MindmapGeneratorTool(BaseTool):
             # 4. Guardar el resultado en la base de datos
             task_id = str(uuid.uuid4())
             async with SessionLocal() as db_session:
-                # Si no hay account_id, usamos None y dejamos que la base de datos maneje el valor por defecto si está configurado
-                account_id_value = uuid.UUID(self.account_id) if self.account_id else None
+                # Usamos el account_id pasado como parámetro, si está disponible, de lo contrario usamos el de la instancia
+                account_id_value = uuid.UUID(account_id) if account_id else (uuid.UUID(self.account_id) if self.account_id else None)
                 new_task = MindmapTask(
                     id=uuid.UUID(task_id),
                     account_id=account_id_value,
@@ -88,15 +88,16 @@ class MindmapGeneratorTool(BaseTool):
                     await db_session.commit()
                 except Exception as db_error:
                     logger.error(f"Error al guardar en la base de datos: {db_error}")
-                    # Si falla el guardado debido a restricciones NOT NULL, intentamos sin account_id
-                    if "not-null constraint" in str(db_error).lower() and account_id_value is None:
+                    # Si falla el guardado debido a restricciones NOT NULL, verificamos si podemos continuar sin account_id
+                    if "not-null constraint" in str(db_error).lower():
                         logger.warning("Reintentando sin account_id debido a restricción NOT NULL.")
                         new_task.account_id = None
                         db_session.add(new_task)
                         await db_session.commit()
 
             # 5. Devolver un mensaje con el ID de tarea para referencia
-            return f"Mapa mental generado con éxito. ID de tarea: {task_id}"
+            # El frontend recuperará la imagen a través del endpoint /api/get-mindmap-result/{task_id}
+            return f"Mapa mental generado con éxito. ID de tarea: {task_id}. La imagen estará disponible pronto en el chat."
 
         except Exception as e:
             logger.exception(f"Error al generar el mapa mental: {e}")

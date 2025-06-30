@@ -41,6 +41,7 @@ from core.database import (
     Perfil,
     SessionLocal,
     Account,
+    Memory,
     engine,
 )  # Importar el engine aquí
 from utils.db_session import DBSession
@@ -589,7 +590,7 @@ async def list_user_documents(account_id: str, team_id: Optional[str] = None) ->
     """
     logger.info(f"Listando documentos para la cuenta {account_id}")
     try:
-        collection_name = f"user_memories_{account_id}" if not team_id else f"team_memories_{team_id}"
+        collection_name = f"user_memories_{account_id}"
         async with DBSession(SessionLocal) as db:
             # Primero, verificar si la colección existe para evitar errores en la consulta pg_embedding
             collection_uuid_query = text(
@@ -790,3 +791,80 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None) 
         except Exception as e:
             logger.error(f"❌ Error listando colecciones para la cuenta {account_id}: {e}", exc_info=True)
             return []
+async def extract_titles_and_update_metadata(account_id: str, topic: Optional[str] = None) -> int:
+    """
+    Extrae títulos de los documentos y actualiza sus metadatos en la base de conocimiento del usuario.
+    
+    Args:
+        account_id: El ID universal de la cuenta del usuario.
+        topic: Tema de los documentos a procesar (opcional).
+    
+    Returns:
+        Número de documentos actualizados.
+    """
+    try:
+        collection_name = f"user_memories_{account_id}"
+        async with DBSession(SessionLocal) as db:
+            # Obtener el UUID de la colección para el usuario
+            col_q = text("SELECT uuid FROM langchain_pg_collection WHERE name = :cname")
+            res = await db.execute(col_q, {"cname": collection_name})
+            collection_uuid = res.scalar_one_or_none()
+            if not collection_uuid:
+                logger.info(f"No existe la colección '{collection_name}', no hay documentos para procesar.")
+                return 0
+
+            # Construir la consulta para obtener los documentos
+            clauses = ["collection_id = :col_id", "cmetadata->>'type' = 'document_chunk'"]
+            params = {"col_id": collection_uuid}
+            if topic:
+                clauses.append("cmetadata->>'topic' = :tpc")
+                params["tpc"] = topic
+
+            select_sql = text("SELECT * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses))
+            logger.info(f"Ejecutando consulta SQL: {select_sql} con parámetros: {params}")
+            result = await db.execute(select_sql, params)
+            chunks = result.mappings().all()
+            logger.info(f"Se encontraron {len(chunks)} fragmentos de documentos para procesar.")
+
+            if not chunks:
+                logger.info("No se encontraron fragmentos de documentos para procesar.")
+                return 0
+
+            documents = {}
+            for chunk in chunks:
+                file_name = chunk['cmetadata'].get('file_name')
+                if file_name:
+                    if file_name not in documents:
+                        documents[file_name] = []
+                    documents[file_name].append(chunk)
+                else:
+                    logger.warning(f"Fragmento sin 'file_name' en cmetadata: {chunk['cmetadata']}")
+
+            updated_count = 0
+            for file_name, doc_chunks in documents.items():
+                logger.info(f"Procesando documento: {file_name} con {len(doc_chunks)} fragmentos.")
+                # Heurística simple para extraer el título: usar la primera línea del primer chunk
+                first_chunk = doc_chunks[0]
+                content = first_chunk['document']
+                first_line = content.split('\n')[0].strip() if content else ""
+                if first_line and len(first_line) > 5 and len(first_line) < 100:  # Verificación básica de un título plausible
+                    logger.info(f"Título extraído para {file_name}: {first_line}")
+                    # Usar la función update_document_metadata para actualizar el título
+                    success = await update_document_metadata(account_id, file_name, new_title=first_line, new_topic=None)
+                    if success:
+                        updated_count += 1
+                        logger.info(f"Actualizado título para el documento {file_name}.")
+                    else:
+                        logger.warning(f"No se pudo actualizar el título para el documento {file_name}.")
+                else:
+                    logger.info(f"No se encontró un título válido para {file_name}. Primera línea: {first_line}")
+
+            if updated_count > 0:
+                logger.info(f"Se actualizaron los títulos de {updated_count} documentos para la cuenta {account_id}.")
+            else:
+                logger.info(f"No se encontraron títulos para actualizar en los documentos de la cuenta {account_id}.")
+                
+            return updated_count
+    except Exception as e:
+        logger.error(f"Error al extraer y actualizar títulos para la cuenta {account_id}: {e}", exc_info=True)
+        return 0

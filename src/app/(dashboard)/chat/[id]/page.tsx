@@ -16,6 +16,7 @@ import { BackgroundTaskIndicator } from '@/components/BackgroundTaskIndicator';
 interface Message {
   text: string;
   sender: 'user' | 'ai';
+  image?: string; // Base64 image data
 }
 
 interface ThreadDetails {
@@ -60,16 +61,19 @@ export default function ChatPage() {
 
   const handlePlayAudio = useCallback(
     async (text: string, index: number) => {
+      // Si hay un audio en reproducción, pausarlo y limpiar
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current = null;
-        setPlayingMessageIndex(null);
       }
 
+      // Si el mensaje ya está seleccionado para reproducción, detenerlo y no iniciar una nueva reproducción
       if (playingMessageIndex === index) {
+        setPlayingMessageIndex(null);
         return;
       }
 
+      // Iniciar reproducción de un nuevo mensaje
       setIsAudioLoading(true);
       setPlayingMessageIndex(index);
 
@@ -98,7 +102,7 @@ export default function ChatPage() {
         setPlayingMessageIndex(null);
       }
     },
-    []
+    [playingMessageIndex]
   );
 
   const uploadPastedImage = useCallback(
@@ -200,7 +204,7 @@ export default function ChatPage() {
         setMessages((prev) => [...prev, aiMessage]);
 
         const responseText = response.data.response_text;
-        if (responseText.includes('Tarea de generación de mapa mental iniciada. ID de tarea:')) {
+        if (responseText.includes('Mapa mental generado con éxito. ID de tarea:')) {
           const taskIdMatch = responseText.match(/ID de tarea: ([a-f0-9-]+)\./);
           if (taskIdMatch && taskIdMatch[1]) {
             setBackgroundTasks((prev) => [...prev, { taskId: taskIdMatch[1], type: 'mindmap' }]);
@@ -244,38 +248,30 @@ export default function ChatPage() {
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (!e.target.files || e.target.files.length === 0 || isUploadingFile) return;
       setIsUploadingFile(true);
-      const file = e.target.files[0]; // Solo procesamos un archivo a la vez para la eliminación de fondo
-      if (!file) return;
+      const files = e.target.files;
 
       const formData = new FormData();
-      formData.append('file', file); // El endpoint espera 'file'
+      formData.append('thread_id', threadId);
+      for (let i = 0; i < files.length; i++) {
+        formData.append('files', files[i]);
+      }
 
-        try {
-          const response = await apiClient.post('/api/process-image-background', formData, {
-            headers: {
-              'Content-Type': 'multipart/form-data',
-            },
-            responseType: 'blob', // Esperamos un blob como respuesta (la imagen)
-          });
-
-          // Crear una URL para la imagen blob
-          const imageUrl = URL.createObjectURL(response.data);
-          
-          // Añadir un mensaje al chat con la imagen procesada
-          const processedImageMessage: Message = { 
-            text: `¡Fondo eliminado! Aquí tienes tu imagen: ![Imagen sin fondo](${imageUrl})`, 
-            sender: 'ai' 
-          };
-          setMessages((prev) => [...prev, processedImageMessage]);
-          toast.success('Fondo de la imagen eliminado con éxito.');
-
-        } catch (error) {
-          console.error('Error al eliminar el fondo de la imagen:', error);
-          toast.error('Error al eliminar el fondo de la imagen. Inténtalo de nuevo.');
-        } finally {
-          setIsUploadingFile(false);
-          e.target.value = ''; // Limpiar el input de archivo
-        }
+      try {
+        const response = await apiClient.post('/api/upload-chat-file', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        });
+        toast.success('Archivo(s) subido(s) con éxito al contexto del chat.');
+        const uploadMessage: Message = { text: response.data.message, sender: 'user' };
+        setMessages((prev) => [...prev, uploadMessage]);
+      } catch (error) {
+        console.error('Error uploading file(s):', error);
+        toast.error('Error al subir archivo(s). Inténtalo de nuevo.');
+      } finally {
+        setIsUploadingFile(false);
+        e.target.value = ''; // Limpiar el input de archivo
+      }
     },
     [threadId, isUploadingFile]
   );
@@ -414,13 +410,26 @@ export default function ChatPage() {
       for (const task of backgroundTasks) {
         try {
           const response = await apiClient.get(`/api/get-mindmap-result/${task.taskId}`);
-          if (response.data.status === 'completed') {
-            const result = response.data.result.mindmap;
-            const completionMessage: Message = { text: `Mapa mental completado:\n\n${result}`, sender: 'ai' };
-            setMessages((prev) => [...prev, completionMessage]);
-            setBackgroundTasks((prev) => prev.filter((t) => t.taskId !== task.taskId));
-            toast.success('Mapa mental completado', { description: 'La generación del mapa mental ha finalizado.' });
-          } else if (response.data.status === 'failed') {
+            if (response.data.status === 'completed') {
+              const result = response.data.result;
+              // Check if there's a base64 image in the result
+              if (result && result.base64_image) {
+                const completionMessage: Message = { 
+                  text: 'Mapa mental completado. Haz clic para ver la imagen.', 
+                  sender: 'ai',
+                  image: result.base64_image 
+                };
+                setMessages((prev) => [...prev, completionMessage]);
+              } else {
+                const completionMessage: Message = { 
+                  text: 'Mapa mental completado, pero no se encontró imagen.', 
+                  sender: 'ai' 
+                };
+                setMessages((prev) => [...prev, completionMessage]);
+              }
+              setBackgroundTasks((prev) => prev.filter((t) => t.taskId !== task.taskId));
+              toast.success('Mapa mental completado', { description: 'La generación del mapa mental ha finalizado.' });
+            } else if (response.data.status === 'failed') {
             const errorMsg = response.data.error || 'Error desconocido al generar el mapa mental.';
             const errorMessage: Message = { text: `Error al generar el mapa mental: ${errorMsg}`, sender: 'ai' };
             setMessages((prev) => [...prev, errorMessage]);

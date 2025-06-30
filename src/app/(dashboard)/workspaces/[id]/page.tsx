@@ -5,13 +5,15 @@ import { useRouter, useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { ArrowLeft, FolderKanban, Plus, MessageSquare, BookMarked } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { ArrowLeft, FolderKanban, Plus, MessageSquare, BookMarked, MoreVertical } from 'lucide-react';
 import apiClient from '@/lib/api';
 
 interface ChatThread {
   id: string;
   title: string;
   workspace_id: string;
+  created_at?: string;
 }
 
 interface Document {
@@ -84,7 +86,7 @@ export default function WorkspaceDashboard() {
   };
 
   const handleChatClick = (chatId: string) => {
-    router.push(`/chat/${chatId}`);
+    router.push(`/workspaces/${workspaceId}/chat/${chatId}`);
   };
 
   if (loading) {
@@ -131,35 +133,48 @@ export default function WorkspaceDashboard() {
       </div>
 
       <div className="mb-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              Chats en este Workspace
-              <Button onClick={handleNewChat}>
-                <Plus className="mr-2 h-4 w-4" />
-                Nuevo Chat
-              </Button>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {filteredChats.length === 0 ? (
-              <p className="text-muted-foreground">No hay chats en este workspace que coincidan con la búsqueda.</p>
-            ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {filteredChats.map((chat) => (
-                  <Card key={chat.id} className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => handleChatClick(chat.id)}>
-                    <CardHeader>
-                      <CardTitle className="flex items-center">
-                        <MessageSquare className="mr-2 h-4 w-4" />
-                        {chat.title}
-                      </CardTitle>
-                    </CardHeader>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-semibold">Chats en este Workspace</h2>
+          <Button onClick={handleNewChat}>
+            <Plus className="mr-2 h-4 w-4" />
+            Nuevo Chat
+          </Button>
+        </div>
+        {filteredChats.length === 0 ? (
+          <p className="text-muted-foreground">No hay chats en este workspace que coincidan con la búsqueda.</p>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {filteredChats.map((chat) => (
+              <Card key={chat.id} className="flex flex-col cursor-pointer hover:border-primary/50 transition-colors">
+                <CardHeader className="flex flex-row items-start justify-between">
+                  <div>
+                    <CardTitle className="flex items-center">
+                      <MessageSquare className="mr-2 h-4 w-4" />
+                      {chat.title}
+                    </CardTitle>
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleChatClick(chat.id); }}>
+                        Abrir Chat
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-xs text-muted-foreground">
+                    Iniciado: {chat.created_at ? new Date(chat.created_at).toLocaleDateString() : 'Fecha no disponible'}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="mb-6">

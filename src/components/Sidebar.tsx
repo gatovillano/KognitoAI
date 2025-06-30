@@ -54,7 +54,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           setActiveWorkspaceId(null);
         }
       } else {
-        const workspaceIdMatch = pathname.match(/\/workspaces\/([a-f0-9-]+)/);
+        const workspaceIdMatch = pathname.match(/\/workspaces\/([a-f0-9-]+)(?:\/chat\/[a-f0-9-]+)?/);
         if (workspaceIdMatch) {
           setActiveWorkspaceId(workspaceIdMatch[1]);
         } else {
