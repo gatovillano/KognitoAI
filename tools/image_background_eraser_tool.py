@@ -24,13 +24,12 @@ class ImageBackgroundEraserTool(BaseTool):
     name: str = "image_background_eraser"
     description: str = (
         "Útil para eliminar el fondo de una imagen. "
-        "Recibe la ruta de un archivo de imagen local y devuelve la ruta de la imagen con el fondo eliminado. "
-        "La imagen de salida se guardará en el mismo directorio que la entrada con '_no_bg' añadido al nombre."
+        "Recibe la ruta de un archivo de imagen local y devuelve los datos de la imagen PNG sin fondo directamente."
     )
     args_schema: Type[BaseModel] = ImageBackgroundEraserInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
 
-    async def _arun(self, image_path: str, **kwargs: Any) -> str:
+    async def _arun(self, image_path: str, **kwargs: Any) -> bytes:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona para eliminar el fondo de una imagen.
         
@@ -39,10 +38,10 @@ class ImageBackgroundEraserTool(BaseTool):
             **kwargs: Argumentos adicionales (no utilizados).
             
         Returns:
-            Un mensaje de texto indicando el resultado de la operación.
+            Los datos de la imagen PNG sin fondo como bytes.
         """
         if not os.path.exists(image_path):
-            return f"Error: El archivo de imagen no existe en la ruta especificada: {image_path}"
+            raise ValueError(f"El archivo de imagen no existe en la ruta especificada: {image_path}")
 
         try:
             logger.info(f"Eliminando el fondo de la imagen: {image_path}")
@@ -50,18 +49,11 @@ class ImageBackgroundEraserTool(BaseTool):
                 input_data = i.read()
 
             output_data = remove(input_data)
-
-            base, ext = os.path.splitext(image_path)
-            output_path = f"{base}_no_bg{ext}"
-
-            with open(output_path, 'wb') as o:
-                o.write(output_data)
-
-            logger.info(f"Fondo de la imagen eliminado. Imagen guardada en: {output_path}")
-            return output_path
+            logger.info(f"Fondo de la imagen eliminado exitosamente.")
+            return output_data
         except Exception as e:
             logger.error(f"Error al eliminar el fondo de la imagen: {e}", exc_info=True)
-            return f"Error al eliminar el fondo de la imagen: {str(e)}"
+            raise Exception(f"Error al eliminar el fondo de la imagen: {str(e)}")
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:
         """La ejecución síncrona no está soportada en nuestra arquitectura asíncrona."""

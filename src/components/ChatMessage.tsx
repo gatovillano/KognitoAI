@@ -8,7 +8,7 @@ import { Copy, Play, Loader2, Square } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 
 interface ChatMessageProps {
-  msg: { text: string; sender: 'user' | 'ai' };
+  msg: { text: string; sender: 'user' | 'ai'; image?: string };
   index: number;
   handleCopyMessage: (text: string) => void;
   handlePlayAudio: (text: string, index: number) => void;
@@ -59,6 +59,16 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
                   <div className="chat-markdown-content">
                     <MarkdownRenderer content={msg.text} />
                   </div>
+                  {msg.image && (
+                    <div className="mt-2">
+                      <img 
+                        src={`data:image/png;base64,${msg.image}`} 
+                        alt="Mapa mental" 
+                        className="max-w-full h-auto rounded-lg cursor-pointer" 
+                        onClick={() => window.open(`data:image/png;base64,${msg.image}`, '_blank')}
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className="mt-2 flex items-center gap-2">
                   <Button variant="ghost" size="sm" onClick={() => handleCopyMessage(msg.text)}>

@@ -4,7 +4,7 @@
 # --- Frameworks Principales ---
 fastapi
 uvicorn[standard]
-python-telegram-bot
+python-telegram-bot[job-queue]
 httpx
 
 # --- Base de Datos y ORM ---

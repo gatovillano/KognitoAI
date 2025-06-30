@@ -12,6 +12,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { EventDetailsDialog } from './EventDetailsDialog';
 
 export interface AgendaEvent {
   id: number;
@@ -30,6 +31,8 @@ export default function AgendaPage() {
   
   const [isEventDialogOpen, setIsEventDialogOpen] = useState(false);
   const [deletingEvent, setDeletingEvent] = useState<AgendaEvent | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<AgendaEvent | null>(null);
+  const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 
   const fetchEvents = async () => {
     setIsLoading(true);
@@ -135,7 +138,7 @@ export default function AgendaPage() {
                     <div className="space-y-4">
                         {eventsForSelectedPeriod.length > 0 ? (
                             eventsForSelectedPeriod.map((event) => (
-                            <div key={event.id} className="p-4 border rounded-lg flex items-center justify-between hover:border-primary/50">
+                            <div key={event.id} className="p-4 border rounded-lg flex items-center justify-between hover:border-primary/50 cursor-pointer" onClick={() => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}>
                                 <div>
                                     <p className="font-semibold flex items-center">
                                         {event.description}
@@ -150,7 +153,7 @@ export default function AgendaPage() {
                                         {new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
                                     </div>
                                 </div>
-                                <div>
+                                <div onClick={(e) => e.stopPropagation()}>
                                     <Button variant="ghost" size="icon" onClick={() => setDeletingEvent(event)}>
                                         <Trash2 className="h-4 w-4 text-destructive" />
                                     </Button>
@@ -172,6 +175,16 @@ export default function AgendaPage() {
         onOpenChange={setIsEventDialogOpen}
         onSaveSuccess={handleSaveSuccess}
       />
+      {selectedEvent && (
+        <EventDetailsDialog
+          isOpen={isDetailsDialogOpen}
+          onOpenChange={setIsDetailsDialogOpen}
+          onSaveSuccess={(updatedEvent) => {
+            setAllEvents(allEvents.map(e => e.id === updatedEvent.id ? updatedEvent : e));
+          }}
+          event={selectedEvent}
+        />
+      )}
       
       <AlertDialog open={!!deletingEvent} onOpenChange={(open) => !open && setDeletingEvent(null)}>
         <AlertDialogContent>

@@ -38,12 +38,14 @@ from tools.set_reminder_tool import SetReminderTool
 from tools.update_user_profile import UpdateProfileTool
 from tools.memory_add_tool import MemoryAddTool
 from tools.conversation_history_analyzer_tool import ConversationHistoryAnalyzerTool
+from tools.conversation_context_analyzer_tool import ConversationContextAnalyzerTool
 
 # Módulo de Gestión de Documentos
 from tools.get_document_list_tool import GetDocumentListTool
 from tools.get_document_content_tool import GetDocumentContentTool
 from tools.delete_document_tool import DeleteDocumentTool
 from tools.document_rag_tool import DocumentRAGTool
+from tools.extract_document_titles_tool import ExtractDocumentTitlesTool
 
 # Módulo de Creación de Contenido y Búsqueda
 from tools.image_generation_tool import ImageGenerationTool
@@ -86,9 +88,9 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
         # Agenda y Recordatorios
         ScheduleEventTool, GetAgendaTool, CancelEventTool, SetReminderTool,
         # Perfil y Memoria
-        UpdateProfileTool, MemoryAddTool, ConversationHistoryAnalyzerTool,
+        UpdateProfileTool, MemoryAddTool, ConversationHistoryAnalyzerTool, ConversationContextAnalyzerTool,
         # Documentos
-        GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
+        GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool, ExtractDocumentTitlesTool,
         # Creación de Contenido y Búsqueda (excepto WebSearchTool que usa fábrica)
         ImageGenerationTool, WebScraperTool, AnalyzeTextForInsightsTool,
         # Herramienta de GitHub
@@ -118,8 +120,8 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
             elif ToolClass in [
                 AddNoteTool, GetNotesTool, UpdateNoteTool, DeleteNoteTool,
                 ScheduleEventTool, GetAgendaTool, CancelEventTool, SetReminderTool,
-                UpdateProfileTool, MemoryAddTool, ConversationHistoryAnalyzerTool, GetDocumentListTool,
-                GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
+                UpdateProfileTool, MemoryAddTool, ConversationHistoryAnalyzerTool, ConversationContextAnalyzerTool,
+                GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
                 ImageGenerationTool, GetProactiveInsightsTool,
                 ProactiveKnowledgeLinkerTool, KnowledgeAnalysisTool, ComprehensiveWebAnalysisTool,
                 GetAnalysisResultsTool, MindmapGeneratorTool, ImageBackgroundEraserTool

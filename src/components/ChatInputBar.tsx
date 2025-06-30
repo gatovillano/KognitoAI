@@ -87,37 +87,35 @@ export function ChatInputBar({
           />
             <div className="mt-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="relative group">
-                <button className="flex items-center justify-center text-2xl text-gray-600 dark:text-muted-foreground/80 cursor-pointer w-8 h-8">
-                  +
-                </button>
-                <div className="absolute left-0 bottom-full mb-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-10">
-                  <div
-                    onClick={onToggleKnowledgeAnalysis}
-                    className={`cursor-pointer flex items-center gap-1.5 text-sm px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 ${isKnowledgeAnalysisActive ? 'text-primary' : 'text-gray-600 dark:text-muted-foreground/80'}`}
-                  >
-                    <BookMarked className="h-4 w-4 text-gray-600 dark:text-muted-foreground/80" />
-                    Análisis de Conocimientos
-                  </div>
-                  <div
-                    onClick={onToggleWebSearch}
-                    className={`cursor-pointer flex items-center gap-1.5 text-sm px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 ${isWebSearchActive ? 'text-primary' : 'text-gray-600 dark:text-muted-foreground/80'}`}
-                  >
-                    <Search className="h-4 w-4 text-gray-600 dark:text-muted-foreground/80" />
-                    Búsqueda Web
-                  </div>
-                  <div
-                    onClick={onToggleComprehensiveAnalysis}
-                    className={`cursor-pointer flex items-center gap-1.5 text-sm px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 ${isComprehensiveAnalysisActive ? 'text-primary' : 'text-gray-600 dark:text-muted-foreground/80'}`}
-                  >
-                    <BrainCircuit className="h-4 w-4 text-gray-600 dark:text-muted-foreground/80" />
-                    Busqueda y Analisis
-                  </div>
-                </div>
-              </div>
+              <button
+                onClick={onToggleKnowledgeAnalysis}
+                className={`cursor-pointer flex items-center gap-1.5 text-sm px-2 py-1 rounded-md ${isKnowledgeAnalysisActive ? 'text-blue-500' : 'text-gray-600 dark:text-muted-foreground/80'}`}
+              >
+                <BookMarked className={`h-4 w-4 ${isKnowledgeAnalysisActive ? 'text-blue-500' : 'text-gray-600 dark:text-muted-foreground/80'}`} />
+                Análisis de Conocimientos
+              </button>
+              <button
+                onClick={onToggleWebSearch}
+                className={`cursor-pointer flex items-center gap-1.5 text-sm px-2 py-1 rounded-md ${isWebSearchActive ? 'text-blue-500' : 'text-gray-600 dark:text-muted-foreground/80'}`}
+              >
+                <Search className={`h-4 w-4 ${isWebSearchActive ? 'text-blue-500' : 'text-gray-600 dark:text-muted-foreground/80'}`} />
+                Búsqueda Web
+              </button>
+              <button
+                onClick={onToggleComprehensiveAnalysis}
+                className={`cursor-pointer flex items-center gap-1.5 text-sm px-2 py-1 rounded-md ${isComprehensiveAnalysisActive ? 'text-blue-500' : 'text-gray-600 dark:text-muted-foreground/80'}`}
+              >
+                <BrainCircuit className={`h-4 w-4 ${isComprehensiveAnalysisActive ? 'text-blue-500' : 'text-gray-600 dark:text-muted-foreground/80'}`} />
+                Búsqueda y Análisis
+              </button>
             </div>
             <div className="flex items-center gap-3">
-              <div className="cursor-pointer flex items-center text-sm text-gray-600 dark:text-muted-foreground/80">
+              <div className="cursor-pointer flex items-center text-sm text-gray-600 dark:text-muted-foreground/80" onClick={() => {
+                const fileInput = document.getElementById('file-upload');
+                if (fileInput) {
+                  fileInput.click();
+                }
+              }}>
                 <Upload className="h-4 w-4 text-gray-600 dark:text-muted-foreground/80" />
                 <label htmlFor="file-upload" className="cursor-pointer sr-only">Subir Archivo</label>
                 <input
@@ -126,7 +124,13 @@ export function ChatInputBar({
                   multiple
                   accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.gif"
                   className="hidden"
-                  onChange={onFileUpload}
+                  onChange={(e) => {
+                    console.log("Evento de subida de archivo disparado", e.target.files);
+                    if (e.target.files && e.target.files.length > 0) {
+                      alert("Archivo seleccionado: " + e.target.files.length + " archivo(s)");
+                      onFileUpload(e);
+                    }
+                  }}
                   disabled={isUploadingFile}
                 />
               </div>

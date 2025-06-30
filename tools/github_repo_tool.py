@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class GitHubRepoTool(BaseTool):
     name: str = "github_repository_explorer"
     description: str = (
-        "Este tool permite explorar repositorios de GitHub. Debes proporcionar la URL del repositorio en el parámetro 'repo_url', la acción a realizar (list_tree, read_file, navigate) en el parámetro 'action', y, opcionalmente, la ruta al archivo o directorio en el parámetro 'path' y el token de GitHub en el parámetro 'github_token' si es necesario. Asegúrate de proporcionar la URL completa del repositorio y de utilizar los nombres de parámetro y acción correctos."
+        "Este tool permite explorar repositorios de GitHub. Debes proporcionar la URL del repositorio en el parámetro 'repo_url', la acción a realizar (list_tree, read_file, navigate, read_directory) en el parámetro 'action', y, opcionalmente, la ruta al archivo o directorio en el parámetro 'path' y el token de GitHub en el parámetro 'github_token' si es necesario. Asegúrate de proporcionar la URL completa del repositorio y de utilizar los nombres de parámetro y acción correctos."
     )
     github_token: Optional[str] = Field(
         None,
@@ -60,8 +60,12 @@ class GitHubRepoTool(BaseTool):
                 if not path:
                     return "Error: Debes especificar la ruta para navegar."
                 return self._navigate(repo_url, path)
+            elif action == "read_directory":
+                if not path:
+                    return "Error: Debes especificar la ruta del directorio para leer los documentos."
+                return self._read_directory(repo_url, path)
             else:
-                return f"Error: Acción no válida. Las acciones válidas son: list_tree, read_file, navigate"
+                return f"Error: Acción no válida. Las acciones válidas son: list_tree, read_file, navigate, read_directory"
         except Exception as e:
             logger.error(f"Error al ejecutar la acción {action} en el repositorio {repo_url}: {e}", exc_info=True)
             return f"Error al ejecutar la acción: {e}"
@@ -132,6 +136,30 @@ class GitHubRepoTool(BaseTool):
         except Exception as e:
             logger.error(f"Error al navegar al directorio {path} del repositorio {repo_url}: {e}", exc_info=True)
             return f"Error al navegar al directorio: {e}"
+
+    def _read_directory(self, repo_url: str, path: str) -> str:
+        """
+        Lee el contenido de todos los archivos en un directorio específico del repositorio.
+        """
+        try:
+            if self.session is None:
+                self.session = requests.Session()
+            api_url = self._get_api_url(repo_url) + f"/contents/{path}"
+            response = self.session.get(api_url)
+            response.raise_for_status()
+            contents = response.json()
+            if isinstance(contents, list):
+                result = []
+                for item in contents:
+                    if item['type'] == 'file':
+                        file_content = self._read_file(repo_url, item['path'])
+                        result.append(f"Archivo: {item['path']}\n{file_content}\n{'-'*50}")
+                return "\n".join(result) if result else f"No se encontraron archivos en el directorio {path}."
+            else:
+                return f"Error: {path} no es un directorio."
+        except Exception as e:
+            logger.error(f"Error al leer el directorio {path} del repositorio {repo_url}: {e}", exc_info=True)
+            return f"Error al leer el directorio: {e}"
     def _get_api_url(self, repo_url: str) -> str:
         """
         Convierte la URL del repositorio a la URL de la API de GitHub.
@@ -154,11 +182,11 @@ class GitHubRepoInput(BaseModel):
     )
     action: str = Field(
         ...,
-        description="La acción a realizar en el repositorio. Las opciones válidas son: 'list_tree' (listar todos los archivos), 'read_file' (leer un archivo específico), 'navigate' (listar contenido de un directorio)."
+        description="La acción a realizar en el repositorio. Las opciones válidas son: 'list_tree' (listar todos los archivos), 'read_file' (leer un archivo específico), 'navigate' (listar contenido de un directorio), 'read_directory' (leer todos los documentos de un directorio)."
     )
     path: Optional[str] = Field(
         None,
-        description="La ruta al archivo o directorio dentro del repositorio. Requerido para las acciones 'read_file' y 'navigate'."
+        description="La ruta al archivo o directorio dentro del repositorio. Requerido para las acciones 'read_file', 'navigate' y 'read_directory'."
     )
     github_token: Optional[str] = Field(
         None,

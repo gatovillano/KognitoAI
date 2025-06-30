@@ -19,7 +19,8 @@ export const getColumns = (
     onEdit: (doc: Document) => void,
     onDelete: (doc: Document) => void,
     onAnalyze?: (doc: Document) => void,
-    onShare?: (doc: Document) => void
+    onShare?: (doc: Document) => void,
+    onExtractTitle?: (doc: Document) => void
 ): ColumnDef<Document>[] => [
   {
     accessorKey: 'title',
@@ -69,6 +70,11 @@ export const getColumns = (
             {onShare && (
               <DropdownMenuItem onClick={() => onShare(document)}>
                 Compartir Documento
+              </DropdownMenuItem>
+            )}
+            {onExtractTitle && (
+              <DropdownMenuItem onClick={() => onExtractTitle(document)}>
+                Extraer Título
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />

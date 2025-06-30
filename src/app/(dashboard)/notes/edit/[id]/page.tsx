@@ -122,13 +122,25 @@ export default function EditNotePage() {
         content: markdownContent,
     };
     
-    const endpoint = noteId === 'new' ? '/api/add-note' : '/api/update-note';
+    let endpoint = noteId === 'new' ? '/api/add-note' : '/api/update-note';
+    let requestPayload;
+    if (fromTeam && noteId !== 'new') {
+      endpoint = `/api/teams/${fromTeam}/shared-items/update`;
+      requestPayload = {
+        type: 'note',
+        itemId: noteId,
+        title,
+        content: markdownContent,
+      };
+    } else {
+      requestPayload = payload;
+    }
     const toastId = toast.loading("Guardando nota...");
 
     try {
-        await apiClient.post(endpoint, payload);
+        await apiClient.post(endpoint, requestPayload);
         toast.success("¡Nota guardada!", { id: toastId });
-        router.push('/notes');
+        router.push(fromTeam ? `/teams/${fromTeam}/dashboard` : '/notes');
     } catch (error) {
         toast.error("Error al guardar la nota.", { id: toastId });
     }

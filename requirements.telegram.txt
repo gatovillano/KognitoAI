@@ -1,5 +1,5 @@
 # Dependencias para el cliente de Telegram
-python-telegram-bot
+python-telegram-bot[job-queue]
 httpx
 python-dotenv
 faster-whisper
