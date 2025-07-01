@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup
 # Import functionalities from other tools and modules
 from tools.web_search_tool import search_and_summarize_web
 from tools.web_scraper_tool import WebScraperTool
-from core.memory_manager import get_relevant_memories
+from core.memory_manager import get_relevant_memories # <-- Esta ya soporta workspace_id
 from core.llm_manager import get_fast_llm
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,11 @@ class ComprehensiveWebAnalysisInput(BaseModel):
     """Input schema for the Comprehensive Web Analysis Tool."""
     query: str = Field(..., description="The user's research query in natural language.")
     account_id: str = Field(..., description="The unique ID of the user's account.")
+    # --- NUEVO: Parámetro para el ID del workspace ---
+    workspace_id: Optional[str] = Field(
+        None,
+        description="El ID del workspace (UUID en formato string) para cruzar la información con documentos de un workspace específico, si aplica."
+    )
 
 class ComprehensiveWebAnalysisTool(BaseTool):
     """
@@ -30,32 +35,32 @@ class ComprehensiveWebAnalysisTool(BaseTool):
     to provide a synthesized answer to a user's query.
     """
     name: str = "comprehensive_web_analyzer"
-    description: str = (
-        "Use this tool for in-depth research requests. It searches the web, reads relevant pages, "
-        "cross-references the findings with the user's personal knowledge base, and provides a "
-        "extended analysis. Ideal for queries like 'research the latest trends in AI and "
-        "compare them to my notes on the topic'."
+    description: str = (\
+        "Use this tool for in-depth research requests. It searches the web, reads relevant pages, "\
+        "cross-references the findings with the user's personal knowledge base, and provides a "\
+        "extended analysis. Ideal for queries like 'research the latest trends in AI and "\
+        "compare them to my notes on the topic'. "
+        "Puede opcionalmente cruzar la información con documentos de un `workspace_id` específico." # <-- Descripción actualizada
     )
     args_schema: Type[BaseModel] = ComprehensiveWebAnalysisInput
     return_direct: bool = False
 
     def _extract_urls(self, search_results: str) -> List[str]:
         """Extracts URLs from the formatted search results string."""
-        # The search_and_summarize_web function formats sources like:
-        # "1. Title - <a href='URL'>Visitar enlace</a>"
-        # We use regex to find all href values within anchor tags.
-        urls = re.findall(r"<a href='(.*?)'>", search_results)
+        urls = re.findall(r"<a href=\'(.*?)\'>", search_results)
         logger.info(f"Extracted {len(urls)} URLs from search results: {urls}")
         return urls
 
-    async def _arun(
-        self,
-        query: str,
-        account_id: str,
-        run_manager: Optional[CallbackManagerForToolRun] = None,
+    async def _arun(\
+        self,\
+        query: str,\
+        account_id: str,\
+        workspace_id: Optional[str] = None, # <-- workspace_id añadido aquí
+        run_manager: Optional[CallbackManagerForToolRun] = None,\
+        **kwargs: Any\
     ) -> str:
         """Executes the comprehensive analysis tool asynchronously."""
-        logger.info(f"--- Running Comprehensive Web Analysis for account {account_id} ---")
+        logger.info(f"--- Running Comprehensive Web Analysis for account {account_id} (Workspace: {workspace_id if workspace_id else 'N/A'}) ---")
         logger.info(f"Query: {query}")
 
         # Step 1: Web Search
@@ -68,14 +73,13 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         urls_to_scrape = self._extract_urls(search_results_str)
         if not urls_to_scrape:
             logger.warning("No URLs could be extracted from the search results.")
-            # Return the snippets if no URLs are found, as they might still be useful.
             soup = BeautifulSoup(search_results_str, "html.parser")
             return f"No pude extraer URLs específicas, pero aquí tienes un resumen de la búsqueda:\n\n{soup.get_text()}"
 
         # Step 2: Web Scraping
         logger.info(f"Step 2: Scraping content from {len(urls_to_scrape)} URLs...")
         scraper = WebScraperTool()
-        scraping_tasks = [scraper._arun(url=url) for url in urls_to_scrape[:10]]  # Increase limit to 5 pages for broader context
+        scraping_tasks = [scraper._arun(url=url) for url in urls_to_scrape[:10]]
         scraped_contents = await asyncio.gather(*scraping_tasks, return_exceptions=True)
 
         combined_web_content = ""
@@ -111,11 +115,12 @@ class ComprehensiveWebAnalysisTool(BaseTool):
 
         # Step 4: Knowledge Base Integration
         logger.info("Step 4: Searching internal knowledge base...")
-        relevant_memories = await get_relevant_memories(account_id, web_summary, k=5)
+        # --- MODIFICACIÓN: Pasar workspace_id a get_relevant_memories ---
+        relevant_memories = await get_relevant_memories(account_id, web_summary, k=5, workspace_id=workspace_id)
 
         # Step 5: Final Combined Analysis
         logger.info("Step 5: Performing final combined analysis...")
-        final_analysis_llm = get_fast_llm() # Use the more powerful model for the final step
+        final_analysis_llm = get_fast_llm()
         if not final_analysis_llm:
             return "Error: El modelo de lenguaje para el análisis final no está disponible."
         
@@ -129,7 +134,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         --- Fin del Resumen Web ---
 
         --- Información Relevante de la Base de Conocimiento Personal del Usuario ---
-        {relevant_memories if "No se encontraron" not in relevant_memories else "No se encontró información interna relevante."}
+        {relevant_memories if "No se encontraron" not in relevant_memories else "No se encontró información interna relevante."}\n
         --- Fin de la Información Interna ---
 
         Basándote en TODA la información anterior, por favor, elabora una respuesta final y completa para el usuario.

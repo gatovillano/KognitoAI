@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class GitHubRepoTool(BaseTool):
     name: str = "github_repository_explorer"
     description: str = (
-        "Este tool permite explorar repositorios de GitHub. Debes proporcionar la URL del repositorio en el parámetro 'repo_url', la acción a realizar (list_tree, read_file, navigate, read_directory) en el parámetro 'action', y, opcionalmente, la ruta al archivo o directorio en el parámetro 'path' y el token de GitHub en el parámetro 'github_token' si es necesario. Asegúrate de proporcionar la URL completa del repositorio y de utilizar los nombres de parámetro y acción correctos."
+        "Este tool permite explorar repositorios de GitHub. Debes proporcionar la URL del repositorio en el parámetro 'repo_url', la acción a realizar (list_tree, read_file, navigate, read_directory, read_directory_recursively) en el parámetro 'action', y, opcionalmente, la ruta al archivo o directorio en el parámetro 'path' y el token de GitHub en el parámetro 'github_token' si es necesario. Asegúrate de proporcionar la URL completa del repositorio y de utilizar los nombres de parámetro y acción correctos."
     )
     github_token: Optional[str] = Field(
         None,
@@ -64,8 +64,10 @@ class GitHubRepoTool(BaseTool):
                 if not path:
                     return "Error: Debes especificar la ruta del directorio para leer los documentos."
                 return self._read_directory(repo_url, path)
+            elif action == "read_directory_recursively":
+                return self._read_directory_recursively(repo_url, path or "")
             else:
-                return f"Error: Acción no válida. Las acciones válidas son: list_tree, read_file, navigate, read_directory"
+                return f"Error: Acción no válida. Las acciones válidas son: list_tree, read_file, navigate, read_directory, read_directory_recursively"
         except Exception as e:
             logger.error(f"Error al ejecutar la acción {action} en el repositorio {repo_url}: {e}", exc_info=True)
             return f"Error al ejecutar la acción: {e}"
@@ -160,6 +162,40 @@ class GitHubRepoTool(BaseTool):
         except Exception as e:
             logger.error(f"Error al leer el directorio {path} del repositorio {repo_url}: {e}", exc_info=True)
             return f"Error al leer el directorio: {e}"
+
+    def _read_directory_recursively(self, repo_url: str, directory_path: str) -> str:
+        """
+        Lee el contenido de todos los archivos en un directorio específico del repositorio, incluyendo subdirectorios.
+        """
+        try:
+            if self.session is None:
+                self.session = requests.Session()
+            
+            api_url = self._get_api_url(repo_url)
+            repo_info_response = self.session.get(api_url)
+            repo_info_response.raise_for_status()
+            default_branch = repo_info_response.json().get("default_branch", "main")
+            
+            tree_url = f"{api_url}/git/trees/{default_branch}?recursive=1"
+            response = self.session.get(tree_url)
+            response.raise_for_status()
+            tree = response.json()["tree"]
+
+            result = []
+            
+            prefix = directory_path.strip('/') if directory_path else ''
+            if prefix:
+                prefix += '/'
+
+            for item in tree:
+                if item['type'] == 'blob' and item['path'].startswith(prefix):
+                    file_content = self._read_file(repo_url, item['path'])
+                    result.append(f"Archivo: {item['path']}\n{file_content}\n{'-'*50}")
+            
+            return "\n".join(result) if result else f"No se encontraron archivos en el directorio '{directory_path}' o sus subdirectorios."
+        except Exception as e:
+            logger.error(f"Error al leer recursivamente el directorio {directory_path} del repositorio {repo_url}: {e}", exc_info=True)
+            return f"Error al leer recursivamente el directorio: {e}"
     def _get_api_url(self, repo_url: str) -> str:
         """
         Convierte la URL del repositorio a la URL de la API de GitHub.
@@ -182,7 +218,7 @@ class GitHubRepoInput(BaseModel):
     )
     action: str = Field(
         ...,
-        description="La acción a realizar en el repositorio. Las opciones válidas son: 'list_tree' (listar todos los archivos), 'read_file' (leer un archivo específico), 'navigate' (listar contenido de un directorio), 'read_directory' (leer todos los documentos de un directorio)."
+        description="La acción a realizar en el repositorio. Las opciones válidas son: 'list_tree' (listar todos los archivos), 'read_file' (leer un archivo específico), 'navigate' (listar contenido de un directorio), 'read_directory' (leer todos los documentos de un directorio), 'read_directory_recursively' (leer todos los documentos de un directorio y sus subdirectorios)."
     )
     path: Optional[str] = Field(
         None,

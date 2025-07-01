@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { marked } from 'marked';
 import { sentImage } from '@/lib/imageUtils';
 import { toast } from 'sonner';
@@ -15,7 +15,7 @@ interface MarkdownRendererProps {
   fontSize?: string;
 }
 
-export function MarkdownRenderer({ content, fontSize = 'text-base' }: MarkdownRendererProps) {
+const _MarkdownRenderer = ({ content, fontSize = 'text-base' }: MarkdownRendererProps) => {
   const [copiedStates, setCopiedStates] = useState<Record<string, boolean>>({});
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -78,49 +78,79 @@ export function MarkdownRenderer({ content, fontSize = 'text-base' }: MarkdownRe
       });
   }, []);
 
-  // Effect to add copy buttons
+  const handlePreview = useCallback((htmlContent: string) => {
+    if (!htmlContent.trim()) {
+      toast.error('El contenido HTML está vacío. No hay nada que previsualizar.');
+      return;
+    }
+    const previewWindow = window.open('', '_blank');
+    if (previewWindow) {
+      previewWindow.document.open();
+      previewWindow.document.write('<!DOCTYPE html><html><head><title>Previsualización HTML</title></head><body>');
+      previewWindow.document.write(htmlContent);
+      previewWindow.document.write('</body></html>');
+      previewWindow.document.close();
+    } else {
+      toast.error('No se pudo abrir la ventana de previsualización. Por favor, habilite las ventanas emergentes en su navegador.');
+    }
+  }, []);
+
+  // Effect to add copy and preview buttons
   useEffect(() => {
-    const addCopyButtons = () => {
+    const addButtons = () => {
       if (!containerRef.current) return;
 
-      const codeBlocks = containerRef.current.querySelectorAll('pre code:not([data-copy-button-added="true"])');
+      const codeBlocks = containerRef.current.querySelectorAll('pre code:not([data-buttons-added="true"])');
 
       codeBlocks.forEach((block, index) => {
         const wrapper = block.parentNode as HTMLPreElement;
         if (!wrapper) return;
 
-        const language = block.className.split('-')[1] || 'code';
+        const language = (block.className.split('-')[1] || 'code').toLowerCase();
         const codeText = block.textContent || '';
-        const codeBlockIndex = `codeblock-${index}`; // Unique index for each code block
+        const codeBlockIndex = `codeblock-${index}`;
 
-        // Create header with language and copy button
-        const header = document.createElement('div');
-        header.className = 'flex items-center justify-between px-4 py-1.5 border-b';
-        header.innerHTML = `
-          <span class="text-xs text-muted-foreground">${language}</span>
-          <button id="copy-btn-${codeBlockIndex}" class="h-7 w-7 inline-flex items-center justify-center bg-transparent border-none cursor-pointer">
-            ${copiedStates[codeBlockIndex] ? '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgb(22 101 52)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>' : '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgb(142 156 173)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>'}
-          </button>
-        `;
+        // Create footer with buttons
+        const footer = document.createElement('div');
+        footer.className = 'flex items-center justify-end px-4 py-1.5 border-t';
+        
+        const buttonsWrapper = document.createElement('div');
+        buttonsWrapper.className = 'flex items-center gap-2';
 
-        wrapper.insertBefore(header, block);
+        // Preview Button
+        if (language === 'html') {
+          const previewBtn = document.createElement('button');
+          previewBtn.className = 'inline-flex items-center justify-center text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-7 px-3 rounded-md';
+          previewBtn.innerHTML = 'Previsualizar';
+          previewBtn.onclick = () => handlePreview(codeText);
+          buttonsWrapper.appendChild(previewBtn);
+        }
+
+        // Copy Button
+        const copyBtn = document.createElement('button');
+        copyBtn.id = `copy-btn-${codeBlockIndex}`;
+        copyBtn.className = 'inline-flex items-center justify-center text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-7 px-3 rounded-md';
+        copyBtn.innerHTML = copiedStates[codeBlockIndex] ? 'Copiado' : 'Copiar';
+        copyBtn.onclick = () => handleCopy(codeText, codeBlockIndex);
+        buttonsWrapper.appendChild(copyBtn);
+
+        footer.appendChild(buttonsWrapper);
+        wrapper.appendChild(footer);
+        
         wrapper.className = 'bg-zinc-900 rounded-md border my-4';
         wrapper.style.backgroundColor = '#2d3748 !important';
-        block.setAttribute('data-copy-button-added', 'true');
-
-        const copyBtn = header.querySelector('button');
-        if (copyBtn) {
-          copyBtn.onclick = () => handleCopy(codeText, codeBlockIndex);
-        }
+        block.setAttribute('data-buttons-added', 'true');
       });
     };
 
-    addCopyButtons();
-  }, [htmlContent, copiedStates, handleCopy]);
+    addButtons();
+  }, [htmlContent, copiedStates, handleCopy, handlePreview]);
 
   return (
     <div className={`prose prose-sm max-w-none ${fontSize} text-foreground`} style={{ overflowWrap: 'break-word', margin: 0, padding: 0 }} ref={containerRef}>
       <div dangerouslySetInnerHTML={{ __html: htmlContent }} style={{ overflowWrap: 'break-word', margin: 0, padding: 0 }} />
     </div>
   );
-}
+};
+
+export const MarkdownRenderer = memo(_MarkdownRenderer);

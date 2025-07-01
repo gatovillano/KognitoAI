@@ -1,149 +1,130 @@
-# Kognito AI System
+# 🧠 Kognito AI System
 
-Kognito AI es un sistema modular de asistente inteligente diseñado para integrar diversas funcionalidades de IA y gestión de información personal a través de múltiples plataformas, comenzando con Telegram y una aplicación web. Su arquitectura desacoplada asegura que la lógica de negocio principal sea independiente de la interfaz de usuario, permitiendo una experiencia unificada y extensible.
+¡Bienvenido a Kognito AI System! Un exocerebro digital personalizable y colaborativo diseñado para aumentar tu inteligencia y la de tu equipo. Kognito AI integra capacidades avanzadas de Inteligencia Artificial, gestión de conocimiento (RAG), y una interfaz multi-plataforma para ayudarte a organizar tu vida digital, automatizar tareas y potenciar la colaboración.
 
-El sistema centraliza la gestión de datos del usuario (notas, agenda, documentos, memoria) y expone estas funcionalidades a través de una API robusta, utilizada tanto por el bot de Telegram como por la webapp.
+Este repositorio contiene el código fuente de Kognito AI y está destinado exclusivamente a colaboradores cercanos para revisión y desarrollo.
 
-DEMO http://kognito.gatoslibres.art
+## ✨ Características Principales
 
-## Características principales
+Kognito AI está diseñado para ser tu asistente inteligente definitivo, ofreciendo:
 
-*   **Identidad Universal:** Cada usuario tiene un `account_id` único (UUID), independiente de la plataforma (Telegram, web, etc.), permitiendo una gestión de datos coherente.
-*   **Bot de Telegram:** Interfaz conversacional completa con soporte para comandos, gestión de documentos (subida, consulta, eliminación), notas, agenda y recordatorios.
-*   **API Centralizada (FastAPI):** Backend que expone endpoints para chat, autenticación JWT, gestión de documentos, notas, agenda y más. Sirve como el cerebro del sistema.
-*   **WebApp / Panel de Usuario:** Interfaz web (`public_chat_ui/`) para interactuar con el asistente, gestionar documentos, ver notas, etc., autenticada vía JWT o login con Telegram.
-*   **Memoria a Largo Plazo y RAG:** Utiliza PostgreSQL con la extensión `pgvector` para almacenar memorias vectoriales y perfiles estructurados, permitiendo al agente de IA recordar conversaciones y documentos relevantes.
-*   **Herramientas LangChain:** Un conjunto de herramientas personalizadas para el agente de IA, incluyendo CRUD de notas, gestión de agenda, scraping web, generación de imágenes, gestión de documentos (subir, listar, ver contenido, eliminar), y más. Estas herramientas operan con el `account_id` universal.
-*   **Autenticación Universal:** Soporte para login vía Telegram (para el bot) y autenticación JWT para la webapp y la API.
-*   **Arquitectura Modular:** Separación clara de responsabilidades en directorios clave: `core/` (lógica de negocio), `telegram_client/` (lógica específica de Telegram), `tools/` (herramientas LangChain), `utils/` (utilidades generales), y `public_chat_ui/` (frontend web).
+*   **Identidad Universal de Usuario:** Unifica tu perfil y datos a través de diferentes plataformas.
+*   **Agente de IA Conversacional (KAI):** Un asistente inteligente capaz de entender tus necesidades, responder preguntas y ejecutar acciones.
+*   **Memoria a Largo Plazo (RAG):**
+    *   **Gestión Documental Inteligente:** Sube y organiza tus documentos (PDFs, DOCX, TXT, MD). Kognito AI los procesa, genera embeddings y los almacena en una base de datos vectorial (PGVector) para una recuperación de información contextual.
+    *   **Notas Colaborativas:** Crea y gestiona notas personales o compártelas con tus equipos.
+    *   **Insights Proactivos:** El sistema analiza continuamente tu base de conocimiento para encontrar conexiones, sinergias, duplicidades y brechas de información, presentándote descubrimientos relevantes.
+*   **Gestión de la Agenda:** Programa eventos y recordatorios, tanto personales como para equipos.
+*   **Entrada Multimodal:** Interactúa con Kognito AI a través de texto, audio (transcripción) e imágenes (generación y procesamiento).
+*   **Herramientas Extensibles:** El agente de IA puede utilizar una variedad de herramientas para interactuar con el sistema y el mundo exterior (búsqueda web, gestión de GitHub, análisis de texto, generación de mapas mentales, etc.).
+*   **Interfaces Multi-Plataforma:**
+    *   **Bot de Telegram:** Tu asistente personal accesible directamente desde Telegram, con chat conversacional y funcionalidades integradas.
+    *   **Panel de Control Web (Telegram Web App):** Una interfaz web rica y visual integrada en Telegram para una gestión avanzada de documentos, agenda, notas y configuración.
+    *   **Frontend Web (Next.js):** Un dashboard completo y moderno para una experiencia de usuario más profunda y rica en funcionalidades.
+*   **Colaboración en Equipo:** Crea equipos, comparte documentos, notas y eventos, y potencia el conocimiento colectivo.
 
-## Estructura del Proyecto
+## 🚀 Arquitectura del Proyecto
+
+Kognito AI está construido como un sistema de microservicios, diseñado para ser modular, escalable y mantenible.
+
+**Representación en Árbol Simple:**
 
 ```
-KognitoAI/
-├── core/                # Lógica de negocio desacoplada (notas, agenda, memoria, config, DB)
-├── telegram_client/     # Bot de Telegram, handlers y lógica específica
-├── tools/               # Herramientas LangChain para el agente de IA (notas, agenda, scraping, documentos, etc.)
-├── utils/               # Utilidades generales (embeddings, helpers, paginador, generación de imágenes)
-├── public_chat_ui/      # Webapp de panel de control (HTML, CSS, JS)
-├── run_api.py           # Punto de entrada para el servidor FastAPI (API central y webapp)
-├── run_telegram_bot.py  # Punto de entrada para el bot de Telegram
-├── requirements.txt     # Dependencias principales (backend y bot)
-├── requirements.telegram.txt # Dependencias mínimas para el cliente de Telegram ligero
-├── Dockerfile*          # Archivos Docker para backend/webapp y cliente Telegram
-├── .env.example         # Ejemplo de archivo de configuración de entorno
-└── ...                  # Otros archivos de configuración y scripts
+Kognito AI System
+├── 1. Backend (API Central - FastAPI)
+│   ├── core/ (Lógica de Negocio y Cerebro)
+│   │   ├── config.py (Configuración global)
+│   │   ├── database.py (Conexión y modelos DB)
+│   │   ├── llm_manager.py (Gestión de LLMs)
+│   │   ├── memory_manager.py (RAG y DB Vectorial)
+│   │   ├── agent.py (Agente de IA y Orquestación)
+│   │   ├── agenda_manager.py (Lógica de Agenda)
+│   │   ├── notes_manager.py (Lógica de Notas)
+│   │   └── reminders_manager.py (Lógica de Recordatorios)
+│   ├── api/ (Endpoints de la API)
+│   │   ├── auth/
+│   │   ├── users/
+│   │   ├── chat/
+│   │   ├── documents/
+│   │   ├── notes/
+│   │   ├── agenda/
+│   │   ├── teams/
+│   │   ├── workspaces/
+│   │   └── analysis/
+│   ├── tools/ (Herramientas para el Agente de IA)
+│   │   ├── add_note_tool.py
+│   │   ├── analyze_text_for_insights_tool.py
+│   │   ├── comprehensive_web_analysis_tool.py
+│   │   ├── document_rag_tool.py
+│   │   ├── image_generation_tool.py
+│   │   ├── proactive_knowledge_linker_tool.py
+│   │   └── ... (otras herramientas)
+│   └── utils/ (Utilidades Compartidas)
+│       ├── advanced_text_analyzer.py
+│       ├── db_session.py
+│       ├── document_parser.py
+│       ├── embeddings.py
+│       ├── generate_mind_map.py
+│       ├── proactive_knowledge_linker.py
+│       └── security.py
+│
+├── 2. Frontend Web (Next.js Dashboard)
+│   ├── src/app/(dashboard)/ (Páginas del Dashboard)
+│   │   ├── chat/
+│   │   ├── agenda/
+│   │   ├── notes/
+│   │   ├── rag/
+│   │   ├── teams/
+│   │   └── workspaces/
+│   ├── src/components/ (Componentes UI Reutilizables)
+│   │   ├── ui/ (Componentes Shadcn/ui)
+│   │   └── ... (componentes personalizados)
+│   ├── src/contexts/ (Contextos de React)
+│   └── src/hooks/ (Hooks Personalizados, ej. useToast)
+│
+├── 3. Telegram Client (Bot)
+│   ├── telegram_client/bot_manager.py (Gestión del Bot)
+│   ├── telegram_client/notification_scheduler.py (Programación de Notificaciones)
+│   └── telegram_client/handlers/ (Lógica de Respuestas del Bot)
+│
+├── 4. Telegram Panel (Web App)
+│   ├── telegram_panel/index.html (Interfaz de Usuario)
+│   ├── telegram_panel/script.js (Lógica Frontend)
+│   ├── telegram_panel/style.css (Estilos)
+│   └── run_telegram_panel.py (Servidor FastAPI para el Panel)
+│
+├── 5. Base de Datos
+│   └── PostgreSQL + PGVector
+│
+├── 6. PGAdmin (Interfaz de Administración DB)
+│
+├── 7. Infraestructura de Despliegue
+│   ├── Dockerfile.core
+│   ├── Dockerfile.frontend
+│   ├── Dockerfile.telegram
+│   ├── Dockerfile.webapp
+│   ├── docker-compose.yml (Orquestación de Servicios)
+│   └── nginx.conf (Proxy Inverso)
+│
+├── 8. (Próximamente) Redis (Broker de Mensajes / Pub/Sub)
+│
+└── 9. (Próximamente) Celery Workers (Procesamiento de Tareas en Segundo Plano)
 ```
 
-## Instalación y despliegue rápido
+## 🛠️ Stack Tecnológico
 
-Sigue estos pasos para poner en marcha el sistema Kognito AI.
+*   **Backend:** Python 3.11, FastAPI, SQLAlchemy (Async), LangChain, LangGraph, Ollama, Google Generative AI (Gemini), spaCy, KeyBERT, `python-telegram-bot`.
+*   **Frontend:** Next.js 14, React, TypeScript, Shadcn/ui, Tailwind CSS, Framer Motion.
+*   **Base de Datos:** PostgreSQL, PGVector.
+*   **Contenerización:** Docker, Docker Compose.
+*   **Proxy Inverso:** Nginx.
+*   **Colas de Tareas:** Celery, Redis (próximamente).
+*   **Comunicación en Tiempo Real:** WebSockets (próximamente).
 
-1.  **Clona el repositorio**
+## 🚧 Próximas Mejoras (En Desarrollo)
 
-```bash
-git clone <repo-url>
-cd KognitoAI
-```
+Estamos trabajando activamente en:
 
-2.  **Configura el entorno**
-
-Copia el archivo `.env.example` a `.env` y completa las variables necesarias. Esto incluye tokens de API (Telegram, Google), URL de la base de datos, claves secretas, etc.
-
-```bash
-cp .env.example .env
-# Edita el archivo .env con tus credenciales y configuraciones
-```
-
-3.  **Instala las dependencias**
-
-Puedes instalar las dependencias completas para el backend y el bot, o solo las mínimas para el cliente Telegram si lo ejecutas por separado.
-
-*   Para el backend (API y webapp) y el bot completo:
-
-```bash
-pip install -r requirements.txt
-```
-
-*   Para el cliente Telegram ligero (si el backend se ejecuta aparte):
-
-```bash
-pip install -r requirements.telegram.txt
-```
-
-4.  **Inicializa la base de datos**
-
-Asegúrate de tener una instancia de PostgreSQL accesible con la extensión `pgvector` habilitada. El sistema creará las tablas automáticamente al iniciar el backend por primera vez.
-
-5.  **Ejecuta el backend (API y webapp)**
-
-Inicia el servidor FastAPI que maneja la API central y sirve la webapp.
-
-```bash
-python run_api.py
-```
-
-6.  **Ejecuta el bot de Telegram**
-
-Inicia el script del bot de Telegram.
-
-```bash
-python run_telegram_bot.py
-```
-
-7.  **(Opcional) Despliegue con Docker**
-
-Puedes usar Docker Compose para construir y ejecutar los servicios (backend/webapp y bot) en contenedores.
-
-```bash
-docker-compose up --build
-```
-
-## Principales variables de entorno (`.env`)
-
-Asegúrate de configurar estas variables en tu archivo `.env`:
-
-*   `TELEGRAM_BOT_TOKEN`: Token proporcionado por BotFather.
-*   `GOOGLE_API_KEY`: API Key para acceder a modelos de Google (Gemini, etc.).
-*   `GOOGLE_PROJECT_ID` y `GOOGLE_PROJECT_LOCATION`: Identificador y región de tu proyecto en Google Cloud (si usas Vertex AI).
-*   `DATABASE_URL`: URL de conexión a tu base de datos PostgreSQL (ej: `postgresql://user:password@host:port/dbname`).
-*   `JWT_SECRET_KEY`: Clave secreta para firmar los tokens JWT.
-*   `TELEGRAM_WEBAPP_URL`: URL pública donde está accesible la webapp/panel de usuario.
-*   `ADMIN_TELEGRAM_ID`: Opcional, ID de Telegram de un administrador para funcionalidades específicas.
-*   ...y otras variables para configuración de herramientas, logging, etc.
-
-## Arquitectura y módulos clave
-
-*   **`core/`**: Contiene la lógica de negocio principal. Módulos como `notes_manager`, `agenda_manager`, `memory_manager`, `config_manager`, y la capa de acceso a datos (`db`). Es la parte del sistema que sabe *qué* hacer con los datos del usuario, independientemente de *cómo* se le pida.
-*   **`telegram_client/`**: Implementa la interfaz específica para Telegram. Contiene los handlers de mensajes, comandos, callbacks, gestión de archivos, etc. Traduce las interacciones de Telegram a llamadas a la lógica de `core/` o a las herramientas.
-*   **`tools/`**: Define las herramientas que el agente de IA (basado en LangChain) puede utilizar. Cada archivo aquí (`get_notes_tool.py`, `update_note_tool.py`, `delete_document_tool.py`, `get_agenda_tool.py`, `get_document_content_tool.py`, etc.) representa una capacidad específica (buscar notas, actualizar agenda, eliminar documentos, etc.) y se conecta a la lógica en `core/`. Son agnósticas a la plataforma, recibiendo siempre el `account_id`.
-*   **`utils/`**: Módulo para funciones de utilidad general que no pertenecen a la lógica de negocio ni a una interfaz específica. Incluye helpers para embeddings, paginación, manejo de fechas, generación de imágenes, etc.
-*   **`public_chat_ui/`**: Contiene los archivos estáticos (HTML, CSS, JavaScript) para la webapp del panel de usuario. Esta webapp interactúa con el backend a través de la API expuesta por `run_api.py`.
-
-## Docker y despliegue
-
-El proyecto incluye soporte para Docker para facilitar el despliegue:
-
-*   `Dockerfile.core`: Para construir la imagen del backend (API y webapp).
-*   `Dockerfile.telegram`: Para construir una imagen ligera solo con el cliente de Telegram y sus dependencias mínimas.
-*   `docker-compose.yml`: Define los servicios para ejecutar el backend y el bot (y potencialmente la base de datos) en contenedores.
-
-## Contribución
-
-¡Las contribuciones son bienvenidas! Si deseas contribuir:
-
-1.  Haz un fork del repositorio.
-2.  Crea una rama para tu feature o corrección (`git checkout -b feature/nombre-de-la-feature`).
-3.  Sigue la arquitectura modular existente y los patrones de importación.
-4.  Asegúrate de que tu código cumpla con los estándares de linting y, si es posible, añade tests.
-5.  Haz commit de tus cambios (`git commit -m 'feat: Añade nueva funcionalidad'`).
-6.  Haz push a tu rama (`git push origin feature/nombre-de-la-feature`).
-7.  Abre un Pull Request explicando tus cambios.
-
-## Licencia
-
-Este proyecto está bajo la Licencia MIT. Consulta el archivo `LICENSE` para más detalles.
-
----
-
-**Kognito AI System** — Un asistente inteligente modular, seguro y extensible.
+*   **Integración de Celery:** Para una gestión robusta de tareas en segundo plano (procesamiento de documentos, análisis de LLMs, generación de insights) que no bloquee la API principal y garantice la persistencia y escalabilidad.
+*   **WebSockets con Redis Pub/Sub:** Para notificaciones en tiempo real al frontend, eliminando el polling y proporcionando una experiencia de usuario instantánea y fluida.
+d

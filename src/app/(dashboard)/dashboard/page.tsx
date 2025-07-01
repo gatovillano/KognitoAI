@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { InsightDetailDialog } from '@/components/InsightDetailDialog'; // Importamos el nuevo diálogo
 import { HelpCircle, Bot, Library, FileText, FolderKanban, Notebook, Calendar, Search, ScanSearch, BrainCircuit } from 'lucide-react';
+import Link from 'next/link';
 
 // Tipos para los datos que esperamos de la API
 interface DashboardData {
@@ -45,7 +46,7 @@ export default function DashboardPage() {
       setIsLoading(true);
       try {
         const [insightsResponse, analysesResponse] = await Promise.all([
-          apiClient.post('/api/dashboard-insights'),
+          apiClient.post('/api/dashboard-insights', { all: false }), // Pedir solo los insights para el dashboard
           apiClient.post('/api/get-saved-analyses', { all: true })
         ]);
         setData(insightsResponse.data);
@@ -211,9 +212,14 @@ export default function DashboardPage() {
 
         {/* Galería de Tarjetas de Insights */}
         <div>
-          <h2 className="text-2xl font-bold mb-4">Descubrimientos Proactivos</h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-2xl font-bold">Descubrimientos Proactivos</h2>
+            <Link href="/dashboard/insights" className="text-sm font-medium text-primary hover:underline">
+              Ver todo
+            </Link>
+          </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {data.proactive_insights.map(insight => (
+            {data.proactive_insights.slice(0, 6).map(insight => ( // Limitar a 6 en el dashboard
               <Card key={insight.id} className="rounded-2xl hover:border-primary/80 transition-colors cursor-pointer" onClick={() => setViewingInsight(insight)}>
                 <CardHeader>
                   <div className="flex items-center gap-2">

@@ -200,7 +200,7 @@ class ExtractDocumentTitlesTool(BaseTool):
                                 # Extraer el contenido de texto del objeto AIMessage
                                 potential_title = response.content if hasattr(response, 'content') else str(response)
                                 potential_title = potential_title.strip()
-                                if potential_title and potential_title != 'Sin título' and len(potential_title) > 5 and len(potential_title) < 100:
+                                if potential_title and potential_title != 'Sin título' and len(potential_title) > 5 and len(potential_title) < 250:
                                     logger.info(f"Título extraído por LLM para {file_name}: {potential_title}")
                                     success = await update_document_metadata(account_id, file_name, new_title=potential_title, new_topic=None)
                                     if success:
@@ -219,7 +219,7 @@ class ExtractDocumentTitlesTool(BaseTool):
                                     if line.strip():
                                         potential_title = line.strip()
                                         break
-                                if potential_title and len(potential_title) > 5 and len(potential_title) < 100:
+                                if potential_title and len(potential_title) > 5 and len(potential_title) < 250:
                                     logger.info(f"Título de respaldo extraído para {file_name}: {potential_title}")
                                     success = await update_document_metadata(account_id, file_name, new_title=potential_title, new_topic=None)
                                     if success:
