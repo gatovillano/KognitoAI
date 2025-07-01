@@ -154,7 +154,17 @@ async def update_thread_title_if_needed(thread_id: str, messages: list):
     logger.info(f"[TÍTULO][DEBUG] Hilo {thread_id} - Título actual: '{current_title}' - Mensajes reales (sin resumen): {len(messages)}")
     # Si el título es 'Nuevo Chat' y hay al menos 5 mensajes, o si hay 20+ mensajes y el título es distinto
     if (current_title == "Nuevo Chat" and len(messages) >= 5) or (current_title != "Nuevo Chat" and len(messages) >= 20 and len(messages) % 20 == 0):
-        conversation_text = '\n'.join([m.content if hasattr(m, 'content') else str(m) for m in messages[-20:]])
+        # Manejar contenido de mensajes que puede ser una lista o una cadena
+        def extract_text_content(content):
+            if isinstance(content, str):
+                return content
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get('type') == 'text':
+                        return item.get('text', '')
+            return str(content)
+        
+        conversation_text = '\n'.join([extract_text_content(m.content) if hasattr(m, 'content') else str(m) for m in messages[-20:]])
         prompt = f"Resume la conversación en un título breve y descriptivo (máx 8 palabras):\n{conversation_text}"
         llm = get_fast_llm()
         if not llm:
@@ -251,8 +261,10 @@ async def create_and_run_agent(
     telegram_id: Optional[int],
     user_message: str,
     image_base64: Optional[str] = None,
+    document_url: Optional[str] = None,
     mode: Optional[str] = None,
-    background_tasks: Optional[Any] = None
+    background_tasks: Optional[Any] = None,
+    workspace_id: Optional[str] = None
 ) -> str:
     """
     Crea y ejecuta el agente de Langchain con manejo explícito de memoria.
@@ -342,6 +354,8 @@ async def create_and_run_agent(
             {"type": "text", "text": user_message},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
         ]
+    elif document_url:
+        current_user_input_content = f"{user_message}\n\nDocumento adjunto: {document_url}"
     current_human_message = HumanMessage(content=current_user_input_content, additional_kwargs={"user_name": account_name})
 
     # --- CORRECCIÓN: Siempre agregar el mensaje actual al final del historial para el modelo ---
@@ -391,9 +405,21 @@ async def create_and_run_agent(
         logger.info("Aplicando prompt personalizado, filtrando variables no soportadas.")
         # Reemplazar referencias a variables problemáticas como row['energy'] o index
         effective_system_prompt = custom_prompt.replace("row['energy']", "valor_energia").replace("index", "indice")
+    
+    # Obtener prompt de sistema personalizado basado en workspace si está disponible
+    if workspace_id:
+        async with DBSession(SessionLocal) as db:
+            workspace = await db.get(Workspace, uuid.UUID(workspace_id))
+            if workspace and workspace.system_prompt:
+                effective_system_prompt = workspace.system_prompt
+                logger.info(f"Usando prompt de sistema de workspace {workspace_id}.")
 
     all_tools = get_all_langchain_tools()
     tools = all_tools
+    
+    # Modificación: Pasar workspace_id a load_agent_tools si está disponible
+    if hasattr(get_all_langchain_tools, 'load_agent_tools'):
+        tools = await get_all_langchain_tools.load_agent_tools(account_id, telegram_id, workspace_id)
     
     if mode == 'knowledgeAnalysis':
         logger.info("Modo de agente: Forzando 'knowledge_base_analyzer'")
@@ -494,10 +520,44 @@ async def create_and_run_agent(
 
         response = await agent_executor.ainvoke(
             input_data,
-            config={"configurable": {"account_id": account_id, "telegram_id": telegram_id, "background_tasks": background_tasks}}
+            config={"configurable": {"account_id": account_id, "telegram_id": telegram_id, "thread_id": thread_id, "background_tasks": background_tasks}}
         )
         final_output = response.get("output", "No pude procesar tu solicitud.")
 
+    except AssertionError as ae:
+        logger.warning(f"⚠️ Error de aserción durante la ejecución del agente para la cuenta {account_id},可能是由于streaming. Intentando sin streaming: {ae}", exc_info=True)
+        # Reintentar sin streaming
+        main_llm = get_main_llm()
+        if main_llm:
+            main_llm.streaming = False
+            llm_with_tools = main_llm.bind_tools(tools)
+            agent_chain = (
+                RunnablePassthrough.assign(
+                    agent_scratchpad=lambda x: format_to_tool_messages(x.get("intermediate_steps", []))
+                )
+                | prompt_template
+                | llm_with_tools
+                | ToolsAgentOutputParser()
+            )
+            agent_executor = AgentExecutor(
+                agent=agent_chain, 
+                tools=tools, 
+                verbose=True, 
+                handle_parsing_errors=True,
+                max_iterations=5
+            )
+            try:
+                response = await agent_executor.ainvoke(
+                    input_data,
+                    config={"configurable": {"account_id": account_id, "telegram_id": telegram_id, "thread_id": thread_id, "background_tasks": background_tasks}}
+                )
+                final_output = response.get("output", "No pude procesar tu solicitud.")
+            except Exception as e2:
+                logger.error(f"❌ FATAL: Error durante el reintento sin streaming para la cuenta {account_id}: {e2}", exc_info=True)
+                final_output = "Lo siento, ocurrió un error inesperado al procesar tu solicitud. El error ha sido registrado."
+        else:
+            logger.error(f"❌ FATAL: No se pudo obtener el LLM principal para reintento sin streaming para la cuenta {account_id}")
+            final_output = "Lo siento, ocurrió un error inesperado al procesar tu solicitud. El error ha sido registrado."
     except Exception as e:
         logger.error(f"❌ FATAL: Error durante la ejecución del agente para la cuenta {account_id}: {e}", exc_info=True)
         final_output = "Lo siento, ocurrió un error inesperado al procesar tu solicitud. El error ha sido registrado."

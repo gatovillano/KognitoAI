@@ -78,7 +78,7 @@ async def search_and_summarize_web(query: str) -> str:
             logger.warning(f"⚠️ La respuesta de Brave Search no contenía 'web' o 'results' para la consulta: '{query}'.")
             return "La búsqueda web no devolvió resultados en el formato esperado."
 
-        raw_results = json_resp["web"]["results"]
+        raw_results = json_resp["web"]["results"]  
         if not raw_results:
             logger.info(f"ℹ️ No se encontraron resultados relevantes para la consulta: '{query}'")
             return "No se encontraron resultados relevantes para tu búsqueda."
@@ -101,8 +101,8 @@ async def search_and_summarize_web(query: str) -> str:
         combined_snippets = "\n\n".join(snippets_to_summarize)
         
         final_response = (
-            "Aquí están los resultados de la búsqueda web. Por favor, sintetiza una respuesta final para el usuario "
-            "basándote en esta información. Si citas las fuentes, usa el formato que te proporciono en la lista de fuentes.\n\n"
+            "Aquí están los resultados de la búsqueda web. Por favor, envia una respuesta comppleta final para el usuario "
+            "basándote en esta información. IMPORTANTE, Debes mostrar el formato que te proporciono en la lista de fuentes.\n\n"
             f"--- Contexto de los Resultados de Búsqueda ---\n{combined_snippets}\n\n"
             f"--- Lista de Fuentes ---\n" + "\n".join(source_list)
         )
@@ -130,7 +130,8 @@ def get_web_search_tool() -> Tool:
         description=(
             "Una potente herramienta de búsqueda web. Úsala cuando necesites responder preguntas sobre "
             "eventos actuales, encontrar información actualizada o acceder a conocimiento más allá de "
-            "tus datos internos. La entrada debe ser una consulta de búsqueda clara y específica."
+            "tus datos internos. La entrada debe ser una consulta de búsqueda clara y específica. No es necesario que te lo soliciten explicitamente"
+            "si puedes complementar la información con una búsqueda, hazlo. Siempre devuelve al final la lista de fuentes"
         ),
         coroutine=search_and_summarize_web,
         func=None

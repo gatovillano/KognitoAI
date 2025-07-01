@@ -212,6 +212,7 @@ export default function ChatLandingPage() {
           isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
           isWebSearchActive={isWebSearchActive}
           isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+          files={[]}
           onMessageChange={setChatInput}
           onSendMessage={handleChatSubmit}
           onKeyDown={handleKeyDown}
@@ -221,6 +222,7 @@ export default function ChatLandingPage() {
           onStartRecording={startRecording}
           onStopRecording={stopRecording}
           onFileUpload={handleFileUpload}
+          onRemoveFile={() => {}} // Placeholder for remove file if needed
           onPaste={() => {}} // Placeholder for paste event if needed
         />
       </motion.div>

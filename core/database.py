@@ -207,6 +207,7 @@ class Workspace(Base):
     # Relaciones
     account = relationship("Account", back_populates="workspaces")
     chat_threads = relationship("ChatThread", back_populates="workspace", cascade="all, delete-orphan")
+    document_chunks = relationship("WorkspaceDocumentChunk", back_populates="workspace", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Workspace(id={self.id}, name='{self.name}')>"
@@ -386,6 +387,30 @@ class AnalysisTask(Base):
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
+class WorkspaceDocumentChunk(Base):
+    """
+    Representa los chunks de documentos y sus embeddings que pertenecen específicamente a un workspace.
+    """
+    __tablename__ = "workspace_document_chunks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=False, index=True)
+    document_id = Column(UUID(as_uuid=True), nullable=False)
+    content = Column(Text, nullable=False)
+    embedding = Column(Vector(384), nullable=False)
+    chunk_order = Column(Integer, nullable=True)
+    file_name = Column(String(255), nullable=True, comment="Nombre del archivo del documento.")
+    title = Column(String(255), nullable=True, comment="Título del documento.")
+    topic = Column(String(255), nullable=True, comment="Tema o categoría del documento.")
+    author = Column(String(255), nullable=True, comment="Autor del documento.")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relaciones
+    workspace = relationship("Workspace", back_populates="document_chunks")
+
+    def __repr__(self):
+        return f"<WorkspaceDocumentChunk(id={self.id}, workspace_id={self.workspace_id}, document_id={self.document_id})>"
 
 class MindmapTask(Base):
     """Guarda el estado y resultado de las tareas de generación de mapas mentales."""

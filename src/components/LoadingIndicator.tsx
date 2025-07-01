@@ -28,43 +28,25 @@ export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
           </div>
         </div>
       ) : (
-        <div className="flex justify-center w-full">
-          <div className="w-full max-w-3xl mx-auto">
-            <div className="flex items-start gap-4">
-              <Avatar className="h-12 w-12 border">
-                <AvatarImage src="/logo-simple.png" alt="Kognito" />
-                <AvatarFallback>K</AvatarFallback>
-              </Avatar>
-              <div className="rounded-lg p-3 bg-secondary flex justify-center items-center">
-                <motion.div
-                  className="flex space-x-1"
-                  animate={{
-                    opacity: [1, 0.5, 1],
-                  }}
-                  transition={{
-                    duration: 1.5,
-                    repeat: Infinity,
-                    ease: 'easeInOut',
-                  }}
-                >
-                  <motion.div className="h-2 w-6 bg-gray-600 rounded-full" style={{ borderRadius: '10px' }} />
-                  <motion.div
-                    className="h-2 w-6 bg-gray-600 rounded-full"
-                    style={{ borderRadius: '10px' }}
-                    animate={{ y: [0, -2, 0] }}
-                    transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut', delay: 0.3 }}
-                  />
-                  <motion.div
-                    className="h-2 w-6 bg-gray-600 rounded-full"
-                    style={{ borderRadius: '10px' }}
-                    animate={{ y: [0, -2, 0] }}
-                    transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut', delay: 0.6 }}
-                  />
-                </motion.div>
-                <span className="ml-2 text-sm text-muted-foreground"></span>
-              </div>
-            </div>
+        <div className="flex justify-center w-full py-2">
+          <div className="flex items-center space-x-2">
+            <motion.div
+              className="h-3 w-3 bg-primary rounded-full"
+              animate={{ y: [0, -4, 0] }}
+              transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            <motion.div
+              className="h-3 w-3 bg-primary rounded-full"
+              animate={{ y: [0, -4, 0] }}
+              transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut', delay: 0.3 }}
+            />
+            <motion.div
+              className="h-3 w-3 bg-primary rounded-full"
+              animate={{ y: [0, -4, 0] }}
+              transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut', delay: 0.6 }}
+            />
           </div>
+          <span className="ml-2 text-sm text-muted-foreground">Procesando...</span>
         </div>
       )}
     </>

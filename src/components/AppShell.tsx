@@ -9,6 +9,8 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import Image from 'next/image';
 import { ThemeToggle } from './ThemeToggle'; // Importamos el botón de tema
 import { LoadingProvider } from '@/contexts/LoadingContext';
+import { useArtifactPanel } from '@/contexts/ArtifactPanelContext';
+import { PanelRightOpen, PanelRightClose } from 'lucide-react';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -39,8 +41,9 @@ export function AppShell({ children }: AppShellProps) {
               <Button variant="ghost" size="icon" onClick={toggleSidebar}>
                 {isSidebarCollapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
               </Button>
-              <div className="ml-auto">
+              <div className="ml-auto flex gap-2">
                 <ThemeToggle />
+                <ArtifactPanelToggleButton />
               </div>
             </header>
             <main className="flex-grow overflow-y-auto bg-background">
@@ -65,8 +68,9 @@ export function AppShell({ children }: AppShellProps) {
               <Image src="/logo-simple.png" alt="Kognito Logo" width={50} height={50} className="mr-2" /> {/* Aumentado tamaño y añadido margen derecho */}
               {/* El texto que sigue al logo se beneficiaría de estar aquí o en un span para control de espaciado */}
             </div>
-            <div className="ml-auto">
+            <div className="ml-auto flex gap-2">
               <ThemeToggle />
+              <ArtifactPanelToggleButton />
             </div>
           </header>
           <main className="flex-grow">
@@ -75,5 +79,14 @@ export function AppShell({ children }: AppShellProps) {
         </div>
       )}
     </LoadingProvider>
+  );
+}
+
+function ArtifactPanelToggleButton() {
+  const { isVisible, toggleVisibility } = useArtifactPanel();
+  return (
+    <Button variant="outline" size="icon" onClick={toggleVisibility}>
+      {isVisible ? <PanelRightClose className="h-5 w-5" /> : <PanelRightOpen className="h-5 w-5" />}
+    </Button>
   );
 }

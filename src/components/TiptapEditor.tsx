@@ -5,8 +5,10 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
+import Mention from '@tiptap/extension-mention';
 import { Bold, Italic, Strikethrough, Code, Heading1, Heading2, List, ListOrdered, Quote, CheckSquare } from 'lucide-react';
 import { Button } from './ui/button';
+import { mentionSuggestion } from './mention-suggestion';
 
 // --- La Barra de Herramientas ---
 const Toolbar = ({ editor }: { editor: any }) => {
@@ -38,6 +40,21 @@ export function TiptapEditor({ content, onChange }: { content: string; onChange:
       TaskList,
       TaskItem.configure({
         nested: true,
+      }),
+      Mention.configure({
+        HTMLAttributes: {
+          class: 'mention',
+          target: '_blank',
+          rel: 'noopener noreferrer',
+        },
+        renderHTML({ node, options }) {
+          return [
+            'a',
+            { href: `/notes/edit/${node.attrs.id}`, ...options.HTMLAttributes },
+            `@${node.attrs.label ?? node.attrs.id}`,
+          ]
+        },
+        suggestion: mentionSuggestion,
       }),
     ],
     content: content,

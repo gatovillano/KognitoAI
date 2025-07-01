@@ -108,3 +108,11 @@
 .dark .prose a {
   color: #7dd3fc !important;
 }
+
+.mention {
+  color: hsl(var(--primary));
+  background-color: hsl(var(--primary) / 0.1);
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.3rem;
+  font-weight: 500;
+}

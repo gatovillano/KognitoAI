@@ -112,8 +112,12 @@ async def delete_analysis_endpoint(
     await db.commit()
     return {"message": f"Análisis con ID {req.task_id} eliminado correctamente."}
 
+class DashboardInsightsRequest(BaseModel):
+    all: bool = False
+
 @router.post("/dashboard-insights")
 async def get_dashboard_insights(
+    req: DashboardInsightsRequest,
     current_account_id: str = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db)
 ):
@@ -165,7 +169,11 @@ async def get_dashboard_insights(
     # Estos son los descubrimientos que la IA hace por sí sola.
     proactive_stmt = select(ProactiveInsight).where(
         ProactiveInsight.account_id == account_uuid
-    ).order_by(desc(ProactiveInsight.created_at)).limit(10)
+    ).order_by(desc(ProactiveInsight.created_at))
+
+    # Si no se solicitan todos, se aplica el límite para el dashboard
+    if not req.all:
+        proactive_stmt = proactive_stmt.limit(10)
     
     proactive_results = await db.execute(proactive_stmt)
     recent_proactive_insights = proactive_results.scalars().all()
@@ -399,7 +407,7 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
             if not llm_for_embeddings:
                 logger.error("No hay LLM disponible para generar embeddings.")
                 raise ValueError("LLM no disponible para análisis semántico.")
-                
+                º
             embeddings = []
             for topic in all_topics:
                 try:

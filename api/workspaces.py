@@ -113,6 +113,8 @@ class MessageResponse(BaseModel):
     text: str  # antes 'content'
     sender: str  # antes 'type', valores: 'human' o 'ai'
     created_at: datetime
+    image_base64: Optional[str] = None  # Campo para imágenes en base64
+    document_url: Optional[str] = None  # Campo para URL de documentos
 
 @router.get("/threads", response_model=List[ThreadResponse], summary="Listar hilos de chat del usuario")
 async def list_chat_threads(
@@ -228,6 +230,23 @@ async def get_thread_messages(
                 continue  # Ignorar mensajes de resumen internos
 
             msg_content = msg.content if hasattr(msg, 'content') else str(msg)
+            image_base64 = None
+            document_url = None
+            
+            # Manejar caso donde el contenido puede ser una lista o un objeto con imágenes o documentos
+            if isinstance(msg_content, list):
+                try:
+                    msg_content = str(msg_content)
+                except:
+                    msg_content = "Mensaje con contenido no legible"
+            elif isinstance(msg_content, dict):
+                if 'text' in msg_content:
+                    msg_content = msg_content['text']
+                if 'image_base64' in msg_content:
+                    image_base64 = msg_content['image_base64']
+                if 'document_url' in msg_content:
+                    document_url = msg_content['document_url']
+                    
             # Determinar el sender de forma robusta
             if isinstance(msg, HumanMessage):
                 sender = "user"
@@ -240,7 +259,9 @@ async def get_thread_messages(
             response_messages.append(MessageResponse(
                 text=msg_content,
                 sender=sender,
-                created_at=msg_created_at
+                created_at=msg_created_at,
+                image_base64=image_base64,
+                document_url=document_url
             ))
         logger.info(f"Mensajes recuperados para el hilo {thread_id}.")
         return response_messages
@@ -264,7 +285,7 @@ async def delete_chat_thread(
         raise HTTPException(status_code=404, detail="Hilo de chat no encontrado o no pertenece al usuario.")
     await db.delete(thread)
     await db.commit()
-    return JSONResponse(status_code=204, content=None)
+    return
 
 @router.get("/threads/{thread_id}", response_model=ThreadResponse, summary="Obtener un hilo de chat por ID")
 async def get_thread_by_id(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):

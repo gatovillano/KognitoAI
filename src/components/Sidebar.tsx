@@ -70,16 +70,14 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
     const fetchThreads = async () => {
       if (user) {
         try {
-          let url = '/api/threads';
-          if (activeWorkspaceId) {
-            url = `/api/threads?workspace_id=${activeWorkspaceId}`;
-          }
-          const response = await apiClient.get<ChatThread[]>(url);
+          // Se obtienen todos los hilos y se filtran en el cliente para mayor consistencia.
+          const response = await apiClient.get<ChatThread[]>('/api/threads');
           const allThreads = response.data;
-          // Filtrado adicional para asegurar que solo se muestren hilos del workspace activo
-          const filteredThreads = activeWorkspaceId 
+          
+          const filteredThreads = activeWorkspaceId
             ? allThreads.filter(thread => thread.workspace_id === activeWorkspaceId)
             : allThreads.filter(thread => !thread.workspace_id);
+            
           setThreads(filteredThreads.filter(thread => !thread.isPinned));
           setPinnedThreads(filteredThreads.filter(thread => thread.isPinned));
         } catch (error) {
@@ -134,6 +132,19 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
       setThreads((prevThreads) => [...prevThreads, { ...thread, isPinned: false }]);
     } catch (error) {
       console.error('Error unpinning thread:', error);
+    }
+  };
+
+  const handleDeleteThread = async (thread: ChatThread) => {
+    try {
+      await apiClient.delete(`/api/threads/${thread.id}`);
+      setPinnedThreads((prevPinned) => prevPinned.filter(t => t.id !== thread.id));
+      setThreads((prevThreads) => prevThreads.filter(t => t.id !== thread.id));
+      if (pathname === `/chat/${thread.id}`) {
+        router.push('/chat');
+      }
+    } catch (error) {
+      console.error('Error deleting thread:', error);
     }
   };
 
@@ -214,6 +225,15 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                     >
                       <Sparkles className="h-4 w-4 mr-2 text-yellow-500" />
                       <span>Nombrar</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleDeleteThread(thread);
+                      }}
+                    >
+                      <span className="text-red-500">Eliminar</span>
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>

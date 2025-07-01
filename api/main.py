@@ -1,7 +1,7 @@
 # api/main.py
 
 import logging
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -17,6 +17,8 @@ from api.teams import router as teams_router
 from core.config import settings
 from core.database import create_tables
 from core.llm_manager import initialize_llms
+from core.websocket_manager import connect_websocket, disconnect_websocket
+from utils.security import decode_access_token
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -77,6 +79,29 @@ async def log_405_errors(request, call_next):
     if response.status_code == 405:
         logger.warning(f"Method Not Allowed (405) for request: {request.method} {request.url}")
     return response
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket, token: str):
+    """Endpoint para manejar conexiones WebSocket."""
+    account_id = decode_access_token(token)
+    if not account_id:
+        await websocket.close(code=1008)
+        logger.warning("Intento de conexión WebSocket con token inválido.")
+        return
+
+    await connect_websocket(account_id, websocket)
+    try:
+        while True:
+            # Mantenemos la conexión abierta. El cliente no necesita enviar datos.
+            # El servidor enviará datos cuando sea necesario.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        logger.info(f"Cliente WebSocket desconectado (de forma limpia): {account_id}")
+    except Exception as e:
+        logger.error(f"Error en la conexión WebSocket para la cuenta {account_id}: {e}", exc_info=True)
+    finally:
+        await disconnect_websocket(account_id)
 
 @app.get("/", include_in_schema=False)
 async def serve_telegram_panel():
