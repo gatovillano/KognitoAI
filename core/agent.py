@@ -41,7 +41,7 @@ from sqlalchemy import update
 
 # --- Módulos del Proyecto ---
 from core.tools import get_all_langchain_tools
-from core.memory_manager import get_user_profile, get_relevant_memories
+from core.memory_manager import get_user_profile, get_relevant_memories, add_memory_to_vector_db
 from core.database import SessionLocal, Account, ChatThread, Workspace
 from utils.db_session import DBSession
 from core.config import settings
@@ -55,11 +55,16 @@ from sqlalchemy.orm import selectinload
 # --- Configuración del Logger ---
 logger = logging.getLogger(__name__)
 
+# Configuración de los prompts del agente
+DEFAULT_SYSTEM_PROMPT = settings.default_system_prompt
+
 # ==============================================================================
 # SECCIÓN 2: MANEJO DE CONTEXTO Y MEMORIA
 # ==============================================================================
 
-async def _get_user_context(account_id: str, user_message: str) -> str:
+# _get_user_context ya no es necesaria como función separada si se integra en create_and_run_agent
+# Pero si la usas en otro lugar, aquí está la versión que estaba en tu repo:
+async def _get_user_context(account_id: str, user_message: str, workspace_id: Optional[str] = None) -> str:
     """
     Recupera el perfil del usuario y las memorias relevantes para una consulta dada.
 
@@ -90,7 +95,8 @@ async def _get_user_context(account_id: str, user_message: str) -> str:
         if len(user_message.strip().split()) < 3 or any(kw in user_message.lower() for kw in ignore_keywords):
             relevant_memories = ""
         else:
-            relevant_memories = await get_relevant_memories(account_id, user_message, k=5)
+            # --- MODIFICACIÓN: Pasar workspace_id a get_relevant_memories ---
+            relevant_memories = await get_relevant_memories(account_id, user_message, k=5, workspace_id=workspace_id)
 
         if relevant_memories and "No se encontraron memorias relevantes" not in relevant_memories:
             user_context_parts.append("\nMemorias y Documentos Relevantes (Base de Conocimiento):")
@@ -104,7 +110,9 @@ async def _get_user_context(account_id: str, user_message: str) -> str:
 
 async def summarize_history_in_background(
     history_to_summarize: List[BaseMessage],
-    chat_message_history: PostgresChatMessageHistory
+    chat_message_history: PostgresChatMessageHistory,
+    account_id: str, # Añadir account_id para add_memory_to_vector_db
+    workspace_id: Optional[str] = None # Añadir workspace_id para add_memory_to_vector_db
 ):
     """
     Resume mensajes en segundo plano y añade un resumen al historial, pero NO borra los mensajes previos.
@@ -134,6 +142,16 @@ async def summarize_history_in_background(
         # Guardar el resumen como un mensaje más, sin borrar el historial
         await chat_message_history.aadd_messages([summary_message])
         logger.info("✅ Sumarización en segundo plano completada y resumen añadido al historial.")
+
+        # --- MODIFICACIÓN: Guardar resumen en memoria vectorial con workspace_id ---
+        await add_memory_to_vector_db(
+            account_id=account_id,
+            content=summary_content,
+            type="thread_summary",
+            workspace_id=workspace_id # Pasar workspace_id
+        )
+        logger.info(f"✅ Resumen del hilo guardado en memoria vectorial como 'thread_summary' para workspace {workspace_id}.")
+
     except Exception as e:
         logger.error(f"❌ Error en la tarea de sumarización: {e}", exc_info=True)
 
@@ -268,8 +286,20 @@ async def create_and_run_agent(
 ) -> str:
     """
     Crea y ejecuta el agente de Langchain con manejo explícito de memoria.
+    Si no se proporciona un workspace_id, intenta recuperarlo del ChatThread asociado.
     """
-    logger.info(f"--- Ejecutando agente para account_id: {account_id}, thread_id: {thread_id} (desde telegram_id: {telegram_id}) ---")
+    logger.info(f"--- Ejecutando agente para account_id: {account_id}, thread_id: {thread_id} (desde telegram_id: {telegram_id}), workspace_id: {workspace_id} ---")
+    # Si no se proporciona workspace_id, intentar recuperarlo del ChatThread
+    if workspace_id is None:
+        async with DBSession(SessionLocal) as db:
+            thread = await db.get(ChatThread, uuid.UUID(thread_id))
+            if thread and thread.workspace_id:
+                workspace_id = str(thread.workspace_id)
+                logger.info(f"Recuperado workspace_id {workspace_id} del ChatThread {thread_id}.")
+            else:
+                logger.info(f"No se encontró workspace_id para el ChatThread {thread_id}.")
+    else:
+        logger.info(f"Usando workspace_id proporcionado: {workspace_id}.")
     # --- 1. Gestión del Historial de Chat ---
     session_id = thread_id  # Usar siempre el thread_id como session_id
     if not settings.database_url:
@@ -367,7 +397,7 @@ async def create_and_run_agent(
     
     # Obtener el perfil y las memorias
     user_profile = await get_user_profile(account_id)
-    relevant_memories = await get_relevant_memories(account_id, user_message)
+    relevant_memories = await get_relevant_memories(account_id, user_message, k=5, workspace_id=workspace_id)
 
     # Construir la parte del perfil del prompt
     profile_info = []
@@ -440,6 +470,7 @@ async def create_and_run_agent(
     <b>Instrucciones Críticas de Identificación de Usuario:</b>
     - Para CUALQUIER herramienta que requiera el argumento `account_id`, DEBES usar este valor exacto: <b>{account_id}</b>.
     - Para CUALQUIER herramienta que requiera el argumento `telegram_id`, DEBES usar este valor exacto: <b>{telegram_id}</b>.
+    - Para CUALQUIER herramienta que requiera el argumento `workspace_id`, DEBES usar este valor exacto: <b>{workspace_id if workspace_id else 'None'}</b>. Si el valor es 'None', no intentes usarlo como UUID.
     """
     system_prompt_content = f"""
 {user_context_string}
@@ -520,7 +551,7 @@ async def create_and_run_agent(
 
         response = await agent_executor.ainvoke(
             input_data,
-            config={"configurable": {"account_id": account_id, "telegram_id": telegram_id, "thread_id": thread_id, "background_tasks": background_tasks}}
+            config={"configurable": {"account_id": account_id, "telegram_id": telegram_id, "thread_id": thread_id, "background_tasks": background_tasks, "workspace_id": workspace_id}}
         )
         final_output = response.get("output", "No pude procesar tu solicitud.")
 
@@ -549,7 +580,7 @@ async def create_and_run_agent(
             try:
                 response = await agent_executor.ainvoke(
                     input_data,
-                    config={"configurable": {"account_id": account_id, "telegram_id": telegram_id, "thread_id": thread_id, "background_tasks": background_tasks}}
+                    config={"configurable": {"account_id": account_id, "telegram_id": telegram_id, "thread_id": thread_id, "background_tasks": background_tasks, "workspace_id": workspace_id}}
                 )
                 final_output = response.get("output", "No pude procesar tu solicitud.")
             except Exception as e2:
@@ -568,7 +599,7 @@ async def create_and_run_agent(
     main_llm = get_main_llm()
     # Sumarizar solo para el contexto, pero sin borrar historial
     if main_llm and main_llm.get_num_tokens_from_messages(updated_full_history) > 3000:
-        asyncio.create_task(summarize_history_in_background(updated_full_history, chat_message_history))
+        asyncio.create_task(summarize_history_in_background(updated_full_history, chat_message_history, account_id, workspace_id))
     # Actualizar título si corresponde
     await update_thread_title_if_needed(session_id, updated_full_history)
     return (final_output)

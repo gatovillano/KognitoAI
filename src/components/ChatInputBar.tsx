@@ -57,8 +57,13 @@ export function ChatInputBar({
       const adjustHeight = () => {
         textArea.style.height = 'auto';
         const newHeight = textArea.scrollHeight;
-        if (newHeight !== textArea.clientHeight) {
+        const maxHeight = 120; // Altura máxima en píxeles
+        if (newHeight > maxHeight) {
+          textArea.style.height = `${maxHeight}px`;
+          textArea.style.overflowY = 'auto';
+        } else {
           textArea.style.height = `${newHeight}px`;
+          textArea.style.overflowY = 'hidden';
         }
       };
       adjustHeight();

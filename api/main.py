@@ -57,11 +57,13 @@ app.add_middleware(
 app.mount("/telegram_panel", StaticFiles(directory="telegram_panel"), name="telegram_panel")
 
 @app.on_event("startup")
+@app.on_event("startup")
 async def startup_event():
     """Se ejecuta una vez al arrancar el servidor. Inicializa recursos críticos."""
     logger.info("El servidor central está arrancando...")
     if not settings.jwt_secret_key:
         logger.error("ERROR FATAL: JWT_SECRET_KEY no está configurada. El servicio de autenticación no funcionará.")
+        raise RuntimeError("JWT_SECRET_KEY no está configurada")
     try:
         await create_tables()
         logger.info("Tablas de la base de datos verificadas/creadas.")
@@ -124,6 +126,8 @@ app.include_router(teams_router, prefix="/api", tags=["teams"])
 app.include_router(workspaces_router, prefix="/api", tags=["workspaces"])
 from api.analysis import router as analysis_router
 app.include_router(analysis_router, prefix="/api", tags=["analysis"])
+from api.github import router as github_router
+app.include_router(github_router, prefix="/api/github", tags=["github"])
 
 if __name__ == "__main__":
     import uvicorn

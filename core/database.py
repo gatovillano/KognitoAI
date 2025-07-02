@@ -207,10 +207,51 @@ class Workspace(Base):
     # Relaciones
     account = relationship("Account", back_populates="workspaces")
     chat_threads = relationship("ChatThread", back_populates="workspace", cascade="all, delete-orphan")
-    document_chunks = relationship("WorkspaceDocumentChunk", back_populates="workspace", cascade="all, delete-orphan")
+    
+    # Nueva relación para la asociación de colecciones
+    collection_associations = relationship("WorkspaceCollectionAssociation", back_populates="workspace", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Workspace(id={self.id}, name='{self.name}')>"
+
+class LangchainPgCollection(Base):
+    """
+    Mapea la tabla 'langchain_pg_collection' de LangChain para poder consultarla.
+    Esta tabla almacena los nombres y UUIDs de las colecciones de embeddings.
+    """
+    __tablename__ = "langchain_pg_collection"
+
+    uuid = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), unique=True, nullable=False)
+    cmetadata = Column(JSONB, nullable=True) # Metadatos de la colección, si los hay
+    
+    # Relación con la nueva tabla de asociación
+    workspace_associations = relationship("WorkspaceCollectionAssociation", back_populates="langchain_collection", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<LangchainPgCollection(uuid={self.uuid}, name='{self.name}')>"
+
+class WorkspaceCollectionAssociation(Base):
+    """
+    Tabla de unión para asociar colecciones de LangChain (topics) con Workspaces.
+    Permite que una colección (topic) esté en múltiples workspaces.
+    """
+    __tablename__ = "workspace_collection_associations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=False, index=True)
+    langchain_collection_id = Column(UUID(as_uuid=True), ForeignKey("langchain_pg_collection.uuid", ondelete='CASCADE'), nullable=False, index=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relaciones
+    workspace = relationship("Workspace", back_populates="collection_associations")
+    langchain_collection = relationship("LangchainPgCollection", back_populates="workspace_associations")
+
+    __table_args__ = (UniqueConstraint('workspace_id', 'langchain_collection_id', name='_workspace_langchain_collection_uc'),)
+
+    def __repr__(self):
+        return f"<WorkspaceCollectionAssociation(workspace_id={self.workspace_id}, langchain_collection_id={self.langchain_collection_id})>"
 
 
 # --- Modelos de Datos Refactorizados (ahora vinculados a Account y opcionalmente a Team) ---
@@ -388,29 +429,6 @@ class AnalysisTask(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
 
-class WorkspaceDocumentChunk(Base):
-    """
-    Representa los chunks de documentos y sus embeddings que pertenecen específicamente a un workspace.
-    """
-    __tablename__ = "workspace_document_chunks"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=False, index=True)
-    document_id = Column(UUID(as_uuid=True), nullable=False)
-    content = Column(Text, nullable=False)
-    embedding = Column(Vector(384), nullable=False)
-    chunk_order = Column(Integer, nullable=True)
-    file_name = Column(String(255), nullable=True, comment="Nombre del archivo del documento.")
-    title = Column(String(255), nullable=True, comment="Título del documento.")
-    topic = Column(String(255), nullable=True, comment="Tema o categoría del documento.")
-    author = Column(String(255), nullable=True, comment="Autor del documento.")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    # Relaciones
-    workspace = relationship("Workspace", back_populates="document_chunks")
-
-    def __repr__(self):
-        return f"<WorkspaceDocumentChunk(id={self.id}, workspace_id={self.workspace_id}, document_id={self.document_id})>"
 
 class MindmapTask(Base):
     """Guarda el estado y resultado de las tareas de generación de mapas mentales."""
@@ -430,6 +448,35 @@ class MindmapTask(Base):
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
+class GitHubDocument(Base):
+    """
+    Representa un documento individual de un repositorio de GitHub almacenado como conocimiento.
+    Permite rastrear el path y el SHA para actualizaciones.
+    """
+    __tablename__ = "github_documents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    repo_url = Column(String, nullable=False, index=True, comment="URL del repositorio de GitHub.")
+    file_path = Column(String, nullable=False, comment="Ruta del archivo dentro del repositorio.")
+    sha = Column(String, nullable=False, comment="SHA del contenido del archivo para detección de cambios.")
+    content = Column(Text, nullable=False, comment="Contenido del archivo.")
+    
+    # Opcional: vincular a un workspace o a una cuenta general
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=True, index=True)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=True, index=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
+    # Relaciones (opcionales, dependiendo de cómo se use)
+    workspace = relationship("Workspace", backref="github_documents")
+    account = relationship("Account", backref="github_documents")
+
+    __table_args__ = (UniqueConstraint('repo_url', 'file_path', name='_github_repo_file_uc'),)
+
+    def __repr__(self):
+        return f"<GitHubDocument(repo_url='{self.repo_url}', file_path='{self.file_path}')>"
 
 # ==============================================================================
 # SECCIÓN 2: FUNCIONES AUXILIARES DE LA BASE DE DATOS
@@ -454,6 +501,12 @@ async def create_tables():
         logger.error(f"❌ ERROR CRÍTICO al crear tablas de la base de datos: {e}", exc_info=True)
         raise
 
+async def get_db_session():
+    """
+    Dependencia de FastAPI para obtener una sesión de base de datos asíncrona.
+    """
+    async with DBSession(SessionLocal) as session:
+        yield session
 
 async def get_or_create_account_from_platform_id(
     platform: str, 

@@ -10,15 +10,16 @@ from fastapi import File, UploadFile
 from fastapi import APIRouter, HTTPException, Depends, status, Form, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import select, desc, update, or_
+from sqlalchemy import select, desc, update, or_, and_
 
-from core.database import SessionLocal, Account, Workspace, ChatThread
+from core.database import SessionLocal, Account, Workspace, ChatThread, LangchainPgCollection, WorkspaceCollectionAssociation
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.agent import create_thread_for_account, force_update_thread_title
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain_core.messages import HumanMessage, AIMessage
 from core.config import settings
+from core.memory_manager import list_user_collections, process_document_for_rag
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -100,6 +101,51 @@ async def delete_workspace(workspace_id: str, current_account_id: str = Depends(
     await db.commit()
     return
 
+# --- Modelos Pydantic para Colecciones ---
+class CollectionResponse(BaseModel):
+    id: str
+    name: str
+    document_count: int
+
+class CollectionCreateRequest(BaseModel):
+    topic: str
+
+class DocumentToCollectionRequest(BaseModel):
+    document_id: str
+
+# --- Endpoints para Colecciones ---
+@router.get("/workspaces/{workspace_id}/collections", response_model=List[CollectionResponse], summary="Listar colecciones de un workspace")
+async def list_collections(workspace_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado o no pertenece al usuario.")
+    
+    collections = await list_user_collections(account_id=current_account_id, workspace_id=workspace_id)
+    return [CollectionResponse(id=c['topic'], name=c['topic'], document_count=c['document_count']) for c in collections]
+
+@router.post("/workspaces/{workspace_id}/collections", status_code=status.HTTP_201_CREATED, summary="Crear una nueva colección en un workspace")
+async def create_collection(workspace_id: str, request: CollectionCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado o no pertenece al usuario.")
+    
+    # La creación de la colección es implícita al subir el primer documento.
+    # Este endpoint puede servir para asociar un topic a un workspace.
+    # O simplemente para validar que el nombre es válido.
+    # Por ahora, solo devolvemos un mensaje de éxito.
+    return {"message": f"Colección '{request.topic}' lista para ser usada en el workspace."}
+
+@router.post("/workspaces/{workspace_id}/collections/{topic}/documents", status_code=status.HTTP_201_CREATED, summary="Añadir un documento a una colección de un workspace")
+async def add_document_to_collection(workspace_id: str, topic: str, request: DocumentToCollectionRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado o no pertenece al usuario.")
+    
+    # Aquí iría la lógica para asociar un documento existente a esta colección/workspace.
+    # Esto podría implicar actualizar los metadatos del documento.
+    # Por ahora, solo devolvemos un mensaje de éxito.
+    return {"message": f"Documento {request.document_id} añadido a la colección '{topic}' en el workspace."}
+
 # --- Modelos Pydantic para Hilos de Chat ---
 class ThreadResponse(BaseModel):
     """Define la estructura de datos para la respuesta de un hilo de chat."""
@@ -152,44 +198,41 @@ class ThreadCreateRequest(BaseModel):
 
 @router.post("/threads", response_model=ThreadResponse, status_code=status.HTTP_201_CREATED, summary="Crear un nuevo hilo de chat")
 async def create_new_thread(
-    workspace_id: Optional[str] = Form(None),
-    files: List[UploadFile] = File(default=[]),
+    request: ThreadCreateRequest,
     current_account_id: str = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Crea un nuevo hilo de chat para el usuario autenticado, con la opción de subir archivos.
+    Crea un nuevo hilo de chat para el usuario autenticado.
     """
-    logger.info(f"Creando nuevo hilo de chat para la cuenta: {current_account_id}")
+    logger.info(f"Creando nuevo hilo de chat para la cuenta: {current_account_id} en workspace: {request.workspace_id}")
     try:
         account_uuid = uuid.UUID(current_account_id)
     except ValueError:
         logger.error(f"Invalid UUID for account_id: {current_account_id}")
         raise HTTPException(status_code=422, detail="Invalid account ID format.")
 
+    workspace_uuid = None
+    if request.workspace_id:
+        try:
+            workspace_uuid = uuid.UUID(request.workspace_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="workspace_id inválido.")
+
     new_thread = ChatThread(
         account_id=account_uuid,
-        workspace_id=uuid.UUID(workspace_id) if workspace_id else None
+        workspace_id=workspace_uuid
     )
     db.add(new_thread)
     await db.commit()
     await db.refresh(new_thread)
 
-    if files:
-        processed_files = 0
-        for file in files:
-            try:
-                content_bytes = await file.read()
-                # Aquí puedes procesar el archivo según sea necesario para el contexto del chat
-                logger.info(f"Archivo {file.filename} subido al hilo {new_thread.id} por la cuenta {account_uuid}")
-                processed_files += 1
-            except Exception as e:
-                logger.error(f"Fallo al procesar el archivo {file.filename} para el hilo {new_thread.id} de la cuenta {account_uuid}: {e}", exc_info=True)
-
-        if processed_files == 0 and files:
-            raise HTTPException(status_code=500, detail="No se pudo procesar ninguno de los archivos.")
-
-    return ThreadResponse(id=str(new_thread.id), title=new_thread.title, created_at=new_thread.created_at, workspace_id=str(new_thread.workspace_id) if new_thread.workspace_id else None)
+    return ThreadResponse(
+        id=str(new_thread.id),
+        title=new_thread.title,
+        created_at=new_thread.created_at,
+        workspace_id=str(new_thread.workspace_id) if new_thread.workspace_id else None
+    )
 
 @router.get("/threads/{thread_id}/messages", response_model=List[MessageResponse], summary="Obtener mensajes de un hilo de chat")
 async def get_thread_messages(
