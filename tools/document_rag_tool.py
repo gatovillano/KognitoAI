@@ -9,6 +9,7 @@ vectorial del usuario. Es útil cuando un usuario sube un documento y desea que 
 """
 
 import logging
+import os
 from typing import Any, Optional, Dict
 
 from langchain_core.tools import BaseTool
@@ -65,6 +66,7 @@ class DocumentRAGTool(BaseTool):
     ) -> str:
         """
         Use the tool asynchronously. Processes the document text for RAG storage.
+        Detects if the content is code based on file extension or content patterns and sets the metadata type accordingly.
         """
         logger.info(f"📊 DocumentRAGTool _arun started for file: {file_name}, topic: {topic}, metadata: {metadata}")
 
@@ -73,7 +75,21 @@ class DocumentRAGTool(BaseTool):
             return "Error: User ID not available to process document. Cannot proceed."
 
         metadata_to_pass = metadata if metadata else {}
-
+        
+        # Detect if the file is likely code based on extension
+        code_extensions = {'.py', '.java', '.cpp', '.c', '.js', '.ts', '.html', '.css', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala', '.sh', '.bash'}
+        file_ext = os.path.splitext(file_name)[1].lower()
+        is_code = file_ext in code_extensions
+        
+        # If not detected by extension, check content for code patterns (e.g., presence of keywords like 'function', 'class', 'def', etc.)
+        if not is_code and extracted_text:
+            code_keywords = ['function ', 'class ', 'def ', 'import ', 'from ', 'export ', 'const ', 'let ', 'var ', 'if (', 'for (', 'while (', 'return ']
+            extracted_text_lower = extracted_text.lower()
+            is_code = any(keyword in extracted_text_lower for keyword in code_keywords) and '{' in extracted_text and '}' in extracted_text
+        
+        # Set metadata type based on detection
+        metadata_to_pass['type'] = 'code' if is_code else 'document_chunk'
+        
         logger.info(f"💾 Calling process_document_for_rag for user {account_id}, file '{file_name}', topic '{topic}', metadata: {metadata_to_pass}")
         
         try:
@@ -86,7 +102,7 @@ class DocumentRAGTool(BaseTool):
             )
 
             if chunks_count > 0:
-                logger.info(f"✅ RAG processing successful for {file_name}. {chunks_count} chunks added.")
+                logger.info(f"✅ RAG processing successful for {file_name}. {chunks_count} chunks added as {'code' if is_code else 'document_chunk'}.")
                 return f"Document '{file_name}' processed and {chunks_count} chunks added to your knowledge base under the topic '{topic}'. You can now ask me questions about this document."
             else:
                 logger.error(f"❌ RAG processing failed for {file_name}. No chunks added.")
@@ -95,6 +111,6 @@ class DocumentRAGTool(BaseTool):
             logger.error(f"❌ Error in DocumentRAGTool for user {account_id}: {e}", exc_info=True)
             return f"An error occurred while processing the document: {e}"
 
-    def _run(self, **kwargs: Any) -> str:
-        logger.error("❌ Synchronous _run method of DocumentRAGTool was called! This should not happen.")
-        raise NotImplementedError("DocumentRAGTool does not support synchronous execution.")
+def _run(self, **kwargs: Any) -> str:
+            logger.error("❌ Synchronous _run method of DocumentRAGTool was called! This should not happen.")
+            raise NotImplementedError("DocumentRAGTool does not support synchronous execution.")

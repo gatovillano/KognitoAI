@@ -14,3 +14,6 @@ credentials
 .env.local
 .vscode/
 .next
+migrations
+run_migration.sh
+debug_metadata.py

@@ -100,37 +100,61 @@ async def upload_chat_file_endpoint(
         raise HTTPException(status_code=500, detail="No se pudo procesar ninguno de los archivos.")
     return {"message": f"{processed_files}/{len(files)} archivo(s) subido(s) y procesado(s) para el contexto del hilo {thread_id}."}
 
+class ListDocumentsRequest(BaseModel):
+    """Define la estructura para filtrar documentos opcionalmente por topic."""
+    topic: Optional[str] = None
+
 @router.post("/list-documents")  # Cambiado a POST porque el frontend web lo usa con FormData
-async def list_documents_endpoint(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
-    """Lista los documentos subidos por el usuario, incluyendo documentos compartidos con equipos. Protegido por JWT."""
+async def list_documents_endpoint(
+    request: Optional[ListDocumentsRequest] = None,
+    current_account_id: str = Depends(get_current_account_id), 
+    db: AsyncSession = Depends(get_db)
+):
+    """Lista los documentos subidos por el usuario, incluyendo documentos compartidos con equipos. 
+    Opcionalmente filtra por topic específico. Protegido por JWT."""
     account_id_uuid = uuid.UUID(current_account_id)
+    topic_filter = request.topic if request else None
     
-    # Obtener documentos personales
-    personal_docs = await list_user_documents(str(account_id_uuid))
-    logger.info(f"Personal documents for account {current_account_id}: {len(personal_docs)} documents found")
+    # Obtener documentos personales (con filtro opcional por topic)
+    personal_docs = await list_user_documents(str(account_id_uuid), topic=topic_filter)
+    logger.info(f"Personal documents for account {current_account_id} (topic: {topic_filter}): {len(personal_docs)} documents found")
     
-    # Obtener equipos del usuario
+    # Obtener equipos del usuario (optimizado)
     member_teams_result = await db.execute(
         select(TeamMember).where(TeamMember.account_id == account_id_uuid)
     )
     member_teams = member_teams_result.scalars().all()
     team_ids = [str(team.team_id) for team in member_teams]
-    logger.info(f"Teams for account {current_account_id}: {team_ids}")
     
-    # Obtener documentos de equipos
+    # Solo log si hay equipos
+    if team_ids:
+        logger.info(f"⚠️ TEAMS: Usuario {current_account_id} pertenece a {len(team_ids)} equipos: {team_ids}")
+    else:
+        logger.info(f"✅ NO TEAMS: Usuario {current_account_id} no pertenece a ningún equipo")
+    
+    # Obtener documentos de equipos solo si los hay
     team_docs = []
-    for team_id in team_ids:
-        team_docs_for_id = await list_user_documents(
-            account_id=str(account_id_uuid),
-            team_id=team_id
-        )
-        logger.info(f"Team documents for team {team_id} and account {current_account_id}: {len(team_docs_for_id)} documents found")
-        team_docs.extend(team_docs_for_id)
+    if team_ids:
+        for team_id in team_ids:
+            team_docs_for_id = await list_user_documents(
+                account_id=str(account_id_uuid),
+                team_id=team_id,
+                topic=topic_filter
+            )
+            if team_docs_for_id:  # Solo log si hay documentos
+                logger.info(f"Team documents for team {team_id}: {len(team_docs_for_id)} documents found")
+            team_docs.extend(team_docs_for_id)
     
     # Combinar documentos personales y de equipos, eliminando duplicados por file_name
     combined_docs = {doc['file_name']: doc for doc in personal_docs + team_docs}.values()
-    logger.info(f"Total combined documents for account {current_account_id}: {len(combined_docs)} documents")
-    return list(combined_docs)
+    combined_docs_list = list(combined_docs)
+    
+    # Debug logging para investigar problema de filtrado
+    logger.info(f"🔍 DEBUG: Total combined documents for account {current_account_id}: {len(combined_docs_list)} documents")
+    for doc in combined_docs_list:
+        logger.info(f"🔍 DEBUG: Documento - file_name: '{doc.get('file_name')}', topic: '{doc.get('topic')}'")
+    
+    return combined_docs_list
 
 @router.post("/delete-document")  # Cambiado a POST porque el frontend web lo usa con FormData
 async def delete_document_endpoint(current_account_id: str = Depends(get_current_account_id), file_name: str = Form(...), db: AsyncSession = Depends(get_db)):
@@ -225,28 +249,30 @@ async def create_collection_endpoint(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Crea una nueva colección vacía en la base de datos.
+    Crea una nueva colección vacía usando la tabla UserDocumentTopic.
     """
     topic = request.get("topic")
+    description = request.get("description")
+    team_id = request.get("teamId")
+    workspace_id = request.get("workspaceId")
+    
     if not topic or not isinstance(topic, str) or len(topic.strip()) < 3:
         raise HTTPException(status_code=400, detail="El nombre de la colección debe ser una cadena de al menos 3 caracteres.")
 
-    account_id_uuid = uuid.UUID(current_account_id)
-    # Usar el topic como nombre de la colección, asegurando unicidad por usuario
-    collection_name = f"collection_{account_id_uuid}_{topic.lower().replace(' ', '_')}"
-
     try:
-        # Verificar si la colección ya existe
-        existing_collection = await db.scalar(
-            select(LangchainPgCollection).where(LangchainPgCollection.name == collection_name)
+        from core.memory_manager import create_empty_collection
+        
+        success = await create_empty_collection(
+            account_id=current_account_id,
+            topic_name=topic.strip(),
+            description=description,
+            workspace_id=workspace_id,
+            team_id=team_id
         )
-        if existing_collection:
-            raise HTTPException(status_code=400, detail=f"La colección '{topic}' ya existe.")
-
-        # Crear una nueva colección
-        new_collection = LangchainPgCollection(name=collection_name, cmetadata={"topic": topic, "account_id": str(account_id_uuid)})
-        db.add(new_collection)
-        await db.commit()
+        
+        if not success:
+            raise HTTPException(status_code=400, detail=f"La colección '{topic}' ya existe o no se pudo crear.")
+        
         return {"message": f"Colección '{topic}' creada exitosamente."}
     except Exception as e:
         logger.error(f"Error al crear la colección para la cuenta {current_account_id}: {e}", exc_info=True)
@@ -261,6 +287,55 @@ async def list_collections_endpoint(current_account_id: str = Depends(get_curren
     """
     collections = await list_user_collections(current_account_id)
     return collections
+
+class DeleteCollectionRequest(BaseModel):
+    """Define la estructura para eliminar una colección específica."""
+    topic: str
+
+@router.post("/delete-collection", summary="Eliminar una colección específica")
+async def delete_collection_endpoint(
+    request: DeleteCollectionRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Elimina una colección específica y todos sus documentos asociados.
+    """
+    try:
+        from core.memory_manager import delete_collection
+        
+        success = await delete_collection(
+            account_id=current_account_id,
+            topic_name=request.topic
+        )
+        if not success:
+            raise HTTPException(status_code=404, detail=f"La colección '{request.topic}' no se encontró o ya fue eliminada.")
+        
+        return {"message": f"Colección '{request.topic}' y todos sus documentos han sido eliminados."}
+    except Exception as e:
+        logger.error(f"Error al eliminar la colección '{request.topic}' para la cuenta {current_account_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error al eliminar la colección.")
+
+# TODO: Implementar endpoint específico para documentos por topic
+# class ListDocumentsByTopicRequest(BaseModel):
+#     """Define la estructura para obtener documentos de una colección específica."""
+#     topic: str
+
+# @router.post("/list-documents-by-topic", summary="Listar documentos de una colección específica")
+# async def list_documents_by_topic_endpoint(
+#     request: ListDocumentsByTopicRequest,
+#     current_account_id: str = Depends(get_current_account_id),
+#     db: AsyncSession = Depends(get_db)
+# ):
+#     """
+#     Lista los documentos de una colección (topic) específica del usuario.
+#     """
+#     try:
+#         documents = await list_documents_by_topic(current_account_id, request.topic)
+#         return documents
+#     except Exception as e:
+#         logger.error(f"Error al listar documentos del topic '{request.topic}' para cuenta {current_account_id}: {e}", exc_info=True)
+#         raise HTTPException(status_code=500, detail="Error al obtener documentos de la colección.")
 
 @router.get("/extract-title-status", summary="Consultar estado del proceso de extracción de títulos")
 async def get_extract_title_status(current_account_id: str = Depends(get_current_account_id)):

@@ -8,7 +8,41 @@ import { sentImage } from '@/lib/imageUtils';
 import { toast } from 'sonner';
 import Prism from 'prismjs';
 import 'prismjs/themes/prism-tomorrow.css';
-import 'prismjs/components/prism-docker'; // Importar el lenguaje Docker
+
+// Importar lenguajes de programación comunes
+import 'prismjs/components/prism-docker';
+import 'prismjs/components/prism-javascript';
+import 'prismjs/components/prism-typescript';
+import 'prismjs/components/prism-python';
+import 'prismjs/components/prism-java';
+import 'prismjs/components/prism-csharp';
+import 'prismjs/components/prism-c';
+import 'prismjs/components/prism-cpp';
+import 'prismjs/components/prism-php';
+import 'prismjs/components/prism-ruby';
+import 'prismjs/components/prism-go';
+import 'prismjs/components/prism-rust';
+import 'prismjs/components/prism-swift';
+import 'prismjs/components/prism-kotlin';
+import 'prismjs/components/prism-scala';
+import 'prismjs/components/prism-sql';
+import 'prismjs/components/prism-bash';
+import 'prismjs/components/prism-powershell';
+import 'prismjs/components/prism-json';
+import 'prismjs/components/prism-yaml';
+import 'prismjs/components/prism-xml-doc';
+import 'prismjs/components/prism-markdown';
+import 'prismjs/components/prism-css';
+import 'prismjs/components/prism-scss';
+import 'prismjs/components/prism-less';
+import 'prismjs/components/prism-jsx';
+import 'prismjs/components/prism-tsx';
+import 'prismjs/components/prism-lua';
+import 'prismjs/components/prism-r';
+import 'prismjs/components/prism-matlab';
+import 'prismjs/components/prism-dart';
+import 'prismjs/components/prism-elixir';
+import 'prismjs/components/prism-haskell';
 
 interface MarkdownRendererProps {
   content: string;
@@ -25,12 +59,46 @@ const _MarkdownRenderer = ({ content, fontSize = 'text-base' }: MarkdownRenderer
       // Configure marked with a custom highlighter
       const renderer = new marked.Renderer();
       renderer.code = function({ text, lang }) {
-        let language = lang || 'markup';
-        // Mapear 'dockerfile' a 'docker' para Prism.js
-        if (language === 'dockerfile') {
-          language = 'docker';
+        let language = lang ? lang.toLowerCase() : 'markup';
+        
+        // Mapeo de alias de lenguajes para mayor compatibilidad
+        const languageMap: Record<string, string> = {
+          'dockerfile': 'docker',
+          'js': 'javascript',
+          'ts': 'typescript',
+          'py': 'python',
+          'cs': 'csharp',
+          'c++': 'cpp',
+          'sh': 'bash',
+          'shell': 'bash',
+          'ps1': 'powershell',
+          'yml': 'yaml',
+          'xml': 'xml-doc',
+          'html': 'markup',
+          'md': 'markdown',
+          'rs': 'rust',
+          'rb': 'ruby',
+          'kt': 'kotlin',
+          'jl': 'julia',
+          'vim': 'vim',
+          'tex': 'latex',
+          'r': 'r',
+          'm': 'matlab'
+        };
+        
+        // Aplicar mapeo si existe
+        if (languageMap[language]) {
+          language = languageMap[language];
         }
-        const highlightedCode = Prism.highlight(text, Prism.languages[language] || Prism.languages.markup, language);
+        
+        // Verificar si el lenguaje está disponible en Prism
+        let prismLanguage = Prism.languages[language];
+        if (!prismLanguage) {
+          console.warn(`Language '${language}' not found in Prism, falling back to markup.`);
+          prismLanguage = Prism.languages.markup;
+        }
+        const highlightedCode = Prism.highlight(text, prismLanguage, language);
+        
         return `<pre><code class="language-${language}">${highlightedCode}</code></pre>`;
       };
       marked.setOptions({

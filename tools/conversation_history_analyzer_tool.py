@@ -87,7 +87,8 @@ class ConversationHistoryAnalyzerTool(BaseTool):
             await self.analyze_conversation_history(account_id, thread_ids)
             return "Análisis de historial de conversaciones completado. Los resultados han sido guardados en tu perfil."
 
-    async def analyze_conversation_history(self, account_id: str, thread_ids: Optional[List[str]] = None):
+
+    async def analyze_conversation_history(self, account_id: str, thread_ids: Optional[List[str]] = None) -> None:
         """
         Analiza el historial de conversaciones del usuario y actualiza su perfil con los intereses y temas clave extraídos.
 
@@ -112,13 +113,15 @@ class ConversationHistoryAnalyzerTool(BaseTool):
 
                 if not threads:
                     logger.warning(f"No se encontraron hilos de chat para la cuenta '{account_id}'.")
-                    return
+
+                    return None
 
                 # Obtener el historial de mensajes de cada hilo
                 all_messages = []
                 if settings.database_url is None:
                     logger.error(f"Configuración de base de datos faltante para la cuenta '{account_id}'.")
-                    return
+
+                    return None
                 db_sync_url = settings.database_url.replace("+psycopg", "")
                 for thread in threads:
                     history = PostgresChatMessageHistory(
@@ -131,7 +134,8 @@ class ConversationHistoryAnalyzerTool(BaseTool):
 
                 if not all_messages:
                     logger.warning(f"No se encontraron mensajes en los hilos de chat para la cuenta '{account_id}'.")
-                    return
+
+                    return None
 
                 # Preparar el texto para análisis
                 conversation_text = "\n".join(
@@ -142,7 +146,8 @@ class ConversationHistoryAnalyzerTool(BaseTool):
                 llm = get_fast_llm()
                 if not llm:
                     logger.error(f"No hay LLM disponible para analizar el historial de la cuenta '{account_id}'.")
-                    return
+
+                    return None
 
                 prompt = (
                     "Analiza el siguiente historial de conversaciones y extrae los intereses y temas clave del usuario. "
@@ -179,9 +184,11 @@ class ConversationHistoryAnalyzerTool(BaseTool):
                     logger.info(f"Perfil actualizado con intereses y temas clave para la cuenta '{account_id}'.")
                 else:
                     logger.warning(f"No se extrajeron intereses ni temas clave para la cuenta '{account_id}'.")
+                return None
 
         except Exception as e:
             logger.error(f"Error durante el análisis de historial de conversaciones para la cuenta '{account_id}': {e}", exc_info=True)
+            return None
 
     def _extract_message_content(self, msg: Any) -> str:
         """

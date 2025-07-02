@@ -131,6 +131,54 @@ export function CommonChat({ threadId }: CommonChatProps) {
     [playingMessageIndex]
   );
 
+  const handleStreamingResponse = useCallback(
+    async (requestData: any, userMessage: ChatMessageType, signal?: AbortSignal) => {
+      // Crear mensaje AI inicial vacío
+      const initialAiMessage = {
+        text: '',
+        sender: 'ai' as const,
+        created_at: new Date().toISOString(),
+        image_base64: '',
+        document_url: ''
+      };
+      
+      setMessages((prev) => [...prev, initialAiMessage]);
+
+      try {
+        const response = await apiClient.post('/api/chat', requestData);
+        const data = response.data;
+        const aiResponse = data.response_text;
+
+        setMessages((prev) => {
+          const newMessages = [...prev];
+          const lastMessage = newMessages[newMessages.length - 1];
+          if (lastMessage && lastMessage.sender === 'ai') {
+            lastMessage.text = aiResponse;
+            lastMessage.image_base64 = data.image_base64 || '';
+            lastMessage.document_url = data.document_url || '';
+          }
+          return newMessages;
+        });
+
+        if (data.image_base64) {
+          setArtifacts((prev) => [...prev, {
+            id: Date.now(),
+            content: data.image_base64,
+            type: 'svg',
+            version: 1
+          }]);
+        }
+
+        // Historial se actualiza automáticamente vía estado
+
+      } catch (error: any) {
+        console.error('Error en la solicitud de chat:', error);
+        throw error;
+      }
+    },
+    [threadId, artifacts]
+  );
+
   const handlePaste = useCallback((e: ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (items) {
@@ -212,37 +260,17 @@ export function CommonChat({ threadId }: CommonChatProps) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-        const response = await apiClient.post(
-          '/api/chat',
-          {
-            thread_id: threadId,
-            account_id: user.id,
-            user_message: messageToSend,
-            image_base64: imageBase64,
-            document_url: documentUrl,
-            mode: mode,
-          },
-          { signal: controller.signal }
-        );
+        // Usar streaming para respuestas más rápidas
+        await handleStreamingResponse({
+          thread_id: threadId,
+          account_id: user.id,
+          user_message: messageToSend,
+          image_base64: imageBase64,
+          document_url: documentUrl,
+          mode: mode,
+        }, userMessage, controller.signal);
 
         clearTimeout(timeoutId);
-
-        const aiMessage = {
-          text: response.data.response_text,
-          sender: 'ai' as const,
-          created_at: new Date().toISOString(),
-          image_base64: response.data.image_base64 || '',
-          document_url: response.data.document_url || ''
-        };
-        setMessages((prev) => [...prev, aiMessage]);
-
-        const responseText = response.data.response_text;
-        if (responseText.includes('Mapa mental generado con éxito. ID de tarea:')) {
-          const taskIdMatch = responseText.match(/ID de tarea: ([a-f0-9-]+)\./);
-          if (taskIdMatch && taskIdMatch[1]) {
-            setBackgroundTasks((prev) => [...prev, { taskId: taskIdMatch[1], type: 'mindmap' }]);
-          }
-        }
       } catch (error: any) {
         console.error('Error sending message:', error);
         let errorText = 'Lo siento, ocurrió un error al procesar tu mensaje.';
@@ -424,13 +452,13 @@ export function CommonChat({ threadId }: CommonChatProps) {
               setMessages((prev) => [...prev, completionMessage]);
             }
             setBackgroundTasks((prev) => prev.filter((t) => t.taskId !== task.taskId));
-            toast.success('Mapa mental completado', { description: 'La generación del mapa mental ha finalizado.' });
+            toast.success('Mapa mental completado: La generación del mapa mental ha finalizado.');
           } else if (response.data.status === 'failed') {
             const errorMsg = response.data.error || 'Error desconocido al generar el mapa mental.';
             const errorMessage = { text: `Error al generar el mapa mental: ${errorMsg}`, sender: 'ai' as const, created_at: new Date().toISOString() };
             setMessages((prev) => [...prev, errorMessage]);
             setBackgroundTasks((prev) => prev.filter((t) => t.taskId !== task.taskId));
-            toast.error('Error en mapa mental', { description: errorMsg });
+            toast.error('Error en mapa mental: ' + errorMsg);
           }
         } catch (error) {
           console.error('Error checking task status:', error);

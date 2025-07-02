@@ -13,15 +13,13 @@ y la hace reutilizable y robusta dentro de un backend centralizado.
 """
 
 import logging
-import asyncio # AGREGAR ESTA LÍNEA
-from typing import Type, Optional, Any
-from pydantic.v1 import BaseModel, Field
+import asyncio
+from typing import Type, Any
+from pydantic import BaseModel, Field
 from langchain.tools import BaseTool
 
-# Importa la función de lógica de notas. (Esta función también deberá ser
-# refactorizada para aceptar account_id en lugar de telegram_id).
+# Importa la función de lógica de notas.
 from core.notes_manager import add_note
-from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger
 
 # Configuración del logger para este módulo
 logger = logging.getLogger(__name__)
@@ -35,15 +33,15 @@ class AddNoteInput(BaseModel):
     # El contenido principal de la nota. Es un campo requerido.
     content: str = Field(description="El contenido principal de la nota a guardar.")
     
-    # El título opcional para la nota.
-    title: Optional[str] = Field(None, description="Un título opcional para la nota.")
-    
-    # La categoría opcional para organizar la nota.
-    category: Optional[str] = Field(None, description="Una categoría opcional para la nota, como 'Trabajo', 'Personal', 'Ideas'.")
-    
     # ¡EL CAMBIO CLAVE! Ahora requerimos el identificador universal de la cuenta.
     # El LLM debe recibir este ID del contexto de la conversación y pasarlo aquí.
     account_id: str = Field(description="El identificador universal (UUID) de la cuenta del usuario.")
+    
+    # El título opcional para la nota.
+    title: str = Field(default="", description="Un título opcional para la nota.")
+    
+    # La categoría opcional para organizar la nota.
+    category: str = Field(default="General", description="Una categoría opcional para la nota, como 'Trabajo', 'Personal', 'Ideas'.")
 
 
 class AddNoteTool(BaseTool):
@@ -63,8 +61,8 @@ class AddNoteTool(BaseTool):
         self,
         account_id: str,
         content: str,
-        title: Optional[str] = None,
-        category: Optional[str] = None,
+        title: str = "",
+        category: str = "General",
     ) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
@@ -75,8 +73,8 @@ class AddNoteTool(BaseTool):
         Args:
             account_id: El UUID de la cuenta del usuario.
             content: El texto de la nota.
-            title: El título opcional.
-            category: La categoría opcional.
+            title: El título de la nota (vacío si no se proporciona).
+            category: La categoría de la nota (por defecto "General").
 
         Returns:
             Una cadena de texto confirmando el resultado de la operación.
@@ -85,24 +83,20 @@ class AddNoteTool(BaseTool):
             return "Error: Se requiere el ID de la cuenta y el contenido para guardar una nota."
         
         try:
-            result_message = await add_note(
+            result_dict = await add_note(
                 account_id=account_id,
                 content=content,
-                title=title or "",
-                category=category or ""
+                title=title if title else None,
+                category=category if category else None
             )
             logger.info(f"Nota añadida exitosamente para la cuenta {account_id}.")
-            # Llamada al trigger proactivo tras añadir la nota
-            new_entry = {
-                'account_id': account_id,
-                'content': content,
-                'title': title,
-                'category': category,
-                'type': 'note'
-            }
-            # CORRECCIÓN: Programar como tarea en segundo plano
-            asyncio.create_task(proactive_knowledge_linker_trigger(new_entry))
-            return result_message
+            
+            # Crear mensaje de confirmación a partir del diccionario retornado
+            note_title = result_dict.get('title', 'Sin título')
+            note_id = result_dict.get('id')
+            result_message = f"✅ Nota guardada exitosamente con ID {note_id}: '{note_title}'"
+            
+            return result_message 
         except Exception as e:
             logger.error(f"Error en AddNoteTool para la cuenta {account_id}: {e}", exc_info=True)
 

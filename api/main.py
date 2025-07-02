@@ -10,6 +10,7 @@ import os
 from api.auth import router as auth_router
 from api.users import router as users_router
 from api.chat import router as chat_router
+from api.chat_streaming import router as chat_streaming_router
 from api.documents import router as documents_router
 from api.notes import router as notes_router
 from api.agenda import router as agenda_router
@@ -56,7 +57,7 @@ app.add_middleware(
 # Montar la carpeta 'telegram_panel' para servir archivos estáticos
 app.mount("/telegram_panel", StaticFiles(directory="telegram_panel"), name="telegram_panel")
 
-@app.on_event("startup")
+
 @app.on_event("startup")
 async def startup_event():
     """Se ejecuta una vez al arrancar el servidor. Inicializa recursos críticos."""
@@ -117,6 +118,7 @@ async def serve_telegram_panel():
 app.include_router(auth_router, prefix="/api", tags=["auth"])
 app.include_router(users_router, prefix="/api", tags=["users"])
 app.include_router(chat_router, prefix="/api", tags=["chat"])
+app.include_router(chat_streaming_router, prefix="/api", tags=["chat-streaming"])
 app.include_router(documents_router, prefix="/api", tags=["documents"])
 app.include_router(notes_router, prefix="/api", tags=["notes"])
 app.include_router(agenda_router, prefix="/api", tags=["agenda"])
