@@ -7,7 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { ArrowLeft, FolderKanban, Plus, MessageSquare, BookMarked, MoreVertical, Sparkles } from 'lucide-react';
+import { ArrowLeft, Bot, Plus, MessageSquare, BookMarked, MoreVertical, Sparkles } from 'lucide-react';
+import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import apiClient from '@/lib/api';
 
 interface ChatThread {
@@ -20,8 +21,10 @@ interface ChatThread {
 interface Collection {
   id: string;
   title: string;
+  topic?: string;
   workspace_id: string;
   created_at: string;
+  description?: string;
 }
 
 interface Workspace {
@@ -36,11 +39,17 @@ export default function WorkspaceDashboard() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [chats, setChats] = useState<ChatThread[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
+  const [chatMessages, setChatMessages] = useState<{ [key: string]: any[] }>({});
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [selectedChat, setSelectedChat] = useState<ChatThread | null>(null);
   const [newChatTitle, setNewChatTitle] = useState('');
+  const [collectionDialogOpen, setCollectionDialogOpen] = useState(false);
+  const [renameCollectionDialogOpen, setRenameCollectionDialogOpen] = useState(false);
+  const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
+  const [newCollectionTitle, setNewCollectionTitle] = useState('');
+  const [newCollectionDescription, setNewCollectionDescription] = useState('');
 
   useEffect(() => {
     const fetchWorkspaceData = async () => {
@@ -51,12 +60,22 @@ export default function WorkspaceDashboard() {
 
         // Obtener chats asociados con el workspace
         const chatsResponse = await apiClient.get(`/api/threads?workspace_id=${workspaceId}`);
-        setChats(chatsResponse.data);
+        const chatsData = chatsResponse.data;
+        setChats(chatsData);
 
-        // Obtener colecciones asociadas con el workspace (asumiendo que existe un endpoint)
-        // NOTA: Las colecciones generales de "Gestión de Documentos" no deben formar parte del contexto del LLM en este workspace.
-        // Esto requiere ajustes en el backend para asegurar que solo las colecciones específicas del workspace sean consideradas en el contexto del LLM.
-        const collectionsResponse = await apiClient.get(`/api/collections?workspace_id=${workspaceId}`);
+        // Obtener mensajes de los chats
+        const messagesPromises = chatsData.map((chat: ChatThread) =>
+          apiClient.get(`/api/threads/${chat.id}/messages`).then(res => ({ id: chat.id, messages: res.data }))
+        );
+        const messagesResults = await Promise.all(messagesPromises);
+        const messagesMap = messagesResults.reduce((acc, { id, messages }) => {
+          acc[id] = messages;
+          return acc;
+        }, {});
+        setChatMessages(messagesMap);
+
+        // Obtener colecciones asociadas con el workspace
+        const collectionsResponse = await apiClient.get(`/api/workspaces/${workspaceId}/collections`);
         setCollections(collectionsResponse.data);
       } catch (error) {
         console.error('Error fetching workspace data:', error);
@@ -73,7 +92,12 @@ export default function WorkspaceDashboard() {
   };
 
   const filteredChats = searchTerm 
-    ? chats.filter(chat => chat.title.toLowerCase().includes(searchTerm.toLowerCase()))
+    ? chats.filter(chat => {
+        const titleMatch = chat.title.toLowerCase().includes(searchTerm.toLowerCase());
+        const messages = chatMessages[chat.id] || [];
+        const contentMatch = messages.some(msg => msg.text.toLowerCase().includes(searchTerm.toLowerCase()));
+        return titleMatch || contentMatch;
+      })
     : chats;
 
   const filteredCollections = searchTerm 
@@ -160,6 +184,135 @@ export default function WorkspaceDashboard() {
     }
   };
 
+  const handleCollectionClick = (collectionId: string) => {
+    // Aquí puedes implementar la navegación a una página de detalles de la colección si es necesario
+    console.log(`Navigating to collection ${collectionId}`);
+  };
+
+  const handleCloseCollectionDialog = () => {
+    setCollectionDialogOpen(false);
+    setNewCollectionTitle('');
+    setNewCollectionDescription('');
+  };
+
+  const handleCreateCollection = async () => {
+    if (newCollectionTitle) {
+      try {
+        const response = await apiClient.post(`/api/workspaces/${workspaceId}/collections`, { 
+          title: newCollectionTitle, 
+          description: newCollectionDescription 
+        });
+        const newCollection = response.data;
+        setCollections((prevCollections) => [...prevCollections, newCollection]);
+      } catch (error) {
+        console.error('Error al crear la colección:', error);
+        alert('Error al crear la colección.');
+      } finally {
+        handleCloseCollectionDialog();
+      }
+    }
+  };
+
+  const [availableCollections, setAvailableCollections] = useState<Collection[]>([]);
+  const [loadingCollections, setLoadingCollections] = useState(false);
+  const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
+
+  const handleOpenAddExistingCollectionDialog = async () => {
+    setLoadingCollections(true);
+    try {
+      const response = await apiClient.post('/api/list-collections', {});
+      const allCollections = response.data.map((col: any) => ({
+        id: col.topic || col.id || col.title || `collection-${Math.random().toString(36).substr(2, 9)}`,
+        title: col.topic || col.title || 'Sin título',
+        topic: col.topic || col.title || '',
+        workspace_id: col.workspace_id || '',
+        created_at: col.created_at || new Date().toISOString(),
+        description: col.description || `Colección con ${col.document_count || 0} documentos`
+      }));
+      // Filtrar para mostrar solo las colecciones que no están ya en este workspace
+      const filteredCollections = allCollections.filter(
+        (col: Collection) => !collections.some(existingCol => existingCol.id === col.id)
+      );
+      setAvailableCollections(filteredCollections);
+      setCollectionDialogOpen(true);
+    } catch (error) {
+      console.error('Error al cargar las colecciones disponibles:', error);
+      alert('Error al cargar las colecciones disponibles.');
+    } finally {
+      setLoadingCollections(false);
+    }
+  };
+
+  const handleAddExistingCollection = async () => {
+    if (selectedCollectionId) {
+      try {
+        const collectionToAdd = availableCollections.find(col => col.id === selectedCollectionId);
+        if (collectionToAdd) {
+          // Usar el campo topic como identificador para la asociación, con un valor por defecto si no está definido
+          const collectionIdentifier = encodeURIComponent(collectionToAdd.topic || collectionToAdd.title);
+          const response = await apiClient.post(`/api/workspaces/${workspaceId}/collections/${collectionIdentifier}/associate`, {});
+          const addedCollection = response.data;
+          setCollections((prevCollections) => [...prevCollections, addedCollection]);
+          handleCloseCollectionDialog();
+        } else {
+          alert('Colección no encontrada.');
+        }
+      } catch (error) {
+        console.error('Error al asociar la colección existente:', error);
+        alert('Error al asociar la colección existente. El identificador de la colección no es válido o no se puede asociar. Por favor, intenta crear una nueva colección con el mismo nombre si es necesario.');
+      }
+    }
+  };
+
+  const handleOpenRenameCollectionDialog = (collection: Collection) => {
+    setSelectedCollection(collection);
+    setNewCollectionTitle(collection.title);
+    setNewCollectionDescription(collection.description || '');
+    setRenameCollectionDialogOpen(true);
+  };
+
+  const handleCloseRenameCollectionDialog = () => {
+    setRenameCollectionDialogOpen(false);
+    setSelectedCollection(null);
+    setNewCollectionTitle('');
+    setNewCollectionDescription('');
+  };
+
+  const handleRenameCollection = async () => {
+    if (selectedCollection && newCollectionTitle) {
+      try {
+        await apiClient.put(`/api/workspaces/${workspaceId}/collections/${selectedCollection.id}`, { 
+          title: newCollectionTitle, 
+          description: newCollectionDescription 
+        });
+        setCollections((prevCollections) =>
+          prevCollections.map((col) =>
+            col.id === selectedCollection.id ? { ...col, title: newCollectionTitle, description: newCollectionDescription } : col
+          )
+        );
+      } catch (error) {
+        console.error('Error al renombrar la colección:', error);
+        alert('Error al renombrar la colección.');
+      } finally {
+        handleCloseRenameCollectionDialog();
+      }
+    } else {
+      handleCloseRenameCollectionDialog();
+    }
+  };
+
+  const handleDeleteCollection = async (collectionId: string) => {
+    if (confirm('¿Estás seguro de que deseas eliminar esta colección? Esta acción no se puede deshacer.')) {
+      try {
+        await apiClient.delete(`/api/workspaces/${workspaceId}/collections/${collectionId}`);
+        setCollections((prevCollections) => prevCollections.filter((col) => col.id !== collectionId));
+      } catch (error) {
+        console.error('Error al eliminar la colección:', error);
+        alert('Error al eliminar la colección.');
+      }
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-6">
@@ -183,10 +336,10 @@ export default function WorkspaceDashboard() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center">
-          <FolderKanban className="mr-2 h-8 w-8 text-primary" />
-          <h1 className="text-3xl font-bold">{workspace.name}</h1>
-        </div>
+<div className="flex items-center">
+  <Bot className="mr-2 h-8 w-8 text-primary" />
+  <h1 className="text-3xl font-bold">{workspace.name}</h1>
+</div>
         <Button onClick={() => router.push('/workspaces')}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           Volver a Workspaces
@@ -222,10 +375,10 @@ export default function WorkspaceDashboard() {
               <Card key={chat.id} className="flex flex-col cursor-pointer hover:border-primary/50 transition-colors min-h-[150px]" onClick={() => handleChatClick(chat.id)}>
                 <CardHeader className="flex flex-row items-start justify-between">
                   <div>
-                    <CardTitle className="flex items-center text-base">
-                      <MessageSquare className="mr-2 h-6 w-6 text-primary flex-shrink-0" />
-                      <span className="flex-wrap">{chat.title}</span>
-                    </CardTitle>
+<CardTitle className="flex items-center text-base">
+  <MessageSquare className="mr-2 h-6 w-6 text-primary flex-shrink-0" />
+  <InlineMarkdownRenderer content={chat.title} />
+</CardTitle>
                   </div>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -263,16 +416,16 @@ export default function WorkspaceDashboard() {
             <BookMarked className="mr-2 h-6 w-6 text-primary" />
             Conocimientos del Workspace
           </h2>
-          <Button onClick={() => alert('Funcionalidad para añadir colección aún no implementada')}>
+          <Button onClick={handleOpenAddExistingCollectionDialog}>
             <Plus className="mr-2 h-4 w-4" />
-            Añadir Colección
+            Añadir Colección Existente
           </Button>
         </div>
         {filteredCollections.length === 0 ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <Card 
               className="border-dashed hover:border-primary hover:text-primary transition-colors flex flex-col items-center justify-center text-center p-6 cursor-pointer h-full"
-              onClick={() => alert('Funcionalidad para crear nueva colección aún no implementada')}
+              onClick={() => setCollectionDialogOpen(true)}
             >
               <Plus className="h-8 w-8 mb-2" />
               <p className="font-semibold">Crear Colección</p>
@@ -283,19 +436,39 @@ export default function WorkspaceDashboard() {
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <Card 
               className="border-dashed hover:border-primary hover:text-primary transition-colors flex flex-col items-center justify-center text-center p-6 cursor-pointer h-full"
-              onClick={() => alert('Funcionalidad para crear nueva colección aún no implementada')}
+              onClick={() => setCollectionDialogOpen(true)}
             >
               <Plus className="h-8 w-8 mb-2" />
               <p className="font-semibold">Crear Colección</p>
               <p className="text-sm text-muted-foreground">Define un nuevo tema para tus documentos.</p>
             </Card>
             {filteredCollections.map((collection) => (
-              <Card key={collection.id} className="cursor-pointer hover:shadow-lg transition-shadow">
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <BookMarked className="mr-2 h-4 w-4" />
-                    {collection.title}
-                  </CardTitle>
+              <Card key={collection.id} className="flex flex-col cursor-pointer hover:border-primary/50 transition-colors min-h-[150px]" onClick={() => handleCollectionClick(collection.id)}>
+                <CardHeader className="flex flex-row items-start justify-between">
+                  <div>
+<CardTitle className="flex items-center text-base">
+  <BookMarked className="mr-2 h-6 w-6 text-primary flex-shrink-0" />
+  <InlineMarkdownRenderer content={collection.title} />
+</CardTitle>
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.stopPropagation()}>
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleCollectionClick(collection.id); }}>
+                        Abrir Colección
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOpenRenameCollectionDialog(collection); }}>
+                        Renombrar
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteCollection(collection.id); }}>
+                        Eliminar
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-muted-foreground">Creado: {new Date(collection.created_at).toLocaleDateString()}</p>
@@ -306,6 +479,70 @@ export default function WorkspaceDashboard() {
         )}
         <p className="text-xs text-muted-foreground mt-2">Nota: Las colecciones están aisladas y solo son accesibles dentro de este workspace.</p>
       </div>
+
+      <Dialog open={collectionDialogOpen} onOpenChange={setCollectionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Añadir Colección Existente</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4">
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {loadingCollections ? (
+                <p>Cargando colecciones...</p>
+              ) : (
+                availableCollections.map(col => (
+                  <div
+                    key={col.id}
+                    className={`p-2 cursor-pointer rounded-md border ${selectedCollectionId === col.id ? 'border-primary bg-primary/10' : 'border-transparent'}`}
+                    onClick={() => setSelectedCollectionId(col.id)}
+                  >
+                    <p className="font-medium">{col.title}</p>
+                    {col.description && <p className="text-sm text-muted-foreground">{col.description}</p>}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={handleCloseCollectionDialog}>
+              Cancelar
+            </Button>
+            <Button onClick={handleAddExistingCollection} disabled={!selectedCollectionId}>
+              Añadir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={renameCollectionDialogOpen} onOpenChange={setRenameCollectionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Renombrar Colección</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4">
+            <Input
+              value={newCollectionTitle}
+              onChange={(e) => setNewCollectionTitle(e.target.value)}
+              placeholder="Nuevo título de la colección"
+              className="w-full"
+            />
+            <Input
+              value={newCollectionDescription}
+              onChange={(e) => setNewCollectionDescription(e.target.value)}
+              placeholder="Nueva descripción (opcional)"
+              className="w-full"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={handleCloseRenameCollectionDialog}>
+              Cancelar
+            </Button>
+            <Button onClick={handleRenameCollection} disabled={!newCollectionTitle}>
+              Guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
         <DialogContent>

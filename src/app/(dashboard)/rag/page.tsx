@@ -15,6 +15,7 @@ import { PlusCircle, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, B
 import { UploadDocumentDialog } from './upload-document-dialog';
 import { CreateCollectionDialog } from './create-collection-dialog';
 import { CollectionAnalysisDialog } from './collection-analysis-dialog';
+import { GitHubRepoDialog } from './github-repo-dialog';
 
 interface Collection {
   topic: string;
@@ -27,6 +28,7 @@ export default function RagCollectionsPage() {
   
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isGitHubRepoOpen, setIsGitHubRepoOpen] = useState(false);
   
   const [collectionAnalysisResult, setCollectionAnalysisResult] = useState<any>(null);
   const [isCollectionAnalysisOpen, setIsCollectionAnalysisOpen] = useState(false);
@@ -119,10 +121,16 @@ export default function RagCollectionsPage() {
           </h1>
           <p className="text-muted-foreground">Organiza tus documentos en bases de conocimiento.</p>
         </div>
-        <Button onClick={() => setIsUploadOpen(true)}>
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Subir Documento
-        </Button>
+        <div className="flex space-x-2">
+          <Button onClick={() => setIsGitHubRepoOpen(true)}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 h-4 w-4"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/></svg>
+            Añadir Repositorio
+          </Button>
+          <Button onClick={() => setIsUploadOpen(true)}>
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Subir Documento
+          </Button>
+        </div>
       </div>
 
       {isLoading ? <p>Cargando colecciones...</p> : (
@@ -191,6 +199,7 @@ export default function RagCollectionsPage() {
 
       <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={fetchCollections} />
       <CreateCollectionDialog isOpen={isCreateOpen} onOpenChange={setIsCreateOpen} onCreateSuccess={handleCollectionCreated} />
+      <GitHubRepoDialog isOpen={isGitHubRepoOpen} onOpenChange={setIsGitHubRepoOpen} onSuccess={fetchCollections} />
       <CollectionAnalysisDialog
         isOpen={isCollectionAnalysisOpen}
         onOpenChange={handleAnalysisDialogClose}

@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Depends, status, Form, File, Uploa
 from pydantic import BaseModel
 from sqlalchemy import select, text
 
-from core.database import SessionLocal, TeamMember
+from core.database import SessionLocal, TeamMember, LangchainPgCollection
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.document_parser import extract_text_and_metadata_from_document
@@ -67,7 +67,7 @@ async def upload_chat_file_endpoint(
 ):
     """
     Endpoint para subir archivos al contexto de un hilo de chat específico.
-    Los archivos se procesan para RAG pero se marcan como específicos del chat.
+    Los archivos se procesan para RAG pero se marcan como específicos del chat y no se guardan en colecciones permanentes.
     """
     account_id_uuid = uuid.UUID(current_account_id)
     processed_files = 0
@@ -79,9 +79,10 @@ async def upload_chat_file_endpoint(
                 logger.warning(f"No se pudo extraer texto del archivo '{file.filename}'. Omitiendo.")
                 continue
 
-            # Añadir metadato para indicar que es un documento de chat
+            # Añadir metadato para indicar que es un documento de chat y no debe guardarse en colecciones permanentes
             metadata['chat_context_only'] = True
             metadata['thread_id'] = thread_id
+            metadata['temporary'] = True  # Marca para indicar que es temporal y solo para el contexto del chat
 
             await process_document_for_rag(
                 account_id=str(account_id_uuid),
@@ -216,6 +217,41 @@ async def extract_titles_endpoint(request: ExtractTitleRequest, current_account_
     except Exception as e:
         logger.error(f"Error al iniciar la extracción de títulos para la cuenta {current_account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error al iniciar la extracción de títulos: {str(e)}")
+
+@router.post("/create-collection", summary="Crear una nueva colección vacía")
+async def create_collection_endpoint(
+    request: dict,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Crea una nueva colección vacía en la base de datos.
+    """
+    topic = request.get("topic")
+    if not topic or not isinstance(topic, str) or len(topic.strip()) < 3:
+        raise HTTPException(status_code=400, detail="El nombre de la colección debe ser una cadena de al menos 3 caracteres.")
+
+    account_id_uuid = uuid.UUID(current_account_id)
+    # Usar el topic como nombre de la colección, asegurando unicidad por usuario
+    collection_name = f"collection_{account_id_uuid}_{topic.lower().replace(' ', '_')}"
+
+    try:
+        # Verificar si la colección ya existe
+        existing_collection = await db.scalar(
+            select(LangchainPgCollection).where(LangchainPgCollection.name == collection_name)
+        )
+        if existing_collection:
+            raise HTTPException(status_code=400, detail=f"La colección '{topic}' ya existe.")
+
+        # Crear una nueva colección
+        new_collection = LangchainPgCollection(name=collection_name, cmetadata={"topic": topic, "account_id": str(account_id_uuid)})
+        db.add(new_collection)
+        await db.commit()
+        return {"message": f"Colección '{topic}' creada exitosamente."}
+    except Exception as e:
+        logger.error(f"Error al crear la colección para la cuenta {current_account_id}: {e}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Error al crear la colección.")
 
 @router.post("/list-collections", summary="Listar las colecciones de conocimiento")
 async def list_collections_endpoint(current_account_id: str = Depends(get_current_account_id)):

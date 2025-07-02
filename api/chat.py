@@ -17,7 +17,8 @@ from core.agent import create_and_run_agent
 from utils.audio_transcriber import transcribe_audio_file
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.database import SessionLocal
+from sqlalchemy import select
+from core.database import SessionLocal, ChatThread
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -109,7 +110,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
     return {"transcription": transcription}
 
 @router.post("/chat", response_model=ChatResponse, summary="Procesar Mensaje de Chat")
-async def handle_chat(request: ChatRequest, background_tasks: BackgroundTasks, current_account_id: str = Depends(get_current_account_id)) -> ChatResponse:
+async def handle_chat(request: ChatRequest, background_tasks: BackgroundTasks, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)) -> ChatResponse:
     """
     Endpoint principal para procesar mensajes de chat con el agente de IA.
     Requiere autenticación JWT.
@@ -124,6 +125,16 @@ async def handle_chat(request: ChatRequest, background_tasks: BackgroundTasks, c
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El account_id proporcionado no tiene un formato válido.")
 
     logger.info(f"Petición de chat recibida de la cuenta: {request.account_id} con modo: {request.mode}")
+    
+    # Obtener el workspace_id del ChatThread asociado
+    workspace_id = None
+    thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(request.thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
+    if thread and thread.workspace_id:
+        workspace_id = str(thread.workspace_id)
+        logger.info(f"Recuperado workspace_id {workspace_id} para el hilo {request.thread_id}.")
+    else:
+        logger.info(f"No se encontró workspace_id para el hilo {request.thread_id}.")
+
     try:
         final_response_text = await create_and_run_agent(
             account_id=request.account_id,
@@ -133,7 +144,8 @@ async def handle_chat(request: ChatRequest, background_tasks: BackgroundTasks, c
             image_base64=request.image_base64,
             document_url=request.document_url,  # Añadir soporte para documentos
             mode=request.mode,
-            background_tasks=background_tasks
+            background_tasks=background_tasks,
+            workspace_id=workspace_id
         )
         return ChatResponse(response_text=final_response_text)
     except Exception as e:

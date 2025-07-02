@@ -47,20 +47,15 @@ export function CreateCollectionDialog({ isOpen, onOpenChange, onCreateSuccess }
     }
     setIsLoading(true);
     try {
-      // Llamamos a la API para crear la colección con teamId si está seleccionado
-      const payload = {
-        topic: topicName,
-        team_id: teamId || undefined
-      };
-      await apiClient.post('/api/collections', payload); // Endpoint ajustado según estructura API
+      await apiClient.post('/api/create-collection', { topic: topicName, teamId: teamId || undefined });
       toast.success(`Colección "${topicName}" creada.`);
       onCreateSuccess(topicName);
       onOpenChange(false);
       setTopicName('');
       setTeamId('');
     } catch (error) {
-      toast.error("Error al crear la colección.");
-      console.error(error);
+      console.error("Error al crear la colección:", error);
+      toast.error('Error al crear la colección.');
     } finally {
       setIsLoading(false);
     }

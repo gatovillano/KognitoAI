@@ -31,13 +31,13 @@ const EmailLoginForm = ({ onLogin, isSubmitting, setParentError }: { onLogin: (t
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
-        <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="bg-transparent border-muted focus:ring-0 focus:border-primary" autoComplete="off" required />
       </div>
       <div className="space-y-2">
         <Label htmlFor="password">Contraseña</Label>
-        <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="bg-transparent border-muted focus:ring-0 focus:border-primary" autoComplete="new-password" required />
       </div>
-      <Button type="submit" className="w-full" disabled={isSubmitting}>
+      <Button type="submit" className="w-full text-background" disabled={isSubmitting}>
         {isSubmitting ? 'Ingresando...' : 'Iniciar Sesión con Email'}
       </Button>
     </form>
@@ -72,10 +72,10 @@ const TelegramCodeForm = ({ setView }: { setView: (view: { type: string; identif
     <form onSubmit={handleRequestCode} className="space-y-4">
       <div className="space-y-2">
         <Label htmlFor="telegram-id">ID o @usuario de Telegram</Label>
-        <Input id="telegram-id" value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder="@tu_usuario" />
+        <Input id="telegram-id" value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder="@tu_usuario" className="bg-transparent border-muted focus:ring-0 focus:border-primary" autoComplete="off" />
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
-      <Button type="submit" className="w-full" variant="secondary" disabled={isSubmitting}>
+      {error && <p className="text-sm text-accent">{error}</p>}
+      <Button type="submit" className="w-full text-background" disabled={isSubmitting}>
         {isSubmitting ? 'Enviando...' : 'Enviar Código a Telegram'}
       </Button>
     </form>
@@ -113,7 +113,7 @@ const VerifyCodeForm = ({ identifier, onVerify, setView }: { identifier: string;
           </p>
           <div className="space-y-2">
             <Label htmlFor="code">Código de Verificación</Label>
-            <Input id="code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" maxLength={6} autoFocus />
+            <Input id="code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" maxLength={6} autoFocus className="bg-transparent border-muted focus:ring-0 focus:border-primary" autoComplete="off" />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <Button type="submit" className="w-full" disabled={isSubmitting}>
@@ -145,10 +145,10 @@ export default function LoginPage() {
     <main className="flex items-center justify-center min-h-screen bg-background p-4">
       <Card className="w-full max-w-sm border-primary/20">
         <CardHeader className="text-center space-y-2">
-          <Image src="/logo-completo.png" alt="Kognito AI Labs" width={120} height={120} className="mx-auto" />
-          <CardTitle className="text-2xl">Bienvenido</CardTitle>
+          <Image src="/logo-completo-dark2.png" alt="Kognito AI Labs" width={300} height={120} className="mx-auto" />
+          <CardTitle className="text-2xl"></CardTitle>
           <CardDescription>
-            {view.type === 'login' ? 'Ingresa a tu exocerebro digital' : 'Introduce el código que recibiste'}
+            {view.type === 'login' ? '' : 'Introduce el código que recibiste'}
           </CardDescription>
         </CardHeader>
         <CardContent>

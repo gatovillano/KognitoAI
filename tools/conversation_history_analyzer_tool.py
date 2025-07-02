@@ -135,7 +135,7 @@ class ConversationHistoryAnalyzerTool(BaseTool):
 
                 # Preparar el texto para análisis
                 conversation_text = "\n".join(
-                    [msg.content if hasattr(msg, 'content') else str(msg) for msg in all_messages]
+                    self._extract_message_content(msg) for msg in all_messages
                 )
 
                 # Utilizar el LLM para extraer intereses y temas clave
@@ -182,6 +182,29 @@ class ConversationHistoryAnalyzerTool(BaseTool):
 
         except Exception as e:
             logger.error(f"Error durante el análisis de historial de conversaciones para la cuenta '{account_id}': {e}", exc_info=True)
+
+    def _extract_message_content(self, msg: Any) -> str:
+        """
+        Extrae el contenido de un mensaje, manejando diferentes formatos y tipos.
+
+        Args:
+            msg: El objeto de mensaje del historial de chat.
+
+        Returns:
+            Una cadena de texto representando el contenido del mensaje.
+        """
+        if hasattr(msg, 'content'):
+            if isinstance(msg.content, str):
+                return msg.content
+            elif isinstance(msg.content, list):
+                # Si el contenido es una lista, intenta extraer texto de sus elementos
+                return "\n".join(
+                    item.get('text', '') if isinstance(item, dict) else str(item)
+                    for item in msg.content
+                )
+            else:
+                return str(msg.content)
+        return str(msg)
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:
         """La ejecución síncrona no está soportada en nuestra arquitectura asíncrona."""

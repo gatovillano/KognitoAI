@@ -24,16 +24,12 @@ from sqlalchemy import select, text, create_engine, delete
 from typing import Optional, List, Union, Dict, Any
 import datetime
 from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger
-# No necesitamos urlparse, parse_qs aquí si usamos el engine directamente para PGVector
 
 import uuid
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import PGVector
 from sqlalchemy import Table, MetaData, update, and_
-
-# Asegúrate de que tu versión de langchain-postgres sea compatible con este uso.
-# Si sigue fallando, podría ser un problema de versión específica.
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
@@ -42,9 +38,10 @@ from core.database import (
     SessionLocal,
     Account,
     Memory,
-    WorkspaceDocumentChunk,
     engine,
-)  # Importar el engine aquí
+    LangchainPgCollection,
+    WorkspaceCollectionAssociation
+)
 from utils.db_session import DBSession
 from utils.embeddings import initialize_embeddings
 from core.config import settings
@@ -56,29 +53,16 @@ CHUNK_OVERLAP = settings.chunk_overlap
 GLOBAL_COLLECTION_NAME = "global_knowledge_base"
 USER_MEMORIES_PREFIX = "user_memories_"
 
-# Engine síncrono solo para PGVector
 PGVECTOR_SYNC_ENGINE = create_engine(settings.database_url)
 
-# Define tables for LangChain PostgreSQL integration
 metadata = MetaData()
 langchain_pg_collection = Table('langchain_pg_collection', metadata, autoload_with=PGVECTOR_SYNC_ENGINE)
 langchain_pg_embedding = Table('langchain_pg_embedding', metadata, autoload_with=PGVECTOR_SYNC_ENGINE)
 
 
-# Ya no necesitamos _get_pgvector_connection_args
-
-
 async def get_user_profile(account_id: str) -> Optional[Perfil]:
     """
     Obtiene el perfil de un usuario a partir de su account_id universal.
-
-    Si no se encuentra un perfil para la cuenta dada, se crea uno nuevo y vacío
-    y se asocia a esa cuenta.
-    Args:
-        account_id: El identificador universal (UUID en formato string) de la cuenta.
-
-    Returns:
-        El objeto Perfil del usuario, o None si la cuenta no existe.
     """
     logger.info(f"Obteniendo perfil para la cuenta ID: {account_id}")
     async with DBSession(SessionLocal) as db:
@@ -92,11 +76,11 @@ async def get_user_profile(account_id: str) -> Optional[Perfil]:
                 )
                 account = await db.get(
                     Account, uuid.UUID(account_id)
-                )  # Convertir a UUID
+                )
                 if account:
                     perfil = Perfil(
                         account_id=uuid.UUID(account_id)
-                    )  # Convertir a UUID
+                    )
                     db.add(perfil)
                     await db.commit()
                     await db.refresh(perfil)
@@ -127,12 +111,6 @@ async def update_user_profile(
 ):
     """
     Actualiza los campos del perfil de un usuario.
-    Args:
-        account_id: El ID universal de la cuenta del usuario a actualizar.
-        nombre: El nuevo nombre del usuario.
-        gustos: Los nuevos gustos del usuario.
-        intereses: Los nuevos intereses del usuario.
-        otros_datos: Otros datos relevantes.
     """
     logger.info(f"Actualizando perfil para la cuenta ID: {account_id}.")
     async with DBSession(SessionLocal) as db:
@@ -167,24 +145,16 @@ async def update_user_profile(
 
 
 async def add_memory_to_vector_db(
-    account_id: str, content: str, type: str = "general_memory", team_id: Optional[str] = None
+    account_id: str, content: str, type: str = "general_memory", team_id: Optional[str] = None, workspace_id: Optional[str] = None
 ) -> None:
     """
     Genera embeddings para el contenido y lo guarda en la DB vectorial del usuario o equipo.
-
-    Args:
-        account_id: El ID universal de la cuenta a la que pertenece la memoria.
-        content: El texto de la memoria a guardar.
-        type: El tipo de memoria (ej: 'fact', 'idea').
-        team_id: El ID del equipo (UUID en formato string) al que se asocia la memoria, si aplica.
     """
     logger.info(
         f"Añadiendo memoria a la DB vectorial para la cuenta {account_id}: '{content[:50]}...'"
     )
     try:
-        embeddings: Embeddings = (
-            await initialize_embeddings()
-        )  # Asegurarse de usar await
+        embeddings: Embeddings = await initialize_embeddings()
         if not embeddings:
             logger.error(
                 "Los Embeddings no están inicializados. No se puede añadir memoria."
@@ -193,26 +163,18 @@ async def add_memory_to_vector_db(
 
         collection_name = f"user_memories_{account_id}" if not team_id else f"team_memories_{team_id}"
 
-        # --- CORRECCIÓN CLAVE AQUÍ para PGVector ---
-        # Ejecutar la operación de PGVector en un thread pool para no bloquear el event loop
-        import asyncio
-
         vectorstore = await asyncio.to_thread(
             PGVector.from_existing_index,
             embedding=embeddings,
             collection_name=collection_name,
             connection=PGVECTOR_SYNC_ENGINE,
         )
-        # Si la colección no existe, afrom_existing_index podría fallar.
-        # Una alternativa más robusta es crearla si no existe, o usar PGVector.from_documents
-        # con una lista vacía para inicializar la colección si es la primera vez.
-        # Por ahora, asumimos que si el índice existe, lo usaremos.
-        # Para crear la colección si no existe, PGVector.adelete(filter={}) y luego aadd_documents
-        # en la primera adición para una nueva colección.
 
         metadata = {"account_id": str(account_id), "type": type}
         if team_id:
             metadata["team_id"] = str(team_id)
+        if workspace_id:
+            metadata["workspace_id"] = str(workspace_id)
         await vectorstore.aadd_documents(
             documents=[Document(page_content=content, metadata=metadata)]
         )
@@ -236,8 +198,6 @@ async def get_relevant_memories(
 ) -> str:
     """
     Recupera memorias relevantes.
-    - Si se proporciona workspace_id, busca solo en los documentos de ese workspace.
-    - Si no, busca en la colección personal del usuario, de un equipo (si se proporciona team_id) y en la global.
     """
     logger.info(
         f"Buscando memorias relevantes para la cuenta {account_id} con la consulta: '{query[:50]}...'"
@@ -250,90 +210,88 @@ async def get_relevant_memories(
         query_embedding = await embeddings.aembed_query(query)
         
         all_docs = []
-
-        if workspace_id:
-            # Búsqueda específica del Workspace
-            logger.info(f"Realizando búsqueda de RAG en el workspace: {workspace_id}")
-            async with DBSession(SessionLocal) as db:
-                stmt = (
-                    select(WorkspaceDocumentChunk)
-                    .where(WorkspaceDocumentChunk.workspace_id == uuid.UUID(workspace_id))
-                    .order_by(WorkspaceDocumentChunk.embedding.l2_distance(query_embedding))
-                    .limit(k)
+        
+        # Obtener las colecciones relevantes (UUIDs)
+        relevant_collection_uuids = []
+        async with DBSession(SessionLocal) as db:
+            if workspace_id:
+                # Si se especifica un workspace, obtener todas las colecciones asociadas a ese workspace
+                stmt = select(WorkspaceCollectionAssociation.langchain_collection_id).where(
+                    WorkspaceCollectionAssociation.workspace_id == uuid.UUID(workspace_id)
                 )
                 result = await db.execute(stmt)
-                workspace_chunks = result.scalars().all()
-                
-                for chunk in workspace_chunks:
-                    # Convertir el chunk a un objeto compatible con el formato de Document de LangChain
-                    doc = Document(
-                        page_content=chunk.content,
-                        metadata={
-                            "source": "Workspace",
-                            "document_id": str(chunk.document_id),
-                            "workspace_id": str(chunk.workspace_id)
-                        }
-                    )
-                    all_docs.append(doc)
-            logger.info(f"Encontrados {len(all_docs)} chunks relevantes en el workspace.")
+                relevant_collection_uuids.extend([str(u) for u in result.scalars().all()])
+                logger.info(f"Buscando en colecciones asociadas al workspace {workspace_id}: {relevant_collection_uuids}")
+            
+            # Siempre incluir la colección personal del usuario y la global
+            user_collection_name = f"user_memories_{account_id}"
+            global_collection_name = GLOBAL_COLLECTION_NAME
+            team_collection_name = f"team_memories_{team_id}" if team_id else None
 
-        else:
-            # Búsqueda general (personal, global, equipo)
-            logger.info("Realizando búsqueda de RAG general (no en workspace).")
-            user_vectorstore = await asyncio.to_thread(
-                PGVector.from_existing_index,
-                embedding=embeddings,
-                collection_name=f"user_memories_{account_id}",
-                connection=PGVECTOR_SYNC_ENGINE,
-            )
-            global_vectorstore = await asyncio.to_thread(
-                PGVector.from_existing_index,
-                embedding=embeddings,
-                collection_name=GLOBAL_COLLECTION_NAME,
-                connection=PGVECTOR_SYNC_ENGINE,
-            )
-            team_vectorstore = None
-            if team_id:
-                team_vectorstore = await asyncio.to_thread(
-                    PGVector.from_existing_index,
-                    embedding=embeddings,
-                    collection_name=f"team_memories_{team_id}",
-                    connection=PGVECTOR_SYNC_ENGINE,
+            for c_name in [user_collection_name, global_collection_name, team_collection_name]:
+                if c_name:
+                    stmt = select(LangchainPgCollection.uuid).where(LangchainPgCollection.name == c_name)
+                    result = await db.execute(stmt)
+                    c_uuid = result.scalar_one_or_none()
+                    if c_uuid and str(c_uuid) not in relevant_collection_uuids: # Evitar duplicados
+                        relevant_collection_uuids.append(str(c_uuid))
+            
+            if not relevant_collection_uuids:
+                logger.info("No se encontraron colecciones relevantes para la búsqueda.")
+                return "No se encontraron memorias relevantes."
+
+        # Realizar la búsqueda en todas las colecciones relevantes
+        # LangChain PGVector no soporta buscar en múltiples colecciones a la vez directamente.
+        # Tendremos que iterar o construir una consulta SQL más compleja.
+        # Por simplicidad, iteraremos sobre las colecciones relevantes.
+        
+        # Filtros de metadatos adicionales
+        final_filters = metadata_filters if metadata_filters else {}
+        if workspace_id:
+            final_filters["workspace_id"] = str(workspace_id) # Asegurar que el metadato workspace_id coincida
+
+        search_tasks = []
+        for col_uuid_str in relevant_collection_uuids:
+            # Obtener el nombre de la colección a partir del UUID para inicializar PGVector
+            async with DBSession(SessionLocal) as db_inner:
+                col_name_obj = await db_inner.scalar(
+                    select(LangchainPgCollection.name).where(LangchainPgCollection.uuid == uuid.UUID(col_uuid_str))
                 )
+                if not col_name_obj:
+                    logger.warning(f"No se encontró el nombre para la colección UUID: {col_uuid_str}. Saltando.")
+                    continue
+                collection_name_for_vectorstore = col_name_obj
 
-            k_per_source = k // (3 if team_id else 2) if k > 1 else 1
-            filters = metadata_filters if metadata_filters else {}
+            vectorstore = await asyncio.to_thread(
+                PGVector.from_existing_index,
+                embedding=embeddings,
+                collection_name=collection_name_for_vectorstore,
+                connection=PGVECTOR_SYNC_ENGINE,
+            )
+            search_tasks.append(vectorstore.asimilarity_search(query, k=k, filter=final_filters))
 
-            user_search_task = user_vectorstore.asimilarity_search(query, k=k_per_source, filter=filters)
-            global_search_task = global_vectorstore.asimilarity_search(query, k=k_per_source, filter=filters)
-            team_search_task = team_vectorstore.asimilarity_search(query, k=k_per_source, filter=filters) if team_id and team_vectorstore else asyncio.sleep(0, result=[])
+        results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
-            results = await asyncio.gather(user_search_task, global_search_task, team_search_task, return_exceptions=True)
-
-            user_results, global_results, team_results = results
-            if isinstance(user_results, list):
-                for doc in user_results: doc.metadata["source"] = "Personal"
-                all_docs.extend(user_results)
+        for res in results:
+            if isinstance(res, list):
+                all_docs.extend(res)
             else:
-                logger.warning(f"⚠️ No se pudo buscar en la memoria personal de la cuenta {account_id}: {user_results}")
-
-            if isinstance(global_results, list):
-                for doc in global_results: doc.metadata["source"] = "Global"
-                all_docs.extend(global_results)
-            else:
-                logger.warning(f"⚠️ No se pudo buscar en la memoria global: {global_results}")
-
-            if team_id and isinstance(team_results, list):
-                for doc in team_results: doc.metadata["source"] = "Team"
-                all_docs.extend(team_results)
-            elif team_id:
-                logger.warning(f"⚠️ No se pudo buscar en la memoria del equipo {team_id}: {team_results}")
+                logger.warning(f"⚠️ Error al buscar en una colección: {res}")
 
         if not all_docs:
             return "No se encontraron memorias relevantes."
 
+        # Eliminar duplicados si un documento aparece en múltiples colecciones
+        unique_docs = {}
+        for doc in all_docs:
+            # Usar una combinación de document_id y chunk_index para identificar chunks únicos
+            doc_key = (doc.metadata.get("document_id"), doc.metadata.get("chunk_index"))
+            if doc_key not in unique_docs:
+                unique_docs[doc_key] = doc
+        all_docs = list(unique_docs.values())
+
         memories_list = [
-            f"- [Fuente: {d.metadata.get('source', 'N/A')}] (Tema: {d.metadata.get('topic', 'N/A')}): {d.page_content}"
+            f"- [Fuente: {d.metadata.get('scope', 'N/A')}] (Tema: {d.metadata.get('topic', 'N/A')}): {d.page_content}"
             for d in all_docs
         ]
         return "\n".join(memories_list)
@@ -354,8 +312,9 @@ async def process_document_for_rag(
 ) -> int:
     """
     Divide, embebe y almacena el texto de un documento en la DB vectorial.
-    Si se proporciona workspace_id, los chunks se guardan en la tabla `workspace_document_chunks`.
-    Si no, se guardan en la colección general de `langchain_pg_embedding`.
+    
+    CAMBIO: Ahora usa solo langchain_pg_embedding para todos los documentos,
+    agregando workspace_id como metadato y columna cuando corresponde.
     """
     if not extracted_text:
         return 0
@@ -369,82 +328,122 @@ async def process_document_for_rag(
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
         texts = text_splitter.split_text(extracted_text)
         
+        # Determinar la colección de LangChain (topic)
+        # Si se proporciona workspace_id, la colección será específica de ese workspace.
+        # Si no, será una colección de usuario/equipo/global.
         if workspace_id:
-            logger.info(f"📊 Iniciando procesamiento RAG para '{file_name}' en el workspace '{workspace_id}'.")
-            document_id = uuid.uuid4()
-            chunks_to_insert = []
-            for i, text_content in enumerate(texts):
-                if not text_content.strip():
-                    continue
-                embedding_vector = await embeddings.aembed_query(text_content)
-                chunks_to_insert.append(
-                    WorkspaceDocumentChunk(
-                        workspace_id=uuid.UUID(workspace_id),
-                        document_id=document_id,
-                        content=text_content,
-                        embedding=embedding_vector,
-                        chunk_order=i,
+            # Para colecciones de workspace, el nombre de la colección en PGVector será el topic
+            # y la asociación se hará en WorkspaceCollectionAssociation.
+            # El topic es el nombre de la colección dentro del workspace.
+            langchain_collection_name = topic # El topic es el nombre de la colección
+            scope = "workspace"
+        elif is_global:
+            langchain_collection_name = GLOBAL_COLLECTION_NAME
+            scope = "global"
+        elif account_id:
+            langchain_collection_name = f"user_memories_{account_id}"
+            scope = "personal"
+        elif team_id:
+            langchain_collection_name = f"team_memories_{team_id}"
+            scope = "team"
+        else:
+            logger.error("❌ process_document_for_rag llamado sin account_id, team_id, workspace_id o is_global=True.")
+            return 0
+
+        logger.info(f"📊 Iniciando procesamiento RAG para '{file_name}' en la colección LangChain '{langchain_collection_name}'.")
+        
+        # Preparar metadatos base
+        base_metadata = metadata if metadata else {}
+        base_metadata.update({
+            "file_name": file_name, 
+            "topic": topic, # El topic sigue siendo el tema del documento
+            "type": "document_chunk",
+            "scope": scope,
+        })
+        
+        # Agregar IDs según corresponda
+        if account_id: 
+            base_metadata["account_id"] = str(account_id)
+        if team_id: 
+            base_metadata["team_id"] = str(team_id)
+        if workspace_id: 
+            base_metadata["workspace_id"] = str(workspace_id) # Añadir workspace_id a los metadatos
+
+        # Generar documento único ID para agrupar chunks
+        document_id = str(uuid.uuid4())
+        base_metadata["document_id"] = document_id
+
+        ids, lc_documents = [], []
+        for i, text_content in enumerate(texts):
+            if not text_content.strip():
+                continue
+            chunk_metadata = base_metadata.copy()
+            chunk_metadata["chunk_index"] = i
+            
+            # Convertir fechas a string para JSON
+            for k, v in chunk_metadata.items():
+                if isinstance(v, (datetime.datetime, datetime.date)):
+                    chunk_metadata[k] = v.isoformat()
+                    
+            lc_documents.append(Document(page_content=text_content, metadata=chunk_metadata))
+            ids.append(str(uuid.uuid4()))
+        
+        # Crear/obtener vectorstore y agregar documentos
+        vectorstore = await asyncio.to_thread(
+            PGVector.from_documents,
+            documents=lc_documents, 
+            embedding=embeddings,
+            collection_name=langchain_collection_name, # Usar el nombre de colección determinado
+            connection=PGVECTOR_SYNC_ENGINE,
+        )
+        
+        # Obtener el UUID de la colección de LangChain recién creada/existente
+        async with DBSession(SessionLocal) as db:
+            collection_obj = await db.scalar(
+                select(LangchainPgCollection).where(LangchainPgCollection.name == langchain_collection_name)
+            )
+            if not collection_obj:
+                logger.error(f"No se pudo encontrar la colección LangChain '{langchain_collection_name}' después de from_documents.")
+                return 0
+            langchain_collection_uuid = collection_obj.uuid
+
+            # Si es un documento de workspace, crear la asociación
+            if workspace_id:
+                existing_association = await db.scalar(
+                    select(WorkspaceCollectionAssociation).where(
+                        WorkspaceCollectionAssociation.workspace_id == uuid.UUID(workspace_id),
+                        WorkspaceCollectionAssociation.langchain_collection_id == langchain_collection_uuid
                     )
                 )
-            
-            async with DBSession(SessionLocal) as db:
-                db.add_all(chunks_to_insert)
-                await db.commit()
-            
-            logger.info(f"✅ Procesado y añadido {len(chunks_to_insert)} chunks al workspace '{workspace_id}'.")
-            # Aquí podrías pasar el workspace_id al trigger si es necesario
-            # asyncio.create_task(proactive_knowledge_linker_trigger(...))
-            return len(chunks_to_insert)
+                if not existing_association:
+                    new_association = WorkspaceCollectionAssociation(
+                        workspace_id=uuid.UUID(workspace_id),
+                        langchain_collection_id=langchain_collection_uuid
+                    )
+                    db.add(new_association)
+                    await db.commit()
+                    logger.info(f"Asociación creada entre workspace {workspace_id} y colección LangChain {langchain_collection_name}.")
+                else:
+                    logger.info(f"Asociación entre workspace {workspace_id} y colección LangChain {langchain_collection_name} ya existe.")
 
-        else:
-            # Lógica existente para colecciones generales
-            if is_global:
-                collection_name = GLOBAL_COLLECTION_NAME
-            elif account_id and not team_id:
-                collection_name = f"user_memories_{account_id}"
-            elif team_id:
-                collection_name = f"team_memories_{team_id}"
-            else:
-                logger.error("❌ process_document_for_rag llamado sin account_id, team_id o is_global=True.")
-                return 0
-
-            logger.info(f"📊 Iniciando procesamiento RAG para '{file_name}' en la colección '{collection_name}'.")
-            
-            base_metadata = metadata if metadata else {}
-            base_metadata.update({
-                "file_name": file_name, "topic": topic, "type": "document_chunk",
-                "scope": "global" if is_global else "personal",
-            })
-            if account_id and not is_global: base_metadata["account_id"] = str(account_id)
-            if team_id: base_metadata["team_id"] = str(team_id)
-
-            ids, lc_documents = [], []
-            for i, text_content in enumerate(texts):
-                if not text_content.strip():
-                    continue
-                chunk_metadata = base_metadata.copy()
-                chunk_metadata["chunk_index"] = i
-                for k, v in chunk_metadata.items():
-                    if isinstance(v, (datetime.datetime, datetime.date)):
-                        chunk_metadata[k] = v.isoformat()
-                lc_documents.append(Document(page_content=text_content, metadata=chunk_metadata))
-                ids.append(str(uuid.uuid4()))
-            
-            vectorstore = await PGVector.afrom_documents(
-                documents=lc_documents, embedding=embeddings,
-                collection_name=collection_name, connection=PGVECTOR_SYNC_ENGINE,
+        logger.info(f"✅ Procesado y añadido {len(lc_documents)} chunks a la colección '{langchain_collection_name}'.")
+        
+        # Trigger proactivo (si es necesario)
+        if account_id or team_id:
+            doc_embedding = await embeddings.aembed_query(
+                extracted_text[:10000] + "..." if len(extracted_text) > 10000 else extracted_text
             )
-            await vectorstore.aadd_documents(documents=lc_documents, ids=ids)
-            
-            logger.info(f"✅ Procesado y añadido {len(lc_documents)} chunks a la colección '{collection_name}'.")
-            
-            doc_embedding = await embeddings.aembed_query(extracted_text[:10000] + "..." if len(extracted_text) > 10000 else extracted_text)
             asyncio.create_task(proactive_knowledge_linker_trigger({
-                "account_id": account_id, "team_id": team_id, "content": extracted_text,
-                "title": file_name, "type": "document", "embedding": doc_embedding,
-                "workspace_id": workspace_id # Pasar workspace_id al trigger
+                "account_id": account_id, 
+                "team_id": team_id, 
+                "content": extracted_text,
+                "title": file_name, 
+                "type": "document", 
+                "embedding": doc_embedding,
+                "workspace_id": workspace_id
             }))
-            return len(lc_documents)
+            
+        return len(lc_documents)
 
     except Exception as e:
         logger.error(f"❌ Error durante el procesamiento RAG para '{file_name}': {e}", exc_info=True)
@@ -460,57 +459,62 @@ async def delete_document_chunks(
 ) -> int:
     """
     Elimina los chunks de documentos.
-    - Si se proporciona workspace_id, elimina de la tabla `workspace_document_chunks`.
-    - Si no, elimina de la colección general de `langchain_pg_embedding`.
     """
     if not file_name and not topic:
         logger.warning("Se llamó a delete_document_chunks sin file_name ni topic.")
         return 0
 
-    if workspace_id:
-        logger.info(f"Eliminando chunks del workspace {workspace_id}")
-        async with DBSession(SessionLocal) as db:
-            try:
-                stmt = delete(WorkspaceDocumentChunk).where(WorkspaceDocumentChunk.workspace_id == uuid.UUID(workspace_id))
-                if file_name:
-                    # Asumiendo que `file_name` corresponde a `document_id` en `WorkspaceDocumentChunk`
-                    stmt = stmt.where(WorkspaceDocumentChunk.document_id == uuid.UUID(file_name))
-                
-                result = await db.execute(stmt)
-                await db.commit()
-                deleted_count = result.rowcount
-                logger.info(f"🗑️ Borrados {deleted_count} chunks del workspace {workspace_id}.")
-                return deleted_count
-            except Exception as e:
-                logger.error(f"❌ Error eliminando chunks del workspace {workspace_id}: {e}", exc_info=True)
-                await db.rollback()
-                return 0
-    else:
-        # Lógica existente para colecciones generales
-        collection_name = f"user_memories_{account_id}" if not team_id else f"team_memories_{team_id}"
-        async with DBSession(SessionLocal) as db:
-            col_q = text("SELECT uuid FROM langchain_pg_collection WHERE name = :cname")
-            res = await db.execute(col_q, {"cname": collection_name})
-            collection_uuid = res.scalar_one_or_none()
-            if not collection_uuid:
-                logger.info(f"No existe la colección '{collection_name}', nada que borrar.")
-                return 0
+    # Lógica unificada para eliminar chunks
+    async with DBSession(SessionLocal) as db:
+        # Obtener los UUIDs de las colecciones relevantes
+        relevant_collection_uuids = []
+        if workspace_id:
+            stmt = select(WorkspaceCollectionAssociation.langchain_collection_id).where(
+                WorkspaceCollectionAssociation.workspace_id == uuid.UUID(workspace_id)
+            )
+            result = await db.execute(stmt)
+            relevant_collection_uuids.extend([str(u) for u in result.scalars().all()])
+        
+        # Siempre incluir la colección personal del usuario y la global/equipo si aplica
+        user_collection_name = f"user_memories_{account_id}"
+        global_collection_name = GLOBAL_COLLECTION_NAME
+        team_collection_name = f"team_memories_{team_id}" if team_id else None
 
+        for c_name in [user_collection_name, global_collection_name, team_collection_name]:
+            if c_name:
+                stmt = select(LangchainPgCollection.uuid).where(LangchainPgCollection.name == c_name)
+                result = await db.execute(stmt)
+                c_uuid = result.scalar_one_or_none()
+                if c_uuid and str(c_uuid) not in relevant_collection_uuids:
+                    relevant_collection_uuids.append(str(c_uuid))
+
+        if not relevant_collection_uuids:
+            logger.info("No se encontraron colecciones relevantes para eliminar.")
+            return 0
+
+        deleted_count = 0
+        for col_uuid_str in relevant_collection_uuids:
             clauses = ["collection_id = :col_id", "cmetadata->>'type' = 'document_chunk'"]
-            params: Dict[str, Any] = {"col_id": collection_uuid}
+            params: Dict[str, Any] = {"col_id": uuid.UUID(col_uuid_str)} # Asegurarse de que sea UUID
+            
             if file_name:
                 clauses.append("cmetadata->>'file_name' = :fname")
                 params["fname"] = file_name
             if topic:
                 clauses.append("cmetadata->>'topic' = :tpc")
                 params["tpc"] = topic
+            if workspace_id:
+                clauses.append("cmetadata->>'workspace_id' = :wsid")
+                params["wsid"] = str(workspace_id) # Filtrar por metadato workspace_id
 
             delete_sql = text("DELETE FROM langchain_pg_embedding WHERE " + " AND ".join(clauses))
             result = await db.execute(delete_sql, params)
-            deleted = result.rowcount or 0
-            await db.commit()
-            logger.info(f"🗑️ Borrados {deleted} chunks de '{collection_name}'.")
-            return deleted
+            deleted_count += result.rowcount or 0
+            logger.info(f"🗑️ Borrados {result.rowcount} chunks de la colección '{col_uuid_str}'.")
+        
+        await db.commit()
+        logger.info(f"🗑️ Total borrados {deleted_count} chunks.")
+        return deleted_count
 
 
 async def get_full_document_content(
@@ -539,82 +543,72 @@ async def get_full_document_content(
             return None
 
         retrieved_docs = []
+        
+        # Obtener los UUIDs de las colecciones relevantes
+        relevant_collection_uuids = []
+        async with DBSession(SessionLocal) as db:
+            if workspace_id:
+                stmt = select(WorkspaceCollectionAssociation.langchain_collection_id).where(
+                    WorkspaceCollectionAssociation.workspace_id == uuid.UUID(workspace_id)
+                )
+                result = await db.execute(stmt)
+                relevant_collection_uuids.extend([str(u) for u in result.scalars().all()])
+            
+            user_collection_name = f"user_memories_{account_id}"
+            global_collection_name = GLOBAL_COLLECTION_NAME
+            team_collection_name = f"team_memories_{team_id}" if team_id else None
 
-        if workspace_id:
-            # Lógica para recuperar de WorkspaceDocumentChunk
-            logger.info(f"Buscando contenido en WorkspaceDocumentChunk para workspace {workspace_id}.")
-            async with DBSession(SessionLocal) as db:
-                # Para reconstruir por file_name, necesitamos que WorkspaceDocumentChunk
-                # tenga un campo 'file_name' o una tabla intermedia.
-                # Asumiendo que 'document_id' en WorkspaceDocumentChunk es el UUID del documento
-                # y que 'file_name' es el identificador que se mapea a ese document_id.
-                # Si 'file_name' no es un UUID, esta lógica necesitaría un mapeo.
-                # Por ahora, buscaremos por el UUID del documento si el file_name es un UUID válido.
-                # Si no, esto requeriría una tabla WorkspaceDocument para mapear.
-
-                # Opción 1: Si file_name ES el document_id (UUID)
-                try:
-                    target_document_uuid = uuid.UUID(file_name)
-                    stmt = select(WorkspaceDocumentChunk).where(
-                        and_(
-                            WorkspaceDocumentChunk.workspace_id == uuid.UUID(workspace_id),
-                            WorkspaceDocumentChunk.document_id == target_document_uuid
-                        )
-                    ).order_by(WorkspaceDocumentChunk.chunk_order)
+            for c_name in [user_collection_name, global_collection_name, team_collection_name]:
+                if c_name:
+                    stmt = select(LangchainPgCollection.uuid).where(LangchainPgCollection.name == c_name)
                     result = await db.execute(stmt)
-                    workspace_chunks = result.scalars().all()
+                    c_uuid = result.scalar_one_or_none()
+                    if c_uuid and str(c_uuid) not in relevant_collection_uuids:
+                        relevant_collection_uuids.append(str(c_uuid))
 
-                    for chunk in workspace_chunks:
-                        retrieved_docs.append(
-                            Document(
-                                page_content=chunk.content,
-                                metadata={
-                                    "source": "Workspace",
-                                    "document_id": str(chunk.document_id),
-                                    "workspace_id": str(chunk.workspace_id),
-                                    "chunk_index": chunk.chunk_order # Para el ordenamiento
-                                }
-                            )
-                        )
-                except ValueError:
-                    # Si file_name no es un UUID válido, significa que no es el document_id.
-                    # En este caso, necesitaríamos una columna 'file_name' en WorkspaceDocumentChunk
-                    # o una tabla intermedia para buscar por nombre de archivo.
-                    logger.warning(f"'{file_name}' no es un UUID válido. No se puede buscar directamente en WorkspaceDocumentChunk por document_id.")
-                    # Si tu WorkspaceDocumentChunk tiene una columna 'file_name', la consulta sería:
-                    # stmt = select(WorkspaceDocumentChunk).where(
-                    #     and_(
-                    #         WorkspaceDocumentChunk.workspace_id == uuid.UUID(workspace_id),
-                    #         WorkspaceDocumentChunk.file_name == file_name
-                    #     )
-                    # ).order_by(WorkspaceDocumentChunk.chunk_order)
-                    # ... y luego procesar los resultados.
-                    pass # Dejar vacío si no hay columna file_name o tabla de mapeo.
+        if not relevant_collection_uuids:
+            logger.warning(f"No se encontraron colecciones relevantes para el documento '{file_name}'.")
+            return None
 
+        # Buscar en cada colección relevante
+        for col_uuid_str in relevant_collection_uuids:
+            async with DBSession(SessionLocal) as db_inner:
+                col_name_obj = await db_inner.scalar(
+                    select(LangchainPgCollection.name).where(LangchainPgCollection.uuid == uuid.UUID(col_uuid_str))
+                )
+                if not col_name_obj:
+                    logger.warning(f"No se encontró el nombre para la colección UUID: {col_uuid_str}. Saltando.")
+                    continue
+                collection_name_for_vectorstore = col_name_obj
 
-        else:
-            # Lógica existente para recuperar de colecciones generales (langchain_pg_embedding)
-            logger.info("Buscando contenido en colecciones PGVector generales.")
-            collection_name = f"user_memories_{account_id}" if not team_id else f"team_memories_{team_id}"
             vectorstore = await asyncio.to_thread(
                 PGVector.from_existing_index,
                 embedding=embeddings,
-                collection_name=collection_name,
+                collection_name=collection_name_for_vectorstore,
                 connection=PGVECTOR_SYNC_ENGINE,
             )
-
-            retrieved_docs = await vectorstore.asimilarity_search(
-                query=" ",
-                k=10000,
+            
+            # Filtrar por file_name y tipo de chunk
+            docs_in_collection = await vectorstore.asimilarity_search(
+                query=" ", # Consulta vacía para obtener todos los documentos que coincidan con el filtro
+                k=10000, # Un número grande para asegurar que se recuperen todos los chunks
                 filter={"file_name": file_name, "type": "document_chunk"},
             )
+            retrieved_docs.extend(docs_in_collection)
 
         if not retrieved_docs:
             logger.warning(f"No se encontraron chunks para el documento '{file_name}' en el contexto especificado.")
             return None
 
+        # Eliminar duplicados y ordenar
+        unique_chunks = {}
+        for doc in retrieved_docs:
+            doc_key = (doc.metadata.get("document_id"), doc.metadata.get("chunk_index"))
+            if doc_key not in unique_chunks:
+                unique_chunks[doc_key] = doc
+        
         sorted_chunks = sorted(
-            retrieved_docs, key=lambda d: d.metadata.get("chunk_index", 0)
+            unique_chunks.values(), key=lambda d: d.metadata.get("chunk_index", 0)
         )
         full_content = "".join([doc.page_content for doc in sorted_chunks])
 
@@ -639,82 +633,70 @@ async def list_user_documents(
     - Si se proporciona workspace_id, lista los documentos de ese workspace.
     - Si no, lista los documentos de la colección general del usuario o equipo.
     """
-    if workspace_id:
-        logger.info(f"Listando documentos para el workspace {workspace_id}")
-        async with DBSession(SessionLocal) as db:
-            try:
-                stmt = (
-                    select(
-                        WorkspaceDocumentChunk.document_id,
-                        WorkspaceDocumentChunk.content.label("title")  # Asumiendo que el título puede ser inferido del contenido
-                    )
-                    .where(WorkspaceDocumentChunk.workspace_id == uuid.UUID(workspace_id))
-                    .distinct(WorkspaceDocumentChunk.document_id)
+    logger.info(f"Listando documentos para la cuenta {account_id} (Workspace: {workspace_id if workspace_id else 'N/A'})")
+    
+    async with DBSession(SessionLocal) as db:
+        try:
+            # Obtener los UUIDs de las colecciones relevantes
+            relevant_collection_uuids = []
+            if workspace_id:
+                stmt = select(WorkspaceCollectionAssociation.langchain_collection_id).where(
+                    WorkspaceCollectionAssociation.workspace_id == uuid.UUID(workspace_id)
                 )
                 result = await db.execute(stmt)
-                documents = [
-                    {
-                        "file_name": str(row.document_id),
-                        "topic": "Workspace",
-                        "title": row.title.split('\n')[0] if row.title else "Sin título",
-                        "author": None,
-                    }
-                    for row in result.mappings()
-                ]
-                logger.info(f"✅ Listados {len(documents)} documentos para el workspace {workspace_id}.")
-                return documents
-            except Exception as e:
-                logger.error(f"❌ Error listando documentos para el workspace {workspace_id}: {e}", exc_info=True)
+                relevant_collection_uuids.extend([str(u) for u in result.scalars().all()])
+            
+            user_collection_name = f"user_memories_{account_id}"
+            global_collection_name = GLOBAL_COLLECTION_NAME
+            team_collection_name = f"team_memories_{team_id}" if team_id else None
+
+            for c_name in [user_collection_name, global_collection_name, team_collection_name]:
+                if c_name:
+                    stmt = select(LangchainPgCollection.uuid).where(LangchainPgCollection.name == c_name)
+                    result = await db.execute(stmt)
+                    c_uuid = result.scalar_one_or_none()
+                    if c_uuid and str(c_uuid) not in relevant_collection_uuids:
+                        relevant_collection_uuids.append(str(c_uuid))
+
+            if not relevant_collection_uuids:
+                logger.info("No se encontraron colecciones relevantes para listar documentos.")
                 return []
-    else:
-        logger.info(f"Listando documentos para la cuenta {account_id}")
-        try:
-            collection_name = f"user_memories_{account_id}"
-            async with DBSession(SessionLocal) as db:
-                collection_uuid_query = text("SELECT uuid FROM langchain_pg_collection WHERE name = :collection_name")
-                collection_result = await db.execute(collection_uuid_query, {"collection_name": collection_name})
-                collection_uuid = collection_result.scalar_one_or_none()
 
-                if not collection_uuid:
-                    logger.info(f"No se encontró la colección '{collection_name}' para listar documentos.")
-                    return []
+            # Construir la consulta para obtener documentos únicos de langchain_pg_embedding
+            # Filtrar por collection_id y metadatos
+            clauses = [
+                "collection_id = ANY(:col_uuids)", # Usar ANY para buscar en múltiples UUIDs
+                "cmetadata->>'type' = 'document_chunk'"
+            ]
+            params: Dict[str, Any] = {"col_uuids": [uuid.UUID(u) for u in relevant_collection_uuids]}
+            
+            if team_id:
+                clauses.append("cmetadata->>'team_id' = :tid")
+                params["tid"] = str(team_id)
+            if workspace_id:
+                clauses.append("cmetadata->>'workspace_id' = :wsid")
+                params["wsid"] = str(workspace_id)
 
-                if team_id:
-                    document_list_query = text(
-                        """
-                        SELECT DISTINCT ON (cmetadata->>'file_name')
-                               cmetadata->>'file_name' AS file_name,
-                               cmetadata->>'topic' AS topic,
-                               cmetadata->>'title' AS title,
-                               cmetadata->>'author' AS author
-                        FROM langchain_pg_embedding
-                        WHERE collection_id = :collection_uuid 
-                        AND cmetadata->>'type' = 'document_chunk'
-                        AND cmetadata->>'team_id' = :team_id
-                        ORDER BY cmetadata->>'file_name', id
-                        """
-                    )
-                    document_list_result = await db.execute(document_list_query, {"collection_uuid": collection_uuid, "team_id": team_id})
-                else:
-                    document_list_query = text(
-                        """
-                        SELECT DISTINCT ON (cmetadata->>'file_name')
-                               cmetadata->>'file_name' AS file_name,
-                               cmetadata->>'topic' AS topic,
-                               cmetadata->>'title' AS title,
-                               cmetadata->>'author' AS author
-                        FROM langchain_pg_embedding
-                        WHERE collection_id = :collection_uuid 
-                        AND cmetadata->>'type' = 'document_chunk'
-                        AND (cmetadata->>'team_id' IS NULL OR cmetadata->>'team_id' = '')
-                        ORDER BY cmetadata->>'file_name', id
-                        """
-                    )
-                    document_list_result = await db.execute(document_list_query, {"collection_uuid": collection_uuid})
-
-                documents = [dict(row) for row in document_list_result.mappings()]
-                logger.info(f"✅ Listados {len(documents)} documentos para la cuenta {account_id}.")
-                return documents
+            document_list_query = text(
+                f"""
+                SELECT DISTINCT ON (cmetadata->>'document_id')
+                       cmetadata->>'file_name' AS file_name,
+                       cmetadata->>'topic' AS topic,
+                       cmetadata->>'title' AS title,
+                       cmetadata->>'author' AS author,
+                       cmetadata->>'document_id' AS document_id,
+                       cmetadata->>'workspace_id' AS workspace_id,
+                       cmetadata->>'team_id' AS team_id
+                FROM langchain_pg_embedding
+                WHERE {" AND ".join(clauses)}
+                ORDER BY cmetadata->>'document_id', id;
+                """
+            )
+            
+            document_list_result = await db.execute(document_list_query, params)
+            documents = [dict(row) for row in document_list_result.mappings()]
+            logger.info(f"✅ Listados {len(documents)} documentos para la cuenta {account_id}.")
+            return documents
         except Exception as e:
             logger.error(f"❌ Error listando documentos para la cuenta {account_id}: {e}", exc_info=True)
             return []
@@ -756,124 +738,80 @@ async def update_document_metadata(
     
     async with DBSession(SessionLocal) as db:
         try:
+            # Obtener los UUIDs de las colecciones relevantes
+            relevant_collection_uuids = []
             if workspace_id:
-                # Lógica para actualizar metadatos en WorkspaceDocumentChunk
-                logger.info(f"Actualizando metadatos en WorkspaceDocumentChunk para workspace {workspace_id}.")
-                
-                # Para actualizar por file_name en WorkspaceDocumentChunk, necesitamos que:
-                # 1. 'file_name' sea una columna en WorkspaceDocumentChunk.
-                # 2. O, que 'file_name' sea el 'document_id' (UUID) que se guarda.
-                # 3. O, que exista una tabla intermedia que mapee 'file_name' a 'document_id'.
-                
-                # Asumiendo que 'document_id' en WorkspaceDocumentChunk es el UUID del documento
-                # y que 'file_name' es el identificador que se mapea a ese document_id.
-                # Si 'file_name' no es un UUID, esta lógica necesitaría un mapeo.
-                
-                # Por ahora, intentaremos convertir file_name a UUID para buscar por document_id.
-                # Si tu WorkspaceDocumentChunk tiene una columna 'file_name', la lógica sería diferente.
-                
-                target_document_uuid = None
-                try:
-                    target_document_uuid = uuid.UUID(file_name)
-                except ValueError:
-                    logger.warning(f"'{file_name}' no es un UUID válido. No se puede buscar directamente en WorkspaceDocumentChunk por document_id para actualizar.")
-                    return False # No podemos actualizar si no encontramos el documento por su ID.
-
-                # Construir la sentencia de actualización para WorkspaceDocumentChunk
-                # NOTA: WorkspaceDocumentChunk no tiene campos 'title' o 'topic' directamente.
-                # Si quieres almacenar estos metadatos, necesitarías añadirlos como columnas
-                # a la tabla WorkspaceDocumentChunk en core/database.py.
-                # Por ahora, esta función no puede actualizar 'title' o 'topic' en WorkspaceDocumentChunk
-                # a menos que los almacenes como parte del 'content' o en una columna JSONB si la añades.
-                
-                # Si añades 'title' y 'topic' como columnas a WorkspaceDocumentChunk:
-                # update_values = {}
-                # if new_title is not None:
-                #     update_values['title'] = new_title
-                # if new_topic is not None:
-                #     update_values['topic'] = new_topic
-                
-                # if update_values:
-                #     stmt = update(WorkspaceDocumentChunk).where(
-                #         and_(
-                #             WorkspaceDocumentChunk.workspace_id == uuid.UUID(workspace_id),
-                #             WorkspaceDocumentChunk.document_id == target_document_uuid
-                #         )
-                #     ).values(**update_values)
-                #     result = await db.execute(stmt)
-                #     await db.commit()
-                #     if result.rowcount > 0:
-                #         logger.info(f"✅ Metadatos de {file_name} en workspace {workspace_id} actualizados.")
-                #         return True
-                # else:
-                #     logger.warning("No hay valores para actualizar en WorkspaceDocumentChunk.")
-                #     return False
-                
-                # Dado que WorkspaceDocumentChunk actualmente solo tiene content y embedding,
-                # y no 'title' o 'topic' como columnas directas, esta función no puede
-                # actualizar esos metadatos directamente en esa tabla.
-                # Si quieres que esto funcione, DEBES añadir esas columnas a WorkspaceDocumentChunk.
-                logger.warning(
-                    f"No se pueden actualizar 'title' o 'topic' directamente en WorkspaceDocumentChunk "
-                    f"para el documento '{file_name}' (workspace {workspace_id}) "
-                    f"ya que esas columnas no existen. Considera añadir 'title' y 'topic' a WorkspaceDocumentChunk."
+                stmt = select(WorkspaceCollectionAssociation.langchain_collection_id).where(
+                    WorkspaceCollectionAssociation.workspace_id == uuid.UUID(workspace_id)
                 )
-                return False # Retorna False porque no se pudo realizar la actualización deseada.
+                result = await db.execute(stmt)
+                relevant_collection_uuids.extend([str(u) for u in result.scalars().all()])
+            
+            user_collection_name = f"user_memories_{account_id}"
+            global_collection_name = GLOBAL_COLLECTION_NAME
+            team_collection_name = f"team_memories_{team_id}" if team_id else None
 
+            for c_name in [user_collection_name, global_collection_name, team_collection_name]:
+                if c_name:
+                    stmt = select(LangchainPgCollection.uuid).where(LangchainPgCollection.name == c_name)
+                    result = await db.execute(stmt)
+                    c_uuid = result.scalar_one_or_none()
+                    if c_uuid and str(c_uuid) not in relevant_collection_uuids:
+                        relevant_collection_uuids.append(str(c_uuid))
 
-            else:
-                # Lógica existente para actualizar metadatos en colecciones generales (langchain_pg_embedding)
-                logger.info("Actualizando metadatos en colecciones PGVector generales.")
-                collection_name = f"user_memories_{account_id}" if not team_id else f"team_memories_{team_id}"
+            if not relevant_collection_uuids:
+                logger.warning(f"No se encontraron colecciones relevantes para actualizar metadatos para '{file_name}'.")
+                return False
 
-                collection_stmt = select(langchain_pg_collection.c.uuid).where(langchain_pg_collection.c.name == collection_name)
-                collection_id_result = await db.execute(collection_stmt)
-                collection_id = collection_id_result.scalar_one_or_none()
+            # Construir la consulta de actualización para langchain_pg_embedding
+            # Actualizar cmetadata para todos los chunks del documento en las colecciones relevantes
+            
+            # Primero, obtener el cmetadata actual de un chunk para no sobrescribir otros metadatos
+            # Hacemos esto para el primer chunk encontrado que coincida con el file_name
+            select_stmt = select(langchain_pg_embedding.c.cmetadata).where(
+                and_(
+                    langchain_pg_embedding.c.collection_id.in_([uuid.UUID(u) for u in relevant_collection_uuids]),
+                    langchain_pg_embedding.c.cmetadata['file_name'].astext == file_name,
+                    langchain_pg_embedding.c.cmetadata['type'].astext == 'document_chunk'
+                )
+            ).limit(1)
+            
+            cmetadata_result = await db.execute(select_stmt)
+            current_cmetadata = cmetadata_result.scalar_one_or_none()
+            
+            if not current_cmetadata:
+                logger.warning(f"No se encontraron chunks para el archivo '{file_name}' en las colecciones relevantes para actualizar.")
+                return False
 
-                if not collection_id:
-                    logger.error(f"No se encontró la colección '{collection_name}' para actualizar metadatos.")
-                    return False
+            values_to_update = current_cmetadata.copy()
+            if new_title is not None:
+                values_to_update['title'] = new_title
+            if new_topic is not None:
+                values_to_update['topic'] = new_topic
+            if workspace_id: # Asegurarse de que workspace_id se actualice si es necesario
+                values_to_update['workspace_id'] = str(workspace_id)
 
-                stmt = select(langchain_pg_embedding.c.cmetadata).where(
+            update_stmt = (
+                update(langchain_pg_embedding)
+                .where(
                     and_(
-                        langchain_pg_embedding.c.collection_id == collection_id,
-                        langchain_pg_embedding.c.cmetadata['file_name'].astext == file_name
+                        langchain_pg_embedding.c.collection_id.in_([uuid.UUID(u) for u in relevant_collection_uuids]),
+                        langchain_pg_embedding.c.cmetadata['file_name'].astext == file_name,
+                        langchain_pg_embedding.c.cmetadata['type'].astext == 'document_chunk'
                     )
-                ).limit(1)
-                
-                cmetadata_result = await db.execute(stmt)
-                current_cmetadata = cmetadata_result.scalar_one_or_none()
-                
-                if not current_cmetadata:
-                    logger.warning(f"No se encontraron chunks para el archivo '{file_name}' en la colección '{collection_name}'.")
-                    return False
-
-                values_to_update = current_cmetadata.copy()
-                if new_title is not None:
-                    values_to_update['title'] = new_title
-                if new_topic is not None:
-                    values_to_update['topic'] = new_topic
-
-                update_stmt = (
-                    update(langchain_pg_embedding)
-                    .where(
-                        and_(
-                            langchain_pg_embedding.c.collection_id == collection_id,
-                            langchain_pg_embedding.c.cmetadata['file_name'].astext == file_name
-                        )
-                    )
-                    .values(cmetadata=values_to_update)
                 )
+                .values(cmetadata=values_to_update)
+            )
 
-                result = await db.execute(update_stmt)
-                await db.commit()
-                
-                if result.rowcount > 0:
-                    logger.info(f"✅ Se actualizaron {result.rowcount} chunks para el archivo '{file_name}'.")
-                    return True
-                else:
-                    logger.warning(f"La consulta de actualización para '{file_name}' no afectó ninguna fila, aunque el documento fue encontrado.")
-                    return False
+            result = await db.execute(update_stmt)
+            await db.commit()
+            
+            if result.rowcount > 0:
+                logger.info(f"✅ Se actualizaron {result.rowcount} chunks para el archivo '{file_name}'.")
+                return True
+            else:
+                logger.warning(f"La consulta de actualización para '{file_name}' no afectó ninguna fila, aunque el documento fue encontrado.")
+                return False
 
         except Exception as e:
             logger.error(f"❌ Error actualizando metadatos de '{file_name}' (workspace {workspace_id}): {e}", exc_info=True)
@@ -882,12 +820,17 @@ async def update_document_metadata(
 
 
 
-async def list_user_collections(account_id: str, team_id: Optional[str] = None) -> List[Dict[str, Any]]:
+async def list_user_collections(account_id: str, team_id: Optional[str] = None, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Obtiene una lista de todas las colecciones (temas) únicas de un usuario o equipo
     y cuenta cuántos documentos hay en cada una.
+    
+    Args:
+        account_id: ID de la cuenta del usuario
+        team_id: ID del equipo (opcional)
+        workspace_id: ID del workspace para filtrar colecciones (opcional)
     """
-    logger.info(f"Listando colecciones para la cuenta {account_id}")
+    logger.info(f"Listando colecciones para la cuenta {account_id}, workspace: {workspace_id}")
     collection_name = f"user_memories_{account_id}" if not team_id else f"team_memories_{team_id}"
     
     async with DBSession(SessionLocal) as db:
@@ -902,24 +845,32 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None) 
                 return []
 
             # Consulta para agrupar por 'topic' y contar los 'file_name' únicos
+            # Si se proporciona workspace_id, filtrar por él
+            where_clause = "collection_id = :collection_uuid AND cmetadata->>'type' = 'document_chunk'"
+            params = {"collection_uuid": collection_uuid}
+            
+            if workspace_id:
+                where_clause += " AND cmetadata->>'workspace_id' = :workspace_id"
+                params["workspace_id"] = workspace_id
+                
             collections_query = text(
-                """
+                f"""
                 SELECT 
                     cmetadata->>'topic' AS topic,
                     COUNT(DISTINCT cmetadata->>'file_name') as document_count
                 FROM langchain_pg_embedding
-                WHERE collection_id = :collection_uuid AND cmetadata->>'type' = 'document_chunk'
+                WHERE {where_clause}
                 GROUP BY cmetadata->>'topic'
                 ORDER BY topic;
                 """
             )
-            result = await db.execute(collections_query, {"collection_uuid": collection_uuid})
+            result = await db.execute(collections_query, params)
             collections = [dict(row) for row in result.mappings()]
             return collections
         except Exception as e:
             logger.error(f"❌ Error listando colecciones para la cuenta {account_id}: {e}", exc_info=True)
             return []
-async def extract_titles_and_update_metadata(account_id: str, topic: Optional[str] = None, workspace_id: Optional[str] = None) -> int:
+async def extract_titles_and_update_metadata(account_id: str, topic: Optional[str] = None, workspace_id: Optional[str] = None, team_id: Optional[str] = None) -> int:
     """
     Extrae títulos de los documentos y actualiza sus metadatos en la base de conocimiento del usuario.
     
@@ -927,6 +878,7 @@ async def extract_titles_and_update_metadata(account_id: str, topic: Optional[st
         account_id: El ID universal de la cuenta del usuario.
         topic: Tema de los documentos a procesar (opcional).
         workspace_id: El ID del workspace (UUID en formato string) para procesar documentos de un workspace específico, si aplica.
+        team_id: El ID del equipo (opcional).
     
     Returns:
         Número de documentos actualizados.
@@ -939,181 +891,106 @@ async def extract_titles_and_update_metadata(account_id: str, topic: Optional[st
     updated_count = 0
     async with DBSession(SessionLocal) as db:
         try:
+            # Obtener los UUIDs de las colecciones relevantes
+            relevant_collection_uuids = []
             if workspace_id:
-                # Lógica para extraer y actualizar títulos de WorkspaceDocumentChunk
-                logger.info(f"Procesando documentos en WorkspaceDocumentChunk para workspace {workspace_id}.")
-                
-                # Asumo que WorkspaceDocumentChunk ahora tiene 'file_name', 'title', 'topic' como columnas.
-                # Si no las tiene, esta sección necesitará ser ajustada o esas columnas añadidas a la DB.
-                
-                stmt = select(
-                    WorkspaceDocumentChunk.document_id,
-                    WorkspaceDocumentChunk.file_name,
-                    WorkspaceDocumentChunk.content,
-                    WorkspaceDocumentChunk.chunk_order,
-                    WorkspaceDocumentChunk.title,
-                    WorkspaceDocumentChunk.topic # Asegurarse de seleccionar topic si se usa para filtrar
-                ).where(
-                    WorkspaceDocumentChunk.workspace_id == uuid.UUID(workspace_id)
-                ).order_by(
-                    WorkspaceDocumentChunk.document_id,
-                    WorkspaceDocumentChunk.chunk_order
+                stmt = select(WorkspaceCollectionAssociation.langchain_collection_id).where(
+                    WorkspaceCollectionAssociation.workspace_id == uuid.UUID(workspace_id)
                 )
-                
-                if topic:
-                    stmt = stmt.where(WorkspaceDocumentChunk.topic == topic)
-                
                 result = await db.execute(stmt)
-                # Convertir los resultados a diccionarios para un acceso más robusto y evitar errores de Pylance
-                chunks_raw = result.all() # Esto devuelve Row objects/tuples
-                
-                if not chunks_raw:
-                    logger.info(f"No se encontraron fragmentos de documentos en el workspace {workspace_id} para procesar.")
-                    return 0 # Asegurar retorno de int
+                relevant_collection_uuids.extend([str(u) for u in result.scalars().all()])
+            
+            user_collection_name = f"user_memories_{account_id}"
+            global_collection_name = GLOBAL_COLLECTION_NAME
+            team_collection_name = f"team_memories_{team_id}" if team_id else None
 
-                # Mapear los resultados a un formato de diccionario más amigable
-                documents_to_process: Dict[uuid.UUID, Dict[str, Any]] = {}
-                for chunk_row in chunks_raw:
-                    # Acceder a los elementos por índice o nombre de columna si es un Row object
-                    doc_id = chunk_row[0] # document_id
-                    file_name = chunk_row[1] # file_name
-                    content = chunk_row[2] # content
-                    order = chunk_row[3] # chunk_order
-                    current_title = chunk_row[4] # title
-                    
-                    if doc_id not in documents_to_process:
-                        documents_to_process[doc_id] = {
-                            "file_name": file_name,
-                            "current_title": current_title,
-                            "chunks": []
-                        }
-                    documents_to_process[doc_id]["chunks"].append({"content": content, "order": order})
+            for c_name in [user_collection_name, global_collection_name, team_collection_name]:
+                if c_name:
+                    stmt = select(LangchainPgCollection.uuid).where(LangchainPgCollection.name == c_name)
+                    result = await db.execute(stmt)
+                    c_uuid = result.scalar_one_or_none()
+                    if c_uuid and str(c_uuid) not in relevant_collection_uuids:
+                        relevant_collection_uuids.append(str(c_uuid))
 
-                for doc_id, doc_data in documents_to_process.items():
-                    logger.info(f"Procesando documento: {doc_data['file_name']} (ID: {doc_id}) con {len(doc_data['chunks'])} fragmentos.")
-                    
-                    full_content = "".join([c["content"] for c in sorted(doc_data["chunks"], key=lambda x: x["order"])])
-                    
-                    new_title = None
-                    if full_content:
-                        lines = [line.strip() for line in full_content.split('\n') if line.strip()]
-                        if lines:
-                            first_line = lines[0]
-                            if 5 < len(first_line) < 100:
-                                new_title = first_line
-                            else:
-                                for line in lines[:5]:
-                                    if len(line) > 10 and len(line) < 150 and line.isupper() and line.count(' ') < len(line)/3:
-                                        new_title = line.title()
-                                        break
-                            if not new_title and len(lines) > 1:
-                                combined_lines = " ".join(lines[:2])
-                                if 10 < len(combined_lines) < 150:
-                                    new_title = combined_lines
-                    
-                    if new_title and new_title != doc_data['current_title']:
-                        logger.info(f"Título extraído para {doc_data['file_name']}: '{new_title}'")
-                        
-                        update_stmt = update(WorkspaceDocumentChunk).where(
-                            and_(
-                                WorkspaceDocumentChunk.workspace_id == uuid.UUID(workspace_id),
-                                WorkspaceDocumentChunk.document_id == doc_id
-                            )
-                        ).values(title=new_title)
-                        
-                        result = await db.execute(update_stmt)
-                        if result.rowcount > 0:
-                            updated_count += 1
-                            logger.info(f"Actualizado título para el documento {doc_data['file_name']} en workspace {workspace_id}.")
-                        else:
-                            logger.warning(f"No se pudo actualizar el título para el documento {doc_data['file_name']} en workspace {workspace_id}.")
-                    else:
-                        logger.info(f"No se encontró un nuevo título válido o el título es el mismo para {doc_data['file_name']}.")
+            if not relevant_collection_uuids:
+                logger.info(f"No se encontraron colecciones relevantes para extraer títulos para la cuenta {account_id}.")
+                return 0
 
-                logger.info(f"Se actualizaron los títulos de {updated_count} documentos para el workspace {workspace_id}.")
+            # Lógica unificada para extraer y actualizar títulos de langchain_pg_embedding
+            logger.info(f"Procesando documentos en colecciones PGVector para cuenta {account_id}.")
+            
+            clauses = [
+                "collection_id = ANY(:col_uuids)",
+                "cmetadata->>'type' = 'document_chunk'"
+            ]
+            params: Dict[str, Any] = {"col_uuids": [uuid.UUID(u) for u in relevant_collection_uuids]}
+            if topic:
+                clauses.append("cmetadata->>'topic' = :tpc")
+                params["tpc"] = topic
+            if workspace_id:
+                clauses.append("cmetadata->>'workspace_id' = :wsid")
+                params["wsid"] = str(workspace_id)
 
+            select_sql = text("SELECT * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses))
+            logger.info(f"Ejecutando consulta SQL: {select_sql} con parámetros: {params}")
+            result = await db.execute(select_sql, params)
+            chunks = result.mappings().all() 
+            logger.info(f"Se encontraron {len(chunks)} fragmentos de documentos para procesar.")
 
-            else:
-                # Lógica existente para colecciones generales (langchain_pg_embedding)
-                logger.info(f"Procesando documentos en colecciones PGVector generales para cuenta {account_id}.")
-                collection_name = f"user_memories_{account_id}"
-                
-                col_q = text("SELECT uuid FROM langchain_pg_collection WHERE name = :cname")
-                res = await db.execute(col_q, {"cname": collection_name})
-                collection_uuid = res.scalar_one_or_none()
-                if not collection_uuid:
-                    logger.info(f"No existe la colección '{collection_name}', no hay documentos para procesar.")
-                    return 0 # Asegurar retorno de int
+            if not chunks:
+                logger.info("No se encontraron fragmentos de documentos para procesar.")
+                return 0
 
-                clauses = ["collection_id = :col_id", "cmetadata->>'type' = 'document_chunk'"]
-                params = {"col_id": collection_uuid}
-                if topic:
-                    clauses.append("cmetadata->>'topic' = :tpc")
-                    params["tpc"] = topic
-
-                select_sql = text("SELECT * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses))
-                logger.info(f"Ejecutando consulta SQL: {select_sql} con parámetros: {params}")
-                result = await db.execute(select_sql, params)
-                # Usar .mappings().all() para obtener diccionarios directamente y evitar errores de Pylance
-                chunks = result.mappings().all() 
-                logger.info(f"Se encontraron {len(chunks)} fragmentos de documentos para procesar.")
-
-                if not chunks:
-                    logger.info("No se encontraron fragmentos de documentos para procesar.")
-                    return 0 # Asegurar retorno de int
-
-                documents = {}
-                for chunk in chunks:
-                    # Acceso directo a cmetadata como dict
-                    file_name = chunk['cmetadata'].get('file_name')
-                    if file_name:
-                        if file_name not in documents:
-                            documents[file_name] = []
-                        documents[file_name].append(chunk)
-                    else:
-                        logger.warning(f"Fragmento sin 'file_name' en cmetadata: {chunk['cmetadata']}")
-
-                for file_name, doc_chunks in documents.items():
-                    logger.info(f"Procesando documento: {file_name} con {len(doc_chunks)} fragmentos.")
-                    
-                    # Acceso a 'document' (contenido del chunk)
-                    full_content = "".join([c['document'] for c in sorted(doc_chunks, key=lambda x: x['cmetadata'].get('chunk_index', 0))])
-
-                    new_title = None
-                    if full_content:
-                        lines = [line.strip() for line in full_content.split('\n') if line.strip()]
-                        if lines:
-                            first_line = lines[0]
-                            if 5 < len(first_line) < 100:
-                                new_title = first_line
-                            else:
-                                for line in lines[:5]:
-                                    if len(line) > 10 and len(line) < 150 and line.isupper() and line.count(' ') < len(line)/3:
-                                        new_title = line.title()
-                                        break
-                            if not new_title and len(lines) > 1:
-                                combined_lines = " ".join(lines[:2])
-                                if 10 < len(combined_lines) < 150:
-                                    new_title = combined_lines
-
-                    if new_title and new_title != doc_chunks[0]['cmetadata'].get('title'):
-                        logger.info(f"Título extraído para {file_name}: '{new_title}'")
-                        success = await update_document_metadata(account_id, file_name, new_title=new_title, new_topic=None)
-                        if success:
-                            updated_count += 1
-                            logger.info(f"Actualizado título para el documento {file_name}.")
-                        else:
-                            logger.warning(f"No se pudo actualizar el título para el documento {file_name}.")
-                    else:
-                        logger.info(f"No se encontró un nuevo título válido o el título es el mismo para {file_name}. Primera línea: {new_title}")
-
-                if updated_count > 0:
-                    logger.info(f"Se actualizaron los títulos de {updated_count} documentos para la cuenta {account_id}.")
+            documents = {}
+            for chunk in chunks:
+                file_name = chunk['cmetadata'].get('file_name')
+                if file_name:
+                    if file_name not in documents:
+                        documents[file_name] = []
+                    documents[file_name].append(chunk)
                 else:
-                    logger.info(f"No se encontraron títulos para actualizar en los documentos de la cuenta {account_id}.")
+                    logger.warning(f"Fragmento sin 'file_name' en cmetadata: {chunk['cmetadata']}")
+
+            for file_name, doc_chunks in documents.items():
+                logger.info(f"Procesando documento: {file_name} con {len(doc_chunks)} fragmentos.")
                 
-            return updated_count # Asegurar retorno de int
+                full_content = "".join([c['document'] for c in sorted(doc_chunks, key=lambda x: x['cmetadata'].get('chunk_index', 0))])
+
+                new_title = None
+                if full_content:
+                    lines = [line.strip() for line in full_content.split('\n') if line.strip()]
+                    if lines:
+                        first_line = lines[0]
+                        if 5 < len(first_line) < 100:
+                            new_title = first_line
+                        else:
+                            for line in lines[:5]:
+                                if len(line) > 10 and len(line) < 150 and line.isupper() and line.count(' ') < len(line)/3:
+                                    new_title = line.title()
+                                    break
+                        if not new_title and len(lines) > 1:
+                            combined_lines = " ".join(lines[:2])
+                            if 10 < len(combined_lines) < 150:
+                                new_title = combined_lines
+
+                if new_title and new_title != doc_chunks[0]['cmetadata'].get('title'):
+                    logger.info(f"Título extraído para {file_name}: '{new_title}'")
+                    success = await update_document_metadata(account_id, file_name, new_title=new_title, new_topic=None, team_id=team_id, workspace_id=workspace_id)
+                    if success:
+                        updated_count += 1
+                        logger.info(f"Actualizado título para el documento {file_name}.")
+                    else:
+                        logger.warning(f"No se pudo actualizar el título para el documento {file_name}.")
+                else:
+                    logger.info(f"No se encontró un nuevo título válido o el título es el mismo para {file_name}. Primera línea: {new_title}")
+
+            if updated_count > 0:
+                logger.info(f"Se actualizaron los títulos de {updated_count} documentos para la cuenta {account_id}.")
+            else:
+                logger.info(f"No se encontraron títulos para actualizar en los documentos de la cuenta {account_id}.")
+            
+            return updated_count
         except Exception as e:
             logger.error(f"Error al extraer y actualizar títulos para la cuenta {account_id} (workspace {workspace_id}): {e}", exc_info=True)
             await db.rollback()
-            return 0 # Asegurar retorno de int # Asegurar rollback en caso de error
+            return 0

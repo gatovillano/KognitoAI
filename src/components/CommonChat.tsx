@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSearch } from '@/contexts/SearchContext';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -379,6 +380,11 @@ export function CommonChat({ threadId }: CommonChatProps) {
     }
   }, [threadId, user]);
 
+  const { searchTerm } = useSearch();
+  const filteredMessages = searchTerm 
+    ? messages.filter(msg => msg.text.toLowerCase().includes(searchTerm.toLowerCase()))
+    : messages;
+
   useEffect(() => {
     if (scrollAreaRef.current) {
       const scrollElement = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
@@ -391,7 +397,7 @@ export function CommonChat({ threadId }: CommonChatProps) {
         }, 100); // Retraso para asegurar que el DOM esté completamente actualizado
       }
     }
-  }, [messages.length]);
+  }, [messages.length, searchTerm]);
 
   useEffect(() => {
     const checkTaskStatus = async () => {
@@ -448,35 +454,35 @@ export function CommonChat({ threadId }: CommonChatProps) {
     <div className="flex h-full">
       <div className="flex flex-col flex-1 overflow-hidden">
         <div className="flex-grow overflow-y-hidden relative">
-          <ScrollArea className="h-full" ref={scrollAreaRef}>
-            <div className="p-4 md:p-6 space-y-6 w-full max-w-7xl mx-auto">
-              {messages.slice(-50).map((msg, index) => (
-                <ChatMessage
-                  key={messages.length - 50 + index}
-                  msg={{ 
-                    text: msg.text, 
-                    sender: msg.sender, 
-                    image: msg.image_base64 || '', 
-                    document_url: msg.document_url || '' 
-                  }}
-                  index={messages.length - 50 + index}
-                  handleCopyMessage={handleCopyMessage}
-                  handlePlayAudio={handlePlayAudio}
-                  isAudioLoading={isAudioLoading}
-                  playingMessageIndex={playingMessageIndex}
-                />
-              ))}
-              {isResponding && (
-                <LoadingIndicator
-                  isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
-                  isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
-                />
-              )}
-              {backgroundTasks.map((task) => (
-                <BackgroundTaskIndicator key={task.taskId} task={task} />
-              ))}
-            </div>
-          </ScrollArea>
+            <ScrollArea className="h-full" ref={scrollAreaRef}>
+              <div className="p-4 md:p-6 space-y-6 w-full max-w-7xl mx-auto">
+                {filteredMessages.slice(-50).map((msg, index) => (
+                  <ChatMessage
+                    key={filteredMessages.length - 50 + index}
+                    msg={{ 
+                      text: msg.text, 
+                      sender: msg.sender, 
+                      image: msg.image_base64 || '', 
+                      document_url: msg.document_url || '' 
+                    }}
+                    index={filteredMessages.length - 50 + index}
+                    handleCopyMessage={handleCopyMessage}
+                    handlePlayAudio={handlePlayAudio}
+                    isAudioLoading={isAudioLoading}
+                    playingMessageIndex={playingMessageIndex}
+                  />
+                ))}
+                {isResponding && (
+                  <LoadingIndicator
+                    isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+                    isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+                  />
+                )}
+                {backgroundTasks.map((task) => (
+                  <BackgroundTaskIndicator key={task.taskId} task={task} />
+                ))}
+              </div>
+            </ScrollArea>
         </div>
         <ChatInputBar
           newMessage={newMessage}

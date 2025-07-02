@@ -257,7 +257,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
   };
 
   return (
-    <div className={cn("flex flex-col h-full p-2", isCollapsed ? "items-center" : "p-4")}>
+    <div className={cn("flex flex-col h-full p-2 rounded-none", isCollapsed ? "items-center" : "p-4")}>
       <div className={cn("flex items-center w-full pb-2 mb-2 border-b", isCollapsed ? "justify-center" : "justify-between")}>
         <Image src="/logo-simple.png" alt="Kognito Logo" width={50} height={50} className={cn(!isCollapsed && "mr-2")} />
         {!isCollapsed && <span className="font-bold text-lg whitespace-nowrap">Kognito</span>}
@@ -275,10 +275,10 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               {!isCollapsed && "Escritorio"}
             </Button>
           </Link>
-          <Link href="/rag" passHref onClick={onLinkClick} title="Gestión de Documentos">
+          <Link href="/rag" passHref onClick={onLinkClick} title="Gestión de Conocimientos">
             <Button variant={pathname.startsWith('/rag') ? 'secondary' : 'ghost'} className={cn("w-full", isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start")}>
               <BookMarked className={cn("h-4 w-4", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && "Gestión de Documentos"}
+              {!isCollapsed && "Gestión de Conocimientos"}
             </Button>
           </Link>
           <Link href="/agenda" passHref onClick={onLinkClick} title="Agenda">
@@ -301,7 +301,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           </Link>
           <Link href="/workspaces" passHref onClick={onLinkClick} title="Workspaces">
             <Button variant={pathname.startsWith('/workspaces') ? 'secondary' : 'ghost'} className={cn("w-full", isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start")}>
-              <FolderKanban className={cn("h-4 w-4", !isCollapsed && "mr-2")}/>
+              <Bot className={cn("h-4 w-4", !isCollapsed && "mr-2")}/>
               {!isCollapsed && "Workspaces"}
             </Button>
           </Link>

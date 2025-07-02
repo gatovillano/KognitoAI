@@ -1,8 +1,11 @@
 # api/analysis.py
 
 import logging
+from langchain.schema.messages import HumanMessage
 import uuid
 from typing import List, Optional
+
+from core.llm_manager import get_fast_llm
 
 from fastapi import APIRouter, HTTPException, Depends, status, Form, BackgroundTasks
 from pydantic import BaseModel
@@ -16,7 +19,7 @@ from utils.advanced_text_analyzer import text_analyzer
 from sklearn.cluster import KMeans
 import numpy as np
 from collections import Counter
-
+from utils.embeddings import initialize_embeddings
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -370,7 +373,7 @@ async def update_semantic_topics_endpoint(
 async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: Optional[int] = None):
     """
     Proceso en segundo plano para realizar análisis semántico y agrupación de temas.
-    Este es un placeholder para la integración con Gemini API.
+    Integración con modelos de embeddings y LLMs para clustering y etiquetado.
     Se puede limitar el número de términos analizados con max_terms.
     """
     async with SessionLocal() as db_session:
@@ -391,83 +394,129 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
             analysis_results = await db_session.execute(analysis_stmt)
             analysis_payloads = analysis_results.scalars().all()
 
-            all_topics = []
+            all_topics_raw = []
             for payload in analysis_payloads:
                 if isinstance(payload, dict):
-                    all_topics.extend(payload.get("temas_clave_avanzados", []))
-            if max_terms is not None and len(all_topics) > max_terms:
-                all_topics = all_topics[:max_terms]
-                logger.info(f"Limitando análisis semántico a {max_terms} términos de un total de {len(all_topics)}.")
+                    all_topics_raw.extend(payload.get("temas_clave_avanzados", []))
+            
+            # Conteo eficiente de temas y selección de temas únicos
+            topic_counts = Counter(all_topics_raw)
+            # Ordenar por frecuencia y luego tomar los únicos, si hay límite
+            if max_terms is not None:
+                # Tomar los 'max_terms' temas más comunes
+                unique_topics = [topic for topic, count in topic_counts.most_common(max_terms)]
+                logger.info(f"Limitando análisis semántico a {max_terms} términos más frecuentes de un total de {len(all_topics_raw)}.")
             else:
-                logger.info(f"Procesando {len(all_topics)} temas para análisis semántico sin límite.")
+                unique_topics = list(topic_counts.keys()) # Todos los temas únicos
+                logger.info(f"Procesando {len(unique_topics)} temas únicos para análisis semántico sin límite.")
 
-            # 2. Integrar Gemini API para obtener embebidos semánticos usando el LLM ya configurado
-            from core.llm_manager import get_fast_llm
-            llm_for_embeddings = get_fast_llm()
-            if not llm_for_embeddings:
-                logger.error("No hay LLM disponible para generar embeddings.")
-                raise ValueError("LLM no disponible para análisis semántico.")
-                º
+            # Si no hay temas únicos para procesar, salir temprano
+            if not unique_topics:
+                logger.info(f"No hay temas únicos para procesar en la tarea {task_id}. Completando sin resultados.")
+                stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                    status="completed", result_payload={"grouped_topics": []})
+                await db_session.execute(stmt_completed)
+                await db_session.commit()
+                return
+
+            # 2. Integrar el MODELO DE EMBEDDINGS dedicado (Ollama en este caso)
+            embedding_model = await initialize_embeddings() # ¡Usamos tu función existente!
+            if not embedding_model:
+                logger.error("No hay modelo de embeddings disponible (Ollama).")
+                raise ValueError("Modelo de embeddings no disponible para análisis semántico.")
+            
             embeddings = []
-            for topic in all_topics:
-                try:
-                    logger.info(f"Generando embedding para el tema: {topic}")
-                    # Usar un prompt más específico para obtener una representación numérica precisa
-                    prompt = f"Convert the topic '{topic}' into a dense numerical vector of 768 dimensions for semantic clustering. Provide the vector as a space-separated list of numbers."
-                    response = await llm_for_embeddings.ainvoke(prompt)
-                    logger.info(f"Respuesta recibida para el tema: {topic}")
-                    # Extraer el contenido como texto y convertir a lista de números
-                    response_text = response.content if hasattr(response, 'content') else str(response)
-                    # Parsear la respuesta para obtener un vector de números
-                    vector = []
-                    for val in response_text.split():
-                        try:
-                            num_val = float(val)
-                            vector.append(num_val)
-                        except ValueError:
-                            continue  # Ignorar valores no numéricos
-                    # Ajustar el tamaño del vector a 768 dimensiones
-                    while len(vector) < 768:
-                        vector.append(0.0)
-                    if len(vector) > 768:
-                        vector = vector[:768]
-                    embeddings.append(vector)
-                    logger.info(f"Embedding generado exitosamente para: {topic}")
-                except Exception as e:
-                    logger.error(f"Error al obtener embedding para {topic}: {e}", exc_info=True)
-                    embeddings.append([0.0] * 768)  # Fallback en caso de error
-            logger.info(f"Obtenidos embeddings para {len(embeddings)} temas.")
+            try:
+                logger.info(f"Generando embeddings para {len(unique_topics)} temas de forma batch...")
+                # Usar el método de batching del modelo de embeddings
+                embeddings = await embedding_model.aembed_documents(unique_topics)
+                logger.info(f"Embeddings generados exitosamente para {len(embeddings)} temas.")
+            except Exception as e:
+                logger.error(f"Error al obtener embeddings de forma batch con Ollama: {e}", exc_info=True)
+                raise ValueError(f"Fallo al generar embeddings de forma batch: {e}")
 
-            # 3. Implementar clustering (e.g., K-Means) para agrupar temas por similitud semántica
-            if len(embeddings) > 5:  # Solo hacer clustering si hay suficientes temas
-                kmeans = KMeans(n_clusters=min(5, len(embeddings) // 2 + 1), random_state=42)
-                clusters = kmeans.fit_predict(np.array(embeddings))
+            if not embeddings:
+                logger.info("No se generaron embeddings, saltando clustering y agrupación.")
+                simulated_grouped_topics = [] # No hay temas para agrupar
             else:
-                clusters = list(range(len(embeddings)))  # Asignar un cluster por tema si hay pocos
+                # 3. Implementar clustering (e.g., K-Means) para agrupar temas por similitud semántica
+                # Asegurarse de que haya suficientes muestras para el número de clusters deseado
+                # Un mínimo de 2 clusters si hay al menos 2 embeddings, o 1 si solo hay 1.
+                n_clusters = min(5, max(1, len(embeddings) // 2 + 1)) 
+                if len(embeddings) < n_clusters: # Si hay menos embeddings que clusters deseados, ajustar
+                    n_clusters = len(embeddings)
+                
+                clusters = []
+                if n_clusters > 1: # Solo ejecutar KMeans si hay al menos 2 clusters posibles
+                    # n_init='auto' es el valor por defecto en versiones recientes de scikit-learn
+                    # para asegurar múltiples inicializaciones y un mejor resultado.
+                    # Si usas una versión antigua, podrías necesitar n_init=10.
+                    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init='auto') 
+                    clusters = kmeans.fit_predict(np.array(embeddings))
+                else:
+                    # Si solo hay 0 o 1 cluster posible, asignar todos al mismo cluster (o a su propio cluster si es 1)
+                    clusters = [0] * len(unique_topics) if len(unique_topics) > 0 else []
 
-            # 4. Agrupar temas por cluster y contar menciones
-            cluster_dict = {}
-            for topic, cluster_id, _ in zip(all_topics, clusters, embeddings):
-                if cluster_id not in cluster_dict:
-                    cluster_dict[cluster_id] = {"topics": [], "mentions": 0}
-                cluster_dict[cluster_id]["topics"].append(topic)
-                cluster_dict[cluster_id]["mentions"] += all_topics.count(topic)
+                # 4. Agrupar temas por cluster y contar menciones (usando topic_counts precalculado)
+                cluster_dict = {}
+                for i, topic in enumerate(unique_topics):
+                    if len(clusters) == 0: # Manejar el caso donde no hay clusters (ej. 0 o 1 tema)
+                        cluster_id = 0 
+                    else:
+                        cluster_id = clusters[i]
+                    
+                    if cluster_id not in cluster_dict:
+                        cluster_dict[cluster_id] = {"topics": [], "mentions": 0}
+                    cluster_dict[cluster_id]["topics"].append(topic)
+                    cluster_dict[cluster_id]["mentions"] += topic_counts[topic] # Usar el conteo pre-calculado
 
-            # 5. Generar un término representativo para cada cluster usando el mismo LLM
-            grouped_topics = []
-            for cluster_id, data in cluster_dict.items():
-                try:
-                    topics_str = ", ".join(data["topics"][:5])  # Limitar a 5 temas para el prompt
-                    prompt = f"Generate a concise tag or term -not phrase, only term-for the following group of topics: {topics_str}. The tag should be a short, specific label (1-3 words) that captures the essence of these topics without any explanation or description. Ensure it is relevant and recognizable to the user."
-                    response = await llm_for_embeddings.ainvoke(prompt)
-                    representative_term = response.content.strip() if hasattr(response, 'content') else f"Grupo {cluster_id + 1}"
-                except Exception as e:
-                    logger.error(f"Error al generar término representativo para cluster {cluster_id}: {e}")
-                    representative_term = f"Grupo {cluster_id + 1}"
-                grouped_topics.append({"topic": representative_term, "mentions": data["mentions"]})
+                # 5. Generar un término representativo para cada cluster usando el LLM generativo
+                grouped_topics = []
+                llm_for_summarization = get_fast_llm() # Este sí es tu LLM generativo
+                if not llm_for_summarization:
+                    logger.error("No hay LLM generativo disponible para generar términos representativos.")
+                    raise ValueError("LLM generativo no disponible para generación de términos representativos.")
+                else:
+                    logger.info("LLM generativo disponible, procediendo a generar términos representativos.")
 
-            # Ordenar por menciones descendentes
-            simulated_grouped_topics = sorted(grouped_topics, key=lambda x: x["mentions"], reverse=True)[:10]
+                for cluster_id, data in cluster_dict.items():
+                    try:
+                        # Limitar a más temas para dar mejor contexto al LLM, si el context window lo permite
+                        # Asegurarse de que topics_for_prompt no esté vacío
+                        topics_for_prompt = ", ".join(data["topics"][:15]) 
+                        if not topics_for_prompt: # Si no hay temas en el cluster, usar un fallback
+                            representative_term = f"Grupo {cluster_id + 1}"
+                        else:
+                            prompt = (
+                                f"Genera una etiqueta o término conciso (1-3 palabras, sin explicación) "
+                                f"que represente mejor el siguiente grupo de temas: {topics_for_prompt}. "
+                                f"La etiqueta debe ser altamente relevante y reconocible. "
+                                f"Ejemplo: 'Ética IA' para ['consideraciones éticas en IA', 'sesgo en aprendizaje automático', 'desarrollo responsable de IA']."
+                            )
+                            logger.info(f"Generando término representativo para cluster {cluster_id} con prompt: {prompt[:100]}...")
+                            response = await llm_for_summarization.ainvoke([HumanMessage(content=prompt)])
+                            representative_term = response.content.strip()
+                            logger.info(f"Término representativo generado para cluster {cluster_id}: {representative_term}")
+                            
+                            # Post-procesamiento para asegurar que sea solo el término
+                            if "Ejemplo:" in representative_term:
+                                representative_term = representative_term.split("Ejemplo:")[0].strip()
+                            if ":" in representative_term:
+                                representative_term = representative_term.split(":")[-1].strip()
+                            # Si es demasiado largo o contiene saltos de línea inesperados, truncar o limpiar
+                            representative_term = representative_term.replace('\n', ' ').replace('\r', '').strip()
+                            if len(representative_term.split()) > 3: 
+                                representative_term = " ".join(representative_term.split()[:3])
+                            if not representative_term: # Si el post-procesamiento lo deja vacío
+                                representative_term = f"Grupo {cluster_id + 1}"
+
+                    except Exception as e:
+                        logger.error(f"Error al generar término representativo para cluster {cluster_id}: {e}", exc_info=True)
+                        representative_term = f"Grupo {cluster_id + 1}"
+                    grouped_topics.append({"topic": representative_term, "mentions": data["mentions"]})
+
+                # Ordenar por menciones descendentes y limitar a los 10 principales
+                simulated_grouped_topics = sorted(grouped_topics, key=lambda x: x["mentions"], reverse=True)[:10]
 
             # 4. Guardar el resultado y marcar como 'completed'
             stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
@@ -482,4 +531,5 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
                 status="failed", error_message=str(e))
             await db_session.execute(stmt_failed)
             await db_session.commit()
+            # Aquí se podría enviar una notificación de error a través de un WebSocket o similar
             # Aquí se podría enviar una notificación de error a través de un WebSocket o similar

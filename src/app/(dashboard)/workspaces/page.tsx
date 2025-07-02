@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Plus, FolderKanban } from 'lucide-react';
+import { Plus, Bot } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { WorkspaceDialog } from './workspace-dialog';
 
@@ -54,10 +54,10 @@ export default function WorkspacesPage() {
   return (
     <div className="p-4 md:p-6">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold flex items-center">
-            <FolderKanban className="mr-2 h-8 w-8 text-primary" />
-            Workspaces
-        </h1>
+<h1 className="text-2xl font-bold flex items-center">
+    <Bot className="mr-2 h-8 w-8 text-primary" />
+    Workspaces
+</h1>
         <Button onClick={() => {
           setSelectedWorkspace(null);
           setIsDialogOpen(true);
