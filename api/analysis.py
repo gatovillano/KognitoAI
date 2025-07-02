@@ -15,6 +15,7 @@ from core.database import SessionLocal, AnalysisTask, ProactiveInsight
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.memory_manager import list_user_documents, get_full_document_content
+from core.database import GitHubDocument
 from utils.advanced_text_analyzer import text_analyzer
 from sklearn.cluster import KMeans
 import numpy as np
@@ -32,6 +33,42 @@ async def get_db() -> AsyncSession:
             yield session
         finally:
             await session.close()
+
+async def list_all_user_documents(account_id: str, topic: Optional[str] = None):
+    """
+    Combina documentos regulares y documentos de GitHub para un usuario.
+    """
+    # Obtener documentos regulares
+    regular_docs = await list_user_documents(account_id)
+    
+    # Obtener documentos de GitHub
+    async with SessionLocal() as db:
+        query = select(GitHubDocument).where(GitHubDocument.account_id == uuid.UUID(account_id))
+        result = await db.execute(query)
+        github_docs = result.scalars().all()
+        
+        github_formatted = [
+            {
+                "file_name": doc.file_path,
+                "repo_url": doc.repo_url,
+                "topic": "Repositories",
+                "title": doc.file_path.split('/')[-1],
+                "author": None,
+                "document_id": f"github_{doc.id}",
+                "workspace_id": str(doc.workspace_id) if doc.workspace_id else None,
+                "team_id": None
+            }
+            for doc in github_docs
+        ]
+    
+    # Combinar ambos tipos de documentos
+    all_docs = regular_docs + github_formatted
+    
+    # Filtrar por topic si se especifica
+    if topic:
+        all_docs = [doc for doc in all_docs if doc.get('topic') == topic]
+    
+    return all_docs
 
 class GetSavedAnalysesRequest(BaseModel):
     topic: Optional[str] = None  # Para filtrar por colección
@@ -61,8 +98,8 @@ async def get_saved_analyses_endpoint(
         # --- LÓGICA MEJORADA PARA COLECCIONES ---
         
         # 1. Obtenemos los nombres de los archivos que pertenecen a este topic.
-        #    (Reutilizamos la lógica de list_user_documents)
-        all_user_docs = await list_user_documents(current_account_id)
+        #    (Usamos la función combinada que incluye documentos de GitHub)
+        all_user_docs = await list_all_user_documents(current_account_id)
         files_in_topic = [
             doc['file_name'] for doc in all_user_docs if doc.get('topic') == req.topic
         ]
@@ -218,8 +255,10 @@ async def run_document_analysis_and_save(task_id: str, account_id: str, file_nam
             analysis_result = await text_analyzer.analyze_single_text(text_content)
 
             # 3. Guardar el resultado y marcar como 'completed'
+            # Asegurarse de que el resultado sea un diccionario
+            result_payload = analysis_result if isinstance(analysis_result, dict) else analysis_result.dict()
             stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-                status="completed", result_payload=analysis_result.dict())
+                status="completed", result_payload=result_payload)
             await db_session.execute(stmt_completed)
             await db_session.commit()
             logger.info(f"Análisis para tarea {task_id} completado.")
@@ -276,50 +315,48 @@ async def run_collection_analysis_and_save(task_id: str, account_id: str, topic:
     """
     Obtiene todos los documentos de una colección, los analiza y guarda el resultado.
     """
-    db_session = SessionLocal()
-    try:
-        # Marcar la tarea como 'processing'
-        await db_session.execute(update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing"))
-        await db_session.commit()
-        
-        logger.info(f"Iniciando análisis de colección para tarea {task_id} (tema: {topic})")
+    async with SessionLocal() as db_session:
+        try:
+            # Marcar la tarea como 'processing'
+            await db_session.execute(update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing"))
+            await db_session.commit()
+            
+            logger.info(f"Iniciando análisis de colección para tarea {task_id} (tema: {topic})")
 
-        # 1. Obtener todos los documentos de la colección
-        all_docs_in_topic = []
-        # (Aquí usamos la lógica de list_user_documents, pero necesitamos el contenido)
-        doc_list = await list_user_documents(account_id)
-        filtered_doc_list = [doc for doc in doc_list if doc.get('topic') == topic]
-        
-        for doc_meta in filtered_doc_list:
-            content = await get_full_document_content(account_id, doc_meta['file_name'])
-            if content:
-                all_docs_in_topic.append({
-                    "title": doc_meta.get('title', doc_meta['file_name']),
-                    "content": content
-                })
+            # 1. Obtener todos los documentos de la colección
+            all_docs_in_topic = []
+            # (Aquí usamos la función combinada que incluye documentos de GitHub)
+            doc_list = await list_all_user_documents(account_id)
+            filtered_doc_list = [doc for doc in doc_list if doc.get('topic') == topic]
+            
+            for doc_meta in filtered_doc_list:
+                content = await get_full_document_content(account_id, doc_meta['file_name'])
+                if content:
+                    all_docs_in_topic.append({
+                        "title": doc_meta.get('title', doc_meta['file_name']),
+                        "content": content
+                    })
 
-        if not all_docs_in_topic:
-            raise ValueError(f"No se encontraron documentos con contenido en la colección '{topic}'.")
+            if not all_docs_in_topic:
+                raise ValueError(f"No se encontraron documentos con contenido en la colección '{topic}'.")
 
-        # 2. Realizar el análisis de la colección
-        analysis_result = await text_analyzer.analyze_collection(all_docs_in_topic)
-        logger.info(f"Collection analysis result generated for topic '{topic}': {analysis_result.dict()}")
-        
-        # 3. Guardar el resultado y marcar como 'completed'
-        stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-            status="completed", result_payload=analysis_result.dict())
-        await db_session.execute(stmt_completed)
-        await db_session.commit()
-        logger.info(f"Análisis de colección para tarea {task_id} completado.")
+            # 2. Realizar el análisis de la colección
+            analysis_result = await text_analyzer.analyze_collection(all_docs_in_topic)
+            logger.info(f"Collection analysis result generated for topic '{topic}': {analysis_result.dict()}")
+            
+            # 3. Guardar el resultado y marcar como 'completed'
+            stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="completed", result_payload=analysis_result.dict())
+            await db_session.execute(stmt_completed)
+            await db_session.commit()
+            logger.info(f"Análisis de colección para tarea {task_id} completado.")
 
-    except Exception as e:
-        logger.error(f"Fallo en tarea de análisis de colección {task_id}: {e}", exc_info=True)
-        stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-            status="failed", error_message=str(e))
-        await db_session.execute(stmt_failed)
-        await db_session.commit()
-    finally:
-        await db_session.close()
+        except Exception as e:
+            logger.error(f"Fallo en tarea de análisis de colección {task_id}: {e}", exc_info=True)
+            stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="failed", error_message=str(e))
+            await db_session.execute(stmt_failed)
+            await db_session.commit()
 
 @router.post("/start-collection-analysis", status_code=202)
 async def start_collection_analysis_endpoint(
@@ -533,3 +570,177 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
             await db_session.commit()
             # Aquí se podría enviar una notificación de error a través de un WebSocket o similar
             # Aquí se podría enviar una notificación de error a través de un WebSocket o similar
+
+class AnalyzeCodeRequest(BaseModel):
+    repo_name: str
+
+async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: str):
+    """Función pesada que se ejecuta en segundo plano para análisis de código."""
+    async with SessionLocal() as db_session:
+        try:
+            # 1. Marcar la tarea como 'processing'
+            stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
+            await db_session.execute(stmt_processing)
+            await db_session.commit()
+            
+            logger.info(f"Iniciando análisis de código para tarea {task_id}...")
+            # Obtener los documentos específicos de GitHub del repositorio
+            query = select(GitHubDocument).where(
+                GitHubDocument.account_id == account_id,
+                GitHubDocument.repo_url.endswith(f"/{repo_name}")
+            )
+            result = await db_session.execute(query)
+            github_docs = result.scalars().all()
+            
+            logger.info(f"Encontrados {len(github_docs)} documentos de GitHub para el repositorio {repo_name}")
+            
+            if not github_docs:
+                raise ValueError("No se encontraron documentos de GitHub para el repositorio.")
+            
+            # 2. Análisis por chunks para repositorios grandes
+            from utils.advanced_code_analyzer import analyze_code_content
+            
+            chunk_size = 300000  # ~300k caracteres por chunk (~400k tokens aprox)
+            chunks = []
+            current_chunk = ""
+            current_chunk_files = []
+            
+            for doc in github_docs:
+                if doc.content:
+                    file_content = f"Archivo: {doc.file_path}\n{doc.content}\n\n"
+                    
+                    # Si agregar este archivo excede el chunk_size, crear un nuevo chunk
+                    if len(current_chunk) + len(file_content) > chunk_size and current_chunk:
+                        chunks.append({
+                            "content": current_chunk,
+                            "files": current_chunk_files.copy()
+                        })
+                        current_chunk = file_content
+                        current_chunk_files = [doc.file_path]
+                    else:
+                        current_chunk += file_content
+                        current_chunk_files.append(doc.file_path)
+            
+            # Agregar el último chunk si tiene contenido
+            if current_chunk:
+                chunks.append({
+                    "content": current_chunk,
+                    "files": current_chunk_files.copy()
+                })
+            
+            logger.info(f"Código dividido en {len(chunks)} chunks para análisis")
+            
+            # 3. Analizar cada chunk
+            all_chunk_results = []
+            combined_categories = {
+                "code_structure": [],
+                "design_patterns": [],
+                "dependencies": [],
+                "potential_issues": [],
+                "recommendations": []
+            }
+            
+            for i, chunk in enumerate(chunks):
+                logger.info(f"Analizando chunk {i+1}/{len(chunks)} ({len(chunk['files'])} archivos)")
+                
+                # Actualizar progreso en la base de datos
+                progress_message = f"Analizando parte {i+1} de {len(chunks)}..."
+                stmt_progress = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                    result_payload={"progress": f"{i+1}/{len(chunks)}", "message": progress_message})
+                await db_session.execute(stmt_progress)
+                await db_session.commit()
+                
+                chunk_result = await analyze_code_content(chunk["content"])
+                all_chunk_results.append({
+                    "chunk_index": i+1,
+                    "files": chunk["files"],
+                    "result": chunk_result
+                })
+                
+                # Combinar categorías de todos los chunks
+                combined_categories["code_structure"].extend(chunk_result.code_structure)
+                combined_categories["design_patterns"].extend(chunk_result.design_patterns)
+                combined_categories["dependencies"].extend(chunk_result.dependencies)
+                combined_categories["potential_issues"].extend(chunk_result.potential_issues)
+                combined_categories["recommendations"].extend(chunk_result.recommendations)
+            
+            # 4. Generar resumen ejecutivo consolidado
+            from tools.analyze_code_for_insights_tool import AnalyzeCodeForInsightsTool
+            
+            # Crear un resumen de todos los chunks para el formatted_result
+            combined_summary = "\n\n".join([
+                f"**Análisis Parte {res['chunk_index']}** (Archivos: {', '.join(res['files'][:3])}{'...' if len(res['files']) > 3 else ''})\n{res['result'].executive_summary}"
+                for res in all_chunk_results
+            ])
+            
+            # Generar análisis consolidado final
+            tool = AnalyzeCodeForInsightsTool()
+            final_summary = f"**Análisis Completo del Repositorio {repo_name}**\n\n"
+            final_summary += f"Se analizaron {len(chunks)} partes del código con un total de {len(github_docs)} archivos.\n\n"
+            final_summary += f"**Resumen por Partes:**\n{combined_summary}\n\n"
+            
+            # Generar formatted_result consolidado usando la herramienta
+            try:
+                # Usar solo una muestra representativa para el formato final
+                sample_content = chunks[0]["content"][:100000] if chunks else ""
+                formatted_result = await tool._arun(sample_content + f"\n\nNOTA: Este es un análisis de {len(chunks)} partes del repositorio {repo_name}")
+            except Exception as e:
+                logger.warning(f"Error generando resultado formateado: {e}")
+                formatted_result = final_summary
+            
+            # 5. Estructura final del resultado
+            analysis_result = {
+                "formatted_result": formatted_result,
+                "executive_summary": f"Análisis completo de {len(github_docs)} archivos en {len(chunks)} partes del repositorio {repo_name}",
+                "code_structure": combined_categories["code_structure"],
+                "design_patterns": combined_categories["design_patterns"], 
+                "dependencies": combined_categories["dependencies"],
+                "potential_issues": combined_categories["potential_issues"],
+                "recommendations": combined_categories["recommendations"],
+                "analysis_metadata": {
+                    "total_files": len(github_docs),
+                    "total_chunks": len(chunks),
+                    "repo_name": repo_name
+                }
+            }
+
+            # 6. Guardar el resultado y marcar como 'completed'
+            stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="completed", result_payload=analysis_result)
+            await db_session.execute(stmt_completed)
+            await db_session.commit()
+            logger.info(f"Análisis de código para tarea {task_id} completado con {len(chunks)} chunks.")
+
+        except Exception as e:
+            logger.error(f"Fallo en tarea de análisis de código {task_id}: {e}", exc_info=True)
+            stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="failed", error_message=str(e))
+            await db_session.execute(stmt_failed)
+            await db_session.commit()
+
+@router.post("/start-code-analysis", status_code=202)
+async def start_code_analysis_endpoint(
+    req: AnalyzeCodeRequest,
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Inicia una tarea de análisis de código o repositorio y devuelve un ID de tarea."""
+    # Verificar que el repositorio existe antes de crear la tarea
+    # Esto requeriría una función para verificar el repositorio, pero por ahora lo simulamos.
+    repo_check = True
+    if not repo_check:
+        raise HTTPException(status_code=404, detail="Repositorio no encontrado.")
+
+    new_task = AnalysisTask(
+        account_id=uuid.UUID(current_account_id),
+        file_name=req.repo_name,
+        status="pending"
+    )
+    db.add(new_task)
+    await db.commit()
+    await db.refresh(new_task)
+    
+    background_tasks.add_task(run_code_analysis_and_save, str(new_task.id), current_account_id, req.repo_name)
+    
+    return {"task_id": str(new_task.id)}

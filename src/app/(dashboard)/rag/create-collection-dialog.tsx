@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 
 interface CreateCollectionDialogProps {
   isOpen: boolean;
@@ -17,6 +18,7 @@ interface CreateCollectionDialogProps {
 
 export function CreateCollectionDialog({ isOpen, onOpenChange, onCreateSuccess }: CreateCollectionDialogProps) {
   const [topicName, setTopicName] = useState('');
+  const [description, setDescription] = useState('');
   const [teamId, setTeamId] = useState('');
   const [teams, setTeams] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -47,11 +49,16 @@ export function CreateCollectionDialog({ isOpen, onOpenChange, onCreateSuccess }
     }
     setIsLoading(true);
     try {
-      await apiClient.post('/api/create-collection', { topic: topicName, teamId: teamId || undefined });
+      await apiClient.post('/api/create-collection', { 
+        topic: topicName, 
+        description: description || undefined,
+        teamId: teamId || undefined 
+      });
       toast.success(`Colección "${topicName}" creada.`);
       onCreateSuccess(topicName);
       onOpenChange(false);
       setTopicName('');
+      setDescription('');
       setTeamId('');
     } catch (error) {
       console.error("Error al crear la colección:", error);
@@ -78,6 +85,16 @@ export function CreateCollectionDialog({ isOpen, onOpenChange, onCreateSuccess }
               value={topicName}
               onChange={(e) => setTopicName(e.target.value)}
               placeholder="Ej: Proyectos 2025"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="description">Descripción (Opcional)</Label>
+            <Textarea 
+              id="description" 
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Describe el propósito de esta colección..."
+              rows={3}
             />
           </div>
           <div className="space-y-2">

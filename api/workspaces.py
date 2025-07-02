@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select, desc, update, or_, and_
 
-from core.database import SessionLocal, Account, Workspace, ChatThread, LangchainPgCollection, WorkspaceCollectionAssociation
+from core.database import SessionLocal, Account, Workspace, ChatThread, LangchainPgCollection
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.agent import create_thread_for_account, force_update_thread_title

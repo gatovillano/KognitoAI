@@ -1,4 +1,4 @@
-// En: src/app/(dashboard)/rag/[topic]/page.tsx
+// En: src/app/(dashboard)/rag/repositories/page.tsx
 
 'use client';
 
@@ -7,11 +7,17 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { DataTable } from '../data-table';
 import { getColumns, type Document } from '../columns';
+
+// Definir un tipo extendido para documentos de GitHub que incluye repo_url
+interface GitHubDocument extends Document {
+  repo_url?: string;
+}
 import apiClient from '@/lib/api';
 import { UploadDocumentDialog } from '../upload-document-dialog';
 import { PreviewDocumentDialog } from '../preview-document-dialog';
@@ -20,16 +26,16 @@ import { DeleteConfirmationDialog } from '../delete-confirmation-dialog';
 import { AnalysisResultDialog } from '../analysis-result-dialog';
 import { CollectionAnalysisDialog } from '../collection-analysis-dialog';
 import { ShareDocumentDialog } from '../share-document-dialog';
+import { GitHubRepoDialog } from '../github-repo-dialog';
 
-export default function CollectionDetailPage() {
-  const params = useParams();
-  const topic = decodeURIComponent(params.topic as string);
-
-  const [documents, setDocuments] = useState<Document[]>([]);
+export default function RepositoriesPage() {
+  const [documents, setDocuments] = useState<GitHubDocument[]>([]);
+  const [repositoriesData, setRepositoriesData] = useState<{ repo_url: string, repo_name: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
   // Estados para diálogos
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isGitHubRepoOpen, setIsGitHubRepoOpen] = useState(false);
   const [documentToPreview, setDocumentToPreview] = useState<Document | null>(null);
   const [documentToEdit, setDocumentToEdit] = useState<Document | null>(null);
   const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null);
@@ -48,28 +54,45 @@ export default function CollectionDetailPage() {
   const [collectionPollingId, setCollectionPollingId] = useState<string | null>(null);
 
   // Estado para el historial de análisis
-  const [savedAnalyses, setSavedAnalyses] = useState([]);
+  const [savedAnalyses, setSavedAnalyses] = useState<any[]>([]);
 
   const fetchPageData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [docsRes, analysesRes] = await Promise.all([
-        apiClient.post('/api/list-documents', { topic: topic }),
-        apiClient.post('/api/get-saved-analyses', { topic: topic })
-      ]);
-      
-      // Ya no necesitamos filtrar en el frontend, el backend lo hace
-      setDocuments(docsRes.data);
-      setSavedAnalyses(analysesRes.data);
+        const [docsRes, reposRes, analysesRes] = await Promise.all([
+          apiClient.post('/api/github/list-github-documents', {}),
+          apiClient.post('/api/github/list-github-repositories', {}),
+          apiClient.post('/api/get-saved-analyses', { topic: 'Repositories', all: false })
+        ]);
+        
+        // Filtrar análisis para incluir solo los relacionados con repositorios
+        const repoAnalyses = analysesRes.data.filter((analysis: { file_name: string; }) => 
+          analysis.file_name.startsWith('Colección: Repositories') || 
+          reposRes.data.some((repo: { repo_name: any; }) => analysis.file_name.includes(repo.repo_name))
+        );
+        
+        setDocuments(docsRes.data);
+        setRepositoriesData(reposRes.data);
+        setSavedAnalyses(repoAnalyses);
     } catch (error) {
-      toast.error('Error al cargar los datos de la colección.');
+      toast.error('Error al cargar los datos de los repositorios.');
     } finally {
       setIsLoading(false);
     }
-  }, [topic]);
+  }, []);
 
   useEffect(() => {
     fetchPageData();
+  }, [fetchPageData]);
+
+  useEffect(() => {
+    const handleUpdateAnalysisHistory = () => {
+      fetchPageData();
+    };
+    window.addEventListener('updateAnalysisHistory', handleUpdateAnalysisHistory);
+    return () => {
+      window.removeEventListener('updateAnalysisHistory', handleUpdateAnalysisHistory);
+    };
   }, [fetchPageData]);
 
   // --- Handlers de Análisis ---
@@ -87,9 +110,9 @@ export default function CollectionDetailPage() {
   const handleAnalyzeCollection = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     try {
-      const response = await apiClient.post('/api/start-collection-analysis', { topic });
+      const response = await apiClient.post('/api/start-collection-analysis', { topic: 'Repositories' });
       setCollectionPollingId(response.data.task_id);
-      toast.info(`Análisis de la colección "${topic}" iniciado.`);
+      toast.info(`Análisis de la colección de repositorios iniciado.`);
     } catch (error) { toast.error("No se pudo iniciar el análisis de la colección."); }
   };
 
@@ -133,8 +156,8 @@ export default function CollectionDetailPage() {
   const handleExtractTitles = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     try {
-      const response = await apiClient.post('/api/extract-title', { topic });
-      toast.info(`Extracción de títulos para la colección "${topic}" iniciada.`);
+      const response = await apiClient.post('/api/extract-title', { topic: 'Repositories' });
+      toast.info(`Extracción de títulos para la colección de repositorios iniciada.`);
       fetchPageData();
     } catch (error) { toast.error("No se pudo iniciar la extracción de títulos."); }
   };
@@ -148,6 +171,15 @@ export default function CollectionDetailPage() {
       fetchPageData();
     } catch (error) { toast.error(`No se pudo iniciar la extracción de título para "${doc.file_name}".`); }
   };
+
+  // Usar datos de repositorios directamente desde la API
+  const repositories = useMemo(() => {
+    return repositoriesData.map(repo => ({
+      name: repo.repo_name,
+      url: repo.repo_url,
+      files: documents.filter(doc => doc.repo_url === repo.repo_url)
+    }));
+  }, [repositoriesData, documents]);
 
   const columns = useMemo(() => getColumns(
       (doc) => setDocumentToPreview(doc),
@@ -169,20 +201,12 @@ export default function CollectionDetailPage() {
             <ArrowLeft className="h-4 w-4 mr-2" />
             Volver a Colecciones
           </Link>
-          <h1 className="text-3xl font-bold break-all">Colección: {topic}</h1>
+          <h1 className="text-3xl font-bold break-all">Repositorios de GitHub</h1>
         </div>
         <div className="flex items-center gap-2">
-            <Button onClick={handleAnalyzeCollection} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
-                {collectionPollingId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ScanSearch className="mr-2 h-4 w-4" />}
-                Analizar Colección
-            </Button>
-            <Button onClick={() => setIsUploadOpen(true)}>
+            <Button onClick={() => setIsGitHubRepoOpen(true)}>
                 <Upload className="mr-2 h-4 w-4" />
-                Subir a esta Colección
-            </Button>
-            <Button onClick={handleExtractTitles} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
-                <Text className="mr-2 h-4 w-4" />
-                Extraer Títulos
+                Añadir Repositorio
             </Button>
         </div>
       </div>
@@ -195,7 +219,33 @@ export default function CollectionDetailPage() {
       )}
 
       <div className="flex-grow">
-        <DataTable columns={columns} data={documents} />
+        {isLoading ? (
+          <div className="flex justify-center items-center h-full">
+            <Loader2 className="h-8 w-8 animate-spin" />
+          </div>
+        ) : repositories.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {repositories.map(repo => (
+              <Card key={repo.url} className="flex flex-col h-full min-h-[150px] hover:border-primary/50 transition-colors relative group">
+                <Link href={`/rag/repositories/${repo.name}`} className="absolute inset-0 z-10" aria-label={`Ver repositorio ${repo.name}`}></Link>
+                <div className="flex justify-between items-start p-4 pb-0 z-20">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6 text-primary flex-shrink-0 mt-1"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/></svg>
+                    <div className="flex-1 min-w-0">
+                      <CardTitle className="break-words">{repo.name}</CardTitle>
+                      <CardContent className="p-0 pt-2">
+                        <p className="text-xs text-muted-foreground/80 italic truncate">{repo.url}</p>
+                        <p className="text-sm text-muted-foreground mt-1">{repo.files.length} documento(s)</p>
+                      </CardContent>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <p className="text-center text-muted-foreground py-8">No hay repositorios disponibles.</p>
+        )}
       </div>
 
       <div className="mt-8 pt-6 border-t">
@@ -222,7 +272,7 @@ export default function CollectionDetailPage() {
                         setIsCollectionAnalysisOpen(true);
                       } else {
                         setDocAnalysisResult(analysis.result_payload);
-                        setDocumentToAnalyze({ file_name: analysis.file_name, topic, title: '', author: '' });
+                        setDocumentToAnalyze({ file_name: analysis.file_name, topic: 'Repositories', title: '', author: '' });
                         setIsDocAnalysisOpen(true);
                       }
                     }}>
@@ -239,12 +289,13 @@ export default function CollectionDetailPage() {
       </div>
 
       {/* Diálogos */}
-      <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={fetchPageData} defaultTopic={topic} />
+      <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={fetchPageData} defaultTopic="Repositories" />
+      <GitHubRepoDialog isOpen={isGitHubRepoOpen} onOpenChange={setIsGitHubRepoOpen} onSuccess={fetchPageData} />
       <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchPageData} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />
-      <AnalysisResultDialog isOpen={isDocAnalysisOpen} onOpenChange={setIsDocAnalysisOpen} analysis={docAnalysisResult} document={documentToAnalyze ?? { file_name: '', topic: topic, title: '', author: '' }} />
-      <CollectionAnalysisDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} topic={topic} />
+      <AnalysisResultDialog isOpen={isDocAnalysisOpen} onOpenChange={setIsDocAnalysisOpen} analysis={docAnalysisResult} document={documentToAnalyze ?? { file_name: '', topic: 'Repositories', title: '', author: '' }} />
+      <CollectionAnalysisDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} topic="Repositories" />
       <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={fetchPageData} document={documentToShare} />
     </div>
   );

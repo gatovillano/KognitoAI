@@ -53,6 +53,7 @@ from tools.web_scraper_tool import WebScraperTool
 # Importar la FÁBRICA de la herramienta de búsqueda web
 from tools.web_search_tool import get_web_search_tool
 from tools.analyze_text_for_insights_tool import AnalyzeTextForInsightsTool
+from tools.analyze_code_for_insights_tool import AnalyzeCodeForInsightsTool
 from tools.github_repo_tool import GitHubRepoTool
 from tools.mindmap_generator_tool import MindmapGeneratorTool
 # Módulo de Procesamiento de Imágenes
@@ -92,7 +93,7 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
         # Documentos
         GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool, ExtractDocumentTitlesTool,
         # Creación de Contenido y Búsqueda (excepto WebSearchTool que usa fábrica)
-        ImageGenerationTool, WebScraperTool, AnalyzeTextForInsightsTool,
+        ImageGenerationTool, WebScraperTool, AnalyzeTextForInsightsTool, AnalyzeCodeForInsightsTool,
         # Herramienta de GitHub
         GitHubRepoTool,
         # Mapa Mental
@@ -144,6 +145,18 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
                 try:
                     # Verificar si la herramienta tiene los atributos requeridos
                     if hasattr(tool_instance, 'name') and hasattr(tool_instance, '_run') and callable(getattr(tool_instance, '_run')) or ToolClass.__name__ in ["MindmapGeneratorTool", "ImageBackgroundEraserTool"]:
+                        # Verificar el esquema de argumentos para identificar problemas con 'type'
+                        if hasattr(tool_instance, 'args_schema') and tool_instance.args_schema is not None:
+                            try:
+                                schema = tool_instance.args_schema.schema()
+                                properties = schema.get('properties', {})
+                                for prop_name, prop_info in properties.items():
+                                    if 'type' not in prop_info:
+                                        logger.error(f"  [ERROR] Propiedad '{prop_name}' en la herramienta '{tool_instance.name}' no tiene la clave 'type' en su esquema.")
+                                    else:
+                                        logger.debug(f"  [DEBUG] Propiedad '{prop_name}' en la herramienta '{tool_instance.name}' tiene tipo '{prop_info['type']}'.")
+                            except Exception as schema_error:
+                                logger.error(f"  [ERROR] Error al inspeccionar el esquema de la herramienta '{tool_instance.name}': {schema_error}")
                         available_tools.append(tool_instance)
                         logger.debug(f"  [+] Herramienta de clase cargada: {tool_instance.name}")
                         if ToolClass.__name__ == "MindmapGeneratorTool":

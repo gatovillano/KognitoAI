@@ -56,10 +56,11 @@ class MemoryAddTool(BaseTool):
     """
     name: str = "memory_add_tool"
     description: str = (
-        "Útil para guardar hechos, ideas, notas o detalles específicos de la conversación "
-        "en la memoria vectorial a largo plazo del usuario. Usa esta herramienta siempre que el "
-        "usuario declare un hecho o detalle que podría ser útil recordar más adelante, o cuando "
-        "identifiques información valiosa para almacenar en conversaciones generales. No la uses para notas de tareas o recordatorios."
+        "CRUCIAL: Herramienta esencial para guardar hechos, ideas, notas o detalles específicos de la conversación "
+        "en la memoria vectorial a largo plazo del usuario. DEBES usar esta herramienta ACTIVAMENTE y con FRECUENCIA "
+        "siempre que el usuario declare un hecho, preferencia, hábito, interés o cualquier detalle personal que pueda ser útil "
+        "recordar más adelante. Es IMPERATIVO que identifiques y almacenes información valiosa en conversaciones generales para "
+        "personalizar respuestas futuras. No la uses para notas de tareas o recordatorios."
     )
     args_schema: Type[BaseModel] = MemoryAddInput
     return_direct: bool = False  # El agente debe procesar la respuesta.

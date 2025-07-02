@@ -42,6 +42,7 @@ from sqlalchemy import update
 # --- Módulos del Proyecto ---
 from core.tools import get_all_langchain_tools
 from core.memory_manager import get_user_profile, get_relevant_memories, add_memory_to_vector_db
+from core.context_cache import get_cached_context, cache_context
 from core.database import SessionLocal, Account, ChatThread, Workspace
 from utils.db_session import DBSession
 from core.config import settings
@@ -273,6 +274,83 @@ async def force_update_all_thread_titles():
 # SECCIÓN 3: EJECUCIÓN PRINCIPAL DEL AGENTE
 # ==============================================================================
 
+async def create_and_run_agent_streaming(
+    account_id: str,
+    thread_id: str,
+    user_message: str,
+    image_base64: Optional[str] = None,
+    document_url: Optional[str] = None,
+    mode: Optional[str] = None,
+    workspace_id: Optional[str] = None
+):
+    """Versión streaming del agente que devuelve chunks progresivamente."""
+    from typing import AsyncGenerator
+    from core.context_cache import get_cached_context, cache_context
+    
+    yield "🔄 Iniciando procesamiento..."
+    
+    # Verificar cache de contexto primero
+    cached_context = await get_cached_context(account_id, user_message, workspace_id)
+    if cached_context:
+        yield "⚡ Contexto recuperado de cache..."
+        user_context = cached_context
+    else:
+        # Pre-cargar contexto en paralelo para reducir latencia inicial
+        context_task = asyncio.create_task(_get_user_context(account_id, user_message, workspace_id))
+        yield "🔍 Cargando contexto de usuario..."
+        user_context = await context_task
+        # Guardar en cache para futuras consultas
+        await cache_context(account_id, user_message, user_context, workspace_id)
+        yield "💾 Contexto guardado en cache..."
+    
+    # Configurar LLM y herramientas
+    llm = get_main_llm()
+    if not llm:
+        yield "❌ Error: LLM no disponible"
+        return
+        
+    tools = get_all_langchain_tools()
+    yield f"🛠️ {len(tools)} herramientas disponibles..."
+    
+    # Crear prompt optimizado con contexto
+    prompt = ChatPromptTemplate.from_messages([
+        SystemMessage(content=f"{DEFAULT_SYSTEM_PROMPT}\n\n{user_context}"),
+        MessagesPlaceholder(variable_name="chat_history"),
+        HumanMessage(content=user_message),
+        MessagesPlaceholder(variable_name="agent_scratchpad"),
+    ])
+    
+    # Configurar agente para streaming
+    llm_with_tools = llm.bind_tools(tools) if tools else llm
+    agent = (
+        RunnablePassthrough.assign(
+            agent_scratchpad=lambda x: format_to_tool_messages(x["intermediate_steps"])
+        )
+        | prompt
+        | llm_with_tools
+        | ToolsAgentOutputParser()
+    )
+    
+    agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+    yield "🤖 Generando respuesta..."
+    
+    # Stream respuesta del agente
+    full_response = ""
+    async for chunk in agent_executor.astream({
+        "input": user_message, 
+        "chat_history": []
+    }):
+        if "output" in chunk:
+            chunk_text = chunk["output"]
+            full_response += chunk_text
+            yield chunk_text
+        elif "intermediate_steps" in chunk and chunk["intermediate_steps"]:
+            yield "🔧 Usando herramientas..."
+    
+    # Guardar en historial si hay respuesta completa
+    if full_response.strip():
+        yield "\n✅ Respuesta completada"
+
 async def create_and_run_agent(
     account_id: str,
     thread_id: str,
@@ -287,8 +365,10 @@ async def create_and_run_agent(
     """
     Crea y ejecuta el agente de Langchain con manejo explícito de memoria.
     Si no se proporciona un workspace_id, intenta recuperarlo del ChatThread asociado.
+    Versión optimizada con cache de contexto.
     """
     logger.info(f"--- Ejecutando agente para account_id: {account_id}, thread_id: {thread_id} (desde telegram_id: {telegram_id}), workspace_id: {workspace_id} ---")
+    
     # Si no se proporciona workspace_id, intentar recuperarlo del ChatThread
     if workspace_id is None:
         async with DBSession(SessionLocal) as db:
@@ -300,6 +380,14 @@ async def create_and_run_agent(
                 logger.info(f"No se encontró workspace_id para el ChatThread {thread_id}.")
     else:
         logger.info(f"Usando workspace_id proporcionado: {workspace_id}.")
+    
+    # Optimización: Verificar cache de contexto primero
+    cached_context = await get_cached_context(account_id, user_message, workspace_id)
+    if cached_context:
+        logger.info("⚡ Contexto recuperado de cache, reduciendo latencia")
+        user_context = cached_context
+    else:
+        logger.info("🔍 Generando contexto de usuario...")
     # --- 1. Gestión del Historial de Chat ---
     session_id = thread_id  # Usar siempre el thread_id como session_id
     if not settings.database_url:
@@ -393,41 +481,45 @@ async def create_and_run_agent(
 
     # --- 3. Construir el Prompt del Sistema Dinámicamente ---
     
-    # ¡CORREGIDO! Llamamos a las funciones que sí existen en tu memory_manager.py
-    
-    # Obtener el perfil y las memorias
-    user_profile = await get_user_profile(account_id)
-    relevant_memories = await get_relevant_memories(account_id, user_message, k=5, workspace_id=workspace_id)
+    # Usar contexto cacheado o generar nuevo
+    if not cached_context:
+        user_profile = await get_user_profile(account_id)
+        relevant_memories = await get_relevant_memories(account_id, user_message, k=5, workspace_id=workspace_id)
 
-    # Construir la parte del perfil del prompt
-    profile_info = []
-    custom_prompt = None
-    async with DBSession(SessionLocal) as db:
-        thread = await db.scalar(select(ChatThread).options(selectinload(ChatThread.workspace)).where(ChatThread.id == uuid.UUID(thread_id)))
-        if thread and thread.workspace and thread.workspace.system_prompt:
-            custom_prompt = thread.workspace.system_prompt
-        elif user_profile:
-            # ¡CORREGIDO! Usamos el nombre correcto del atributo: system_prompt
-            custom_prompt = user_profile.system_prompt
+        # Construir la parte del perfil del prompt
+        profile_info = []
+        custom_prompt = None
+        async with DBSession(SessionLocal) as db:
+            thread = await db.scalar(select(ChatThread).options(selectinload(ChatThread.workspace)).where(ChatThread.id == uuid.UUID(thread_id)))
+            if thread and thread.workspace and thread.workspace.system_prompt:
+                custom_prompt = thread.workspace.system_prompt
+            elif user_profile:
+                custom_prompt = user_profile.system_prompt
 
-    if user_profile:
-        if user_profile.nombre: profile_info.append(f"- Nombre: {user_profile.nombre}")
-        if user_profile.gustos: profile_info.append(f"- Gustos: {user_profile.gustos}")
-        if user_profile.intereses: profile_info.append(f"- Intereses: {user_profile.intereses}")
-        if user_profile.otros_datos: profile_info.append(f"- Otros datos: {user_profile.otros_datos}")
+        if user_profile:
+            if user_profile.nombre: profile_info.append(f"- Nombre: {user_profile.nombre}")
+            if user_profile.gustos: profile_info.append(f"- Gustos: {user_profile.gustos}")
+            if user_profile.intereses: profile_info.append(f"- Intereses: {user_profile.intereses}")
+            if user_profile.otros_datos: profile_info.append(f"- Otros datos: {user_profile.otros_datos}")
+            
+        user_context_parts = [
+            "--- Información Relevante sobre el Usuario y su Contexto ---",
+            "Información de Perfil del Usuario:",
+            "\n".join(profile_info) if profile_info else "No hay información de perfil disponible."
+        ]
+
+        if relevant_memories and "No se encontraron memorias relevantes" not in relevant_memories:
+            user_context_parts.append("\nMemorias y Documentos Relevantes (Base de Conocimiento):")
+            user_context_parts.append(relevant_memories)
+
+        user_context_parts.append("---------------------------------------------------------")
+        user_context = "\n".join(user_context_parts)
         
-    user_context_parts = [
-        "--- Información Relevante sobre el Usuario y su Contexto ---",
-        "Información de Perfil del Usuario:",
-        "\n".join(profile_info) if profile_info else "No hay información de perfil disponible."
-    ]
-
-    if relevant_memories and "No se encontraron memorias relevantes" not in relevant_memories:
-        user_context_parts.append("\nMemorias y Documentos Relevantes (Base de Conocimiento):")
-        user_context_parts.append(relevant_memories)
-
-    user_context_parts.append("---------------------------------------------------------")
-    user_context_string = "\n".join(user_context_parts)
+        # Guardar contexto en cache para futuras consultas
+        await cache_context(account_id, user_message, user_context, workspace_id)
+        logger.info("💾 Contexto guardado en cache")
+    
+    user_context_string = user_context
     
     # Filtrar variables no deseadas del custom_prompt para evitar errores de variables no definidas
     effective_system_prompt = custom_prompt or settings.default_system_prompt

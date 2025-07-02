@@ -30,21 +30,18 @@ import asyncio
 import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
-import uuid
 import pytz
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 # --- Importaciones de SQLAlchemy ---
 from sqlalchemy import (
     Column, String, DateTime, Text, ForeignKey, BigInteger, Integer, Boolean,
-    UniqueConstraint, select, text, Float
+    UniqueConstraint, select, text, Float, Index
 )
 from sqlalchemy.orm import sessionmaker, relationship, selectinload
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-# Importar el tipo UUID de la extensión de PostgreSQL
-from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 # --- Importaciones de pgvector y del proyecto ---
 from pgvector.sqlalchemy import Vector
@@ -107,7 +104,8 @@ class Account(Base):
     
     # Relaciones uno a muchos con los datos del usuario.
     workspaces = relationship("Workspace", back_populates="account", cascade="all, delete-orphan")
-    memories = relationship("Memory", back_populates="account", cascade="all, delete-orphan")
+    # ELIMINADO: La tabla 'Memory' se eliminará, por lo que esta relación ya no es necesaria.
+    # memories = relationship("Memory", back_populates="account", cascade="all, delete-orphan")
     notas = relationship("Nota", back_populates="account", cascade="all, delete-orphan")
     recordatorios = relationship("Recordatorio", back_populates="account", cascade="all, delete-orphan")
     agenda_events = relationship("AgendaEvent", back_populates="account", cascade="all, delete-orphan")
@@ -117,6 +115,8 @@ class Account(Base):
         back_populates="account",
         cascade="all, delete-orphan"
     )
+    # AÑADIDO: Relación con la nueva tabla de temas/colecciones de documentos definidos por el usuario
+    user_document_topics = relationship("UserDocumentTopic", back_populates="account", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Account(id={self.id}, name='{self.name}')>"
@@ -163,8 +163,12 @@ class Team(Base):
     members = relationship("TeamMember", back_populates="team", cascade="all, delete-orphan")
     notas = relationship("Nota", back_populates="team", cascade="all, delete-orphan")
     agenda_events = relationship("AgendaEvent", back_populates="team", cascade="all, delete-orphan")
-    memories = relationship("Memory", back_populates="team", cascade="all, delete-orphan")
+    # ELIMINADO: La tabla 'Memory' se eliminará, por lo que esta relación ya no es necesaria.
+    # memories = relationship("Memory", back_populates="team", cascade="all, delete-orphan")
     proactive_insights = relationship("ProactiveInsight", back_populates="team", cascade="all, delete-orphan")
+    # AÑADIDO: Relación con la nueva tabla de temas/colecciones de documentos definidos por el equipo
+    user_document_topics = relationship("UserDocumentTopic", back_populates="team", cascade="all, delete-orphan")
+
 
     def __repr__(self):
         return f"<Team(id={self.id}, name='{self.name}')>"
@@ -207,9 +211,10 @@ class Workspace(Base):
     # Relaciones
     account = relationship("Account", back_populates="workspaces")
     chat_threads = relationship("ChatThread", back_populates="workspace", cascade="all, delete-orphan")
-    
-    # Nueva relación para la asociación de colecciones
-    collection_associations = relationship("WorkspaceCollectionAssociation", back_populates="workspace", cascade="all, delete-orphan")
+    # ELIMINADO: La relación 'collection_associations' ya no es necesaria.
+    # collection_associations = relationship("WorkspaceCollectionAssociation", back_populates="workspace", cascade="all, delete-orphan")
+    # AÑADIDO: Relación con la nueva tabla de temas/colecciones de documentos definidos para este workspace
+    user_document_topics = relationship("UserDocumentTopic", back_populates="workspace", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Workspace(id={self.id}, name='{self.name}')>"
@@ -217,7 +222,7 @@ class Workspace(Base):
 class LangchainPgCollection(Base):
     """
     Mapea la tabla 'langchain_pg_collection' de LangChain para poder consultarla.
-    Esta tabla almacena los nombres y UUIDs de las colecciones de embeddings.
+    Esta tabla almacena macrocolecciones que permiten mapear a que usuario pertenecen, que elementos de la tabla langchain_pg_embedding
     """
     __tablename__ = "langchain_pg_collection"
 
@@ -225,33 +230,79 @@ class LangchainPgCollection(Base):
     name = Column(String(255), unique=True, nullable=False)
     cmetadata = Column(JSONB, nullable=True) # Metadatos de la colección, si los hay
     
-    # Relación con la nueva tabla de asociación
-    workspace_associations = relationship("WorkspaceCollectionAssociation", back_populates="langchain_collection", cascade="all, delete-orphan")
-
+    # ELIMINADO: La relación 'workspace_associations' ya no es necesaria.
+    # workspace_associations = relationship("WorkspaceCollectionAssociation", back_populates="langchain_collection", cascade="all, delete-orphan")
+    
     def __repr__(self):
         return f"<LangchainPgCollection(uuid={self.uuid}, name='{self.name}')>"
 
-class WorkspaceCollectionAssociation(Base):
-    """
-    Tabla de unión para asociar colecciones de LangChain (topics) con Workspaces.
-    Permite que una colección (topic) esté en múltiples workspaces.
-    """
-    __tablename__ = "workspace_collection_associations"
+# ELIMINADO: La clase 'WorkspaceCollectionAssociation' ya no es necesaria y se elimina por completo.
+# class WorkspaceCollectionAssociation(Base):
+#     """
+#     Tabla de unión para asociar colecciones de LangChain (topics) con Workspaces.
+#     Permite que una colección (topic) esté en múltiples workspaces.
+#     """
+#     __tablename__ = "workspace_collection_associations"
+#     id = Column(Integer, primary_key=True, autoincrement=True)
+#     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=False, index=True)
+#     langchain_collection_id = Column(UUID(as_uuid=True), ForeignKey("langchain_pg_collection.uuid", ondelete='CASCADE'), nullable=False, index=True)
+#     created_at = Column(DateTime(timezone=True), server_default=func.now())
+#     workspace = relationship("Workspace", back_populates="collection_associations")
+#     langchain_collection = relationship("LangchainPgCollection", back_populates="workspace_associations")
+#     __table_args__ = (UniqueConstraint('workspace_id', 'langchain_collection_id', name='_workspace_langchain_collection_uc'),)
+#     def __repr__(self):
+#         return f"<WorkspaceCollectionAssociation(workspace_id={self.workspace_id}, langchain_collection_id={self.langchain_collection_id})>"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=False, index=True)
-    langchain_collection_id = Column(UUID(as_uuid=True), ForeignKey("langchain_pg_collection.uuid", ondelete='CASCADE'), nullable=False, index=True)
-    
+
+# --- AÑADIDO: NUEVA TABLA para almacenar las colecciones/temas definidas por el usuario ---
+class UserDocumentTopic(Base):
+    """
+    Representa una colección o tema de documentos definido por el usuario.
+    Permite crear colecciones "vacías" antes de que se les asignen documentos.
+    """
+    __tablename__ = "user_document_topics"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=True, index=True)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete='CASCADE'), nullable=True, index=True) # Opcional: si las colecciones pueden ser de equipo
+
+    name = Column(String(255), nullable=False, comment="El nombre del tema/colección (corresponde al 'topic' en cmetadata).")
+    description = Column(Text, nullable=True, comment="Descripción opcional de la colección.")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
 
     # Relaciones
-    workspace = relationship("Workspace", back_populates="collection_associations")
-    langchain_collection = relationship("LangchainPgCollection", back_populates="workspace_associations")
+    account = relationship("Account", back_populates="user_document_topics")
+    workspace = relationship("Workspace", back_populates="user_document_topics")
+    team = relationship("Team", back_populates="user_document_topics") # Si se añade team_id
 
-    __table_args__ = (UniqueConstraint('workspace_id', 'langchain_collection_id', name='_workspace_langchain_collection_uc'),)
+    # Restricciones para asegurar que un usuario/workspace/equipo no tenga dos colecciones con el mismo nombre
+    __table_args__ = (
+        Index('ix_account_workspace_topic', 'account_id', 'workspace_id', 'name', unique=True, postgresql_where=text("workspace_id IS NOT NULL")),
+        Index('ix_account_team_topic', 'account_id', 'team_id', 'name', unique=True, postgresql_where=text("team_id IS NOT NULL")),
+        Index('ix_account_personal_topic', 'account_id', 'name', unique=True, postgresql_where=text("workspace_id IS NULL AND team_id IS NULL")),
+    )
 
     def __repr__(self):
-        return f"<WorkspaceCollectionAssociation(workspace_id={self.workspace_id}, langchain_collection_id={self.langchain_collection_id})>"
+        return f"<UserDocumentTopic(id={self.id}, name='{self.name}', account_id={self.account_id})>"
+
+
+# --- ELIMINADO: La clase 'Memory' ya no es necesaria si todo va a langchain_pg_embedding ---
+# class Memory(Base):
+#     """Almacena memorias vectoriales para RAG."""
+#     __tablename__ = "memories"
+#     id = Column(Integer, primary_key=True, autoincrement=True)
+#     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False)
+#     team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True, index=True)
+#     content = Column(Text, nullable=False)
+#     embedding = Column(Vector(384), nullable=False)
+#     type = Column(String, default="general_memory")
+#     created_at = Column(DateTime(timezone=True), default=func.now())
+#     account = relationship("Account", back_populates="memories")
+#     team = relationship("Team", back_populates="memories")
+#     def __repr__(self):
+#         return f"<Memory(id={self.id}, type='{self.type}', content='{self.content[:50]}...')>"
 
 
 # --- Modelos de Datos Refactorizados (ahora vinculados a Account y opcionalmente a Team) ---
@@ -268,31 +319,10 @@ class Perfil(Base):
     intereses = Column(String, nullable=True)
     otros_datos = Column(String, nullable=True)
     
-    # ¡CORREGIDO! Añadimos la columna que faltaba.
-    # Será un string que puede ser nulo si el usuario no tiene un prompt personalizado.
+    # CORREGIDO: Añadimos la columna 'system_prompt' que faltaba.
     system_prompt = Column(String, nullable=True)
 
     account = relationship("Account", back_populates="profile")
-
-
-class Memory(Base):
-    """Almacena memorias vectoriales para RAG."""
-    __tablename__ = "memories"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    # Refactorizado: Se vincula a account_id
-    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True, index=True)
-    
-    content = Column(Text, nullable=False)
-    embedding = Column(Vector(384), nullable=False) # CORREGIDO: Si Memory también usa all-MiniLM-L6-v2
-    type = Column(String, default="general_memory") # Ej: 'general_memory', 'document_chunk', 'user_profile_fact'
-    created_at = Column(DateTime(timezone=True), default=func.now())
-
-    account = relationship("Account", back_populates="memories")
-    team = relationship("Team", back_populates="memories")
-
-    def __repr__(self):
-        return f"<Memory(id={self.id}, type='{self.type}', content='{self.content[:50]}...')>"
 
 
 class Nota(Base):
@@ -327,7 +357,7 @@ class AgendaEvent(Base):
     description = Column(String, nullable=False)
     event_datetime_utc = Column(DateTime(timezone=True), nullable=False)
     
-    # ¡CORREGIDO! Añadimos la columna que faltaba.
+    # CORREGIDO: Añadimos la columna 'is_active' que faltaba.
     is_active = Column(Boolean, default=True, nullable=False)
     
     job_name = Column(String, nullable=True, unique=True) # Para poder cancelar los jobs de Telegram
@@ -465,6 +495,10 @@ class GitHubDocument(Base):
     # Opcional: vincular a un workspace o a una cuenta general
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=True, index=True)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=True, index=True)
+    topic = Column(String, nullable=True, comment="Tema o categoría asociada al documento para colecciones RAG.")
+    
+    # Columna de embedding para búsquedas semánticas o análisis
+    embedding = Column(Vector(384), nullable=True, comment="Embedding vectorial del contenido del documento para búsquedas semánticas.")
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
@@ -477,6 +511,7 @@ class GitHubDocument(Base):
 
     def __repr__(self):
         return f"<GitHubDocument(repo_url='{self.repo_url}', file_path='{self.file_path}')>"
+
 
 # ==============================================================================
 # SECCIÓN 2: FUNCIONES AUXILIARES DE LA BASE DE DATOS

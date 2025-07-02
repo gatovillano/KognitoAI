@@ -18,7 +18,7 @@ import numpy as np
 from scipy.spatial.distance import cosine
 
 # Importaciones de la base de datos y la configuración
-from core.database import ProactiveInsight, SessionLocal, Nota, Memory, Account
+from core.database import ProactiveInsight, SessionLocal, Nota, Account
 from utils.db_session import DBSession
 from utils.embeddings import initialize_embeddings
 from langchain_core.embeddings import Embeddings
@@ -293,21 +293,50 @@ async def get_all_knowledge(account_id: str) -> List[Dict[str, Any]]:
                 'account_id': account_id
             })
 
-        # Fetch Vector Memories (including document chunks)
-        memories_stmt = select(Memory).where(Memory.account_id == account_uuid)
-        memories = (await db.execute(memories_stmt)).scalars().all()
+        # Fetch Vector Memories (including document chunks) from langchain_pg_embedding
+        from sqlalchemy import Table, MetaData
+        from core.memory_manager import PGVECTOR_SYNC_ENGINE, langchain_pg_embedding
+        from core.database import LangchainPgCollection
+
+        # Obtener los UUIDs de las colecciones relevantes para el usuario
+        relevant_collection_uuids = []
+        collection_names = [
+            f"user_memories_{account_id}",
+            f"user_documents_{account_id}",
+            "global_knowledge_base"
+        ]
+
+        for c_name in collection_names:
+            stmt = select(LangchainPgCollection.uuid).where(LangchainPgCollection.name == c_name)
+            result = await db.execute(stmt)
+            c_uuid = result.scalar_one_or_none()
+            if c_uuid:
+                relevant_collection_uuids.append(c_uuid)
+
+        memories = []
+        if relevant_collection_uuids:
+            memories_stmt = select(langchain_pg_embedding).where(
+                langchain_pg_embedding.c.collection_id.in_(relevant_collection_uuids),
+                langchain_pg_embedding.c.cmetadata['account_id'].astext == account_id
+            )
+            result = await db.execute(memories_stmt)
+            memories = result.mappings().all()
+
         for mem in memories:
-            title = mem.content[:50] + "..." if len(mem.content) > 50 else mem.content
-            category = mem.type
+            cmetadata = mem['cmetadata'] if 'cmetadata' in mem else {}
+            content = mem.get('document', '')
+            mem_type = cmetadata.get('type', 'general_memory')
+            title = content[:50] + "..." if len(content) > 50 else content
+            category = mem_type
 
             all_items.append({
-                'id': str(mem.id),
-                'content': mem.content,
+                'id': str(mem.get('id', '')),
+                'content': content,
                 'title': title,
-                'type': mem.type,
+                'type': mem_type,
                 'category': category,
-                'timestamp': mem.created_at,
-                'embedding': mem.embedding,
+                'timestamp': cmetadata.get('created_at', None),  # Puede no estar disponible, ajustar según necesidad
+                'embedding': mem.get('embedding', None),
                 'related_to_id': None,
                 'account_id': account_id
             })

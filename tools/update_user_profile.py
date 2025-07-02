@@ -37,10 +37,10 @@ class ProfileUpdateInput(BaseModel):
         description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
     )
     # Los demás campos son opcionales, permitiendo actualizaciones parciales del perfil.
-    nombre: Optional[str] = Field(None, description="El nombre del usuario.")
-    gustos: Optional[str] = Field(None, description="Los gustos o preferencias del usuario.")
-    intereses: Optional[str] = Field(None, description="Los intereses o hobbies del usuario.")
-    otros_datos: Optional[str] = Field(None, description="Cualquier otra información relevante sobre el usuario.")
+    nombre: Optional[str] = Field(default=None, description="El nombre del usuario.")
+gustos: Optional[str] = Field(default=None, description="Los gustos o preferencias del usuario.")
+intereses: Optional[str] = Field(default=None, description="Los intereses o hobbies del usuario.")
+otros_datos: Optional[str] = Field(default=None, description="Cualquier otra información relevante sobre el usuario.")
 
 
 class UpdateProfileTool(BaseTool):

@@ -14,6 +14,11 @@ interface Collection {
   document_count: number;
 }
 
+interface Workspace {
+  id: string;
+  name: string;
+}
+
 interface GitHubRepoDialogProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
@@ -24,25 +29,32 @@ export function GitHubRepoDialog({ isOpen, onOpenChange, onSuccess }: GitHubRepo
   const [repoUrl, setRepoUrl] = useState("");
   const [githubToken, setGithubToken] = useState("");
   const [collections, setCollections] = useState<Collection[]>([]);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
+  const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(null);
+  const [collectionTopic, setCollectionTopic] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
     if (isOpen) {
-      const fetchCollections = async () => {
+      const fetchData = async () => {
         try {
-          const response = await apiClient.post("/api/list-collections");
-          setCollections(response.data);
+          const [collectionsResponse, workspacesResponse] = await Promise.all([
+            apiClient.post("/api/list-collections"),
+            apiClient.get("/api/workspaces")
+          ]);
+          setCollections(collectionsResponse.data);
+          setWorkspaces(workspacesResponse.data);
         } catch (error) {
           toast({
             title: "Error",
-            description: "No se pudieron cargar las colecciones.",
+            description: "No se pudieron cargar los datos.",
             variant: "destructive",
           });
         }
       };
-      fetchCollections();
+      fetchData();
     }
   }, [isOpen, toast]);
 
@@ -61,9 +73,9 @@ export function GitHubRepoDialog({ isOpen, onOpenChange, onSuccess }: GitHubRepo
       const response = await apiClient.post("/api/github/collections", {
         repo_url: repoUrl,
         action,
-        collection_topic: selectedCollection === "general" ? null : selectedCollection,
         github_token: githubToken,
-        // account_id se manejaría en el backend a partir del usuario autenticado
+        collection_topic: collectionTopic || "repositorio",
+        workspace_id: selectedWorkspace,
       });
       toast({
         title: "Éxito",
@@ -109,22 +121,34 @@ export function GitHubRepoDialog({ isOpen, onOpenChange, onSuccess }: GitHubRepo
             />
           </div>
           <div>
-            <Label htmlFor="collection-select">Colección (opcional)</Label>
-            <Select onValueChange={setSelectedCollection}>
-              <SelectTrigger id="collection-select">
-                <SelectValue placeholder="Conocimiento General" />
+            <Label htmlFor="collection-topic">Tema de la Colección</Label>
+            <Input
+              id="collection-topic"
+              value={collectionTopic}
+              onChange={(e) => setCollectionTopic(e.target.value)}
+              placeholder="repositorio (por defecto)"
+            />
+            <p className="text-sm text-muted-foreground mt-1">
+              Tema bajo el cual se organizará este repositorio.
+            </p>
+          </div>
+          <div>
+            <Label htmlFor="workspace-select">Workspace (opcional)</Label>
+            <Select value={selectedWorkspace || ""} onValueChange={setSelectedWorkspace}>
+              <SelectTrigger id="workspace-select">
+                <SelectValue placeholder="Seleccionar workspace o dejar en blanco para uso personal" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="general">Conocimiento General</SelectItem>
-                {collections.map((collection) => (
-                  <SelectItem key={collection.topic} value={collection.topic}>
-                    {collection.topic}
+                <SelectItem value="">Personal (sin workspace)</SelectItem>
+                {workspaces.map((workspace) => (
+                  <SelectItem key={workspace.id} value={workspace.id}>
+                    {workspace.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
             <p className="text-sm text-muted-foreground mt-1">
-              Si no seleccionas una colección, el repositorio se añadirá al conocimiento general.
+              Si seleccionas un workspace, el repositorio estará disponible solo en ese workspace.
             </p>
           </div>
         </div>
