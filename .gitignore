@@ -10,8 +10,8 @@ build/
 *.log
 *.sqlite3
 credentials
-.env
-.env.local
+*.env
+*.env.local
 .vscode/
 .next
 migrations

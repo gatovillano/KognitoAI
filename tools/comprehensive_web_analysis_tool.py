@@ -149,5 +149,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         return final_response.content
 
     def _run(self, **kwargs: Any) -> str:
-        """Synchronous execution is not supported."""
-        raise NotImplementedError("This tool is designed for asynchronous use only.")
+        """Redirige la ejecución síncrona al método asíncrono."""
+        logger.warning("⚠️ Método síncrono _run de ComprehensiveWebAnalysisTool fue llamado. Redirigiendo al método asíncrono.")
+        import asyncio
+        return asyncio.run(self._arun(**kwargs))

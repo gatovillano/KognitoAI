@@ -164,8 +164,8 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           <Button
             variant={pathname === `/chat/${thread.id}` ? "secondary" : "ghost"}
             className={cn(
-              "w-full font-normal items-start text-left",
-              isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-auto py-2 px-2"
+              "w-full font-normal items-start text-left transition-all duration-200 hover:bg-muted rounded-xl",
+              isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-auto py-2 px-3"
             )}
           >
             <MessageSquare className={cn("h-4 w-4 mt-1 flex-shrink-0", !isCollapsed && "mr-2")} />
@@ -257,81 +257,126 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
   };
 
   return (
-    <div className={cn("flex flex-col h-full p-2 rounded-none", isCollapsed ? "items-center" : "p-4")}>
-      <div className={cn("flex items-center w-full pb-2 mb-2 border-b", isCollapsed ? "justify-center" : "justify-between")}>
-        <Image src="/logo-simple.png" alt="Kognito Logo" width={50} height={50} className={cn(!isCollapsed && "mr-2")} />
-        {!isCollapsed && <span className="font-bold text-lg whitespace-nowrap">Kognito</span>}
-        <Button onClick={handleNewChat} variant="ghost" size="icon" className={cn("hover:bg-primary/20", isCollapsed ? "hidden" : "ml-auto")}>
-          <Plus className="h-5 w-5 text-primary" />
-        </Button>
+    <div className={cn("flex flex-col h-full", isCollapsed ? "items-center p-2" : "p-6")}>
+      {/* Header del sidebar */}
+      <div className={cn("flex items-center w-full pb-4 mb-4", isCollapsed ? "justify-center" : "justify-between")}>
+        <div className="flex items-center gap-3">
+          <Image src="/logo-simple.png" alt="Kognito Logo" width={40} height={40} />
+          {!isCollapsed && <span className="font-bold text-xl text-foreground">Kognito</span>}
+        </div>
+        {!isCollapsed && (
+          <Button onClick={handleNewChat} variant="ghost" size="icon" className="hover:bg-muted rounded-full">
+            <Plus className="h-4 w-4" />
+          </Button>
+        )}
       </div>
 
+      {/* Sección de herramientas */}
       <div className={cn("w-full", isCollapsed && "flex flex-col items-center")}>
-        {!isCollapsed && <p className="font-semibold text-muted-foreground mb-2 px-2 whitespace-nowrap">Herramientas</p>}
+        {!isCollapsed && <p className="text-xs font-medium text-muted-foreground mb-3 px-2 uppercase tracking-wider">Herramientas</p>}
         <nav className="space-y-1 w-full">
           <Link href="/dashboard" passHref onClick={onLinkClick} title="Escritorio">
-            <Button variant={pathname.startsWith('/dashboard') ? 'secondary' : 'ghost'} className={cn("w-full", isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start")}>
-              <Bot className={cn("h-4 w-4", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && "Escritorio"}
+            <Button 
+              variant={pathname.startsWith('/dashboard') ? 'secondary' : 'ghost'} 
+              className={cn(
+                "w-full transition-all duration-200 hover:bg-muted rounded-xl", 
+                isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-10 px-3"
+              )}
+            >
+              <Bot className={cn("h-4 w-4", !isCollapsed && "mr-3")}/>
+              {!isCollapsed && <span className="text-sm font-medium">Escritorio</span>}
             </Button>
           </Link>
           <Link href="/rag" passHref onClick={onLinkClick} title="Gestión de Conocimientos">
-            <Button variant={pathname.startsWith('/rag') ? 'secondary' : 'ghost'} className={cn("w-full", isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start")}>
-              <BookMarked className={cn("h-4 w-4", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && "Gestión de Conocimientos"}
+            <Button 
+              variant={pathname.startsWith('/rag') ? 'secondary' : 'ghost'} 
+              className={cn(
+                "w-full transition-all duration-200 hover:bg-muted rounded-xl", 
+                isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-10 px-3"
+              )}
+            >
+              <BookMarked className={cn("h-4 w-4", !isCollapsed && "mr-3")}/>
+              {!isCollapsed && <span className="text-sm font-medium">Conocimientos</span>}
             </Button>
           </Link>
           <Link href="/agenda" passHref onClick={onLinkClick} title="Agenda">
-            <Button variant={pathname.startsWith('/agenda') ? 'secondary' : 'ghost'} className={cn("w-full", isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start")}>
-              <Calendar className={cn("h-4 w-4", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && "Agenda"}
+            <Button 
+              variant={pathname.startsWith('/agenda') ? 'secondary' : 'ghost'} 
+              className={cn(
+                "w-full transition-all duration-200 hover:bg-muted rounded-xl", 
+                isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-10 px-3"
+              )}
+            >
+              <Calendar className={cn("h-4 w-4", !isCollapsed && "mr-3")}/>
+              {!isCollapsed && <span className="text-sm font-medium">Agenda</span>}
             </Button>
           </Link>
           <Link href="/notes" passHref onClick={onLinkClick} title="Notas">
-            <Button variant={pathname.startsWith('/notes') ? 'secondary' : 'ghost'} className={cn("w-full", isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start")}>
-              <Notebook className={cn("h-4 w-4", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && "Notas"}
+            <Button 
+              variant={pathname.startsWith('/notes') ? 'secondary' : 'ghost'} 
+              className={cn(
+                "w-full transition-all duration-200 hover:bg-muted rounded-xl", 
+                isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-10 px-3"
+              )}
+            >
+              <Notebook className={cn("h-4 w-4", !isCollapsed && "mr-3")}/>
+              {!isCollapsed && <span className="text-sm font-medium">Notas</span>}
             </Button>
           </Link>
           <Link href="/teams" passHref onClick={onLinkClick} title="Equipos">
-            <Button variant={pathname.startsWith('/teams') ? 'secondary' : 'ghost'} className={cn("w-full", isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start")}>
-              <Users className={cn("h-4 w-4", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && "Equipos"}
+            <Button 
+              variant={pathname.startsWith('/teams') ? 'secondary' : 'ghost'} 
+              className={cn(
+                "w-full transition-all duration-200 hover:bg-muted rounded-xl", 
+                isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-10 px-3"
+              )}
+            >
+              <Users className={cn("h-4 w-4", !isCollapsed && "mr-3")}/>
+              {!isCollapsed && <span className="text-sm font-medium">Equipos</span>}
             </Button>
           </Link>
           <Link href="/workspaces" passHref onClick={onLinkClick} title="Workspaces">
-            <Button variant={pathname.startsWith('/workspaces') ? 'secondary' : 'ghost'} className={cn("w-full", isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start")}>
-              <Bot className={cn("h-4 w-4", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && "Workspaces"}
+            <Button 
+              variant={pathname.startsWith('/workspaces') ? 'secondary' : 'ghost'} 
+              className={cn(
+                "w-full transition-all duration-200 hover:bg-muted rounded-xl", 
+                isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-10 px-3"
+              )}
+            >
+              <Bot className={cn("h-4 w-4", !isCollapsed && "mr-3")}/>
+              {!isCollapsed && <span className="text-sm font-medium">Workspaces</span>}
             </Button>
           </Link>
           <Link href="/chat" passHref onClick={onLinkClick} title="Chat">
-            <Button variant={pathname.startsWith('/chat') ? 'secondary' : 'ghost'} className={cn("w-full", isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start")}>
-              <MessageSquare className={cn("h-4 w-4", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && "Chat"}
+            <Button 
+              variant={pathname.startsWith('/chat') ? 'secondary' : 'ghost'} 
+              className={cn(
+                "w-full transition-all duration-200 hover:bg-muted rounded-xl", 
+                isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-10 px-3"
+              )}
+            >
+              <MessageSquare className={cn("h-4 w-4", !isCollapsed && "mr-3")}/>
+              {!isCollapsed && <span className="text-sm font-medium">Chat</span>}
             </Button>
           </Link>
         </nav>
         {!isCollapsed && (
-          <div className="flex items-center justify-between mb-4 px-2 mt-4">
-            <p className="font-semibold text-muted-foreground whitespace-nowrap">Conversaciones</p>
-          </div>
-        )}
-        {!isCollapsed && (
-          <div className="mb-4 px-2 mt-2">
-            <input
-              type="text"
-              placeholder="Buscar conversaciones..."
-              value={searchTerm}
-              onChange={handleSearchChange}
-              className="w-full p-2 rounded-full focus:outline-none focus:ring-2 focus:ring-primary text-sm text-gray-300"
-              style={{ backgroundColor: '#1d1e20' }}
-            />
+          <div className="mt-6 mb-4">
+            <p className="text-xs font-medium text-muted-foreground mb-3 px-2 uppercase tracking-wider">Conversaciones</p>
+            <div className="px-2">
+              <input
+                type="text"
+                placeholder="Buscar conversaciones..."
+                value={searchTerm}
+                onChange={handleSearchChange}
+                className="w-full p-3 rounded-full bg-[#1d1e20] border border-border focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm text-foreground placeholder:text-muted-foreground transition-all"
+              />
+            </div>
           </div>
         )}
         {isCollapsed && (
-          <Button onClick={handleNewChat} variant="ghost" size="icon" className="mb-2" title="Nuevo Chat">
-            <Plus className="h-5 w-5" />
+          <Button onClick={handleNewChat} variant="ghost" size="icon" className="mb-4 rounded-full hover:bg-muted" title="Nuevo Chat">
+            <Plus className="h-4 w-4" />
           </Button>
         )}
       </div>
@@ -339,15 +384,15 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
       <ScrollArea className="flex-grow w-full">
         <DndProvider backend={HTML5Backend}>
           {!isCollapsed && (
-            <div className="flex items-center justify-between mb-1 px-2">
-              <p className="font-semibold text-muted-foreground text-sm whitespace-nowrap">Fijados</p>
+            <div className="flex items-center justify-between mb-3 px-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Fijados</p>
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="p-0 h-5 w-5" 
+                className="p-0 h-6 w-6 rounded-full hover:bg-muted" 
                 onClick={() => setIsPinnedCollapsed(!isPinnedCollapsed)}
               >
-                {isPinnedCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                {isPinnedCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               </Button>
             </div>
           )}
@@ -367,15 +412,15 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
             </DropArea>
           )}
           {!isCollapsed && (
-            <div className="flex items-center justify-between mb-1 px-2 mt-2">
-              <p className="font-semibold text-muted-foreground text-sm whitespace-nowrap">Recientes</p>
+            <div className="flex items-center justify-between mb-3 px-2 mt-4">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Recientes</p>
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="p-0 h-5 w-5" 
+                className="p-0 h-6 w-6 rounded-full hover:bg-muted" 
                 onClick={() => setIsRecentCollapsed(!isRecentCollapsed)}
               >
-                {isRecentCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                {isRecentCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               </Button>
             </div>
           )}
@@ -391,21 +436,34 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
         </DndProvider>
       </ScrollArea>
 
-      <div className={cn("mt-auto w-full pt-2 border-t", isCollapsed && "flex flex-col items-center")}>
+      {/* Usuario */}
+      <div className={cn("mt-auto w-full pt-4", isCollapsed && "flex flex-col items-center")}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className={cn("w-full mt-4 h-auto py-2", isCollapsed ? "h-10 w-10 p-0" : "justify-start gap-2")}>
-              <Avatar className={cn("h-8 w-8", !isCollapsed && "mr-2")}>
-                <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" /> {/* Placeholder image */}
-                <AvatarFallback>CN</AvatarFallback>
+            <Button 
+              variant="ghost" 
+              className={cn(
+                "w-full h-auto py-3 transition-all duration-200 hover:bg-muted rounded-xl", 
+                isCollapsed ? "h-10 w-10 p-0" : "justify-start gap-3"
+              )}
+            >
+              <Avatar className="h-8 w-8">
+                <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />
+                <AvatarFallback className="bg-primary text-primary-foreground font-medium">
+                  {user?.username?.slice(0, 2).toUpperCase() || "KA"}
+                </AvatarFallback>
               </Avatar>
               {!isCollapsed && (
-                <div className="flex flex-col items-start overflow-hidden">
-                  <span className="font-semibold text-sm truncate w-full text-left">{user?.username || "Usuario"}</span>
-                  <span className="text-xs text-muted-foreground truncate w-full text-left">{user?.email || "Sin Email"}</span>
+                <div className="flex flex-col items-start overflow-hidden flex-1">
+                  <span className="font-medium text-sm truncate w-full text-left text-foreground">
+                    {user?.username || "Usuario"}
+                  </span>
+                  <span className="text-xs text-muted-foreground truncate w-full text-left">
+                    {user?.email || "Sin Email"}
+                  </span>
                 </div>
               )}
-              {!isCollapsed && <Settings className="h-4 w-4 ml-auto" />}
+              {!isCollapsed && <Settings className="h-4 w-4 text-muted-foreground" />}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">

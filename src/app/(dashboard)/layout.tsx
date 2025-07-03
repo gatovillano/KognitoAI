@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppShell } from '@/components/AppShell';
+import { WorkspaceTitleProvider } from '@/contexts/WorkspaceTitleContext';
 import { Toaster } from '@/components/ui/sonner';
 import Image from 'next/image';
 
@@ -34,8 +35,10 @@ export default function DashboardLayout({
 
   return (
     <>
-      <AppShell>{children}</AppShell>
+      <WorkspaceTitleProvider>
+        <AppShell>{children}</AppShell>
+      </WorkspaceTitleProvider>
       <Toaster richColors position="top-right" />
-    </>
+e    </>
   );
 }

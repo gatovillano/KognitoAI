@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { ArrowLeft, Bot, Plus, MessageSquare, BookMarked, MoreVertical, Sparkles } from 'lucide-react';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import apiClient from '@/lib/api';
+import { CreateWorkspaceCollectionDialog } from './CreateWorkspaceCollectionDialog';
 
 interface ChatThread {
   id: string;
@@ -46,11 +47,11 @@ export default function WorkspaceDashboard() {
   const [selectedChat, setSelectedChat] = useState<ChatThread | null>(null);
   const [newChatTitle, setNewChatTitle] = useState('');
   const [collectionDialogOpen, setCollectionDialogOpen] = useState(false);
+  const [createCollectionDialogOpen, setCreateCollectionDialogOpen] = useState(false);
   const [renameCollectionDialogOpen, setRenameCollectionDialogOpen] = useState(false);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
   const [newCollectionTitle, setNewCollectionTitle] = useState('');
   const [newCollectionDescription, setNewCollectionDescription] = useState('');
-
   useEffect(() => {
     const fetchWorkspaceData = async () => {
       try {
@@ -191,8 +192,19 @@ export default function WorkspaceDashboard() {
 
   const handleCloseCollectionDialog = () => {
     setCollectionDialogOpen(false);
-    setNewCollectionTitle('');
-    setNewCollectionDescription('');
+  };
+
+  const handleCreateCollectionSuccess = (newTopic: string) => {
+    // Actualizar la lista de colecciones después de crear una nueva
+    const fetchCollections = async () => {
+      try {
+        const collectionsResponse = await apiClient.get(`/api/workspaces/${workspaceId}/collections`);
+        setCollections(collectionsResponse.data);
+      } catch (error) {
+        console.error('Error fetching collections:', error);
+      }
+    };
+    fetchCollections();
   };
 
   const handleCreateCollection = async () => {
@@ -416,16 +428,22 @@ export default function WorkspaceDashboard() {
             <BookMarked className="mr-2 h-6 w-6 text-primary" />
             Conocimientos del Workspace
           </h2>
-          <Button onClick={handleOpenAddExistingCollectionDialog}>
-            <Plus className="mr-2 h-4 w-4" />
-            Añadir Colección Existente
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={handleOpenAddExistingCollectionDialog}>
+              <Plus className="mr-2 h-4 w-4" />
+              Añadir Colección Existente
+            </Button>
+            <Button onClick={() => setCreateCollectionDialogOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Crear Colección
+            </Button>
+          </div>
         </div>
         {filteredCollections.length === 0 ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <Card 
               className="border-dashed hover:border-primary hover:text-primary transition-colors flex flex-col items-center justify-center text-center p-6 cursor-pointer h-full"
-              onClick={() => setCollectionDialogOpen(true)}
+              onClick={() => setCreateCollectionDialogOpen(true)}
             >
               <Plus className="h-8 w-8 mb-2" />
               <p className="font-semibold">Crear Colección</p>
@@ -436,7 +454,7 @@ export default function WorkspaceDashboard() {
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <Card 
               className="border-dashed hover:border-primary hover:text-primary transition-colors flex flex-col items-center justify-center text-center p-6 cursor-pointer h-full"
-              onClick={() => setCollectionDialogOpen(true)}
+              onClick={() => setCreateCollectionDialogOpen(true)}
             >
               <Plus className="h-8 w-8 mb-2" />
               <p className="font-semibold">Crear Colección</p>
@@ -479,6 +497,13 @@ export default function WorkspaceDashboard() {
         )}
         <p className="text-xs text-muted-foreground mt-2">Nota: Las colecciones están aisladas y solo son accesibles dentro de este workspace.</p>
       </div>
+
+      <CreateWorkspaceCollectionDialog 
+        isOpen={createCollectionDialogOpen} 
+        onOpenChange={setCreateCollectionDialogOpen} 
+        onCreateSuccess={handleCreateCollectionSuccess}
+        workspaceId={workspaceId}
+      />
 
       <Dialog open={collectionDialogOpen} onOpenChange={setCollectionDialogOpen}>
         <DialogContent>

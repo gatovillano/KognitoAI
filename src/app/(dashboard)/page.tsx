@@ -190,74 +190,159 @@ export default function ChatLandingPage() {
     }
   };
 
+  const exampleQuestions = [
+    "¿Cuáles son los top 2025 auriculares con cancelación de ruido?",
+    "¿Cuáles son los aspectos económicos de la actual escasez mundial de huevos?",
+    "¿Cuáles son algunos ETFs con la mayor oportunidad de crecimiento?",
+    "¿Cuáles son buenos zapatos duraderos para correr largas distancias?"
+  ];
+
   return (
     <div className="flex flex-col h-full">
       <motion.div
-        className="flex flex-col items-center justify-center flex-grow"
+        className="flex flex-col items-center justify-center flex-grow px-4"
         animate={{
           justifyContent: isInputMoved ? 'flex-start' : 'center',
-          paddingTop: isInputMoved ? '10vh' : '0',
+          paddingTop: isInputMoved ? '8vh' : '0',
         }}
         transition={{ duration: 0.5, ease: 'easeOut' }}
       >
-        <Image src="/logo-simple.png" alt="Kognito AI Labs" width={300} height={300} className="mt-8" />
-        <h1 className="text-4xl font-bold -mt-16 tracking-tight flex items-center z-10">
-            👋 ¡Hola! Soy KAI
-        </h1>
-        <form onSubmit={handleChatSubmit} className="mt-6 w-full max-w-3xl relative">
-          <div className="rounded-2xl bg-card p-4 shadow-lg">
-            <Textarea
-              ref={textAreaRef}
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="¿Cómo puedo ayudarte hoy?"
-              autoComplete="off"
-              disabled={isResponding}
-              className="w-full resize-none bg-transparent border-0 focus:ring-0 p-0 text-base"
-              rows={1}
-            />
-            <div className="mt-3 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div
-                  onClick={toggleKnowledgeAnalysis}
-                  className={`cursor-pointer flex items-center gap-1.5 text-sm ${isKnowledgeAnalysisActive ? 'text-primary' : 'text-muted-foreground'}`}
-                >
-                  <BookMarked className="h-4 w-4" />
-                  Análisis de Conocimientos
+        {/* Logo y Título */}
+        <div className="flex flex-col items-center mb-8">
+          <div className="flex items-center gap-3 mb-4">
+            <Image src="/logo-simple.png" alt="Kognito AI Labs" width={80} height={80} />
+            <h1 className="text-5xl font-bold tracking-tight">
+              Kognito
+            </h1>
+          </div>
+          <p className="text-lg text-muted-foreground">
+            ¿Qué quieres saber?
+          </p>
+        </div>
+
+        {/* Input Principal */}
+        <form onSubmit={handleChatSubmit} className="w-full max-w-4xl">
+          <div className="relative">
+            <div className="rounded-3xl bg-card border border-border p-6 shadow-sm">
+              <Textarea
+                ref={textAreaRef}
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Pregúntame lo que quieras..."
+                autoComplete="off"
+                disabled={isResponding}
+                className="w-full resize-none bg-transparent border-0 focus:ring-0 p-0 text-lg placeholder:text-muted-foreground/70"
+                rows={1}
+              />
+              
+              {/* Barra de acciones */}
+              <div className="flex items-center justify-between mt-4 pt-4 border-t border-border/50">
+                {/* Botones de modo */}
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant={isKnowledgeAnalysisActive ? "default" : "outline"}
+                    size="sm"
+                    onClick={toggleKnowledgeAnalysis}
+                    className="rounded-full"
+                  >
+                    <BookMarked className="h-4 w-4 mr-2" />
+                    Conocimientos
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={isWebSearchActive ? "default" : "outline"}
+                    size="sm"
+                    onClick={toggleWebSearch}
+                    className="rounded-full"
+                  >
+                    <Search className="h-4 w-4 mr-2" />
+                    Web
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={isComprehensiveAnalysisActive ? "default" : "outline"}
+                    size="sm"
+                    onClick={toggleComprehensiveAnalysis}
+                    className="rounded-full"
+                  >
+                    <BrainCircuit className="h-4 w-4 mr-2" />
+                    Análisis
+                  </Button>
                 </div>
-                <div
-                  onClick={toggleWebSearch}
-                  className={`cursor-pointer flex items-center gap-1.5 text-sm ${isWebSearchActive ? 'text-primary' : 'text-muted-foreground'}`}
-                >
-                  <Search className="h-4 w-4" />
-                  Búsqueda Web
-                </div>
-                <div
-                  onClick={toggleComprehensiveAnalysis}
-                  className={`cursor-pointer flex items-center gap-1.5 text-sm ${isComprehensiveAnalysisActive ? 'text-primary' : 'text-muted-foreground'}`}
-                >
-                  <BrainCircuit className="h-4 w-4" />
-                  Busqueda y Analisis
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <div
-                  onClick={isRecording ? stopRecording : startRecording}
-                  className={`cursor-pointer flex items-center text-sm ${isRecording ? 'text-red-500' : 'text-muted-foreground'}`}
-                >
-                  <Mic className="h-4 w-4" />
-                </div>
-                <div
-                  onClick={handleChatSubmit}
-                  className={`cursor-pointer flex items-center text-sm ${isResponding || !chatInput.trim() ? 'text-gray-400' : 'text-gray-600 hover:text-primary'}`}
-                >
-                  <Send className="h-4 w-4" />
+
+                {/* Botones de acción */}
+                <div className="flex items-center gap-3">
+                  <input
+                    type="file"
+                    multiple
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    id="file-upload"
+                    disabled={isUploadingFile}
+                  />
+                  <label
+                    htmlFor="file-upload"
+                    className={`cursor-pointer p-2 rounded-full hover:bg-muted transition-colors ${isUploadingFile ? 'opacity-50' : ''}`}
+                  >
+                    <Upload className="h-5 w-5 text-muted-foreground" />
+                  </label>
+                  
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={isRecording ? stopRecording : startRecording}
+                    className={`rounded-full ${isRecording ? 'text-red-500 bg-red-50 dark:bg-red-950' : ''}`}
+                  >
+                    <Mic className="h-5 w-5" />
+                  </Button>
+                  
+                  <Button
+                    type="submit"
+                    disabled={isResponding || !chatInput.trim()}
+                    className="rounded-full px-6"
+                  >
+                    {isResponding ? (
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-background border-t-transparent" />
+                    ) : (
+                      <Send className="h-4 w-4 mr-2" />
+                    )}
+                    {isResponding ? 'Enviando...' : 'Enviar'}
+                  </Button>
                 </div>
               </div>
             </div>
           </div>
         </form>
+
+        {/* Preguntas de ejemplo */}
+        {!isInputMoved && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="w-full max-w-4xl mt-8"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {exampleQuestions.map((question, index) => (
+                <motion.button
+                  key={index}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 + index * 0.1 }}
+                  onClick={() => setChatInput(question)}
+                  className="p-4 text-left rounded-2xl bg-card/50 hover:bg-card border border-border/50 hover:border-border transition-all duration-200 group"
+                >
+                  <p className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                    {question}
+                  </p>
+                </motion.button>
+              ))}
+            </div>
+          </motion.div>
+        )}
       </motion.div>
     </div>
   );

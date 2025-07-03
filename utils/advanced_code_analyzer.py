@@ -92,6 +92,10 @@ Responde solo con el objeto JSON, sin texto adicional."""
         # Ejecutar el análisis
         result = await chain.ainvoke({"code_content": code_content})
         
+        # Convertir el diccionario a objeto Pydantic si es necesario
+        if isinstance(result, dict):
+            result = CodeAnalysisResult(**result)
+        
         logger.info("Análisis de código completado exitosamente.")
         return result
         

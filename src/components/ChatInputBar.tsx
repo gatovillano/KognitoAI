@@ -87,95 +87,118 @@ export function ChatInputBar({
   return (
     <footer className="p-4 w-full flex justify-center shrink-0 bg-transparent mb-2">
       <form onSubmit={onSendMessage} className="relative w-full max-w-4xl">
-            <div className="rounded-2xl bg-gray-300 dark:bg-card/90 p-4 shadow-lg w-[90%] mx-auto">
+        <div className="rounded-3xl bg-card border border-border p-6 shadow-sm">
+          {/* Archivos adjuntos */}
           {files.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-2">
+            <div className="mb-4 flex flex-wrap gap-2">
               {files.map((file, index) => (
-                <div key={index} className="flex items-center gap-2 bg-gray-200 dark:bg-gray-700 rounded-full px-3 py-1 text-sm">
-                  <Paperclip className="h-4 w-4" />
-                  <span>{file.name}</span>
-                  <button type="button" onClick={() => onRemoveFile(index)} className="text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white">
+                <div key={index} className="flex items-center gap-2 bg-muted rounded-full px-3 py-2 text-sm">
+                  <Paperclip className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-foreground max-w-32 truncate">{file.name}</span>
+                  <button 
+                    type="button" 
+                    onClick={() => onRemoveFile(index)} 
+                    className="text-muted-foreground hover:text-destructive transition-colors"
+                  >
                     <X className="h-4 w-4" />
                   </button>
                 </div>
               ))}
             </div>
           )}
+
+          {/* Input de texto */}
           <Textarea
             ref={textAreaRef}
             value={newMessage}
             onChange={(e) => onMessageChange(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="¿Cómo puedo ayudarte hoy?"
+            placeholder="Escribe tu mensaje..."
             autoComplete="off"
             disabled={isResponding}
-            className="w-full resize-none bg-transparent border-0 focus:ring-0 p-0 text-base text-gray-800 dark:text-white"
+            className="w-full resize-none bg-transparent border-0 focus:ring-0 p-0 text-lg placeholder:text-muted-foreground/70"
             rows={1}
           />
-            <div className="mt-3 flex items-center justify-between">
+          
+          {/* Barra de acciones */}
+          <div className="flex items-center justify-between mt-4 pt-4 border-t border-border/50">
+            {/* Botones de modo */}
             <div className="flex items-center gap-2">
-              <button
+              <Button
                 type="button"
+                variant={isKnowledgeAnalysisActive ? "default" : "outline"}
+                size="sm"
                 onClick={onToggleKnowledgeAnalysis}
-                className={`cursor-pointer flex items-center gap-1.5 text-sm px-2 py-1 rounded-md ${isKnowledgeAnalysisActive ? 'text-blue-500' : 'text-gray-600 dark:text-muted-foreground/80'}`}
+                className="rounded-full"
               >
-                <BookMarked className={`h-4 w-4 ${isKnowledgeAnalysisActive ? 'text-blue-500' : 'text-gray-600 dark:text-muted-foreground/80'}`} />
-                Análisis de Conocimientos
-              </button>
-              <button
+                <BookMarked className="h-4 w-4 mr-2" />
+                Conocimientos
+              </Button>
+              <Button
                 type="button"
+                variant={isWebSearchActive ? "default" : "outline"}
+                size="sm"
                 onClick={onToggleWebSearch}
-                className={`cursor-pointer flex items-center gap-1.5 text-sm px-2 py-1 rounded-md ${isWebSearchActive ? 'text-blue-500' : 'text-gray-600 dark:text-muted-foreground/80'}`}
+                className="rounded-full"
               >
-                <Search className={`h-4 w-4 ${isWebSearchActive ? 'text-blue-500' : 'text-gray-600 dark:text-muted-foreground/80'}`} />
-                Búsqueda Web
-              </button>
-              <button
+                <Search className="h-4 w-4 mr-2" />
+                Web
+              </Button>
+              <Button
                 type="button"
+                variant={isComprehensiveAnalysisActive ? "default" : "outline"}
+                size="sm"
                 onClick={onToggleComprehensiveAnalysis}
-                className={`cursor-pointer flex items-center gap-1.5 text-sm px-2 py-1 rounded-md ${isComprehensiveAnalysisActive ? 'text-blue-500' : 'text-gray-600 dark:text-muted-foreground/80'}`}
+                className="rounded-full"
               >
-                <BrainCircuit className={`h-4 w-4 ${isComprehensiveAnalysisActive ? 'text-blue-500' : 'text-gray-600 dark:text-muted-foreground/80'}`} />
-                Búsqueda y Análisis
-              </button>
+                <BrainCircuit className="h-4 w-4 mr-2" />
+                Análisis
+              </Button>
             </div>
+
+            {/* Botones de acción */}
             <div className="flex items-center gap-3">
-              <div className="cursor-pointer flex items-center text-sm text-gray-600 dark:text-muted-foreground/80" onClick={() => {
-                const fileInput = document.getElementById('file-upload');
-                if (fileInput) {
-                  fileInput.click();
-                }
-              }}>
-                <Upload className="h-4 w-4 text-gray-600 dark:text-muted-foreground/80" />
-                <label htmlFor="file-upload" className="cursor-pointer sr-only">Subir Archivo</label>
-                <input
-                  id="file-upload"
-                  type="file"
-                  multiple
-                  accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.gif"
-                  className="hidden"
-                  onChange={(e) => {
-                    onFileUpload(e);
-                    // Reset the input value to allow selecting the same file again
-                    e.target.value = '';
-                  }}
-                  disabled={isUploadingFile}
-                />
-              </div>
-              <button
-                type="button"
-                onClick={isRecording ? onStopRecording : onStartRecording}
-                className={`cursor-pointer flex items-center text-sm ${isRecording ? 'text-red-500' : 'text-gray-600 dark:text-muted-foreground/80'}`}
+              <input
+                id="file-upload"
+                type="file"
+                multiple
+                accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.gif"
+                className="hidden"
+                onChange={(e) => {
+                  onFileUpload(e);
+                  e.target.value = '';
+                }}
+                disabled={isUploadingFile}
+              />
+              <label
+                htmlFor="file-upload"
+                className={`cursor-pointer p-2 rounded-full hover:bg-muted transition-colors ${isUploadingFile ? 'opacity-50' : ''}`}
               >
-                <Mic className={`h-4 w-4 ${isRecording ? 'text-red-500' : 'text-gray-600 dark:text-muted-foreground/80'}`} />
-              </button>
-              <button
+                <Upload className="h-5 w-5 text-muted-foreground" />
+              </label>
+              
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={isRecording ? onStopRecording : onStartRecording}
+                className={`rounded-full ${isRecording ? 'text-red-500 bg-red-50 dark:bg-red-950' : ''}`}
+              >
+                <Mic className="h-5 w-5" />
+              </Button>
+              
+              <Button
                 type="submit"
                 disabled={isResponding || (!newMessage.trim() && files.length === 0)}
-                className={`cursor-pointer flex items-center text-sm ${isResponding || (!newMessage.trim() && files.length === 0) ? 'text-gray-400' : 'text-gray-700 hover:text-primary'} dark:${isResponding || (!newMessage.trim() && files.length === 0) ? 'text-gray-500' : 'text-gray-300 hover:text-primary'}`}
+                className="rounded-full px-6"
               >
-                <Send className="h-4 w-4" />
-              </button>
+                {isResponding ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-background border-t-transparent" />
+                ) : (
+                  <Send className="h-4 w-4 mr-2" />
+                )}
+                {isResponding ? 'Enviando...' : 'Enviar'}
+              </Button>
             </div>
           </div>
         </div>
