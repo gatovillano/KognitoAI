@@ -120,8 +120,10 @@ class ConversationContextAnalyzerTool(BaseTool):
         return "Análisis de contexto reciente iniciado. Se generarán insights sobre conversaciones y memorias en segundo plano."
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:
-        """La ejecución síncrona no está soportada en nuestra arquitectura asíncrona."""
-        raise NotImplementedError("conversation_context_analyzer_tool no soporta ejecución síncrona.")
+        """Redirige la ejecución síncrona a la método asíncrono."""
+        logger.warning("⚠️ Método síncrono _run de ConversationContextAnalyzerTool fue llamado. Redirigiendo al método asíncrono.")
+        import asyncio
+        return asyncio.run(self._arun(**kwargs))
 
     def _format_result(self, result: Any) -> str:
         """

@@ -479,38 +479,38 @@ export function CommonChat({ threadId }: CommonChatProps) {
   }
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full bg-background">
       <div className="flex flex-col flex-1 overflow-hidden">
         <div className="flex-grow overflow-y-hidden relative">
-            <ScrollArea className="h-full" ref={scrollAreaRef}>
-              <div className="p-4 md:p-6 space-y-6 w-full max-w-7xl mx-auto">
-                {filteredMessages.slice(-50).map((msg, index) => (
-                  <ChatMessage
-                    key={filteredMessages.length - 50 + index}
-                    msg={{ 
-                      text: msg.text, 
-                      sender: msg.sender, 
-                      image: msg.image_base64 || '', 
-                      document_url: msg.document_url || '' 
-                    }}
-                    index={filteredMessages.length - 50 + index}
-                    handleCopyMessage={handleCopyMessage}
-                    handlePlayAudio={handlePlayAudio}
-                    isAudioLoading={isAudioLoading}
-                    playingMessageIndex={playingMessageIndex}
-                  />
-                ))}
-                {isResponding && (
-                  <LoadingIndicator
-                    isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
-                    isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
-                  />
-                )}
-                {backgroundTasks.map((task) => (
-                  <BackgroundTaskIndicator key={task.taskId} task={task} />
-                ))}
-              </div>
-            </ScrollArea>
+          <ScrollArea className="h-full" ref={scrollAreaRef}>
+            <div className="p-4 md:p-6 space-y-6 w-full max-w-4xl mx-auto">
+              {filteredMessages.slice(-50).map((msg, index) => (
+                <ChatMessage
+                  key={filteredMessages.length - 50 + index}
+                  msg={{ 
+                    text: msg.text, 
+                    sender: msg.sender, 
+                    image: msg.image_base64 || '', 
+                    document_url: msg.document_url || '' 
+                  }}
+                  index={filteredMessages.length - 50 + index}
+                  handleCopyMessage={handleCopyMessage}
+                  handlePlayAudio={handlePlayAudio}
+                  isAudioLoading={isAudioLoading}
+                  playingMessageIndex={playingMessageIndex}
+                />
+              ))}
+              {isResponding && (
+                <LoadingIndicator
+                  isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+                  isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+                />
+              )}
+              {backgroundTasks.map((task) => (
+                <BackgroundTaskIndicator key={task.taskId} task={task} />
+              ))}
+            </div>
+          </ScrollArea>
         </div>
         <ChatInputBar
           newMessage={newMessage}
@@ -535,7 +535,7 @@ export function CommonChat({ threadId }: CommonChatProps) {
         />
       </div>
       {isArtifactPanelVisible && (
-        <div className="w-1/3 h-full hidden lg:block">
+        <div className="w-1/3 h-full hidden lg:block border-l border-border">
           <ArtifactPanel artifacts={artifacts} onCopyContent={handleCopyArtifactContent} isVisible={isArtifactPanelVisible} onToggleVisibility={toggleVisibility} />
         </div>
       )}

@@ -13,6 +13,7 @@ import { PreviewDocumentDialog } from '../../preview-document-dialog';
 import { EditDocumentDialog } from '../../edit-document-dialog';
 import { DeleteConfirmationDialog } from '../../delete-confirmation-dialog';
 import { AnalysisResultDialog } from '../../analysis-result-dialog';
+import { CodeAnalysisResultDialog } from '../../code-analysis-result-dialog';
 import { ShareDocumentDialog } from '../../share-document-dialog';
 import type { Document } from '../../columns';
 
@@ -93,7 +94,7 @@ export default function RepositoryDetailPage() {
   const handleVectorizeRepository = async () => {
     if (docPollingId || collectionPollingId || vectorizationPollingId) { toast.info('Ya hay un proceso en progreso'); return; }
     try {
-      const response = await apiClient.post('/api/start-vectorization', { repo_name: repoName });
+      const response = await apiClient.post('/api/github/start-vectorization', { repo_name: repoName });
       setVectorizationPollingId(response.data.task_id);
       toast.info(`Vectorización del repositorio "${repoName}" iniciada`);
     } catch (error) { toast.error('No se pudo iniciar la vectorización del repositorio'); }
@@ -142,7 +143,7 @@ export default function RepositoryDetailPage() {
     if (!vectorizationPollingId) return;
     const poller = setInterval(async () => {
       try {
-        const response = await apiClient.get(`/api/get-vectorization-result/${vectorizationPollingId}`);
+        const response = await apiClient.get(`/api/github/get-vectorization-result/${vectorizationPollingId}`);
         const { status, result, error } = response.data;
         if (status === 'completed') {
           clearInterval(poller); setVectorizationPollingId(null); setVectorizationResult(result);
@@ -309,8 +310,12 @@ export default function RepositoryDetailPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" className="border-blue-400 text-blue-400 hover:bg-blue-50" disabled={!!docPollingId || !!collectionPollingId} onClick={handleAnalyzeRepository}>
-            <ScanSearch className="mr-2 h-4 w-4" />
-            Analizar Repositorio
+            {collectionPollingId ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <ScanSearch className="mr-2 h-4 w-4" />
+            )}
+            {collectionPollingId ? 'Analizando...' : 'Analizar Repositorio'}
           </Button>
           <Button variant="outline" className="border-green-400 text-green-400 hover:bg-green-50" disabled={!!docPollingId || !!collectionPollingId || !!vectorizationPollingId} onClick={handleVectorizeRepository}>
             <FileText className="mr-2 h-4 w-4" />
@@ -340,7 +345,7 @@ export default function RepositoryDetailPage() {
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={() => {}} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={() => {}} document={documentToDelete} />
       <AnalysisResultDialog isOpen={isDocAnalysisOpen} onOpenChange={setIsDocAnalysisOpen} analysis={docAnalysisResult} document={documentToAnalyze ?? { file_name: '', topic: 'Repositories', title: '', author: '' }} />
-      <AnalysisResultDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} document={{ file_name: repoName, topic: 'Repositories', title: repoName, author: '' }} />
+      <CodeAnalysisResultDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} repoName={repoName} />
       <AnalysisResultDialog isOpen={isVectorizationOpen} onOpenChange={setIsVectorizationOpen} analysis={vectorizationResult} document={{ file_name: repoName, topic: 'Repositories', title: 'Vectorización de ' + repoName, author: '' }} />
       <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={() => {}} document={documentToShare} />
     </div>

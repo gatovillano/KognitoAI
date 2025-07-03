@@ -61,17 +61,7 @@ export default function WorkspaceChatPage() {
 
   return (
     <div className="flex h-screen flex-col">
-      <div className="sticky top-0 z-10 bg-background p-4 border-b flex items-center justify-between">
-<div className="flex items-center">
-  <Bot className="mr-2 h-6 w-6 text-primary" />
-  <h1 className="text-xl font-bold">{workspace.name}</h1>
-</div>
-        <Button onClick={handleBackToWorkspace} variant="outline">
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Volver al Workspace
-        </Button>
-      </div>
-      <div className="flex-4 overflow-auto" style={{ height: 'calc(100vh - 60px)' }}>
+      <div className="flex-4 overflow-auto" style={{ height: '100vh' }}>
         <CommonChat threadId={chatId} />
       </div>
     </div>

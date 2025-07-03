@@ -190,41 +190,87 @@ export default function ChatLandingPage() {
     }
   };
 
+  const exampleQuestions = [
+    "¿Cuáles son los top 2025 auriculares con cancelación de ruido?",
+    "¿Cuáles son los aspectos económicos de la actual escasez mundial de huevos?",
+    "¿Cuáles son algunos ETFs con la mayor oportunidad de crecimiento?",
+    "¿Cuáles son buenos zapatos duraderos para correr largas distancias?"
+  ];
+
   return (
     <div className="flex flex-col h-full">
-        <motion.div
-          className="flex flex-col items-center justify-center flex-grow"
-          animate={{
-            justifyContent: isInputMoved ? 'flex-end' : 'center',
-            paddingBottom: isInputMoved ? '2vh' : '0',
-          }}
-          transition={{ duration: 0.5, ease: 'easeOut' }}
-        >
-        <Image src="/logo-simple.png" alt="Kognito AI Labs" width={200} height={200} className="mt-8 relative top-[-70px]" />
-        <h1 className="text-4xl font-bold -mt-16 tracking-tight flex items-center z-10">
-            👋 ¡Hola! Soy KAI
-        </h1>
-        <ChatInputBar
-          newMessage={chatInput}
-          isResponding={isResponding}
-          isRecording={isRecording}
-          isUploadingFile={isUploadingFile}
-          isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
-          isWebSearchActive={isWebSearchActive}
-          isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
-          files={[]}
-          onMessageChange={setChatInput}
-          onSendMessage={handleChatSubmit}
-          onKeyDown={handleKeyDown}
-          onToggleKnowledgeAnalysis={toggleKnowledgeAnalysis}
-          onToggleWebSearch={toggleWebSearch}
-          onToggleComprehensiveAnalysis={toggleComprehensiveAnalysis}
-          onStartRecording={startRecording}
-          onStopRecording={stopRecording}
-          onFileUpload={handleFileUpload}
-          onRemoveFile={() => {}} // Placeholder for remove file if needed
-          onPaste={() => {}} // Placeholder for paste event if needed
-        />
+      <motion.div
+        className="flex flex-col items-center justify-center flex-grow px-4"
+        animate={{
+          justifyContent: isInputMoved ? 'flex-start' : 'center',
+          paddingTop: isInputMoved ? '8vh' : '0',
+        }}
+        transition={{ duration: 0.5, ease: 'easeOut' }}
+      >
+        {/* Logo y Título */}
+        <div className="flex flex-col items-center mb-8">
+          <div className="flex items-center gap-3 mb-4">
+            <Image src="/logo-simple.png" alt="Kognito AI Labs" width={80} height={80} />
+            <h1 className="text-5xl font-bold tracking-tight">
+              Kognito
+            </h1>
+          </div>
+          <p className="text-lg text-muted-foreground">
+            ¿Qué quieres saber?
+          </p>
+        </div>
+
+        {/* Input usando ChatInputBar */}
+        <div className="w-full max-w-4xl">
+          <ChatInputBar
+            newMessage={chatInput}
+            isResponding={isResponding}
+            isRecording={isRecording}
+            isUploadingFile={isUploadingFile}
+            isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+            isWebSearchActive={isWebSearchActive}
+            isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+            files={[]}
+            onMessageChange={setChatInput}
+            onSendMessage={handleChatSubmit}
+            onKeyDown={handleKeyDown}
+            onToggleKnowledgeAnalysis={toggleKnowledgeAnalysis}
+            onToggleWebSearch={toggleWebSearch}
+            onToggleComprehensiveAnalysis={toggleComprehensiveAnalysis}
+            onStartRecording={startRecording}
+            onStopRecording={stopRecording}
+            onFileUpload={handleFileUpload}
+            onRemoveFile={() => {}}
+            onPaste={() => {}}
+          />
+        </div>
+
+        {/* Preguntas de ejemplo */}
+        {!isInputMoved && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="w-full max-w-4xl mt-8"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {exampleQuestions.map((question, index) => (
+                <motion.button
+                  key={index}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 + index * 0.1 }}
+                  onClick={() => setChatInput(question)}
+                  className="p-4 text-left rounded-2xl bg-card/50 hover:bg-card border border-border/50 hover:border-border transition-all duration-200 group"
+                >
+                  <p className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                    {question}
+                  </p>
+                </motion.button>
+              ))}
+            </div>
+          </motion.div>
+        )}
       </motion.div>
     </div>
   );

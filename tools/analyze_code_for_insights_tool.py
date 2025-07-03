@@ -65,9 +65,9 @@ class AnalyzeCodeForInsightsTool(BaseTool):
             logger.error(f"Error durante la ejecución síncrona del análisis de código: {e}", exc_info=True)
             return f"Ocurrió un error durante el análisis de código: {str(e)}"
 
-    def _format_result(self, result: dict) -> str:
+    def _format_result(self, result: CodeAnalysisResult) -> str:
         """
-        Formatea el resultado del análisis (un diccionario) en una cadena legible.
+        Formatea el resultado del análisis (un objeto CodeAnalysisResult) en una cadena legible.
         """
         def format_item_list(items, item_type="item"):
             if not items:
@@ -102,15 +102,15 @@ class AnalyzeCodeForInsightsTool(BaseTool):
             
             return "\n".join(formatted_items)
 
-        structure = format_item_list(result.get('code_structure', []), "componentes de estructura")
-        patterns = format_item_list(result.get('design_patterns', []), "patrones de diseño")
-        dependencies = format_item_list(result.get('dependencies', []), "dependencias")
-        issues = format_item_list(result.get('potential_issues', []), "problemas potenciales")
-        recommendations = format_item_list(result.get('recommendations', []), "recomendaciones")
+        structure = format_item_list(result.code_structure, "componentes de estructura")
+        patterns = format_item_list(result.design_patterns, "patrones de diseño")
+        dependencies = format_item_list(result.dependencies, "dependencias")
+        issues = format_item_list(result.potential_issues, "problemas potenciales")
+        recommendations = format_item_list(result.recommendations, "recomendaciones")
 
         formatted_result = (
             f"**Informe de Análisis de Código**\n\n"
-            f"**Resumen Ejecutivo:**\n{result.get('executive_summary', 'No se proporcionó un resumen ejecutivo.')}\n\n"
+            f"**Resumen Ejecutivo:**\n{result.executive_summary}\n\n"
             f"**Estructura del Código:**\n{structure}\n\n"
             f"**Patrones de Diseño:**\n{patterns}\n\n"
             f"**Dependencias:**\n{dependencies}\n\n"

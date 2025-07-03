@@ -144,7 +144,7 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
             if tool_instance: # Asegúrate de que la instancia se creó
                 try:
                     # Verificar si la herramienta tiene los atributos requeridos
-                    if hasattr(tool_instance, 'name') and hasattr(tool_instance, '_run') and callable(getattr(tool_instance, '_run')) or ToolClass.__name__ in ["MindmapGeneratorTool", "ImageBackgroundEraserTool"]:
+                    if hasattr(tool_instance, 'name') and ((hasattr(tool_instance, '_run') and callable(getattr(tool_instance, '_run'))) or (hasattr(tool_instance, '_arun') and callable(getattr(tool_instance, '_arun')))) or ToolClass.__name__ in ["MindmapGeneratorTool", "ImageBackgroundEraserTool"]:
                         # Verificar el esquema de argumentos para identificar problemas con 'type'
                         if hasattr(tool_instance, 'args_schema') and tool_instance.args_schema is not None:
                             try:

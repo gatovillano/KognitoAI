@@ -1,5 +1,3 @@
-// En: src/components/MarkdownRenderer.tsx
-
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
@@ -83,11 +81,14 @@ const _MarkdownRenderer = ({ content, fontSize = 'text-base' }: MarkdownRenderer
           'vim': 'vim',
           'tex': 'latex',
           'r': 'r',
-          'm': 'matlab'
+          'm': 'matlab',
+          'markup-templating': 'markup'
         };
         
-        // Aplicar mapeo si existe
-        if (languageMap[language]) {
+        // Aplicar mapeo si existe, con especial atención a markup-templating
+        if (language === 'markup-templating') {
+          language = 'markup';
+        } else if (languageMap[language]) {
           language = languageMap[language];
         }
         
@@ -96,9 +97,20 @@ const _MarkdownRenderer = ({ content, fontSize = 'text-base' }: MarkdownRenderer
         if (!prismLanguage) {
           console.warn(`Language '${language}' not found in Prism, falling back to markup.`);
           prismLanguage = Prism.languages.markup;
+          language = 'markup'; // Actualizar el lenguaje para la clase CSS
         }
-        const highlightedCode = Prism.highlight(text, prismLanguage, language);
+        // Asegurarse de que siempre se use un lenguaje válido
+        const finalLanguage = prismLanguage || Prism.languages.markup;
         
+        // Evitar cualquier error al resaltar el código
+        let highlightedCode = text;
+        try {
+          if (finalLanguage) {
+            highlightedCode = Prism.highlight(text, finalLanguage, language);
+          }
+        } catch (e) {
+          // No mostrar errores en la consola para evitar molestar al usuario
+        }
         return `<pre><code class="language-${language}">${highlightedCode}</code></pre>`;
       };
       marked.setOptions({

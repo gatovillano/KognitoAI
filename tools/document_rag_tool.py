@@ -111,6 +111,7 @@ class DocumentRAGTool(BaseTool):
             logger.error(f"❌ Error in DocumentRAGTool for user {account_id}: {e}", exc_info=True)
             return f"An error occurred while processing the document: {e}"
 
-def _run(self, **kwargs: Any) -> str:
-            logger.error("❌ Synchronous _run method of DocumentRAGTool was called! This should not happen.")
-            raise NotImplementedError("DocumentRAGTool does not support synchronous execution.")
+    def _run(self, **kwargs: Any) -> str:
+        logger.warning("⚠️ Synchronous _run method of DocumentRAGTool was called. Redirecting to asynchronous method.")
+        import asyncio
+        return asyncio.run(self._arun(**kwargs))

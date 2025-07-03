@@ -657,19 +657,30 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                     "result": chunk_result
                 })
                 
-                # Combinar categorías de todos los chunks
-                combined_categories["code_structure"].extend(chunk_result.code_structure)
-                combined_categories["design_patterns"].extend(chunk_result.design_patterns)
-                combined_categories["dependencies"].extend(chunk_result.dependencies)
-                combined_categories["potential_issues"].extend(chunk_result.potential_issues)
-                combined_categories["recommendations"].extend(chunk_result.recommendations)
+                # Manejar tanto objetos Pydantic como diccionarios
+                if hasattr(chunk_result, 'code_structure'):
+                    # Es un objeto Pydantic
+                    combined_categories["code_structure"].extend(chunk_result.code_structure)
+                    combined_categories["design_patterns"].extend(chunk_result.design_patterns)
+                    combined_categories["dependencies"].extend(chunk_result.dependencies)
+                    combined_categories["potential_issues"].extend(chunk_result.potential_issues)
+                    combined_categories["recommendations"].extend(chunk_result.recommendations)
+                elif isinstance(chunk_result, dict):
+                    # Es un diccionario
+                    combined_categories["code_structure"].extend(chunk_result.get("code_structure", []))
+                    combined_categories["design_patterns"].extend(chunk_result.get("design_patterns", []))
+                    combined_categories["dependencies"].extend(chunk_result.get("dependencies", []))
+                    combined_categories["potential_issues"].extend(chunk_result.get("potential_issues", []))
+                    combined_categories["recommendations"].extend(chunk_result.get("recommendations", []))
+                else:
+                    logger.warning(f"Resultado inesperado del análisis de chunk {i+1}: {type(chunk_result)}")
             
             # 4. Generar resumen ejecutivo consolidado
             from tools.analyze_code_for_insights_tool import AnalyzeCodeForInsightsTool
             
             # Crear un resumen de todos los chunks para el formatted_result
             combined_summary = "\n\n".join([
-                f"**Análisis Parte {res['chunk_index']}** (Archivos: {', '.join(res['files'][:3])}{'...' if len(res['files']) > 3 else ''})\n{res['result'].executive_summary}"
+                f"**Análisis Parte {res['chunk_index']}** (Archivos: {', '.join(res['files'][:3])}{'...' if len(res['files']) > 3 else ''})\n{res['result'].executive_summary if hasattr(res['result'], 'executive_summary') else res['result'].get('executive_summary', 'Sin resumen disponible')}"
                 for res in all_chunk_results
             ])
             
