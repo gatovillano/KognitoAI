@@ -61,6 +61,11 @@ class MemoryAddInput(BaseModel):
             "Si no es aplicable o no se puede inferir, déjalo como None."
         )
     )
+    # Añadimos 'workspace_id' para asociar la memoria con un workspace específico.
+    workspace_id: Optional[str] = Field(
+        None,
+        description="El identificador del workspace (UUID en formato string) para asociar la memoria con un workspace específico, si aplica."
+    )
 
 
 class MemoryAddTool(BaseTool):
@@ -81,7 +86,7 @@ class MemoryAddTool(BaseTool):
     args_schema: Type[BaseModel] = MemoryAddInput
     return_direct: bool = False
 
-    async def _arun(self, content: str, account_id: str, type: Optional[str] = "user_memory", category: Optional[str] = None, **kwargs: Any) -> str:
+    async def _arun(self, content: str, account_id: str, type: Optional[str] = "user_memory", category: Optional[str] = None, workspace_id: Optional[str] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -90,6 +95,7 @@ class MemoryAddTool(BaseTool):
             account_id: El ID universal de la cuenta del usuario.
             type: El tipo general de memoria a guardar (ej. 'user_memory').
             category: La categoría específica de la memoria (ej. 'interes').
+            workspace_id: El ID del workspace para asociar la memoria (opcional).
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
@@ -100,40 +106,30 @@ class MemoryAddTool(BaseTool):
             return "No se puede guardar contenido vacío en la memoria."
 
         log_content = content[:100] + '...' if len(content) > 100 else content
-        logger.info(f"Ejecutando MemoryAddTool para la cuenta '{account_id}' (Tipo: {type}, Categoría: {category}): '{log_content}'")
+        logger.info(f"Ejecutando MemoryAddTool para la cuenta '{account_id}' (Tipo: {type}, Categoría: {category}, Workspace: {workspace_id}): '{log_content}'")
 
         try:
-            # Prepara los metadatos, incluyendo la categoría si está presente
-            metadata = {"category": category} if category else {}
             # Asegura que el tipo sea 'user_memory' si no se especifica explícitamente
             final_type = type if type else "user_memory"
 
-            # Asumiendo que add_memory_to_vector_db puede manejar metadatos
-            # from core.memory_manager import add_memory_to_vector_db
-            # from utils.proactive_knowledge_linker import proactive_knowledge_linker_trigger
-            
-            # NOTA: Necesitarías importar add_memory_to_vector_db y proactive_knowledge_linker_trigger
-            # para que este código funcione en tu entorno.
-            # Aquí solo estoy mostrando la lógica.
-            
-            # Simulación de la llamada a add_memory_to_vector_db
-            print(f"DEBUG: Llamando add_memory_to_vector_db con account_id={account_id}, content='{content}', type='{final_type}', metadata={metadata}")
-            # await add_memory_to_vector_db(
-            #     account_id=account_id,
-            #     content=content,
-            #     type=final_type,
-            #     metadata=metadata # Pasamos los metadatos aquí
-            # )
+            # Añade la memoria a la base de datos vectorial
+            await add_memory_to_vector_db(
+                account_id=account_id,
+                content=content,
+                type=final_type,
+                workspace_id=workspace_id,
+                topic=category if category else "general"
+            )
             logger.info(f"Memoria añadida exitosamente para la cuenta '{account_id}'.")
 
             new_entry = {
                 'account_id': account_id,
                 'content': content,
                 'type': final_type,
-                'category': category # También pasamos la categoría al linker si es necesario
+                'category': category if category else "general"
             }
-            # asyncio.create_task(proactive_knowledge_linker_trigger(new_entry))
-            print(f"DEBUG: Disparando proactive_knowledge_linker_trigger con {new_entry}")
+            # Disparar el enlace proactivo de conocimiento en segundo plano
+            asyncio.create_task(proactive_knowledge_linker_trigger(new_entry))
             
             return "La información ha sido añadida a tu memoria a largo plazo."
         except Exception as e:

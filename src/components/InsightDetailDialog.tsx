@@ -12,6 +12,7 @@ interface Insight {
   created_at: string;
   related_items: any[];
   action_suggestion?: string;
+  synthetic_name?: string; // Asegúrate de que coincida con la interfaz en page.tsx
 }
 
 export function InsightDetailDialog({ insight, isOpen, onOpenChange }: { insight: Insight | null; isOpen: boolean; onOpenChange: (open: boolean) => void }) {

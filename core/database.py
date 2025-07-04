@@ -52,8 +52,11 @@ from utils.db_session import DBSession
 logger = logging.getLogger(__name__)
 
 # Motor de base de datos asíncrono
+database_url = settings.database_url
+if database_url is None:
+    raise ValueError("DATABASE_URL no está configurado en las settings.")
 engine = create_async_engine(
-    settings.database_url,
+    database_url,
     echo=False,  # Poner en True para depurar las queries SQL
     pool_pre_ping=True
 )
@@ -62,7 +65,7 @@ engine = create_async_engine(
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
-    bind=engine,
+    bind=engine,  # type: ignore
     class_=AsyncSession,
     expire_on_commit=False
 )
@@ -373,7 +376,7 @@ class AgendaEvent(Base):
         return {
             "id": self.id,
             "account_id": str(self.account_id),
-            "team_id": str(self.team_id) if self.team_id else None,
+            "team_id": str(self.team_id) if self.team_id else None, # type: ignore
             "description": self.description,
             "event_datetime_utc": self.event_datetime_utc.isoformat(),
             "event_datetime_local": local_datetime.isoformat(),
@@ -550,13 +553,8 @@ async def get_or_create_account_from_platform_id(
     last_name: str | None = None,
     username: str | None = None
 ) -> Tuple[Account, bool] | None:
-    """
-    Obtiene una cuenta basada en un ID de plataforma, o la crea si no existe,
-    poblando los datos del perfil si se proporcionan.
-    """
     async with DBSession(SessionLocal) as db:
         try:
-            # Primero, buscar si la identidad de la plataforma ya existe.
             stmt = select(PlatformIdentity).where(
                 PlatformIdentity.platform == platform,
                 PlatformIdentity.platform_user_id == platform_user_id
@@ -565,18 +563,18 @@ async def get_or_create_account_from_platform_id(
             result = await db.execute(stmt)
             identity = result.scalars().first()
             
-            if identity:
+            if identity is not None and identity.account is not None:
                 # Si la cuenta existe pero no tiene nombre, la actualizamos.
-                if identity.account and not identity.account.name and first_name:
+                if identity.account.name is None and first_name:  # type: ignore
                     identity.account.name = first_name
+                if identity.account.username is None and username:  # type: ignore
                     identity.account.username = username
+                if first_name or username:
                     await db.commit()
                 return (identity.account, False)
 
             # Si no existe, crear todo desde cero.
             logger.info(f"Creando nueva cuenta para {platform}:{platform_user_id}...")
-            
-            # ¡CORREGIDO! Creamos la cuenta con los datos proporcionados.
             new_account = Account(
                 name=first_name,
                 username=username
@@ -591,7 +589,6 @@ async def get_or_create_account_from_platform_id(
             )
             db.add(new_identity)
             
-            # Crear también un perfil vacío.
             new_profile = Perfil(account_id=new_account.id)
             db.add(new_profile)
             
@@ -604,7 +601,6 @@ async def get_or_create_account_from_platform_id(
             logger.error(f"Error en get_or_create_account_from_platform_id para {platform}:{platform_user_id}: {e}", exc_info=True)
             await db.rollback()
             return None
-
         
 # En core/database.py, al final del archivo
 

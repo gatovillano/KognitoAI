@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+import re
 from typing import Optional
 from io import BytesIO
 import httpx
@@ -12,6 +13,8 @@ from pydantic import BaseModel
 
 # Usamos el nombre del servicio Docker y el puerto interno correcto.
 TTS_SERVICE_URL = "http://openai-edge-tts:5050/v1/audio/speech"
+
+from sqlalchemy import update
 
 from core.agent import create_and_run_agent
 from utils.audio_transcriber import transcribe_audio_file
@@ -55,6 +58,10 @@ class TextToSpeechRequest(BaseModel):
     text: str
     voice: Optional[str] = None  # Voz opcional para la conversión
 
+class PinThreadRequest(BaseModel):
+    """Define la estructura de datos para una solicitud de fijar/desfijar un hilo de chat."""
+    isPinned: bool
+
 @router.post("/text-to-speech", summary="Generar audio desde texto")
 async def text_to_speech(request: TextToSpeechRequest):
     """
@@ -63,12 +70,26 @@ async def text_to_speech(request: TextToSpeechRequest):
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="El texto no puede estar vacío.")
 
-    # Parámetros para open-edgetts. Ajusta la voz, etc., según necesites.
+    # Pre-procesar el texto para eliminar elementos no deseados
+    text_to_speak = request.text
+    # 1. Eliminar bloques de código cercados (```...```)
+    text_to_speak = re.sub(r'```.*?```', '', text_to_speak, flags=re.DOTALL)
+    # 2. Eliminar código en línea (`...`)
+    text_to_speak = re.sub(r'`[^`]*`', '', text_to_speak)
+    # 3. Eliminar caracteres de puntuación que no se quieren leer
+    text_to_speak = re.sub(r'[\[\]{}()#*_]', '', text_to_speak)
+    # 4. Limpiar espacios en blanco múltiples
+    text_to_speak = re.sub(r'\s+', ' ', text_to_speak).strip()
+
+    if not text_to_speak:
+        return StreamingResponse(BytesIO(), media_type="audio/wav")
+
+    # Parámetros para open-edgetts.
     tts_payload = {
-        'input': request.text,
+        'input': text_to_speak,
         'voice': request.voice if request.voice else 'es-MX-DaliaNeural',
-        'model': 'edge-tts',  # O el modelo que use tu wrapper
-        'speed': 1.0,  # El wrapper parece esperar un número, no "+10%"
+        'model': 'edge-tts',
+        'speed': 1.0,
     }
 
     try:
@@ -151,3 +172,120 @@ async def handle_chat(request: ChatRequest, background_tasks: BackgroundTasks, c
     except Exception as e:
         logger.error(f"Error al procesar petición de la cuenta {request.account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Ocurrió un error interno al procesar tu solicitud.")
+
+@router.get("/threads", summary="Obtener lista de hilos de chat")
+async def get_threads(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Endpoint para obtener la lista de todos los hilos de chat del usuario autenticado.
+    """
+    try:
+        threads = await db.execute(select(ChatThread).where(ChatThread.account_id == uuid.UUID(current_account_id)))
+        thread_list = threads.scalars().all()
+        return [{"id": str(thread.id), "title": thread.title, "isPinned": thread.is_pinned, "workspace_id": str(thread.workspace_id) if thread.workspace_id else None} for thread in thread_list]
+    except Exception as e:
+        logger.error(f"Error al obtener la lista de hilos para la cuenta {current_account_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ocurrió un error al obtener la lista de hilos de chat.")
+
+@router.get("/threads/{thread_id}", summary="Obtener detalles de un hilo de chat")
+async def get_thread(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Endpoint para obtener los detalles de un hilo de chat específico.
+    """
+    try:
+        thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
+        if not thread:
+            raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
+        return {"id": str(thread.id), "title": thread.title, "isPinned": thread.is_pinned, "workspace_id": str(thread.workspace_id) if thread.workspace_id else None}
+    except ValueError:
+        logger.error(f"El thread_id proporcionado no es un UUID válido: {thread_id}")
+        raise HTTPException(status_code=400, detail="El thread_id proporcionado no tiene un formato válido.")
+    except HTTPException:
+        # Re-raise HTTPExceptions (like 404) without modification
+        raise
+    except Exception as e:
+        logger.error(f"Error al obtener detalles del hilo {thread_id} para la cuenta {current_account_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ocurrió un error al obtener los detalles del hilo de chat.")
+
+@router.post("/threads", summary="Crear un nuevo hilo de chat")
+async def create_thread(request: dict = {}, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Endpoint para crear un nuevo hilo de chat para el usuario autenticado.
+    """
+    try:
+        workspace_id = request.get('workspace_id')
+        new_thread = ChatThread(
+            account_id=uuid.UUID(current_account_id),
+            title="Nuevo Chat",
+            workspace_id=uuid.UUID(workspace_id) if workspace_id else None
+        )
+        db.add(new_thread)
+        await db.commit()
+        await db.refresh(new_thread)
+        return {"id": str(new_thread.id), "title": new_thread.title, "isPinned": new_thread.is_pinned, "workspace_id": str(new_thread.workspace_id) if new_thread.workspace_id else None}
+    except ValueError:
+        logger.error(f"El workspace_id proporcionado no es un UUID válido: {workspace_id}")
+        raise HTTPException(status_code=400, detail="El workspace_id proporcionado no tiene un formato válido.")
+    except Exception as e:
+        logger.error(f"Error al crear un nuevo hilo para la cuenta {current_account_id}: {e}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Ocurrió un error al crear un nuevo hilo de chat.")
+
+@router.put("/threads/{thread_id}/pin", summary="Fijar o desfijar un hilo de chat")
+async def pin_thread(thread_id: str, request: PinThreadRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Endpoint para fijar o desfijar un hilo de chat específico.
+    """
+    try:
+        thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
+        if not thread:
+            raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
+        await db.execute(update(ChatThread).where(ChatThread.id == uuid.UUID(thread_id)).values(is_pinned=request.isPinned))
+        await db.commit()
+        return {"id": str(thread.id), "isPinned": request.isPinned}
+    except ValueError:
+        logger.error(f"El thread_id proporcionado no es un UUID válido: {thread_id}")
+        raise HTTPException(status_code=400, detail="El thread_id proporcionado no tiene un formato válido.")
+    except Exception as e:
+        logger.error(f"Error al actualizar el estado de fijado del hilo {thread_id} para la cuenta {current_account_id}: {e}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Ocurrió un error al actualizar el estado de fijado del hilo de chat.")
+
+@router.delete("/threads/{thread_id}", summary="Eliminar un hilo de chat")
+async def delete_thread(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Endpoint para eliminar un hilo de chat específico.
+    """
+    try:
+        thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
+        if not thread:
+            raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
+        await db.delete(thread)
+        await db.commit()
+        return {"id": thread_id, "deleted": True}
+    except ValueError:
+        logger.error(f"El thread_id proporcionado no es un UUID válido: {thread_id}")
+        raise HTTPException(status_code=400, detail="El thread_id proporcionado no tiene un formato válido.")
+    except Exception as e:
+        logger.error(f"Error al eliminar el hilo {thread_id} para la cuenta {current_account_id}: {e}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Ocurrió un error al eliminar el hilo de chat.")
+
+@router.post("/threads/{thread_id}/generate-title", summary="Generar un título para un hilo de chat")
+async def generate_thread_title(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Endpoint para generar un título para un hilo de chat específico basado en su contenido.
+    """
+    try:
+        thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
+        if not thread:
+            raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
+        from core.agent import force_update_thread_title
+        await force_update_thread_title(thread_id)
+        updated_thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id)))
+        return {"id": thread_id, "title": updated_thread.title}
+    except ValueError:
+        logger.error(f"El thread_id proporcionado no es un UUID válido: {thread_id}")
+        raise HTTPException(status_code=400, detail="El thread_id proporcionado no tiene un formato válido.")
+    except Exception as e:
+        logger.error(f"Error al generar título para el hilo {thread_id} para la cuenta {current_account_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ocurrió un error al generar el título del hilo de chat.")

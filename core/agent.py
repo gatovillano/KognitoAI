@@ -428,6 +428,11 @@ async def create_and_run_agent(
     # Modificación: Pasar workspace_id a load_agent_tools si está disponible
     if hasattr(get_all_langchain_tools, 'load_agent_tools'):
         tools = await get_all_langchain_tools.load_agent_tools(account_id, telegram_id, workspace_id)
+    else:
+        # Asegurarse de que las herramientas individuales reciban el workspace_id si está disponible
+        for tool in tools:
+            if hasattr(tool, 'args_schema') and tool.args_schema is not None and 'workspace_id' in tool.args_schema.__fields__:
+                tool.args_schema.workspace_id = workspace_id
     
     if mode == 'knowledgeAnalysis':
         logger.info("Modo de agente: Forzando 'knowledge_base_analyzer'")
@@ -517,16 +522,6 @@ async def create_and_run_agent(
         handle_parsing_errors=True
     )
 
-    # --- Log del prompt completo ---
-    log_prompt_parts = [
-        "--- PROMPT FINAL CRUDO ---",
-        f"System: {system_prompt_content}",
-        f"History: {full_history_for_llm_prompt}",
-        f"Input: {user_message}",
-        "--- FIN PROMPT ---"
-    ]
-    logger.info("\n".join(log_prompt_parts))
-    # --- Fin log ---
 
     final_output = ""
     try:

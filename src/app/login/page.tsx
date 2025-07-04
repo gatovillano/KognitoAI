@@ -83,7 +83,7 @@ const TelegramCodeForm = ({ setView }: { setView: (view: { type: string; identif
 };
 
 // --- Sub-componente para el formulario de Verificación de Código ---
-const VerifyCodeForm = ({ identifier, onVerify, setView }: { identifier: string; onVerify: (token: string) => void; setView: (view: { type: string; identifier?: string }) => void }) => {
+const VerifyCodeForm = ({ identifier, onVerify, setView, isProcessing }: { identifier: string; onVerify: (token: string) => void; setView: (view: { type: string; identifier?: string }) => void; isProcessing: boolean }) => {
     const [code, setCode] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState('');
@@ -116,8 +116,8 @@ const VerifyCodeForm = ({ identifier, onVerify, setView }: { identifier: string;
             <Input id="code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" maxLength={6} autoFocus className="bg-muted/30 border-0 rounded-2xl h-12 focus:ring-2 focus:ring-primary/20 focus:bg-muted/50 transition-all placeholder:text-muted-foreground/50 text-center text-lg tracking-widest" autoComplete="off" />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
-          <Button type="submit" className="w-full h-12 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-medium shadow-lg hover:shadow-xl transition-all duration-200" disabled={isSubmitting}>
-            {isSubmitting ? 'Verificando...' : 'Verificar e Ingresar'}
+          <Button type="submit" className="w-full h-12 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-medium shadow-lg hover:shadow-xl transition-all duration-200" disabled={isSubmitting || isProcessing}>
+            {isSubmitting ? 'Verificando...' : isProcessing ? 'Ingresando...' : 'Verificar e Ingresar'}
           </Button>
           <Button variant="ghost" onClick={() => setView({ type: 'login' })} className="w-full h-12 rounded-2xl hover:bg-muted/50 transition-all duration-200">
             Volver
@@ -184,6 +184,7 @@ export default function LoginPage() {
               identifier={view.identifier}
               onVerify={handleSuccessfulLogin}
               setView={setView}
+              isProcessing={isProcessing}
             />
           )}
         </CardContent>

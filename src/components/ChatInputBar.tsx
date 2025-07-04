@@ -6,6 +6,14 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { Send, ArrowUp, Search, BookMarked, BrainCircuit, Upload, Mic, X, Paperclip } from 'lucide-react';
 
+interface ChatMessage {
+  text: string;
+  sender: 'user' | 'ai';
+  created_at: string;
+  image_base64?: string;
+  document_url?: string;
+}
+
 interface ChatInputBarProps {
   newMessage: string;
   isResponding: boolean;
@@ -15,6 +23,7 @@ interface ChatInputBarProps {
   isWebSearchActive: boolean;
   isComprehensiveAnalysisActive: boolean;
   files: File[];
+  messages?: ChatMessage[];
   onMessageChange: (value: string) => void;
   onSendMessage: (e?: React.FormEvent) => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -26,7 +35,8 @@ interface ChatInputBarProps {
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRemoveFile: (index: number) => void;
   onPaste: (e: ClipboardEvent) => void;
-  isFixedPosition?: boolean; // Nueva prop para controlar si está fijo o no
+  isFixedPosition?: boolean;
+  onOpenSearch?: () => void;
 }
 
 export function ChatInputBar({
@@ -49,7 +59,8 @@ export function ChatInputBar({
   onFileUpload,
   onRemoveFile,
   onPaste,
-  isFixedPosition = true
+  isFixedPosition = true,
+  onOpenSearch
 }: ChatInputBarProps) {
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -90,7 +101,7 @@ export function ChatInputBar({
     <div className={isFixedPosition ? "fixed bottom-0 right-0 p-6 bg-background z-30" : "relative w-full"} style={isFixedPosition ? { left: '320px' } : {}}>
       <div className="flex justify-center w-full">
       <form onSubmit={onSendMessage} className="relative w-full max-w-4xl">
-        <div className="rounded-3xl bg-card border border-border p-6 shadow-sm">
+        <div className="rounded-3xl bg-card border border-border p-6 shadow-medium hover:shadow-strong transition-shadow duration-300">
           {/* Archivos adjuntos */}
           {files.length > 0 && (
             <div className="mb-4 flex flex-wrap gap-2">
@@ -129,33 +140,39 @@ export function ChatInputBar({
             <div className="flex items-center gap-2">
               <Button
                 type="button"
-                variant={isKnowledgeAnalysisActive ? "default" : "outline"}
+                variant="ghost"
                 size="sm"
                 onClick={onToggleKnowledgeAnalysis}
-                className="rounded-full"
+                className={`rounded-full overflow-hidden transition-all duration-300 ease-in-out hover:w-auto w-8 h-8 p-0 hover:px-3 group flex items-center justify-center ${isKnowledgeAnalysisActive ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}
               >
-                <BookMarked className="h-3 w-3 mr-2" />
-                Analisis de Conocimientos
+                <BookMarked className="h-4 w-4 flex-shrink-0" />
+                <span className="ml-2 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 max-w-0 group-hover:max-w-xs overflow-hidden">
+                  Análisis de Conocimientos
+                </span>
               </Button>
               <Button
                 type="button"
-                variant={isWebSearchActive ? "default" : "outline"}
+                variant="ghost"
                 size="sm"
                 onClick={onToggleWebSearch}
-                className="rounded-full"
+                className={`rounded-full overflow-hidden transition-all duration-300 ease-in-out hover:w-auto w-8 h-8 p-0 hover:px-3 group flex items-center justify-center ${isWebSearchActive ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}
               >
-                <Search className="h-4 w-4 mr-2" />
-                Busqueda Web
+                <Search className="h-4 w-4 flex-shrink-0" />
+                <span className="ml-2 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 max-w-0 group-hover:max-w-xs overflow-hidden">
+                  Búsqueda Web
+                </span>
               </Button>
               <Button
                 type="button"
-                variant={isComprehensiveAnalysisActive ? "default" : "outline"}
+                variant="ghost"
                 size="sm"
                 onClick={onToggleComprehensiveAnalysis}
-                className="rounded-full"
+                className={`rounded-full overflow-hidden transition-all duration-300 ease-in-out hover:w-auto w-8 h-8 p-0 hover:px-3 group flex items-center justify-center ${isComprehensiveAnalysisActive ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}
               >
-                <BrainCircuit className="h-2 w-2 mr-2" />
-                Busqueda Analítica
+                <BrainCircuit className="h-4 w-4 flex-shrink-0" />
+                <span className="ml-2 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 max-w-0 group-hover:max-w-xs overflow-hidden">
+                  Búsqueda Analítica
+                </span>
               </Button>
             </div>
 
@@ -175,17 +192,17 @@ export function ChatInputBar({
               />
               <label
                 htmlFor="file-upload"
-                className={`cursor-pointer p-2 rounded-full hover:bg-muted transition-colors ${isUploadingFile ? 'opacity-50' : ''}`}
+                className={`cursor-pointer p-2 rounded-full hover:bg-muted transition-colors flex items-center justify-center ${isUploadingFile ? 'opacity-50' : ''}`}
               >
                 <Upload className="h-5 w-5 text-muted-foreground" />
               </label>
-              
+
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
                 onClick={isRecording ? onStopRecording : onStartRecording}
-                className={`rounded-full ${isRecording ? 'text-red-500 bg-red-50 dark:bg-red-950' : ''}`}
+                className={`rounded-full flex items-center justify-center ${isRecording ? 'text-red-500 bg-red-50 dark:bg-red-950' : ''}`}
               >
                 <Mic className="h-5 w-5" />
               </Button>
@@ -193,14 +210,18 @@ export function ChatInputBar({
               <Button
                 type="submit"
                 disabled={isResponding || (!newMessage.trim() && files.length === 0)}
-                className="rounded-full px-6"
+                className="rounded-full overflow-hidden transition-all duration-300 ease-in-out hover:w-auto w-10 h-10 p-0 hover:px-4 group flex items-center justify-start hover:justify-start"
               >
-                {isResponding ? (
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-background border-t-transparent" />
-                ) : (
-                  <Send className="h-4 w-4 mr-2" />
-                )}
-                {isResponding ? 'Enviando...' : 'Enviar'}
+                <div className="flex items-center justify-center w-10 h-10 flex-shrink-0">
+                  {isResponding ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-background border-t-transparent" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                </div>
+                <span className="ml-2 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 max-w-0 group-hover:max-w-xs overflow-hidden">
+                  {isResponding ? 'Enviando...' : 'Enviar'}
+                </span>
               </Button>
             </div>
           </div>

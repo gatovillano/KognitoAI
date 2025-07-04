@@ -53,7 +53,7 @@ GLOBAL_COLLECTION_NAME = "global_knowledge_base"
 USER_MEMORIES_PREFIX = "user_memories_"
 USER_DOCUMENTS_PREFIX = "user_documents_"
 
-PGVECTOR_SYNC_ENGINE = create_engine(settings.database_url)
+PGVECTOR_SYNC_ENGINE = create_engine(settings.database_url or "postgresql://postgres:postgres@localhost:5432/postgres")
 
 metadata = MetaData()
 langchain_pg_collection = Table('langchain_pg_collection', metadata, autoload_with=PGVECTOR_SYNC_ENGINE)
@@ -122,17 +122,19 @@ async def update_user_profile(
                 )
                 return
 
-            db.add(perfil)
+            updates = {}
             if nombre is not None:
-                perfil.nombre = nombre
+                updates['nombre'] = nombre
             if gustos is not None:
-                perfil.gustos = gustos
+                updates['gustos'] = gustos
             if intereses is not None:
-                perfil.intereses = intereses
+                updates['intereses'] = intereses
             if otros_datos is not None:
-                perfil.otros_datos = otros_datos
+                updates['otros_datos'] = otros_datos
 
-            await db.commit()
+            if updates:
+                await db.execute(update(Perfil).where(Perfil.account_id == account_id).values(**updates))
+                await db.commit()
             logger.info(
                 f"✅ Perfil de la cuenta ID {account_id} actualizado exitosamente."
             )
@@ -145,10 +147,14 @@ async def update_user_profile(
 
 
 async def add_memory_to_vector_db(
-    account_id: str, content: str, type: str = "general_memory", team_id: Optional[str] = None, workspace_id: Optional[str] = None
+    account_id: str, content: str, type: str = "general_memory", team_id: Optional[str] = None, workspace_id: Optional[str] = None, topic: Optional[str] = None
 ) -> None:
+
+
+
+
     """
-    Genera embeddings para el contenido y lo guarda en la DB vectorial del usuario o equipo.
+    Genera embeddings para el contenido y lo guarda en la DB vectorial del usuario o equipo usando langchain_pg_embedding.
     """
     logger.info(
         f"Añadiendo memoria a la DB vectorial para la cuenta {account_id}: '{content[:50]}...'"
@@ -163,18 +169,26 @@ async def add_memory_to_vector_db(
 
         collection_name = f"user_memories_{account_id}" if not team_id else f"team_memories_{team_id}"
 
-        vectorstore = await asyncio.to_thread(
-            PGVector.from_existing_index,
-            embedding=embeddings,
+        # Usar el motor asíncrono preconfigurado desde core/database.py
+        from core.database import engine
+        vectorstore = PGVector(
+            embeddings=embeddings,
             collection_name=collection_name,
-            connection=PGVECTOR_SYNC_ENGINE,
+            connection=engine,
+            use_jsonb=True
         )
 
-        metadata = {"account_id": str(account_id), "type": type}
+        metadata = {
+            "account_id": str(account_id),
+            "type": type,
+            "scope": "personal" if not team_id else "team",
+            "topic": topic if topic else "general"
+        }
         if team_id:
             metadata["team_id"] = str(team_id)
         if workspace_id:
             metadata["workspace_id"] = str(workspace_id)
+            metadata["scope"] = "workspace"
         await vectorstore.aadd_documents(
             documents=[Document(page_content=content, metadata=metadata)]
         )
@@ -194,10 +208,11 @@ async def get_relevant_memories(
     k: int = 10,
     metadata_filters: Optional[Dict[str, Any]] = None,
     team_id: Optional[str] = None,
-    workspace_id: Optional[str] = None
+    workspace_id: Optional[str] = None,
+    topic: Optional[str] = None
 ) -> str:
     """
-    Recupera memorias relevantes.
+    Recupera memorias relevantes de la base de datos vectorial usando langchain_pg_embedding.
     """
     logger.info(
         f"Buscando memorias relevantes para la cuenta {account_id} con la consulta: '{query[:50]}...'"
@@ -244,6 +259,8 @@ async def get_relevant_memories(
         final_filters = metadata_filters if metadata_filters else {}
         if workspace_id:
             final_filters["workspace_id"] = str(workspace_id)
+        if topic:
+            final_filters["topic"] = topic
 
         search_tasks = []
         for col_uuid_str in relevant_collection_uuids:
@@ -257,11 +274,13 @@ async def get_relevant_memories(
                     continue
                 collection_name_for_vectorstore = col_name_obj
 
-            vectorstore = await asyncio.to_thread(
-                PGVector.from_existing_index,
-                embedding=embeddings,
+            # Usar el motor asíncrono preconfigurado desde core/database.py
+            from core.database import engine
+            vectorstore = PGVector(
+                embeddings=embeddings,
                 collection_name=collection_name_for_vectorstore,
-                connection=PGVECTOR_SYNC_ENGINE,
+                connection=engine,
+                use_jsonb=True
             )
             search_tasks.append(vectorstore.asimilarity_search_by_vector(query_embedding, k=k, filter=final_filters))
 
@@ -313,6 +332,12 @@ async def process_document_for_rag(
     """
     if not extracted_text:
         return 0
+        
+    # Limpiar el texto de caracteres no válidos como NUL bytes
+    cleaned_text = extracted_text.replace('\x00', '')
+    if len(cleaned_text) != len(extracted_text):
+        logger.info(f"Se eliminaron caracteres no válidos del documento '{file_name}'.")
+    extracted_text = cleaned_text
 
     try:
         embeddings = await initialize_embeddings()
@@ -383,13 +408,15 @@ async def process_document_for_rag(
             ids.append(str(uuid.uuid4()))
         
         # Crear/obtener vectorstore y agregar documentos
-        vectorstore = await asyncio.to_thread(
-            PGVector.from_documents,
-            documents=lc_documents, 
-            embedding=embeddings,
-            collection_name=langchain_collection_name, # Usar el nombre de colección determinado
-            connection=PGVECTOR_SYNC_ENGINE,
+        # Usar el motor asíncrono preconfigurado desde core/database.py
+        from core.database import engine
+        vectorstore = PGVector(
+            embeddings=embeddings,
+            collection_name=langchain_collection_name,
+            connection=engine,
+            use_jsonb=True
         )
+        await vectorstore.aadd_documents(lc_documents)
         
         # Obtener el UUID de la colección de LangChain recién creada/existente
         async with DBSession(SessionLocal) as db:
@@ -582,11 +609,13 @@ async def get_full_document_content(
                     continue
                 collection_name_for_vectorstore = col_name_obj
 
-            vectorstore = await asyncio.to_thread(
-                PGVector.from_existing_index,
-                embedding=embeddings,
+            # Usar el motor asíncrono preconfigurado desde core/database.py
+            from core.database import engine
+            vectorstore = PGVector(
+                embeddings=embeddings,
                 collection_name=collection_name_for_vectorstore,
-                connection=PGVECTOR_SYNC_ENGINE,
+                connection=engine,
+                use_jsonb=True
             )
             
             # Filtrar por file_name y tipo de chunk
@@ -650,6 +679,12 @@ async def list_user_documents(
 
             collection_names = [user_memories_name, user_documents_name, global_collection_name, team_memories_name, team_documents_name]
             
+            # Si se busca dentro de un workspace y una colección específica (topic),
+            # el nombre de la colección en PGVector es el propio 'topic'.
+            # Lo añadimos a la lista de colecciones a buscar.
+            if workspace_id and topic:
+                collection_names.append(topic)
+
             # Debug: Ver en qué colecciones estamos buscando
             logger.info(f"🔍 DEBUG: Buscando en colecciones: {[c for c in collection_names if c]}")
             
@@ -1007,6 +1042,86 @@ async def create_empty_collection(
             
         except Exception as e:
             logger.error(f"❌ Error creando colección '{topic_name}' para cuenta {account_id}: {e}", exc_info=True)
+            await db.rollback()
+            return False
+
+async def update_collection_workspace(
+    account_id: str, 
+    topic_name: str, 
+    workspace_id: str
+) -> bool:
+    """
+    Actualiza el workspace_id en los metadatos de todos los documentos de una colección.
+    
+    Args:
+        account_id: ID de la cuenta del usuario.
+        topic_name: Nombre de la colección a actualizar.
+        workspace_id: ID del workspace al que se asociará la colección.
+        
+    Returns:
+        True si la colección fue actualizada exitosamente, False si hay error.
+    """
+    logger.info(f"Asociando colección '{topic_name}' al workspace {workspace_id} para cuenta {account_id}")
+    
+    async with DBSession(SessionLocal) as db:
+        try:
+            # Obtener los UUIDs de las colecciones relevantes
+            relevant_collection_uuids = []
+            
+            user_documents_name = f"user_documents_{account_id}"
+            stmt = select(LangchainPgCollection.uuid).where(LangchainPgCollection.name == user_documents_name)
+            result = await db.execute(stmt)
+            c_uuid = result.scalar_one_or_none()
+            if c_uuid:
+                relevant_collection_uuids.append(str(c_uuid))
+            
+            if not relevant_collection_uuids:
+                logger.warning(f"No se encontraron colecciones relevantes para actualizar la colección '{topic_name}'.")
+                return False
+            
+            # Actualizar el workspace_id en los metadatos de los documentos de la colección
+            select_stmt = select(langchain_pg_embedding.c.cmetadata).where(
+                and_(
+                    langchain_pg_embedding.c.collection_id.in_([uuid.UUID(u) for u in relevant_collection_uuids]),
+                    langchain_pg_embedding.c.cmetadata['topic'].astext == topic_name,
+                    langchain_pg_embedding.c.cmetadata['type'].astext == 'document_chunk'
+                )
+            ).limit(1)
+            
+            cmetadata_result = await db.execute(select_stmt)
+            current_cmetadata = cmetadata_result.scalar_one_or_none()
+            
+            if not current_cmetadata:
+                logger.warning(f"No se encontraron documentos para la colección '{topic_name}' en las colecciones relevantes.")
+                return False
+            
+            values_to_update = current_cmetadata.copy()
+            values_to_update['workspace_id'] = workspace_id
+            
+            update_stmt = (
+                update(langchain_pg_embedding)
+                .where(
+                    and_(
+                        langchain_pg_embedding.c.collection_id.in_([uuid.UUID(u) for u in relevant_collection_uuids]),
+                        langchain_pg_embedding.c.cmetadata['topic'].astext == topic_name,
+                        langchain_pg_embedding.c.cmetadata['type'].astext == 'document_chunk'
+                    )
+                )
+                .values(cmetadata=values_to_update)
+            )
+            
+            result = await db.execute(update_stmt)
+            await db.commit()
+            
+            if result.rowcount > 0:
+                logger.info(f"✅ Se actualizaron {result.rowcount} documentos para la colección '{topic_name}' con workspace_id {workspace_id}.")
+                return True
+            else:
+                logger.warning(f"No se encontraron documentos para actualizar en la colección '{topic_name}'.")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error asociando colección '{topic_name}' al workspace {workspace_id}: {e}", exc_info=True)
             await db.rollback()
             return False
 

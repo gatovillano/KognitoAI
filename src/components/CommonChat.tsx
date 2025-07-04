@@ -92,6 +92,7 @@ export function CommonChat({ threadId }: CommonChatProps) {
   const [backgroundTasks, setBackgroundTasks] = useState<{ taskId: string; type: string }[]>([]);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
   const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
+  const [isAudioPaused, setIsAudioPaused] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const { isVisible: isArtifactPanelVisible, toggleVisibility } = useArtifactPanel();
@@ -194,6 +195,11 @@ export function CommonChat({ threadId }: CommonChatProps) {
         document_url: ''
       };
       setMessages((prev) => [...prev, userMessage]);
+
+      // Mantener scroll al final inmediatamente después de agregar el mensaje del usuario
+      requestAnimationFrame(() => {
+        scrollToBottom(true);
+      });
 
       const messageToSend = messageText;
       const filesToSend = [...files];
@@ -299,16 +305,23 @@ export function CommonChat({ threadId }: CommonChatProps) {
 
   const handlePlayAudio = useCallback(
     async (text: string, index: number) => {
+      if (playingMessageIndex === index && audioRef.current) {
+        if (isAudioPaused) {
+          audioRef.current.play();
+          setIsAudioPaused(false);
+        } else {
+          audioRef.current.pause();
+          setIsAudioPaused(true);
+        }
+        return;
+      }
+
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current = null;
       }
 
-      if (playingMessageIndex === index) {
-        setPlayingMessageIndex(null);
-        return;
-      }
-
+      setIsAudioPaused(false);
       setIsAudioLoading(true);
       setPlayingMessageIndex(index);
 
@@ -324,6 +337,7 @@ export function CommonChat({ threadId }: CommonChatProps) {
 
         audioRef.current.onended = () => {
           setPlayingMessageIndex(null);
+          setIsAudioPaused(false);
           URL.revokeObjectURL(audioUrl);
         };
       } catch (error) {
@@ -331,9 +345,10 @@ export function CommonChat({ threadId }: CommonChatProps) {
         console.error('Error en TTS:', error);
         setIsAudioLoading(false);
         setPlayingMessageIndex(null);
+        setIsAudioPaused(false);
       }
     },
-    [playingMessageIndex]
+    [playingMessageIndex, isAudioPaused]
   );
 
   const handlePaste = useCallback((e: ClipboardEvent) => {
@@ -463,19 +478,50 @@ export function CommonChat({ threadId }: CommonChatProps) {
     ? messages.filter(msg => msg.text.toLowerCase().includes(searchTerm.toLowerCase()))
     : messages;
 
-  useEffect(() => {
+  // Función para mantener el scroll al final
+  const scrollToBottom = useCallback((immediate = false) => {
     if (scrollAreaRef.current) {
       const scrollElement = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
       if (scrollElement) {
-        setTimeout(() => {
+        if (immediate) {
+          // Scroll inmediato sin animación
+          scrollElement.scrollTop = scrollElement.scrollHeight;
+        } else {
+          // Scroll suave
           scrollElement.scrollTo({
             top: scrollElement.scrollHeight,
             behavior: 'smooth',
           });
-        }, 100); // Retraso para asegurar que el DOM esté completamente actualizado
+        }
       }
     }
-  }, [messages.length, searchTerm]);
+  }, []);
+
+  // Efecto para scroll inicial (cuando se cargan los mensajes por primera vez)
+  useEffect(() => {
+    if (messages.length > 0) {
+      scrollToBottom(true); // Scroll inmediato para carga inicial
+    }
+  }, [messages.length > 0, scrollToBottom]);
+
+  // Efecto para mantener el scroll al final cuando se agregan nuevos mensajes
+  useEffect(() => {
+    if (messages.length > 0) {
+      // Usar requestAnimationFrame para asegurar que el DOM se haya actualizado
+      requestAnimationFrame(() => {
+        scrollToBottom(false); // Scroll suave para nuevos mensajes
+      });
+    }
+  }, [messages.length, scrollToBottom]);
+
+  // Efecto separado para búsqueda
+  useEffect(() => {
+    if (searchTerm && messages.length > 0) {
+      requestAnimationFrame(() => {
+        scrollToBottom(true); // Scroll inmediato para búsqueda
+      });
+    }
+  }, [searchTerm, scrollToBottom]);
 
   useEffect(() => {
     const checkTaskStatus = async () => {
@@ -554,22 +600,23 @@ export function CommonChat({ threadId }: CommonChatProps) {
         }
       `}</style>
       <div className="flex flex-col h-full w-full">
-        <div className="flex-1 overflow-y-auto">
-          <div className="p-4 md:p-6 space-y-6 w-full max-w-4xl mx-auto pb-80">
+        <ScrollArea ref={scrollAreaRef} className="flex-1">
+          <div className="p-4 md:p-6 space-y-6 w-full max-w-4xl mx-auto">
             <AnimatePresence initial={false}>
               {filteredMessages.slice(-50).map((msg, index) => {
                 const messageIndex = filteredMessages.length - 50 + index;
-                const isNewMessage = index >= filteredMessages.slice(-50).length - 2; // Últimos 2 mensajes se consideran nuevos
+                const isNewMessage = index >= filteredMessages.slice(-50).length - 2;
                 
                 return (
                   <motion.div
                     key={`${msg.created_at}-${messageIndex}`}
-                    initial={isNewMessage ? { opacity: 0, y: 30, scale: 0.98 } : false}
+                    initial={isNewMessage ? { opacity: 0, y: 50, scale: 0.95 } : false}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -10, scale: 0.98 }}
                     transition={{ 
-                      duration: 0.3, 
-                      ease: "easeOut"
+                      duration: 0.5, 
+                      ease: "easeOut",
+                      delay: index * 0.05
                     }}
                     layout="position"
                   >
@@ -586,6 +633,7 @@ export function CommonChat({ threadId }: CommonChatProps) {
                       handlePlayAudio={handlePlayAudio}
                       isAudioLoading={isAudioLoading}
                       playingMessageIndex={playingMessageIndex}
+                      isAudioPaused={isAudioPaused}
                     />
                   </motion.div>
                 );
@@ -616,29 +664,32 @@ export function CommonChat({ threadId }: CommonChatProps) {
               ))}
             </AnimatePresence>
           </div>
+        </ScrollArea>
+        <div className="w-full max-w-4xl mx-auto">
+            <ChatInputBar
+                newMessage={newMessage}
+                isResponding={isResponding}
+                isRecording={isRecording}
+                isUploadingFile={isUploadingFile}
+                isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+                isWebSearchActive={isWebSearchActive}
+                isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+                files={files}
+                onMessageChange={setNewMessage}
+                onSendMessage={handleSendMessage}
+                onKeyDown={handleKeyDown}
+                onToggleKnowledgeAnalysis={toggleKnowledgeAnalysis}
+                onToggleWebSearch={toggleWebSearch}
+                onToggleComprehensiveAnalysis={toggleComprehensiveAnalysis}
+                onStartRecording={startRecording}
+                onStopRecording={stopRecording}
+                onFileUpload={handleFileUpload}
+                onRemoveFile={handleRemoveFile}
+                onPaste={handlePaste}
+                isFixedPosition={false}
+            />
         </div>
       </div>
-      <ChatInputBar
-        newMessage={newMessage}
-        isResponding={isResponding}
-        isRecording={isRecording}
-        isUploadingFile={isUploadingFile}
-        isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
-        isWebSearchActive={isWebSearchActive}
-        isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
-        files={files}
-        onMessageChange={setNewMessage}
-        onSendMessage={handleSendMessage}
-        onKeyDown={handleKeyDown}
-        onToggleKnowledgeAnalysis={toggleKnowledgeAnalysis}
-        onToggleWebSearch={toggleWebSearch}
-        onToggleComprehensiveAnalysis={toggleComprehensiveAnalysis}
-        onStartRecording={startRecording}
-        onStopRecording={stopRecording}
-        onFileUpload={handleFileUpload}
-        onRemoveFile={handleRemoveFile}
-        onPaste={handlePaste}
-      />
       {isArtifactPanelVisible && (
         <div className="w-1/3 h-full hidden lg:block border-l border-border">
           <ArtifactPanel artifacts={artifacts} onCopyContent={handleCopyArtifactContent} isVisible={isArtifactPanelVisible} onToggleVisibility={toggleVisibility} />

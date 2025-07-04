@@ -16,7 +16,7 @@ que se conecte al backend central.
 import logging
 from typing import Type, Optional, Any
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de notas.
@@ -37,11 +37,13 @@ class GetNotesInput(BaseModel):
     )
     category: Optional[str] = Field(
         None,
-        description="Filtra las notas por una categoría específica. Ejemplo: 'Trabajo', 'Ideas'."
+        description="Filtra las notas por una categoría específica. Ejemplo: 'Trabajo', 'Ideas'.",
+        json_schema_extra={"type": "string"}
     )
     search_query: Optional[str] = Field(
         None,
-        description="Busca un texto específico en el título o contenido de las notas. Ejemplo: 'receta de pastel'."
+        description="Busca un texto específico en el título o contenido de las notas. Ejemplo: 'receta de pastel'.",
+        json_schema_extra={"type": "string"}
     )
 
 
@@ -49,12 +51,11 @@ class GetNotesTool(BaseTool):
     """
     Una herramienta para que el agente busque y recupere notas de un usuario.
     """
-    name = "get_notes_tool"
-    description = (
-        "Útil para cuando un usuario quiere ver, listar o buscar sus notas. "
-        "Permite filtrar las notas por una categoría o buscar por palabras clave. "
+    name: str = "get_notes_tool"
+    description: str = "Útil para cuando un usuario quiere ver, listar o buscar sus notas. " \
+        "Permite filtrar las notas por una categoría o buscar por palabras clave. " \
         "Si el usuario solo dice 'muéstrame mis notas', no se necesita 'category' ni 'search_query'."
-    )
+    
     args_schema: Type[BaseModel] = GetNotesInput
 
     async def _arun(

@@ -241,7 +241,7 @@ export default function NotesPage() {
 
   return (
     <DndProvider backend={HTML5Backend}>
-      <div>
+      <div className="pt-8">
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold flex items-center">

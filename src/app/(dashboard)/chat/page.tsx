@@ -209,7 +209,7 @@ export default function ChatLandingPage() {
       >
         {/* Logo y Título */}
         <div className="flex flex-col items-center mb-8">
-          <Image src="/logo-simple.png" alt="Kognito AI Labs" width={80} height={80} className="mb-4" />
+          <Image src="/logo-simple.png" alt="Kognito AI Labs" width={120} height={120} className="mb-6" />
           <h1 className="text-5xl font-bold tracking-tight mb-4">
             ¡Hola!
           </h1>

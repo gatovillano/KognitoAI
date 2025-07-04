@@ -6,78 +6,106 @@
 
 @layer base {
   :root {
-    /* --- MODO CLARO - Paleta de Grises Sutiles --- */
-    --background: 0 0% 100%; /* Fondo principal blanco */
-    --foreground: 222.2 84% 4.9%; /* Texto principal casi negro */
+    /* --- MODO CLARO - Paleta Moderna y Elegante --- */
+    --background: 0 0% 98%; /* Fondo principal más suave */
+    --foreground: 220 13% 9%; /* Texto principal gris oscuro más suave */
 
-    --card: 210 40% 96.1%; /* Gris claro para sidebar y barra superior en tema claro */
-    --card-foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%; /* Blanco para tarjetas normales */
+    --card-foreground: 220 13% 9%;
+
+    /* Nueva variable para sidebar y elementos de navegación */
+    --card-elevated: 220 14% 97%; /* Gris muy claro para sidebar/barra superior */
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 220 13% 9%;
 
-    /* El color primario (acento) se mantiene para interacciones importantes */
-    --primary: 204 90% 45%; 
+    /* Primario basado en el logo de Kognito - azul a cyan */
+    --primary: 200 100% 50%; /* Cyan del logo */
     --primary-foreground: 0 0% 98%;
 
-    /* El secundario es ahora un gris claro, para fondos sutiles */
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    /* Secundario más neutro y elegante */
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 9% 46%;
 
-    /* Muted es un gris aún más sutil para texto secundario */
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    /* Muted más refinado para mejor jerarquía */
+    --muted: 220 14% 94%;
+    --muted-foreground: 220 9% 46%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    /* Accent más elegante */
+    --accent: 220 14% 96%;
+    --accent-foreground: 220 9% 46%;
 
-    --destructive: 0 84.2% 60.2%;
+    /* Destructive refinado */
+    --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 214.3 31.8% 91.4%; /* Bordes muy claros */
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    /* Bordes más sutiles y modernos */
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 200 100% 50%; /* Ring color basado en el cyan del logo */
 
-    --radius: 0.5rem; /* Valor de radio de borde predeterminado */
-    --user-bubble: 210 40% 96.1%; /* Gris claro para la burbuja del usuario en modo claro */
+    /* Radio de bordes más moderno */
+    --radius: 0.875rem;
+    --user-bubble: 220 14% 96%; /* Gris claro más elegante para la burbuja del usuario */
+
+    /* Variables para efectos modernos - modo claro - Colores del logo Kognito */
+    --gradient-primary: linear-gradient(135deg, hsl(220 100% 60%) 0%, hsl(200 100% 50%) 100%); /* Azul a cyan como el logo */
+    --gradient-secondary: linear-gradient(135deg, hsl(0 0% 98%) 0%, hsl(220 14% 96%) 100%);
+    --shadow-soft: 0 2px 8px -2px hsl(220 13% 9% / 0.08);
+    --shadow-medium: 0 4px 16px -4px hsl(220 13% 9% / 0.12);
+    --shadow-strong: 0 8px 32px -8px hsl(220 13% 9% / 0.16);
   }
 
   .dark {
-    /* --- MODO OSCURO - Paleta de Grises Sofisticada (Estilo ChatGPT) --- */
-    --background: 220 5% 12%; /* Fondo principal casi negro (#1d1e20) */
-    --foreground: 210 20% 70%;     /* Texto principal gris muy claro (antes casi blanco) */
+    /* --- MODO OSCURO - Paleta Moderna y Elegante --- */
+    --background: 222 13% 11%; /* Fondo principal más cálido */
+    --foreground: 220 9% 89%; /* Texto principal más suave */
 
-    /* Las tarjetas tienen un color ligeramente diferente para destacar */
-    --card: 220 5% 7%; /* Color para sidebar y recadros (#111213) */
-    --card-foreground: 210 40% 98%;
+    /* Tarjetas con mejor contraste */
+    --card: 222 13% 8%; /* Color para tarjetas normales */
+    --card-foreground: 220 9% 89%;
 
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
+    /* Nueva variable para sidebar y elementos de navegación en modo oscuro */
+    --card-elevated: 222 13% 10%; /* Ligeramente más claro que las tarjetas normales */
 
-    /* El color primario se mantiene para el acento */
-    --primary: 204 88% 57%;
-    --primary-foreground: 210 40% 98%;
+    --popover: 222 13% 8%;
+    --popover-foreground: 220 9% 89%;
 
-    /* El secundario es ahora un gris oscuro, para los mensajes de la IA */
-    --secondary: 220 5% 7%; /* Color para sidebar y recadros (#111213) */
-    --secondary-foreground: 210 40% 98%;
+    /* Primario basado en el logo de Kognito - modo oscuro */
+    --primary: 200 100% 50%; /* Cyan del logo */
+    --primary-foreground: 220 9% 89%;
 
-    /* Muted es un gris medio para texto secundario */
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    /* Secundario más refinado */
+    --secondary: 222 13% 8%;
+    --secondary-foreground: 220 9% 89%;
 
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    /* Muted más elegante */
+    --muted: 222 13% 16%;
+    --muted-foreground: 220 9% 56%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    /* Accent más moderno */
+    --accent: 222 13% 16%;
+    --accent-foreground: 220 9% 89%;
 
-    --border: 220 5% 7%; /* Bordes del mismo color que el fondo para eliminar visibilidad (#1d1e20) */
-    --input: 217.2 32.6% 17.5%;
-    --ring: 204 88% 57%;
+    /* Destructive refinado */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 220 9% 89%;
 
-    --radius: 0.5rem;
-    --user-bubble: 220 5% 15%; /* Gris muy oscuro para la burbuja del usuario en modo oscuro */
+    /* Bordes más sutiles */
+    --border: 222 13% 16%;
+    --input: 222 13% 16%;
+    --ring: 200 100% 50%; /* Ring color basado en el cyan del logo */
+
+    /* Radio moderno */
+    --radius: 0.875rem;
+    --user-bubble: 222 13% 16%; /* Gris elegante para la burbuja del usuario */
+
+    /* Variables para efectos modernos - modo oscuro - Colores del logo Kognito */
+    --gradient-primary: linear-gradient(135deg, hsl(220 100% 60%) 0%, hsl(200 100% 50%) 100%); /* Azul a cyan como el logo */
+    --gradient-secondary: linear-gradient(135deg, hsl(222 13% 8%) 0%, hsl(222 13% 16%) 100%);
+    --shadow-soft: 0 2px 8px -2px hsl(0 0% 0% / 0.2);
+    --shadow-medium: 0 4px 16px -4px hsl(0 0% 0% / 0.3);
+    --shadow-strong: 0 8px 32px -8px hsl(0 0% 0% / 0.4);
   }
 }
 
@@ -109,10 +137,310 @@
   color: #7dd3fc !important;
 }
 
+.dark .prose pre {
+  background-color: hsl(220 5% 7%) !important; /* #111213 */
+  padding: 0.5rem;
+  border-radius: 0.3rem;
+  overflow-x: auto;
+}
+
+.dark .prose pre code {
+  color: hsl(210 40% 98%) !important; /* Texto principal del código en blanco */
+  background-color: transparent !important;
+}
+
+/* Resaltado de sintaxis básico para modo oscuro */
+.dark .prose pre code .keyword {
+  color: hsl(204 88% 57%) !important; /* Palabras clave en azul claro */
+}
+
+.dark .prose pre code .string {
+  color: hsl(120 70% 50%) !important; /* Cadenas en verde */
+}
+
+.dark .prose pre code .comment {
+  color: hsl(210 20% 60%) !important; /* Comentarios en gris */
+  font-style: italic;
+}
+
+.dark .prose pre code .function {
+  color: hsl(300 70% 60%) !important; /* Funciones en morado */
+}
+
+.dark .prose pre code .number {
+  color: hsl(30 70% 50%) !important; /* Números en naranja */
+}
+
 .mention {
   color: hsl(var(--primary));
   background-color: hsl(var(--primary) / 0.1);
   border-radius: 0.25rem;
   padding: 0.1rem 0.3rem;
   font-weight: 500;
+}
+
+/* Clases utilitarias modernas */
+.glass-effect {
+  background: hsl(var(--card) / 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid hsl(var(--border) / 0.5);
+}
+
+.gradient-primary {
+  background: var(--gradient-primary);
+}
+
+.gradient-secondary {
+  background: var(--gradient-secondary);
+}
+
+.shadow-soft {
+  box-shadow: var(--shadow-soft);
+}
+
+.shadow-medium {
+  box-shadow: var(--shadow-medium);
+}
+
+.shadow-strong {
+  box-shadow: var(--shadow-strong);
+}
+
+.modern-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border) / 0.5);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  transition: all 0.2s ease-in-out;
+}
+
+.modern-card:hover {
+  box-shadow: var(--shadow-medium);
+  transform: translateY(-1px);
+}
+
+.text-gradient {
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Sidebar oscuro personalizado */
+.sidebar-dark {
+  background: #0f0f0f;
+  color: #e5e7eb;
+}
+
+.sidebar-dark .text-foreground {
+  color: #e5e7eb !important;
+}
+
+.sidebar-dark .text-muted-foreground {
+  color: #9ca3af !important;
+}
+
+.sidebar-dark .border-border {
+  border-color: rgba(55, 65, 81, 0.2) !important;
+}
+
+.sidebar-dark .bg-muted {
+  background-color: rgba(55, 65, 81, 0.15) !important;
+}
+
+.sidebar-dark .hover\:bg-primary\/10:hover {
+  background-color: rgba(0, 191, 255, 0.1) !important;
+}
+
+.sidebar-dark .hover\:text-primary:hover {
+  color: hsl(200 100% 50%) !important;
+}
+
+.sidebar-dark .bg-primary\/10 {
+  background-color: rgba(0, 191, 255, 0.15) !important;
+}
+
+.sidebar-dark .text-primary {
+  color: hsl(200 100% 50%) !important;
+}
+
+.sidebar-dark .border-primary\/20 {
+  border-color: rgba(0, 191, 255, 0.2) !important;
+}
+
+/* Mejoras tipográficas */
+.typography-heading-1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+
+.typography-heading-2 {
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.typography-heading-3 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.015em;
+}
+
+.typography-body-large {
+  font-size: 1.125rem;
+  line-height: 1.6;
+  font-weight: 400;
+}
+
+.typography-body {
+  font-size: 1rem;
+  line-height: 1.6;
+  font-weight: 400;
+}
+
+.typography-body-small {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+.typography-caption {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  font-weight: 500;
+  letter-spacing: 0.025em;
+}
+
+/* Espaciado consistente */
+.spacing-section {
+  margin-bottom: 3rem;
+}
+
+.spacing-component {
+  margin-bottom: 1.5rem;
+}
+
+.spacing-element {
+  margin-bottom: 1rem;
+}
+
+.spacing-tight {
+  margin-bottom: 0.5rem;
+}
+
+/* Efectos visuales modernos */
+.glass-card {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+}
+
+.dark .glass-card {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.floating-animation {
+  animation: float 6s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+.pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-glow {
+  from { box-shadow: 0 0 20px rgba(0, 191, 255, 0.3); }
+  to { box-shadow: 0 0 30px rgba(0, 191, 255, 0.6); }
+}
+
+.hover-lift {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hover-lift:hover {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+}
+
+.gradient-border {
+  position: relative;
+  background: linear-gradient(var(--gradient-primary));
+  border-radius: var(--radius);
+  padding: 1px;
+}
+
+.gradient-border::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  background: hsl(var(--background));
+  border-radius: calc(var(--radius) - 1px);
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.1),
+    transparent
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.micro-interaction {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.micro-interaction:hover {
+  transform: scale(1.05);
+}
+
+.micro-interaction:active {
+  transform: scale(0.98);
+}
+
+/* Esquina curva para unir sidebar y header */
+.curved-corner {
+  position: relative;
+}
+
+.curved-corner::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 20px;
+  height: 20px;
+  background: hsl(var(--background));
+  border-top-right-radius: 20px;
+  z-index: 1;
+}
+
+.curved-corner::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 20px;
+  height: 20px;
+  background: hsl(var(--card) / 0.8);
+  border-top-right-radius: 16px;
+  z-index: 2;
+  margin: 2px;
 }

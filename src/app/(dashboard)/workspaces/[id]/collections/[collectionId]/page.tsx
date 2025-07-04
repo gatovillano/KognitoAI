@@ -1,4 +1,4 @@
-// En: src/app/(dashboard)/rag/[topic]/page.tsx
+// En: src/app/(dashboard)/workspaces/[id]/collections/[collectionId]/page.tsx
 
 'use client';
 
@@ -11,20 +11,22 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { DataTable } from '../data-table';
-import { getColumns, type Document } from '../columns';
+import { DataTable } from '@/app/(dashboard)/rag/data-table';
+import { getColumns, type Document } from '@/app/(dashboard)/rag/columns';
 import apiClient from '@/lib/api';
-import { UploadDocumentDialog } from '../upload-document-dialog';
-import { PreviewDocumentDialog } from '../preview-document-dialog';
-import { EditDocumentDialog } from '../edit-document-dialog';
-import { DeleteConfirmationDialog } from '../delete-confirmation-dialog';
-import { AnalysisResultDialog } from '../analysis-result-dialog';
-import { CollectionAnalysisDialog } from '../collection-analysis-dialog';
-import { ShareDocumentDialog } from '../share-document-dialog';
+import { UploadDocumentDialog } from '@/app/(dashboard)/rag/upload-document-dialog';
+import { PreviewDocumentDialog } from '@/app/(dashboard)/rag/preview-document-dialog';
+import { EditDocumentDialog } from '@/app/(dashboard)/rag/edit-document-dialog';
+import { DeleteConfirmationDialog } from '@/app/(dashboard)/rag/delete-confirmation-dialog';
+import { AnalysisResultDialog } from '@/app/(dashboard)/rag/analysis-result-dialog';
+import { CollectionAnalysisDialog } from '@/app/(dashboard)/rag/collection-analysis-dialog';
+import { ShareDocumentDialog } from '@/app/(dashboard)/rag/share-document-dialog';
 
-export default function CollectionDetailPage() {
+export default function WorkspaceCollectionDetailPage() {
   const params = useParams();
-  const topic = decodeURIComponent(params.topic as string);
+  const workspaceId = params.id as string;
+  const collectionId = params.collectionId as string;
+  const [collectionName, setCollectionName] = useState('');
 
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -52,22 +54,25 @@ export default function CollectionDetailPage() {
   const [savedAnalyses, setSavedAnalyses] = useState([]);
 
   const fetchPageData = useCallback(async () => {
+    if (!workspaceId || !collectionId) return;
     setIsLoading(true);
     try {
-      const [docsRes, analysesRes] = await Promise.all([
-        apiClient.post('/api/list-documents', { topic: topic }),
-        apiClient.post('/api/get-saved-analyses', { topic: topic })
+      const [collectionRes, docsRes, analysesRes] = await Promise.all([
+        apiClient.get(`/api/workspaces/${workspaceId}/collections/${collectionId}`),
+        apiClient.get(`/api/workspaces/${workspaceId}/collections/${collectionId}/documents`),
+        apiClient.post('/api/get-saved-analyses', { topic: collectionId }) // Asumiendo que el topic es el collectionId
       ]);
       
-      // Ya no necesitamos filtrar en el frontend, el backend lo hace
+      setCollectionName(collectionRes.data.name || collectionRes.data.title || 'Colección sin nombre');
       setDocuments(docsRes.data);
       setSavedAnalyses(analysesRes.data);
     } catch (error) {
       toast.error('Error al cargar los datos de la colección.');
+      console.error(error);
     } finally {
       setIsLoading(false);
     }
-  }, [topic]);
+  }, [workspaceId, collectionId]);
 
   useEffect(() => {
     fetchPageData();
@@ -79,7 +84,7 @@ export default function CollectionDetailPage() {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     setDocumentToAnalyze(doc);
     try {
-      const response = await apiClient.post('/api/start-document-analysis', { file_name: doc.file_name });
+      const response = await apiClient.post('/api/start-document-analysis', { file_name: doc.file_name, workspace_id: workspaceId });
       setDocPollingId(response.data.task_id);
       toast.info(`Análisis para "${doc.file_name}" iniciado.`);
     } catch (error) { toast.error("No se pudo iniciar el análisis del documento."); }
@@ -88,9 +93,9 @@ export default function CollectionDetailPage() {
   const handleAnalyzeCollection = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     try {
-      const response = await apiClient.post('/api/start-collection-analysis', { topic });
+      const response = await apiClient.post('/api/start-collection-analysis', { topic: collectionId, workspace_id: workspaceId });
       setCollectionPollingId(response.data.task_id);
-      toast.info(`Análisis de la colección "${topic}" iniciado.`);
+      toast.info(`Análisis de la colección "${collectionName}" iniciado.`);
     } catch (error) { toast.error("No se pudo iniciar el análisis de la colección."); }
   };
 
@@ -134,8 +139,8 @@ export default function CollectionDetailPage() {
   const handleExtractTitles = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     try {
-      const response = await apiClient.post('/api/extract-title', { topic });
-      toast.info(`Extracción de títulos para la colección "${topic}" iniciada.`);
+      const response = await apiClient.post('/api/extract-title', { topic: collectionId, workspace_id: workspaceId });
+      toast.info(`Extracción de títulos para la colección "${collectionName}" iniciada.`);
       fetchPageData();
     } catch (error) { toast.error("No se pudo iniciar la extracción de títulos."); }
   };
@@ -144,20 +149,10 @@ export default function CollectionDetailPage() {
   const handleExtractTitleForDocument = async (doc: Document) => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     try {
-      const response = await apiClient.post('/api/extract-title', { file_name: doc.file_name });
+      const response = await apiClient.post('/api/extract-title', { file_name: doc.file_name, workspace_id: workspaceId });
       toast.info(`Extracción de título para "${doc.file_name}" iniciada.`);
       fetchPageData();
     } catch (error) { toast.error(`No se pudo iniciar la extracción de título para "${doc.file_name}".`); }
-  };
-
-  // --- Handler para Resumen Semántico de la Colección ---
-  const handleSemanticSummary = async () => {
-    if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
-    try {
-      const response = await apiClient.post('/api/start-semantic-summary', { topic });
-      setCollectionPollingId(response.data.task_id);
-      toast.info(`Resumen semántico de la colección "${topic}" iniciado.`);
-    } catch (error) { toast.error("No se pudo iniciar el resumen semántico de la colección."); }
   };
 
   const columns = useMemo(() => getColumns(
@@ -176,11 +171,11 @@ export default function CollectionDetailPage() {
     <div className="h-full flex flex-col p-6">
       <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
         <div>
-          <Link href="/rag" className="flex items-center text-sm text-muted-foreground hover:text-foreground mb-2">
+          <Link href={`/workspaces/${workspaceId}`} className="flex items-center text-sm text-muted-foreground hover:text-foreground mb-2">
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Volver a Colecciones
+            Volver al Workspace
           </Link>
-          <h1 className="text-3xl font-bold break-all">Colección: {topic}</h1>
+          <h1 className="text-3xl font-bold break-all">Colección: {collectionName}</h1>
         </div>
         <div className="flex items-center gap-2">
           <Button onClick={handleAnalyzeCollection} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
@@ -194,10 +189,6 @@ export default function CollectionDetailPage() {
           <Button onClick={handleExtractTitles} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
             <Text className="mr-2 h-4 w-4" />
             Extraer Títulos
-          </Button>
-          <Button onClick={handleSemanticSummary} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
-            <ScanSearch className="mr-2 h-4 w-4" />
-            Resumen Semántico
           </Button>
         </div>
       </div>
@@ -228,49 +219,49 @@ export default function CollectionDetailPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {savedAnalyses.length > 0 ? (
-            <div className="w-full max-h-[300px] overflow-y-auto">
-              <Accordion type="single" collapsible className="w-full">
-                {savedAnalyses.map((analysis: any) => (
-                  <AccordionItem value={`item-${analysis.id}`} key={analysis.id}>
-                    <AccordionTrigger>
-                      <div className="flex items-center gap-2 text-left flex-1 min-w-0">
-                        {analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                        <span className="font-medium truncate">{analysis.file_name}</span>
-                        <span className="ml-auto text-xs text-muted-foreground pr-4">{new Date(analysis.created_at).toLocaleDateString()}</span>
-                      </div>
-                    </AccordionTrigger>
-                    <AccordionContent>
-                      <Button variant="link" className="p-0 h-auto" onClick={() => {
-                        if (analysis.file_name.startsWith('Colección:')) {
-                          setCollectionAnalysisResult(analysis.result_payload);
-                          setIsCollectionAnalysisOpen(true);
-                        } else {
-                          setDocAnalysisResult(analysis.result_payload);
-                          setDocumentToAnalyze({ file_name: analysis.file_name, topic, title: '', author: '' });
-                          setIsDocAnalysisOpen(true);
-                        }
-                      }}>
-                        Ver Resultados Detallados
-                      </Button>
-                    </AccordionContent>
-                  </AccordionItem>
-                ))}
-              </Accordion>
-            </div>
-          ) : (
-            !isLoading && <p className="text-sm text-muted-foreground text-center py-4">No hay análisis guardados para esta vista.</p>
-          )}
+        {savedAnalyses.length > 0 ? (
+          <div className="w-full max-h-[300px] overflow-y-auto">
+            <Accordion type="single" collapsible className="w-full">
+              {savedAnalyses.map((analysis: any) => (
+                <AccordionItem value={`item-${analysis.id}`} key={analysis.id}>
+                  <AccordionTrigger>
+                    <div className="flex items-center gap-2 text-left flex-1 min-w-0">
+                      {analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                      <span className="font-medium truncate">{analysis.file_name}</span>
+                      <span className="ml-auto text-xs text-muted-foreground pr-4">{new Date(analysis.created_at).toLocaleDateString()}</span>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <Button variant="link" className="p-0 h-auto" onClick={() => {
+                      if (analysis.file_name.startsWith('Colección:')) {
+                        setCollectionAnalysisResult(analysis.result_payload);
+                        setIsCollectionAnalysisOpen(true);
+                      } else {
+                        setDocAnalysisResult(analysis.result_payload);
+                        setDocumentToAnalyze({ file_name: analysis.file_name, topic: collectionId, title: '', author: '' });
+                        setIsDocAnalysisOpen(true);
+                      }
+                    }}>
+                      Ver Resultados Detallados
+                    </Button>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          </div>
+        ) : (
+          !isLoading && <p className="text-sm text-muted-foreground text-center py-4">No hay análisis guardados para esta vista.</p>
+        )}
         </CardContent>
       </Card>
 
       {/* Diálogos */}
-      <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={fetchPageData} defaultTopic={topic} />
+      <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={fetchPageData} defaultTopic={collectionId} workspaceId={workspaceId} />
       <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchPageData} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />
-      <AnalysisResultDialog isOpen={isDocAnalysisOpen} onOpenChange={setIsDocAnalysisOpen} analysis={docAnalysisResult} document={documentToAnalyze ?? { file_name: '', topic: topic, title: '', author: '' }} />
-      <CollectionAnalysisDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} topic={topic} />
+      <AnalysisResultDialog isOpen={isDocAnalysisOpen} onOpenChange={setIsDocAnalysisOpen} analysis={docAnalysisResult} document={documentToAnalyze ?? { file_name: '', topic: collectionId, title: '', author: '' }} />
+      <CollectionAnalysisDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} topic={collectionId} />
       <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={fetchPageData} document={documentToShare} />
     </div>
   );

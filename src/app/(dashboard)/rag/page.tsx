@@ -21,6 +21,7 @@ interface Collection {
   topic: string;
   document_count: number;
   description?: string;
+  team_shared?: boolean;
 }
 
 const CollectionCard = ({
@@ -34,6 +35,17 @@ const CollectionCard = ({
   onDelete: (topic: string) => void;
   isAnalyzing: boolean;
 }) => {
+  const router = useRouter();
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Don't navigate if clicking on dropdown or its content
+    if ((e.target as HTMLElement).closest('[data-dropdown-trigger]') ||
+        (e.target as HTMLElement).closest('[data-dropdown-content]')) {
+      return;
+    }
+    router.push(`/rag/${encodeURIComponent(collection.topic)}`);
+  };
+
   return (
     <motion.div
       layout
@@ -43,24 +55,35 @@ const CollectionCard = ({
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
       className="h-full"
     >
-      <Card className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full relative">
-        <Link href={`/rag/${encodeURIComponent(collection.topic)}`} className="absolute inset-0 z-0" aria-label={`Ver colección ${collection.topic}`}></Link>
-        <CardHeader className="pb-3 z-10">
+      <Card
+        className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full"
+        onClick={handleCardClick}
+      >
+        <CardHeader className="pb-3">
           <CardTitle className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0 flex-1">
               <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                 <FolderKanban className="h-5 w-5 text-primary" />
               </div>
               <span className="font-semibold text-lg truncate">{collection.topic}</span>
+              {collection.team_shared && (
+                <span className="text-blue-500" title="Compartido con equipo">👥</span>
+              )}
             </div>
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 p-0 hover:bg-muted" onClick={(e) => e.stopPropagation()}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 p-0 hover:bg-muted"
+                    onClick={(e) => e.stopPropagation()}
+                    data-dropdown-trigger
+                  >
                     <MoreVertical className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()} data-dropdown-content>
                   <DropdownMenuItem onClick={() => onAnalyze(collection.topic)}>
                     <ScanSearch className="mr-2 h-4 w-4" />
                     <span>Analizar Colección</span>
@@ -74,7 +97,7 @@ const CollectionCard = ({
             </div>
           </CardTitle>
         </CardHeader>
-        <CardContent className="pt-0 flex-grow z-10">
+        <CardContent className="pt-0 flex-grow">
           {isAnalyzing ? (
             <div className="flex items-center text-sm text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -86,7 +109,7 @@ const CollectionCard = ({
             </p>
           )}
         </CardContent>
-        <CardFooter className="flex justify-between items-center text-xs text-muted-foreground pt-3 mt-auto border-t border-border/50 z-10">
+        <CardFooter className="flex justify-between items-center text-xs text-muted-foreground pt-3 mt-auto border-t border-border/50">
           <span>{collection.document_count} documento(s)</span>
         </CardFooter>
       </Card>
@@ -99,11 +122,13 @@ const StaticCollectionCard = ({
   icon: Icon,
   title,
   description,
+  className,
 }: {
   href: string;
   icon: React.ElementType;
   title: string;
   description: string;
+  className?: string;
 }) => {
   return (
     <motion.div
@@ -115,7 +140,7 @@ const StaticCollectionCard = ({
       className="h-full"
     >
       <Link href={href} className="h-full block">
-        <Card className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full">
+        <Card className={`group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full ${className || ''}`}>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-start gap-3">
               <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -252,10 +277,10 @@ export default function RagCollectionsPage() {
 
     if (collections.length === 0) {
       return (
-        <div className="text-center py-16">
-          <FolderKanban className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
-          <h3 className="text-xl font-semibold mb-2">No tienes colecciones aún</h3>
-          <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+        <div className="text-center py-20 px-8">
+          <FolderKanban className="mx-auto h-16 w-16 text-muted-foreground/50 mb-6" />
+          <h3 className="text-xl font-semibold mb-4">No tienes colecciones aún</h3>
+          <p className="text-muted-foreground mb-8 max-w-md mx-auto">
             Las colecciones te ayudan a organizar tus documentos por temas. ¡Crea tu primera colección para empezar!
           </p>
           <Button onClick={() => setIsCreateOpen(true)} size="lg">
@@ -267,19 +292,21 @@ export default function RagCollectionsPage() {
     }
 
     return (
-      <motion.div layout className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <motion.div layout className="grid gap-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 px-2">
         <AnimatePresence>
           <StaticCollectionCard
             href="/rag/all"
             icon={Library}
             title="Todos los Documentos"
             description="Ver y gestionar todos tus archivos en un solo lugar."
+            className="bg-muted"
           />
           <StaticCollectionCard
             href="/rag/repositories"
             icon={Github}
             title="Repositorios"
             description="Ver y gestionar todos tus repositorios de GitHub."
+            className="bg-muted"
           />
           {collections.map((collection) => (
             <CollectionCard
@@ -296,8 +323,8 @@ export default function RagCollectionsPage() {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-8 mx-4">
+      <div className="flex items-center justify-between mb-12">
         <div>
           <h1 className="text-3xl font-bold flex items-center">
             <BookMarked className="mr-3 h-8 w-8 text-primary" />
@@ -306,7 +333,7 @@ export default function RagCollectionsPage() {
           <p className="text-muted-foreground mt-2">Organiza tus documentos en bases de conocimiento.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setIsGitHubRepoOpen(true)}>
+          <Button onClick={() => setIsGitHubRepoOpen(true)} className="bg-primary hover:bg-primary/90">
             <Github className="mr-2 h-4 w-4" />
             Añadir Repositorio
           </Button>

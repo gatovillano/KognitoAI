@@ -18,7 +18,7 @@ langchain-core
 langchain-community
 langchain-google-genai
 langgraph
-langchain-postgres==0.0.4
+langchain-postgres
 langchain-google-vertexai
 
 # --- Autenticación y Credenciales ---
@@ -43,8 +43,8 @@ fake-useragent
 faster-whisper
 pdfminer.six
 python-docx
-passlib==1.7.4
-bcrypt==4.0.1
+passlib
+bcrypt
 pydantic[email]
 scipy
 spacy

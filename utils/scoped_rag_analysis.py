@@ -63,7 +63,7 @@ async def _get_documents_context(
 
         # La búsqueda se realiza sobre una colección específica (topic)
         store = PGVector(
-            connection_string=settings.database_url,
+            connection_string=settings.database_url, # type: ignore
             embedding_function=embedding_model,
             collection_name=topic,
         )
@@ -93,8 +93,8 @@ async def run_scoped_rag_analysis(
     query: str,
     content_types: List[str],
     analysis_goal: str,
-    topic: Optional[str] = None,
-    keywords: Optional[List[str]] = None
+    topic: str = "",
+    keywords: List[str] = []
 ) -> str:
     """
     Ejecuta un análisis RAG profundo y focalizado.
@@ -104,7 +104,7 @@ async def run_scoped_rag_analysis(
     context_parts = []
     account_uuid = uuid.UUID(account_id)
     
-    async with SessionLocal() as db:
+    async with SessionLocal() as db: # type: ignore
         if "notes" in content_types:
             notes_context = await _get_notes_context(db, account_uuid, topic, keywords)
             if notes_context:
@@ -122,7 +122,7 @@ async def run_scoped_rag_analysis(
     full_context = "\n\n".join(context_parts)
     
     system_prompt = (
-        "Eres un asistente de IA experto en análisis de información y síntesis. "
+        "Eres un investigador destacado y experto en análisis de información y conocimientos. "
         "Tu tarea es analizar el contexto proporcionado para responder a la consulta del usuario. "
         "Debes estructurar tu respuesta final estrictamente de acuerdo con el 'objetivo del análisis' especificado."
     )

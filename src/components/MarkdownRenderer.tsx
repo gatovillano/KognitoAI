@@ -209,16 +209,17 @@ const _MarkdownRenderer = ({ content, fontSize = 'text-base' }: MarkdownRenderer
         // Copy Button
         const copyBtn = document.createElement('button');
         copyBtn.id = `copy-btn-${codeBlockIndex}`;
-        copyBtn.className = 'inline-flex items-center justify-center text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-7 px-3 rounded-md';
+        copyBtn.className = 'inline-flex items-center justify-center text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring focus-visible:ring-offset-4 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-7 px-5 rounded-md';
         copyBtn.innerHTML = copiedStates[codeBlockIndex] ? 'Copiado' : 'Copiar';
         copyBtn.onclick = () => handleCopy(codeText, codeBlockIndex);
         buttonsWrapper.appendChild(copyBtn);
 
         footer.appendChild(buttonsWrapper);
         wrapper.appendChild(footer);
-        
-        wrapper.className = 'bg-zinc-900 rounded-md border my-4';
-        wrapper.style.backgroundColor = '#2d3748 !important';
+
+        wrapper.className = 'backdrop-blur-md rounded-3xl'; // Bordes más curvos con rounded-3xl
+        wrapper.style.backgroundColor = '#111213 !important';
+        (block as HTMLElement).style.color = '#ffffff !important'; // Asegura que el texto sea blanco para contrastar con el fondo negro
         block.setAttribute('data-buttons-added', 'true');
       });
     };

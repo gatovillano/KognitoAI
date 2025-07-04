@@ -80,7 +80,7 @@ export function CreateWorkspaceCollectionDialog({ isOpen, onOpenChange, onCreate
               rows={3}
             />
           </div>
-          // La compartición con equipo no está implementada en workspaces
+          
         </div>
         <DialogFooter>
           <Button onClick={handleCreate} disabled={isLoading}>

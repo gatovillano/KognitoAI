@@ -8,6 +8,9 @@ interface InlineMarkdownRendererProps {
 }
 
 export function InlineMarkdownRenderer({ content }: InlineMarkdownRendererProps) {
+  // Asegurarse de que el contenido sea una cadena de texto para evitar errores en ReactMarkdown
+  const markdownContent = typeof content === 'string' ? content : '';
+
   return (
     <ReactMarkdown
       // Lista de elementos de bloque que NO queremos que se rendericen.
@@ -18,7 +21,7 @@ export function InlineMarkdownRenderer({ content }: InlineMarkdownRendererProps)
       unwrapDisallowed={true}
       remarkPlugins={[remarkGfm]}
     >
-      {content}
+      {markdownContent}
     </ReactMarkdown>
   );
 }
