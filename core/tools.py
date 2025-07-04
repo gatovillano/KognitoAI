@@ -65,8 +65,11 @@ from tools.knowledge_analysis_tool import KnowledgeAnalysisTool
 from tools.comprehensive_web_analysis_tool import ComprehensiveWebAnalysisTool
 from tools.get_analysis_results_tool import GetAnalysisResultsTool
 from tools.scoped_rag_analysis_tool import ScopedRagAnalysisTool
+from tools.vector_db_query_tool import VectorDBQueryTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
+
 
 
 def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List[Tool]:
@@ -107,7 +110,8 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
         KnowledgeAnalysisTool,
         ComprehensiveWebAnalysisTool,
         GetAnalysisResultsTool,
-        ScopedRagAnalysisTool
+        ScopedRagAnalysisTool, # Herramienta de Análisis RAG Focalizado
+        VectorDBQueryTool # Herramienta para consultas a la base de datos vectorial
     ]
 
     for ToolClass in tool_classes_to_instantiate:
@@ -127,7 +131,8 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
                 GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
                 ImageGenerationTool, GetProactiveInsightsTool,
                 ProactiveKnowledgeLinkerTool, KnowledgeAnalysisTool, ComprehensiveWebAnalysisTool,
-                GetAnalysisResultsTool, MindmapGeneratorTool, ImageBackgroundEraserTool, ScopedRagAnalysisTool
+                GetAnalysisResultsTool, MindmapGeneratorTool, ImageBackgroundEraserTool, ScopedRagAnalysisTool,
+                VectorDBQueryTool
             ]:
                 kwargs = {"account_id": account_id}
                 if ToolClass in [SetReminderTool, ImageGenerationTool, GetDocumentContentTool]:
@@ -142,6 +147,17 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
             # Para herramientas generales que no requieren argumentos específicos de usuario en su constructor
             else:
                 tool_instance = ToolClass()
+            
+            # Verificación adicional para identificar problemas con el esquema de argumentos
+            if tool_instance and hasattr(tool_instance, 'args_schema') and tool_instance.args_schema is not None:
+                try:
+                    schema = tool_instance.args_schema.schema()
+                    properties = schema.get('properties', {})
+                    for prop_name, prop_info in properties.items():
+                        if 'type' not in prop_info:
+                            logger.error(f"  [ERROR CRÍTICO] Propiedad '{prop_name}' en la herramienta '{tool_instance.name}' no tiene la clave 'type' en su esquema. Esto puede causar errores en bind_tools.")
+                except Exception as schema_error:
+                    logger.error(f"  [ERROR] Error al inspeccionar el esquema de la herramienta '{tool_instance.name}': {schema_error}")
             
             if tool_instance: # Asegúrate de que la instancia se creó
                 try:

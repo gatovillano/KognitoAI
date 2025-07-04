@@ -24,10 +24,10 @@ class ComprehensiveWebAnalysisInput(BaseModel):
     query: str = Field(..., description="The user's research query in natural language.")
     account_id: str = Field(..., description="The unique ID of the user's account.")
     # --- NUEVO: Parámetro para el ID del workspace ---
-    workspace_id: Optional[str] = Field(
-        None,
+    workspace_id: str = Field(
+        default="",
         description="El ID del workspace (UUID en formato string) para cruzar la información con documentos de un workspace específico, si aplica."
-    )
+)
 
 class ComprehensiveWebAnalysisTool(BaseTool):
     """

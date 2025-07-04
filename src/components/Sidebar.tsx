@@ -259,13 +259,26 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
   return (
     <div className={cn("flex flex-col h-full", isCollapsed ? "items-center p-2" : "p-6")}>
       {/* Header del sidebar */}
-      <div className={cn("flex items-center w-full pb-4 mb-4", isCollapsed ? "justify-center" : "justify-between")}>
+      <div className={cn("flex items-center w-full pb-6 mb-6 border-b border-border/50", isCollapsed ? "justify-center" : "justify-between")}>
         <div className="flex items-center gap-3">
-          <Image src="/logo-simple.png" alt="Kognito Logo" width={40} height={40} />
-          {!isCollapsed && <span className="font-bold text-xl text-foreground">Kognito</span>}
+          <div className="relative">
+            <Image src="/logo-simple.png" alt="Kognito Logo" width={48} height={48} className="rounded-lg" />
+            <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-primary rounded-full border-2 border-background"></div>
+          </div>
+          {!isCollapsed && (
+            <div className="flex flex-col">
+              <span className="font-bold text-xl text-foreground">Kognito</span>
+              <span className="text-xs text-muted-foreground">AI Labs</span>
+            </div>
+          )}
         </div>
         {!isCollapsed && (
-          <Button onClick={handleNewChat} variant="ghost" size="icon" className="hover:bg-muted rounded-full">
+          <Button
+            onClick={handleNewChat}
+            variant="ghost"
+            size="icon"
+            className="hover:bg-primary/10 hover:text-primary rounded-xl transition-all duration-200"
+          >
             <Plus className="h-4 w-4" />
           </Button>
         )}
@@ -273,103 +286,118 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
 
       {/* Sección de herramientas */}
       <div className={cn("w-full", isCollapsed && "flex flex-col items-center")}>
-        {!isCollapsed && <p className="text-xs font-medium text-muted-foreground mb-3 px-2 uppercase tracking-wider">Herramientas</p>}
-        <nav className="space-y-1 w-full">
+        {!isCollapsed && (
+          <div className="flex items-center gap-2 mb-4 px-2">
+            <div className="w-1 h-1 rounded-full bg-primary"></div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Herramientas</p>
+          </div>
+        )}
+        <nav className="space-y-2 w-full">
           <Link href="/dashboard" passHref onClick={onLinkClick} title="Escritorio">
-            <Button 
-              variant={pathname.startsWith('/dashboard') ? 'secondary' : 'ghost'} 
+            <Button
+              variant={pathname.startsWith('/dashboard') ? 'secondary' : 'ghost'}
               className={cn(
-                "w-full transition-all duration-200 hover:bg-muted rounded-xl", 
-                isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-10 px-3"
+                "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
+                pathname.startsWith('/dashboard') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
-              <Bot className={cn("h-4 w-4", !isCollapsed && "mr-3")}/>
+              <Bot className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
               {!isCollapsed && <span className="text-sm font-medium">Escritorio</span>}
             </Button>
           </Link>
           <Link href="/rag" passHref onClick={onLinkClick} title="Gestión de Conocimientos">
-            <Button 
-              variant={pathname.startsWith('/rag') ? 'secondary' : 'ghost'} 
+            <Button
+              variant={pathname.startsWith('/rag') ? 'secondary' : 'ghost'}
               className={cn(
-                "w-full transition-all duration-200 hover:bg-muted rounded-xl", 
-                isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-10 px-3"
+                "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
+                pathname.startsWith('/rag') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
-              <BookMarked className={cn("h-4 w-4", !isCollapsed && "mr-3")}/>
+              <BookMarked className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
               {!isCollapsed && <span className="text-sm font-medium">Conocimientos</span>}
             </Button>
           </Link>
           <Link href="/agenda" passHref onClick={onLinkClick} title="Agenda">
-            <Button 
-              variant={pathname.startsWith('/agenda') ? 'secondary' : 'ghost'} 
+            <Button
+              variant={pathname.startsWith('/agenda') ? 'secondary' : 'ghost'}
               className={cn(
-                "w-full transition-all duration-200 hover:bg-muted rounded-xl", 
-                isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-10 px-3"
+                "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
+                pathname.startsWith('/agenda') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
-              <Calendar className={cn("h-4 w-4", !isCollapsed && "mr-3")}/>
+              <Calendar className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
               {!isCollapsed && <span className="text-sm font-medium">Agenda</span>}
             </Button>
           </Link>
           <Link href="/notes" passHref onClick={onLinkClick} title="Notas">
-            <Button 
-              variant={pathname.startsWith('/notes') ? 'secondary' : 'ghost'} 
+            <Button
+              variant={pathname.startsWith('/notes') ? 'secondary' : 'ghost'}
               className={cn(
-                "w-full transition-all duration-200 hover:bg-muted rounded-xl", 
-                isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-10 px-3"
+                "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
+                pathname.startsWith('/notes') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
-              <Notebook className={cn("h-4 w-4", !isCollapsed && "mr-3")}/>
+              <Notebook className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
               {!isCollapsed && <span className="text-sm font-medium">Notas</span>}
             </Button>
           </Link>
           <Link href="/teams" passHref onClick={onLinkClick} title="Equipos">
-            <Button 
-              variant={pathname.startsWith('/teams') ? 'secondary' : 'ghost'} 
+            <Button
+              variant={pathname.startsWith('/teams') ? 'secondary' : 'ghost'}
               className={cn(
-                "w-full transition-all duration-200 hover:bg-muted rounded-xl", 
-                isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-10 px-3"
+                "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
+                pathname.startsWith('/teams') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
-              <Users className={cn("h-4 w-4", !isCollapsed && "mr-3")}/>
+              <Users className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
               {!isCollapsed && <span className="text-sm font-medium">Equipos</span>}
             </Button>
           </Link>
           <Link href="/workspaces" passHref onClick={onLinkClick} title="Workspaces">
-            <Button 
-              variant={pathname.startsWith('/workspaces') ? 'secondary' : 'ghost'} 
+            <Button
+              variant={pathname.startsWith('/workspaces') ? 'secondary' : 'ghost'}
               className={cn(
-                "w-full transition-all duration-200 hover:bg-muted rounded-xl", 
-                isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-10 px-3"
+                "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
+                pathname.startsWith('/workspaces') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
-              <Bot className={cn("h-4 w-4", !isCollapsed && "mr-3")}/>
+              <Bot className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
               {!isCollapsed && <span className="text-sm font-medium">Workspaces</span>}
             </Button>
           </Link>
           <Link href="/chat" passHref onClick={onLinkClick} title="Chat">
-            <Button 
-              variant={pathname.startsWith('/chat') ? 'secondary' : 'ghost'} 
+            <Button
+              variant={pathname.startsWith('/chat') ? 'secondary' : 'ghost'}
               className={cn(
-                "w-full transition-all duration-200 hover:bg-muted rounded-xl", 
-                isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-10 px-3"
+                "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
+                pathname.startsWith('/chat') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
-              <MessageSquare className={cn("h-4 w-4", !isCollapsed && "mr-3")}/>
+              <MessageSquare className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
               {!isCollapsed && <span className="text-sm font-medium">Chat</span>}
             </Button>
           </Link>
         </nav>
         {!isCollapsed && (
-          <div className="mt-6 mb-4">
-            <p className="text-xs font-medium text-muted-foreground mb-3 px-2 uppercase tracking-wider">Conversaciones</p>
+          <div className="mt-8 mb-6">
+            <div className="flex items-center gap-2 mb-4 px-2">
+              <div className="w-1 h-1 rounded-full bg-primary"></div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Conversaciones</p>
+            </div>
             <div className="px-2">
               <input
                 type="text"
                 placeholder="Buscar conversaciones..."
                 value={searchTerm}
                 onChange={handleSearchChange}
-                className="w-full p-3 rounded-full bg-[#1d1e20] border border-border focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm text-foreground placeholder:text-muted-foreground transition-all"
+                className="w-full p-3 rounded-xl bg-muted/50 border border-border/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 text-sm text-foreground placeholder:text-muted-foreground transition-all duration-200"
               />
             </div>
           </div>
@@ -437,25 +465,28 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
       </ScrollArea>
 
       {/* Usuario */}
-      <div className={cn("mt-auto w-full pt-4", isCollapsed && "flex flex-col items-center")}>
+      <div className={cn("mt-auto w-full pt-6 border-t border-border/50", isCollapsed && "flex flex-col items-center")}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               className={cn(
-                "w-full h-auto py-3 transition-all duration-200 hover:bg-muted rounded-xl", 
-                isCollapsed ? "h-10 w-10 p-0" : "justify-start gap-3"
+                "w-full h-auto py-4 transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                isCollapsed ? "h-12 w-12 p-0" : "justify-start gap-3"
               )}
             >
-              <Avatar className="h-8 w-8">
-                <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />
-                <AvatarFallback className="bg-primary text-primary-foreground font-medium">
-                  {user?.username?.slice(0, 2).toUpperCase() || "KA"}
-                </AvatarFallback>
-              </Avatar>
+              <div className="relative">
+                <Avatar className="h-10 w-10 border-2 border-primary/20">
+                  <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />
+                  <AvatarFallback className="bg-primary text-primary-foreground font-semibold text-sm">
+                    {user?.username?.slice(0, 2).toUpperCase() || "KA"}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-background"></div>
+              </div>
               {!isCollapsed && (
                 <div className="flex flex-col items-start overflow-hidden flex-1">
-                  <span className="font-medium text-sm truncate w-full text-left text-foreground">
+                  <span className="font-semibold text-sm truncate w-full text-left text-foreground group-hover:text-primary transition-colors">
                     {user?.username || "Usuario"}
                   </span>
                   <span className="text-xs text-muted-foreground truncate w-full text-left">
@@ -463,7 +494,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                   </span>
                 </div>
               )}
-              {!isCollapsed && <Settings className="h-4 w-4 text-muted-foreground" />}
+              {!isCollapsed && <Settings className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">

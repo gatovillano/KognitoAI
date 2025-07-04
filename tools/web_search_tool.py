@@ -70,7 +70,7 @@ async def search_and_summarize_web(query: str) -> str:
 
     try:
         async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(brave_api_url, params=params, timeout=10) as response:
+            async with session.get(brave_api_url, params=params, timeout=10) as response: # type: ignore
                 response.raise_for_status()
                 json_resp = await response.json()
 

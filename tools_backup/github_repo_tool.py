@@ -1,4 +1,3 @@
-from pydantic import Field
 # tools/github_repo_tool.py
 import logging
 import os
@@ -23,7 +22,7 @@ class GitHubRepoTool(BaseTool):
     )
     github_token: Optional[str] = Field(
         None,
-        description="El token de GitHub a utilizar para acceder a repositorios privados. Si no se proporciona, se utilizará la variable de entorno GITHUB_TOKEN.",
+        description="El token de GitHub a utilizar para acceder a repositorios privados. Si no se proporciona, se utilizará la variable de entorno GITHUB_TOKEN."
     )
     session: Optional[requests.Session] = Field(
         default_factory=requests.Session,
@@ -345,12 +344,12 @@ class GitHubRepoTool(BaseTool):
                             except Exception as vec_error:
                                 logger.error(f"❌ Error vectorizando {file_path}: {vec_error}", exc_info=True)
                     
-                    await db_session.commit() # type: ignore
+                    await db_session.commit()
                     return f"Repositorio {repo_name} añadido con {file_count} archivos. {vectorized_count} archivos vectorizados correctamente para la cuenta {account_id} con tema '{collection_topic if collection_topic else 'repositorio'}'."
                 else:
                     return "Error: Debes especificar un ID de cuenta para añadir la colección de conocimientos."
             finally:
-                await db_session.close() # type: ignore
+                await db_session.close()
         except Exception as e:
             logger.error(f"Error al añadir el repositorio {repo_url} como colección de conocimientos: {e}", exc_info=True)
             return f"Error al añadir el repositorio como colección de conocimientos: {e}"
@@ -433,7 +432,7 @@ class GitHubRepoTool(BaseTool):
                             except Exception as del_error:
                                 logger.error(f"❌ Error eliminando embeddings de {file_path}: {del_error}")
                             
-                            await db_session.delete(db_doc) # type: ignore
+                            await db_session.delete(db_doc)
                             deleted_files += 1
                     
                     # 2. Añadir nuevos archivos o actualizar modificados
@@ -586,3 +585,7 @@ class GitHubRepoInput(BaseModel):
         description="ID del workspace al que se asociará la colección de conocimientos. Opcional. Si se proporciona, el repositorio se asociará a ese workspace específico."
     )
 
+# Asignar el esquema de entrada a la herramienta
+GitHubRepoTool.args_schema = GitHubRepoInput
+
+# Nota: Esta herramienta debe ser instanciada en la función get_all_langchain_tools() en telegram_client/tools.py

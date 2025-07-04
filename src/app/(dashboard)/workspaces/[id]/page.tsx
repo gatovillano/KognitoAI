@@ -21,11 +21,12 @@ interface ChatThread {
 
 interface Collection {
   id: string;
-  title: string;
+  title?: string;
   topic?: string;
   workspace_id: string;
   created_at: string;
   description?: string;
+  name?: string;
 }
 
 interface Workspace {
@@ -49,9 +50,13 @@ export default function WorkspaceDashboard() {
   const [collectionDialogOpen, setCollectionDialogOpen] = useState(false);
   const [createCollectionDialogOpen, setCreateCollectionDialogOpen] = useState(false);
   const [renameCollectionDialogOpen, setRenameCollectionDialogOpen] = useState(false);
+  const [shareCollectionDialogOpen, setShareCollectionDialogOpen] = useState(false);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
   const [newCollectionTitle, setNewCollectionTitle] = useState('');
   const [newCollectionDescription, setNewCollectionDescription] = useState('');
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
+  const [availableWorkspaces, setAvailableWorkspaces] = useState<Workspace[]>([]);
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
   useEffect(() => {
     const fetchWorkspaceData = async () => {
       try {
@@ -61,7 +66,7 @@ export default function WorkspaceDashboard() {
 
         // Obtener chats asociados con el workspace
         const chatsResponse = await apiClient.get(`/api/threads?workspace_id=${workspaceId}`);
-        const chatsData = chatsResponse.data;
+        const chatsData = chatsResponse.data.filter((chat: ChatThread) => chat.workspace_id === workspaceId);
         setChats(chatsData);
 
         // Obtener mensajes de los chats
@@ -101,8 +106,8 @@ export default function WorkspaceDashboard() {
       })
     : chats;
 
-  const filteredCollections = searchTerm 
-    ? collections.filter(col => col.title.toLowerCase().includes(searchTerm.toLowerCase()))
+  const filteredCollections = searchTerm
+    ? collections.filter(col => (col.title || col.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
     : collections;
 
   const handleNewChat = async () => {
@@ -186,8 +191,7 @@ export default function WorkspaceDashboard() {
   };
 
   const handleCollectionClick = (collectionId: string) => {
-    // Aquí puedes implementar la navegación a una página de detalles de la colección si es necesario
-    console.log(`Navigating to collection ${collectionId}`);
+    router.push(`/workspaces/${workspaceId}/collections/${collectionId}`);
   };
 
   const handleCloseCollectionDialog = () => {
@@ -236,6 +240,7 @@ export default function WorkspaceDashboard() {
       const allCollections = response.data.map((col: any) => ({
         id: col.topic || col.id || col.title || `collection-${Math.random().toString(36).substr(2, 9)}`,
         title: col.topic || col.title || 'Sin título',
+        name: col.topic || col.title || 'Sin título',
         topic: col.topic || col.title || '',
         workspace_id: col.workspace_id || '',
         created_at: col.created_at || new Date().toISOString(),
@@ -261,7 +266,7 @@ export default function WorkspaceDashboard() {
         const collectionToAdd = availableCollections.find(col => col.id === selectedCollectionId);
         if (collectionToAdd) {
           // Usar el campo topic como identificador para la asociación, con un valor por defecto si no está definido
-          const collectionIdentifier = encodeURIComponent(collectionToAdd.topic || collectionToAdd.title);
+          const collectionIdentifier = encodeURIComponent(collectionToAdd.topic || collectionToAdd.title || '');
           const response = await apiClient.post(`/api/workspaces/${workspaceId}/collections/${collectionIdentifier}/associate`, {});
           const addedCollection = response.data;
           setCollections((prevCollections) => [...prevCollections, addedCollection]);
@@ -278,9 +283,47 @@ export default function WorkspaceDashboard() {
 
   const handleOpenRenameCollectionDialog = (collection: Collection) => {
     setSelectedCollection(collection);
-    setNewCollectionTitle(collection.title);
+    setNewCollectionTitle(collection.title || collection.name || '');
     setNewCollectionDescription(collection.description || '');
     setRenameCollectionDialogOpen(true);
+  };
+
+  const handleOpenShareCollectionDialog = (collection: Collection) => {
+    setSelectedCollection(collection);
+    setShareCollectionDialogOpen(true);
+    loadAvailableWorkspaces();
+  };
+
+  const handleCloseShareCollectionDialog = () => {
+    setShareCollectionDialogOpen(false);
+    setSelectedCollection(null);
+    setSelectedWorkspaceId(null);
+  };
+
+  const loadAvailableWorkspaces = async () => {
+    setLoadingWorkspaces(true);
+    try {
+      const response = await apiClient.get('/api/workspaces');
+      setAvailableWorkspaces(response.data);
+    } catch (error) {
+      console.error('Error al cargar los workspaces disponibles:', error);
+      alert('Error al cargar los workspaces disponibles.');
+    } finally {
+      setLoadingWorkspaces(false);
+    }
+  };
+
+  const handleShareCollection = async () => {
+    if (selectedCollection && selectedWorkspaceId) {
+      try {
+        await apiClient.post(`/api/workspaces/${selectedWorkspaceId}/collections/${selectedCollection.id}/share`, {});
+        alert('Colección compartida con éxito.');
+        handleCloseShareCollectionDialog();
+      } catch (error) {
+        console.error('Error al compartir la colección:', error);
+        alert('Error al compartir la colección.');
+      }
+    }
   };
 
   const handleCloseRenameCollectionDialog = () => {
@@ -537,7 +580,7 @@ export default function WorkspaceDashboard() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold text-sm line-clamp-2">
-                          <InlineMarkdownRenderer content={collection.title} />
+                          <InlineMarkdownRenderer content={collection.title || collection.name || ''} />
                         </div>
                       </div>
                     </div>
@@ -558,6 +601,12 @@ export default function WorkspaceDashboard() {
                           </svg>
                           Renombrar
                         </DropdownMenuItem>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOpenShareCollectionDialog(collection); }}>
+                          <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                          </svg>
+                          Compartir
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteCollection(collection.id); }} className="text-destructive">
                           <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -574,7 +623,7 @@ export default function WorkspaceDashboard() {
                   </p>
                   <div className="flex items-center justify-between pt-2 border-t border-border/50">
                     <span className="text-xs text-muted-foreground">
-                      {new Date(collection.created_at).toLocaleDateString()}
+                      {collection.created_at ? new Date(collection.created_at).toLocaleDateString() : 'Sin fecha'}
                     </span>
                     <div className="flex items-center gap-1">
                       <div className="h-2 w-2 rounded-full bg-blue-500"></div>
@@ -657,6 +706,39 @@ export default function WorkspaceDashboard() {
             </Button>
             <Button onClick={handleRenameCollection} disabled={!newCollectionTitle}>
               Guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={shareCollectionDialogOpen} onOpenChange={setShareCollectionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Compartir Colección</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4">
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {loadingWorkspaces ? (
+                <p>Cargando workspaces...</p>
+              ) : (
+                availableWorkspaces.map(workspace => (
+                  <div
+                    key={workspace.id}
+                    className={`p-2 cursor-pointer rounded-md border ${selectedWorkspaceId === workspace.id ? 'border-primary bg-primary/10' : 'border-transparent'}`}
+                    onClick={() => setSelectedWorkspaceId(workspace.id)}
+                  >
+                    <p className="font-medium">{workspace.name}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={handleCloseShareCollectionDialog}>
+              Cancelar
+            </Button>
+            <Button onClick={handleShareCollection} disabled={!selectedWorkspaceId}>
+              Compartir
             </Button>
           </DialogFooter>
         </DialogContent>

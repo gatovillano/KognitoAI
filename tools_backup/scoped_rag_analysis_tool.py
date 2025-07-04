@@ -1,4 +1,3 @@
-from pydantic import Field
 # tools/scoped_rag_analysis_tool.py
 
 """
@@ -20,9 +19,8 @@ class ScopedRagAnalysisInput(BaseModel):
 
 # 2. Crear la Clase para la Herramienta
 class ScopedRagAnalysisTool(BaseTool):
-    name: str = Field(default="scoped_rag_analysis", description="Nombre de la herramienta")
     name = "scoped_rag_analysis"
-    description: str = (
+    description = (
         "Útil para iniciar un análisis profundo de la base de conocimiento de un usuario, "
         "permitiendo especificar los tipos de contenido (notas, documentos) y, opcionalmente, "
         "un tema o palabras clave para un análisis RAG altamente focalizado. Además, permite al usuario "

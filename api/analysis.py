@@ -24,9 +24,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_db() -> AsyncSession:
+from typing import AsyncGenerator
+
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session:
+    async with SessionLocal() as session: # type: ignore
         try:
             yield session
         finally:
@@ -40,7 +42,7 @@ async def list_all_user_documents(account_id: str, topic: Optional[str] = None):
     regular_docs = await list_user_documents(account_id)
     
     # Obtener documentos de GitHub
-    async with SessionLocal() as db:
+    async with SessionLocal() as db: # type: ignore
         query = select(GitHubDocument).where(GitHubDocument.account_id == uuid.UUID(account_id))
         result = await db.execute(query)
         github_docs = result.scalars().all()
@@ -143,8 +145,11 @@ async def delete_analysis_endpoint(
     task_uuid = uuid.UUID(req.task_id)
     
     task = await db.get(AnalysisTask, task_uuid)
-    if not task or task.account_id != account_uuid:
-        raise HTTPException(status_code=404, detail="Análisis no encontrado o no pertenece al usuario.")
+    if task is None:
+        raise HTTPException(status_code=404, detail="Análisis no encontrado.")
+    # Evitar comparación directa que puede causar error de tipo en Pylance
+    if str(task.account_id) != str(account_uuid):
+        raise HTTPException(status_code=404, detail="Análisis no pertenece al usuario.")
     
     await db.delete(task)
     await db.commit()
@@ -238,7 +243,7 @@ class AnalyzeDocumentRequest(BaseModel):
 
 async def run_document_analysis_and_save(task_id: str, account_id: str, file_name: str):
     """Función pesada que se ejecuta en segundo plano."""
-    async with SessionLocal() as db_session:
+    async with SessionLocal() as db_session: # type: ignore
         try:
             # 1. Marcar la tarea como 'processing'
             stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
@@ -325,7 +330,7 @@ async def run_collection_analysis_and_save(task_id: str, account_id: str, topic:
     """
     Obtiene todos los documentos de una colección, los analiza y guarda el resultado.
     """
-    async with SessionLocal() as db_session:
+    async with SessionLocal() as db_session: # type: ignore
         try:
             # Marcar la tarea como 'processing'
             await db_session.execute(update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing"))
@@ -395,16 +400,16 @@ async def update_semantic_topics_endpoint(
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db),
-    max_terms: Optional[int] = Form(default=15, ge=1, description="Número máximo de términos a analizar para el análisis semántico")
+    max_terms: Optional[int] = Form(None)
 ):
     """
-    Dispara manualmente el proceso de análisis semántico para agrupar temas por similitud.
-    Este proceso se ejecuta en segundo plano y actualiza los datos para el endpoint /api/dashboard-insights.
-    Opcionalmente, se puede limitar el número de términos analizados con max_terms.
+    Inicia un proceso en segundo plano para realizar análisis semántico y agrupación de temas.
+    Integración con modelos de embeddings y LLMs para clustering y etiquetado.
+    Se puede limitar el número de términos analizados con max_terms.
+    Ahora incluye detalles de los temas individuales agrupados.
     """
-    account_uuid = uuid.UUID(current_account_id)
     new_task = AnalysisTask(
-        account_id=account_uuid,
+        account_id=uuid.UUID(current_account_id),
         file_name="Semantic Topic Analysis",
         status="pending"
     )
@@ -412,25 +417,24 @@ async def update_semantic_topics_endpoint(
     await db.commit()
     await db.refresh(new_task)
     
-    logger.info(f"Iniciando tarea de análisis semántico con ID {str(new_task.id)} para la cuenta {current_account_id} con límite de {max_terms if max_terms else 'todos'} términos")
     background_tasks.add_task(run_semantic_topic_analysis, str(new_task.id), current_account_id, max_terms)
     
-    return {"task_id": str(new_task.id), "message": f"Análisis semántico iniciado en segundo plano con límite de {max_terms if max_terms else 'todos los'} términos."}
+    return {"task_id": str(new_task.id)}
 
 async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: Optional[int] = None):
     """
     Proceso en segundo plano para realizar análisis semántico y agrupación de temas.
     Integración con modelos de embeddings y LLMs para clustering y etiquetado.
     Se puede limitar el número de términos analizados con max_terms.
+    Ahora incluye detalles de los temas individuales agrupados.
     """
-    async with SessionLocal() as db_session:
+    async with SessionLocal() as db_session: #type: ignore
         try:
             # Marcar la tarea como 'processing' y notificar al usuario
             stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
             await db_session.execute(stmt_processing)
             await db_session.commit()
             logger.info(f"Iniciando análisis semántico para tarea {task_id} para la cuenta {account_id}...")
-            # Aquí se podría enviar una notificación de inicio a través de un WebSocket o similar
 
             # 1. Obtener todos los temas de análisis previos
             analysis_stmt = select(AnalysisTask.result_payload).where(
@@ -444,30 +448,28 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
             all_topics_raw = []
             for payload in analysis_payloads:
                 if isinstance(payload, dict):
+                    # Asumimos que 'temas_clave_avanzados' es la fuente de temas individuales
                     all_topics_raw.extend(payload.get("temas_clave_avanzados", []))
             
-            # Conteo eficiente de temas y selección de temas únicos
             topic_counts = Counter(all_topics_raw)
-            # Ordenar por frecuencia y luego tomar los únicos, si hay límite
+            
             if max_terms is not None:
-                # Tomar los 'max_terms' temas más comunes
                 unique_topics = [topic for topic, count in topic_counts.most_common(max_terms)]
                 logger.info(f"Limitando análisis semántico a {max_terms} términos más frecuentes de un total de {len(all_topics_raw)}.")
             else:
-                unique_topics = list(topic_counts.keys()) # Todos los temas únicos
+                unique_topics = list(topic_counts.keys())
                 logger.info(f"Procesando {len(unique_topics)} temas únicos para análisis semántico sin límite.")
 
-            # Si no hay temas únicos para procesar, salir temprano
             if not unique_topics:
                 logger.info(f"No hay temas únicos para procesar en la tarea {task_id}. Completando sin resultados.")
                 stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-                    status="completed", result_payload={"grouped_topics": []})
+                    status="completed", result_payload={"grouped_topics": [], "detailed_clusters": []})
                 await db_session.execute(stmt_completed)
                 await db_session.commit()
                 return
 
             # 2. Integrar el MODELO DE EMBEDDINGS dedicado (Ollama en este caso)
-            embedding_model = await initialize_embeddings() # ¡Usamos tu función existente!
+            embedding_model = await initialize_embeddings()
             if not embedding_model:
                 logger.error("No hay modelo de embeddings disponible (Ollama).")
                 raise ValueError("Modelo de embeddings no disponible para análisis semántico.")
@@ -475,7 +477,6 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
             embeddings = []
             try:
                 logger.info(f"Generando embeddings para {len(unique_topics)} temas de forma batch...")
-                # Usar el método de batching del modelo de embeddings
                 embeddings = await embedding_model.aembed_documents(unique_topics)
                 logger.info(f"Embeddings generados exitosamente para {len(embeddings)} temas.")
             except Exception as e:
@@ -484,42 +485,40 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
 
             if not embeddings:
                 logger.info("No se generaron embeddings, saltando clustering y agrupación.")
-                simulated_grouped_topics = [] # No hay temas para agrupar
+                simulated_grouped_topics = []
+                detailed_clusters_data = [] # También vacío si no hay embeddings
             else:
-                # 3. Implementar clustering (e.g., K-Means) para agrupar temas por similitud semántica
-                # Asegurarse de que haya suficientes muestras para el número de clusters deseado
-                # Un mínimo de 2 clusters si hay al menos 2 embeddings, o 1 si solo hay 1.
+                # 3. Implementar clustering (e.g., K-Means)
                 n_clusters = min(5, max(1, len(embeddings) // 2 + 1)) 
-                if len(embeddings) < n_clusters: # Si hay menos embeddings que clusters deseados, ajustar
+                if len(embeddings) < n_clusters:
                     n_clusters = len(embeddings)
                 
                 clusters = []
-                if n_clusters > 1: # Solo ejecutar KMeans si hay al menos 2 clusters posibles
-                    # n_init='auto' es el valor por defecto en versiones recientes de scikit-learn
-                    # para asegurar múltiples inicializaciones y un mejor resultado.
-                    # Si usas una versión antigua, podrías necesitar n_init=10.
+                if n_clusters > 1:
                     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init='auto') 
                     clusters = kmeans.fit_predict(np.array(embeddings))
                 else:
-                    # Si solo hay 0 o 1 cluster posible, asignar todos al mismo cluster (o a su propio cluster si es 1)
                     clusters = [0] * len(unique_topics) if len(unique_topics) > 0 else []
 
-                # 4. Agrupar temas por cluster y contar menciones (usando topic_counts precalculado)
+                # 4. Agrupar temas por cluster y contar menciones
                 cluster_dict = {}
+                # Nueva lista para almacenar los detalles de cada tema y su cluster
+                detailed_clusters_data = [] 
+
                 for i, topic in enumerate(unique_topics):
-                    if len(clusters) == 0: # Manejar el caso donde no hay clusters (ej. 0 o 1 tema)
-                        cluster_id = 0 
-                    else:
-                        cluster_id = clusters[i]
+                    cluster_id = clusters[i] if len(clusters) > 0 else 0 # Asegurar cluster_id incluso si clusters está vacío
                     
                     if cluster_id not in cluster_dict:
-                        cluster_dict[cluster_id] = {"topics": [], "mentions": 0}
+                        cluster_dict[cluster_id] = {"topics": [], "mentions": 0, "id": cluster_id} # Añadir id del cluster
                     cluster_dict[cluster_id]["topics"].append(topic)
-                    cluster_dict[cluster_id]["mentions"] += topic_counts[topic] # Usar el conteo pre-calculado
+                    cluster_dict[cluster_id]["mentions"] += topic_counts[topic]
+
+                    # Capturar el detalle de cada tema único y su asignación de cluster
+                    detailed_clusters_data.append({"term": topic, "cluster_id": int(cluster_id), "mentions": int(topic_counts[topic])})
 
                 # 5. Generar un término representativo para cada cluster usando el LLM generativo
                 grouped_topics = []
-                llm_for_summarization = get_fast_llm() # Este sí es tu LLM generativo
+                llm_for_summarization = get_fast_llm()
                 if not llm_for_summarization:
                     logger.error("No hay LLM generativo disponible para generar términos representativos.")
                     raise ValueError("LLM generativo no disponible para generación de términos representativos.")
@@ -528,10 +527,8 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
 
                 for cluster_id, data in cluster_dict.items():
                     try:
-                        # Limitar a más temas para dar mejor contexto al LLM, si el context window lo permite
-                        # Asegurarse de que topics_for_prompt no esté vacío
                         topics_for_prompt = ", ".join(data["topics"][:15]) 
-                        if not topics_for_prompt: # Si no hay temas en el cluster, usar un fallback
+                        if not topics_for_prompt:
                             representative_term = f"Grupo {cluster_id + 1}"
                         else:
                             prompt = (
@@ -545,48 +542,51 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
                             representative_term = response.content.strip()
                             logger.info(f"Término representativo generado para cluster {cluster_id}: {representative_term}")
                             
-                            # Post-procesamiento para asegurar que sea solo el término
                             if "Ejemplo:" in representative_term:
                                 representative_term = representative_term.split("Ejemplo:")[0].strip()
                             if ":" in representative_term:
                                 representative_term = representative_term.split(":")[-1].strip()
-                            # Si es demasiado largo o contiene saltos de línea inesperados, truncar o limpiar
                             representative_term = representative_term.replace('\n', ' ').replace('\r', '').strip()
                             if len(representative_term.split()) > 3: 
                                 representative_term = " ".join(representative_term.split()[:3])
-                            if not representative_term: # Si el post-procesamiento lo deja vacío
+                            if not representative_term:
                                 representative_term = f"Grupo {cluster_id + 1}"
 
                     except Exception as e:
                         logger.error(f"Error al generar término representativo para cluster {cluster_id}: {e}", exc_info=True)
                         representative_term = f"Grupo {cluster_id + 1}"
-                    grouped_topics.append({"topic": representative_term, "mentions": data["mentions"]})
+                    
+                    # Añadir el ID del cluster al grupo final para poder vincularlo con detailed_clusters
+                    grouped_topics.append({"topic": representative_term, "mentions": int(data["mentions"]), "cluster_id": int(cluster_id)})
 
                 # Ordenar por menciones descendentes y limitar a los 10 principales
                 simulated_grouped_topics = sorted(grouped_topics, key=lambda x: x["mentions"], reverse=True)[:10]
 
-            # 4. Guardar el resultado y marcar como 'completed'
+            # 6. Guardar el resultado y marcar como 'completed'
+            # El payload ahora incluye 'detailed_clusters'
             stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-                status="completed", result_payload={"grouped_topics": simulated_grouped_topics})
+                status="completed", 
+                result_payload={
+                    "grouped_topics": simulated_grouped_topics,
+                    "detailed_clusters": detailed_clusters_data # ¡Nueva información aquí!
+                }
+            )
             await db_session.execute(stmt_completed)
             await db_session.commit()
-            logger.info(f"Análisis semántico para tarea {task_id} completado con {len(simulated_grouped_topics)} grupos de temas.")
-            # Aquí se podría enviar una notificación de finalización a través de un WebSocket o similar
+            logger.info(f"Análisis semántico para tarea {task_id} completado con {len(simulated_grouped_topics)} grupos de temas y {len(detailed_clusters_data)} temas detallados.")
         except Exception as e:
             logger.error(f"Fallo en tarea de análisis semántico {task_id}: {e}", exc_info=True)
             stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 status="failed", error_message=str(e))
             await db_session.execute(stmt_failed)
             await db_session.commit()
-            # Aquí se podría enviar una notificación de error a través de un WebSocket o similar
-            # Aquí se podría enviar una notificación de error a través de un WebSocket o similar
 
 class AnalyzeCodeRequest(BaseModel):
     repo_name: str
 
 async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: str):
     """Función pesada que se ejecuta en segundo plano para análisis de código."""
-    async with SessionLocal() as db_session:
+    async with SessionLocal() as db_session: # type: ignore
         try:
             # 1. Marcar la tarea como 'processing'
             stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")

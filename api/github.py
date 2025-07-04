@@ -204,6 +204,9 @@ async def get_vectorization_result_endpoint(
         if not task or str(task.account_id) != current_account_id:
             raise HTTPException(status_code=404, detail="Tarea no encontrada o no pertenece al usuario.")
         return {"status": task.status, "result": task.result_payload, "error": task.error_message}
+    except HTTPException:
+        # Re-raise HTTPExceptions (like 404) without modification
+        raise
     except Exception as e:
         logger.error(f"Error al obtener resultado de vectorización para task_id: {task_id}: {str(e)}", exc_info=True)
         raise HTTPException(

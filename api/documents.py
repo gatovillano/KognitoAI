@@ -32,7 +32,8 @@ async def get_db() -> AsyncSession:
 async def upload_document_endpoint(
     current_account_id: str = Depends(get_current_account_id),
     files: List[UploadFile] = File(...),
-    topic: str = Form(...)  # El topic se recibe correctamente aquí
+    topic: str = Form(...),
+    workspace_id: Optional[str] = Form(None)  # Añadir parámetro para workspace_id
 ):
     account_id_uuid = uuid.UUID(current_account_id)
     processed_files = 0
@@ -49,7 +50,8 @@ async def upload_document_endpoint(
                 file_name=file.filename,
                 extracted_text=extracted_text,
                 topic=topic,
-                metadata={"original_filename": file.filename}
+                metadata={"original_filename": file.filename},
+                workspace_id=workspace_id  # Pasar workspace_id a la función
             )
             processed_files += 1
         except Exception as e:
@@ -303,15 +305,18 @@ async def delete_collection_endpoint(
     """
     try:
         from core.memory_manager import delete_collection
-        
+
         success = await delete_collection(
             account_id=current_account_id,
             topic_name=request.topic
         )
         if not success:
             raise HTTPException(status_code=404, detail=f"La colección '{request.topic}' no se encontró o ya fue eliminada.")
-        
+
         return {"message": f"Colección '{request.topic}' y todos sus documentos han sido eliminados."}
+    except HTTPException:
+        # Re-raise HTTPExceptions (like 404) without modification
+        raise
     except Exception as e:
         logger.error(f"Error al eliminar la colección '{request.topic}' para la cuenta {current_account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error al eliminar la colección.")

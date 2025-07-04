@@ -1,11 +1,16 @@
 // En: src/app/(dashboard)/rag/analysis-result-dialog.tsx
 'use client';
 
+import { useState } from 'react';
+
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
+import { Expand, HelpCircle } from 'lucide-react';
+import { QuestionSliderDialog } from '@/components/QuestionSliderDialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { type Document } from './columns'; // Importamos el tipo
@@ -18,6 +23,8 @@ interface AnalysisResultDialogProps {
 }
 
 export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange }: AnalysisResultDialogProps) {
+  const [isQuestionsDialogOpen, setIsQuestionsDialogOpen] = useState(false);
+
   if (!analysis) return null;
 
   // Log the analysis object for debugging
@@ -41,6 +48,7 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
   };
 
   return (
+    <>
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
@@ -94,14 +102,36 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                     </ul>
                 </div>
                 <div>
-                    <h3 className="font-semibold mb-2">Problemas Potenciales o Preguntas para Explorar</h3>
-                    <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                        {Array.isArray(mappedAnalysis.preguntas_para_explorar) && mappedAnalysis.preguntas_para_explorar.length > 0 ? (
-                            mappedAnalysis.preguntas_para_explorar.map((question: string, i: number) => <li key={i}>{question}</li>)
-                        ) : (
-                            <li className="text-sm text-muted-foreground">No hay preguntas para explorar disponibles.</li>
-                        )}
-                    </ul>
+                    <h3 className="font-semibold mb-4">Problemas Potenciales o Preguntas para Explorar</h3>
+                    {Array.isArray(mappedAnalysis.preguntas_para_explorar) && mappedAnalysis.preguntas_para_explorar.length > 0 ? (
+                      <Card
+                        className="cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-300 border-2 hover:border-primary/20 group"
+                        onClick={() => setIsQuestionsDialogOpen(true)}
+                      >
+                        <CardContent className="p-4">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <HelpCircle className="h-5 w-5 text-primary" />
+                              <span className="font-medium text-sm">
+                                {mappedAnalysis.preguntas_para_explorar.length} pregunta{mappedAnalysis.preguntas_para_explorar.length !== 1 ? 's' : ''} para explorar
+                              </span>
+                            </div>
+                            <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                              <Expand className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                          </div>
+                          <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">
+                            {mappedAnalysis.preguntas_para_explorar[0]}
+                          </p>
+                          <div className="mt-3 text-xs text-primary/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1">
+                            <Expand className="h-3 w-3" />
+                            Haz clic para ver todas las preguntas
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No hay preguntas para explorar disponibles.</p>
+                    )}
                 </div>
                 <div>
                     <h3 className="font-semibold mb-2">Recomendaciones</h3>
@@ -140,5 +170,14 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Diálogo para mostrar las preguntas para explorar en grande */}
+    <QuestionSliderDialog
+      isOpen={isQuestionsDialogOpen}
+      onOpenChange={setIsQuestionsDialogOpen}
+      questions={mappedAnalysis.preguntas_para_explorar || []}
+      title="Preguntas para Explorar"
+    />
+  </>
   );
 }

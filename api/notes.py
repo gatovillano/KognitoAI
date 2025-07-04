@@ -84,13 +84,22 @@ async def add_note_endpoint(note: NoteRequest, current_account_id: str = Depends
     # Devolvemos la nota creada para poder añadirla al estado del frontend sin re-fetchear
     return new_note 
 
-class NoteUpdateRequest(NoteRequest):
+class NoteUpdateRequest(BaseModel):
     note_id: int
+    title: Optional[str] = None
+    content: Optional[str] = None
+    category: Optional[str] = None
 
 @router.post("/update-note")
 async def update_note_endpoint(note: NoteUpdateRequest, current_account_id: str = Depends(get_current_account_id)):
     """Actualiza una nota existente del usuario. Protegido por JWT."""
-    result_message = await update_note(current_account_id, note.note_id, note.title, note.content, note.category)
+    result_message = await update_note(
+        account_id=current_account_id, 
+        note_id=note.note_id, 
+        new_title=note.title, 
+        new_content=note.content, 
+        new_category=note.category
+    )
     return {"message": result_message}
 
 class NoteDeleteRequest(BaseModel):

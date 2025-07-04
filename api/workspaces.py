@@ -4,6 +4,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
+from urllib.parse import unquote
 
 from fastapi import File, UploadFile
 
@@ -19,7 +20,7 @@ from core.agent import create_thread_for_account, force_update_thread_title
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain_core.messages import HumanMessage, AIMessage
 from core.config import settings
-from core.memory_manager import list_user_collections, process_document_for_rag
+from core.memory_manager import list_user_collections, process_document_for_rag, list_user_documents
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -113,7 +114,48 @@ class CollectionCreateRequest(BaseModel):
 class DocumentToCollectionRequest(BaseModel):
     document_id: str
 
+class DocumentResponse(BaseModel):
+    file_name: str
+    topic: Optional[str] = None
+    title: Optional[str] = None
+    author: Optional[str] = None
+    document_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    team_id: Optional[str] = None
+
 # --- Endpoints para Colecciones ---
+@router.get("/workspaces/{workspace_id}/collections/{collection_id}", response_model=CollectionResponse, summary="Obtener detalles de una colección de un workspace")
+async def get_collection_details(workspace_id: str, collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado o no pertenece al usuario.")
+    
+    decoded_collection_id = unquote(collection_id)
+    
+    # Lógica más robusta para encontrar la colección
+    collections = await list_user_collections(account_id=current_account_id, workspace_id=workspace_id)
+    logger.info(f"Buscando colección '{decoded_collection_id}' en {len(collections)} colecciones del workspace.")
+    
+    collection = None
+    for c in collections:
+        if c.get('topic') == decoded_collection_id:
+            collection = c
+            break
+            
+    if not collection:
+        logger.warning(f"Colección '{decoded_collection_id}' no encontrada. Colecciones disponibles: {[c.get('topic') for c in collections]}")
+        raise HTTPException(status_code=404, detail=f"Colección '{decoded_collection_id}' no encontrada en este workspace.")
+        
+    return CollectionResponse(id=collection['topic'], name=collection['topic'], document_count=collection['document_count'])
+
+@router.get("/workspaces/{workspace_id}/collections/{collection_id}/documents", response_model=List[DocumentResponse], summary="Listar documentos de una colección de un workspace")
+async def list_collection_documents(workspace_id: str, collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado o no pertenece al usuario.")
+    
+    documents = await list_user_documents(account_id=current_account_id, workspace_id=workspace_id, topic=collection_id)
+    return [DocumentResponse(**doc) for doc in documents]
 @router.get("/workspaces/{workspace_id}/collections", response_model=List[CollectionResponse], summary="Listar colecciones de un workspace")
 async def list_collections(workspace_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
     workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
@@ -134,6 +176,20 @@ async def create_collection(workspace_id: str, request: CollectionCreateRequest,
     # O simplemente para validar que el nombre es válido.
     # Por ahora, solo devolvemos un mensaje de éxito.
     return {"message": f"Colección '{request.topic}' lista para ser usada en el workspace."}
+
+@router.post("/workspaces/{workspace_id}/collections/{collection_id}/associate", status_code=status.HTTP_200_OK, summary="Asociar una colección existente a un workspace")
+async def associate_collection_to_workspace(workspace_id: str, collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    from core.memory_manager import update_collection_workspace
+    workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado o no pertenece al usuario.")
+    
+    decoded_collection_id = unquote(collection_id)
+    success = await update_collection_workspace(current_account_id, decoded_collection_id, workspace_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Colección no encontrada o no se pudo asociar al workspace.")
+    
+    return {"message": f"Colección '{decoded_collection_id}' asociada al workspace con éxito.", "id": decoded_collection_id, "workspace_id": workspace_id}
 
 @router.post("/workspaces/{workspace_id}/collections/{topic}/documents", status_code=status.HTTP_201_CREATED, summary="Añadir un documento a una colección de un workspace")
 async def add_document_to_collection(workspace_id: str, topic: str, request: DocumentToCollectionRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):

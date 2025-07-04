@@ -32,14 +32,14 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 
 logger = logging.getLogger(__name__)
-
+logging.getLogger("langchain_community.vectorstores.pgvector").setLevel(logging.DEBUG)
 # --- MODELOS SINGLETON ---
-_nlp_model: Optional[spacy.Language] = None
-_keybert_model: Optional[KeyBERT] = None
+_nlp_model: Optional["spacy.language.Language"] = None
+_keybert_model: KeyBERT | None = None
 _gemini_model: Optional[ChatGoogleGenerativeAI] = None
 _embedding_model: Optional[Embeddings] = None
 
-async def get_nlp_model() -> spacy.Language:
+async def get_nlp_model() -> "spacy.language.Language":
     """Carga y devuelve el modelo spaCy para NER, inicializándolo solo una vez."""
     global _nlp_model
     if _nlp_model is None:
@@ -52,11 +52,13 @@ async def get_nlp_model() -> spacy.Language:
         
         try:
             _nlp_model = await loop.run_in_executor(None, lambda: spacy.load("en_core_web_sm"))
+            if _nlp_model is None:
+                raise ValueError("Failed to load spaCy model")
             logger.info("Modelo spaCy cargado.")
         except Exception as e:
             logger.error(f"Error al cargar el modelo spaCy 'en_core_web_sm': {e}", exc_info=True)
             raise
-    return _nlp_model
+    return _nlp_model  # type: ignore
 
 async def get_keybert_model_instance() -> KeyBERT:
     """Carga y devuelve el modelo KeyBERT, inicializándolo solo una vez."""
@@ -70,6 +72,7 @@ async def get_keybert_model_instance() -> KeyBERT:
             asyncio.set_event_loop(loop)
         _keybert_model = await loop.run_in_executor(None, lambda: KeyBERT("all-MiniLM-L6-v2"))
         logger.info("Modelo KeyBERT cargado.")
+    assert _keybert_model is not None
     return _keybert_model
 
 async def get_gemini_model() -> ChatGoogleGenerativeAI:
@@ -159,7 +162,7 @@ async def analyze_relationship_with_llm(item_a: Dict[str, Any], item_b: Dict[str
         return None
 
     prompt = f"""
-    Eres un analista experto. Analiza la relación entre dos documentos de manera objetiva y considera todas las posibles relaciones sin sesgo hacia ninguna en particular.
+    Eres un analista de relaciones de conocimientos en ideas innovadoras experto. Analiza la relación entre dos documentos de manera objetiva y considera todas las posibles relaciones sin sesgo hacia ninguna en particular.
 
     --- {item_a.get('title', 'Documento 1')} ---
     Tipo: {item_a.get('type')}
@@ -188,9 +191,13 @@ async def analyze_relationship_with_llm(item_a: Dict[str, Any], item_b: Dict[str
     """
     try:
         response = await llm.ainvoke([HumanMessage(content=prompt)])
-        content = response.content.strip()
-        if content.startswith("```json"):
-            content = content[7:-3].strip()
+        content = response.content
+        if isinstance(content, str):
+            content = content.strip()
+            if content.startswith("```json"):
+                content = content[7:-3].strip()
+        else:
+            content = str(content)
         analysis_result = json.loads(content)
         return analysis_result
     except Exception as e:
@@ -206,7 +213,7 @@ async def interpret_user_request_for_analysis(user_query: str) -> Dict[str, Any]
 
     # Prompt de "tool calling" o "function calling"
     prompt = f"""
-    Eres un asistente inteligente que interpreta las peticiones de un usuario para activar una herramienta de análisis de conocimiento.
+    Eres un investigador experto en la área de análisis de conocimiento. Interpreta las peticiones de un usuario para activar una herramienta de análisis de conocimiento.
     Tu tarea es analizar la siguiente petición del usuario y determinar la acción a realizar y los parámetros necesarios.
 
     Petición del usuario: "{user_query}"
@@ -231,9 +238,13 @@ async def interpret_user_request_for_analysis(user_query: str) -> Dict[str, Any]
 
     try:
         response = await llm.ainvoke([HumanMessage(content=prompt)])
-        content = response.content.strip()
-        if content.startswith("```json"):
-            content = content[7:-3].strip()
+        content = response.content
+        if isinstance(content, str):
+            content = content.strip()
+            if content.startswith("```json"):
+                content = content[7:-3].strip()
+        else:
+            content = str(content)
         structured_response = json.loads(content)
         return structured_response
     except (json.JSONDecodeError, Exception) as e:
@@ -259,10 +270,10 @@ async def summarize_text(text: str, max_length: int = 130) -> str:
         response = await gemini_model.ainvoke([HumanMessage(content=prompt)])
         summary = response.content
         
-        if len(summary) > max_length:
+        if isinstance(summary, str) and len(summary) > max_length:
             summary = summary[:max_length] + "..."
         
-        return summary
+        return summary if isinstance(summary, str) else str(summary)
     except Exception as e:
         logger.warning(f"Error resumiendo texto: {e}. Volviendo a texto truncado.", exc_info=True)
         return text[:max_length] + "..." if len(text) > max_length else text

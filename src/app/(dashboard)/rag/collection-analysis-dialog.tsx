@@ -6,6 +6,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
+import { Expand, HelpCircle } from 'lucide-react';
+import { QuestionSliderDialog } from '@/components/QuestionSliderDialog';
 
 interface CollectionAnalysisProps {
   analysis: any;
@@ -19,6 +22,7 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
   const [selectedTheme, setSelectedTheme] = useState<any>(null);
   const [isConnectionDialogOpen, setIsConnectionDialogOpen] = useState(false);
   const [isThemeDialogOpen, setIsThemeDialogOpen] = useState(false);
+  const [isKnowledgeGapsDialogOpen, setIsKnowledgeGapsDialogOpen] = useState(false);
 
   if (!analysis) return null;
 
@@ -99,10 +103,36 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
                       </div>
                   </div>
                    <div>
-                      <h3 className="font-semibold mb-2">Brechas de Conocimiento</h3>
-                      <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                         {mappedAnalysis.brechas_conocimiento?.map((gap: string, i: number) => <li key={i}>{gap}</li>)}
-                      </ul>
+                      <h3 className="font-semibold mb-4">Brechas de Conocimiento</h3>
+                      {mappedAnalysis.brechas_conocimiento && mappedAnalysis.brechas_conocimiento.length > 0 ? (
+                        <Card
+                          className="cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-300 border-2 hover:border-primary/20 group"
+                          onClick={() => setIsKnowledgeGapsDialogOpen(true)}
+                        >
+                          <CardContent className="p-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <HelpCircle className="h-5 w-5 text-primary" />
+                                <span className="font-medium text-sm">
+                                  {mappedAnalysis.brechas_conocimiento.length} pregunta{mappedAnalysis.brechas_conocimiento.length !== 1 ? 's' : ''} para explorar
+                                </span>
+                              </div>
+                              <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                <Expand className="h-4 w-4 text-muted-foreground" />
+                              </div>
+                            </div>
+                            <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">
+                              {mappedAnalysis.brechas_conocimiento[0]}
+                            </p>
+                            <div className="mt-3 text-xs text-primary/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1">
+                              <Expand className="h-3 w-3" />
+                              Haz clic para ver todas las preguntas
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No hay brechas de conocimiento identificadas.</p>
+                      )}
                   </div>
               </div>
           </ScrollArea>
@@ -160,6 +190,14 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Diálogo para mostrar las brechas de conocimiento en grande */}
+      <QuestionSliderDialog
+        isOpen={isKnowledgeGapsDialogOpen}
+        onOpenChange={setIsKnowledgeGapsDialogOpen}
+        questions={mappedAnalysis.brechas_conocimiento || []}
+        title="Brechas de Conocimiento"
+      />
     </>
   );
 }

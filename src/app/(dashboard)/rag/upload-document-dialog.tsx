@@ -29,10 +29,11 @@ interface UploadDocumentDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onUploadSuccess: () => void;
-  defaultTopic?: string; // <-- NUEVA PROP OPCIONAL
+  defaultTopic?: string;
+  workspaceId?: string;
 }
 
-export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, defaultTopic }: UploadDocumentDialogProps) {
+export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, defaultTopic, workspaceId }: UploadDocumentDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
@@ -61,13 +62,20 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, de
     const topicForUpload = defaultTopic || values.topic || 'General';
     const formData = new FormData();
     formData.append('topic', topicForUpload);
+    if (workspaceId) {
+      formData.append('workspace_id', workspaceId);
+    }
     for (let i = 0; i < values.files.length; i++) {
       formData.append('files', values.files[i]);
     }
 
     toast.info('Subiendo documentos...', {
       description: `A la colección: ${topicForUpload}`,
+      duration: 0, // Mantener la notificación hasta que se actualice
+      id: 'upload-progress'
     });
+
+    onOpenChange(false); // Cerrar el diálogo inmediatamente para permitir interacción
 
     try {
       await apiClient.post('/api/upload-document', formData, {
@@ -75,13 +83,15 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, de
           'Content-Type': 'multipart/form-data',
         },
       });
-      toast.success('¡Documentos subidos con éxito!');
+      toast.success('¡Documentos subidos con éxito!', {
+        id: 'upload-progress'
+      });
       onUploadSuccess();
-      onOpenChange(false);
       form.reset();
     } catch (error) {
       toast.error('Error al subir documentos', {
         description: 'Por favor, inténtalo de nuevo.',
+        id: 'upload-progress'
       });
       console.error(error);
     } finally {
@@ -142,7 +152,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, de
                 {isSubmitting ? (
                   <>
                     <span className="absolute left-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                    Subiendo...
+                    <span className="pl-6">Subiendo...</span>
                   </>
                 ) : (
                   'Subir'

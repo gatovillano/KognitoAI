@@ -1,10 +1,10 @@
 // ChatMessage.tsx
 import React, { memo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Avatar } from '@/components/ui/avatar';
+
 import { ChatAvatar } from './ChatAvatar';
 import { Button } from '@/components/ui/button';
-import { Copy, Play, Loader2, Square, RefreshCw } from 'lucide-react';
+import { Copy, Play, Loader2, Pause, RefreshCw } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 
 interface Artifact {
@@ -22,6 +22,7 @@ interface ChatMessageProps {
   handlePlayAudio: (text: string, index: number) => void;
   isAudioLoading: boolean;
   playingMessageIndex: number | null;
+  isAudioPaused: boolean;
 }
 
 const ChatMessage: React.FC<ChatMessageProps> = memo(({
@@ -32,6 +33,7 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
   handlePlayAudio,
   isAudioLoading,
   playingMessageIndex,
+  isAudioPaused,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(msg.text);
@@ -54,16 +56,43 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
   return (
     <motion.div
       key={index}
-      initial={{ opacity: 0, y: 15 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: 'easeOut' }}
+      initial={{ opacity: 0, y: 20, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{
+        duration: 0.4,
+        ease: [0.25, 0.46, 0.45, 0.94],
+        type: "spring",
+        stiffness: 100,
+        damping: 15
+      }}
       className="group"
     >
       {msg.sender === 'user' ? (
         // Mensaje del usuario
-        <div className="flex flex-col items-end mb-6">
+        <motion.div
+          className="flex flex-col items-end mb-6"
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{
+            duration: 0.4,
+            ease: [0.25, 0.46, 0.45, 0.94],
+            type: "spring",
+            stiffness: 120,
+            damping: 20
+          }}
+        >
           <div className="flex items-start gap-3 max-w-[100%] mr-4" style={{ marginRight: '20px' }}>
-            <div className="text-white rounded-2xl px-4 py-2 shadow-sm" style={{ backgroundColor: '#2f3237', maxWidth: '800px' }}>
+            <motion.div
+              className="rounded-2xl px-4 py-3 shadow-sm bg-muted/80 backdrop-blur-sm text-foreground border border-border/30"
+              style={{ maxWidth: '800px' }}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{
+                duration: 0.3,
+                ease: "easeOut",
+                delay: 0.1
+              }}
+            >
               {isEditing ? (
                 <textarea
                   value={editedText}
@@ -96,12 +125,12 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
                   <span className="text-sm">{msg.document_url.split('/').pop() || 'Documento'}</span>
                 </div>
               )}
-            </div>
+            </motion.div>
             <ChatAvatar sender="user" />
           </div>
-          
+
           {/* Botones de acción */}
-          <div className="flex items-center gap-1 mt-2 mr-12 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-1 mt-0 mr-12 opacity-0 group-hover:opacity-100 transition-opacity">
             <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full" onClick={() => handleCopyMessage(msg.text)}>
               <Copy className="h-3 w-3" />
             </Button>
@@ -131,17 +160,34 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
               </>
             )}
           </div>
-        </div>
+        </motion.div>
       ) : (
         // Mensaje de la IA
-        <div className="flex flex-col mb-8">
+        <motion.div
+          className="flex flex-col mb-8"
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{
+            duration: 0.5,
+            ease: [0.25, 0.46, 0.45, 0.94],
+            delay: 0.1
+          }}
+        >
           <div className="flex items-start gap-3">
-            <ChatAvatar sender="ai" />
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-2">
+              <motion.div
+                className="flex items-center gap-2 mb-3"
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{
+                  duration: 0.3,
+                  ease: "easeOut",
+                  delay: 0.2
+                }}
+              >
                 <span className="font-semibold text-foreground">Kognito</span>
                 <span className="text-xs text-muted-foreground">AI Assistant</span>
-              </div>
+              </motion.div>
               
               <div className="py-2">
                 {isEditing ? (
@@ -188,7 +234,7 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
               </div>
               
               {/* Botones de acción */}
-              <div className="flex items-center gap-1 mt-2 ml-3 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="flex items-center gap-1 mt-0 ml-3 opacity-0 group-hover:opacity-100 transition-opacity">
                 <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full" onClick={() => handleCopyMessage(msg.text)}>
                   <Copy className="h-3 w-3" />
                 </Button>
@@ -199,13 +245,17 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
                   onClick={() => handlePlayAudio(msg.text, index)}
                   disabled={isAudioLoading && playingMessageIndex === index}
                 >
-                  {isAudioLoading && playingMessageIndex === index && (
+                  {isAudioLoading && playingMessageIndex === index ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : playingMessageIndex === index ? (
+                    isAudioPaused ? (
+                      <Play className="h-3 w-3" />
+                    ) : (
+                      <Pause className="h-3 w-3" />
+                    )
+                  ) : (
+                    <Play className="h-3 w-3" />
                   )}
-                  {playingMessageIndex === index && !isAudioLoading && (
-                    <Square className="h-3 w-3" />
-                  )}
-                  {playingMessageIndex !== index && <Play className="h-3 w-3" />}
                 </Button>
                 {isEditing ? (
                   <>
@@ -230,7 +280,7 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
               </div>
             </div>
           </div>
-        </div>
+        </motion.div>
       )}
     </motion.div>
   );

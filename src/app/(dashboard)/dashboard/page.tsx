@@ -8,11 +8,43 @@ import { Bar, BarChart, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recha
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
-import { InsightDetailDialog } from '@/components/InsightDetailDialog'; // Importamos el nuevo diálogo
+import { InsightDetailDialog } from '@/components/InsightDetailDialog';
 import { HelpCircle, Bot, Library, FileText, FolderKanban, Notebook, Calendar, Search, ScanSearch, BrainCircuit } from 'lucide-react';
 import Link from 'next/link';
+import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
+import { Button } from '@/components/ui/button';
+import { QuestionSlider } from '@/components/QuestionSlider';
+import { CustomChartTooltip } from '@/components/CustomChartTooltip';
+import { TopicGroupDialog } from '@/components/TopicGroupDialog';
+import { DashboardHelpCarousel } from '@/components/DashboardHelpCarousel';
+import { WelcomeDialog } from '@/components/WelcomeDialog';
 
 // Tipos para los datos que esperamos de la API
+const CustomYAxisTick = (props: any) => {
+  const { x, y, payload } = props;
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <foreignObject x={-200} y={-12} width={195} height={24}>
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            textAlign: 'right',
+            paddingRight: '5px',
+            fontSize: '16px',
+            color: 'hsl(var(--foreground))'
+          }}
+        >
+          <InlineMarkdownRenderer content={payload.value} />
+        </div>
+      </foreignObject>
+    </g>
+  );
+};
+
 interface DashboardData {
   key_topics: { topic: string; mentions: number }[];
   proactive_insights: Insight[];
@@ -32,25 +64,32 @@ interface Insight {
   created_at: string, 
   related_items: any[];
   action_suggestion?: string;
+  synthetic_name?: string; // Nuevo campo para el nombre sintético
 }
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [viewingInsight, setViewingInsight] = useState<Insight | null>(null);
-
   const [analysisData, setAnalysisData] = useState<AnalysisData[]>([]);
+  const [isWelcomeDialogOpen, setIsWelcomeDialogOpen] = useState(false);
 
   useEffect(() => {
     const fetchInsights = async () => {
       setIsLoading(true);
       try {
         const [insightsResponse, analysesResponse] = await Promise.all([
-          apiClient.post('/api/dashboard-insights', { all: false }), // Pedir solo los insights para el dashboard
+          apiClient.post('/api/dashboard-insights', { all: false }),
           apiClient.post('/api/get-saved-analyses', { all: true })
         ]);
         setData(insightsResponse.data);
         setAnalysisData(analysesResponse.data);
+
+        const hasVisited = localStorage.getItem('hasVisitedDashboard');
+        if (!hasVisited) {
+          setIsWelcomeDialogOpen(true);
+          localStorage.setItem('hasVisitedDashboard', 'true');
+        }
       } catch (error) {
         toast.error('No se pudieron cargar los datos del dashboard.');
         console.error("Dashboard fetch error:", error);
@@ -64,13 +103,13 @@ export default function DashboardPage() {
   const getInsightIcon = (type: string) => {
     switch (type.toLowerCase()) {
       case 'pattern':
-        return <Bot className="h-5 w-5 text-cyan-600" />;
+        return <Bot className="h-5 w-5 text-primary" />;
       case 'connection':
-        return <Library className="h-5 w-5 text-cyan-600" />;
+        return <Library className="h-5 w-5 text-primary" />;
       case 'project':
-        return <FolderKanban className="h-5 w-5 text-cyan-600" />;
+        return <FolderKanban className="h-5 w-5 text-primary" />;
       default:
-        return <FileText className="h-5 w-5 text-cyan-600" />;
+        return <FileText className="h-5 w-5 text-primary" />;
     }
   };
 
@@ -86,48 +125,41 @@ export default function DashboardPage() {
 
   return (
     <>
-      <div className="p-6 space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold">Dashboard de Insights</h1>
-          <p className="text-muted-foreground">Kognito está encontrando patrones y conexiones en tu conocimiento.</p>
+      <div className="p-8 mx-4 space-y-8">
+        {/* Header moderno */}
+        <div className="spacing-component">
+          <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
+            Dashboard de Insights
+          </h1>
+          <p className="typography-body-large text-muted-foreground max-w-2xl">
+            Kognito está encontrando patrones y conexiones en tu conocimiento de forma inteligente.
+          </p>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid gap-8 lg:grid-cols-2 px-2">
           {/* Gráfico de Temas Principales */}
-          <Card className="rounded-3xl backdrop-blur-xl bg-card/80 border-0 shadow-xl">
-            <CardHeader>
-              <CardTitle>Temas Principales</CardTitle>
-              <CardDescription className="space-y-1">
-                <span>Tópicos más frecuentes en tu base de conocimiento.</span>
-                <div className="text-xs text-muted-foreground/70 bg-muted/20 px-2 py-1 rounded-full inline-block mt-2">
-                  💡 Nota: Actualmente no agrupados por similitud semántica
+          <Card className="modern-card border-0 shadow-medium hover:shadow-strong transition-all duration-300">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-2xl font-bold flex items-center gap-3 mb-3">
+                <div className="w-3 h-3 rounded-full bg-primary"></div>
+                Temas Principales
+              </CardTitle>
+              <CardDescription className="space-y-2">
+                <span className="text-base">Tópicos más frecuentes en tu base de conocimiento.</span>
+                <div className="text-xs text-muted-foreground bg-primary/10 px-3 py-1.5 rounded-full inline-block border border-primary/20">
+                  ✨ Agrupados por similitud semántica
                 </div>
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-6">
-              <div className="flex justify-end mb-4 space-x-2">
-                <input
-                  type="number"
-                  min="1"
-                  defaultValue="20"
-                  className="px-3 py-2 w-24 border-0 bg-muted/30 rounded-2xl text-sm focus:ring-2 focus:ring-primary/20 focus:bg-muted/50 transition-all"
-                  id="maxTermsInput"
-                  placeholder="Max términos"
-                />
-                <button 
-                  className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white rounded-2xl font-medium shadow-lg hover:shadow-xl transition-all duration-200 flex items-center gap-2"
+              <div className="flex justify-end mb-6 space-x-2">
+                <button
+                  className="px-6 py-3 gradient-primary text-white rounded-xl font-medium shadow-medium hover:shadow-strong transition-all duration-300 flex items-center gap-2 hover:scale-105"
                   onClick={async () => {
                     setIsLoading(true);
                     try {
-                      // Get the max terms value from input
-                      const maxTermsInput = document.getElementById('maxTermsInput') as HTMLInputElement;
-                      const maxTerms = maxTermsInput.value ? parseInt(maxTermsInput.value) : undefined;
-                      // Trigger semantic analysis process with optional max_terms parameter
-                      const formData = new FormData();
-                      if (maxTerms && maxTerms > 0) {
-                        formData.append('max_terms', maxTerms.toString());
-                      }
-                      const triggerResponse = await apiClient.post('/api/update-semantic-topics', formData);
+                      // Trigger semantic analysis process
+                      const triggerResponse = await apiClient.post('/api/update-semantic-topics');
                       const taskId = triggerResponse.data.task_id;
                       toast.info('Análisis semántico iniciado en segundo plano.', {
                         description: 'Recibirás una notificación cuando haya terminado.',
@@ -177,20 +209,15 @@ export default function DashboardPage() {
                 <BarChart data={data.key_topics} layout="vertical" margin={{ left: 10, right: 30, top: 30, bottom: 30 }}>
                   <defs>
                     <linearGradient id="barGradient" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0%" stopColor="#06b6d4" />
-                      <stop offset="100%" stopColor="#2563eb" />
+                      <stop offset="0%" stopColor="hsl(220 100% 60%)" />
+                      <stop offset="100%" stopColor="hsl(200 100% 50%)" />
                     </linearGradient>
                   </defs>
                   <XAxis type="number" hide />
-                  <YAxis dataKey="topic" type="category" stroke="hsl(var(--foreground))" fontSize={16} tickLine={false} axisLine={false} width={200} interval={0} tick={{ dy: 15 }} />
-                  <Tooltip 
-                    cursor={{ fill: 'hsl(var(--muted))' }} 
-                    contentStyle={{ 
-                      backgroundColor: 'hsl(var(--background))', 
-                      border: '1px solid hsl(var(--border))', 
-                      borderRadius: '12px',
-                      boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
-                    }} 
+                  <YAxis dataKey="topic" type="category" stroke="hsl(var(--foreground))" fontSize={16} tickLine={false} axisLine={false} width={200} interval={0} tick={<CustomYAxisTick />} />
+                  <Tooltip
+                    cursor={{ fill: 'hsl(var(--muted))' }}
+                    content={(props) => <CustomChartTooltip {...props} />}
                   />
                   <Bar dataKey="mentions" fill="url(#barGradient)" radius={[0, 8, 8, 0]} barSize={40} />
                 </BarChart>
@@ -198,62 +225,50 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          {/* Tarjeta de Ayuda */}
-          <Card className="rounded-3xl backdrop-blur-xl bg-card/80 border-0 shadow-xl">
-              <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><HelpCircle />Ayuda y Capacidades</CardTitle>
-                  <CardDescription>Descubre qué puedes pedirle a Kognito en el chat o desde la interfaz.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4 text-sm overflow-y-auto h-[350px] pr-2">
-                   <div>
-                      <p className="font-semibold flex items-center gap-2"><Notebook className="h-4 w-4" /> Gestión de Notas</p>
-                      <p className="text-muted-foreground pl-6">"Crea una nota sobre...", "muéstrame mis notas de trabajo", "edita la nota sobre la reunión".</p>
-                  </div>
-                   <div>
-                      <p className="font-semibold flex items-center gap-2"><Calendar className="h-4 w-4" /> Agenda</p>
-                      <p className="text-muted-foreground pl-6">"Agenda una reunión para mañana a las 3pm", "¿qué tengo para hoy?".</p>
-                  </div>
-                   <div>
-                      <p className="font-semibold flex items-center gap-2"><Search className="h-4 w-4" /> Búsqueda Web</p>
-                      <p className="text-muted-foreground pl-6">"Busca las últimas noticias sobre IA generativa", "¿cuál es la capital de Mongolia?".</p>
-                  </div>
-                   <div>
-                      <p className="font-semibold flex items-center gap-2"><ScanSearch className="h-4 w-4" /> Análisis de Conocimiento</p>
-                      <p className="text-muted-foreground pl-6">Activa esta herramienta en el chat para analizar profundamente tu base de conocimientos personal y obtener respuestas basadas en tus documentos y notas.</p>
-                  </div>
-                   <div>
-                      <p className="font-semibold flex items-center gap-2"><BrainCircuit className="h-4 w-4" /> Búsqueda y Análisis</p>
-                      <p className="text-muted-foreground pl-6">Utiliza esta herramienta en el chat para realizar investigaciones exhaustivas que combinan búsquedas en la web con tu base de conocimientos personal, proporcionando un análisis completo y detallado.</p>
-                  </div>
-              </CardContent>
+          {/* Carrusel de Ayuda */}
+          <Card className="modern-card border-0 shadow-medium hover:shadow-strong transition-all duration-300 h-full">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-2xl font-bold flex items-center gap-3 mb-2">
+                <div className="w-3 h-3 rounded-full bg-primary"></div>
+                <HelpCircle className="h-6 w-6 text-primary" />
+                Ayuda y Capacidades
+              </CardTitle>
+              <CardDescription className="text-lg">Un tour rápido por las funciones clave de Kognito.</CardDescription>
+            </CardHeader>
+            <CardContent className="p-0 h-[calc(100%-7rem)]">
+              <DashboardHelpCarousel />
+            </CardContent>
           </Card>
         </div>
 
         {/* Galería de Tarjetas de Insights */}
-        <div>
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-2xl font-bold">Descubrimientos Proactivos</h2>
-            <Link href="/dashboard/insights" className="text-sm font-medium text-cyan-600 hover:text-cyan-500 transition-colors">
+        <div className="spacing-section mt-16">
+          <div className="flex justify-between items-center spacing-component mb-10">
+            <h2 className="text-4xl font-bold tracking-tight">Descubrimientos Proactivos</h2>
+            <Link href="/dashboard/insights" className="typography-body-small font-medium text-primary hover:text-primary/80 transition-colors">
               Ver todo
             </Link>
           </div>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3 px-2">
             {data.proactive_insights.slice(0, 6).map(insight => ( // Limitar a 6 en el dashboard
-              <Card key={insight.id} className="rounded-3xl backdrop-blur-xl bg-card/80 border-0 shadow-xl hover:shadow-2xl transition-all duration-200 cursor-pointer hover:scale-105" onClick={() => setViewingInsight(insight)}>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
+              <Card key={insight.id} className="modern-card border-0 shadow-medium hover:shadow-strong transition-all duration-300 cursor-pointer hover:scale-105 group" onClick={() => setViewingInsight(insight)}>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-3">
+                     <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
                      {getInsightIcon(insight.type)}
-                     <CardTitle className="text-base">{insight.type.charAt(0).toUpperCase() + insight.type.slice(1)}</CardTitle>
+                     <CardTitle className="text-lg font-semibold group-hover:text-primary transition-colors">
+                       {insight.type.charAt(0).toUpperCase() + insight.type.slice(1)}
+                     </CardTitle>
                   </div>
                 </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground line-clamp-3 mb-3">{insight.summary}</p>
-                  <div className="text-xs space-y-1">
-                    <p className="font-semibold">Ítems Relacionados:</p>
+                <CardContent className="pt-0">
+                  <p className="text-sm text-muted-foreground line-clamp-3 mb-4 leading-relaxed">{insight.summary}</p>
+                  <div className="text-xs space-y-2">
+                    <p className="font-semibold text-foreground">Ítems Relacionados:</p>
                     {insight.related_items.slice(0, 2).map((item, idx) => (
-                      <p key={idx} className="flex items-center gap-1.5 text-muted-foreground truncate">
-                        <FileText className="h-3 w-3" />
-                        {item.title || item.reference}
+                      <p key={idx} className="flex items-center gap-2 text-muted-foreground truncate">
+                        <FileText className="h-3 w-3 text-primary/60" />
+                        <span className="truncate">{item.title || item.reference}</span>
                       </p>
                     ))}
                   </div>
@@ -267,51 +282,69 @@ export default function DashboardPage() {
         </div>
 
         {/* Nueva Sección para Preguntas de Análisis */}
-        <div>
-          <h2 className="text-2xl font-bold mb-4">Preguntas de Análisis</h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card className="rounded-3xl backdrop-blur-xl bg-card/80 border-0 shadow-xl">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <HelpCircle className="h-5 w-5 text-cyan-600" />
-                  Brechas de Conocimiento (Colecciones)
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {analysisData.filter(a => a.file_name.startsWith('Colección:')).length > 0 ? (
-                  <ul className="list-disc list-inside space-y-2 text-sm text-muted-foreground">
-                    {analysisData.filter(a => a.file_name.startsWith('Colección:')).flatMap(a => a.result_payload.brechas_conocimiento || []).slice(0, 5).map((gap, idx) => (
-                      <li key={idx}>{gap}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No hay brechas de conocimiento disponibles.</p>
-                )}
-              </CardContent>
-            </Card>
-            <Card className="rounded-3xl backdrop-blur-xl bg-card/80 border-0 shadow-xl">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <HelpCircle className="h-5 w-5 text-cyan-600" />
-                  Preguntas para Explorar (Documentos)
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {analysisData.filter(a => !a.file_name.startsWith('Colección:')).length > 0 ? (
-                  <ul className="list-disc list-inside space-y-2 text-sm text-muted-foreground">
-                    {analysisData.filter(a => !a.file_name.startsWith('Colección:')).flatMap(a => a.result_payload.preguntas_para_explorar || []).slice(0, 5).map((question, idx) => (
-                      <li key={idx}>{question}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No hay preguntas para explorar disponibles.</p>
-                )}
-              </CardContent>
-            </Card>
+        <div className="spacing-section mt-16">
+          <h2 className="text-4xl font-bold tracking-tight mb-10 bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
+            Preguntas de Análisis
+          </h2>
+          <div className="grid gap-6 md:grid-cols-2 px-2">
+            <QuestionSlider
+              title="Brechas de Conocimiento"
+              questions={analysisData
+                .filter(a => a.file_name.startsWith('Colección:'))
+                .flatMap(a => a.result_payload.emergent_knowledge_gaps || [])
+                .slice(0, 10)
+              }
+              icon={<Search className="h-5 w-5 text-primary" />}
+              emptyMessage="No hay brechas de conocimiento disponibles. Es posible que no se hayan cargado datos de análisis de colecciones."
+              onReload={async () => {
+                setIsLoading(true);
+                try {
+                  const analysesResponse = await apiClient.post('/api/get-saved-analyses', { all: true });
+                  setAnalysisData(analysesResponse.data);
+                  toast.success('Datos de análisis recargados.');
+                } catch (error) {
+                  toast.error('Error al recargar datos de análisis.');
+                  console.error("Reload analyses error:", error);
+                } finally {
+                  setIsLoading(false);
+                }
+              }}
+              isLoading={isLoading}
+              autoSlide={true}
+              slideInterval={5000}
+            />
+            <QuestionSlider
+              title="Preguntas para Explorar"
+              questions={analysisData
+                .filter(a => !a.file_name.startsWith('Colección:'))
+                .flatMap(a => a.result_payload.knowledge_gaps || [])
+                .slice(0, 10)
+              }
+              icon={<BrainCircuit className="h-5 w-5 text-primary" />}
+              emptyMessage="No hay preguntas para explorar disponibles. Es posible que no se hayan cargado datos de análisis de documentos individuales."
+              onReload={async () => {
+                setIsLoading(true);
+                try {
+                  const analysesResponse = await apiClient.post('/api/get-saved-analyses', { all: true });
+                  setAnalysisData(analysesResponse.data);
+                  toast.success('Datos de análisis recargados.');
+                } catch (error) {
+                  toast.error('Error al recargar datos de análisis.');
+                  console.error("Reload analyses error:", error);
+                } finally {
+                  setIsLoading(false);
+                }
+              }}
+              isLoading={isLoading}
+              autoSlide={true}
+              slideInterval={6000}
+            />
           </div>
         </div>
       </div>
       
+      <WelcomeDialog isOpen={isWelcomeDialogOpen} onOpenChange={setIsWelcomeDialogOpen} />
+
       {/* El diálogo para mostrar los detalles */}
       <InsightDetailDialog 
         isOpen={!!viewingInsight} 
