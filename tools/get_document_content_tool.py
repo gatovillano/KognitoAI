@@ -18,9 +18,9 @@ título adecuado en la paginación.
 
 import logging
 import asyncio
-from typing import Any, Type, Optional
+from typing import Any, Type, Optional, Union
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importaciones de la lógica de negocio y gestión de estado
@@ -51,12 +51,14 @@ class GetDocumentContentInput(BaseModel):
     )
     telegram_id: Optional[int] = Field(
         None,
-        description="El ID numérico original de Telegram del usuario. Es necesario para interactuar con sistemas de estado de sesión como `user_data`. Puede ser None si no aplica."
+        description="El ID numérico original de Telegram del usuario. Es necesario para interactuar con sistemas de estado de sesión como `user_data`. Puede ser None si no aplica.",
+        json_schema_extra={"type": "integer"}
     )
     # --- NUEVO: Parámetro para el ID del workspace ---
     workspace_id: Optional[str] = Field(
         None,
-        description="El ID del workspace (UUID en formato string) para recuperar el documento de un workspace específico, si aplica."
+        description="El ID del workspace (UUID en formato string) para recuperar el documento de un workspace específico, si aplica.",
+        json_schema_extra={"type": "string"}
     )
 
 

@@ -12,7 +12,7 @@ import logging
 import asyncio
 import datetime
 from typing import Any, Dict, List, Optional, Type
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importar utilidades necesarias para el análisis de contexto
@@ -32,11 +32,13 @@ class ConversationContextAnalyzerInput(BaseModel):
     )
     conversation_history: Optional[str] = Field(
         None,
-        description="El historial de conversación a analizar. Si no se proporciona, se analizarán las memorias y conversaciones recientes del usuario."
+        description="El historial de conversación a analizar. Si no se proporciona, se analizarán las memorias y conversaciones recientes del usuario.",
+        json_schema_extra={"type": "string"}
     )
     user_query: Optional[str] = Field(
         None,
-        description="Consulta del usuario para análisis bajo demanda, si aplica."
+        description="Consulta del usuario para análisis bajo demanda, si aplica.",
+        json_schema_extra={"type": "string"}
     )
 
 class ConversationContextAnalyzerTool(BaseTool):
@@ -47,9 +49,10 @@ class ConversationContextAnalyzerTool(BaseTool):
     name: str = "conversation_context_analyzer_tool"
     description: str = (
         "Útil para analizar el contexto de conversaciones y memorias del usuario, generando insights "
-        "sobre patrones, temas recurrentes, emociones y posibles brechas de conocimiento. Esta herramienta "
-        "se activa automáticamente con nuevas interacciones significativas y también puede ser llamada "
-        "bajo demanda para análisis específicos."
+        "sobre patrones, temas recurrentes, emociones y posibles brechas de conocimiento. "
+        "ACTUALIZADO: Ahora usa búsquedas optimizadas con aislamiento por workspace. "
+        "Esta herramienta se activa automáticamente con nuevas interacciones significativas y también "
+        "puede ser llamada bajo demanda para análisis específicos."
     )
     args_schema: Type[BaseModel] = ConversationContextAnalyzerInput
     return_direct: bool = False  # El agente debe procesar la respuesta.

@@ -11,7 +11,7 @@ información sobre conexiones, sinergias, duplicidades, contradicciones y brecha
 
 import logging
 from typing import Type, Any, List, Dict
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from sqlalchemy import select
 from core.database import ProactiveInsight, SessionLocal

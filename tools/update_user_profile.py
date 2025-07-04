@@ -14,9 +14,9 @@ correcto, asegurando que el perfil se actualice en la cuenta correcta.
 """
 
 import logging
-from typing import Any, Dict, Optional, Type
+from typing import Any, Optional, Type
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de memoria.
@@ -37,10 +37,10 @@ class ProfileUpdateInput(BaseModel):
         description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
     )
     # Los demás campos son opcionales, permitiendo actualizaciones parciales del perfil.
-    nombre: Optional[str] = Field(default=None, description="El nombre del usuario.")
-gustos: Optional[str] = Field(default=None, description="Los gustos o preferencias del usuario.")
-intereses: Optional[str] = Field(default=None, description="Los intereses o hobbies del usuario.")
-otros_datos: Optional[str] = Field(default=None, description="Cualquier otra información relevante sobre el usuario.")
+    nombre: Optional[str] = Field(default=None, description="El nombre del usuario.", json_schema_extra={"type": "string"})
+    gustos: Optional[str] = Field(default=None, description="Los gustos o preferencias del usuario.", json_schema_extra={"type": "string"})
+    intereses: Optional[str] = Field(default=None, description="Los intereses o hobbies del usuario.", json_schema_extra={"type": "string"})
+    otros_datos: Optional[str] = Field(default=None, description="Cualquier otra información relevante sobre el usuario.", json_schema_extra={"type": "string"})
 
 
 class UpdateProfileTool(BaseTool):

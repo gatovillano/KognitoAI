@@ -10,8 +10,8 @@ el perfil del usuario con esta información para personalización a largo plazo.
 """
 
 import logging
-from typing import Any, Dict, Optional, Type, List
-from pydantic.v1 import BaseModel, Field
+from typing import Any, Optional, Type, List
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -37,7 +37,8 @@ class ConversationAnalysisInput(BaseModel):
     )
     thread_ids_str: Optional[str] = Field(
         default=None,
-        description="Cadena de texto opcional con IDs de hilos de chat específicos a analizar, separados por comas. Si no se proporciona, se analizarán todos los hilos del usuario."
+        description="Cadena de texto opcional con IDs de hilos de chat específicos a analizar, separados por comas. Si no se proporciona, se analizarán todos los hilos del usuario.",
+        json_schema_extra={"type": "string"}
     )
 
 

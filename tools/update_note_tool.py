@@ -18,7 +18,7 @@ from typing import Type, Optional, Any
 
 # --- Importaciones de LangChain y Pydantic ---
 from langchain_core.tools import BaseTool
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 
 # --- Importaciones de la Lógica de Negocio ---
 from core.notes_manager import update_note
@@ -42,15 +42,18 @@ class UpdateNoteInput(BaseModel):
     )
     new_content: Optional[str] = Field(
         None,
-        description="El nuevo contenido para la nota. Si se proporciona, reemplazará completamente el contenido anterior."
+        description="El nuevo contenido para la nota. Si se proporciona, reemplazará completamente el contenido anterior.",
+        json_schema_extra={"type": "string"}
     )
     new_title: Optional[str] = Field(
         None,
-        description="El nuevo título para la nota."
+        description="El nuevo título para la nota.",
+        json_schema_extra={"type": "string"}
     )
     new_category: Optional[str] = Field(
         None,
-        description="La nueva categoría para la nota."
+        description="La nueva categoría para la nota.",
+        json_schema_extra={"type": "string"}
     )
 
 

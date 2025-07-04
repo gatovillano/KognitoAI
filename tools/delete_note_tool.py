@@ -17,7 +17,7 @@ La herramienta sigue el diseño de la arquitectura centralizada:
 import logging
 from typing import Type, Any
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de notas.
@@ -51,6 +51,7 @@ class DeleteNoteTool(BaseTool):
     name: str = "delete_note_tool"
     description: str = (
         "Útil para borrar o eliminar permanentemente una nota existente. "
+        "ACTUALIZADO: Ahora soporta aislamiento por workspace para eliminar notas específicas del contexto. "
         "Esta herramienta requiere el ID de la nota a eliminar. Si el usuario no proporciona el ID, "
         "se le debe sugerir que primero liste sus notas con `get_notes_tool` para encontrar el ID correcto."
     )

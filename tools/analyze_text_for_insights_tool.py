@@ -4,7 +4,7 @@ import logging
 import asyncio
 from typing import Any, Type
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importamos la INSTANCIA del analizador, no la función.
@@ -30,7 +30,8 @@ class AnalyzeTextForInsightsTool(BaseTool):
     description: str = (
         "Útil para un análisis exhaustivo de un fragmento de texto. Devuelve un resumen ejecutivo, "
         "los temas clave, el sentimiento general, el tono del autor y preguntas que invitan a la reflexión "
-        "sobre las brechas de conocimiento del texto."
+        "sobre las brechas de conocimiento del texto. "
+        "ACTUALIZADO: Los resultados pueden almacenarse con tipo 'text_insights' para seguimiento."
     )
     args_schema: Type[BaseModel] = AnalyzeTextInput
     # La respuesta es rica y estructurada, mejor que el agente la procese.

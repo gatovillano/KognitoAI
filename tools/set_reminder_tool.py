@@ -16,7 +16,7 @@ de cualquier interfaz.
 import logging
 from typing import Type, Any
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de recordatorios.
