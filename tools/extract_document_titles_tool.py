@@ -9,7 +9,7 @@ Esta herramienta permite al agente de IA procesar documentos almacenados y extra
 import logging
 from typing import Type, Optional, Any
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa las dependencias necesarias para interactuar con la base de datos y el LLM.
@@ -21,9 +21,7 @@ from sqlalchemy import create_engine
 from core.memory_manager import update_document_metadata, get_full_document_content
 from core.llm_manager import get_fast_llm
 import logging
-from typing import Optional, Any, Type
-from pydantic.v1 import BaseModel, Field
-from langchain_core.tools import BaseTool
+
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -40,7 +38,8 @@ class ExtractDocumentTitlesInput(BaseModel):
     )
     topic: Optional[str] = Field(
         None,
-        description="El tema o categoría de los documentos a procesar. Si no se proporciona, se procesarán todos los documentos del usuario."
+        description="El tema o categoría de los documentos a procesar. Si no se proporciona, se procesarán todos los documentos del usuario.",
+        json_schema_extra={"type": "string"}
     )
 
 
@@ -75,6 +74,9 @@ class ExtractDocumentTitlesTool(BaseTool):
         """
         logger.info(f"Ejecutando ExtractDocumentTitlesTool para la cuenta '{account_id}' con tema: '{topic}', archivo: '{file_name}'.")
         try:
+            if not settings.database_url:
+                raise ValueError("Database URL is not configured")
+                
             # Engine síncrono para conectar con la base de datos
             PGVECTOR_SYNC_ENGINE = create_engine(settings.database_url)
             metadata = MetaData()
@@ -104,31 +106,22 @@ class ExtractDocumentTitlesTool(BaseTool):
                 """), {"account_id": account_id})
                 await db.commit()
 
-                # Obtener el UUID de la colección para el usuario
-                col_q = text("SELECT uuid FROM langchain_pg_collection WHERE name = :cname")
-                res = await db.execute(col_q, {"cname": f"user_memories_{account_id}"})
-                collection_uuid = res.scalar_one_or_none()
-                if not collection_uuid:
-                    logger.info(f"No existe la colección 'user_memories_{account_id}', no hay documentos para procesar.")
-                    await db.execute(text("""
-                        UPDATE process_status
-                        SET status = 'completed', message = 'No se encontraron documentos para procesar en tu base de conocimiento.', last_updated = CURRENT_TIMESTAMP
-                        WHERE account_id = :account_id
-                    """), {"account_id": account_id})
-                    await db.commit()
-                    return "No se encontraron documentos para procesar en tu base de conocimiento."
+                # Construir la consulta optimizada usando las nuevas columnas directamente
+                clauses = [
+                    "account_id = :account_id",
+                    "content_type = 'user_documents'",
+                    "cmetadata->>'type' = 'document_chunk'"
+                ]
+                params = {"account_id": account_id}
 
-                # Construir la consulta para obtener los documentos
-                clauses = ["collection_id = :col_id", "cmetadata->>'type' = 'document_chunk'"]
-                params = {"col_id": collection_uuid}
                 if topic:
-                    clauses.append("cmetadata->>'topic' = :tpc")
-                    params["tpc"] = topic
+                    clauses.append("topic = :topic")
+                    params["topic"] = topic
                 if file_name:
                     clauses.append("cmetadata->>'file_name' = :fname")
                     params["fname"] = file_name
 
-                select_sql = text("SELECT DISTINCT ON (cmetadata->>'file_name') * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses))
+                select_sql = text("SELECT DISTINCT ON (cmetadata->>'file_name') * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses) + " ORDER BY cmetadata->>'file_name', id")
                 logger.info(f"Ejecutando consulta SQL: {select_sql} con parámetros: {params}")
                 result = await db.execute(select_sql, params)
                 chunks = result.mappings().all()
@@ -175,13 +168,14 @@ class ExtractDocumentTitlesTool(BaseTool):
                         first_chunk_query = text("""
                             SELECT document
                             FROM langchain_pg_embedding
-                            WHERE collection_id = :col_id
+                            WHERE account_id = :account_id
+                            AND content_type = 'user_documents'
                             AND cmetadata->>'file_name' = :file_name
                             AND cmetadata->>'type' = 'document_chunk'
                             ORDER BY (cmetadata->>'chunk_index')::integer ASC
                             LIMIT 3
                         """)
-                        chunk_result = await db.execute(first_chunk_query, {"col_id": collection_uuid, "file_name": file_name})
+                        chunk_result = await db.execute(first_chunk_query, {"account_id": account_id, "file_name": file_name})
                         first_chunk = chunk_result.mappings().first()
                         
                         if first_chunk and 'document' in first_chunk:

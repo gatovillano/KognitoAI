@@ -11,7 +11,7 @@ información sobre resúmenes, temas clave, conceptos centrales y relaciones.
 
 import logging
 from typing import Type, Any, List, Dict
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from sqlalchemy import select
 from core.database import AnalysisTask, SessionLocal
@@ -57,8 +57,9 @@ class GetAnalysisResultsTool(BaseTool):
     name: str = "get_analysis_results_tool"
     description: str = (
         "Útil para recuperar y mostrar los resultados de análisis de documentos y colecciones "
-        "guardados para el usuario. Estos resultados incluyen resúmenes ejecutivos, temas clave, "
-        "conceptos centrales y relaciones basadas en la información analizada."
+        "guardados para el usuario. ACTUALIZADO: Ahora soporta filtrado por tipo de análisis "
+        "(document, collection, semantic, code, etc.) usando la nueva columna analysis_type. "
+        "Estos resultados incluyen resúmenes ejecutivos, temas clave, conceptos centrales y relaciones."
     )
     args_schema: Type[BaseModel] = GetAnalysisResultsInput
     return_direct: bool = False  # El agente debe procesar la respuesta.

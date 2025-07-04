@@ -15,9 +15,9 @@ sea consistente con los chunks del documento.
 """
 
 import logging
-from typing import Any, Type, Optional
+from typing import Any, Type, Optional, Union
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importación de la lógica de negocio para actualizar metadatos
@@ -64,7 +64,7 @@ class UpdateDocumentMetadataTool(BaseTool):
     description: str = (
         "Actualiza el título y/o la categoría (topic) de un documento existente en la base de conocimiento del usuario. "
         "Permite especificar el documento por su `file_name` y el `account_id` del usuario. "
-        "También puede operar en documentos dentro de un `workspace_id` específico. " # <-- Descripción actualizada
+        "ACTUALIZADO: Soporta aislamiento por workspace y usa búsquedas optimizadas para localizar documentos. "
         "Se debe proporcionar al menos `new_title` o `new_topic`."
     )
     args_schema: Type[BaseModel] = UpdateDocumentMetadataInput

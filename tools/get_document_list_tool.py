@@ -17,9 +17,9 @@ correctamente si es necesario.
 """
 
 import logging
-from typing import Any, List, Dict, Type, Optional
+from typing import Any, List, Dict, Type, Optional, Union
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importaciones de la lógica de negocio y gestión de estado
@@ -46,7 +46,8 @@ class GetDocumentListInput(BaseModel):
     # --- NUEVO: Parámetro para el ID del workspace ---
     workspace_id: Optional[str] = Field(
         None,
-        description="El ID del workspace (UUID en formato string) para listar documentos del workspace, si aplica."
+        description="El ID del workspace (UUID en formato string) para listar documentos del workspace, si aplica.",
+        json_schema_extra={"type": "string"}
     )
 
 
@@ -59,7 +60,7 @@ class GetDocumentListTool(BaseTool):
     description: str = (
         "Recupera una lista de todos los documentos (junto con sus temas, títulos y autores) "
         "que el usuario ha subido previamente a su base de conocimiento. "
-        "Permite listar documentos generales o documentos específicos de un workspace. " # <-- Descripción actualizada
+        "ACTUALIZADO: Permite listar documentos generales o documentos específicos de un workspace con aislamiento optimizado. "
         "Úsala cuando el usuario pida explícitamente ver sus documentos guardados."
     )
     args_schema: Type[BaseModel] = GetDocumentListInput

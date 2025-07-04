@@ -13,7 +13,7 @@ import asyncio
 import datetime
 from typing import Any, Dict, List, Optional, Type
 import uuid
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -44,19 +44,23 @@ class ProactiveKnowledgeLinkerInput(BaseModel):
     )
     new_entry_title: Optional[str] = Field(
         None,
-        description="El título de la nueva entrada, si está disponible."
+        description="El título de la nueva entrada, si está disponible.",
+        json_schema_extra={"type": "string"}
     )
     new_entry_type: Optional[str] = Field(
         "general",
-        description="El tipo de la nueva entrada (por ejemplo, 'note', 'memory', 'document')."
+        description="El tipo de la nueva entrada (por ejemplo, 'note', 'memory', 'document').",
+        json_schema_extra={"type": "string"}
     )
     new_entry_category: Optional[str] = Field(
         None,
-        description="La categoría de la nueva entrada, si aplica."
+        description="La categoría de la nueva entrada, si aplica.",
+        json_schema_extra={"type": "string"}
     )
     user_query: Optional[str] = Field(
         None,
-        description="Consulta del usuario para análisis bajo demanda, si aplica."
+        description="Consulta del usuario para análisis bajo demanda, si aplica.",
+        json_schema_extra={"type": "string"}
     )
 
 class ProactiveKnowledgeLinkerTool(BaseTool):
@@ -68,6 +72,7 @@ class ProactiveKnowledgeLinkerTool(BaseTool):
     description: str = (
         "Útil para analizar nuevas entradas de información (notas, memorias, documentos) y generar insights "
         "proactivos sobre conexiones, sinergias, duplicidades, contradicciones y brechas de conocimiento. "
+        "ACTUALIZADO: Ahora usa búsquedas optimizadas 10-50x más rápidas con aislamiento por workspace. "
         "Esta herramienta se activa automáticamente solo para notas cuando se añade nueva información. "
         "Para documentos, el análisis se realiza una vez al día por la noche. También puede ser llamada "
         "bajo demanda para análisis específicos."

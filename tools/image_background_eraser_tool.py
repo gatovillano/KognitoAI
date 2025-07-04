@@ -5,7 +5,7 @@ from PIL import Image
 from rembg import remove # Se requiere la instalación de 'rembg' y 'Pillow'
 from typing import Type, Any
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 logger = logging.getLogger(__name__)
