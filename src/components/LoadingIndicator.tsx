@@ -35,51 +35,29 @@ export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
           </div>
         </div>
       ) : (
-        <div className="flex justify-center w-full py-2">
-          <div className="flex items-center space-x-3">
-            <div className="relative">
-              {/* Outer glow ring */}
-              <motion.div
-                className="absolute inset-0 w-8 h-8 rounded-full bg-gradient-to-r from-primary/30 via-primary/60 to-primary/30 blur-sm"
-                animate={{ rotate: 360 }}
-                transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-              />
-              {/* Main spinner */}
-              <motion.div
-                className="relative w-8 h-8 rounded-full bg-gradient-to-r from-primary via-primary/80 to-transparent"
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
-                style={{
-                  background: 'conic-gradient(from 0deg, transparent, hsl(var(--primary)), transparent)',
-                }}
-              />
-              {/* Inner core */}
-              <motion.div
-                className="absolute top-1/2 left-1/2 w-2 h-2 bg-primary rounded-full transform -translate-x-1/2 -translate-y-1/2"
-                animate={{ scale: [0.8, 1.2, 0.8], opacity: [0.5, 1, 0.5] }}
-                transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
-              />
-              {/* Orbiting dots */}
-              <motion.div
-                className="absolute top-0 left-1/2 w-1 h-1 bg-primary/60 rounded-full transform -translate-x-1/2"
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                style={{ transformOrigin: '50% 16px' }}
-              />
-              <motion.div
-                className="absolute top-0 left-1/2 w-1 h-1 bg-primary/40 rounded-full transform -translate-x-1/2"
-                animate={{ rotate: -360 }}
-                transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
-                style={{ transformOrigin: '50% 16px' }}
-              />
-            </div>
-            <motion.span 
-              className="text-sm text-muted-foreground font-medium"
-              animate={{ opacity: [0.6, 1, 0.6] }}
-              transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-            >
-              Procesando...
-            </motion.span>
+        <div className="flex justify-start w-full py-3">
+          <div className="space-y-3 w-full max-w-md">
+            {/* Línea 1 - larga */}
+            <motion.div
+              className="h-4 bg-muted rounded-lg"
+              style={{ width: '75%' }}
+              animate={{ opacity: [0.4, 0.8, 0.4] }}
+              transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut', delay: 0 }}
+            />
+            {/* Línea 2 - muy larga */}
+            <motion.div
+              className="h-4 bg-muted rounded-lg"
+              style={{ width: '90%' }}
+              animate={{ opacity: [0.4, 0.8, 0.4] }}
+              transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut', delay: 0.3 }}
+            />
+            {/* Línea 3 - mediana */}
+            <motion.div
+              className="h-4 bg-muted rounded-lg"
+              style={{ width: '60%' }}
+              animate={{ opacity: [0.4, 0.8, 0.4] }}
+              transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut', delay: 0.6 }}
+            />
           </div>
         </div>
       )}

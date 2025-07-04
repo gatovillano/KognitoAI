@@ -260,13 +260,15 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
             try:
                 create_thread_url = f"{API_BASE_URL}/internal/bot-create-thread" # Endpoint para el bot
                 internal_headers = {
-                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Content-Type': 'application/json',
                     'X-Internal-API-Key': settings.internal_api_key_for_bot # Clave API interna
                 }
-                # Enviar como formulario, no como JSON
-                create_payload = {'account_id': account_id_str}
+                create_payload = {
+                    'account_id': account_id_str,
+                    'chat_id': str(chat_id)
+                }
                 async with httpx.AsyncClient() as client:
-                    response = await client.post(create_thread_url, headers=internal_headers, data=create_payload, timeout=10)
+                    response = await client.post(create_thread_url, headers=internal_headers, json=create_payload, timeout=10)
                     response.raise_for_status()
                 
                 thread_data = response.json()
@@ -282,7 +284,10 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
                 context.chat_data[CURRENT_CHAT_THREAD_ID_KEY] = current_thread_id
                 logger.info(f"Nuevo hilo {current_thread_id} creado para la cuenta {account_id_str}.")
             except httpx.HTTPStatusError as e:
-                error_detail = e.response.json().get("detail", "Error del servidor al crear hilo.")
+                try:
+                    error_detail = e.response.json().get("detail", "Error del servidor al crear hilo.")
+                except Exception:
+                    error_detail = e.response.text if e.response.text else "Error del servidor al crear hilo."
                 logger.error(f"Error al crear hilo para la cuenta {account_id_str}: {error_detail}")
                 await update.message.reply_text(f"No pude iniciar una nueva conversación. Problema: {error_detail}")
                 return None
@@ -300,15 +305,67 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
                 # Iniciar nuevo hilo por inactividad
                 context.chat_data[CURRENT_CHAT_THREAD_ID_KEY] = None
                 current_thread_id = None
+                logger.info(f"Hilo anterior inactivo para la cuenta {account_id_str}. Creando uno nuevo por inactividad...")
+                try:
+                    create_thread_url = f"{API_BASE_URL}/internal/bot-create-thread" # Endpoint para el bot
+                    internal_headers = {
+                        'Content-Type': 'application/json',
+                        'X-Internal-API-Key': settings.internal_api_key_for_bot # Clave API interna
+                    }
+                    create_payload = {
+                        'account_id': account_id_str,
+                        'chat_id': str(chat_id)
+                    }
+                    async with httpx.AsyncClient() as client:
+                        response = await client.post(create_thread_url, headers=internal_headers, json=create_payload, timeout=10)
+                        response.raise_for_status()
+                    
+                    thread_data = response.json()
+                    logger.info(f"Respuesta de /internal/bot-create-thread por inactividad: {thread_data}")
+                    if 'id' in thread_data:
+                        current_thread_id = thread_data['id']
+                    elif 'thread_id' in thread_data:
+                        current_thread_id = thread_data['thread_id']
+                    else:
+                        logger.error(f"La respuesta no contiene 'id' ni 'thread_id'. Respuesta: {thread_data}")
+                        await update.message.reply_text(f"No pude iniciar una nueva conversación por inactividad. Respuesta inesperada del servidor: {thread_data}")
+                        return None
+                    context.chat_data[CURRENT_CHAT_THREAD_ID_KEY] = current_thread_id
+                    logger.info(f"Nuevo hilo {current_thread_id} creado por inactividad para la cuenta {account_id_str}.")
+                except httpx.HTTPStatusError as e:
+                    try:
+                        error_detail = e.response.json().get("detail", "Error del servidor al crear hilo por inactividad.")
+                    except Exception:
+                        error_detail = e.response.text if e.response.text else "Error del servidor al crear hilo por inactividad."
+                    logger.error(f"Error al crear hilo por inactividad para la cuenta {account_id_str}: {error_detail}")
+                    await update.message.reply_text(f"No pude iniciar una nueva conversación por inactividad. Problema: {error_detail}")
+                    return None
+                except Exception as e:
+                    logger.error(f"Error inesperado al crear hilo por inactividad para la cuenta {account_id_str}: {e}", exc_info=True)
+                    await update.message.reply_text("Ocurrió un error inesperado al iniciar la conversación por inactividad.")
+                    return None
 
         # 3. Construir el payload para la API central de chat.
         api_payload = {
             "account_id": account_id_str,
             "telegram_id": user.id, # telegram_id puede ser Optional[int] en el Pydantic BaseModel de la API
-            "thread_id": current_thread_id,
             "user_message": user_message,
-            "image_base64": image_base64,
         }
+        if image_base64:
+            api_payload["image_base64"] = image_base64
+        if current_thread_id:
+            try:
+                # Verificar si current_thread_id es un UUID válido
+                import uuid
+                uuid.UUID(current_thread_id)
+                api_payload["thread_id"] = current_thread_id
+            except ValueError:
+                logger.warning(f"El thread_id {current_thread_id} no es un UUID válido, generando uno temporal.")
+                api_payload["thread_id"] = str(uuid.uuid4())
+        else:
+            logger.warning(f"No hay thread_id disponible, generando uno temporal.")
+            import uuid
+            api_payload["thread_id"] = str(uuid.uuid4())
         
         # 4. Realizar la llamada a la API del agente.
         chat_api_url = f"{API_BASE_URL}/api/chat"
@@ -356,8 +413,8 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
         error_detail = "Error del servidor."
         try:
             error_detail = e.response.json().get("detail", e.response.text)
-        except json.JSONDecodeError:
-            error_detail = e.response.text
+        except Exception:
+            error_detail = e.response.text if e.response.text else "Error desconocido del servidor."
         logger.error(f"Error de API al procesar mensaje para la cuenta {account_id_log}: {error_detail}")
         error_msg = "No pude procesar tu mensaje. Hubo un problema con el servidor: {}".format(error_detail)
         await update.message.reply_text(error_msg)

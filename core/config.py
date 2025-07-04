@@ -158,7 +158,7 @@ class Config:
         *   NO uses HTML ni otros formatos de Markdown.
     *   Colaborativo y servicial. Usa un lenguaje que invite a la acción y al diálogo.
     *   Siempre humilde. Reconoce cuando no tienes suficiente información o cuando una tarea supera tus capacidades.
-    """,
+    """
         )
 
         # --- Configuración de JWT ---

@@ -493,9 +493,13 @@ async def run_batch_analysis_job(
 
 # --- TRIGGER REFACTORIZADO ---
 async def proactive_knowledge_linker_trigger(new_entry: Dict[str, Any]):
-    """Trigger que se llama cuando se añade algo nuevo."""
-    async def run_analysis():
-        knowledge_pool = await get_all_knowledge(new_entry['account_id'])
-        await analyze_entry(new_entry, knowledge_pool)
-    asyncio.create_task(run_analysis())
-    logger.info("[Proactive Linker] Tarea de análisis proactivo programada en segundo plano.")
+    """Trigger que se llama cuando se añade algo nuevo. Solo se activa para notas, no para documentos."""
+    if new_entry.get('type') == 'note':
+        async def run_analysis():
+            knowledge_pool = await get_all_knowledge(new_entry['account_id'])
+            await analyze_entry(new_entry, knowledge_pool)
+        asyncio.create_task(run_analysis())
+        logger.info("[Proactive Linker] Tarea de análisis proactivo programada en segundo plano para una nota.")
+    else:
+        logger.info("[Proactive Linker] Análisis proactivo no programado para documentos. Se analizará en el job nocturno.")
+        # TODO: Implementar job nocturno para análisis de documentos una vez al día.

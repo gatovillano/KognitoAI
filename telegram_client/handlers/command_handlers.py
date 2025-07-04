@@ -160,6 +160,74 @@ async def open_documents_panel(update: Update, context: CallbackContext) -> None
     )
 
 
+async def open_conversation(update: Update, context: CallbackContext) -> None:
+    """
+    Manejador para el comando /abrir_conversacion.
+    Abre o crea un hilo de conversación con el nombre especificado.
+    """
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    logger.info(f"Comando /abrir_conversacion recibido de {user.id} ({user.first_name})")
+
+    try:
+        # Obtener el nombre de la conversación del texto del comando
+        command_text = update.message.text.split()
+        if len(command_text) < 2:
+            await update.message.reply_text("Por favor, proporciona un nombre para la conversación. Uso: /abrir_conversacion <nombre>")
+            return
+
+        conversation_name = " ".join(command_text[1:])
+        
+        # Obtener o crear la cuenta del usuario
+        result = await get_or_create_account_from_platform_id(
+            platform='telegram',
+            platform_user_id=str(user.id),
+            first_name=user.first_name,
+            last_name=user.last_name,
+            username=user.username
+        )
+        
+        if not result:
+            logger.error(f"No se pudo obtener/crear una cuenta en /abrir_conversacion para {user.id}.")
+            await update.message.reply_text("Lo siento, ocurrió un error al procesar tu solicitud.")
+            return
+        
+        account, _ = result
+        
+        # Buscar o crear el hilo de conversación con el nombre dado
+        from core.database import SessionLocal, ChatThread
+        from utils.db_session import DBSession
+        
+        async with DBSession(SessionLocal) as db:
+            # Buscar si existe un hilo con ese nombre para este usuario
+            thread = await db.query(ChatThread).filter(
+                ChatThread.account_id == account.id,
+                ChatThread.name == conversation_name
+            ).first()
+            
+            if thread:
+                # Si existe, establecerlo como el hilo activo
+                context.chat_data['current_chat_thread_id'] = thread.id
+                await update.message.reply_text(f"Conversación '{conversation_name}' abierta. Puedes continuar chateando aquí.")
+            else:
+                # Si no existe, crear un nuevo hilo con ese nombre
+                thread = ChatThread(
+                    account_id=account.id,
+                    name=conversation_name,
+                    platform='telegram'
+                )
+                db.add(thread)
+                await db.commit()
+                await db.refresh(thread)
+                context.chat_data['current_chat_thread_id'] = thread.id
+                await update.message.reply_text(f"Nueva conversación '{conversation_name}' creada y abierta. Puedes empezar a chatear.")
+                
+    except Exception as e:
+        logger.error(f"Error en el handler /abrir_conversacion para el usuario {user.id}: {e}", exc_info=True)
+        await update.message.reply_text("Lo siento, ocurrió un error al procesar tu solicitud. Por favor, intenta de nuevo.")
+
 def register_command_handlers(application: Application, group: int = 2):
     """
     Registra todos los manejadores de comandos en la aplicación de Telegram.
@@ -171,4 +239,5 @@ def register_command_handlers(application: Application, group: int = 2):
     application.add_handler(CommandHandler("start", start), group=group)
     application.add_handler(CommandHandler("help", help_command), group=group)
     application.add_handler(CommandHandler("documentos", open_documents_panel), group=group)
+    application.add_handler(CommandHandler("abrir_conversacion", open_conversation), group=group)
     logger.info("✅ Handlers de comandos registrados.")

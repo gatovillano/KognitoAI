@@ -10,7 +10,6 @@ import os
 from api.auth import router as auth_router
 from api.users import router as users_router
 from api.chat import router as chat_router
-from api.chat_streaming import router as chat_streaming_router
 from api.documents import router as documents_router
 from api.notes import router as notes_router
 from api.agenda import router as agenda_router
@@ -118,7 +117,6 @@ async def serve_telegram_panel():
 app.include_router(auth_router, prefix="/api", tags=["auth"])
 app.include_router(users_router, prefix="/api", tags=["users"])
 app.include_router(chat_router, prefix="/api", tags=["chat"])
-app.include_router(chat_streaming_router, prefix="/api", tags=["chat-streaming"])
 app.include_router(documents_router, prefix="/api", tags=["documents"])
 app.include_router(notes_router, prefix="/api", tags=["notes"])
 app.include_router(agenda_router, prefix="/api", tags=["agenda"])
@@ -129,7 +127,10 @@ app.include_router(workspaces_router, prefix="/api", tags=["workspaces"])
 from api.analysis import router as analysis_router
 app.include_router(analysis_router, prefix="/api", tags=["analysis"])
 from api.github import router as github_router
+from api.telegram import router as telegram_router
+
 app.include_router(github_router, prefix="/api/github", tags=["github"])
+app.include_router(telegram_router, prefix="", tags=["telegram"])
 
 if __name__ == "__main__":
     import uvicorn

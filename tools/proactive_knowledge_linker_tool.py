@@ -68,7 +68,8 @@ class ProactiveKnowledgeLinkerTool(BaseTool):
     description: str = (
         "Útil para analizar nuevas entradas de información (notas, memorias, documentos) y generar insights "
         "proactivos sobre conexiones, sinergias, duplicidades, contradicciones y brechas de conocimiento. "
-        "Esta herramienta se activa automáticamente cuando se añade nueva información y también puede ser llamada "
+        "Esta herramienta se activa automáticamente solo para notas cuando se añade nueva información. "
+        "Para documentos, el análisis se realiza una vez al día por la noche. También puede ser llamada "
         "bajo demanda para análisis específicos."
     )
     args_schema: Type[BaseModel] = ProactiveKnowledgeLinkerInput
@@ -130,7 +131,7 @@ class ProactiveKnowledgeLinkerTool(BaseTool):
                 # Programar el análisis como tarea en segundo plano para no bloquear
                 asyncio.create_task(proactive_knowledge_linker_trigger(new_entry))
                 logger.info(f"Análisis proactivo programado para la cuenta '{account_id}'.")
-                return "Análisis proactivo de la nueva entrada iniciado. Se generarán insights en segundo plano."
+                return "Análisis proactivo de la nueva entrada iniciado para notas. Se generarán insights en segundo plano. Para documentos, el análisis se realiza una vez al día por la noche."
         except Exception as e:
             logger.error(f"Error en ProactiveKnowledgeLinkerTool para la cuenta '{account_id}': {e}", exc_info=True)
             return f"Ocurrió un error inesperado al iniciar el análisis proactivo: {e}"

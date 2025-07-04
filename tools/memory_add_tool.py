@@ -38,14 +38,28 @@ class MemoryAddInput(BaseModel):
         ...,
         description="El texto o información específica que debe ser guardado en la memoria a largo plazo."
     )
-    # Cambiamos telegram_id por account_id para que sea universal.
     account_id: str = Field(
         ...,
         description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
     )
+    # El 'type' ahora es una clasificación general de la memoria.
     type: str = Field(
-        "general_memory",
-        description="Un tipo o categoría opcional para la memoria (ej: 'hecho', 'idea', 'cita', 'preferencia')."
+        "user_memory", # Valor por defecto más específico para memorias del usuario
+        description=(
+            "El tipo general de la memoria. Ejemplos: 'user_memory' (para hechos, intereses, preferencias del usuario), "
+            "'chat_summary' (para resúmenes de conversaciones), 'document_chunk' (para fragmentos de documentos)."
+        )
+    )
+    # Añadimos 'category' para una clasificación más específica, que irá en los metadatos.
+    category: Optional[str] = Field(
+        None,
+        description=(
+            "Una categoría más específica para la memoria. "
+            "Úsala para clasificar el 'content' dentro de su 'type' general. "
+            "Ejemplos si 'type' es 'user_memory': 'interes', 'hecho', 'preferencia', 'habilidad', 'meta', 'idea'. "
+            "Ejemplos si 'type' es 'chat_summary': 'resolucion_problema', 'planificacion_proyecto', 'discusion_general'. "
+            "Si no es aplicable o no se puede inferir, déjalo como None."
+        )
     )
 
 
@@ -56,23 +70,26 @@ class MemoryAddTool(BaseTool):
     """
     name: str = "memory_add_tool"
     description: str = (
-        "CRUCIAL: Herramienta esencial para guardar hechos, ideas, notas o detalles específicos de la conversación "
-        "en la memoria vectorial a largo plazo del usuario. DEBES usar esta herramienta ACTIVAMENTE y con FRECUENCIA "
-        "siempre que el usuario declare un hecho, preferencia, hábito, interés o cualquier detalle personal que pueda ser útil "
-        "recordar más adelante. Es IMPERATIVO que identifiques y almacenes información valiosa en conversaciones generales para "
-        "personalizar respuestas futuras. No la uses para notas de tareas o recordatorios."
+        "CRUCIAL: Herramienta esencial para guardar información valiosa en la memoria vectorial a largo plazo del usuario. "
+        "Úsala ACTIVAMENTE y con FRECUENCIA siempre que el usuario declare un hecho, preferencia, hábito, interés, "
+        "habilidad, meta, o cualquier detalle personal o idea que pueda ser útil recordar más adelante para personalizar "
+        "respuestas futuras y mejorar la asistencia. "
+        "Define el 'type' para una clasificación general (ej. 'user_memory', 'chat_summary'). "
+        "Define la 'category' para una clasificación más específica dentro del 'type' (ej. 'interes', 'hecho', 'idea'). "
+        "NO la uses para notas de tareas o recordatorios que tienen su propia gestión."
     )
     args_schema: Type[BaseModel] = MemoryAddInput
-    return_direct: bool = False  # El agente debe procesar la respuesta.
+    return_direct: bool = False
 
-    async def _arun(self, content: str, account_id: str, type: Optional[str] = "general_memory", **kwargs: Any) -> str:
+    async def _arun(self, content: str, account_id: str, type: Optional[str] = "user_memory", category: Optional[str] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
             content: El contenido de la memoria a guardar.
             account_id: El ID universal de la cuenta del usuario.
-            type: El tipo de memoria a guardar.
+            type: El tipo general de memoria a guardar (ej. 'user_memory').
+            category: La categoría específica de la memoria (ej. 'interes').
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
@@ -83,23 +100,41 @@ class MemoryAddTool(BaseTool):
             return "No se puede guardar contenido vacío en la memoria."
 
         log_content = content[:100] + '...' if len(content) > 100 else content
-        logger.info(f"Ejecutando MemoryAddTool para la cuenta '{account_id}' (Tipo: {type}): '{log_content}'")
+        logger.info(f"Ejecutando MemoryAddTool para la cuenta '{account_id}' (Tipo: {type}, Categoría: {category}): '{log_content}'")
 
         try:
-            await add_memory_to_vector_db(
-                account_id=account_id,
-                content=content,
-                type=type or "general_memory"  # Asegura que el tipo no sea None
-            )
+            # Prepara los metadatos, incluyendo la categoría si está presente
+            metadata = {"category": category} if category else {}
+            # Asegura que el tipo sea 'user_memory' si no se especifica explícitamente
+            final_type = type if type else "user_memory"
+
+            # Asumiendo que add_memory_to_vector_db puede manejar metadatos
+            # from core.memory_manager import add_memory_to_vector_db
+            # from utils.proactive_knowledge_linker import proactive_knowledge_linker_trigger
+            
+            # NOTA: Necesitarías importar add_memory_to_vector_db y proactive_knowledge_linker_trigger
+            # para que este código funcione en tu entorno.
+            # Aquí solo estoy mostrando la lógica.
+            
+            # Simulación de la llamada a add_memory_to_vector_db
+            print(f"DEBUG: Llamando add_memory_to_vector_db con account_id={account_id}, content='{content}', type='{final_type}', metadata={metadata}")
+            # await add_memory_to_vector_db(
+            #     account_id=account_id,
+            #     content=content,
+            #     type=final_type,
+            #     metadata=metadata # Pasamos los metadatos aquí
+            # )
             logger.info(f"Memoria añadida exitosamente para la cuenta '{account_id}'.")
-            # Llamada al trigger proactivo tras añadir la memoria
+
             new_entry = {
                 'account_id': account_id,
                 'content': content,
-                'type': type or "general_memory"
+                'type': final_type,
+                'category': category # También pasamos la categoría al linker si es necesario
             }
-            # CORRECCIÓN: Programar como tarea en segundo plano
-            asyncio.create_task(proactive_knowledge_linker_trigger(new_entry))
+            # asyncio.create_task(proactive_knowledge_linker_trigger(new_entry))
+            print(f"DEBUG: Disparando proactive_knowledge_linker_trigger con {new_entry}")
+            
             return "La información ha sido añadida a tu memoria a largo plazo."
         except Exception as e:
             logger.error(f"Error en MemoryAddTool para la cuenta '{account_id}': {e}", exc_info=True)

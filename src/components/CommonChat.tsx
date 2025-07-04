@@ -8,14 +8,14 @@ import { useSearch } from '@/contexts/SearchContext';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { ArrowLeft, FolderKanban } from 'lucide-react';
+import { ArrowLeft, FolderKanban, Bot, BrainCircuit, Search } from 'lucide-react';
 import { ChatMessage } from '@/components/ChatMessage';
 import { ChatInputBar } from '@/components/ChatInputBar';
-import { LoadingIndicator } from '@/components/LoadingIndicator';
 import { BackgroundTaskIndicator } from '@/components/BackgroundTaskIndicator';
 import { ArtifactPanel } from '@/components/ArtifactPanel';
 import { useArtifactPanel } from '@/contexts/ArtifactPanelContext';
 import { PanelRightOpen, PanelRightClose } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface ChatMessageType {
   text: string;
@@ -40,6 +40,42 @@ interface ThreadDetails {
 
 interface CommonChatProps {
   threadId: string;
+}
+
+// Nuevo componente de indicador de carga con animación de escritura
+function LoadingIndicator({
+  isComprehensiveAnalysisActive = false,
+  isKnowledgeAnalysisActive = false,
+}: {
+  isComprehensiveAnalysisActive?: boolean;
+  isKnowledgeAnalysisActive?: boolean;
+}) {
+  let text = 'Kognito está pensando...';
+  let Icon = Bot;
+
+  if (isComprehensiveAnalysisActive) {
+    text = 'Realizando análisis comprensivo...';
+    Icon = BrainCircuit;
+  } else if (isKnowledgeAnalysisActive) {
+    text = 'Consultando la base de conocimiento...';
+    Icon = Search;
+  }
+
+  return (
+    <div className="flex items-center space-x-4 p-4 rounded-lg">
+      <div className="flex-shrink-0">
+        <Icon className="h-8 w-8 text-primary animate-pulse" />
+      </div>
+      <div className="flex-1 space-y-2 py-1">
+        <p className="text-sm font-medium leading-none text-muted-foreground">{text}</p>
+        <div className="w-full space-y-2">
+          <div className="h-2 bg-primary/20 rounded-full animate-writing-line" style={{ animationDelay: '0s' }}></div>
+          <div className="h-2 bg-primary/20 rounded-full animate-writing-line" style={{ animationDelay: '0.2s' }}></div>
+          <div className="h-2 bg-primary/20 rounded-full animate-writing-line" style={{ animationDelay: '0.4s' }}></div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function CommonChat({ threadId }: CommonChatProps) {
@@ -79,58 +115,7 @@ export function CommonChat({ threadId }: CommonChatProps) {
         toast.error('No se pudo copiar el mensaje.');
       });
   }, []);
-
-  const handleCopyArtifactContent = useCallback((content: string) => {
-    navigator.clipboard
-      .writeText(content)
-      .then(() => {
-        toast.success('Contenido del artefacto copiado al portapapeles');
-      })
-      .catch((err) => {
-        console.error('Error al copiar el contenido del artefacto: ', err);
-        toast.error('No se pudo copiar el contenido del artefacto.');
-      });
-  }, []);
-
-  const handlePlayAudio = useCallback(
-    async (text: string, index: number) => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-
-      if (playingMessageIndex === index) {
-        setPlayingMessageIndex(null);
-        return;
-      }
-
-      setIsAudioLoading(true);
-      setPlayingMessageIndex(index);
-
-      try {
-        const response = await apiClient.post('/api/text-to-speech', { text }, {
-          responseType: 'blob',
-        });
-        const audioBlob = new Blob([response.data], { type: 'audio/wav' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        audioRef.current = new Audio(audioUrl);
-        audioRef.current.play();
-        setIsAudioLoading(false);
-
-        audioRef.current.onended = () => {
-          setPlayingMessageIndex(null);
-          URL.revokeObjectURL(audioUrl);
-        };
-      } catch (error) {
-        toast.error('No se pudo generar el audio.');
-        console.error('Error en TTS:', error);
-        setIsAudioLoading(false);
-        setPlayingMessageIndex(null);
-      }
-    },
-    [playingMessageIndex]
-  );
-
+  
   const handleStreamingResponse = useCallback(
     async (requestData: any, userMessage: ChatMessageType, signal?: AbortSignal) => {
       // Crear mensaje AI inicial vacío
@@ -148,6 +133,11 @@ export function CommonChat({ threadId }: CommonChatProps) {
         const response = await apiClient.post('/api/chat', requestData);
         const data = response.data;
         const aiResponse = data.response_text;
+
+        if (aiResponse && aiResponse.includes("ID de tarea:")) {
+          const taskId = aiResponse.split("ID de tarea:")[1].trim().split(".")[0];
+          setBackgroundTasks((prev) => [...prev, { taskId, type: 'mindmap' }]);
+        }
 
         setMessages((prev) => {
           const newMessages = [...prev];
@@ -179,26 +169,11 @@ export function CommonChat({ threadId }: CommonChatProps) {
     [threadId, artifacts]
   );
 
-  const handlePaste = useCallback((e: ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (items) {
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf('image') !== -1) {
-          e.preventDefault();
-          const blob = items[i].getAsFile();
-          if (blob) {
-            const imageFile = new File([blob], 'pasted-image.png', { type: blob.type });
-            setFiles((prevFiles) => [...prevFiles, imageFile]);
-          }
-        }
-      }
-    }
-  }, []);
-
   const handleSendMessage = useCallback(
-    async (e?: React.FormEvent) => {
+    async (e?: React.FormEvent, retryMessage?: string) => {
       if (e) e.preventDefault();
-      if ((!newMessage.trim() && files.length === 0) || isResponding) return;
+      const messageText = retryMessage || newMessage;
+      if ((!messageText.trim() && files.length === 0) || isResponding) return;
 
       if (!user || !user.id) {
         toast.error('Error: Usuario no autenticado o ID de usuario faltante.');
@@ -212,7 +187,7 @@ export function CommonChat({ threadId }: CommonChatProps) {
       }
 
       const userMessage = {
-        text: newMessage,
+        text: messageText,
         sender: 'user' as const,
         created_at: new Date().toISOString(),
         image_base64: '',
@@ -220,9 +195,11 @@ export function CommonChat({ threadId }: CommonChatProps) {
       };
       setMessages((prev) => [...prev, userMessage]);
 
-      const messageToSend = newMessage;
+      const messageToSend = messageText;
       const filesToSend = [...files];
-      setNewMessage('');
+      if (!retryMessage) {
+        setNewMessage('');
+      }
       setFiles([]);
       setIsResponding(true);
 
@@ -299,9 +276,82 @@ export function CommonChat({ threadId }: CommonChatProps) {
       isKnowledgeAnalysisActive,
       isWebSearchActive,
       isComprehensiveAnalysisActive,
-      threadId
+      threadId,
+      handleStreamingResponse
     ]
   );
+
+  const handleRetry = useCallback((text: string) => {
+    handleSendMessage(undefined, text);
+  }, [handleSendMessage]);
+
+  const handleCopyArtifactContent = useCallback((content: string) => {
+    navigator.clipboard
+      .writeText(content)
+      .then(() => {
+        toast.success('Contenido del artefacto copiado al portapapeles');
+      })
+      .catch((err) => {
+        console.error('Error al copiar el contenido del artefacto: ', err);
+        toast.error('No se pudo copiar el contenido del artefacto.');
+      });
+  }, []);
+
+  const handlePlayAudio = useCallback(
+    async (text: string, index: number) => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+
+      if (playingMessageIndex === index) {
+        setPlayingMessageIndex(null);
+        return;
+      }
+
+      setIsAudioLoading(true);
+      setPlayingMessageIndex(index);
+
+      try {
+        const response = await apiClient.post('/api/text-to-speech', { text }, {
+          responseType: 'blob',
+        });
+        const audioBlob = new Blob([response.data], { type: 'audio/wav' });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        audioRef.current = new Audio(audioUrl);
+        audioRef.current.play();
+        setIsAudioLoading(false);
+
+        audioRef.current.onended = () => {
+          setPlayingMessageIndex(null);
+          URL.revokeObjectURL(audioUrl);
+        };
+      } catch (error) {
+        toast.error('No se pudo generar el audio.');
+        console.error('Error en TTS:', error);
+        setIsAudioLoading(false);
+        setPlayingMessageIndex(null);
+      }
+    },
+    [playingMessageIndex]
+  );
+
+  const handlePaste = useCallback((e: ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          e.preventDefault();
+          const blob = items[i].getAsFile();
+          if (blob) {
+            const imageFile = new File([blob], 'pasted-image.png', { type: blob.type });
+            setFiles((prevFiles) => [...prevFiles, imageFile]);
+          }
+        }
+      }
+    }
+  }, []);
+
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -479,61 +529,116 @@ export function CommonChat({ threadId }: CommonChatProps) {
   }
 
   return (
-    <div className="flex h-full bg-background">
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <div className="flex-grow overflow-y-hidden relative">
-          <ScrollArea className="h-full" ref={scrollAreaRef}>
-            <div className="p-4 md:p-6 space-y-6 w-full max-w-4xl mx-auto">
-              {filteredMessages.slice(-50).map((msg, index) => (
-                <ChatMessage
-                  key={filteredMessages.length - 50 + index}
-                  msg={{ 
-                    text: msg.text, 
-                    sender: msg.sender, 
-                    image: msg.image_base64 || '', 
-                    document_url: msg.document_url || '' 
-                  }}
-                  index={filteredMessages.length - 50 + index}
-                  handleCopyMessage={handleCopyMessage}
-                  handlePlayAudio={handlePlayAudio}
-                  isAudioLoading={isAudioLoading}
-                  playingMessageIndex={playingMessageIndex}
-                />
-              ))}
+    <div className="flex h-full bg-background -m-6">
+      <style jsx global>{`
+        @keyframes writing-line {
+          0% {
+            width: 0%;
+            opacity: 0.5;
+          }
+          20% {
+            width: 100%;
+            opacity: 1;
+          }
+          80% {
+            width: 100%;
+            opacity: 1;
+          }
+          100% {
+            width: 0%;
+            opacity: 0.5;
+          }
+        }
+        .animate-writing-line {
+          animation: writing-line 2.5s ease-in-out infinite;
+        }
+      `}</style>
+      <div className="flex flex-col h-full w-full">
+        <div className="flex-1 overflow-y-auto">
+          <div className="p-4 md:p-6 space-y-6 w-full max-w-4xl mx-auto pb-80">
+            <AnimatePresence initial={false}>
+              {filteredMessages.slice(-50).map((msg, index) => {
+                const messageIndex = filteredMessages.length - 50 + index;
+                const isNewMessage = index >= filteredMessages.slice(-50).length - 2; // Últimos 2 mensajes se consideran nuevos
+                
+                return (
+                  <motion.div
+                    key={`${msg.created_at}-${messageIndex}`}
+                    initial={isNewMessage ? { opacity: 0, y: 30, scale: 0.98 } : false}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -10, scale: 0.98 }}
+                    transition={{ 
+                      duration: 0.3, 
+                      ease: "easeOut"
+                    }}
+                    layout="position"
+                  >
+                    <ChatMessage
+                      msg={{ 
+                        text: msg.text, 
+                        sender: msg.sender, 
+                        image: msg.image_base64 || '', 
+                        document_url: msg.document_url || '' 
+                      }}
+                      index={messageIndex}
+                      handleCopyMessage={handleCopyMessage}
+                      handleRetry={handleRetry}
+                      handlePlayAudio={handlePlayAudio}
+                      isAudioLoading={isAudioLoading}
+                      playingMessageIndex={playingMessageIndex}
+                    />
+                  </motion.div>
+                );
+              })}
               {isResponding && (
-                <LoadingIndicator
-                  isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
-                  isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
-                />
+                <motion.div
+                  initial={{ opacity: 0, y: 30 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.4, ease: "easeOut" }}
+                >
+                  <LoadingIndicator
+                    isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+                    isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+                  />
+                </motion.div>
               )}
               {backgroundTasks.map((task) => (
-                <BackgroundTaskIndicator key={task.taskId} task={task} />
+                <motion.div
+                  key={task.taskId}
+                  initial={{ opacity: 0, y: 30 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.4, ease: "easeOut" }}
+                >
+                  <BackgroundTaskIndicator task={task} />
+                </motion.div>
               ))}
-            </div>
-          </ScrollArea>
+            </AnimatePresence>
+          </div>
         </div>
-        <ChatInputBar
-          newMessage={newMessage}
-          isResponding={isResponding}
-          isRecording={isRecording}
-          isUploadingFile={isUploadingFile}
-          isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
-          isWebSearchActive={isWebSearchActive}
-          isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
-          files={files}
-          onMessageChange={setNewMessage}
-          onSendMessage={handleSendMessage}
-          onKeyDown={handleKeyDown}
-          onToggleKnowledgeAnalysis={toggleKnowledgeAnalysis}
-          onToggleWebSearch={toggleWebSearch}
-          onToggleComprehensiveAnalysis={toggleComprehensiveAnalysis}
-          onStartRecording={startRecording}
-          onStopRecording={stopRecording}
-          onFileUpload={handleFileUpload}
-          onRemoveFile={handleRemoveFile}
-          onPaste={handlePaste}
-        />
       </div>
+      <ChatInputBar
+        newMessage={newMessage}
+        isResponding={isResponding}
+        isRecording={isRecording}
+        isUploadingFile={isUploadingFile}
+        isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+        isWebSearchActive={isWebSearchActive}
+        isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+        files={files}
+        onMessageChange={setNewMessage}
+        onSendMessage={handleSendMessage}
+        onKeyDown={handleKeyDown}
+        onToggleKnowledgeAnalysis={toggleKnowledgeAnalysis}
+        onToggleWebSearch={toggleWebSearch}
+        onToggleComprehensiveAnalysis={toggleComprehensiveAnalysis}
+        onStartRecording={startRecording}
+        onStopRecording={stopRecording}
+        onFileUpload={handleFileUpload}
+        onRemoveFile={handleRemoveFile}
+        onPaste={handlePaste}
+      />
       {isArtifactPanelVisible && (
         <div className="w-1/3 h-full hidden lg:block border-l border-border">
           <ArtifactPanel artifacts={artifacts} onCopyContent={handleCopyArtifactContent} isVisible={isArtifactPanelVisible} onToggleVisibility={toggleVisibility} />

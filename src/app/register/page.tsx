@@ -64,8 +64,8 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center py-2">
-      <Card className="w-full max-w-md">
+    <div className="flex min-h-screen flex-col items-center justify-center py-2 bg-background">
+      <Card className="w-full max-w-md backdrop-blur-xl bg-card/80 border-0 shadow-2xl rounded-3xl overflow-hidden">
         <CardHeader>
           <CardTitle>Crear una cuenta</CardTitle>
           <CardDescription>Regístrate para acceder a la plataforma</CardDescription>
@@ -80,6 +80,7 @@ export default function RegisterPage() {
                 placeholder="Tu nombre"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                className="bg-muted/30 border-0 rounded-2xl h-12 focus:ring-2 focus:ring-primary/20 focus:bg-muted/50 transition-all placeholder:text-muted-foreground/50"
                 required
               />
             </div>
@@ -91,6 +92,7 @@ export default function RegisterPage() {
                 placeholder="tu@ejemplo.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                className="bg-muted/30 border-0 rounded-2xl h-12 focus:ring-2 focus:ring-primary/20 focus:bg-muted/50 transition-all placeholder:text-muted-foreground/50"
                 required
               />
             </div>
@@ -99,13 +101,15 @@ export default function RegisterPage() {
               <Input
                 id="password"
                 type="password"
+                placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                className="bg-muted/30 border-0 rounded-2xl h-12 focus:ring-2 focus:ring-primary/20 focus:bg-muted/50 transition-all placeholder:text-muted-foreground/50"
                 required
                 minLength={6}
               />
             </div>
-            <Button type="submit" className="w-full" disabled={isLoading}>
+            <Button type="submit" className="w-full h-12 rounded-2xl" disabled={isLoading}>
               {isLoading ? 'Registrando...' : 'Registrarse'}
             </Button>
           </form>

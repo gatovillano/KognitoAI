@@ -209,19 +209,23 @@ export default function ChatLandingPage() {
       >
         {/* Logo y Título */}
         <div className="flex flex-col items-center mb-8">
-          <div className="flex items-center gap-3 mb-4">
-            <Image src="/logo-simple.png" alt="Kognito AI Labs" width={80} height={80} />
-            <h1 className="text-5xl font-bold tracking-tight">
-              Kognito
-            </h1>
-          </div>
+          <Image src="/logo-simple.png" alt="Kognito AI Labs" width={80} height={80} className="mb-4" />
+          <h1 className="text-5xl font-bold tracking-tight mb-4">
+            ¡Hola!
+          </h1>
           <p className="text-lg text-muted-foreground">
-            ¿Qué quieres saber?
+            ¿Cómo te puedo colaborar hoy?
           </p>
         </div>
 
         {/* Input usando ChatInputBar */}
-        <div className="w-full max-w-4xl">
+        <motion.div 
+          className="w-full max-w-4xl"
+          animate={{
+            y: isInputMoved ? 300 : 0,
+          }}
+          transition={{ duration: 0.6, ease: 'easeInOut' }}
+        >
           <ChatInputBar
             newMessage={chatInput}
             isResponding={isResponding}
@@ -242,8 +246,9 @@ export default function ChatLandingPage() {
             onFileUpload={handleFileUpload}
             onRemoveFile={() => {}}
             onPaste={() => {}}
+            isFixedPosition={false}
           />
-        </div>
+        </motion.div>
 
         {/* Preguntas de ejemplo */}
         {!isInputMoved && (

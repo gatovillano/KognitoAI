@@ -64,7 +64,7 @@ class KnowledgeAnalysisTool(BaseTool):
         2. `analyze_recent_items`: Para peticiones como "revisa lo último", "analiza mis notas de hoy".
         3. `analyze_specific_topic`: Para peticiones como "analiza mis notas sobre 'Proyecto Hydra'".
 
-        Hoy es: {datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')}.
+        Hoy es: {datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')}
 
         Responde únicamente en formato JSON: {{"action": "...", "parameters": {{"days_ago": null, "topic_keywords": null}}}}
         """

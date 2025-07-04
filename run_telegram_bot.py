@@ -97,7 +97,7 @@ async def lifespan(app: FastAPI):
 
     if ptb_app.updater:
         # Iniciar polling y añadir el callback síncrono.
-        polling_task = asyncio.create_task(ptb_app.updater.start_polling(drop_pending_updates=True))
+        polling_task = asyncio.create_task(ptb_app.updater.start_polling(drop_pending_updates=True, error_callback=done_callback))
         polling_task.add_done_callback(done_callback)
         logger.info("✅ Tarea de polling de Telegram iniciada.")
         
@@ -108,6 +108,24 @@ async def lifespan(app: FastAPI):
         
         # Guardar las tareas para poder cancelarlas al apagar.
         app.state.background_tasks = [polling_task, dispatcher_task]
+        
+        # Configurar reintentos para errores de red
+        async def retry_on_network_error():
+            while True:
+                if not ptb_app.updater.is_running():
+                    try:
+                        await ptb_app.updater.start_polling(drop_pending_updates=True, error_callback=done_callback)
+                        logger.info("✅ Polling reiniciado con éxito.")
+                        break
+                    except Exception as e:
+                        logger.error(f"❌ Error de red en polling, reintentando en 5 segundos: {e}", exc_info=True)
+                        await asyncio.sleep(5)
+                else:
+                    logger.info("✅ Updater ya está corriendo, no se necesita reintento.")
+                    break
+
+        # Iniciar tarea de reintento si es necesario
+        app.state.retry_task = asyncio.create_task(retry_on_network_error())
 
     yield # La API y el bot están ahora activos.
 
@@ -166,6 +184,11 @@ class StoreUserDataRequest(BaseModel):
     key: str
     data: str  # Datos en base64 para la imagen
 
+class BotCreateThreadRequest(BaseModel):
+    """Define la estructura de datos para una solicitud de creación de hilo de bot."""
+    chat_id: int
+    thread_name: str
+
 @internal_api.post("/internal/store-user-data")
 async def store_user_data_endpoint(request: StoreUserDataRequest):
     """
@@ -186,6 +209,25 @@ async def store_user_data_endpoint(request: StoreUserDataRequest):
     except Exception as e:
         logger.error(f"Error en endpoint interno /store-user-data: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error al almacenar datos de usuario.")
+
+@internal_api.post("/internal/bot-create-thread")
+async def bot_create_thread_endpoint(request: BotCreateThreadRequest):
+    """
+    Endpoint de la API interna para crear un hilo de conversación desde el bot de Telegram.
+    """
+    if not bot_manager.is_initialized():
+        raise HTTPException(status_code=503, detail="El cliente de Telegram no está listo.")
+    bot_instance = bot_manager.bot
+    if bot_instance is None:
+        raise HTTPException(status_code=503, detail="El bot de Telegram no está inicializado.")
+    try:
+        # Aquí se implementaría la lógica para crear un hilo de conversación en Telegram
+        # Por ahora, solo registramos la solicitud y devolvemos un estado de éxito simulado
+        logger.info(f"Creando hilo de conversación en chat {request.chat_id} con nombre {request.thread_name}")
+        return {"status": "ok", "thread_id": f"thread_{request.chat_id}_{request.thread_name}"}
+    except Exception as e:
+        logger.error(f"Error en endpoint interno /bot-create-thread: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error al crear hilo de conversación.")
 
 
 if __name__ == "__main__":

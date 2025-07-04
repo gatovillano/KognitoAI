@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { ArrowLeft, Loader2, FileText, Folder, Eye, Edit, ScanSearch, Share2, Trash2 } from 'lucide-react';
+import { ArrowLeft, Loader2, FileText, Folder, Eye, Edit, ScanSearch, Share2, Trash2, History, FolderKanban } from 'lucide-react';
 import { toast } from 'sonner';
 
 import apiClient from '@/lib/api';
@@ -52,14 +52,35 @@ export default function RepositoryDetailPage() {
   const [vectorizationResult, setVectorizationResult] = useState<any>(null);
   const [isVectorizationOpen, setIsVectorizationOpen] = useState(false);
 
+  // Estado para el historial de análisis
+  const [savedAnalyses, setSavedAnalyses] = useState<any[]>([]);
+
   useEffect(() => {
-    const fetchDocuments = async () => {
+    const fetchData = async () => {
       setIsLoading(true);
       try {
-        const response = await apiClient.post('/api/github/list-github-documents', {});
+        const [docsRes, analysesRes] = await Promise.all([
+          apiClient.post('/api/github/list-github-documents', {}),
+          apiClient.post('/api/get-repo-analyses', { repo_name: repoName })
+        ]);
         // Filtrar documentos por repo_url que termine con el repoName
-        const filteredDocs = response.data.filter((doc: GitHubDocument) => doc.repo_url && doc.repo_url.endsWith(`/${repoName}`));
+        const filteredDocs = docsRes.data.filter((doc: GitHubDocument) => doc.repo_url && doc.repo_url.endsWith(`/${repoName}`));
+        // Usar los análisis directamente del endpoint específico para el repositorio
+        const repoAnalyses = analysesRes.data
+          .map((analysis: any) => {
+            let fileName = 'Análisis sin título';
+            if (analysis.result_payload && typeof analysis.result_payload === 'object') {
+              fileName = analysis.result_payload.file_name || analysis.result_payload.title || fileName;
+            }
+            return {
+              ...analysis,
+              file_name: fileName
+            };
+          });
+        console.log('Total de análisis cargados desde la API para este repositorio:', repoAnalyses.length);
+        toast.info(`Análisis cargados desde API para ${repoName}: ${repoAnalyses.length}`);
         setDocuments(filteredDocs);
+        setSavedAnalyses(repoAnalyses);
       } catch (error) {
         toast.error('Error al cargar los datos del repositorio');
       } finally {
@@ -67,7 +88,7 @@ export default function RepositoryDetailPage() {
       }
     };
 
-    fetchDocuments();
+    fetchData();
   }, [repoName]);
 
   const handleAnalyzeDocument = async (doc: Document) => {
@@ -248,9 +269,22 @@ export default function RepositoryDetailPage() {
       return (
         <AccordionItem key={node.path} value={node.path}>
           <AccordionTrigger style={{ paddingLeft: `${indent + 16}px` }}>
-            <div className="flex items-center gap-2">
-              <Folder className="h-5 w-5" />
-              <span>{node.name}</span>
+            <div className="flex items-center gap-2 flex-1 justify-between">
+              <div className="flex items-center gap-2">
+                <Folder className="h-5 w-5" />
+                <span>{node.name}</span>
+              </div>
+              <div className="flex gap-1">
+                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); /* Lógica para analizar carpeta */ toast.info(`Analizando carpeta ${node.name}`); }} title="Analizar Carpeta">
+                  <ScanSearch className="h-4 w-4" />
+                </Button>
+                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); /* Lógica para compartir carpeta */ toast.info(`Compartiendo carpeta ${node.name}`); }} title="Compartir Carpeta">
+                  <Share2 className="h-4 w-4" />
+                </Button>
+                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); /* Lógica para eliminar carpeta */ toast.info(`Eliminando carpeta ${node.name}`); }} title="Eliminar Carpeta">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </AccordionTrigger>
           <AccordionContent>
@@ -329,22 +363,64 @@ export default function RepositoryDetailPage() {
           <Loader2 className="h-8 w-8 animate-spin" />
         </div>
       ) : (
-        <div className="flex-grow overflow-auto">
-          {Object.keys(folderTree.children).length > 0 || folderTree.files.length > 0 ? (
-            <Accordion type="multiple" className="w-full">
-              {renderFolder(folderTree)}
-            </Accordion>
-          ) : (
-            <p className="text-center text-muted-foreground py-8">No hay archivos en este repositorio.</p>
-          )}
-        </div>
+        <>
+          <div className="flex-grow overflow-auto">
+            {Object.keys(folderTree.children).length > 0 || folderTree.files.length > 0 ? (
+              <Accordion type="multiple" className="w-full">
+                {renderFolder(folderTree)}
+              </Accordion>
+            ) : (
+              <p className="text-center text-muted-foreground py-8">No hay archivos en este repositorio.</p>
+            )}
+          </div>
+
+          <div className="mt-8 pt-6 border-t">
+            <h2 className="text-2xl font-bold flex items-center gap-2 mb-4">
+              <History className="h-6 w-6" />
+              Historial de Análisis
+            </h2>
+            {savedAnalyses.length > 0 ? (
+              <div className="w-full max-h-[300px] overflow-y-auto">
+                <Accordion type="single" collapsible className="w-full">
+                  {savedAnalyses.map((analysis: any) => (
+                    <AccordionItem value={`item-${analysis.id}`} key={analysis.id}>
+                      <AccordionTrigger>
+                        <div className="flex items-center gap-2 text-left flex-1 min-w-0">
+                          {analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                          <span className="font-medium truncate">{analysis.file_name}</span>
+                          <span className="ml-auto text-xs text-muted-foreground pr-4">{new Date(analysis.created_at).toLocaleDateString()}</span>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <Button variant="link" className="p-0 h-auto" onClick={() => {
+                          if (analysis.file_name.startsWith('Colección:')) {
+                            setCollectionAnalysisResult(analysis.result_payload);
+                            setIsCollectionAnalysisOpen(true);
+                          } else {
+                            setDocAnalysisResult(analysis.result_payload);
+                            setDocumentToAnalyze({ file_name: analysis.file_name, topic: 'Repositories', title: '', author: '' });
+                            setIsDocAnalysisOpen(true);
+                          }
+                        }}>
+                          Ver Resultados Detallados
+                        </Button>
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
+              </div>
+            ) : (
+              !isLoading && <p className="text-sm text-muted-foreground text-center py-4">No hay análisis guardados para este repositorio.</p>
+            )}
+          </div>
+        </>
       )}
 
       {/* Diálogos */}
       <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={() => {}} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={() => {}} document={documentToDelete} />
-      <AnalysisResultDialog isOpen={isDocAnalysisOpen} onOpenChange={setIsDocAnalysisOpen} analysis={docAnalysisResult} document={documentToAnalyze ?? { file_name: '', topic: 'Repositories', title: '', author: '' }} />
+      <CodeAnalysisResultDialog isOpen={isDocAnalysisOpen} onOpenChange={setIsDocAnalysisOpen} analysis={docAnalysisResult} repoName={repoName} />
       <CodeAnalysisResultDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} repoName={repoName} />
       <AnalysisResultDialog isOpen={isVectorizationOpen} onOpenChange={setIsVectorizationOpen} analysis={vectorizationResult} document={{ file_name: repoName, topic: 'Repositories', title: 'Vectorización de ' + repoName, author: '' }} />
       <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={() => {}} document={documentToShare} />

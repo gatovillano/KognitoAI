@@ -64,6 +64,7 @@ from tools.proactive_knowledge_linker_tool import ProactiveKnowledgeLinkerTool
 from tools.knowledge_analysis_tool import KnowledgeAnalysisTool
 from tools.comprehensive_web_analysis_tool import ComprehensiveWebAnalysisTool
 from tools.get_analysis_results_tool import GetAnalysisResultsTool
+from tools.scoped_rag_analysis_tool import ScopedRagAnalysisTool
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,8 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
         ProactiveKnowledgeLinkerTool,
         KnowledgeAnalysisTool,
         ComprehensiveWebAnalysisTool,
-        GetAnalysisResultsTool
+        GetAnalysisResultsTool,
+        ScopedRagAnalysisTool
     ]
 
     for ToolClass in tool_classes_to_instantiate:
@@ -125,7 +127,7 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
                 GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
                 ImageGenerationTool, GetProactiveInsightsTool,
                 ProactiveKnowledgeLinkerTool, KnowledgeAnalysisTool, ComprehensiveWebAnalysisTool,
-                GetAnalysisResultsTool, MindmapGeneratorTool, ImageBackgroundEraserTool
+                GetAnalysisResultsTool, MindmapGeneratorTool, ImageBackgroundEraserTool, ScopedRagAnalysisTool
             ]:
                 kwargs = {"account_id": account_id}
                 if ToolClass in [SetReminderTool, ImageGenerationTool, GetDocumentContentTool]:
