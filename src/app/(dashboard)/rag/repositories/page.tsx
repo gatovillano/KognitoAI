@@ -62,18 +62,27 @@ export default function RepositoriesPage() {
         const [docsRes, reposRes, analysesRes] = await Promise.all([
           apiClient.post('/api/github/list-github-documents', {}),
           apiClient.post('/api/github/list-github-repositories', {}),
-          apiClient.post('/api/get-saved-analyses', { topic: 'Repositories', all: false })
+          apiClient.post('/api/get-saved-analyses', { topic: 'Repositories', all: true })
         ]);
         
-        // Filtrar análisis para incluir solo los relacionados con repositorios
-        const repoAnalyses = analysesRes.data.filter((analysis: { file_name: string; }) => 
-          analysis.file_name.startsWith('Colección: Repositories') || 
-          reposRes.data.some((repo: { repo_name: any; }) => analysis.file_name.includes(repo.repo_name))
-        );
+        // Confiar en el filtrado del backend como en las páginas de topics
+        // Intentar extraer file_name de result_payload si está disponible
+        const repoAnalyses = analysesRes.data.map((analysis: any) => {
+          let fileName = 'Análisis sin título';
+          if (analysis.result_payload && typeof analysis.result_payload === 'object') {
+            fileName = analysis.result_payload.file_name || analysis.result_payload.title || fileName;
+          }
+          return {
+            ...analysis,
+            file_name: fileName
+          };
+        });
         
         setDocuments(docsRes.data);
         setRepositoriesData(reposRes.data);
         setSavedAnalyses(repoAnalyses);
+        console.log('Análisis guardados:', repoAnalyses.length);
+        toast.info(`Análisis guardados: ${repoAnalyses.length}`);
     } catch (error) {
       toast.error('Error al cargar los datos de los repositorios.');
     } finally {

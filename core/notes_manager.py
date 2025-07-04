@@ -85,19 +85,7 @@ async def add_note(account_id: str, title: Optional[str], content: str, category
             "team_id": str(new_note.team_id) if new_note.team_id else None,
             # No devolvemos el embedding, es muy grande
         }
-        # Trigger the proactive knowledge linker in the background
-        # Asegúrate de que proactive_knowledge_linker_trigger esté importado
-        from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger
-        asyncio.create_task(proactive_knowledge_linker_trigger({
-            'id': str(new_note.id),
-            'account_id': account_id,
-            'content': new_note.content,
-            'title': new_note.title,
-            'type': 'note',
-            'category': new_note.category,
-            'timestamp': new_note.created_at,
-            'embedding': note_embedding # Pasa el embedding si ya lo tienes
-        }))
+      
 
         return note_dict
 
@@ -146,8 +134,8 @@ async def get_notes(account_id: str, category: Optional[str] = None, search_quer
         response_lines = ["Aquí están tus notas:"]
         for note in notes:
             title = f"<b>{note.title}</b>" if note.title else "Nota sin título"
-            response_lines.append(f"\n- <b>ID: {note.id}</b> | {title} (Categoría: {note.category})\n  <i>{note.content[:100]}...</i>")
-        
+            response_lines.append(f"\n- <b>ID: {note.id}</b> | {title} (Categoría: {note.category})\n  <i>{note.content}</i>")
+
         return "\n".join(response_lines)
 
 

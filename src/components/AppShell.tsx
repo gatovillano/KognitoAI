@@ -71,14 +71,14 @@ export function AppShell({ children }: AppShellProps) {
     <LoadingProvider>
       <SearchProvider>
       {isDesktop ? (
-        <div className="h-screen max-h-screen overflow-hidden flex bg-background">
+        <div className="fixed inset-0 bg-background">
           <div
-            className={`bg-card transition-all duration-300 ease-in-out rounded-tr-lg ${isSidebarCollapsed ? 'w-20' : 'w-80'}`}
+            className={`bg-card transition-all duration-300 ease-in-out rounded-tr-lg ${isSidebarCollapsed ? 'w-20' : 'w-80'} h-full overflow-y-auto fixed left-0 top-0 z-10`}
           >
             <Sidebar isCollapsed={isSidebarCollapsed} />
           </div>
 
-          <div className="flex-grow flex flex-col">
+          <div className={`fixed top-0 bottom-0 right-0 flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'left-20' : 'left-80'}`}>
             <header className="flex h-14 items-center gap-4 bg-card px-6 shrink-0 border-b border-border/50">
               <Button variant="ghost" size="icon" onClick={toggleSidebar} className="rounded-full hover:bg-muted">
                 {isSidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
@@ -113,7 +113,7 @@ export function AppShell({ children }: AppShellProps) {
                 <ArtifactPanelToggleButton />
               </div>
             </header>
-            <main className="flex-grow overflow-y-auto bg-background">
+            <main className="flex-1 bg-background overflow-y-auto p-6">
               {children}
             </main>
           </div>

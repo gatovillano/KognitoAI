@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { Avatar } from '@/components/ui/avatar';
 import { ChatAvatar } from './ChatAvatar';
 import { Button } from '@/components/ui/button';
-import { Copy, Play, Loader2, Square } from 'lucide-react';
+import { Copy, Play, Loader2, Square, RefreshCw } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 
 interface Artifact {
@@ -18,6 +18,7 @@ interface ChatMessageProps {
   msg: { text: string; sender: 'user' | 'ai'; image?: string; document_url?: string; artifact?: Artifact };
   index: number;
   handleCopyMessage: (text: string) => void;
+  handleRetry: (text: string) => void;
   handlePlayAudio: (text: string, index: number) => void;
   isAudioLoading: boolean;
   playingMessageIndex: number | null;
@@ -27,6 +28,7 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
   msg,
   index,
   handleCopyMessage,
+  handleRetry,
   handlePlayAudio,
   isAudioLoading,
   playingMessageIndex,
@@ -61,7 +63,7 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
         // Mensaje del usuario
         <div className="flex flex-col items-end mb-6">
           <div className="flex items-start gap-3 max-w-[100%] mr-4" style={{ marginRight: '20px' }}>
-            <div className="text-white rounded-2xl px-4 py-3 shadow-sm" style={{ backgroundColor: '#2f3237', maxWidth: '800px' }}>
+            <div className="text-white rounded-2xl px-4 py-2 shadow-sm" style={{ backgroundColor: '#2f3237', maxWidth: '800px' }}>
               {isEditing ? (
                 <textarea
                   value={editedText}
@@ -117,11 +119,16 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
                 </Button>
               </>
             ) : (
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full" onClick={handleEdit}>
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                </svg>
-              </Button>
+              <>
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full" onClick={() => handleRetry(msg.text)}>
+                  <RefreshCw className="h-3 w-3" />
+                </Button>
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full" onClick={handleEdit}>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                  </svg>
+                </Button>
+              </>
             )}
           </div>
         </div>

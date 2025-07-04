@@ -407,21 +407,10 @@ async def process_document_for_rag(
 
         logger.info(f"✅ Procesado y añadido {len(lc_documents)} chunks a la colección '{langchain_collection_name}'.")
         
-        # Trigger proactivo (si es necesario)
+        # Trigger proactivo deshabilitado para documentos (se analizará en un job nocturno)
         if account_id or team_id:
-            from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger
-            doc_embedding = await embeddings.aembed_query(
-                extracted_text[:10000] + "..." if len(extracted_text) > 10000 else extracted_text
-            )
-            asyncio.create_task(proactive_knowledge_linker_trigger({
-                "account_id": account_id, 
-                "team_id": team_id, 
-                "content": extracted_text,
-                "title": file_name, 
-                "type": "document", 
-                "embedding": doc_embedding,
-                "workspace_id": workspace_id
-            }))
+            logger.info("[Memory Manager] Análisis proactivo no programado para documentos. Se analizará en el job nocturno.")
+            # TODO: Implementar job nocturno para análisis de documentos una vez al día.
             
         return len(lc_documents)
 

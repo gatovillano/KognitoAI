@@ -327,17 +327,24 @@ export default function WorkspaceDashboard() {
 
   if (loading) {
     return (
-      <div className="p-6">
-        <p>Cargando datos del workspace...</p>
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Cargando datos del workspace...</p>
+        </div>
       </div>
     );
   }
 
   if (!workspace) {
     return (
-      <div className="p-6">
-        <p>Workspace no encontrado o no tienes acceso a este workspace.</p>
-        <Button onClick={() => router.push('/workspaces')} className="mt-4">
+      <div className="text-center py-16">
+        <Bot className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
+        <h3 className="text-xl font-semibold mb-2">Workspace no encontrado</h3>
+        <p className="text-muted-foreground mb-6">
+          No se pudo acceder a este workspace o no tienes permisos para verlo.
+        </p>
+        <Button onClick={() => router.push('/workspaces')} size="lg">
           <ArrowLeft className="mr-2 h-4 w-4" />
           Volver a Workspaces
         </Button>
@@ -346,156 +353,242 @@ export default function WorkspaceDashboard() {
   }
 
   return (
-    <div className="p-6">
+    <div>
       <div className="flex items-center justify-between mb-8">
-<div className="flex items-center">
-  <Bot className="mr-2 h-8 w-8 text-primary" />
-  <h1 className="text-3xl font-bold">{workspace.name}</h1>
-</div>
-        <Button onClick={() => router.push('/workspaces')}>
+        <div className="flex items-center gap-3">
+          <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
+            <Bot className="h-6 w-6 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold">{workspace.name}</h1>
+            <p className="text-muted-foreground">Espacio de trabajo especializado</p>
+          </div>
+        </div>
+        <Button variant="outline" onClick={() => router.push('/workspaces')}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           Volver a Workspaces
         </Button>
       </div>
 
-      <div className="mb-6">
-        <Input
-          type="text"
-          placeholder="Buscar en chats y documentos..."
-          value={searchTerm}
-          onChange={handleSearchChange}
-          className="w-full p-2 pl-5 rounded-full bg-card border-none"
-        />
+      <div className="mb-8">
+        <div className="relative">
+          <svg className="absolute left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <Input
+            type="text"
+            placeholder="Buscar en chats y documentos..."
+            value={searchTerm}
+            onChange={handleSearchChange}
+            className="pl-12 h-12 rounded-full bg-card border-0 shadow-sm focus:ring-2 focus:ring-primary/20"
+          />
+        </div>
       </div>
 
-      <div className="mb-10">
+      <div className="mb-12">
+        <div className="mb-6">
+          <div>
+            <h2 className="text-2xl font-semibold flex items-center">
+              <MessageSquare className="mr-3 h-6 w-6 text-primary" />
+              Chats en este Workspace
+            </h2>
+            <p className="text-muted-foreground mt-1">Conversaciones específicas de este espacio</p>
+          </div>
+        </div>
+        
+        {filteredChats.length === 0 ? (
+          <div className="text-center py-16 border-2 border-dashed border-border rounded-xl">
+            <MessageSquare className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
+            <h3 className="text-xl font-semibold mb-2">
+              {searchTerm ? 'No se encontraron chats' : 'No hay chats aún'}
+            </h3>
+            <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+              {searchTerm 
+                ? 'No hay chats que coincidan con tu búsqueda. Intenta con otros términos.'
+                : 'Comienza una nueva conversación especializada en este workspace.'
+              }
+            </p>
+            {!searchTerm && (
+              <Button onClick={handleNewChat} size="lg">
+                <Plus className="mr-2 h-5 w-5" />
+                Crear primer Chat
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <Card 
+              className="group border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center text-center p-6 cursor-pointer min-h-[180px]"
+              onClick={handleNewChat}
+            >
+              <div className="h-12 w-12 rounded-full bg-green-500/10 flex items-center justify-center mb-3 group-hover:bg-green-500/20 transition-colors">
+                <Plus className="h-6 w-6 text-green-600" />
+              </div>
+              <h3 className="font-semibold text-lg mb-1">Nuevo Chat</h3>
+              <p className="text-sm text-muted-foreground">Iniciar nueva conversación</p>
+            </Card>
+            {filteredChats.map((chat) => (
+              <Card key={chat.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 min-h-[180px] flex flex-col" onClick={() => handleChatClick(chat.id)}>
+                <CardHeader className="pb-3 flex-1">
+                  <CardTitle className="flex items-start justify-between gap-3 h-full">
+                    <div className="flex items-start gap-3 min-w-0 flex-1 h-full">
+                      <div className="h-10 w-10 rounded-lg bg-green-500/10 flex items-center justify-center flex-shrink-0">
+                        <MessageSquare className="h-5 w-5 text-green-600" />
+                      </div>
+                      <div className="min-w-0 flex-1 flex flex-col justify-between h-full">
+                        <div className="font-semibold text-sm leading-relaxed">
+                          <InlineMarkdownRenderer content={chat.title} />
+                        </div>
+                      </div>
+                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleChatClick(chat.id); }}>
+                          <MessageSquare className="mr-2 h-4 w-4" />
+                          Abrir Chat
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOpenRenameDialog(chat); }}>
+                          <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                          Renombrar
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.id); }} className="text-destructive">
+                          <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                          Eliminar
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0 mt-auto">
+                  <div className="flex items-center justify-between pt-3 border-t border-border/50">
+                    <span className="text-xs text-muted-foreground">
+                      {chat.created_at ? new Date(chat.created_at).toLocaleDateString() : 'Sin fecha'}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <div className="h-2 w-2 rounded-full bg-green-500"></div>
+                      <span className="text-xs text-muted-foreground">Activo</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mb-12">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-semibold flex items-center">
-            <MessageSquare className="mr-2 h-6 w-6 text-primary" />
-            Chats en este Workspace
-          </h2>
-          <Button onClick={handleNewChat}>
+          <div>
+            <h2 className="text-2xl font-semibold flex items-center">
+              <BookMarked className="mr-3 h-6 w-6 text-primary" />
+              Conocimientos del Workspace
+            </h2>
+            <p className="text-muted-foreground mt-1">Documentos y colecciones especializadas</p>
+          </div>
+          <Button variant="outline" onClick={handleOpenAddExistingCollectionDialog}>
             <Plus className="mr-2 h-4 w-4" />
-            Nuevo Chat
+            Añadir Existente
           </Button>
         </div>
-        {filteredChats.length === 0 ? (
-          <p className="text-muted-foreground">No hay chats en este workspace que coincidan con la búsqueda.</p>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filteredChats.map((chat) => (
-              <Card key={chat.id} className="flex flex-col cursor-pointer hover:border-primary/50 transition-colors min-h-[150px]" onClick={() => handleChatClick(chat.id)}>
-                <CardHeader className="flex flex-row items-start justify-between">
-                  <div>
-<CardTitle className="flex items-center text-base">
-  <MessageSquare className="mr-2 h-6 w-6 text-primary flex-shrink-0" />
-  <InlineMarkdownRenderer content={chat.title} />
-</CardTitle>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.stopPropagation()}>
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleChatClick(chat.id); }}>
-                        Abrir Chat
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOpenRenameDialog(chat); }}>
-                        Nombrar
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.id); }}>
-                        Eliminar
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-xs text-muted-foreground">
-                    Iniciado: {chat.created_at ? new Date(chat.created_at).toLocaleDateString() : 'Fecha no disponible'}
-                  </p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="mb-10">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-semibold flex items-center">
-            <BookMarked className="mr-2 h-6 w-6 text-primary" />
-            Conocimientos del Workspace
-          </h2>
-          <div className="flex gap-2">
-            <Button onClick={handleOpenAddExistingCollectionDialog}>
-              <Plus className="mr-2 h-4 w-4" />
-              Añadir Colección Existente
-            </Button>
-            <Button onClick={() => setCreateCollectionDialogOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Crear Colección
-            </Button>
-          </div>
-        </div>
+        
         {filteredCollections.length === 0 ? (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <Card 
-              className="border-dashed hover:border-primary hover:text-primary transition-colors flex flex-col items-center justify-center text-center p-6 cursor-pointer h-full"
+              className="group border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center text-center p-8 cursor-pointer min-h-[200px]"
               onClick={() => setCreateCollectionDialogOpen(true)}
             >
-              <Plus className="h-8 w-8 mb-2" />
-              <p className="font-semibold">Crear Colección</p>
-              <p className="text-sm text-muted-foreground">Define un nuevo tema para tus documentos.</p>
+              <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
+                <Plus className="h-8 w-8 text-primary" />
+              </div>
+              <h3 className="font-semibold text-lg mb-2">Crear Colección</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Define un nuevo tema para organizar tus documentos y conocimientos.
+              </p>
             </Card>
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <Card 
-              className="border-dashed hover:border-primary hover:text-primary transition-colors flex flex-col items-center justify-center text-center p-6 cursor-pointer h-full"
+              className="group border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center text-center p-6 cursor-pointer"
               onClick={() => setCreateCollectionDialogOpen(true)}
             >
-              <Plus className="h-8 w-8 mb-2" />
-              <p className="font-semibold">Crear Colección</p>
-              <p className="text-sm text-muted-foreground">Define un nuevo tema para tus documentos.</p>
+              <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/20 transition-colors">
+                <Plus className="h-6 w-6 text-primary" />
+              </div>
+              <h3 className="font-semibold mb-1">Crear Colección</h3>
+              <p className="text-xs text-muted-foreground">Nuevo tema de documentos</p>
             </Card>
             {filteredCollections.map((collection) => (
-              <Card key={collection.id} className="flex flex-col cursor-pointer hover:border-primary/50 transition-colors min-h-[150px]" onClick={() => handleCollectionClick(collection.id)}>
-                <CardHeader className="flex flex-row items-start justify-between">
-                  <div>
-<CardTitle className="flex items-center text-base">
-  <BookMarked className="mr-2 h-6 w-6 text-primary flex-shrink-0" />
-  <InlineMarkdownRenderer content={collection.title} />
-</CardTitle>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.stopPropagation()}>
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleCollectionClick(collection.id); }}>
-                        Abrir Colección
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOpenRenameCollectionDialog(collection); }}>
-                        Renombrar
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteCollection(collection.id); }}>
-                        Eliminar
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+              <Card key={collection.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleCollectionClick(collection.id)}>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="h-10 w-10 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                        <BookMarked className="h-5 w-5 text-blue-600" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm line-clamp-2">
+                          <InlineMarkdownRenderer content={collection.title} />
+                        </div>
+                      </div>
+                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleCollectionClick(collection.id); }}>
+                          <BookMarked className="mr-2 h-4 w-4" />
+                          Abrir Colección
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOpenRenameCollectionDialog(collection); }}>
+                          <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                          Renombrar
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteCollection(collection.id); }} className="text-destructive">
+                          <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                          Eliminar
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground">Creado: {new Date(collection.created_at).toLocaleDateString()}</p>
+                <CardContent className="pt-0">
+                  <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
+                    {collection.description || 'Colección de documentos especializados'}
+                  </p>
+                  <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(collection.created_at).toLocaleDateString()}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <div className="h-2 w-2 rounded-full bg-blue-500"></div>
+                      <span className="text-xs text-muted-foreground">Disponible</span>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             ))}
           </div>
         )}
-        <p className="text-xs text-muted-foreground mt-2">Nota: Las colecciones están aisladas y solo son accesibles dentro de este workspace.</p>
+        <p className="text-xs text-muted-foreground/70 mt-4 text-center">
+          Las colecciones están aisladas y solo son accesibles dentro de este workspace
+        </p>
       </div>
 
       <CreateWorkspaceCollectionDialog 

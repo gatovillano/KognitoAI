@@ -31,13 +31,13 @@ const EmailLoginForm = ({ onLogin, isSubmitting, setParentError }: { onLogin: (t
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
-        <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="bg-transparent border-muted focus:ring-0 focus:border-primary" autoComplete="off" required />
+        <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="bg-muted/30 border-0 rounded-2xl h-12 focus:ring-2 focus:ring-primary/20 focus:bg-muted/50 transition-all placeholder:text-muted-foreground/50" placeholder="tu@email.com" autoComplete="off" required />
       </div>
       <div className="space-y-2">
         <Label htmlFor="password">Contraseña</Label>
-        <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="bg-transparent border-muted focus:ring-0 focus:border-primary" autoComplete="new-password" required />
+        <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="bg-muted/30 border-0 rounded-2xl h-12 focus:ring-2 focus:ring-primary/20 focus:bg-muted/50 transition-all placeholder:text-muted-foreground/50" placeholder="••••••••" autoComplete="new-password" required />
       </div>
-      <Button type="submit" className="w-full text-background" disabled={isSubmitting}>
+      <Button type="submit" className="w-full h-12 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-medium shadow-lg hover:shadow-xl transition-all duration-200" disabled={isSubmitting}>
         {isSubmitting ? 'Ingresando...' : 'Iniciar Sesión con Email'}
       </Button>
     </form>
@@ -72,10 +72,10 @@ const TelegramCodeForm = ({ setView }: { setView: (view: { type: string; identif
     <form onSubmit={handleRequestCode} className="space-y-4">
       <div className="space-y-2">
         <Label htmlFor="telegram-id">ID o @usuario de Telegram</Label>
-        <Input id="telegram-id" value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder="@tu_usuario" className="bg-transparent border-muted focus:ring-0 focus:border-primary" autoComplete="off" />
+        <Input id="telegram-id" value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder="@tu_usuario" className="bg-muted/30 border-0 rounded-2xl h-12 focus:ring-2 focus:ring-primary/20 focus:bg-muted/50 transition-all placeholder:text-muted-foreground/50" autoComplete="off" />
       </div>
       {error && <p className="text-sm text-accent">{error}</p>}
-      <Button type="submit" className="w-full text-background" disabled={isSubmitting}>
+      <Button type="submit" className="w-full h-12 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-medium shadow-lg hover:shadow-xl transition-all duration-200" disabled={isSubmitting}>
         {isSubmitting ? 'Enviando...' : 'Enviar Código a Telegram'}
       </Button>
     </form>
@@ -113,13 +113,13 @@ const VerifyCodeForm = ({ identifier, onVerify, setView }: { identifier: string;
           </p>
           <div className="space-y-2">
             <Label htmlFor="code">Código de Verificación</Label>
-            <Input id="code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" maxLength={6} autoFocus className="bg-transparent border-muted focus:ring-0 focus:border-primary" autoComplete="off" />
+            <Input id="code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" maxLength={6} autoFocus className="bg-muted/30 border-0 rounded-2xl h-12 focus:ring-2 focus:ring-primary/20 focus:bg-muted/50 transition-all placeholder:text-muted-foreground/50 text-center text-lg tracking-widest" autoComplete="off" />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
-          <Button type="submit" className="w-full" disabled={isSubmitting}>
+          <Button type="submit" className="w-full h-12 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-medium shadow-lg hover:shadow-xl transition-all duration-200" disabled={isSubmitting}>
             {isSubmitting ? 'Verificando...' : 'Verificar e Ingresar'}
           </Button>
-          <Button variant="link" onClick={() => setView({ type: 'login' })} className="w-full h-auto p-1">
+          <Button variant="ghost" onClick={() => setView({ type: 'login' })} className="w-full h-12 rounded-2xl hover:bg-muted/50 transition-all duration-200">
             Volver
           </Button>
         </form>
@@ -143,15 +143,12 @@ export default function LoginPage() {
 
   return (
     <main className="flex items-center justify-center min-h-screen bg-background p-4">
-      <Card className="w-full max-w-sm border-primary/20">
-        <CardHeader className="text-center space-y-2">
-          <Image src="/logo-completo-dark2.png" alt="Kognito AI Labs" width={300} height={120} className="mx-auto" />
-          <CardTitle className="text-2xl"></CardTitle>
-          <CardDescription>
-            {view.type === 'login' ? '' : 'Introduce el código que recibiste'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+      <div className="w-full max-w-md">
+        <Card className="backdrop-blur-xl bg-card/80 border-0 shadow-2xl rounded-3xl overflow-hidden">
+          <CardHeader className="text-center space-y-6 pt-8 pb-6">
+            <Image src="/logo-completo-dark2.png" alt="Kognito AI Labs" width={320} height={110} className="mx-auto" />
+          </CardHeader>
+          <CardContent className="px-8 pb-8">
           {globalError && <p className="text-sm text-destructive text-center mb-4">{globalError}</p>}
 
           {view.type === 'login' && (
@@ -159,23 +156,23 @@ export default function LoginPage() {
               {/* Aquí iría el botón de Telegram Widget si se reactiva */}
               
               <div className="relative">
-                <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+                <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-muted/30" /></div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-card px-2 text-muted-foreground">Login con Telegram</span>
+                  <span className="bg-card px-4 py-1 text-muted-foreground rounded-full">Login con Telegram</span>
                 </div>
               </div>
               <TelegramCodeForm setView={setView} />
               
               <div className="relative">
-                <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+                <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-muted/30" /></div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-card px-2 text-muted-foreground">O con Email</span>
+                  <span className="bg-card px-4 py-1 text-muted-foreground rounded-full">O con Email</span>
                 </div>
               </div>
               <EmailLoginForm onLogin={handleSuccessfulLogin} isSubmitting={isProcessing} setParentError={setGlobalError} />
               <div className="text-center text-sm text-muted-foreground">
                 ¿No tienes una cuenta?{' '}
-                <a href="/register" className="text-primary hover:underline">
+                <a href="/register" className="text-primary hover:text-primary/80 font-medium transition-colors">
                   Regístrate
                 </a>
               </div>
@@ -190,7 +187,8 @@ export default function LoginPage() {
             />
           )}
         </CardContent>
-      </Card>
+        </Card>
+      </div>
     </main>
   );
 }

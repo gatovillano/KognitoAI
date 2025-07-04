@@ -26,6 +26,7 @@ interface ChatInputBarProps {
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRemoveFile: (index: number) => void;
   onPaste: (e: ClipboardEvent) => void;
+  isFixedPosition?: boolean; // Nueva prop para controlar si está fijo o no
 }
 
 export function ChatInputBar({
@@ -47,7 +48,8 @@ export function ChatInputBar({
   onStopRecording,
   onFileUpload,
   onRemoveFile,
-  onPaste
+  onPaste,
+  isFixedPosition = true
 }: ChatInputBarProps) {
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -85,7 +87,8 @@ export function ChatInputBar({
   }, [onPaste]);
 
   return (
-    <footer className="p-4 w-full flex justify-center shrink-0 bg-transparent mb-2">
+    <div className={isFixedPosition ? "fixed bottom-0 right-0 p-6 bg-background z-30" : "relative w-full"} style={isFixedPosition ? { left: '320px' } : {}}>
+      <div className="flex justify-center w-full">
       <form onSubmit={onSendMessage} className="relative w-full max-w-4xl">
         <div className="rounded-3xl bg-card border border-border p-6 shadow-sm">
           {/* Archivos adjuntos */}
@@ -121,7 +124,7 @@ export function ChatInputBar({
           />
           
           {/* Barra de acciones */}
-          <div className="flex items-center justify-between mt-4 pt-4 border-t border-border/50">
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/50">
             {/* Botones de modo */}
             <div className="flex items-center gap-2">
               <Button
@@ -131,8 +134,8 @@ export function ChatInputBar({
                 onClick={onToggleKnowledgeAnalysis}
                 className="rounded-full"
               >
-                <BookMarked className="h-4 w-4 mr-2" />
-                Conocimientos
+                <BookMarked className="h-3 w-3 mr-2" />
+                Analisis de Conocimientos
               </Button>
               <Button
                 type="button"
@@ -142,7 +145,7 @@ export function ChatInputBar({
                 className="rounded-full"
               >
                 <Search className="h-4 w-4 mr-2" />
-                Web
+                Busqueda Web
               </Button>
               <Button
                 type="button"
@@ -151,8 +154,8 @@ export function ChatInputBar({
                 onClick={onToggleComprehensiveAnalysis}
                 className="rounded-full"
               >
-                <BrainCircuit className="h-4 w-4 mr-2" />
-                Análisis
+                <BrainCircuit className="h-2 w-2 mr-2" />
+                Busqueda Analítica
               </Button>
             </div>
 
@@ -203,6 +206,7 @@ export function ChatInputBar({
           </div>
         </div>
       </form>
-    </footer>
+      </div>
+    </div>
   );
 };

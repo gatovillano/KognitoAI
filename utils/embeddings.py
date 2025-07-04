@@ -66,3 +66,10 @@ async def initialize_embeddings():
     # Pero si otras partes del código lo esperan como retorno, podrías mantenerlo.
     # Por consistencia con la función original, lo mantenemos.
     return _embedding_model
+
+
+def get_embedding_model() -> Optional[OllamaEmbeddings]:
+    """
+    Devuelve la instancia global inicializada del modelo de embeddings.
+    """
+    return _embedding_model

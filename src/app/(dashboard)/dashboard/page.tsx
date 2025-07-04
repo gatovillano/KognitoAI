@@ -64,13 +64,13 @@ export default function DashboardPage() {
   const getInsightIcon = (type: string) => {
     switch (type.toLowerCase()) {
       case 'pattern':
-        return <Bot className="h-5 w-5 text-primary" />;
+        return <Bot className="h-5 w-5 text-cyan-600" />;
       case 'connection':
-        return <Library className="h-5 w-5 text-primary" />;
+        return <Library className="h-5 w-5 text-cyan-600" />;
       case 'project':
-        return <FolderKanban className="h-5 w-5 text-primary" />;
+        return <FolderKanban className="h-5 w-5 text-cyan-600" />;
       default:
-        return <FileText className="h-5 w-5 text-primary" />;
+        return <FileText className="h-5 w-5 text-cyan-600" />;
     }
   };
 
@@ -94,10 +94,15 @@ export default function DashboardPage() {
 
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Gráfico de Temas Principales */}
-          <Card className="rounded-2xl">
+          <Card className="rounded-3xl backdrop-blur-xl bg-card/80 border-0 shadow-xl">
             <CardHeader>
               <CardTitle>Temas Principales</CardTitle>
-              <CardDescription>Tópicos más frecuentes en tu base de conocimiento. Nota: Actualmente no agrupados por similitud semántica.</CardDescription>
+              <CardDescription className="space-y-1">
+                <span>Tópicos más frecuentes en tu base de conocimiento.</span>
+                <div className="text-xs text-muted-foreground/70 bg-muted/20 px-2 py-1 rounded-full inline-block mt-2">
+                  💡 Nota: Actualmente no agrupados por similitud semántica
+                </div>
+              </CardDescription>
             </CardHeader>
             <CardContent className="pt-6">
               <div className="flex justify-end mb-4 space-x-2">
@@ -105,12 +110,12 @@ export default function DashboardPage() {
                   type="number"
                   min="1"
                   defaultValue="20"
-                  className="px-2 py-1 w-20 border border-gray-300 rounded-md text-sm"
+                  className="px-3 py-2 w-24 border-0 bg-muted/30 rounded-2xl text-sm focus:ring-2 focus:ring-primary/20 focus:bg-muted/50 transition-all"
                   id="maxTermsInput"
                   placeholder="Max términos"
                 />
                 <button 
-                  className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors flex items-center gap-2"
+                  className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white rounded-2xl font-medium shadow-lg hover:shadow-xl transition-all duration-200 flex items-center gap-2"
                   onClick={async () => {
                     setIsLoading(true);
                     try {
@@ -170,17 +175,31 @@ export default function DashboardPage() {
               </div>
               <ResponsiveContainer width="100%" height={600}>
                 <BarChart data={data.key_topics} layout="vertical" margin={{ left: 10, right: 30, top: 30, bottom: 30 }}>
+                  <defs>
+                    <linearGradient id="barGradient" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor="#06b6d4" />
+                      <stop offset="100%" stopColor="#2563eb" />
+                    </linearGradient>
+                  </defs>
                   <XAxis type="number" hide />
                   <YAxis dataKey="topic" type="category" stroke="hsl(var(--foreground))" fontSize={16} tickLine={false} axisLine={false} width={200} interval={0} tick={{ dy: 15 }} />
-                  <Tooltip cursor={{ fill: 'hsl(var(--muted))' }} contentStyle={{ backgroundColor: 'hsl(var(--background))', border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)' }} />
-                  <Bar dataKey="mentions" fill="hsl(var(--primary))" radius={[0, 8, 8, 0]} barSize={40} />
+                  <Tooltip 
+                    cursor={{ fill: 'hsl(var(--muted))' }} 
+                    contentStyle={{ 
+                      backgroundColor: 'hsl(var(--background))', 
+                      border: '1px solid hsl(var(--border))', 
+                      borderRadius: '12px',
+                      boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
+                    }} 
+                  />
+                  <Bar dataKey="mentions" fill="url(#barGradient)" radius={[0, 8, 8, 0]} barSize={40} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
           </Card>
 
           {/* Tarjeta de Ayuda */}
-          <Card className="rounded-2xl">
+          <Card className="rounded-3xl backdrop-blur-xl bg-card/80 border-0 shadow-xl">
               <CardHeader>
                   <CardTitle className="flex items-center gap-2"><HelpCircle />Ayuda y Capacidades</CardTitle>
                   <CardDescription>Descubre qué puedes pedirle a Kognito en el chat o desde la interfaz.</CardDescription>
@@ -214,13 +233,13 @@ export default function DashboardPage() {
         <div>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-2xl font-bold">Descubrimientos Proactivos</h2>
-            <Link href="/dashboard/insights" className="text-sm font-medium text-primary hover:underline">
+            <Link href="/dashboard/insights" className="text-sm font-medium text-cyan-600 hover:text-cyan-500 transition-colors">
               Ver todo
             </Link>
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {data.proactive_insights.slice(0, 6).map(insight => ( // Limitar a 6 en el dashboard
-              <Card key={insight.id} className="rounded-2xl hover:border-primary/80 transition-colors cursor-pointer" onClick={() => setViewingInsight(insight)}>
+              <Card key={insight.id} className="rounded-3xl backdrop-blur-xl bg-card/80 border-0 shadow-xl hover:shadow-2xl transition-all duration-200 cursor-pointer hover:scale-105" onClick={() => setViewingInsight(insight)}>
                 <CardHeader>
                   <div className="flex items-center gap-2">
                      {getInsightIcon(insight.type)}
@@ -251,10 +270,10 @@ export default function DashboardPage() {
         <div>
           <h2 className="text-2xl font-bold mb-4">Preguntas de Análisis</h2>
           <div className="grid gap-4 md:grid-cols-2">
-            <Card className="rounded-2xl">
+            <Card className="rounded-3xl backdrop-blur-xl bg-card/80 border-0 shadow-xl">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <HelpCircle className="h-5 w-5 text-primary" />
+                  <HelpCircle className="h-5 w-5 text-cyan-600" />
                   Brechas de Conocimiento (Colecciones)
                 </CardTitle>
               </CardHeader>
@@ -270,10 +289,10 @@ export default function DashboardPage() {
                 )}
               </CardContent>
             </Card>
-            <Card className="rounded-2xl">
+            <Card className="rounded-3xl backdrop-blur-xl bg-card/80 border-0 shadow-xl">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <HelpCircle className="h-5 w-5 text-primary" />
+                  <HelpCircle className="h-5 w-5 text-cyan-600" />
                   Preguntas para Explorar (Documentos)
                 </CardTitle>
               </CardHeader>

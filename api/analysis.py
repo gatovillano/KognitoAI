@@ -1,5 +1,3 @@
-# api/analysis.py
-
 import logging
 from langchain.schema.messages import HumanMessage
 import uuid
@@ -11,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Depends, status, Form, BackgroundT
 from pydantic import BaseModel
 from sqlalchemy import select, desc, or_, update
 
-from core.database import SessionLocal, AnalysisTask, ProactiveInsight
+from core.database import SessionLocal, AnalysisTask, ProactiveInsight, MindmapTask
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.memory_manager import list_user_documents, get_full_document_content
@@ -306,6 +304,18 @@ async def get_analysis_result_endpoint(
     task = await db.get(AnalysisTask, uuid.UUID(task_id))
     if not task or str(task.account_id) != current_account_id:
         raise HTTPException(status_code=404, detail="Tarea no encontrada.")
+    return {"status": task.status, "result": task.result_payload, "error": task.error_message}
+
+@router.get("/get-mindmap-result/{task_id}")
+async def get_mindmap_result_endpoint(
+    task_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Consulta el estado y el resultado de una tarea de generación de mapa mental."""
+    task = await db.get(MindmapTask, uuid.UUID(task_id))
+    if not task or str(task.account_id) != current_account_id:
+        raise HTTPException(status_code=404, detail="Tarea de mapa mental no encontrada.")
     return {"status": task.status, "result": task.result_payload, "error": task.error_message}
 
 class AnalyzeCollectionRequest(BaseModel):
@@ -755,3 +765,40 @@ async def start_code_analysis_endpoint(
     background_tasks.add_task(run_code_analysis_and_save, str(new_task.id), current_account_id, req.repo_name)
     
     return {"task_id": str(new_task.id)}
+
+class GetRepoAnalysesRequest(BaseModel):
+    repo_name: str
+
+@router.post("/get-repo-analyses")
+async def get_repo_analyses_endpoint(
+    req: GetRepoAnalysesRequest,
+    current_account_id: str = Depends(get_current_account_id), 
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Recupera la lista de análisis completados para un repositorio específico.
+    Filtra los análisis donde file_name sea igual al nombre del repositorio o esté en la lista de documentos del repositorio.
+    """
+    account_uuid = uuid.UUID(current_account_id)
+    
+    # Obtener documentos del repositorio
+    query_docs = select(GitHubDocument).where(
+        GitHubDocument.account_id == account_uuid,
+        GitHubDocument.repo_url.endswith(f"/{req.repo_name}")
+    )
+    result_docs = await db.execute(query_docs)
+    repo_docs = result_docs.scalars().all()
+    repo_doc_file_names = [doc.file_path for doc in repo_docs]
+    
+    # Construir la consulta de análisis
+    stmt = select(AnalysisTask).where(
+        AnalysisTask.account_id == account_uuid,
+        AnalysisTask.status == "completed",
+        or_(
+            AnalysisTask.file_name == req.repo_name,
+            AnalysisTask.file_name.in_(repo_doc_file_names)
+        )
+    ).order_by(desc(AnalysisTask.created_at)).limit(50)
+    
+    results = await db.execute(stmt)
+    return results.scalars().all()

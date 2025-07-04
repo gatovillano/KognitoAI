@@ -38,7 +38,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
     description: str = (\
         "Use this tool for in-depth research requests. It searches the web, reads relevant pages, "\
         "cross-references the findings with the user's personal knowledge base, and provides a "\
-        "extended analysis. Ideal for queries like 'research the latest trends in AI and "\
+        "extended analysis. You can make another search with a second or third query to provide a better answer. Ideal for queries like 'research the latest trends in AI and "\
         "compare them to my notes on the topic'. "
         "Puede opcionalmente cruzar la información con documentos de un `workspace_id` específico." # <-- Descripción actualizada
     )
@@ -134,7 +134,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         --- Fin del Resumen Web ---
 
         --- Información Relevante de la Base de Conocimiento Personal del Usuario ---
-        {relevant_memories if "No se encontraron" not in relevant_memories else "No se encontró información interna relevante."}\n
+        {{relevant_memories if "No se encontraron" not in relevant_memories else "No se encontró información interna relevante."}}\\n
         --- Fin de la Información Interna ---
 
         Basándote en TODA la información anterior, por favor, elabora una respuesta final y completa para el usuario.
@@ -142,7 +142,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         - Si encuentras conexiones, sinergias o contradicciones entre la información web y el conocimiento del usuario, destácalas.
         - Adopta un tono de asistente útil y experto.
         - Formatea tu respuesta de manera clara y legible usando Markdown.
-        - **Importante:** Al final de tu respuesta, incluye una sección titulada "**Fuentes**" donde listes todas las URLs utilizadas en la investigación web ({', '.join(urls_to_scrape[:5])}). Asegúrate de que cada URL esté en formato de enlace clickable usando Markdown.
+        - **Importante:** Al final de tu respuesta, incluye una sección titulada "**Fuentes** donde listes todas las URLs utilizadas en la investigación web ({{', '.join(urls_to_scrape[:5])}}). Asegúrate de que cada URL esté en formato de enlace clickable usando Markdown.\n
         """
         final_response = await final_analysis_llm.ainvoke([HumanMessage(content=final_prompt)])
 

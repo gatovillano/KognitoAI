@@ -46,7 +46,7 @@ class MindmapGeneratorTool(BaseTool):
         super().__init__(**kwargs)
         self.account_id = account_id
 
-    async def _arun(self, document_content: str, account_id: str = "", concept_query: str = "temas clave", topic_hint: str = "") -> str:
+    async def _arun(self, document_content: str, account_id: str, concept_query: str = "temas clave", topic_hint: str = "") -> str:
         """
         Ejecuta la herramienta de generación de mapas mentales de forma asíncrona.
         """

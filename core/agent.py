@@ -33,10 +33,12 @@ import os
 from langchain.agents import AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain.agents.output_parsers.tools import ToolsAgentOutputParser
 from langchain.agents.format_scratchpad.tools import format_to_tool_messages
 from langchain_core.runnables import RunnablePassthrough
+from langchain_core.language_models.base import BaseLanguageModel
 from sqlalchemy import update
 
 # --- Módulos del Proyecto ---
@@ -45,9 +47,9 @@ from core.memory_manager import get_user_profile, get_relevant_memories, add_mem
 from core.context_cache import get_cached_context, cache_context
 from core.database import SessionLocal, Account, ChatThread, Workspace
 from utils.db_session import DBSession
+#from utils.helpers import sanitize_html
 from core.config import settings
-from core.llm_manager import get_main_llm, get_fast_llm, initialize_llms
-
+from core.llm_manager import get_main_llm, get_fast_llm
 # --- Claves para estado temporal ---
 from utils.image_generation import GENERATED_IMAGE_KEY
 from tools.get_document_content_tool import DOCUMENT_NAME_KEY
@@ -56,58 +58,9 @@ from sqlalchemy.orm import selectinload
 # --- Configuración del Logger ---
 logger = logging.getLogger(__name__)
 
-# Configuración de los prompts del agente
-DEFAULT_SYSTEM_PROMPT = settings.default_system_prompt
-
 # ==============================================================================
 # SECCIÓN 2: MANEJO DE CONTEXTO Y MEMORIA
 # ==============================================================================
-
-# _get_user_context ya no es necesaria como función separada si se integra en create_and_run_agent
-# Pero si la usas en otro lugar, aquí está la versión que estaba en tu repo:
-async def _get_user_context(account_id: str, user_message: str, workspace_id: Optional[str] = None) -> str:
-    """
-    Recupera el perfil del usuario y las memorias relevantes para una consulta dada.
-
-    Args:
-        account_id: El ID universal de la cuenta del usuario.
-        user_message: El mensaje actual del usuario para buscar memorias relevantes.
-
-    Returns:
-        Una cadena de texto formateada con el contexto del usuario.
-    """
-    try:
-        profile = await get_user_profile(account_id)
-        profile_info = []
-        if profile:
-            if profile.nombre: profile_info.append(f"- Nombre: {profile.nombre}")
-            if profile.gustos: profile_info.append(f"- Gustos: {profile.gustos}")
-            if profile.intereses: profile_info.append(f"- Intereses: {profile.intereses}")
-            if profile.otros_datos: profile_info.append(f"- Otros datos: {profile.otros_datos}")
-
-        user_context_parts = [
-            "--- Información Relevante sobre el Usuario y su Contexto ---",
-            "Información de Perfil del Usuario:",
-            "\n".join(profile_info) if profile_info else "No hay información de perfil disponible."
-        ]
-
-        # Evitar búsqueda de memoria para mensajes muy cortos o saludos
-        ignore_keywords = ['hola', 'hey', 'qué tal', 'cómo estás', 'gracias', 'ok', 'dale']
-        if len(user_message.strip().split()) < 3 or any(kw in user_message.lower() for kw in ignore_keywords):
-            relevant_memories = ""
-        else:
-            # --- MODIFICACIÓN: Pasar workspace_id a get_relevant_memories ---
-            relevant_memories = await get_relevant_memories(account_id, user_message, k=5, workspace_id=workspace_id)
-
-        if relevant_memories and "No se encontraron memorias relevantes" not in relevant_memories:
-            user_context_parts.append("\nMemorias y Documentos Relevantes (Base de Conocimiento):")
-            user_context_parts.append(relevant_memories)
-
-        user_context_parts.append("---------------------------------------------------------")
-        return "\n".join(user_context_parts)
-    except Exception as e:
-        logger.error(f"❌ Error recuperando el contexto para la cuenta {account_id}: {e}", exc_info=True)
-        return "Error recuperando la información del usuario."
 
 async def summarize_history_in_background(
     history_to_summarize: List[BaseMessage],
@@ -185,7 +138,7 @@ async def update_thread_title_if_needed(thread_id: str, messages: list):
         
         conversation_text = '\n'.join([extract_text_content(m.content) if hasattr(m, 'content') else str(m) for m in messages[-20:]])
         prompt = f"Resume la conversación en un título breve y descriptivo (máx 8 palabras):\n{conversation_text}"
-        llm = get_fast_llm()
+        llm = get_fast_llm() or get_main_llm()
         if not llm:
             logger.warning(f"[TÍTULO] No hay LLM disponible para generar título del hilo {thread_id}.")
             return
@@ -274,83 +227,6 @@ async def force_update_all_thread_titles():
 # SECCIÓN 3: EJECUCIÓN PRINCIPAL DEL AGENTE
 # ==============================================================================
 
-async def create_and_run_agent_streaming(
-    account_id: str,
-    thread_id: str,
-    user_message: str,
-    image_base64: Optional[str] = None,
-    document_url: Optional[str] = None,
-    mode: Optional[str] = None,
-    workspace_id: Optional[str] = None
-):
-    """Versión streaming del agente que devuelve chunks progresivamente."""
-    from typing import AsyncGenerator
-    from core.context_cache import get_cached_context, cache_context
-    
-    yield "🔄 Iniciando procesamiento..."
-    
-    # Verificar cache de contexto primero
-    cached_context = await get_cached_context(account_id, user_message, workspace_id)
-    if cached_context:
-        yield "⚡ Contexto recuperado de cache..."
-        user_context = cached_context
-    else:
-        # Pre-cargar contexto en paralelo para reducir latencia inicial
-        context_task = asyncio.create_task(_get_user_context(account_id, user_message, workspace_id))
-        yield "🔍 Cargando contexto de usuario..."
-        user_context = await context_task
-        # Guardar en cache para futuras consultas
-        await cache_context(account_id, user_message, user_context, workspace_id)
-        yield "💾 Contexto guardado en cache..."
-    
-    # Configurar LLM y herramientas
-    llm = get_main_llm()
-    if not llm:
-        yield "❌ Error: LLM no disponible"
-        return
-        
-    tools = get_all_langchain_tools()
-    yield f"🛠️ {len(tools)} herramientas disponibles..."
-    
-    # Crear prompt optimizado con contexto
-    prompt = ChatPromptTemplate.from_messages([
-        SystemMessage(content=f"{DEFAULT_SYSTEM_PROMPT}\n\n{user_context}"),
-        MessagesPlaceholder(variable_name="chat_history"),
-        HumanMessage(content=user_message),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
-    ])
-    
-    # Configurar agente para streaming
-    llm_with_tools = llm.bind_tools(tools) if tools else llm
-    agent = (
-        RunnablePassthrough.assign(
-            agent_scratchpad=lambda x: format_to_tool_messages(x["intermediate_steps"])
-        )
-        | prompt
-        | llm_with_tools
-        | ToolsAgentOutputParser()
-    )
-    
-    agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
-    yield "🤖 Generando respuesta..."
-    
-    # Stream respuesta del agente
-    full_response = ""
-    async for chunk in agent_executor.astream({
-        "input": user_message, 
-        "chat_history": []
-    }):
-        if "output" in chunk:
-            chunk_text = chunk["output"]
-            full_response += chunk_text
-            yield chunk_text
-        elif "intermediate_steps" in chunk and chunk["intermediate_steps"]:
-            yield "🔧 Usando herramientas..."
-    
-    # Guardar en historial si hay respuesta completa
-    if full_response.strip():
-        yield "\n✅ Respuesta completada"
-
 async def create_and_run_agent(
     account_id: str,
     thread_id: str,
@@ -360,12 +236,11 @@ async def create_and_run_agent(
     document_url: Optional[str] = None,
     mode: Optional[str] = None,
     background_tasks: Optional[Any] = None,
-    workspace_id: Optional[str] = None
+    workspace_id: Optional[str] = None,
+    k: int = 5  # Default number of relevant memories to retrieve
 ) -> str:
     """
     Crea y ejecuta el agente de Langchain con manejo explícito de memoria.
-    Si no se proporciona un workspace_id, intenta recuperarlo del ChatThread asociado.
-    Versión optimizada con cache de contexto.
     """
     logger.info(f"--- Ejecutando agente para account_id: {account_id}, thread_id: {thread_id} (desde telegram_id: {telegram_id}), workspace_id: {workspace_id} ---")
     
@@ -462,7 +337,7 @@ async def create_and_run_agent(
     # --- 2. Preparar el Mensaje Actual del Usuario ---
     account_name = "Usuario" # Valor por defecto
     async with DBSession(SessionLocal) as db:
-        account = await db.get(Account, account_id)
+        account = await db.get(Account, uuid.UUID(account_id))
         if account and account.name:
             account_name = account.name
             
@@ -481,53 +356,64 @@ async def create_and_run_agent(
 
     # --- 3. Construir el Prompt del Sistema Dinámicamente ---
     
-    # Usar contexto cacheado o generar nuevo
-    if not cached_context:
-        user_profile = await get_user_profile(account_id)
-        relevant_memories = await get_relevant_memories(account_id, user_message, k=5, workspace_id=workspace_id)
+    # ¡CORREGIDO! Llamamos a las funciones que sí existen en tu memory_manager.py
+    
+    # Obtener el perfil y las memorias
+    user_profile = await get_user_profile(account_id)
+    relevant_memories = await get_relevant_memories(account_id, user_message, k=k, workspace_id=workspace_id)
 
-        # Construir la parte del perfil del prompt
-        profile_info = []
-        custom_prompt = None
-        async with DBSession(SessionLocal) as db:
-            thread = await db.scalar(select(ChatThread).options(selectinload(ChatThread.workspace)).where(ChatThread.id == uuid.UUID(thread_id)))
-            if thread and thread.workspace and thread.workspace.system_prompt:
-                custom_prompt = thread.workspace.system_prompt
-            elif user_profile:
-                custom_prompt = user_profile.system_prompt
-
-        if user_profile:
-            if user_profile.nombre: profile_info.append(f"- Nombre: {user_profile.nombre}")
-            if user_profile.gustos: profile_info.append(f"- Gustos: {user_profile.gustos}")
-            if user_profile.intereses: profile_info.append(f"- Intereses: {user_profile.intereses}")
-            if user_profile.otros_datos: profile_info.append(f"- Otros datos: {user_profile.otros_datos}")
-            
-        user_context_parts = [
-            "--- Información Relevante sobre el Usuario y su Contexto ---",
-            "Información de Perfil del Usuario:",
-            "\n".join(profile_info) if profile_info else "No hay información de perfil disponible."
-        ]
-
-        if relevant_memories and "No se encontraron memorias relevantes" not in relevant_memories:
-            user_context_parts.append("\nMemorias y Documentos Relevantes (Base de Conocimiento):")
-            user_context_parts.append(relevant_memories)
-
-        user_context_parts.append("---------------------------------------------------------")
-        user_context = "\n".join(user_context_parts)
+    # Construir la parte del perfil del prompt
+    profile_info = []
+    custom_prompt = None
+    if user_profile:
+        if user_profile.nombre: profile_info.append(f"- Nombre: {user_profile.nombre}")
+        if user_profile.gustos: profile_info.append(f"- Gustos: {user_profile.gustos}")
+        if user_profile.intereses: profile_info.append(f"- Intereses: {user_profile.intereses}")
+        if user_profile.otros_datos: profile_info.append(f"- Otros datos: {user_profile.otros_datos}")
+        # ¡CORREGIDO! Usamos el nombre correcto del atributo: system_prompt
+        custom_prompt = user_profile.system_prompt
         
-        # Guardar contexto en cache para futuras consultas
-        await cache_context(account_id, user_message, user_context, workspace_id)
-        logger.info("💾 Contexto guardado en cache")
+    user_context_parts = [
+        "--- Información Relevante sobre el Usuario y su Contexto ---",
+        "Información de Perfil del Usuario:",
+        "\n".join(profile_info) if profile_info else "No hay información de perfil disponible."
+    ]
+
+    if relevant_memories and "No se encontraron memorias relevantes" not in relevant_memories:
+        user_context_parts.append("\nMemorias y Documentos Relevantes (Base de Conocimiento):")
+        user_context_parts.append(relevant_memories)
+
+    user_context_parts.append("---------------------------------------------------------")
+    user_context_string = "\n".join(user_context_parts)
     
-    user_context_string = user_context
-    
-    # Filtrar variables no deseadas del custom_prompt para evitar errores de variables no definidas
     effective_system_prompt = custom_prompt or settings.default_system_prompt
     if custom_prompt:
         logger.info("Aplicando prompt personalizado, filtrando variables no soportadas.")
         # Reemplazar referencias a variables problemáticas como row['energy'] o index
         effective_system_prompt = custom_prompt.replace("row['energy']", "valor_energia").replace("index", "indice")
-    
+
+    # --- FIX: Pre-formatear el prompt para eliminar placeholders inválidos ---
+    # El KeyError indica que el prompt contiene placeholders que no son simples variables.
+    # Los limpiamos aquí antes de construir el prompt final.
+    try:
+        # Intenta un formateo seguro, proveyendo los valores que podrían faltar.
+        # Esto resuelve placeholders como {query} o {web_summary}.
+        effective_system_prompt = effective_system_prompt.format(
+            query=user_message,
+            web_summary="",  # Valor por defecto si no está presente
+            relevant_memories=relevant_memories,
+            # Añade aquí cualquier otra variable que pueda estar en los prompts personalizados
+        )
+    except KeyError as e:
+        logger.warning(f"No se pudo pre-formatear el prompt, puede que contenga placeholders desconocidos: {e}")
+        # Como fallback, reemplazamos los placeholders conocidos que causan problemas
+        effective_system_prompt = effective_system_prompt.replace('{query}', user_message)
+        effective_system_prompt = effective_system_prompt.replace('{web_summary}', '')
+        # Este es el placeholder más problemático que aparece en el error
+        problematic_placeholder = '{relevant_memories if "No se encontraron" not in relevant_memories else "No se encontró información interna relevante."}'
+        if problematic_placeholder in effective_system_prompt:
+            effective_system_prompt = effective_system_prompt.replace(problematic_placeholder, relevant_memories)
+
     # Obtener prompt de sistema personalizado basado en workspace si está disponible
     if workspace_id:
         async with DBSession(SessionLocal) as db:
@@ -562,27 +448,25 @@ async def create_and_run_agent(
     <b>Instrucciones Críticas de Identificación de Usuario:</b>
     - Para CUALQUIER herramienta que requiera el argumento `account_id`, DEBES usar este valor exacto: <b>{account_id}</b>.
     - Para CUALQUIER herramienta que requiera el argumento `telegram_id`, DEBES usar este valor exacto: <b>{telegram_id}</b>.
-    - Para CUALQUIER herramienta que requiera el argumento `workspace_id`, DEBES usar este valor exacto: <b>{workspace_id if workspace_id else 'None'}</b>. Si el valor es 'None', no intentes usarlo como UUID.
     """
-    system_prompt_content = f"""
-{user_context_string}
-{summary_string}
-    <hr>
-{effective_system_prompt}
-    <hr>
-<b>Nota Importante sobre Capacidades del LLM:</b> Este LLM es multimodal, lo que significa que puede procesar y responder a una variedad de tipos de entrada, incluyendo texto, imágenes y posiblemente otros formatos de datos. Además, tiene la capacidad de producir código en múltiples lenguajes de programación, ofrecer explicaciones detalladas sobre conceptos técnicos, y asistir en la resolución de problemas de programación. Puedes aprovechar estas capacidades para solicitar ayuda con desarrollo de software, análisis de datos, creación de contenido visual (si está dentro de las herramientas disponibles), y más. Si necesitas asistencia con código o interpretación de contenido multimedia, no dudes en pedírmelo, y utilizaré mis habilidades para proporcionarte soluciones precisas y útiles.
-    <hr>
-<b>Instrucción crítica:</b> Si necesitas usar herramientas, hazlo de una en una. Nunca intentes usar más de una herramienta en una sola respuesta. Espera la siguiente interacción antes de usar otra herramienta.
-    <hr>
-<b>Instrucción de Memoria Importante:</b> Es muy importante que analices cada mensaje del usuario para identificar información relevante que deba ser guardada automáticamente en la memoria. Esto incluye datos personales, preferencias, eventos importantes, o cualquier detalle que pueda ser útil para futuras interacciones. Utiliza la herramienta adecuada para almacenar esta información cuando la detectes.
-    <hr>
-{id_instructions}
-    <hr>
-    <b>Guía de Uso de Herramientas Obligatoria:</b>
-    Debes analizar CADA petición del usuario para determinar si una de tus herramientas es la forma más apropiada de responder. Si una herramienta encaja, DEBES usarla.
-{tool_descriptions}
-    """
-
+    # Se usa "\n".join en lugar de un f-string para construir el prompt final.
+    # Esto evita errores de formato si las variables de texto (ej. system_prompt)
+    # contienen llaves "{" o "}" que no están escapadas.
+    system_prompt_parts = [
+        user_context_string,
+        summary_string,
+        "<hr>",
+        effective_system_prompt,
+        "<hr>",
+        "<b>Instrucción crítica:</b> Si necesitas usar herramientas, hazlo de una en una. Nunca intentes usar más de una herramienta en una sola respuesta. Espera la siguiente interacción antes de usar otra herramienta.",
+        "<hr>",
+        id_instructions,
+        "<hr>",
+        "<b>Guía de Uso de Herramientas Obligatoria:</b>",
+        "Debes analizar CADA petición del usuario para determinar si una de tus herramientas es la forma más apropiada de responder. Si una herramienta encaja, DEBES usarla.",
+        tool_descriptions
+    ]
+    system_prompt_content = "\n".join(system_prompt_parts)
     # --- NUEVO: Instrucciones de formato MarkdownV2 para Telegram ---
     # markdownv2_format_rules = (
     #     "\n[Reglas de formato MarkdownV2 para Telegram]\n"
@@ -597,9 +481,13 @@ async def create_and_run_agent(
     # system_prompt_content += markdownv2_format_rules
 
     # 4. --- Configurar y Ejecutar el Agente ---
+    # Se usa SystemMessage(content=...) en lugar de ("system", ...) para evitar
+    # que LangChain intente re-interpretar el contenido del prompt del sistema
+    # como una plantilla, lo que causaba errores si el contenido ya formateado
+    # incluía llaves ({}).
     prompt_template = ChatPromptTemplate.from_messages(
         [
-            ("system", system_prompt_content),
+            SystemMessage(content=system_prompt_content),
             MessagesPlaceholder(variable_name="chat_history", optional=True),
             ("human", "{input}"),
             MessagesPlaceholder(variable_name="agent_scratchpad"),
@@ -626,9 +514,19 @@ async def create_and_run_agent(
         agent=agent_chain, 
         tools=tools, 
         verbose=True, 
-        handle_parsing_errors=True,
-        max_iterations=5  # Aumentar a 5 iteraciones para permitir más ciclos de búsqueda y síntesis
+        handle_parsing_errors=True
     )
+
+    # --- Log del prompt completo ---
+    log_prompt_parts = [
+        "--- PROMPT FINAL CRUDO ---",
+        f"System: {system_prompt_content}",
+        f"History: {full_history_for_llm_prompt}",
+        f"Input: {user_message}",
+        "--- FIN PROMPT ---"
+    ]
+    logger.info("\n".join(log_prompt_parts))
+    # --- Fin log ---
 
     final_output = ""
     try:
@@ -639,48 +537,13 @@ async def create_and_run_agent(
             "input": user_message,
             "chat_history": full_history_for_llm_prompt,
         }
-        logger.info(f"Datos de entrada pasados al agente: {input_data.keys()}")
 
         response = await agent_executor.ainvoke(
             input_data,
-            config={"configurable": {"account_id": account_id, "telegram_id": telegram_id, "thread_id": thread_id, "background_tasks": background_tasks, "workspace_id": workspace_id}}
+            config={"configurable": {"account_id": account_id, "telegram_id": telegram_id}}
         )
         final_output = response.get("output", "No pude procesar tu solicitud.")
 
-    except AssertionError as ae:
-        logger.warning(f"⚠️ Error de aserción durante la ejecución del agente para la cuenta {account_id},可能是由于streaming. Intentando sin streaming: {ae}", exc_info=True)
-        # Reintentar sin streaming
-        main_llm = get_main_llm()
-        if main_llm:
-            main_llm.streaming = False
-            llm_with_tools = main_llm.bind_tools(tools)
-            agent_chain = (
-                RunnablePassthrough.assign(
-                    agent_scratchpad=lambda x: format_to_tool_messages(x.get("intermediate_steps", []))
-                )
-                | prompt_template
-                | llm_with_tools
-                | ToolsAgentOutputParser()
-            )
-            agent_executor = AgentExecutor(
-                agent=agent_chain, 
-                tools=tools, 
-                verbose=True, 
-                handle_parsing_errors=True,
-                max_iterations=5
-            )
-            try:
-                response = await agent_executor.ainvoke(
-                    input_data,
-                    config={"configurable": {"account_id": account_id, "telegram_id": telegram_id, "thread_id": thread_id, "background_tasks": background_tasks, "workspace_id": workspace_id}}
-                )
-                final_output = response.get("output", "No pude procesar tu solicitud.")
-            except Exception as e2:
-                logger.error(f"❌ FATAL: Error durante el reintento sin streaming para la cuenta {account_id}: {e2}", exc_info=True)
-                final_output = "Lo siento, ocurrió un error inesperado al procesar tu solicitud. El error ha sido registrado."
-        else:
-            logger.error(f"❌ FATAL: No se pudo obtener el LLM principal para reintento sin streaming para la cuenta {account_id}")
-            final_output = "Lo siento, ocurrió un error inesperado al procesar tu solicitud. El error ha sido registrado."
     except Exception as e:
         logger.error(f"❌ FATAL: Error durante la ejecución del agente para la cuenta {account_id}: {e}", exc_info=True)
         final_output = "Lo siento, ocurrió un error inesperado al procesar tu solicitud. El error ha sido registrado."
@@ -688,8 +551,8 @@ async def create_and_run_agent(
     # Es importante añadir el `current_human_message` que creamos antes
     await chat_message_history.aadd_messages([current_human_message, AIMessage(content=final_output)])
     updated_full_history = await chat_message_history.aget_messages()
-    main_llm = get_main_llm()
     # Sumarizar solo para el contexto, pero sin borrar historial
+    main_llm = get_main_llm()
     if main_llm and main_llm.get_num_tokens_from_messages(updated_full_history) > 3000:
         asyncio.create_task(summarize_history_in_background(updated_full_history, chat_message_history, account_id, workspace_id))
     # Actualizar título si corresponde
