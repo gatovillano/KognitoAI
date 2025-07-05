@@ -1,6 +1,12 @@
 # 🧠 Kognito AI System
 
+
+
+![Screenshot from 2025-07-04 09-19-16](https://github.com/user-attachments/assets/0eb98075-8f09-41a0-a8ab-103ab38bd19e)
 ![image](https://github.com/user-attachments/assets/c315e215-c133-4b48-9748-b9f6e97c1921)
+![Screenshot from 2025-07-04 17-45-17](https://github.com/user-attachments/assets/46b13225-486c-4ffc-b149-a6a2bcda5398)
+![Screenshot from 2025-07-04 18-05-08](https://github.com/user-attachments/assets/4ca15d85-2999-41e5-8565-cf97658c59d8)
+
 
 ¡Bienvenido a Kognito AI System! Un exocerebro digital personalizable y colaborativo diseñado para aumentar tu inteligencia y la de tu equipo. Kognito AI integra capacidades avanzadas de Inteligencia Artificial, gestión de conocimiento (RAG), y una interfaz multi-plataforma para ayudarte a organizar tu vida digital, automatizar tareas y potenciar la colaboración.
 
