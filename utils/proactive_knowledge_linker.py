@@ -18,7 +18,7 @@ import numpy as np
 from scipy.spatial.distance import cosine
 
 # Importaciones de la base de datos y la configuración
-from core.database import ProactiveInsight, SessionLocal, Nota, Account
+from core.database import ProactiveInsight, ProactiveInsightFeedback, SessionLocal, Nota, Account
 from utils.db_session import DBSession
 from utils.embeddings import initialize_embeddings
 from langchain_core.embeddings import Embeddings
@@ -429,11 +429,40 @@ async def analyze_entry(entry_to_analyze: Dict[str, Any], knowledge_pool: List[D
         analysis = await analyze_relationship_with_llm(entry_to_analyze, candidate)
         if analysis and analysis.get("relationship_type") != "Sin Relación Significativa":
             relationship_type = analysis.get("relationship_type")
+            current_confidence = analysis.get('confidence_score', 0.0)
+
+            # --- Incorporar Feedback del Usuario ---
+            # Comprobar si existen feedbacks negativos previos para esta combinación de ítems o similares
+            # Esta es una simplificación. Una implementación más robusta podría buscar feedback
+            # para los IDs específicos de entry_to_analyze y candidate si ya han formado parte de un insight.
+            # Por ahora, solo logueamos y no modificamos la confianza.
+            # En una iteración futura, aquí se consultaría ProactiveInsightFeedback.
+
+            # Ejemplo de cómo se podría consultar (pseudo-código, necesita IDs de insights previos):
+            # async with DBSession(SessionLocal) as db:
+            #     # Supongamos que tenemos una forma de encontrar insights previos que involucran estos items
+            #     # y luego buscar feedback para esos insights. Esto es complejo sin una estructura de datos
+            #     # que vincule items directamente a los feedbacks o insights previos de forma fácil.
+            #     # Por ahora, este paso es un marcador de posición.
+            #     # relevant_feedbacks = await db.execute(
+            #     #     select(ProactiveInsightFeedback).where(...)
+            #     # ).scalars().all()
+            #     # for fb in relevant_feedbacks:
+            #     #     if not fb.is_useful and fb.feedback_category in ["IRRELEVANT", "INCORRECT"]:
+            #     #         logger.info(f"Feedback negativo previo encontrado para ítems similares. Ajustando confianza para insight entre '{entry_to_analyze.get('title')}' y '{candidate.get('title')}'.")
+            #     #         current_confidence *= 0.7 # Reducir confianza por feedback negativo
+            #     pass # Fin del pseudo-código de feedback
+
+            # No almacenar si la confianza es muy baja (después de posible ajuste por feedback)
+            if current_confidence < 0.3: # Umbral de ejemplo
+                logger.info(f"Insight entre '{entry_to_analyze.get('title')}' y '{candidate.get('title')}' no almacenado debido a baja confianza ({current_confidence:.2f}).")
+                continue
+
             insight_data = {
                 'account_id': account_id,
                 'type': relationship_type.lower() if relationship_type else "unknown",
                 'insight_message': analysis.get('explanation', ''),
-                'confidence_score': analysis.get('confidence_score', 0.0),
+                'confidence_score': current_confidence,
                 'action_suggestion': analysis.get('action_suggestion', ''),
                 'related_items': [entry_to_analyze, candidate]
             }

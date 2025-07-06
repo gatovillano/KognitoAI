@@ -118,6 +118,8 @@ class Account(Base):
         back_populates="account",
         cascade="all, delete-orphan"
     )
+    # Relación con ProactiveInsightFeedback
+    proactive_insight_feedbacks = relationship("ProactiveInsightFeedback", back_populates="account", cascade="all, delete-orphan")
     # AÑADIDO: Relación con la nueva tabla de temas/colecciones de documentos definidos por el usuario
     user_document_topics = relationship("UserDocumentTopic", back_populates="account", cascade="all, delete-orphan")
 
@@ -514,6 +516,45 @@ class GitHubDocument(Base):
 
     def __repr__(self):
         return f"<GitHubDocument(repo_url='{self.repo_url}', file_path='{self.file_path}')>"
+
+
+class ProactiveInsightFeedback(Base):
+    """Almacena el feedback del usuario sobre los insights proactivos."""
+    __tablename__ = "proactive_insight_feedbacks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    insight_id = Column(Integer, ForeignKey("proactive_insights.id", ondelete="CASCADE"), nullable=False, index=True)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    # workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True) # Descomentar si los insights pueden ser por workspace
+
+    is_useful = Column(Boolean, nullable=False)
+    feedback_category = Column(String(50), nullable=True) # e.g., IRRELEVANT, ALREADY_KNOWN, INCORRECT
+    comment = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relaciones
+    insight = relationship("ProactiveInsight", back_populates="feedbacks")
+    account = relationship("Account", back_populates="proactive_insight_feedbacks")
+    # workspace = relationship("Workspace", back_populates="proactive_insight_feedbacks") # Descomentar si los insights pueden ser por workspace
+
+    __table_args__ = (
+        UniqueConstraint('insight_id', 'account_id', name='_insight_account_uc'),
+        # Index('ix_proactive_insight_feedbacks_workspace_id', 'workspace_id'), # Descomentar si se usa workspace_id
+    )
+
+    def __repr__(self):
+        return f"<ProactiveInsightFeedback(id={self.id}, insight_id={self.insight_id}, account_id={self.account_id}, is_useful={self.is_useful})>"
+
+
+# Modificar ProactiveInsight para añadir la relación inversa
+ProactiveInsight.feedbacks = relationship(
+    "ProactiveInsightFeedback",
+    order_by=ProactiveInsightFeedback.created_at,
+    back_populates="insight",
+    cascade="all, delete-orphan"
+)
 
 
 # ==============================================================================

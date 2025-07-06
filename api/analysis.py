@@ -129,6 +129,163 @@ async def get_saved_analyses_endpoint(
     results = await db.execute(final_stmt)
     return results.scalars().all()
 
+
+# --- Schemas para Feedback de Insights ---
+class ProactiveInsightFeedbackCreate(BaseModel):
+    insight_id: int
+    is_useful: bool
+    feedback_category: Optional[str] = None
+    comment: Optional[str] = None
+
+class ProactiveInsightFeedbackResponse(ProactiveInsightFeedbackCreate):
+    id: uuid.UUID
+    account_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True # Deprecated in Pydantic v2, use model_config = {"from_attributes": True}
+        # For Pydantic v2:
+        # model_config = {"from_attributes": True}
+
+
+# --- Endpoints para Feedback de Insights ---
+@router.post("/proactive-insights/feedback", response_model=ProactiveInsightFeedbackResponse, status_code=status.HTTP_201_CREATED)
+async def submit_proactive_insight_feedback(
+    feedback_data: ProactiveInsightFeedbackCreate,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Permite a un usuario enviar feedback sobre un insight proactivo específico.
+    """
+    from core.database import ProactiveInsight, ProactiveInsightFeedback # Importar aquí para evitar dependencia circular a nivel de módulo
+
+    account_uuid = uuid.UUID(current_account_id)
+
+    # 1. Verificar que el insight original existe y pertenece al usuario (o es de equipo al que pertenece)
+    insight = await db.get(ProactiveInsight, feedback_data.insight_id)
+    if not insight:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Insight no encontrado.")
+
+    # Simple check: insight must belong to the account.
+    # TODO: Add team access check if insights can be team-based and feedback is per-user.
+    if insight.account_id != account_uuid:
+        # If team_id is present on insight, check if user is part of that team
+        if insight.team_id:
+            from core.database import TeamMember # Local import
+            member_check = await db.execute(
+                select(TeamMember).where(
+                    TeamMember.team_id == insight.team_id,
+                    TeamMember.account_id == account_uuid
+                )
+            )
+            if not member_check.scalars().first():
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes permiso para dar feedback sobre este insight.")
+        else: # Insight is personal and doesn't match account_id
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes permiso para dar feedback sobre este insight.")
+
+
+    # 2. Verificar si ya existe feedback para este insight y usuario (upsert)
+    existing_feedback_stmt = select(ProactiveInsightFeedback).where(
+        ProactiveInsightFeedback.insight_id == feedback_data.insight_id,
+        ProactiveInsightFeedback.account_id == account_uuid
+    )
+    result = await db.execute(existing_feedback_stmt)
+    existing_feedback = result.scalars().first()
+
+    if existing_feedback:
+        # Actualizar feedback existente
+        existing_feedback.is_useful = feedback_data.is_useful
+        existing_feedback.feedback_category = feedback_data.feedback_category
+        existing_feedback.comment = feedback_data.comment
+        existing_feedback.updated_at = datetime.utcnow()
+        db.add(existing_feedback)
+        feedback_to_return = existing_feedback
+    else:
+        # Crear nuevo feedback
+        new_feedback = ProactiveInsightFeedback(
+            id=uuid.uuid4(),
+            insight_id=feedback_data.insight_id,
+            account_id=account_uuid,
+            is_useful=feedback_data.is_useful,
+            feedback_category=feedback_data.feedback_category,
+            comment=feedback_data.comment
+        )
+        db.add(new_feedback)
+        feedback_to_return = new_feedback
+
+    await db.commit()
+    await db.refresh(feedback_to_return)
+
+    # Convertir a Pydantic model para la respuesta, incluyendo los campos generados por DB
+    # Esto requiere que el modelo Pydantic ProactiveInsightFeedbackResponse esté bien definido
+    # y que el objeto SQLAlchemy 'feedback_to_return' tenga los atributos correspondientes.
+
+    # Manually construct the response if direct conversion fails or is complex
+    return ProactiveInsightFeedbackResponse(
+        id=feedback_to_return.id,
+        insight_id=feedback_to_return.insight_id,
+        account_id=feedback_to_return.account_id,
+        is_useful=feedback_to_return.is_useful,
+        feedback_category=feedback_to_return.feedback_category,
+        comment=feedback_to_return.comment,
+        created_at=feedback_to_return.created_at,
+        updated_at=feedback_to_return.updated_at
+    )
+
+
+@router.get("/proactive-insights/{insight_id}/feedback", response_model=List[ProactiveInsightFeedbackResponse])
+async def get_feedback_for_insight(
+    insight_id: int,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Recupera todo el feedback para un insight proactivo específico.
+    El usuario debe tener acceso al insight (ser el dueño o miembro del equipo si es de equipo).
+    """
+    from core.database import ProactiveInsight, ProactiveInsightFeedback, TeamMember # Importar aquí
+
+    account_uuid = uuid.UUID(current_account_id)
+
+    insight = await db.get(ProactiveInsight, insight_id)
+    if not insight:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Insight no encontrado.")
+
+    if insight.account_id != account_uuid:
+        if insight.team_id:
+            member_check = await db.execute(
+                select(TeamMember).where(
+                    TeamMember.team_id == insight.team_id,
+                    TeamMember.account_id == account_uuid
+                )
+            )
+            if not member_check.scalars().first():
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes permiso para ver feedback de este insight.")
+        else:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes permiso para ver feedback de este insight.")
+
+    feedbacks_stmt = select(ProactiveInsightFeedback).where(
+        ProactiveInsightFeedback.insight_id == insight_id
+    ).order_by(desc(ProactiveInsightFeedback.created_at))
+
+    result = await db.execute(feedbacks_stmt)
+    feedbacks = result.scalars().all()
+
+    return [
+        ProactiveInsightFeedbackResponse(
+            id=fb.id,
+            insight_id=fb.insight_id,
+            account_id=fb.account_id,
+            is_useful=fb.is_useful,
+            feedback_category=fb.feedback_category,
+            comment=fb.comment,
+            created_at=fb.created_at,
+            updated_at=fb.updated_at
+        ) for fb in feedbacks
+    ]
+
 class DeleteAnalysisRequest(BaseModel):
     task_id: str
 

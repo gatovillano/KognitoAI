@@ -22,6 +22,7 @@ Kognito AI está diseñado para ser tu asistente inteligente definitivo, ofrecie
     *   **Gestión Documental Inteligente:** Sube y organiza tus documentos (PDFs, DOCX, TXT, MD). Kognito AI los procesa, genera embeddings y los almacena en una base de datos vectorial (PGVector) para una recuperación de información contextual.
     *   **Notas Colaborativas:** Crea y gestiona notas personales o compártelas con tus equipos.
     *   **Insights Proactivos:** El sistema analiza continuamente tu base de conocimiento para encontrar conexiones, sinergias, duplicidades y brechas de información, presentándote descubrimientos relevantes.
+        *   **Feedback del Usuario sobre Insights:** Los usuarios pueden ahora proporcionar feedback (útil/no útil, categorías, comentarios) sobre los insights generados. Esta información se utilizará en el futuro para mejorar la relevancia y precisión de los descubrimientos proactivos.
 *   **Gestión de la Agenda:** Programa eventos y recordatorios, tanto personales como para equipos.
 *   **Entrada Multimodal:** Interactúa con Kognito AI a través de texto, audio (transcripción) e imágenes (generación y procesamiento).
 *   **Herramientas Extensibles:** El agente de IA puede utilizar una variedad de herramientas para interactuar con el sistema y el mundo exterior (búsqueda web, gestión de GitHub, análisis de texto, generación de mapas mentales, etc.).
@@ -135,4 +136,4 @@ Estamos trabajando activamente en:
 
 *   **Integración de Celery:** Para una gestión robusta de tareas en segundo plano (procesamiento de documentos, análisis de LLMs, generación de insights) que no bloquee la API principal y garantice la persistencia y escalabilidad.
 *   **WebSockets con Redis Pub/Sub:** Para notificaciones en tiempo real al frontend, eliminando el polling y proporcionando una experiencia de usuario instantánea y fluida.
-d
+*   **Refinamiento de Insights Proactivos Basado en Feedback:** Mejorar el algoritmo de generación de insights para que aprenda de las preferencias y correcciones del usuario, utilizando el feedback recolectado para ofrecer descubrimientos aún más personalizados y acertados.
