@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class ComprehensiveWebAnalysisInput(BaseModel):
     """Input schema for the Comprehensive Web Analysis Tool."""
     query: str = Field(..., description="The user's research query in natural language.")
-    account_id: str = Field(..., description="The unique ID of the user's account.")
+    account_id: str = Field(default="", description="The unique ID of the user's account. If not provided, uses the one from agent configuration.")
     # --- NUEVO: Parámetro para el ID del workspace ---
     workspace_id: str = Field(
         default="",
@@ -45,6 +45,11 @@ class ComprehensiveWebAnalysisTool(BaseTool):
     args_schema: Type[BaseModel] = ComprehensiveWebAnalysisInput
     return_direct: bool = False
 
+    def __init__(self, account_id: str = "", **kwargs):
+        """Initialize the tool with account_id."""
+        super().__init__(**kwargs)
+        self.account_id = account_id
+
     def _extract_urls(self, search_results: str) -> List[str]:
         """Extracts URLs from the formatted search results string."""
         urls = re.findall(r"<a href=\'(.*?)\'>", search_results)
@@ -54,13 +59,54 @@ class ComprehensiveWebAnalysisTool(BaseTool):
     async def _arun(\
         self,\
         query: str,\
-        account_id: str,\
+        account_id: str = None,\
         workspace_id: Optional[str] = None, # <-- workspace_id añadido aquí
         run_manager: Optional[CallbackManagerForToolRun] = None,\
         **kwargs: Any\
     ) -> str:
         """Executes the comprehensive analysis tool asynchronously."""
-        logger.info(f"--- Running Comprehensive Web Analysis for account {account_id} (Workspace: {workspace_id if workspace_id else 'N/A'}) ---")
+        # Obtener account_id de la configuración del agente si está disponible
+        config_account_id = None
+        config_workspace_id = workspace_id
+
+        # Intentar múltiples formas de obtener la configuración
+        if run_manager:
+            # Método 1: Acceso directo a config
+            if hasattr(run_manager, 'config'):
+                config = getattr(run_manager, 'config', {})
+                configurable = config.get('configurable', {})
+                config_account_id = configurable.get('account_id')
+                if not config_workspace_id:
+                    config_workspace_id = configurable.get('workspace_id')
+
+            # Método 2: Buscar en kwargs del run_manager
+            elif hasattr(run_manager, 'kwargs'):
+                run_kwargs = getattr(run_manager, 'kwargs', {})
+                config = run_kwargs.get('config', {})
+                configurable = config.get('configurable', {})
+                config_account_id = configurable.get('account_id')
+                if not config_workspace_id:
+                    config_workspace_id = configurable.get('workspace_id')
+
+        # Método 3: Buscar en kwargs generales
+        if not config_account_id and 'config' in kwargs:
+            config = kwargs.get('config', {})
+            configurable = config.get('configurable', {})
+            config_account_id = configurable.get('account_id')
+            if not config_workspace_id:
+                config_workspace_id = configurable.get('workspace_id')
+
+        # Usar configuración, parámetros o instancia como fallback
+        effective_account_id = config_account_id or account_id or getattr(self, 'account_id', None)
+        effective_workspace_id = config_workspace_id
+
+        # Log para debugging
+        logger.info(f"🔍 Debug config access - account_id from config: {config_account_id}, from param: {account_id}, from instance: {getattr(self, 'account_id', None)}, effective: {effective_account_id}")
+
+        if not effective_account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
+        logger.info(f"--- Running Comprehensive Web Analysis for account {effective_account_id} (Workspace: {effective_workspace_id if effective_workspace_id else 'N/A'}) ---")
         logger.info(f"Query: {query}")
 
         # Step 1: Web Search
@@ -116,7 +162,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         # Step 4: Knowledge Base Integration
         logger.info("Step 4: Searching internal knowledge base...")
         # --- MODIFICACIÓN: Pasar workspace_id a get_relevant_memories ---
-        relevant_memories = await get_relevant_memories(account_id, web_summary, k=5, workspace_id=workspace_id)
+        relevant_memories = await get_relevant_memories(effective_account_id, web_summary, k=5, workspace_id=effective_workspace_id)
 
         # Step 5: Final Combined Analysis
         logger.info("Step 5: Performing final combined analysis...")

@@ -4,7 +4,7 @@ import logging
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, status, Form, File, UploadFile
+from fastapi import APIRouter, HTTPException, Depends, status, Form, File, UploadFile, Body
 from pydantic import BaseModel
 from sqlalchemy import select, text
 
@@ -107,13 +107,13 @@ class ListDocumentsRequest(BaseModel):
     """Define la estructura para filtrar documentos opcionalmente por topic."""
     topic: Optional[str] = None
 
-@router.post("/list-documents")  # Cambiado a POST porque el frontend web lo usa con FormData
+@router.post("/list-documents")
 async def list_documents_endpoint(
-    request: Optional[ListDocumentsRequest] = None,
-    current_account_id: str = Depends(get_current_account_id), 
+    request: Optional[ListDocumentsRequest] = Body(None),
+    current_account_id: str = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """Lista los documentos subidos por el usuario, incluyendo documentos compartidos con equipos. 
+    """Lista los documentos subidos por el usuario, incluyendo documentos compartidos con equipos.
     Opcionalmente filtra por topic específico. Protegido por JWT."""
     account_id_uuid = uuid.UUID(current_account_id)
     topic_filter = request.topic if request else None
@@ -301,6 +301,24 @@ async def list_collections_endpoint(current_account_id: str = Depends(get_curren
     """
     collections = await list_user_collections(current_account_id)
     return collections
+
+@router.post("/list-general-collections", summary="Listar solo las colecciones del contexto general")
+async def list_general_collections_endpoint(current_account_id: str = Depends(get_current_account_id)):
+    """
+    Devuelve una lista de las colecciones del contexto general (sin workspace_id)
+    que pueden ser asociadas a workspaces.
+    """
+    # Obtener solo colecciones del contexto general (sin workspace_id)
+    collections = await list_user_collections(current_account_id, workspace_id=None)
+
+    # Filtrar para asegurar que solo devolvemos colecciones sin workspace_id
+    general_collections = []
+    for collection in collections:
+        # Verificar que la colección realmente no tenga workspace_id en la base de datos
+        if collection.get('document_count', 0) > 0:  # Solo colecciones con documentos
+            general_collections.append(collection)
+
+    return general_collections
 
 class DeleteCollectionRequest(BaseModel):
     """Define la estructura para eliminar una colección específica."""

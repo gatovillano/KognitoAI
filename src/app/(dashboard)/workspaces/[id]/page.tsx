@@ -236,7 +236,13 @@ export default function WorkspaceDashboard() {
   const handleOpenAddExistingCollectionDialog = async () => {
     setLoadingCollections(true);
     try {
-      const response = await apiClient.post('/api/list-collections', {});
+      // Obtener colecciones del contexto general (sin workspace_id)
+      const response = await apiClient.post('/api/list-general-collections', {});
+
+      // Obtener colecciones ya asociadas a este workspace
+      const workspaceCollectionsResponse = await apiClient.get(`/api/workspaces/${workspaceId}/collections`);
+      const workspaceCollectionIds = new Set(workspaceCollectionsResponse.data.map((col: any) => col.id));
+
       const allCollections = response.data.map((col: any) => ({
         id: col.topic || col.id || col.title || `collection-${Math.random().toString(36).substr(2, 9)}`,
         title: col.topic || col.title || 'Sin título',
@@ -246,10 +252,12 @@ export default function WorkspaceDashboard() {
         created_at: col.created_at || new Date().toISOString(),
         description: col.description || `Colección con ${col.document_count || 0} documentos`
       }));
-      // Filtrar para mostrar solo las colecciones que no están ya en este workspace
+
+      // Filtrar para mostrar solo las colecciones del contexto general que no están ya en este workspace
       const filteredCollections = allCollections.filter(
-        (col: Collection) => !collections.some(existingCol => existingCol.id === col.id)
+        (col: Collection) => !workspaceCollectionIds.has(col.id) && col.document_count > 0
       );
+
       setAvailableCollections(filteredCollections);
       setCollectionDialogOpen(true);
     } catch (error) {

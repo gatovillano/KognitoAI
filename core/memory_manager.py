@@ -1439,6 +1439,9 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
                 # como las del contexto general (workspace_id IS NULL)
                 where_clause_parts.append("(workspace_id = :workspace_id OR workspace_id IS NULL)")
                 params["workspace_id"] = workspace_id
+            else:
+                # Para contexto general, incluir solo documentos sin workspace_id
+                where_clause_parts.append("workspace_id IS NULL")
 
             final_where_clause = " AND ".join(where_clause_parts)
 
