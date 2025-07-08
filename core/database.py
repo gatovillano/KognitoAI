@@ -96,6 +96,7 @@ class Account(Base):
     timezone = Column(String(255), nullable=True, default="UTC", comment="Zona horaria preferida de la cuenta.")
     custom_system_prompt = Column(Text, nullable=True, comment="Prompt de sistema personalizado para la IA de esta cuenta.")
     is_admin = Column(Boolean, default=False, nullable=False, comment="Indica si esta cuenta tiene privilegios de administrador.")
+    is_active = Column(Boolean, default=True, nullable=False, comment="Indica si esta cuenta está activa y puede usar el sistema.")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # --- Relaciones con otros modelos ---
@@ -120,6 +121,10 @@ class Account(Base):
     )
     # AÑADIDO: Relación con la nueva tabla de temas/colecciones de documentos definidos por el usuario
     user_document_topics = relationship("UserDocumentTopic", back_populates="account", cascade="all, delete-orphan")
+
+    # NUEVO: Relaciones con las tablas de análisis
+    analysis_tasks = relationship("AnalysisTask", back_populates="account", cascade="all, delete-orphan")
+    mindmap_tasks = relationship("MindmapTask", back_populates="account", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Account(id={self.id}, name='{self.name}')>"
@@ -406,12 +411,13 @@ class ChatThread(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=True, index=True)
-    
+
     title = Column(String, default="Nuevo Chat")
+    platform = Column(String, default="web", nullable=False, comment="Plataforma de origen: 'web', 'telegram'")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_pinned = Column(Boolean, default=False, nullable=False)
     # Usamos JSONB para almacenar una lista flexible de etiquetas.
-    tags = Column(JSONB, nullable=True) 
+    tags = Column(JSONB, nullable=True)
 
     account = relationship("Account", back_populates="chat_threads")
     workspace = relationship("Workspace", back_populates="chat_threads")
@@ -426,7 +432,7 @@ class ProactiveInsight(Base):
     insight_message = Column(Text, nullable=False)
     confidence_score = Column(Float, nullable=False)
     action_suggestion = Column(Text, nullable=True)
-    related_items = Column(JSONB, nullable=True)  # Se almacena la lista de ítems como JSON
+    related_items = Column(JSONB, nullable=True)  # Se almacena la lista de ítems como JSON (incluye tool_used en metadata)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     account = relationship("Account", back_populates="proactive_insights")
@@ -452,15 +458,19 @@ class AnalysisTask(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
-    
+
     file_name = Column(String, nullable=False) # Guardamos el nombre del archivo analizado
+    analysis_type = Column(String, nullable=False, default="document", index=True) # NUEVO: Tipo de análisis (document, collection, semantic, code, etc.)
     status = Column(String, default="pending", index=True, nullable=False) # pending, processing, completed, failed
-    
-    result_payload = Column(JSONB, nullable=True) # Aquí guardamos el JSON completo del análisis
+
+    result_payload = Column(JSONB, nullable=True) # Aquí guardamos el JSON completo del análisis (incluye tool_used en metadata)
     error_message = Column(Text, nullable=True)
-    
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
+    # Relación con Account
+    account = relationship("Account", back_populates="analysis_tasks")
 
 
 class MindmapTask(Base):
@@ -469,18 +479,21 @@ class MindmapTask(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
-    
+
     topic = Column(String, nullable=False) # Tema central del mapa mental
     ideas_input = Column(Text, nullable=True) # Ideas iniciales proporcionadas por el usuario
     document_name = Column(String, nullable=True) # Nombre del documento del cual extraer conceptos
     concept_query = Column(String, nullable=True) # Tipo de información a extraer del documento
     status = Column(String, default="pending", index=True, nullable=False) # pending, processing, completed, failed
-    
-    result_payload = Column(JSONB, nullable=True) # Aquí guardamos el resultado del mapa mental
+
+    result_payload = Column(JSONB, nullable=True) # Aquí guardamos el resultado del mapa mental (incluye tool_used en metadata)
     error_message = Column(Text, nullable=True)
-    
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
+    # Relación con Account
+    account = relationship("Account", back_populates="mindmap_tasks")
 
 class GitHubDocument(Base):
     """
@@ -535,6 +548,23 @@ async def create_tables():
             # Crea todas las tablas que heredan de Base
             await conn.run_sync(Base.metadata.create_all)
             logger.info("Tablas de la base de datos verificadas/creadas.")
+            
+            # Asegura que las columnas personalizadas existan en langchain_pg_embedding
+            await conn.execute(text("""
+                ALTER TABLE IF EXISTS langchain_pg_embedding 
+                ADD COLUMN IF NOT EXISTS account_id UUID,
+                ADD COLUMN IF NOT EXISTS content_type VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS topic VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS category VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS workspace_id UUID,
+                ADD COLUMN IF NOT EXISTS team_id UUID,
+                ADD COLUMN IF NOT EXISTS visibility_teams UUID[];
+                
+                CREATE INDEX IF NOT EXISTS idx_langchain_pg_embedding_account_id ON langchain_pg_embedding(account_id);
+                CREATE INDEX IF NOT EXISTS idx_langchain_pg_embedding_workspace_id ON langchain_pg_embedding(workspace_id);
+                CREATE INDEX IF NOT EXISTS idx_langchain_pg_embedding_team_id ON langchain_pg_embedding(team_id);
+            """))
+            logger.info("Columnas personalizadas en langchain_pg_embedding verificadas/creadas.")
     except Exception as e:
         logger.error(f"❌ ERROR CRÍTICO al crear tablas de la base de datos: {e}", exc_info=True)
         raise

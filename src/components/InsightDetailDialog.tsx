@@ -2,7 +2,6 @@
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface Insight {
@@ -40,44 +39,87 @@ export function InsightDetailDialog({ insight, isOpen, onOpenChange }: { insight
                   Generado el: {new Date(insight.created_at).toLocaleString('es-ES')}
                 </DialogDescription>
               </DialogHeader>
-              <motion.div 
-                className="space-y-4 py-4"
+              <motion.div
+                className="space-y-6 py-4"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1, duration: 0.3 }}
               >
-                <div>
-                  <h4 className="font-semibold mb-1">Resumen del Hallazgo:</h4>
-                  <p className="text-sm text-muted-foreground">{insight.summary}</p>
-                </div>
-                <Separator />
-                <div>
-                  <h4 className="font-semibold mb-1">Ítems Relacionados:</h4>
-                  <div className="space-y-2 text-sm">
-                    {insight.related_items?.map((item, index) => (
-                      <motion.div 
-                        key={index} 
-                        className="p-3 bg-muted/30 rounded-2xl border border-border/50"
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.2 + index * 0.05, duration: 0.2 }}
-                      >
-                        <p className="font-medium">{item.title || item.reference || 'Ítem sin título'}</p>
-                        <p className="text-xs text-muted-foreground">Tipo: {item.type || 'N/A'}</p>
-                      </motion.div>
-                    ))}
-                  </div>
-                </div>
+                {/* Card principal del insight */}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1, duration: 0.3 }}
+                  className="border border-slate-200 bg-slate-50/50 dark:border-slate-700 dark:bg-slate-800/30 rounded-2xl p-4"
+                >
+                  <h4 className="font-semibold mb-3 text-foreground flex items-center gap-2">
+                    <span className="h-2 w-2 bg-yellow-500 rounded-full"></span>
+                    Resumen del Hallazgo
+                  </h4>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{insight.summary}</p>
+                </motion.div>
+
+                {/* Sugerencia de acción */}
                 {insight.action_suggestion && (
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3, duration: 0.2 }}
+                    transition={{ delay: 0.2, duration: 0.2 }}
+                    className="border border-slate-200 bg-slate-50/50 dark:border-slate-700 dark:bg-slate-800/30 rounded-2xl p-4"
                   >
-                    <h4 className="font-semibold mb-1">Sugerencia de Acción:</h4>
-                    <p className="text-sm text-muted-foreground">{insight.action_suggestion}</p>
+                    <h4 className="font-semibold mb-3 text-foreground flex items-center gap-2">
+                      <span className="h-2 w-2 bg-blue-500 rounded-full"></span>
+                      Sugerencia de Acción
+                    </h4>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{insight.action_suggestion}</p>
                   </motion.div>
                 )}
+
+                {/* Ítems relacionados */}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3, duration: 0.2 }}
+                  className="border border-slate-200 bg-slate-50/50 dark:border-slate-700 dark:bg-slate-800/30 rounded-2xl p-4"
+                >
+                  <h4 className="font-semibold mb-4 text-foreground flex items-center gap-2">
+                    <span className="h-2 w-2 bg-primary rounded-full"></span>
+                    Ítems Relacionados
+                  </h4>
+                  <div className="space-y-3 text-sm">
+                    {(() => {
+                      // Handle different possible structures of related_items
+                      let items = insight.related_items || [];
+
+                      // If related_items is an object with an 'items' property, use that
+                      if (typeof items === 'object' && !Array.isArray(items) && items.items) {
+                        items = items.items;
+                      }
+
+                      // Ensure we have an array
+                      if (!Array.isArray(items)) {
+                        items = [];
+                      }
+
+                      return items.map((item, index) => (
+                        <motion.div
+                          key={index}
+                          className="p-4 bg-white/60 dark:bg-slate-900/40 rounded-2xl border border-slate-200/50 dark:border-slate-600/50 hover:bg-white/80 dark:hover:bg-slate-900/60 transition-colors duration-200"
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.4 + index * 0.05, duration: 0.2 }}
+                        >
+                          <p className="font-medium text-foreground">{item.title || item.reference || 'Ítem sin título'}</p>
+                          <div className="mt-2">
+                            <Badge variant="secondary" className="text-xs">
+                              {item.type || 'N/A'}
+                            </Badge>
+                          </div>
+                        </motion.div>
+                      ));
+                    })()}
+                  </div>
+                </motion.div>
               </motion.div>
             </motion.div>
           </DialogContent>

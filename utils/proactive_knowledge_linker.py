@@ -20,7 +20,7 @@ from scipy.spatial.distance import cosine
 # Importaciones de la base de datos y la configuración
 from core.database import ProactiveInsight, SessionLocal, Nota, Account
 from utils.db_session import DBSession
-from utils.embeddings import initialize_embeddings
+
 from langchain_core.embeddings import Embeddings
 
 # Modelos para NLP y summarization - cargados de forma singleton
@@ -80,16 +80,21 @@ async def get_gemini_model() -> ChatGoogleGenerativeAI:
     global _gemini_model
     if _gemini_model is None:
         logger.info("Inicializando modelo Gemini...")
-        _gemini_model = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.2)
+        _gemini_model = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            temperature=0.2,
+            disable_streaming=False  # Habilita streaming
+        )
         logger.info("Modelo Gemini inicializado.")
     return _gemini_model
 
 async def get_embedding_model_instance() -> Embeddings:
-    """Obtiene y devuelve la instancia del modelo de embeddings, inicializándola si es necesario."""
-    global _embedding_model
-    if _embedding_model is None:
-        _embedding_model = await initialize_embeddings()  # Esta función ya es asíncrona
-    return _embedding_model
+    """Obtiene y devuelve la instancia del modelo de embeddings."""
+    from utils.embeddings import get_embedding_model
+    embedding_model = get_embedding_model()
+    if embedding_model is None:
+        raise ValueError("El modelo de embeddings no está inicializado. Debe llamarse initialize_embeddings() al inicio de la aplicación.")
+    return embedding_model
 
 # --- Helper Functions for Semantic Analysis ---
 async def find_top_k_similar_items(
@@ -324,14 +329,14 @@ async def get_all_knowledge(account_id: str) -> List[Dict[str, Any]]:
             if c_uuid:
                 relevant_collection_uuids.append(c_uuid)
 
+        # Usar la nueva estructura optimizada con account_id directo
         memories = []
-        if relevant_collection_uuids:
-            memories_stmt = select(langchain_pg_embedding).where(
-                langchain_pg_embedding.c.collection_id.in_(relevant_collection_uuids),
-                langchain_pg_embedding.c.cmetadata['account_id'].astext == account_id
-            )
-            result = await db.execute(memories_stmt)
-            memories = result.mappings().all()
+        memories_stmt = select(langchain_pg_embedding).where(
+            langchain_pg_embedding.c.account_id == account_id,
+            langchain_pg_embedding.c.content_type == 'user_memories'
+        )
+        result = await db.execute(memories_stmt)
+        memories = result.mappings().all()
 
         for mem in memories:
             cmetadata = mem['cmetadata'] if 'cmetadata' in mem else {}
@@ -393,13 +398,26 @@ async def store_proactive_insight(insight_data: Dict[str, Any]):
                 {k: (v.isoformat() if isinstance(v, datetime.datetime) else v) for k, v in item.items() if k != 'embedding'}
                 for item in insight_data.get("related_items", [])
             ]
+
+            # Agregar metadata de herramienta utilizada
+            related_items_with_metadata = {
+                "items": related_items,
+                "tool_used": "proactive_knowledge_linker_tool.py",
+                "analysis_metadata": {
+                    "tool_used": "proactive_knowledge_linker_tool.py",
+                    "analysis_type": "proactive_insight",
+                    "insight_type": insight_data.get("type", "unknown"),
+                    "created_at": datetime.datetime.now().isoformat()
+                }
+            }
+
             pi = ProactiveInsight(
                 account_id=account_id_uuid,
                 type=insight_data.get("type", "unknown"),
                 insight_message=insight_data.get("insight_message", ""),
                 confidence_score=insight_data.get("confidence_score", 0.0),
                 action_suggestion=insight_data.get("action_suggestion"),
-                related_items=related_items
+                related_items=related_items_with_metadata
             )
             db.add(pi)
             await db.commit()

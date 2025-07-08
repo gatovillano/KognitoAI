@@ -35,6 +35,7 @@ export default function AllDocumentsPage() {
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [isAnalysisDialogOpen, setIsAnalysisDialogOpen] = useState(false);
   const [isCollectionAnalysisOpen, setIsCollectionAnalysisOpen] = useState(false); // Necesario para el diálogo
+  const [docPollingId, setDocPollingId] = useState<string | null>(null);
 
   // Estado para el historial
   const [savedAnalyses, setSavedAnalyses] = useState([]);
@@ -60,19 +61,50 @@ export default function AllDocumentsPage() {
     fetchPageData();
   }, [fetchPageData]);
 
-  const handleAnalyzeDocument = async (doc: Document) => {
-    const toastId = toast.loading(`Analizando "${doc.file_name}"...`);
+  // Polling para el análisis de documento
+  useEffect(() => {
+    const pollDocumentAnalysis = async () => {
+      if (docPollingId) {
+        try {
+          const response = await apiClient.get(`/api/get-analysis-result/${docPollingId}`);
+          if (response.data.status === 'completed') {
+            setAnalysisResult(response.data.result);
+            setIsAnalysisDialogOpen(true);
+            setDocPollingId(null);
+            toast.success("¡Análisis completado!");
+            fetchPageData(); // Refresca la lista de análisis guardados
+          } else if (response.data.status === 'failed') {
+            toast.error(`Error en el análisis: ${response.data.error || 'Error desconocido'}`);
+            setDocPollingId(null);
+          }
+        } catch (error) {
+          toast.error("Error al verificar el estado del análisis.");
+          console.error(error);
+          setDocPollingId(null);
+        }
+      }
+    };
+
+    if (docPollingId) {
+      const interval = setInterval(pollDocumentAnalysis, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [docPollingId, fetchPageData]);
+
+  const handleAnalyzeDocument = useCallback(async (doc: Document) => {
+    if (docPollingId) {
+      toast.info('Ya hay un análisis en progreso');
+      return;
+    }
     setDocumentToAnalyze(doc);
     try {
-        const response = await apiClient.post('/api/analyze-document', { file_name: doc.file_name });
-        setAnalysisResult(response.data);
-        setIsAnalysisDialogOpen(true);
-        toast.success("¡Análisis completado!", { id: toastId });
-        fetchPageData(); // Refresca la lista de análisis guardados
+      const response = await apiClient.post('/api/start-document-analysis', { file_name: doc.file_name });
+      setDocPollingId(response.data.task_id);
+      toast.info(`Análisis para "${doc.file_name}" iniciado`);
     } catch (error) {
-        toast.error("Fallo en el análisis del documento.", { id: toastId });
+      toast.error('No se pudo iniciar el análisis del documento');
     }
-  };
+  }, [docPollingId]);
   
   const columns = useMemo(() => getColumns(
       (doc) => setDocumentToPreview(doc),

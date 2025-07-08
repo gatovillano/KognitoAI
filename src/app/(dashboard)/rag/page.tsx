@@ -8,13 +8,15 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github } from 'lucide-react';
+import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { UploadDocumentDialog } from './upload-document-dialog';
 import { CreateCollectionDialog } from './create-collection-dialog';
 import { CollectionAnalysisDialog } from './collection-analysis-dialog';
 import { GitHubRepoDialog } from './github-repo-dialog';
+import { EditCollectionDialog } from './edit-collection-dialog';
+import { ShareCollectionDialog } from './share-collection-dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 
 interface Collection {
@@ -28,11 +30,15 @@ const CollectionCard = ({
   collection,
   onAnalyze,
   onDelete,
+  onEdit,
+  onShare,
   isAnalyzing,
 }: {
   collection: Collection;
   onAnalyze: (topic: string) => void;
   onDelete: (topic: string) => void;
+  onEdit: (collection: Collection) => void;
+  onShare: (collection: Collection) => void;
   isAnalyzing: boolean;
 }) => {
   const router = useRouter();
@@ -84,6 +90,14 @@ const CollectionCard = ({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()} data-dropdown-content>
+                  <DropdownMenuItem onClick={() => onEdit(collection)}>
+                    <Edit className="mr-2 h-4 w-4" />
+                    <span>Editar</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onShare(collection)}>
+                    <Share2 className="mr-2 h-4 w-4" />
+                    <span>Compartir</span>
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => onAnalyze(collection.topic)}>
                     <ScanSearch className="mr-2 h-4 w-4" />
                     <span>Analizar Colección</span>
@@ -175,6 +189,11 @@ export default function RagCollectionsPage() {
   const [isCollectionAnalysisOpen, setIsCollectionAnalysisOpen] = useState(false);
   const [collectionPollingId, setCollectionPollingId] = useState<string | null>(null);
   const [analyzingTopic, setAnalyzingTopic] = useState<string | null>(null);
+
+  // Estados para editar y compartir colecciones
+  const [isEditCollectionOpen, setIsEditCollectionOpen] = useState(false);
+  const [isShareCollectionOpen, setIsShareCollectionOpen] = useState(false);
+  const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
   
   const router = useRouter();
 
@@ -192,7 +211,10 @@ export default function RagCollectionsPage() {
 
   useEffect(() => { fetchCollections(); }, [fetchCollections]);
 
-  const handleCollectionCreated = (newTopic: string) => {
+  const handleCollectionCreated = async (newTopic: string) => {
+    // Recargar las colecciones para mostrar la nueva
+    await fetchCollections();
+    // Luego navegar a la nueva colección
     router.push(`/rag/${encodeURIComponent(newTopic)}`);
   };
 
@@ -270,6 +292,26 @@ export default function RagCollectionsPage() {
     setDeletingTopic(topic);
   };
 
+  const handleEditCollection = (collection: Collection) => {
+    setSelectedCollection(collection);
+    setIsEditCollectionOpen(true);
+  };
+
+  const handleShareCollection = (collection: Collection) => {
+    setSelectedCollection(collection);
+    setIsShareCollectionOpen(true);
+  };
+
+  const handleEditSuccess = () => {
+    fetchCollections();
+    setSelectedCollection(null);
+  };
+
+  const handleShareSuccess = () => {
+    fetchCollections();
+    setSelectedCollection(null);
+  };
+
   const renderContent = () => {
     if (isLoading) {
       return <p className="text-center py-10">Cargando colecciones...</p>;
@@ -314,9 +356,31 @@ export default function RagCollectionsPage() {
               collection={collection}
               onAnalyze={handleAnalyzeCollection}
               onDelete={openDeleteDialog}
+              onEdit={handleEditCollection}
+              onShare={handleShareCollection}
               isAnalyzing={collectionPollingId !== null && analyzingTopic === collection.topic}
             />
           ))}
+          {/* Tarjeta para crear nueva colección */}
+          <motion.div
+            layout
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            className="h-full"
+          >
+            <Card
+              className="group border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center text-center p-6 cursor-pointer h-full"
+              onClick={() => setIsCreateOpen(true)}
+            >
+              <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/20 transition-colors">
+                <Plus className="h-6 w-6 text-primary" />
+              </div>
+              <h3 className="font-semibold mb-1">Crear Colección</h3>
+              <p className="text-xs text-muted-foreground">Nuevo tema de documentos</p>
+            </Card>
+          </motion.div>
         </AnimatePresence>
       </motion.div>
     );
@@ -328,7 +392,7 @@ export default function RagCollectionsPage() {
         <div>
           <h1 className="text-3xl font-bold flex items-center">
             <BookMarked className="mr-3 h-8 w-8 text-primary" />
-            Gestión de Documentos
+            Colecciones de Conocimientos
           </h1>
           <p className="text-muted-foreground mt-2">Organiza tus documentos en bases de conocimiento.</p>
         </div>
@@ -369,6 +433,20 @@ export default function RagCollectionsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <EditCollectionDialog
+        isOpen={isEditCollectionOpen}
+        onOpenChange={setIsEditCollectionOpen}
+        onEditSuccess={handleEditSuccess}
+        collection={selectedCollection}
+      />
+
+      <ShareCollectionDialog
+        isOpen={isShareCollectionOpen}
+        onOpenChange={setIsShareCollectionOpen}
+        onShareSuccess={handleShareSuccess}
+        collection={selectedCollection}
+      />
     </div>
   );
 }

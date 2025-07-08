@@ -2,12 +2,13 @@ import logging
 from langchain.schema.messages import HumanMessage
 import uuid
 from typing import List, Optional
+from datetime import datetime
 
 from core.llm_manager import get_fast_llm
 
 from fastapi import APIRouter, HTTPException, Depends, status, Form, BackgroundTasks
 from pydantic import BaseModel
-from sqlalchemy import select, desc, or_, update
+from sqlalchemy import select, desc, or_, update, func, String
 
 from core.database import SessionLocal, AnalysisTask, ProactiveInsight, MindmapTask
 from utils.security import get_current_account_id
@@ -18,7 +19,8 @@ from utils.advanced_text_analyzer import text_analyzer
 from sklearn.cluster import KMeans
 import numpy as np
 from collections import Counter
-from utils.embeddings import initialize_embeddings
+from utils.embeddings import get_embedding_model
+from core.memory_manager import create_memory_context, search_vector_db_optimized
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -260,6 +262,15 @@ async def run_document_analysis_and_save(task_id: str, account_id: str, file_nam
             # 3. Guardar el resultado y marcar como 'completed'
             # Asegurarse de que el resultado sea un diccionario
             result_payload = analysis_result if isinstance(analysis_result, dict) else analysis_result.dict()
+
+            # Agregar metadata de herramienta utilizada
+            result_payload["tool_used"] = "advanced_text_analyzer.py"
+            result_payload["analysis_metadata"] = {
+                "tool_used": "advanced_text_analyzer.py",
+                "analysis_type": "document",
+                "created_at": datetime.now().isoformat()
+            }
+
             stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 status="completed", result_payload=result_payload)
             await db_session.execute(stmt_completed)
@@ -289,7 +300,8 @@ async def start_document_analysis_endpoint(
     new_task = AnalysisTask(
         account_id=uuid.UUID(current_account_id),
         file_name=req.file_name,
-        status="pending"
+        status="pending",
+        analysis_type="document"  # NUEVO: Especificar tipo de análisis
     )
     db.add(new_task)
     await db.commit()
@@ -325,6 +337,7 @@ async def get_mindmap_result_endpoint(
 
 class AnalyzeCollectionRequest(BaseModel):
     topic: str
+    workspace_id: Optional[str] = None
 
 async def run_collection_analysis_and_save(task_id: str, account_id: str, topic: str):
     """
@@ -357,11 +370,23 @@ async def run_collection_analysis_and_save(task_id: str, account_id: str, topic:
 
             # 2. Realizar el análisis de la colección
             analysis_result = await text_analyzer.analyze_collection(all_docs_in_topic)
-            logger.info(f"Collection analysis result generated for topic '{topic}': {analysis_result.dict()}")
-            
+            logger.info(f"Collection analysis result generated for topic '{topic}': {analysis_result.model_dump()}")
+
             # 3. Guardar el resultado y marcar como 'completed'
+            result_payload = analysis_result.model_dump()
+
+            # Agregar metadata de herramienta utilizada
+            result_payload["tool_used"] = "advanced_text_analyzer.py"
+            result_payload["analysis_metadata"] = {
+                "tool_used": "advanced_text_analyzer.py",
+                "analysis_type": "collection",
+                "topic": topic,
+                "documents_count": len(all_docs_in_topic),
+                "created_at": datetime.now().isoformat()
+            }
+
             stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-                status="completed", result_payload=analysis_result.dict())
+                status="completed", result_payload=result_payload)
             await db_session.execute(stmt_completed)
             await db_session.commit()
             logger.info(f"Análisis de colección para tarea {task_id} completado.")
@@ -385,7 +410,8 @@ async def start_collection_analysis_endpoint(
         account_id=uuid.UUID(current_account_id),
         # Usamos el nombre del topic como referencia en lugar de un file_name
         file_name=f"Colección: {req.topic}",
-        status="pending"
+        status="pending",
+        analysis_type="collection"  # NUEVO: Especificar tipo de análisis
     )
     db.add(new_task)
     await db.commit()
@@ -393,6 +419,31 @@ async def start_collection_analysis_endpoint(
     
     background_tasks.add_task(run_collection_analysis_and_save, str(new_task.id), current_account_id, req.topic)
     
+    return {"task_id": str(new_task.id)}
+
+@router.post("/start-semantic-summary", status_code=202, summary="Iniciar resumen semántico de una colección")
+async def start_semantic_summary_endpoint(
+    req: AnalyzeCollectionRequest,
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Inicia un análisis semántico específico de una colección.
+    Se enfoca en agrupación semántica de documentos y extracción de patrones.
+    """
+    new_task = AnalysisTask(
+        account_id=uuid.UUID(current_account_id),
+        file_name=f"Resumen Semántico: {req.topic}",
+        status="pending",
+        analysis_type="semantic_summary"  # NUEVO: Tipo específico para resumen semántico
+    )
+    db.add(new_task)
+    await db.commit()
+    await db.refresh(new_task)
+
+    background_tasks.add_task(run_semantic_summary_analysis, str(new_task.id), current_account_id, req.topic, req.workspace_id)
+
     return {"task_id": str(new_task.id)}
 
 @router.post("/update-semantic-topics", status_code=202, summary="Actualizar temas con análisis semántico")
@@ -411,14 +462,15 @@ async def update_semantic_topics_endpoint(
     new_task = AnalysisTask(
         account_id=uuid.UUID(current_account_id),
         file_name="Semantic Topic Analysis",
-        status="pending"
+        status="pending",
+        analysis_type="semantic"  # NUEVO: Especificar tipo de análisis
     )
     db.add(new_task)
     await db.commit()
     await db.refresh(new_task)
-    
+
     background_tasks.add_task(run_semantic_topic_analysis, str(new_task.id), current_account_id, max_terms)
-    
+
     return {"task_id": str(new_task.id)}
 
 async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: Optional[int] = None):
@@ -469,7 +521,7 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
                 return
 
             # 2. Integrar el MODELO DE EMBEDDINGS dedicado (Ollama en este caso)
-            embedding_model = await initialize_embeddings()
+            embedding_model = get_embedding_model()
             if not embedding_model:
                 logger.error("No hay modelo de embeddings disponible (Ollama).")
                 raise ValueError("Modelo de embeddings no disponible para análisis semántico.")
@@ -502,22 +554,23 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
 
                 # 4. Agrupar temas por cluster y contar menciones
                 cluster_dict = {}
-                # Nueva lista para almacenar los detalles de cada tema y su cluster
-                detailed_clusters_data = [] 
+                # Lista temporal para almacenar los detalles de cada tema y su cluster
+                temp_detailed_data = []
 
                 for i, topic in enumerate(unique_topics):
                     cluster_id = clusters[i] if len(clusters) > 0 else 0 # Asegurar cluster_id incluso si clusters está vacío
-                    
+
                     if cluster_id not in cluster_dict:
                         cluster_dict[cluster_id] = {"topics": [], "mentions": 0, "id": cluster_id} # Añadir id del cluster
                     cluster_dict[cluster_id]["topics"].append(topic)
                     cluster_dict[cluster_id]["mentions"] += topic_counts[topic]
 
                     # Capturar el detalle de cada tema único y su asignación de cluster
-                    detailed_clusters_data.append({"term": topic, "cluster_id": int(cluster_id), "mentions": int(topic_counts[topic])})
+                    temp_detailed_data.append({"term": topic, "cluster_id": int(cluster_id), "mentions": int(topic_counts[topic])})
 
                 # 5. Generar un término representativo para cada cluster usando el LLM generativo
                 grouped_topics = []
+                detailed_clusters_data = []  # Lista final con información completa de clusters
                 llm_for_summarization = get_fast_llm()
                 if not llm_for_summarization:
                     logger.error("No hay LLM generativo disponible para generar términos representativos.")
@@ -527,49 +580,89 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
 
                 for cluster_id, data in cluster_dict.items():
                     try:
-                        topics_for_prompt = ", ".join(data["topics"][:15]) 
+                        topics_for_prompt = ", ".join(data["topics"][:15])
                         if not topics_for_prompt:
                             representative_term = f"Grupo {cluster_id + 1}"
+                            description = f"Agrupación que incluye: {', '.join(data['topics'][:3])}"
                         else:
                             prompt = (
-                                f"Genera una etiqueta o término conciso (1-3 palabras, sin explicación) "
-                                f"que represente mejor el siguiente grupo de temas: {topics_for_prompt}. "
-                                f"La etiqueta debe ser altamente relevante y reconocible. "
-                                f"Ejemplo: 'Ética IA' para ['consideraciones éticas en IA', 'sesgo en aprendizaje automático', 'desarrollo responsable de IA']."
+                                f"Analiza el siguiente grupo de temas relacionados y proporciona:\n"
+                                f"1. Una etiqueta representativa concisa (máximo 3 palabras) NUNCA USES GRUPO nº\n"
+                                f"2. Una descripción clara de qué conceptos agrupa (máximo 2 líneas)\n\n"
+                                f"Temas: {topics_for_prompt}\n\n"
+                                f"Formato de respuesta:\n"
+                                f"ETIQUETA: [etiqueta aquí]\n"
+                                f"DESCRIPCIÓN: [descripción aquí]"
                             )
                             logger.info(f"Generando término representativo para cluster {cluster_id} con prompt: {prompt[:100]}...")
                             response = await llm_for_summarization.ainvoke([HumanMessage(content=prompt)])
-                            representative_term = response.content.strip()
-                            logger.info(f"Término representativo generado para cluster {cluster_id}: {representative_term}")
-                            
-                            if "Ejemplo:" in representative_term:
-                                representative_term = representative_term.split("Ejemplo:")[0].strip()
-                            if ":" in representative_term:
-                                representative_term = representative_term.split(":")[-1].strip()
-                            representative_term = representative_term.replace('\n', ' ').replace('\r', '').strip()
-                            if len(representative_term.split()) > 3: 
-                                representative_term = " ".join(representative_term.split()[:3])
-                            if not representative_term:
+                            content = response.content.strip()
+                            logger.info(f"Respuesta generada para cluster {cluster_id}: {content}")
+
+                            # Parsear la respuesta
+                            representative_term = f"Grupo {cluster_id + 1}"
+                            description = f"Agrupación que incluye: {', '.join(data['topics'][:3])}"
+
+                            lines = content.split('\n')
+                            for line in lines:
+                                if line.startswith('ETIQUETA:'):
+                                    term = line.replace('ETIQUETA:', '').strip()
+                                    if term and len(term.split()) <= 3:
+                                        representative_term = term
+                                elif line.startswith('DESCRIPCIÓN:'):
+                                    desc = line.replace('DESCRIPCIÓN:', '').strip()
+                                    if desc and len(desc) <= 150:
+                                        description = desc
+
+                            if not representative_term or representative_term == f"Grupo {cluster_id + 1}":
                                 representative_term = f"Grupo {cluster_id + 1}"
 
                     except Exception as e:
                         logger.error(f"Error al generar término representativo para cluster {cluster_id}: {e}", exc_info=True)
                         representative_term = f"Grupo {cluster_id + 1}"
-                    
+                        description = f"Agrupación que incluye: {', '.join(data['topics'][:3])}"
+
+                    # Añadir información completa del cluster a detailed_clusters_data
+                    detailed_clusters_data.append({
+                        "cluster_id": int(cluster_id),
+                        "representative_term": representative_term,
+                        "description": description,
+                        "topics": data["topics"],
+                        "total_mentions": int(data["mentions"]),
+                        "topic_count": len(data["topics"])
+                    })
+
                     # Añadir el ID del cluster al grupo final para poder vincularlo con detailed_clusters
-                    grouped_topics.append({"topic": representative_term, "mentions": int(data["mentions"]), "cluster_id": int(cluster_id)})
+                    grouped_topics.append({
+                        "topic": representative_term,
+                        "mentions": int(data["mentions"]),
+                        "cluster_id": int(cluster_id),
+                        "description": description,
+                        "topics": data["topics"]
+                    })
 
                 # Ordenar por menciones descendentes y limitar a los 10 principales
                 simulated_grouped_topics = sorted(grouped_topics, key=lambda x: x["mentions"], reverse=True)[:10]
 
             # 6. Guardar el resultado y marcar como 'completed'
-            # El payload ahora incluye 'detailed_clusters'
-            stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-                status="completed", 
-                result_payload={
-                    "grouped_topics": simulated_grouped_topics,
-                    "detailed_clusters": detailed_clusters_data # ¡Nueva información aquí!
+            # El payload ahora incluye 'detailed_clusters' y metadata de herramienta
+            result_payload = {
+                "grouped_topics": simulated_grouped_topics,
+                "detailed_clusters": detailed_clusters_data,
+                "tool_used": "semantic_topic_analysis_tool.py",
+                "analysis_metadata": {
+                    "tool_used": "semantic_topic_analysis_tool.py",
+                    "analysis_type": "semantic",
+                    "total_topics": len(unique_topics),
+                    "clusters_count": len(detailed_clusters_data),
+                    "max_terms_limit": max_terms,
+                    "created_at": datetime.now().isoformat()
                 }
+            }
+
+            stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="completed",
+                result_payload=result_payload
             )
             await db_session.execute(stmt_completed)
             await db_session.commit()
@@ -581,8 +674,118 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
             await db_session.execute(stmt_failed)
             await db_session.commit()
 
+async def run_semantic_summary_analysis(task_id: str, account_id: str, topic: str, workspace_id: Optional[str] = None):
+    """
+    Proceso en segundo plano para realizar un resumen semántico específico de una colección.
+    Se enfoca en agrupación semántica de documentos y extracción de patrones dentro de la colección.
+    """
+    async with SessionLocal() as db_session: #type: ignore
+        try:
+            # Marcar la tarea como 'processing'
+            stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
+            await db_session.execute(stmt_processing)
+            await db_session.commit()
+
+            logger.info(f"🔍 Iniciando resumen semántico para colección '{topic}' (tarea {task_id})")
+
+            # Obtener todos los documentos de la colección
+            from core.memory_manager import list_user_documents
+            documents = await list_user_documents(
+                account_id=account_id,
+                workspace_id=workspace_id,
+                topic=topic
+            )
+
+            if not documents:
+                raise ValueError(f"No se encontraron documentos en la colección '{topic}'")
+
+            logger.info(f"📚 Analizando {len(documents)} documentos en la colección '{topic}'")
+
+            # Obtener contenido de los documentos para análisis semántico
+            from core.memory_manager import search_vector_db_optimized
+            all_chunks = []
+            for doc in documents:
+                chunks = await search_vector_db_optimized(
+                    account_id=account_id,
+                    query=doc['file_name'],
+                    content_type="user_documents",
+                    topic=topic,
+                    workspace_id=workspace_id,
+                    k=50  # Obtener más chunks por documento
+                )
+                all_chunks.extend(chunks)
+
+            if not all_chunks:
+                raise ValueError(f"No se encontró contenido para analizar en la colección '{topic}'")
+
+            # Preparar contenido para análisis semántico
+            combined_content = "\n\n".join([chunk.get('content', '') for chunk in all_chunks[:100]])  # Limitar para evitar tokens excesivos
+
+            # Usar el analizador de texto avanzado para análisis semántico
+            from utils.advanced_text_analyzer import AdvancedTextAnalyzer
+            analyzer = AdvancedTextAnalyzer()
+
+            # Realizar análisis semántico de la colección
+            # Preparar documentos en el formato esperado por analyze_collection
+            documents_for_analysis = [{"title": f"Colección {topic}", "content": combined_content}]
+            semantic_analysis = await analyzer.analyze_collection(documents_for_analysis)
+
+            # Crear resultado estructurado
+            result_payload = {
+                "resumen_semantico": semantic_analysis.collection_summary,
+                "temas_transversales": [
+                    {
+                        "tema": theme.theme,
+                        "citas": [{"documento": quote.document_title, "cita": quote.quote} for quote in theme.related_quotes],
+                        "relevancia": "alta"
+                    } for theme in semantic_analysis.cross_cutting_themes
+                ],
+                "conceptos_centrales": semantic_analysis.central_concepts,
+                "brechas_conocimiento": semantic_analysis.emergent_knowledge_gaps,
+                "patrones_semanticos": {
+                    "total_documentos": len(documents),
+                    "total_chunks_analizados": len(all_chunks),
+                    "temas_identificados": len(semantic_analysis.cross_cutting_themes)
+                },
+                "tool_used": "semantic_summary_analysis",
+                "analysis_metadata": {
+                    "tool_used": "semantic_summary_analysis",
+                    "analysis_type": "semantic_summary",
+                    "collection_name": topic,
+                    "workspace_id": workspace_id,
+                    "documents_count": len(documents),
+                    "chunks_analyzed": len(all_chunks),
+                    "created_at": datetime.now().isoformat()
+                }
+            }
+
+            # Marcar como completado
+            stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="completed",
+                result_payload=result_payload
+            )
+            await db_session.execute(stmt_completed)
+            await db_session.commit()
+
+            logger.info(f"✅ Resumen semántico completado para colección '{topic}' (tarea {task_id})")
+
+        except Exception as e:
+            logger.error(f"❌ Error en resumen semántico para colección '{topic}' (tarea {task_id}): {e}", exc_info=True)
+            stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="failed",
+                error_message=str(e)
+            )
+            await db_session.execute(stmt_failed)
+            await db_session.commit()
+
 class AnalyzeCodeRequest(BaseModel):
     repo_name: str
+
+class GetAllAnalysisRequest(BaseModel):
+    limit: Optional[int] = 20
+    offset: Optional[int] = 0
+    analysis_type: Optional[str] = None  # 'document', 'collection', 'mindmap', 'insight', 'code'
+    search_query: Optional[str] = None
 
 async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: str):
     """Función pesada que se ejecuta en segundo plano para análisis de código."""
@@ -704,7 +907,12 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
             try:
                 # Usar solo una muestra representativa para el formato final
                 sample_content = chunks[0]["content"][:100000] if chunks else ""
-                formatted_result = await tool._arun(sample_content + f"\n\nNOTA: Este es un análisis de {len(chunks)} partes del repositorio {repo_name}")
+                formatted_result = await tool._arun(
+                    code_content=sample_content + f"\n\nNOTA: Este es un análisis de {len(chunks)} partes del repositorio {repo_name}",
+                    account_id=account_id,
+                    file_name=f"Análisis de Repositorio: {repo_name}",
+                    save_to_database=False  # No guardar este análisis parcial
+                )
             except Exception as e:
                 logger.warning(f"Error generando resultado formateado: {e}")
                 formatted_result = final_summary
@@ -714,14 +922,18 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                 "formatted_result": formatted_result,
                 "executive_summary": f"Análisis completo de {len(github_docs)} archivos en {len(chunks)} partes del repositorio {repo_name}",
                 "code_structure": combined_categories["code_structure"],
-                "design_patterns": combined_categories["design_patterns"], 
+                "design_patterns": combined_categories["design_patterns"],
                 "dependencies": combined_categories["dependencies"],
                 "potential_issues": combined_categories["potential_issues"],
                 "recommendations": combined_categories["recommendations"],
+                "tool_used": "advanced_code_analyzer.py",
                 "analysis_metadata": {
+                    "tool_used": "advanced_code_analyzer.py",
+                    "analysis_type": "code",
                     "total_files": len(github_docs),
                     "total_chunks": len(chunks),
-                    "repo_name": repo_name
+                    "repo_name": repo_name,
+                    "created_at": datetime.now().isoformat()
                 }
             }
 
@@ -756,7 +968,8 @@ async def start_code_analysis_endpoint(
     new_task = AnalysisTask(
         account_id=uuid.UUID(current_account_id),
         file_name=req.repo_name,
-        status="pending"
+        status="pending",
+        analysis_type="code"  # NUEVO: Especificar tipo de análisis
     )
     db.add(new_task)
     await db.commit()
@@ -765,6 +978,231 @@ async def start_code_analysis_endpoint(
     background_tasks.add_task(run_code_analysis_and_save, str(new_task.id), current_account_id, req.repo_name)
     
     return {"task_id": str(new_task.id)}
+
+@router.post("/get-all-analysis")
+async def get_all_analysis_endpoint(
+    req: GetAllAnalysisRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Obtiene todos los análisis del usuario de forma unificada.
+    Combina AnalysisTask, MindmapTask y ProactiveInsight en una sola respuesta.
+    """
+    account_uuid = uuid.UUID(current_account_id)
+    all_analysis = []
+
+    # 1. Obtener AnalysisTask (análisis de documentos, colecciones, código)
+    if not req.analysis_type or req.analysis_type in ['document', 'collection', 'code']:
+        analysis_stmt = select(AnalysisTask).where(
+            AnalysisTask.account_id == account_uuid,
+            AnalysisTask.status == "completed"
+        ).order_by(AnalysisTask.updated_at.desc())
+
+        if req.search_query:
+            analysis_stmt = analysis_stmt.where(
+                or_(
+                    AnalysisTask.file_name.ilike(f"%{req.search_query}%"),
+                    func.cast(AnalysisTask.result_payload, String).ilike(f"%{req.search_query}%")
+                )
+            )
+
+        analysis_results = await db.execute(analysis_stmt)
+        analysis_tasks = analysis_results.scalars().all()
+
+        for task in analysis_tasks:
+            # Determinar el tipo específico basado en el file_name
+            file_name = str(task.file_name) if task.file_name is not None else ""
+            if file_name.startswith("Colección:"):
+                analysis_type = "collection"
+                title = file_name
+            elif file_name == "Semantic Topic Analysis":
+                analysis_type = "semantic"
+                title = "Análisis Semántico de Temas"
+            elif "repositorio" in file_name.lower() or file_name.endswith(".git"):
+                analysis_type = "code"
+                title = f"Análisis de Código: {file_name}"
+            else:
+                analysis_type = "document"
+                title = f"Análisis de Documento: {file_name}"
+
+            # Extraer resumen del resultado
+            summary = "Sin resumen disponible"
+            tool_used = "Desconocido"
+
+            if task.result_payload is not None:
+                if 'executive_summary' in task.result_payload:
+                    summary = task.result_payload['executive_summary']
+                elif 'resumen_ejecutivo' in task.result_payload:
+                    summary = task.result_payload['resumen_ejecutivo']
+                elif 'formatted_result' in task.result_payload:
+                    summary = str(task.result_payload['formatted_result'])[:200] + "..."
+
+                # Obtener herramienta usada desde los metadatos o inferir basándose en la estructura
+                if 'tool_used' in task.result_payload:
+                    tool_used = task.result_payload['tool_used']
+                elif 'analysis_metadata' in task.result_payload and 'tool_used' in task.result_payload['analysis_metadata']:
+                    tool_used = task.result_payload['analysis_metadata']['tool_used']
+                else:
+                    # Fallback: inferir basándose en la estructura del payload y file_name
+                    if 'code_structure' in task.result_payload and 'design_patterns' in task.result_payload:
+                        tool_used = "advanced_code_analyzer.py"
+                    elif 'grouped_topics' in task.result_payload and 'detailed_clusters' in task.result_payload:
+                        tool_used = "semantic_topic_analysis_tool.py"
+                    elif file_name == "Semantic Topic Analysis":
+                        tool_used = "semantic_topic_analysis_tool.py"
+                    elif 'cross_cutting_themes' in task.result_payload:
+                        tool_used = "advanced_text_analyzer.py (colección)"
+                    elif 'key_themes' in task.result_payload and 'central_concepts' in task.result_payload:
+                        tool_used = "advanced_text_analyzer.py (documento)"
+                    elif file_name.startswith("Colección:"):
+                        tool_used = "collection_analysis_tool.py"
+                    elif "repositorio" in file_name.lower() or file_name.endswith(".git"):
+                        tool_used = "advanced_code_analyzer.py"
+                    elif analysis_type == "document":
+                        tool_used = "document_analysis_tool.py"
+                    else:
+                        tool_used = f"herramienta_{analysis_type}"
+
+            all_analysis.append({
+                "id": str(task.id),
+                "type": analysis_type,
+                "title": title,
+                "summary": summary,
+                "created_at": task.created_at.isoformat(),
+                "updated_at": task.updated_at.isoformat(),
+                "source_table": "analysis_tasks",
+                "tool_used": tool_used,
+                "full_data": task.result_payload
+            })
+
+    # 2. Obtener MindmapTask
+    if not req.analysis_type or req.analysis_type == 'mindmap':
+        # Seleccionar solo las columnas que existen en mindmap_tasks (sin analysis_type)
+        mindmap_stmt = select(
+            MindmapTask.id,
+            MindmapTask.account_id,
+            MindmapTask.topic,
+            MindmapTask.ideas_input,
+            MindmapTask.document_name,
+            MindmapTask.concept_query,
+            MindmapTask.status,
+            MindmapTask.result_payload,
+            MindmapTask.error_message,
+            MindmapTask.created_at,
+            MindmapTask.updated_at
+        ).where(
+            MindmapTask.account_id == account_uuid,
+            MindmapTask.status == "completed"
+        ).order_by(MindmapTask.updated_at.desc())
+
+        if req.search_query:
+            mindmap_stmt = mindmap_stmt.where(
+                or_(
+                    MindmapTask.topic.ilike(f"%{req.search_query}%"),
+                    func.cast(MindmapTask.result_payload, String).ilike(f"%{req.search_query}%")
+                )
+            )
+
+        mindmap_results = await db.execute(mindmap_stmt)
+        mindmap_rows = mindmap_results.fetchall()
+
+        for row in mindmap_rows:
+            summary = f"Mapa mental sobre: {row.topic}"
+            if row.result_payload is not None and 'summary' in row.result_payload:
+                summary = row.result_payload['summary']
+
+            # Obtener herramienta usada desde los metadatos o usar fallback
+            tool_used = "mindmap_generator_tool.py"
+            if row.result_payload is not None:
+                if 'tool_used' in row.result_payload:
+                    tool_used = row.result_payload['tool_used']
+                elif 'analysis_metadata' in row.result_payload and 'tool_used' in row.result_payload['analysis_metadata']:
+                    tool_used = row.result_payload['analysis_metadata']['tool_used']
+
+            all_analysis.append({
+                "id": str(row.id),
+                "type": "mindmap",
+                "title": f"Mapa Mental: {row.topic}",
+                "summary": summary,
+                "created_at": row.created_at.isoformat(),
+                "updated_at": row.updated_at.isoformat(),
+                "source_table": "mindmap_tasks",
+                "tool_used": tool_used,
+                "full_data": row.result_payload
+            })
+
+    # 3. Obtener ProactiveInsight
+    if not req.analysis_type or req.analysis_type == 'insight':
+        insight_stmt = select(ProactiveInsight).where(
+            ProactiveInsight.account_id == account_uuid
+        ).order_by(ProactiveInsight.created_at.desc())
+
+        if req.search_query:
+            insight_stmt = insight_stmt.where(
+                or_(
+                    ProactiveInsight.insight_message.ilike(f"%{req.search_query}%"),
+                    ProactiveInsight.type.ilike(f"%{req.search_query}%")
+                )
+            )
+
+        insight_results = await db.execute(insight_stmt)
+        insights = insight_results.scalars().all()
+
+        for insight in insights:
+            # Obtener herramienta usada desde los metadatos o usar fallback
+            tool_used = "proactive_knowledge_linker_tool.py"
+            related_items = insight.related_items or {}
+
+            if isinstance(related_items, dict):
+                if 'tool_used' in related_items:
+                    tool_used = related_items['tool_used']
+                elif 'analysis_metadata' in related_items and 'tool_used' in related_items['analysis_metadata']:
+                    tool_used = related_items['analysis_metadata']['tool_used']
+
+                # Extraer los items reales si están en la nueva estructura
+                actual_items = related_items.get('items', related_items)
+            else:
+                # Fallback para estructura antigua
+                actual_items = related_items
+
+            all_analysis.append({
+                "id": str(insight.id),
+                "type": "insight",
+                "title": f"Insight {insight.type.title()}",
+                "summary": insight.insight_message,
+                "created_at": insight.created_at.isoformat(),
+                "updated_at": insight.created_at.isoformat(),
+                "source_table": "proactive_insights",
+                "tool_used": tool_used,
+                "confidence_score": insight.confidence_score,
+                "action_suggestion": insight.action_suggestion,
+                "related_items": actual_items,
+                "full_data": {
+                    "type": insight.type,
+                    "insight_message": insight.insight_message,
+                    "confidence_score": insight.confidence_score,
+                    "action_suggestion": insight.action_suggestion,
+                    "related_items": insight.related_items,
+                    "tool_used": tool_used
+                }
+            })
+
+    # 4. Ordenar por fecha de actualización y aplicar paginación
+    all_analysis.sort(key=lambda x: x['updated_at'], reverse=True)
+
+    # Aplicar paginación
+    start_idx = req.offset or 0
+    end_idx = start_idx + (req.limit or 20)
+    paginated_analysis = all_analysis[start_idx:end_idx]
+
+    return {
+        "analysis": paginated_analysis,
+        "total": len(all_analysis),
+        "limit": req.limit or 20,
+        "offset": req.offset or 0,
+        "has_more": end_idx < len(all_analysis)
+    }
 
 class GetRepoAnalysesRequest(BaseModel):
     repo_name: str
@@ -802,3 +1240,194 @@ async def get_repo_analyses_endpoint(
     
     results = await db.execute(stmt)
     return results.scalars().all()
+
+
+# ============================================================================
+# NUEVOS ENDPOINTS OPTIMIZADOS CON ANALYSIS_TYPE Y BÚSQUEDA MEJORADA
+# ============================================================================
+
+class GetAnalysisTypesRequest(BaseModel):
+    """Request para obtener tipos de análisis disponibles."""
+    pass
+
+@router.post("/get-analysis-types")
+async def get_analysis_types_endpoint(
+    req: GetAnalysisTypesRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Obtiene los tipos de análisis disponibles y sus estadísticas de uso.
+
+    Utiliza la nueva columna analysis_type para mostrar estadísticas
+    de uso por tipo de análisis.
+    """
+    try:
+        account_uuid = uuid.UUID(current_account_id)
+
+        # Obtener estadísticas por tipo de análisis
+        stats_query = """
+            SELECT
+                analysis_type,
+                COUNT(*) as total,
+                COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
+                COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
+                COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
+                MAX(created_at) as last_used
+            FROM analysis_tasks
+            WHERE account_id = :account_id
+            GROUP BY analysis_type
+            ORDER BY total DESC
+        """
+
+        from sqlalchemy import text
+        result = await db.execute(text(stats_query), {"account_id": account_uuid})
+        rows = result.fetchall()
+
+        # Definir tipos disponibles con descripciones
+        available_types = {
+            "document": {
+                "name": "Análisis de Documentos",
+                "description": "Análisis de documentos individuales (PDFs, docs, etc.)",
+                "icon": "📄"
+            },
+            "collection": {
+                "name": "Análisis de Colecciones",
+                "description": "Análisis de colecciones completas de documentos",
+                "icon": "📚"
+            },
+            "semantic": {
+                "name": "Análisis Semántico",
+                "description": "Análisis semántico de topics y clustering",
+                "icon": "🧠"
+            },
+            "code": {
+                "name": "Análisis de Código",
+                "description": "Análisis de código y repositorios",
+                "icon": "💻"
+            },
+            "code_insights": {
+                "name": "Análisis de Código (Insights)",
+                "description": "Análisis profundo de código para extraer insights y recomendaciones",
+                "icon": "🔍"
+            },
+            "proactive_insight": {
+                "name": "Insights Proactivos",
+                "description": "Insights proactivos automáticos",
+                "icon": "💡"
+            },
+            "unknown": {
+                "name": "Otros Análisis",
+                "description": "Análisis de tipo no categorizado",
+                "icon": "❓"
+            }
+        }
+
+        # Combinar estadísticas con información de tipos
+        analysis_types = []
+        used_types = set()
+
+        for row in rows:
+            analysis_type = row[0] or "unknown"
+            used_types.add(analysis_type)
+
+            type_info = available_types.get(analysis_type, {
+                "name": analysis_type.title() if analysis_type else "Desconocido",
+                "description": f"Análisis de tipo {analysis_type}",
+                "icon": "❓"
+            })
+
+            analysis_types.append({
+                "type": analysis_type,
+                "name": type_info["name"],
+                "description": type_info["description"],
+                "icon": type_info["icon"],
+                "stats": {
+                    "total": row[1],
+                    "completed": row[2],
+                    "pending": row[3],
+                    "failed": row[4],
+                    "last_used": row[5].isoformat() if row[5] else None
+                }
+            })
+
+        # Agregar tipos disponibles que no han sido usados
+        for analysis_type, type_info in available_types.items():
+            if analysis_type not in used_types:
+                analysis_types.append({
+                    "type": analysis_type,
+                    "name": type_info["name"],
+                    "description": type_info["description"],
+                    "icon": type_info["icon"],
+                    "stats": {
+                        "total": 0,
+                        "completed": 0,
+                        "pending": 0,
+                        "failed": 0,
+                        "last_used": None
+                    }
+                })
+
+        return {
+            "success": True,
+            "total_types": len(analysis_types),
+            "types_used": len(used_types),
+            "analysis_types": analysis_types
+        }
+
+    except Exception as e:
+        logger.error(f"Error obteniendo tipos de análisis: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+
+class GetAnalysisByTypeRequest(BaseModel):
+    """Request para obtener análisis filtrados por tipo."""
+    analysis_type: Optional[str] = None
+    status: Optional[str] = None
+    limit: Optional[int] = 20
+
+@router.post("/get-analysis-by-type")
+async def get_analysis_by_type_endpoint(
+    req: GetAnalysisByTypeRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Obtiene análisis filtrados por tipo usando la nueva columna analysis_type.
+
+    Permite filtrado eficiente por tipo de análisis y estado.
+    """
+    try:
+        account_uuid = uuid.UUID(current_account_id)
+
+        # Construir consulta con filtros
+        stmt = select(AnalysisTask).where(AnalysisTask.account_id == account_uuid)
+
+        if req.analysis_type:
+            stmt = stmt.where(AnalysisTask.analysis_type == req.analysis_type)
+
+        if req.status:
+            stmt = stmt.where(AnalysisTask.status == req.status)
+
+        stmt = stmt.order_by(desc(AnalysisTask.created_at))
+
+        if req.limit:
+            stmt = stmt.limit(req.limit)
+
+        results = await db.execute(stmt)
+        analysis_tasks = results.scalars().all()
+
+        return {
+            "success": True,
+            "total_results": len(analysis_tasks),
+            "filters_applied": {
+                "analysis_type": req.analysis_type,
+                "status": req.status,
+                "limit": req.limit
+            },
+            "results": analysis_tasks
+        }
+
+    except Exception as e:
+        logger.error(f"Error obteniendo análisis por tipo: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")

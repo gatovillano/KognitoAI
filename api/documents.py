@@ -12,8 +12,9 @@ from core.database import SessionLocal, TeamMember, LangchainPgCollection
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.document_parser import extract_text_and_metadata_from_document
-from core.memory_manager import process_document_for_rag, list_user_documents, delete_document_chunks, get_full_document_content, update_document_metadata, list_user_collections, extract_titles_and_update_metadata
+from core.memory_manager import process_document_for_rag, list_user_documents, list_user_documents_all_teams, delete_document_chunks, get_full_document_content, update_document_metadata, list_user_collections, extract_titles_and_update_metadata
 from utils.db_session import DBSession
+from tools.add_web_to_rag_tool import AddWebToRAGTool
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -117,39 +118,12 @@ async def list_documents_endpoint(
     account_id_uuid = uuid.UUID(current_account_id)
     topic_filter = request.topic if request else None
     
-    # Obtener documentos personales (con filtro opcional por topic)
-    personal_docs = await list_user_documents(str(account_id_uuid), topic=topic_filter)
-    logger.info(f"Personal documents for account {current_account_id} (topic: {topic_filter}): {len(personal_docs)} documents found")
-    
-    # Obtener equipos del usuario (optimizado)
-    member_teams_result = await db.execute(
-        select(TeamMember).where(TeamMember.account_id == account_id_uuid)
-    )
-    member_teams = member_teams_result.scalars().all()
-    team_ids = [str(team.team_id) for team in member_teams]
-    
-    # Solo log si hay equipos
-    if team_ids:
-        logger.info(f"⚠️ TEAMS: Usuario {current_account_id} pertenece a {len(team_ids)} equipos: {team_ids}")
-    else:
-        logger.info(f"✅ NO TEAMS: Usuario {current_account_id} no pertenece a ningún equipo")
-    
-    # Obtener documentos de equipos solo si los hay
-    team_docs = []
-    if team_ids:
-        for team_id in team_ids:
-            team_docs_for_id = await list_user_documents(
-                account_id=str(account_id_uuid),
-                team_id=team_id,
-                topic=topic_filter
-            )
-            if team_docs_for_id:  # Solo log si hay documentos
-                logger.info(f"Team documents for team {team_id}: {len(team_docs_for_id)} documents found")
-            team_docs.extend(team_docs_for_id)
-    
-    # Combinar documentos personales y de equipos, eliminando duplicados por file_name
-    combined_docs = {doc['file_name']: doc for doc in personal_docs + team_docs}.values()
-    combined_docs_list = list(combined_docs)
+    # Obtener TODOS los documentos del usuario (incluyendo compartidos y no compartidos)
+    # Para la vista personal, el usuario debe ver todos sus documentos independientemente del team_id
+    all_user_docs = await list_user_documents_all_teams(str(account_id_uuid), topic=topic_filter)
+    logger.info(f"All user documents for account {current_account_id} (topic: {topic_filter}): {len(all_user_docs)} documents found")
+
+    combined_docs_list = all_user_docs
     
     # Debug logging para investigar problema de filtrado
     logger.info(f"🔍 DEBUG: Total combined documents for account {current_account_id}: {len(combined_docs_list)} documents")
@@ -219,6 +193,14 @@ class ExtractTitleRequest(BaseModel):
     topic: Optional[str] = None
     file_name: Optional[str] = None
 
+class UpdateCollectionRequest(BaseModel):
+    """Define la estructura para actualizar una colección específica."""
+    old_topic: str
+    new_topic: Optional[str] = None
+    new_description: Optional[str] = None
+    workspace_id: Optional[str] = None
+    team_id: Optional[str] = None
+
 @router.post("/extract-title", summary="Extraer títulos de documentos y actualizar metadatos")
 async def extract_titles_endpoint(request: ExtractTitleRequest, current_account_id: str = Depends(get_current_account_id)):
     """
@@ -280,6 +262,36 @@ async def create_collection_endpoint(
         logger.error(f"Error al crear la colección para la cuenta {current_account_id}: {e}", exc_info=True)
         await db.rollback()
         raise HTTPException(status_code=500, detail="Error al crear la colección.")
+
+@router.post("/update-collection", summary="Actualizar metadatos de una colección")
+async def update_collection_endpoint(
+    request: UpdateCollectionRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Actualiza los metadatos de una colección (nombre y/o descripción).
+    """
+    try:
+        from core.memory_manager import update_collection_metadata
+
+        success = await update_collection_metadata(
+            account_id=current_account_id,
+            old_topic_name=request.old_topic,
+            new_topic_name=request.new_topic,
+            new_description=request.new_description,
+            workspace_id=request.workspace_id,
+            team_id=request.team_id
+        )
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"La colección '{request.old_topic}' no se encontró o no se pudo actualizar.")
+
+        return {"message": f"Colección actualizada exitosamente."}
+    except Exception as e:
+        logger.error(f"Error al actualizar la colección para la cuenta {current_account_id}: {e}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Error al actualizar la colección.")
 
 @router.post("/list-collections", summary="Listar las colecciones de conocimiento")
 async def list_collections_endpoint(current_account_id: str = Depends(get_current_account_id)):
@@ -366,3 +378,41 @@ async def get_extract_title_status(current_account_id: str = Depends(get_current
             "message": status_data["message"],
             "last_updated": status_data["last_updated"].isoformat() if status_data["last_updated"] else None
         }
+
+class AddWebRequest(BaseModel):
+    url: str
+    topic: str
+    workspace_id: Optional[str] = None
+    custom_title: Optional[str] = None
+
+@router.post("/add-web-to-rag", summary="Añadir contenido web a la base de conocimiento")
+async def add_web_to_rag_endpoint(
+    request: AddWebRequest,
+    current_account_id: str = Depends(get_current_account_id)
+):
+    """
+    Endpoint para añadir contenido de una URL directamente a la base de conocimiento del usuario.
+    Extrae el contenido web, lo procesa y lo almacena en la base vectorial.
+    """
+    try:
+        # Crear instancia de la herramienta
+        tool = AddWebToRAGTool()
+
+        # Ejecutar la herramienta
+        result = await tool._arun(
+            url=request.url,
+            topic=request.topic,
+            account_id=current_account_id,
+            workspace_id=request.workspace_id,
+            custom_title=request.custom_title
+        )
+
+        # Verificar si fue exitoso
+        if result.startswith("✅"):
+            return {"success": True, "message": result}
+        else:
+            return {"success": False, "message": result}
+
+    except Exception as e:
+        logger.error(f"Error en add_web_to_rag_endpoint para la cuenta {current_account_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error al procesar la URL: {str(e)}")

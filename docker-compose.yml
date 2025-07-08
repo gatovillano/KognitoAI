@@ -18,6 +18,8 @@ services:
       - kognito_network
 
   # 2. El Cerebro (Servicio Core API)
+  # 🔧 API accesible en: http://localhost:8889
+  # 📚 Documentación: http://localhost:8889/docs
   core:
     build:
       context: .
@@ -27,14 +29,9 @@ services:
     depends_on:
       - db
     ports:
-      - "${API_PORT:-8889}:8000" # Usamos una variable de entorno para el puerto
+      - "${API_PORT:-8889}:8000" # API accesible en localhost:8889
     volumes:
-      - ./core:/app/core
       - .:/app
-      - ./tools:/app/tools
-      - ./utils:/app/utils
-      - ./run_api.py:/app/run_api.py
-      - ./telegram_panel:/app/telegram_panel # Añadir este volumen
       - ./credentials/gen-lang-client-0283065579-d517663d377f.json:/app/credentials/gen-lang-client-0283065579-d517663d377f.json:ro
     env_file:
       - ./.env
@@ -66,7 +63,8 @@ services:
     links:
       - core # ¡NUEVO! Creamos un enlace explícito al servicio core.
 
-  # 4. El Frontend de la Web App Pública <-- ¡AQUÍ ESTÁ EL CAMBIO!
+  # 4. El Frontend de la Web App Pública
+  # 🌐 Acceso: http://localhost:8880 
   frontend:
     # Usamos nuestro nuevo Dockerfile
     build:
@@ -74,11 +72,12 @@ services:
       dockerfile: Dockerfile.frontend
       args:
         # Pasamos la URL del backend al proceso de build.
-        # Dentro de Docker, el frontend se comunica con el backend usando su nombre de servicio 'core'.
-        NEXT_PUBLIC_API_URL: "" 
+        # Para producción usa la URL pública, para desarrollo usa localhost:8889
+        NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-https://apibase.gatoslibres.art}"
     container_name: kognito_frontend
     restart: always
-    # Mapeamos el puerto 8880 de tu máquina al puerto 3000 del contenedor (donde corre Next.js)
+    # 📍 IMPORTANTE: Frontend accesible en http://localhost:8880
+    # (El puerto 3000 que aparece en logs es interno del contenedor)
     ports:
       - "${FRONTEND_PORT:-8880}:3000"
     depends_on:

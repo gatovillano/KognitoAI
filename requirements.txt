@@ -39,6 +39,7 @@ emoji
 aiofiles
 python-multipart
 fake-useragent
+ddgs
 # --- Procesamiento de Audio y Documentos ---
 faster-whisper
 pdfminer.six

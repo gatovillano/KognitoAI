@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { ArrowLeft, Loader2, FileText, Folder, Eye, Edit, ScanSearch, Share2, Trash2, History, FolderKanban } from 'lucide-react';
+import { ArrowLeft, Loader2, FileText, Folder, Eye, Edit, ScanSearch, Share2, Trash2, History, FolderKanban, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
 import apiClient from '@/lib/api';
@@ -15,6 +15,7 @@ import { DeleteConfirmationDialog } from '../../delete-confirmation-dialog';
 import { AnalysisResultDialog } from '../../analysis-result-dialog';
 import { CodeAnalysisResultDialog } from '../../code-analysis-result-dialog';
 import { ShareDocumentDialog } from '../../share-document-dialog';
+import { UpdateRepositoryDialog } from '../../update-repository-dialog';
 import type { Document } from '../../columns';
 
 // Definir un tipo extendido para documentos de GitHub que incluye repo_url
@@ -28,6 +29,7 @@ export default function RepositoryDetailPage() {
   const repoName = params.repoName as string;
   const [documents, setDocuments] = useState<GitHubDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [repoUrl, setRepoUrl] = useState<string>('');
   
   // Estados para diálogos
   const [documentToPreview, setDocumentToPreview] = useState<Document | null>(null);
@@ -35,6 +37,7 @@ export default function RepositoryDetailPage() {
   const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null);
   const [documentToShare, setDocumentToShare] = useState<Document | null>(null);
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const [isUpdateRepoOpen, setIsUpdateRepoOpen] = useState(false);
   
   // Estados para análisis de documento individual
   const [documentToAnalyze, setDocumentToAnalyze] = useState<Document | null>(null);
@@ -65,6 +68,11 @@ export default function RepositoryDetailPage() {
         ]);
         // Filtrar documentos por repo_url que termine con el repoName
         const filteredDocs = docsRes.data.filter((doc: GitHubDocument) => doc.repo_url && doc.repo_url.endsWith(`/${repoName}`));
+
+        // Obtener la URL del repositorio del primer documento
+        if (filteredDocs.length > 0 && filteredDocs[0].repo_url) {
+          setRepoUrl(filteredDocs[0].repo_url);
+        }
         // Usar los análisis directamente del endpoint específico para el repositorio
         const repoAnalyses = analysesRes.data
           .map((analysis: any) => {
@@ -343,6 +351,10 @@ export default function RepositoryDetailPage() {
           <h1 className="text-3xl font-bold break-all">{repoName}</h1>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" className="border-orange-400 text-orange-400 hover:bg-orange-50" onClick={() => setIsUpdateRepoOpen(true)}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Actualizar Repositorio
+          </Button>
           <Button variant="outline" className="border-blue-400 text-blue-400 hover:bg-blue-50" disabled={!!docPollingId || !!collectionPollingId} onClick={handleAnalyzeRepository}>
             {collectionPollingId ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -424,6 +436,13 @@ export default function RepositoryDetailPage() {
       <CodeAnalysisResultDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} repoName={repoName} />
       <AnalysisResultDialog isOpen={isVectorizationOpen} onOpenChange={setIsVectorizationOpen} analysis={vectorizationResult} document={{ file_name: repoName, topic: 'Repositories', title: 'Vectorización de ' + repoName, author: '' }} />
       <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={() => {}} document={documentToShare} />
+      <UpdateRepositoryDialog
+        isOpen={isUpdateRepoOpen}
+        onOpenChange={setIsUpdateRepoOpen}
+        onSuccess={() => window.location.reload()}
+        repositoryUrl={repoUrl}
+        repositoryName={repoName}
+      />
     </div>
   );
 }

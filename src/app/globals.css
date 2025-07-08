@@ -4,6 +4,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Importar estilos de resaltado de código ANTES que otros estilos */
+@import '../styles/code-highlighting.css';
+
 @layer base {
   :root {
     /* --- MODO CLARO - Paleta Moderna y Elegante --- */
@@ -137,39 +140,40 @@
   color: #7dd3fc !important;
 }
 
+/* Estilos de código movidos a code-highlighting.css
 .dark .prose pre {
-  background-color: hsl(220 5% 7%) !important; /* #111213 */
+  background-color: hsl(220 5% 7%) !important;
   padding: 0.5rem;
   border-radius: 0.3rem;
   overflow-x: auto;
 }
 
 .dark .prose pre code {
-  color: hsl(210 40% 98%) !important; /* Texto principal del código en blanco */
+  color: hsl(210 40% 98%) !important;
   background-color: transparent !important;
 }
 
-/* Resaltado de sintaxis básico para modo oscuro */
 .dark .prose pre code .keyword {
-  color: hsl(204 88% 57%) !important; /* Palabras clave en azul claro */
+  color: hsl(204 88% 57%) !important;
 }
 
 .dark .prose pre code .string {
-  color: hsl(120 70% 50%) !important; /* Cadenas en verde */
+  color: hsl(120 70% 50%) !important;
 }
 
 .dark .prose pre code .comment {
-  color: hsl(210 20% 60%) !important; /* Comentarios en gris */
+  color: hsl(210 20% 60%) !important;
   font-style: italic;
 }
 
 .dark .prose pre code .function {
-  color: hsl(300 70% 60%) !important; /* Funciones en morado */
+  color: hsl(300 70% 60%) !important;
 }
 
 .dark .prose pre code .number {
-  color: hsl(30 70% 50%) !important; /* Números en naranja */
+  color: hsl(30 70% 50%) !important;
 }
+*/
 
 .mention {
   color: hsl(var(--primary));
@@ -444,3 +448,5 @@
   z-index: 2;
   margin: 2px;
 }
+
+

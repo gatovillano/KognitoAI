@@ -59,8 +59,8 @@ async def deep_analysis_on_topic(
         try:
             # Registrar la tarea en la base de datos
             insert_query = text("""
-                INSERT INTO analysis_tasks (id, account_id, file_name, status, created_at, updated_at)
-                VALUES (:task_id, :account_id, :topic, 'pending', NOW(), NOW())
+                INSERT INTO analysis_tasks (id, account_id, file_name, status, analysis_type, created_at, updated_at)
+                VALUES (:task_id, :account_id, :topic, 'pending', 'topic_analysis', NOW(), NOW())
             """)
             await db.execute(insert_query, {"task_id": task_id, "account_id": account_id, "topic": topic})
             await db.commit()

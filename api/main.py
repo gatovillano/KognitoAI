@@ -19,9 +19,25 @@ from core.database import create_tables
 from core.llm_manager import initialize_llms
 from core.websocket_manager import connect_websocket, disconnect_websocket
 from utils.security import decode_access_token
+from utils.embeddings import initialize_embeddings
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Configurar logging detallado para LangChain y componentes del LLM
+from utils.llm_logging_config import setup_llm_detailed_logging, create_llm_log_filename, enable_verbose_langchain_logging, disable_noisy_loggers
+
+# Configurar logging detallado del LLM
+setup_llm_detailed_logging(
+    log_level="DEBUG",
+    log_file=create_llm_log_filename()
+)
+
+# Habilitar logging verbose para debugging completo
+enable_verbose_langchain_logging()
+
+# Silenciar loggers ruidosos
+disable_noisy_loggers()
 
 app = FastAPI(
     title="Kognito AI System - API Central",
@@ -69,6 +85,8 @@ async def startup_event():
         logger.info("Tablas de la base de datos verificadas/creadas.")
         await initialize_llms()
         logger.info("Modelos de Lenguaje (LLMs) inicializados.")
+        await initialize_embeddings()
+        logger.info("Modelo de embeddings inicializado.")
         logger.info("Servidor listo para aceptar peticiones.")
     except Exception as e:
         logger.error(f"ERROR FATAL DURANTE EL ARRANQUE: {e}", exc_info=True)
@@ -128,9 +146,13 @@ from api.analysis import router as analysis_router
 app.include_router(analysis_router, prefix="/api", tags=["analysis"])
 from api.github import router as github_router
 from api.telegram import router as telegram_router
+from api.logs import router as logs_router
+from api.scheduled_tools import router as scheduled_tools_router
 
 app.include_router(github_router, prefix="/api/github", tags=["github"])
 app.include_router(telegram_router, prefix="", tags=["telegram"])
+app.include_router(logs_router, prefix="/api", tags=["logs"])
+app.include_router(scheduled_tools_router, prefix="/api", tags=["scheduled-tools"])
 
 if __name__ == "__main__":
     import uvicorn
