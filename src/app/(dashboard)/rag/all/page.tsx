@@ -6,7 +6,7 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { ArrowLeft, Upload, History, FileText, FolderKanban } from 'lucide-react';
+import { ArrowLeft, Upload, History, FileText, FolderKanban, Brain } from 'lucide-react';
 import { toast } from 'sonner';
 
 // Importaciones de componentes del directorio padre 'rag'
@@ -19,6 +19,7 @@ import { EditDocumentDialog } from '../edit-document-dialog';
 import { DeleteConfirmationDialog } from '../delete-confirmation-dialog';
 import { AnalysisResultDialog } from '../analysis-result-dialog';
 import { CollectionAnalysisDialog } from '../collection-analysis-dialog'; // Aunque no lo iniciamos aquí, lo necesitamos por si el usuario abre un análisis guardado de colección
+import { SemanticAnalysisDialog } from '../semantic-analysis-dialog';
 
 export default function AllDocumentsPage() {
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -35,6 +36,7 @@ export default function AllDocumentsPage() {
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [isAnalysisDialogOpen, setIsAnalysisDialogOpen] = useState(false);
   const [isCollectionAnalysisOpen, setIsCollectionAnalysisOpen] = useState(false); // Necesario para el diálogo
+  const [isSemanticAnalysisOpen, setIsSemanticAnalysisOpen] = useState(false); // Para análisis semánticos
   const [docPollingId, setDocPollingId] = useState<string | null>(null);
 
   // Estado para el historial
@@ -145,7 +147,8 @@ export default function AllDocumentsPage() {
               <AccordionItem value={`item-${analysis.id}`} key={analysis.id}>
                 <AccordionTrigger>
                   <div className="flex items-center gap-2 text-left flex-1 min-w-0">
-                    {analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                    {analysis.file_name.startsWith('Resumen Semántico:') ? <Brain className="h-4 w-4" /> :
+                     analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
                     <span className="font-medium truncate">{analysis.file_name}</span>
                     <span className="ml-auto text-xs text-muted-foreground pr-4">{new Date(analysis.created_at).toLocaleDateString()}</span>
                   </div>
@@ -153,7 +156,9 @@ export default function AllDocumentsPage() {
                 <AccordionContent>
                   <Button variant="link" className="p-0 h-auto" onClick={() => {
                     setAnalysisResult(analysis.result_payload);
-                    if (analysis.file_name.startsWith('Colección:')) {
+                    if (analysis.file_name.startsWith('Resumen Semántico:')) {
+                      setIsSemanticAnalysisOpen(true);
+                    } else if (analysis.file_name.startsWith('Colección:')) {
                       setIsCollectionAnalysisOpen(true);
                     } else {
                       setDocumentToAnalyze({ file_name: analysis.file_name, topic: '', title: '', author: '' });
@@ -178,6 +183,7 @@ export default function AllDocumentsPage() {
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />
       <AnalysisResultDialog isOpen={isAnalysisDialogOpen} onOpenChange={setIsAnalysisDialogOpen} analysis={analysisResult} document={documentToAnalyze} />
       <CollectionAnalysisDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={analysisResult} topic={documentToAnalyze?.file_name?.replace('Colección: ', '') ?? ''} />
+      <SemanticAnalysisDialog isOpen={isSemanticAnalysisOpen} onOpenChange={setIsSemanticAnalysisOpen} analysis={analysisResult} topic={documentToAnalyze?.file_name?.replace('Resumen Semántico: ', '') ?? ''} />
     </div>
   );
 }

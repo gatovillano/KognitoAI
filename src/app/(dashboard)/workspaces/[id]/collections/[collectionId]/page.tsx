@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text } from 'lucide-react';
+import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Brain } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { DataTable } from '@/app/(dashboard)/rag/data-table';
@@ -20,6 +20,7 @@ import { EditDocumentDialog } from '@/app/(dashboard)/rag/edit-document-dialog';
 import { DeleteConfirmationDialog } from '@/app/(dashboard)/rag/delete-confirmation-dialog';
 import { AnalysisResultDialog } from '@/app/(dashboard)/rag/analysis-result-dialog';
 import { CollectionAnalysisDialog } from '@/app/(dashboard)/rag/collection-analysis-dialog';
+import { SemanticAnalysisDialog } from '@/app/(dashboard)/rag/semantic-analysis-dialog';
 import { ShareDocumentDialog } from '@/app/(dashboard)/rag/share-document-dialog';
 
 export default function WorkspaceCollectionDetailPage() {
@@ -49,6 +50,10 @@ export default function WorkspaceCollectionDetailPage() {
   const [collectionAnalysisResult, setCollectionAnalysisResult] = useState<any>(null);
   const [isCollectionAnalysisOpen, setIsCollectionAnalysisOpen] = useState(false);
   const [collectionPollingId, setCollectionPollingId] = useState<string | null>(null);
+
+  // Estados para análisis semántico
+  const [semanticAnalysisResult, setSemanticAnalysisResult] = useState<any>(null);
+  const [isSemanticAnalysisOpen, setIsSemanticAnalysisOpen] = useState(false);
 
   // Estado para el historial de análisis
   const [savedAnalyses, setSavedAnalyses] = useState([]);
@@ -125,8 +130,18 @@ export default function WorkspaceCollectionDetailPage() {
         const response = await apiClient.get(`/api/get-analysis-result/${collectionPollingId}`);
         const { status, result, error } = response.data;
         if (status === 'completed') {
-          clearInterval(poller); setCollectionPollingId(null); setCollectionAnalysisResult(result);
-          setIsCollectionAnalysisOpen(true); toast.success("¡Análisis de colección completado!"); fetchPageData();
+          clearInterval(poller); setCollectionPollingId(null);
+          // Verificar si es análisis semántico por el tipo de análisis
+          if (result?.analysis_metadata?.analysis_type === 'semantic_summary') {
+            setSemanticAnalysisResult(result);
+            setIsSemanticAnalysisOpen(true);
+            toast.success("¡Resumen semántico completado!");
+          } else {
+            setCollectionAnalysisResult(result);
+            setIsCollectionAnalysisOpen(true);
+            toast.success("¡Análisis de colección completado!");
+          }
+          fetchPageData();
         } else if (status === 'failed') {
           clearInterval(poller); setCollectionPollingId(null); toast.error("El análisis de la colección falló: " + error);
         }
@@ -240,14 +255,18 @@ export default function WorkspaceCollectionDetailPage() {
                 <AccordionItem value={`item-${analysis.id}`} key={analysis.id}>
                   <AccordionTrigger>
                     <div className="flex items-center gap-2 text-left flex-1 min-w-0">
-                      {analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                      {analysis.file_name.startsWith('Resumen Semántico:') ? <Brain className="h-4 w-4" /> :
+                       analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
                       <span className="font-medium truncate">{analysis.file_name}</span>
                       <span className="ml-auto text-xs text-muted-foreground pr-4">{new Date(analysis.created_at).toLocaleDateString()}</span>
                     </div>
                   </AccordionTrigger>
                   <AccordionContent>
                     <Button variant="link" className="p-0 h-auto" onClick={() => {
-                      if (analysis.file_name.startsWith('Colección:')) {
+                      if (analysis.file_name.startsWith('Resumen Semántico:')) {
+                        setSemanticAnalysisResult(analysis.result_payload);
+                        setIsSemanticAnalysisOpen(true);
+                      } else if (analysis.file_name.startsWith('Colección:')) {
                         setCollectionAnalysisResult(analysis.result_payload);
                         setIsCollectionAnalysisOpen(true);
                       } else {
@@ -276,6 +295,7 @@ export default function WorkspaceCollectionDetailPage() {
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />
       <AnalysisResultDialog isOpen={isDocAnalysisOpen} onOpenChange={setIsDocAnalysisOpen} analysis={docAnalysisResult} document={documentToAnalyze ?? { file_name: '', topic: collectionId, title: '', author: '' }} />
       <CollectionAnalysisDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} topic={collectionId} />
+      <SemanticAnalysisDialog isOpen={isSemanticAnalysisOpen} onOpenChange={setIsSemanticAnalysisOpen} analysis={semanticAnalysisResult} topic={collectionId} />
       <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={fetchPageData} document={documentToShare} />
     </div>
   );
