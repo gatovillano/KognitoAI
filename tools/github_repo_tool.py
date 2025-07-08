@@ -355,6 +355,112 @@ class GitHubRepoTool(BaseTool):
             logger.error(f"Error al añadir el repositorio {repo_url} como colección de conocimientos: {e}", exc_info=True)
             return f"Error al añadir el repositorio como colección de conocimientos: {e}"
 
+    async def _update_repository_documents(self, repo_url: str, account_id: str, workspace_id: Optional[str] = None) -> str:
+        """
+        Actualiza solo los documentos textuales de un repositorio de GitHub sin vectorizar.
+        Esta función es específica para la sección de repositorios donde solo queremos
+        mantener los archivos actualizados como documentos, no como embeddings RAG.
+        """
+        try:
+            from core.database import SessionLocal, GitHubDocument
+            from sqlalchemy import select, delete
+            import uuid
+            import base64
+            from datetime import datetime
+
+            if self.session is None:
+                self.session = requests.Session()
+
+            # Obtener información del repositorio
+            api_url = self._get_api_url(repo_url)
+            repo_info_response = self.session.get(api_url)
+            repo_info_response.raise_for_status()
+            repo_info = repo_info_response.json()
+            repo_name = repo_info["name"]
+            default_branch = repo_info.get("default_branch", "main")
+
+            # Conectar a la base de datos
+            db_session = SessionLocal()
+
+            try:
+                updated_files = 0
+                new_files = 0
+                deleted_files = 0
+
+                # Obtener el árbol actual del repositorio de GitHub
+                tree_url = f"{api_url}/git/trees/{default_branch}?recursive=1"
+                response = self.session.get(tree_url)
+                response.raise_for_status()
+                github_tree = response.json()["tree"]
+
+                # Mapear archivos de GitHub por path y SHA
+                github_files = {item['path']: item['sha'] for item in github_tree if item['type'] == 'blob'}
+
+                # Obtener los documentos de GitHub existentes en la base de datos para este repositorio y cuenta
+                # Para repositorios de documentos, usamos topic=None (sin tema específico)
+                existing_github_docs_query = select(GitHubDocument).where(
+                    GitHubDocument.repo_url == repo_url,
+                    GitHubDocument.account_id == account_id,
+                    GitHubDocument.topic == None  # Repositorios de documentos no tienen tema específico
+                )
+                result = await db_session.execute(existing_github_docs_query)
+                existing_db_docs = {doc.file_path: doc for doc in result.scalars().all()}
+
+                # 1. Eliminar archivos que ya no existen en GitHub
+                for file_path, db_doc in existing_db_docs.items():
+                    if file_path not in github_files:
+                        await db_session.delete(db_doc) # type: ignore
+                        deleted_files += 1
+                        logger.info(f"🗑️ Documento eliminado: {file_path}")
+
+                # 2. Añadir nuevos archivos o actualizar modificados
+                for file_path, github_sha in github_files.items():
+                    content_response = self.session.get(f"{api_url}/contents/{file_path}")
+                    content_response.raise_for_status()
+                    content_data = content_response.json()
+                    content_base64 = content_data["content"]
+                    encoding = content_data["encoding"]
+
+                    if encoding == "base64":
+                        decoded_content = base64.b64decode(content_base64).decode("utf-8", errors="ignore")
+                    else:
+                        decoded_content = content_base64
+
+                    if file_path in existing_db_docs:
+                        db_doc = existing_db_docs[file_path]
+                        if db_doc.sha != github_sha:
+                            # Contenido modificado, actualizar solo el documento
+                            db_doc.content = decoded_content
+                            db_doc.sha = github_sha
+                            db_doc.updated_at = datetime.now()
+                            updated_files += 1
+                            logger.info(f"📝 Documento actualizado: {file_path}")
+                    else:
+                        # Nuevo archivo, añadir solo como documento
+                        github_doc = GitHubDocument(
+                            repo_url=repo_url,
+                            file_path=file_path,
+                            sha=github_sha,
+                            content=decoded_content,
+                            account_id=account_id,
+                            workspace_id=workspace_id if workspace_id else None,
+                            topic=None,  # Sin tema para repositorios de documentos
+                            created_at=datetime.now(),
+                            updated_at=datetime.now()
+                        )
+                        db_session.add(github_doc)
+                        new_files += 1
+                        logger.info(f"📄 Nuevo documento añadido: {file_path}")
+
+                await db_session.commit()
+                return f"Repositorio {repo_name} actualizado. Archivos nuevos: {new_files}, Archivos actualizados: {updated_files}, Archivos eliminados: {deleted_files}."
+
+            finally:
+                await db_session.close()
+        except Exception as e:
+            logger.error(f"Error al actualizar documentos del repositorio {repo_url}: {e}", exc_info=True)
+            return f"Error al actualizar documentos del repositorio: {e}"
+
     async def _update_knowledge_collection(self, repo_url: str, collection_topic: Optional[str] = None, account_id: Optional[str] = None, workspace_id: Optional[str] = None) -> str:
         """
         Actualiza una colección de conocimientos existente desde un repositorio de GitHub, ya sea en una colección RAG específica o como conocimiento general de una cuenta.

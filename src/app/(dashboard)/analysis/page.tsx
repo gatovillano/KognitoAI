@@ -7,21 +7,28 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AnalysisDetailDialog } from './analysis-detail-dialog';
+import { CollectionAnalysisDialog } from '../rag/collection-analysis-dialog';
+import { SemanticAnalysisDialog } from '../rag/semantic-analysis-dialog';
+import { CodeAnalysisResultDialog } from '../rag/code-analysis-result-dialog';
+import { AnalysisResultDialog } from '../rag/analysis-result-dialog';
+import { SemanticTopicsAnalysisDialog } from './semantic-topics-analysis-dialog';
+import { CustomAnalysisResultDialog } from '../rag/custom-analysis-result-dialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { 
-  BarChart3, 
-  FileText, 
-  FolderKanban, 
-  Brain, 
-  Lightbulb, 
-  Code, 
-  Search, 
-  Filter, 
+import {
+  BarChart3,
+  FileText,
+  FolderKanban,
+  Brain,
+  Lightbulb,
+  Code,
+  Search,
+  Filter,
   ChevronDown,
   Calendar,
   Eye,
-  Loader2
+  Loader2,
+  Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -62,6 +69,10 @@ const getAnalysisIcon = (type: string) => {
       return <Code className="h-5 w-5 text-orange-500" />;
     case 'semantic':
       return <BarChart3 className="h-5 w-5 text-indigo-500" />;
+    case 'semantic_summary':
+      return <Brain className="h-5 w-5 text-purple-500" />;
+    case 'custom':
+      return <Sparkles className="h-5 w-5 text-pink-500" />;
     default:
       return <FileText className="h-5 w-5 text-gray-500" />;
   }
@@ -81,6 +92,10 @@ const getAnalysisTypeLabel = (type: string) => {
       return 'Código';
     case 'semantic':
       return 'Semántico';
+    case 'semantic_summary':
+      return 'Resumen Semántico';
+    case 'custom':
+      return 'Personalizado';
     default:
       return 'Análisis';
   }
@@ -100,6 +115,10 @@ const getAnalysisTypeBadgeColor = (type: string) => {
       return 'bg-orange-100 text-orange-800 border-orange-200';
     case 'semantic':
       return 'bg-indigo-100 text-indigo-800 border-indigo-200';
+    case 'semantic_summary':
+      return 'bg-purple-100 text-purple-800 border-purple-200';
+    case 'custom':
+      return 'bg-pink-100 text-pink-800 border-pink-200';
     default:
       return 'bg-gray-100 text-gray-800 border-gray-200';
   }
@@ -115,6 +134,16 @@ export default function AnalysisPage() {
   const [hasMore, setHasMore] = useState(false);
   const [offset, setOffset] = useState(0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+
+  // Estados para diálogos específicos
+  const [isAnalysisResultOpen, setIsAnalysisResultOpen] = useState(false);
+  const [isCollectionAnalysisOpen, setIsCollectionAnalysisOpen] = useState(false);
+  const [isSemanticAnalysisOpen, setIsSemanticAnalysisOpen] = useState(false);
+  const [isSemanticTopicsAnalysisOpen, setIsSemanticTopicsAnalysisOpen] = useState(false);
+  const [isCodeAnalysisOpen, setIsCodeAnalysisOpen] = useState(false);
+  const [isCustomAnalysisResultOpen, setIsCustomAnalysisResultOpen] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const [documentToAnalyze, setDocumentToAnalyze] = useState<any>(null);
 
   const fetchAnalyses = async (reset = false) => {
     if (reset) {
@@ -162,8 +191,57 @@ export default function AnalysisPage() {
   };
 
   const handleViewDetails = (analysis: Analysis) => {
+    console.log('🔍 Abriendo análisis:', analysis);
+    console.log('📊 Datos del análisis:', analysis.full_data);
+
     setSelectedAnalysis(analysis);
-    setIsDetailDialogOpen(true);
+    setAnalysisResult(analysis.full_data);
+
+    // Abrir el diálogo específico según el tipo de análisis
+    switch (analysis.type) {
+      case 'document':
+        console.log('📄 Abriendo análisis de documento');
+        // Extraer el nombre del archivo del título, manejando diferentes formatos
+        let fileName = analysis.title;
+        if (fileName.startsWith('Análisis de Documento: ')) {
+          fileName = fileName.replace('Análisis de Documento: ', '');
+        }
+        setDocumentToAnalyze({
+          file_name: fileName,
+          topic: '',
+          title: '',
+          author: ''
+        });
+        setIsAnalysisResultOpen(true);
+        break;
+      case 'collection':
+        console.log('📁 Abriendo análisis de colección');
+        setIsCollectionAnalysisOpen(true);
+        break;
+      case 'semantic_summary':
+        console.log('🧠 Abriendo análisis semántico (resumen)');
+        setIsSemanticAnalysisOpen(true);
+        break;
+      case 'code':
+        console.log('💻 Abriendo análisis de código');
+        setIsCodeAnalysisOpen(true);
+        break;
+      case 'semantic':
+        console.log('🔍 Abriendo análisis semántico de temas');
+        // Para análisis semántico de temas (dashboard), usar el diálogo específico
+        setIsSemanticTopicsAnalysisOpen(true);
+        break;
+      case 'custom':
+        console.log('✨ Abriendo análisis personalizado');
+        // Para análisis personalizado, usar el diálogo específico
+        setIsCustomAnalysisResultOpen(true);
+        break;
+      default:
+        console.log('❓ Abriendo diálogo genérico para tipo:', analysis.type);
+        // Para otros tipos, usar el diálogo genérico
+        setIsDetailDialogOpen(true);
+        break;
+    }
   };
 
   const handleLoadMore = () => {
@@ -189,7 +267,8 @@ export default function AnalysisPage() {
     { value: 'mindmap', label: 'Mapas Mentales' },
     { value: 'insight', label: 'Insights' },
     { value: 'code', label: 'Código' },
-    { value: 'semantic', label: 'Semántico' }
+    { value: 'semantic', label: 'Semántico' },
+    { value: 'custom', label: 'Personalizado' }
   ];
 
   if (isLoading) {
@@ -394,6 +473,47 @@ export default function AnalysisPage() {
         analysis={selectedAnalysis}
         isOpen={isDetailDialogOpen}
         onOpenChange={setIsDetailDialogOpen}
+      />
+
+      {/* Diálogos específicos para cada tipo de análisis */}
+      <AnalysisResultDialog
+        isOpen={isAnalysisResultOpen}
+        onOpenChange={setIsAnalysisResultOpen}
+        document={documentToAnalyze}
+        analysis={analysisResult}
+      />
+
+      <CollectionAnalysisDialog
+        isOpen={isCollectionAnalysisOpen}
+        onOpenChange={setIsCollectionAnalysisOpen}
+        analysis={analysisResult}
+        topic={selectedAnalysis?.title?.replace('Colección: ', '') || ''}
+      />
+
+      <SemanticAnalysisDialog
+        isOpen={isSemanticAnalysisOpen}
+        onOpenChange={setIsSemanticAnalysisOpen}
+        analysis={analysisResult}
+        topic={selectedAnalysis?.title?.replace('Resumen Semántico: ', '') || ''}
+      />
+
+      <SemanticTopicsAnalysisDialog
+        isOpen={isSemanticTopicsAnalysisOpen}
+        onOpenChange={setIsSemanticTopicsAnalysisOpen}
+        analysisResult={analysisResult}
+      />
+
+      <CodeAnalysisResultDialog
+        isOpen={isCodeAnalysisOpen}
+        onOpenChange={setIsCodeAnalysisOpen}
+        repoName={selectedAnalysis?.title?.replace('Análisis de Repositorio: ', '').replace('Análisis de Código: ', '') || null}
+        analysis={analysisResult}
+      />
+
+      <CustomAnalysisResultDialog
+        isOpen={isCustomAnalysisResultOpen}
+        onOpenChange={setIsCustomAnalysisResultOpen}
+        analysisResult={analysisResult}
       />
     </div>
   );

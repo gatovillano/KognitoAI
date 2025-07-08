@@ -131,33 +131,73 @@ export function CommonChat({ threadId }: CommonChatProps) {
       setMessages((prev) => [...prev, initialAiMessage]);
 
       try {
-        const response = await apiClient.post('/api/chat', requestData);
-        const data = response.data;
-        const aiResponse = data.response_text;
-
-        if (aiResponse && aiResponse.includes("ID de tarea:")) {
-          const taskId = aiResponse.split("ID de tarea:")[1].trim().split(".")[0];
-          setBackgroundTasks((prev) => [...prev, { taskId, type: 'mindmap' }]);
-        }
-
-        setMessages((prev) => {
-          const newMessages = [...prev];
-          const lastMessage = newMessages[newMessages.length - 1];
-          if (lastMessage && lastMessage.sender === 'ai') {
-            lastMessage.text = aiResponse;
-            lastMessage.image_base64 = data.image_base64 || '';
-            lastMessage.document_url = data.document_url || '';
-          }
-          return newMessages;
+        // Usar streaming real
+        const response = await fetch('/api/chat/stream', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          },
+          body: JSON.stringify(requestData),
+          signal: signal
         });
 
-        if (data.image_base64) {
-          setArtifacts((prev) => [...prev, {
-            id: Date.now(),
-            content: data.image_base64,
-            type: 'svg',
-            version: 1
-          }]);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error('No reader available');
+        }
+
+        let fullResponse = '';
+        const decoder = new TextDecoder();
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+
+                if (data.type === 'chunk') {
+                  fullResponse += data.content;
+
+                  // Actualizar mensaje en tiempo real
+                  setMessages((prev) => {
+                    const newMessages = [...prev];
+                    const lastMessage = newMessages[newMessages.length - 1];
+                    if (lastMessage && lastMessage.sender === 'ai') {
+                      lastMessage.text = fullResponse;
+                    }
+                    return newMessages;
+                  });
+                } else if (data.type === 'info') {
+                  // Opcional: mostrar información de herramientas
+                  console.log('Tool info:', data.content);
+                } else if (data.type === 'done') {
+                  // Respuesta completada
+                  break;
+                } else if (data.type === 'error') {
+                  throw new Error(data.message);
+                }
+              } catch (parseError) {
+                console.warn('Error parsing streaming data:', parseError);
+              }
+            }
+          }
+        }
+
+        // Verificar si hay ID de tarea en la respuesta final
+        if (fullResponse && fullResponse.includes("ID de tarea:")) {
+          const taskId = fullResponse.split("ID de tarea:")[1].trim().split(".")[0];
+          setBackgroundTasks((prev) => [...prev, { taskId, type: 'mindmap' }]);
         }
 
         // Historial se actualiza automáticamente vía estado

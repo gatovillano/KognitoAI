@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text } from 'lucide-react';
+import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { DataTable } from '../data-table';
@@ -21,6 +21,8 @@ import { DeleteConfirmationDialog } from '../delete-confirmation-dialog';
 import { AnalysisResultDialog } from '../analysis-result-dialog';
 import { CollectionAnalysisDialog } from '../collection-analysis-dialog';
 import { SemanticAnalysisDialog } from '../semantic-analysis-dialog';
+import { CustomAnalysisDialog } from '../custom-analysis-dialog';
+import { CustomAnalysisResultDialog } from '../custom-analysis-result-dialog';
 import { ShareDocumentDialog } from '../share-document-dialog';
 
 export default function CollectionDetailPage() {
@@ -53,6 +55,11 @@ export default function CollectionDetailPage() {
   const [semanticAnalysisResult, setSemanticAnalysisResult] = useState<any>(null);
   const [isSemanticAnalysisOpen, setIsSemanticAnalysisOpen] = useState(false);
 
+  // Estados para análisis personalizado
+  const [isCustomAnalysisOpen, setIsCustomAnalysisOpen] = useState(false);
+  const [customAnalysisResult, setCustomAnalysisResult] = useState<any>(null);
+  const [isCustomAnalysisResultOpen, setIsCustomAnalysisResultOpen] = useState(false);
+
   // Estado para el historial de análisis
   const [savedAnalyses, setSavedAnalyses] = useState([]);
 
@@ -61,7 +68,7 @@ export default function CollectionDetailPage() {
     try {
       const [docsRes, analysesRes] = await Promise.all([
         apiClient.post('/api/list-documents', { topic: topic }),
-        apiClient.post('/api/get-saved-analyses', { topic: topic })
+        apiClient.post('/api/get-saved-analyses', { topic: topic, workspace_id: null })
       ]);
       
       // Ya no necesitamos filtrar en el frontend, el backend lo hace
@@ -214,6 +221,10 @@ export default function CollectionDetailPage() {
             <ScanSearch className="mr-2 h-4 w-4" />
             Resumen Semántico
           </Button>
+          <Button onClick={() => setIsCustomAnalysisOpen(true)} variant="outline">
+            <Sparkles className="mr-2 h-4 w-4" />
+            Análisis Personalizado
+          </Button>
         </div>
       </div>
       
@@ -250,7 +261,15 @@ export default function CollectionDetailPage() {
                   <AccordionItem value={`item-${analysis.id}`} key={analysis.id}>
                     <AccordionTrigger>
                       <div className="flex items-center gap-2 text-left flex-1 min-w-0">
-                        {analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                        {analysis.file_name.startsWith('Colección:') ? (
+                          <FolderKanban className="h-4 w-4" />
+                        ) : analysis.file_name.startsWith('Análisis Personalizado:') ? (
+                          <Sparkles className="h-4 w-4 text-pink-500" />
+                        ) : analysis.file_name.startsWith('Resumen Semántico:') ? (
+                          <Text className="h-4 w-4 text-purple-500" />
+                        ) : (
+                          <FileText className="h-4 w-4" />
+                        )}
                         <span className="font-medium truncate">{analysis.file_name}</span>
                         <span className="ml-auto text-xs text-muted-foreground pr-4">{new Date(analysis.created_at).toLocaleDateString()}</span>
                       </div>
@@ -261,9 +280,15 @@ export default function CollectionDetailPage() {
                           setSemanticAnalysisResult(analysis.result_payload);
                           setIsSemanticAnalysisOpen(true);
                         } else if (analysis.file_name.startsWith('Colección:')) {
+                          console.log('📁 Abriendo análisis de colección');
                           setCollectionAnalysisResult(analysis.result_payload);
                           setIsCollectionAnalysisOpen(true);
+                        } else if (analysis.file_name.startsWith('Análisis Personalizado:')) {
+                          console.log('✨ Abriendo análisis personalizado');
+                          setCustomAnalysisResult(analysis.result_payload);
+                          setIsCustomAnalysisResultOpen(true);
                         } else {
+                          console.log('📄 Abriendo análisis de documento');
                           setDocAnalysisResult(analysis.result_payload);
                           setDocumentToAnalyze({ file_name: analysis.file_name, topic, title: '', author: '' });
                           setIsDocAnalysisOpen(true);
@@ -290,6 +315,18 @@ export default function CollectionDetailPage() {
       <AnalysisResultDialog isOpen={isDocAnalysisOpen} onOpenChange={setIsDocAnalysisOpen} analysis={docAnalysisResult} document={documentToAnalyze ?? { file_name: '', topic: topic, title: '', author: '' }} />
       <CollectionAnalysisDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} topic={topic} />
       <SemanticAnalysisDialog isOpen={isSemanticAnalysisOpen} onOpenChange={setIsSemanticAnalysisOpen} analysis={semanticAnalysisResult} topic={topic} />
+      <CustomAnalysisDialog
+        isOpen={isCustomAnalysisOpen}
+        onOpenChange={setIsCustomAnalysisOpen}
+        document={documentToAnalyze ?? { file_name: '', topic: topic, title: '', author: '' }}
+        topic={topic}
+        onAnalysisStart={fetchPageData}
+      />
+      <CustomAnalysisResultDialog
+        isOpen={isCustomAnalysisResultOpen}
+        onOpenChange={setIsCustomAnalysisResultOpen}
+        analysisResult={customAnalysisResult}
+      />
       <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={fetchPageData} document={documentToShare} />
     </div>
   );

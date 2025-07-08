@@ -35,22 +35,25 @@ class ThemeReference(BaseModel):
 class SingleTextAnalysis(BaseModel):
     """Define la estructura de salida para el análisis de un único texto."""
     executive_summary: str = Field(description="Un resumen conciso que captura la esencia y las conclusiones principales del texto.")
-    key_themes: List[ThemeReference] = Field(description="Una lista de hasta 8 conceptos o temas centrales del texto, cada uno con citas del texto.")
-    central_concepts: List[str] = Field(description="Una lista de hasta 5 conceptos centrales del texto en el formato 'CONCEPTO: DEFINICIÓN DETALLADA'.")
+    general_analysis: str = Field(description="Un análisis general extenso del documento que profundiza en el contexto, metodología, argumentos principales, implicaciones y relevancia (400-600 palabras).")
+    key_themes: List[ThemeReference] = Field(description="Una lista de hasta 12 conceptos o temas centrales del texto, cada uno con citas del texto y explicación detallada.")
+    central_concepts: List[str] = Field(description="Una lista de hasta 8 conceptos centrales del texto en el formato 'CONCEPTO: DEFINICIÓN DETALLADA CON CONTEXTO Y EJEMPLOS'.")
     discipline: List[str] = Field(description="El area, disciplina o campo al que refiere el documento. Por ejemplo si es un documémico y de qué área, o si es un documento técnico, etc.').")
     authorial_tone: str = Field(description="El tono o la voz del autor (ej. 'Formal y Académico', 'Informal y Conversacional', 'Urgente y Directo', 'Escéptico y Crítico').")
-    knowledge_gaps: List[str] = Field(description="Una lista de 3 a 5 preguntas inteligentes y abiertas que el texto inspira pero no responde. Deben ser preguntas, no afirmaciones.")
-    final_reflections: List[str] = Field (description="Reflexiuón final sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales pouedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
+    knowledge_gaps: List[str] = Field(description="Una lista de 5 a 8 preguntas inteligentes y abiertas que el texto inspira pero no responde. Deben ser preguntas, no afirmaciones.")
+    final_reflections: List[str] = Field (description="Una lista de 3 a 5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
 
 class CollectionAnalysis(BaseModel):
     """Define la estructura de salida para el análisis de una colección de textos."""
-    collection_summary: str = Field(description="Un resumen analítico que sintetiza la información de TODOS los documentos como un todo. No es necesario que sea tan corto")
+    collection_summary: str = Field(description="Un resumen analítico que sintetiza la información de TODOS los documentos como un todo. Debe ser comprehensivo y detallado (200-300 palabras)")
     cross_cutting_themes: List[ThemeReference] = Field(description="Lista de hasta 10 temas recurrentes de los documentos que puedes identificar, cada uno con citas relacionadas de los documentos. Puedes agruparlos en algún concepto que los englobe cuando hay similitud semántica")
-    central_concepts: List[str] = Field(description="Una lista de hasta 5 conceptos, ideas o tesis centrales de la colección en el formato 'CONCEPTO: DEFINICIÓN'.")
-    concept_relationships: List[str] = Field(description="Una lista de hasta 5 descripciones de cómo los conceptos centrales se relacionan entre sí en la colección.")
-    identified_connections: List[CollectionConnection] = Field(description="Lista de insights específicos que conectan dos o más documentos.")
-    emergent_knowledge_gaps: List[str] = Field(description="Lista de preguntas o áreas que la colección en su conjunto no responde o deja abiertas.")
-    final_reflections: List[str] = Field (description="Reflexiuón final sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales pouedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
+    central_concepts: List[str] = Field(description="Una lista de hasta 8 conceptos, ideas o tesis centrales de la colección en el formato 'CONCEPTO: DEFINICIÓN DETALLADA'.")
+    concept_relationships: List[str] = Field(description="Una lista de hasta 8 descripciones detalladas de cómo los conceptos centrales se relacionan entre sí en la colección.")
+    identified_connections: List[CollectionConnection] = Field(description="Lista de insights específicos que conectan dos o más documentos. Incluye sinergias, evoluciones, contradicciones o complementariedades.")
+    emergent_knowledge_gaps: List[str] = Field(description="Lista de 5-8 preguntas inteligentes o áreas que la colección en su conjunto no responde o deja abiertas.")
+    final_reflections: List[str] = Field(description="3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
+    collection_insights: List[str] = Field(description="3-5 insights únicos que emergen del análisis conjunto de todos los documentos, que no serían evidentes analizando documentos individuales")
+    methodological_notes: List[str] = Field(description="2-3 observaciones sobre la metodología, enfoque o perspectiva común en los documentos analizados")
 
 
 # --- Clase Principal del Analizador ---
@@ -98,20 +101,54 @@ class AdvancedTextAnalyzer:
             logger.error(f"Fallo en el pipeline de análisis y parseo del LLM: {e}", exc_info=True)
             raise ValueError(f"No se pudo obtener una respuesta JSON válida del LLM. Error: {e}")
 
-    async def analyze_single_text(self, text: str) -> SingleTextAnalysis:
+    async def analyze_single_text(self, text: str, document_title: str = "Documento analizado") -> SingleTextAnalysis:
         """
         Ejecuta un análisis completo y estructurado sobre un único fragmento de texto.
         """
         if not text or len(text.split()) < 30:
             return SingleTextAnalysis(
-                executive_summary=text, key_themes=[], central_concepts=[],
-                discipline=[], authorial_tone="N/A", knowledge_gaps=[], final_reflections=[]
+                executive_summary=text, general_analysis="Texto insuficiente para análisis detallado",
+                key_themes=[], central_concepts=[], discipline=[], authorial_tone="N/A",
+                knowledge_gaps=[], final_reflections=[]
             )
 
         prompt = f"""
-        Eres un analista experto en analisis textual de conocimientos. Analiza el siguiente texto en profundidad.
-        Extrae el resumen, los temas clave, los conceptos centrales con sus definiciones, el área de conocimiento, el tono del autor y las brechas de conocimiento que revela.
-        Para los temas clave y conceptos centrales, utiliza nombres precisos y relevantes al contexto del texto, priorizando términos específicos del dominio o categorías reconocibles por el usuario. Los conceptos centrales deben estar en el formato 'CONCEPTO: DEFINICIÓN'.
+        Eres un analista experto en análisis textual de conocimientos. Realiza un análisis exhaustivo y detallado del siguiente texto.
+
+        INSTRUCCIONES ESPECÍFICAS:
+        1. **Resumen ejecutivo**: Conciso pero completo (50-80 palabras)
+
+        2. **Análisis general**: EXTENSO y profundo (400-600 palabras) que incluya:
+           - Contexto histórico, teórico o práctico del documento
+           - Metodología o enfoque utilizado por el autor
+           - Argumentos principales y su estructura lógica
+           - Implicaciones teóricas y prácticas
+           - Relevancia en el campo de conocimiento
+           - Conexiones con otros temas o disciplinas
+           - Evaluación crítica del contenido
+           - Fortalezas y debilidades del texto
+           - Audiencia objetivo y propósito del documento
+           - Contribuciones originales o innovadoras
+           - Limitaciones o sesgos identificados
+
+        3. **Temas clave**: Hasta 12 temas importantes del texto. Para cada tema:
+           - Usa el nombre del documento como "document_title"
+           - Incluye citas textuales completas y relevantes como "quote"
+           - Las citas deben ser párrafos u oraciones completas, no fragmentos cortados
+
+        4. **Conceptos centrales**: Hasta 8 conceptos en formato 'CONCEPTO: DEFINICIÓN DETALLADA CON CONTEXTO Y EJEMPLOS'
+
+        5. **Disciplina**: Área(s) de conocimiento específica(s)
+
+        6. **Tono del autor**: Descripción precisa del estilo y enfoque
+
+        7. **Brechas de conocimiento**: 5-8 preguntas inteligentes y abiertas que el texto inspira
+
+        8. **Reflexiones finales**: 3-5 reflexiones sobre importancia, aportes y proyecciones
+
+        Para los temas clave y conceptos centrales, utiliza nombres precisos y relevantes al contexto del texto, priorizando términos específicos del dominio o categorías reconocibles por el usuario.
+
+        IMPORTANTE: Para los temas clave, usa "{document_title}" como document_title, y extrae citas textuales reales del contenido.
 
         Texto a analizar:
         ---

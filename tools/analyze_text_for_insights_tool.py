@@ -46,7 +46,7 @@ class AnalyzeTextForInsightsTool(BaseTool):
         logger.info(f"Delegando análisis de texto al AdvancedTextAnalyzer...")
         try:
             # La llamada es ahora a un método de la instancia del analizador.
-            analysis_result = await text_analyzer.analyze_single_text(text)
+            analysis_result = await text_analyzer.analyze_single_text(text, document_title="Texto proporcionado")
             logger.info("Análisis de texto completado exitosamente.")
             # El formateo ahora usa el nuevo objeto de resultado.
             return self._format_result(analysis_result)
