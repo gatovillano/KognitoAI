@@ -134,6 +134,10 @@ async def list_github_repositories(
 class GitHubVectorizationRequest(BaseModel):
     repo_name: str
 
+class GitHubUpdateRequest(BaseModel):
+    repo_url: str
+    collection_topic: Optional[str] = "repositorio"
+
 @router.post("/start-vectorization", status_code=status.HTTP_202_ACCEPTED)
 async def start_vectorization_endpoint(
     req: GitHubVectorizationRequest,
@@ -188,6 +192,92 @@ async def start_vectorization_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al iniciar vectorización: {str(e)}"
         )
+
+@router.post("/update-repository", status_code=status.HTTP_202_ACCEPTED)
+async def update_repository_endpoint(
+    req: GitHubUpdateRequest,
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Inicia el proceso de actualización de un repositorio de GitHub en segundo plano.
+    """
+    from core.database import AnalysisTask
+    import uuid
+
+    try:
+        # Crear una nueva tarea de análisis para trackear el progreso
+        new_task = AnalysisTask(
+            account_id=uuid.UUID(current_account_id),
+            file_name=f"Actualización: {req.repo_url}",
+            status="pending"
+        )
+        db.add(new_task)
+        await db.commit()
+        await db.refresh(new_task)
+
+        # Iniciar la tarea en segundo plano
+        background_tasks.add_task(
+            update_repository_task,
+            str(new_task.id),
+            current_account_id,
+            req.repo_url,
+            req.collection_topic or "repositorio"
+        )
+
+        return {"task_id": str(new_task.id), "message": f"Actualización del repositorio iniciada en segundo plano."}
+    except Exception as e:
+        logger.error(f"Error al iniciar actualización para account_id: {current_account_id}, repo_url: {req.repo_url}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al iniciar actualización: {str(e)}"
+        )
+
+async def update_repository_task(task_id: str, account_id: str, repo_url: str, collection_topic: str):
+    """
+    Tarea en segundo plano para actualizar un repositorio de GitHub.
+    """
+    from core.database import SessionLocal, AnalysisTask
+    from sqlalchemy import update
+    import uuid
+
+    async with SessionLocal() as db: # type: ignore
+        try:
+            # Marcar la tarea como 'processing'
+            stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
+            await db.execute(stmt_processing)
+            await db.commit()
+
+            logger.info(f"Iniciando actualización de repositorio para tarea {task_id}...")
+
+            # Usar el GitHubRepoTool para actualizar el repositorio
+            github_tool = GitHubRepoTool()
+            result = await github_tool._update_knowledge_collection(
+                repo_url=repo_url,
+                collection_topic=collection_topic,
+                account_id=account_id
+            )
+
+            # Marcar la tarea como completada con el resultado
+            stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="completed",
+                result_payload={"message": result, "repo_url": repo_url}
+            )
+            await db.execute(stmt_completed)
+            await db.commit()
+
+            logger.info(f"Actualización de repositorio completada para tarea {task_id}")
+
+        except Exception as e:
+            logger.error(f"Error en actualización de repositorio para tarea {task_id}: {e}", exc_info=True)
+            # Marcar la tarea como fallida
+            stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="failed",
+                error_message=str(e)
+            )
+            await db.execute(stmt_failed)
+            await db.commit()
 
 @router.get("/get-vectorization-result/{task_id}")
 async def get_vectorization_result_endpoint(

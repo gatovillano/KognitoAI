@@ -145,6 +145,16 @@ export default function WorkspaceCollectionDetailPage() {
     } catch (error) { toast.error("No se pudo iniciar la extracción de títulos."); }
   };
 
+  // --- Handler para Resumen Semántico de la Colección ---
+  const handleSemanticSummary = async () => {
+    if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
+    try {
+      const response = await apiClient.post('/api/start-semantic-summary', { topic: collectionId, workspace_id: workspaceId });
+      setCollectionPollingId(response.data.task_id);
+      toast.info(`Resumen semántico de la colección "${collectionName}" iniciado.`);
+    } catch (error) { toast.error("No se pudo iniciar el resumen semántico de la colección."); }
+  };
+
   // --- Handler para Extraer Título de un Documento Individual ---
   const handleExtractTitleForDocument = async (doc: Document) => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
@@ -189,6 +199,10 @@ export default function WorkspaceCollectionDetailPage() {
           <Button onClick={handleExtractTitles} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
             <Text className="mr-2 h-4 w-4" />
             Extraer Títulos
+          </Button>
+          <Button onClick={handleSemanticSummary} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
+            <ScanSearch className="mr-2 h-4 w-4" />
+            Resumen Semántico
           </Button>
         </div>
       </div>

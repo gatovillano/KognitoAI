@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text } from 'lucide-react';
+import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { DataTable } from '../data-table';
@@ -27,6 +27,7 @@ import { AnalysisResultDialog } from '../analysis-result-dialog';
 import { CollectionAnalysisDialog } from '../collection-analysis-dialog';
 import { ShareDocumentDialog } from '../share-document-dialog';
 import { GitHubRepoDialog } from '../github-repo-dialog';
+import { UpdateRepositoryDialog } from '../update-repository-dialog';
 
 export default function RepositoriesPage() {
   const [documents, setDocuments] = useState<GitHubDocument[]>([]);
@@ -36,6 +37,8 @@ export default function RepositoriesPage() {
   // Estados para diálogos
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isGitHubRepoOpen, setIsGitHubRepoOpen] = useState(false);
+  const [isUpdateRepoOpen, setIsUpdateRepoOpen] = useState(false);
+  const [repoToUpdate, setRepoToUpdate] = useState<{name: string, url: string} | null>(null);
   const [documentToPreview, setDocumentToPreview] = useState<Document | null>(null);
   const [documentToEdit, setDocumentToEdit] = useState<Document | null>(null);
   const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null);
@@ -181,6 +184,12 @@ export default function RepositoriesPage() {
     } catch (error) { toast.error(`No se pudo iniciar la extracción de título para "${doc.file_name}".`); }
   };
 
+  // --- Handler para Actualizar Repositorio ---
+  const handleUpdateRepository = (repoName: string, repoUrl: string) => {
+    setRepoToUpdate({ name: repoName, url: repoUrl });
+    setIsUpdateRepoOpen(true);
+  };
+
   // Usar datos de repositorios directamente desde la API
   const repositories = useMemo(() => {
     return repositoriesData.map(repo => ({
@@ -248,6 +257,19 @@ export default function RepositoriesPage() {
                       </CardContent>
                     </div>
                   </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity z-30"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleUpdateRepository(repo.name, repo.url);
+                    }}
+                    title="Actualizar repositorio"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
                 </div>
               </Card>
             ))}
@@ -300,6 +322,13 @@ export default function RepositoriesPage() {
       {/* Diálogos */}
       <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={fetchPageData} defaultTopic="Repositories" />
       <GitHubRepoDialog isOpen={isGitHubRepoOpen} onOpenChange={setIsGitHubRepoOpen} onSuccess={fetchPageData} />
+      <UpdateRepositoryDialog
+        isOpen={isUpdateRepoOpen}
+        onOpenChange={setIsUpdateRepoOpen}
+        onSuccess={fetchPageData}
+        repositoryUrl={repoToUpdate?.url || ""}
+        repositoryName={repoToUpdate?.name || ""}
+      />
       <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchPageData} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />

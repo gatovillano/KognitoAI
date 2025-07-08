@@ -3,7 +3,10 @@
 import logging
 import uuid
 import re
-from typing import Optional
+import json
+import asyncio
+import os
+from typing import Optional, AsyncGenerator, Any, List
 from io import BytesIO
 import httpx
 from fastapi import APIRouter, HTTPException, Depends, status, Form, File, UploadFile
@@ -20,7 +23,7 @@ from core.agent import create_and_run_agent
 from utils.audio_transcriber import transcribe_audio_file
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from core.database import SessionLocal, ChatThread
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -28,15 +31,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session:
+    async with SessionLocal() as session:  # type: ignore
         try:
             yield session
         finally:
             await session.close()
 
 # --- Modelos para el Chat ---
+class Source(BaseModel):
+    """Define la estructura de datos para una fuente citada."""
+    id: int
+    title: str
+    url: str
+    snippet: str
+    type: str = "web"  # "web", "document", "memory", etc.
+
 class ChatRequest(BaseModel):
     """Define la estructura de datos para una solicitud de mensaje de chat al agente."""
     thread_id: str
@@ -50,6 +61,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     """Define la estructura de datos para la respuesta del agente de chat."""
     response_text: str
+    sources: Optional[List[Source]] = None  # Lista de fuentes citadas
     image_base64: Optional[str] = None  # Campo para imágenes en base64
     document_url: Optional[str] = None  # Campo para URL de documentos
 
@@ -149,7 +161,10 @@ async def handle_chat(request: ChatRequest, background_tasks: BackgroundTasks, c
     
     # Obtener el workspace_id del ChatThread asociado
     workspace_id = None
-    thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(request.thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
+    thread = await db.scalar(select(ChatThread).where(  # type: ignore[arg-type]
+        ChatThread.id == uuid.UUID(request.thread_id),
+        ChatThread.account_id == uuid.UUID(current_account_id)
+    ))
     if thread and thread.workspace_id:
         workspace_id = str(thread.workspace_id)
         logger.info(f"Recuperado workspace_id {workspace_id} para el hilo {request.thread_id}.")
@@ -173,6 +188,212 @@ async def handle_chat(request: ChatRequest, background_tasks: BackgroundTasks, c
         logger.error(f"Error al procesar petición de la cuenta {request.account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Ocurrió un error interno al procesar tu solicitud.")
 
+async def create_and_run_agent_streaming(
+    account_id: str,
+    thread_id: str,
+    telegram_id: Optional[int],
+    user_message: str,
+    image_base64: Optional[str] = None,
+    document_url: Optional[str] = None,
+    mode: Optional[str] = None,
+    background_tasks: Optional[Any] = None,
+    workspace_id: Optional[str] = None,
+    k: int = 5
+) -> AsyncGenerator[str, None]:
+    """
+    Versión streaming de create_and_run_agent que yield chunks de respuesta.
+    """
+    try:
+        # Importar aquí para evitar dependencias circulares
+        from core.agent import get_user_profile, get_relevant_memories
+        from core.llm_manager import get_main_llm
+        from core.tools import get_all_langchain_tools
+        from langchain_community.chat_message_histories import PostgresChatMessageHistory
+        from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+        from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+        from langchain_core.runnables import RunnablePassthrough
+        from langchain.agents import AgentExecutor
+        from langchain.agents.format_scratchpad.tools import format_to_tool_messages
+        from langchain.agents.output_parsers.tools import ToolsAgentOutputParser
+
+        logger.info(f"--- Iniciando agente streaming para account_id: {account_id}, thread_id: {thread_id} ---")
+
+        # Configurar historial de chat
+        session_id = f"{account_id}_{thread_id}"
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url:
+            raise HTTPException(status_code=500, detail="DATABASE_URL no está configurado")
+
+        chat_message_history = PostgresChatMessageHistory(
+            connection_string=database_url,
+            session_id=session_id
+        )
+
+        # Obtener historial y construir contexto (similar a create_and_run_agent)
+        history = await chat_message_history.aget_messages()
+        current_human_message = HumanMessage(content=user_message)
+
+        # Obtener perfil y memorias relevantes
+        user_profile = await get_user_profile(account_id)
+        relevant_memories = await get_relevant_memories(account_id, user_message, k=k, workspace_id=workspace_id)
+
+        # Construir prompt del sistema (versión simplificada)
+        user_context_string = f"Perfil del usuario: {user_profile}" if user_profile else ""
+        memories_string = ""
+        if relevant_memories:
+            memories_string = "Memorias relevantes:\n" + "\n".join([f"- {mem}" for mem in relevant_memories[:5]])
+
+        system_prompt_content = f"""Eres un asistente de IA inteligente y útil.
+
+{user_context_string}
+
+{memories_string}
+
+Responde de manera clara, útil y en español."""
+
+        # Configurar herramientas
+        all_tools = get_all_langchain_tools(account_id=account_id, telegram_id=str(telegram_id) if telegram_id else "")
+        tools = all_tools
+
+        if mode == 'knowledgeAnalysis':
+            tools = [t for t in all_tools if t.name == 'knowledge_base_analyzer']
+            system_prompt_content += "\n\nMODO DE ANÁLISIS DE CONOCIMIENTO ACTIVADO. Utiliza la herramienta 'knowledge_base_analyzer'."
+        elif mode == 'webSearch':
+            tools = [t for t in all_tools if t.name == 'web_search']
+            system_prompt_content += "\n\nMODO DE BÚSQUEDA WEB ACTIVADO. Utiliza la herramienta 'web_search'."
+
+        # Configurar prompt template
+        prompt_template = ChatPromptTemplate.from_messages([
+            SystemMessage(content=system_prompt_content),
+            MessagesPlaceholder(variable_name="chat_history", optional=True),
+            ("human", "{input}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad"),
+        ])
+
+        # Configurar LLM y agente
+        main_llm = get_main_llm()
+        if not main_llm:
+            yield "data: " + json.dumps({"type": "error", "message": "LLM no disponible"}) + "\n\n"
+            return
+
+        # Importar el callback personalizado para logging detallado
+        from core.agent import DetailedLLMLoggingCallback
+        llm_callback = DetailedLLMLoggingCallback(account_id, thread_id)
+
+        # Cast para acceder a bind_tools (disponible en ChatGoogleGenerativeAI)
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        if isinstance(main_llm, ChatGoogleGenerativeAI):
+            llm_with_tools = main_llm.bind_tools(tools)
+        else:
+            # Fallback si no es ChatGoogleGenerativeAI
+            llm_with_tools = main_llm
+
+        agent_chain = (
+            RunnablePassthrough.assign(
+                agent_scratchpad=lambda x: format_to_tool_messages(x.get("intermediate_steps", []))
+            )
+            | prompt_template
+            | llm_with_tools
+            | ToolsAgentOutputParser()
+        )
+
+        agent_executor = AgentExecutor(
+            agent=agent_chain,
+            tools=tools,
+            verbose=True,
+            handle_parsing_errors=True,
+            callbacks=[llm_callback]  # Añadir el callback personalizado
+        )
+
+        # Ejecutar agente con streaming
+        input_data = {
+            "input": user_message,
+            "chat_history": history + [current_human_message],
+        }
+
+        full_response = ""
+        async for chunk in agent_executor.astream(
+            input_data,
+            config={"configurable": {"account_id": account_id, "telegram_id": telegram_id}}
+        ):
+            if "output" in chunk:
+                content = chunk["output"]
+                full_response += content
+                yield "data: " + json.dumps({"type": "chunk", "content": content}) + "\n\n"
+            elif "intermediate_steps" in chunk:
+                # Opcional: enviar información sobre pasos intermedios
+                steps = chunk["intermediate_steps"]
+                if steps:
+                    step_info = f"[Ejecutando herramienta: {steps[-1][0].tool}]"
+                    yield "data: " + json.dumps({"type": "info", "content": step_info}) + "\n\n"
+
+        # Guardar en historial
+        await chat_message_history.aadd_messages([current_human_message, AIMessage(content=full_response)])
+
+        # Señal de finalización
+        yield "data: " + json.dumps({"type": "done", "message": "Respuesta completada"}) + "\n\n"
+
+    except Exception as e:
+        logger.error(f"Error en streaming agent: {e}", exc_info=True)
+        yield "data: " + json.dumps({"type": "error", "message": str(e)}) + "\n\n"
+
+@router.post("/chat/stream", summary="Chat con streaming de baja latencia")
+async def handle_chat_stream(
+    request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Endpoint de streaming para chat con respuestas de baja latencia.
+    """
+    try:
+        account_id_uuid = uuid.UUID(request.account_id)
+        if str(account_id_uuid) != current_account_id:
+            raise HTTPException(status_code=403, detail="Account ID no autorizado")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Account ID inválido")
+
+    logger.info(f"Petición de chat streaming recibida de la cuenta: {request.account_id} con modo: {request.mode}")
+
+    # Obtener workspace_id del ChatThread
+    workspace_id = None
+    thread = await db.scalar(select(ChatThread).where(and_(  # type: ignore
+        ChatThread.id == uuid.UUID(request.thread_id),
+        ChatThread.account_id == uuid.UUID(current_account_id)
+    )))
+    if thread and thread.workspace_id:
+        workspace_id = str(thread.workspace_id)
+        logger.info(f"Recuperado workspace_id {workspace_id} para el hilo {request.thread_id}.")
+
+    async def generate_stream():
+        try:
+            async for chunk in create_and_run_agent_streaming(
+                account_id=request.account_id,
+                thread_id=request.thread_id,
+                telegram_id=request.telegram_id,
+                user_message=request.user_message,
+                image_base64=request.image_base64,
+                document_url=request.document_url,
+                mode=request.mode,
+                background_tasks=background_tasks,
+                workspace_id=workspace_id
+            ):
+                yield chunk
+        except Exception as e:
+            logger.error(f"Error en generate_stream: {e}", exc_info=True)
+            yield "data: " + json.dumps({"type": "error", "message": "Error interno del servidor"}) + "\n\n"
+
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream",
+        }
+    )
+
 @router.get("/threads", summary="Obtener lista de hilos de chat")
 async def get_threads(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
     """
@@ -181,7 +402,7 @@ async def get_threads(current_account_id: str = Depends(get_current_account_id),
     try:
         threads = await db.execute(select(ChatThread).where(ChatThread.account_id == uuid.UUID(current_account_id)))
         thread_list = threads.scalars().all()
-        return [{"id": str(thread.id), "title": thread.title, "isPinned": thread.is_pinned, "workspace_id": str(thread.workspace_id) if thread.workspace_id else None} for thread in thread_list]
+        return [{"id": str(thread.id), "title": thread.title, "isPinned": thread.is_pinned, "platform": thread.platform, "workspace_id": str(thread.workspace_id) if thread.workspace_id else None} for thread in thread_list]
     except Exception as e:
         logger.error(f"Error al obtener la lista de hilos para la cuenta {current_account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Ocurrió un error al obtener la lista de hilos de chat.")
@@ -195,7 +416,7 @@ async def get_thread(thread_id: str, current_account_id: str = Depends(get_curre
         thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
         if not thread:
             raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
-        return {"id": str(thread.id), "title": thread.title, "isPinned": thread.is_pinned, "workspace_id": str(thread.workspace_id) if thread.workspace_id else None}
+        return {"id": str(thread.id), "title": thread.title, "isPinned": thread.is_pinned, "platform": thread.platform, "workspace_id": str(thread.workspace_id) if thread.workspace_id else None}
     except ValueError:
         logger.error(f"El thread_id proporcionado no es un UUID válido: {thread_id}")
         raise HTTPException(status_code=400, detail="El thread_id proporcionado no tiene un formato válido.")
@@ -216,12 +437,13 @@ async def create_thread(request: dict = {}, current_account_id: str = Depends(ge
         new_thread = ChatThread(
             account_id=uuid.UUID(current_account_id),
             title="Nuevo Chat",
+            platform="web",
             workspace_id=uuid.UUID(workspace_id) if workspace_id else None
         )
         db.add(new_thread)
         await db.commit()
         await db.refresh(new_thread)
-        return {"id": str(new_thread.id), "title": new_thread.title, "isPinned": new_thread.is_pinned, "workspace_id": str(new_thread.workspace_id) if new_thread.workspace_id else None}
+        return {"id": str(new_thread.id), "title": new_thread.title, "isPinned": new_thread.is_pinned, "platform": new_thread.platform, "workspace_id": str(new_thread.workspace_id) if new_thread.workspace_id else None}
     except ValueError:
         logger.error(f"El workspace_id proporcionado no es un UUID válido: {workspace_id}")
         raise HTTPException(status_code=400, detail="El workspace_id proporcionado no tiene un formato válido.")
@@ -282,6 +504,8 @@ async def generate_thread_title(thread_id: str, current_account_id: str = Depend
         from core.agent import force_update_thread_title
         await force_update_thread_title(thread_id)
         updated_thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id)))
+        if not updated_thread:
+            raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
         return {"id": thread_id, "title": updated_thread.title}
     except ValueError:
         logger.error(f"El thread_id proporcionado no es un UUID válido: {thread_id}")

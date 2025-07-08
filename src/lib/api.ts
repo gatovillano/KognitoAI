@@ -2,11 +2,13 @@
 import axios from 'axios';
 
 const apiClient = axios.create({
-  // Hardcoding the base URL to ensure it's used correctly
-  baseURL: 'https://apibase.gatoslibres.art', 
+  // Usar variable de entorno o fallback a desarrollo local
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8889',
   headers: {
     'Content-Type': 'application/json',
   },
+  // Timeout aumentado para operaciones largas del LLM (15 minutos)
+  timeout: 900000, // 15 minutos en milisegundos
 });
 
 // El interceptor para el token no cambia

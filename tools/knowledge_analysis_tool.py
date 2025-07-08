@@ -36,11 +36,13 @@ class KnowledgeAnalysisInput(BaseModel):
     """Esquema de entrada para la Herramienta de Análisis de Conocimiento."""
     query: str = Field(
         ...,
-        description="La petición completa del usuario en lenguaje natural, por ejemplo: 'ejecuta un análisis completo de mis notas'."
+        description="La petición completa del usuario en lenguaje natural, por ejemplo: 'ejecuta un análisis completo de mis notas'.",
+        json_schema_extra={"type": "string"}
     )
-    account_id: str = Field(
-        ...,
-        description="El identificador único de la cuenta del usuario. El LLM DEBE proporcionar este valor."
+    account_id: Optional[str] = Field(
+        None,
+        description="El identificador único de la cuenta del usuario. Si no se proporciona, se obtendrá del contexto de ejecución.",
+        json_schema_extra={"type": "string"}
     )
 
 
@@ -92,7 +94,9 @@ class KnowledgeAnalysisTool(BaseTool):
     async def _arun(
         self,
         query: str,
-        account_id: str
+        account_id: Optional[str] = None,
+        run_manager: Optional[Any] = None,
+        **kwargs: Any
     ) -> str:
         """
         Ejecuta la herramienta de forma asíncrona.
@@ -100,10 +104,18 @@ class KnowledgeAnalysisTool(BaseTool):
         2. Llama a la función de análisis con los parámetros correctos.
         3. Devuelve un mensaje de confirmación al usuario.
         """
-        logger.info(f"KnowledgeAnalysisTool activada para la cuenta {account_id} con la consulta: '{query}'")
 
+        # Si account_id no se proporciona, intentar obtenerlo del contexto de configuración
+        if not account_id and run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+
+        # Validar que tenemos account_id
         if not account_id:
-             return "Error: No se pudo identificar al usuario para realizar el análisis."
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
+        logger.info(f"KnowledgeAnalysisTool activada para la cuenta {account_id} con la consulta: '{query}'")
         
         # 1. Interpretar la intención del usuario
         intent = await self._interpret_request(query)

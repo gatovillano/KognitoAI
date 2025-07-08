@@ -3,33 +3,30 @@
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, AsyncGenerator, cast
 from urllib.parse import unquote
 
-from fastapi import File, UploadFile
-
-from fastapi import APIRouter, HTTPException, Depends, status, Form, Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Depends, status, Query, Form
 from pydantic import BaseModel
-from sqlalchemy import select, desc, update, or_, and_
+from sqlalchemy import select
 
-from core.database import SessionLocal, Account, Workspace, ChatThread, LangchainPgCollection
+from core.database import SessionLocal, Workspace, ChatThread
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.agent import create_thread_for_account, force_update_thread_title
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain_core.messages import HumanMessage, AIMessage
 from core.config import settings
-from core.memory_manager import list_user_collections, process_document_for_rag, list_user_documents
+from core.memory_manager import list_user_collections, list_user_documents
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session:
+    async with SessionLocal() as session:  # type: ignore
         try:
             yield session
         finally:
@@ -56,14 +53,14 @@ async def list_workspaces(current_account_id: str = Depends(get_current_account_
     stmt = select(Workspace).where(Workspace.account_id == uuid.UUID(current_account_id)).order_by(Workspace.created_at.desc())
     result = await db.execute(stmt)
     workspaces = result.scalars().all()
-    return [WorkspaceResponse(id=str(w.id), name=w.name, system_prompt=w.system_prompt, created_at=w.created_at) for w in workspaces]
+    return [WorkspaceResponse(id=str(w.id), name=w.name, system_prompt=w.system_prompt, created_at=w.created_at) for w in workspaces]  # type: ignore
 
 @router.get("/workspaces/{workspace_id}", response_model=WorkspaceResponse, summary="Obtener detalles de un workspace")
 async def get_workspace(workspace_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
     workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace no encontrado o no pertenece al usuario.")
-    return WorkspaceResponse(id=str(workspace.id), name=workspace.name, system_prompt=workspace.system_prompt, created_at=workspace.created_at)
+    return WorkspaceResponse(id=str(workspace.id), name=workspace.name, system_prompt=workspace.system_prompt, created_at=workspace.created_at)  # type: ignore
 
 @router.post("/workspaces", response_model=WorkspaceResponse, status_code=status.HTTP_201_CREATED, summary="Crear un nuevo workspace")
 async def create_workspace(request: WorkspaceCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
@@ -75,7 +72,7 @@ async def create_workspace(request: WorkspaceCreateRequest, current_account_id: 
     db.add(new_workspace)
     await db.commit()
     await db.refresh(new_workspace)
-    return WorkspaceResponse(id=str(new_workspace.id), name=new_workspace.name, system_prompt=new_workspace.system_prompt, created_at=new_workspace.created_at)
+    return WorkspaceResponse(id=str(new_workspace.id), name=new_workspace.name, system_prompt=new_workspace.system_prompt, created_at=new_workspace.created_at)  # type: ignore
 
 @router.put("/workspaces/{workspace_id}", response_model=WorkspaceResponse, summary="Actualizar un workspace")
 async def update_workspace(workspace_id: str, request: WorkspaceUpdateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
@@ -84,13 +81,13 @@ async def update_workspace(workspace_id: str, request: WorkspaceUpdateRequest, c
         raise HTTPException(status_code=404, detail="Workspace no encontrado.")
     
     if request.name is not None:
-        workspace.name = request.name
+        setattr(workspace, 'name', request.name)
     if request.system_prompt is not None:
-        workspace.system_prompt = request.system_prompt
+        setattr(workspace, 'system_prompt', request.system_prompt)
         
     await db.commit()
     await db.refresh(workspace)
-    return WorkspaceResponse(id=str(workspace.id), name=workspace.name, system_prompt=workspace.system_prompt, created_at=workspace.created_at)
+    return WorkspaceResponse(id=str(workspace.id), name=workspace.name, system_prompt=workspace.system_prompt, created_at=workspace.created_at)  # type: ignore
 
 @router.delete("/workspaces/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Eliminar un workspace")
 async def delete_workspace(workspace_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
@@ -153,9 +150,17 @@ async def list_collection_documents(workspace_id: str, collection_id: str, curre
     workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace no encontrado o no pertenece al usuario.")
-    
-    documents = await list_user_documents(account_id=current_account_id, workspace_id=workspace_id, topic=collection_id)
-    return [DocumentResponse(**doc) for doc in documents]
+
+    try:
+        # Decodificar el collection_id de la URL
+        decoded_collection_id = unquote(collection_id)
+        logger.info(f"Listando documentos de la colección '{decoded_collection_id}' en workspace {workspace_id}")
+
+        documents = await list_user_documents(account_id=current_account_id, workspace_id=workspace_id, topic=decoded_collection_id)
+        return [DocumentResponse(**doc) for doc in documents]
+    except Exception as e:
+        logger.error(f"Error listando documentos de la colección '{collection_id}' en workspace {workspace_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error al obtener documentos de la colección '{collection_id}'.")
 @router.get("/workspaces/{workspace_id}/collections", response_model=List[CollectionResponse], summary="Listar colecciones de un workspace")
 async def list_collections(workspace_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
     workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
@@ -241,13 +246,18 @@ async def list_chat_threads(
         except ValueError:
             raise HTTPException(status_code=400, detail="workspace_id inválido.")
     else:
-        stmt = stmt.where(ChatThread.workspace_id.is_(None))
+        stmt = stmt.where(ChatThread.workspace_id.is_(None))  # type: ignore
         
     stmt = stmt.order_by(ChatThread.created_at.desc())
     result = await db.execute(stmt)
     threads = result.scalars().all()
     
-    return [ThreadResponse(id=str(t.id), title=t.title, created_at=t.created_at, workspace_id=str(t.workspace_id) if t.workspace_id else None) for t in threads]
+    return [ThreadResponse(
+        id=str(t.id),
+        title=cast(str, t.title),
+        created_at=cast(datetime, t.created_at),
+        workspace_id=str(t.workspace_id) if t.workspace_id is not None else None
+    ) for t in threads]
 
 class ThreadCreateRequest(BaseModel):
     workspace_id: Optional[str] = None
@@ -277,6 +287,7 @@ async def create_new_thread(
 
     new_thread = ChatThread(
         account_id=account_uuid,
+        platform="web",
         workspace_id=workspace_uuid
     )
     db.add(new_thread)
@@ -285,9 +296,9 @@ async def create_new_thread(
 
     return ThreadResponse(
         id=str(new_thread.id),
-        title=new_thread.title,
-        created_at=new_thread.created_at,
-        workspace_id=str(new_thread.workspace_id) if new_thread.workspace_id else None
+        title=cast(str, new_thread.title),
+        created_at=cast(datetime, new_thread.created_at),
+        workspace_id=str(new_thread.workspace_id) if new_thread.workspace_id is not None else None
     )
 
 @router.get("/threads/{thread_id}/messages", response_model=List[MessageResponse], summary="Obtener mensajes de un hilo de chat")
@@ -340,11 +351,11 @@ async def get_thread_messages(
                     msg_content = "Mensaje con contenido no legible"
             elif isinstance(msg_content, dict):
                 if 'text' in msg_content:
-                    msg_content = msg_content['text']
+                    msg_content = msg_content.get('text', '')
                 if 'image_base64' in msg_content:
-                    image_base64 = msg_content['image_base64']
+                    image_base64 = msg_content.get('image_base64')
                 if 'document_url' in msg_content:
-                    document_url = msg_content['document_url']
+                    document_url = msg_content.get('document_url')
                     
             # Determinar el sender de forma robusta
             if isinstance(msg, HumanMessage):
@@ -353,7 +364,9 @@ async def get_thread_messages(
                 sender = "ai"
             else:
                 sender = "ai"  # fallback seguro
-            msg_created_at = datetime.now(timezone.utc)  # Placeholder si no hay un 'created_at' en BaseMessage
+
+            # Usar datetime.now() directamente ya que los mensajes no tienen created_at
+            msg_created_at = datetime.now(timezone.utc)
 
             response_messages.append(MessageResponse(
                 text=msg_content,
@@ -391,7 +404,7 @@ async def get_thread_by_id(thread_id: str, current_account_id: str = Depends(get
     thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
     if not thread:
         raise HTTPException(status_code=404, detail="Hilo de chat no encontrado o no pertenece al usuario.")
-    return ThreadResponse(id=str(thread.id), title=thread.title, created_at=thread.created_at)
+    return ThreadResponse(id=str(thread.id), title=str(thread.title), created_at=thread.created_at.replace(tzinfo=timezone.utc))
 
 class ThreadPinRequest(BaseModel):
     isPinned: bool
@@ -404,10 +417,11 @@ async def update_thread_pin_status(thread_id: str, request: ThreadPinRequest, cu
     thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
     if not thread:
         raise HTTPException(status_code=404, detail="Hilo de chat no encontrado o no pertenece al usuario.")
-    thread.is_pinned = request.isPinned
+
+    setattr(thread, 'is_pinned', request.isPinned)
     await db.commit()
     await db.refresh(thread)
-    return ThreadResponse(id=str(thread.id), title=thread.title, created_at=thread.created_at)
+    return ThreadResponse(id=str(thread.id), title=str(thread.title), created_at=thread.created_at.replace(tzinfo=timezone.utc))
 
 @router.post("/threads/{thread_id}/generate-title", response_model=ThreadResponse, summary="Forzar la generación de un nuevo título para un hilo de chat")
 async def force_generate_thread_title(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
@@ -418,7 +432,7 @@ async def force_generate_thread_title(thread_id: str, current_account_id: str = 
     thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
     if not thread:
         raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
-    return ThreadResponse(id=str(thread.id), title=thread.title, created_at=thread.created_at)
+    return ThreadResponse(id=str(thread.id), title=str(thread.title), created_at=thread.created_at.replace(tzinfo=timezone.utc))
 
 @router.post("/internal/bot-create-thread")
 async def bot_create_thread(account_id: str = Form(...), title: str = Form("Nuevo Chat")):

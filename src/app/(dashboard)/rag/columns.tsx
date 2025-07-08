@@ -25,6 +25,7 @@ export const getColumns = (
   {
     accessorKey: 'title',
     header: 'Título',
+    enableSorting: true,
     cell: ({ row }) => (
       <div className="font-medium flex items-center">
         {row.original.title || <span className="text-muted-foreground italic">Sin título</span>}
@@ -37,10 +38,12 @@ export const getColumns = (
   {
     accessorKey: 'file_name',
     header: 'Nombre del Archivo',
+    enableSorting: true,
   },
   {
     accessorKey: 'topic',
     header: 'Base de Conocimiento',
+    enableSorting: true,
   },
   {
     id: 'actions',

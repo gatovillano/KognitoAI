@@ -1,4 +1,4 @@
-# telegram_bot/notes_manager.py
+# core/notes_manager.py
 
 """
 Gestor de Lógica de Negocio para las Notas.
@@ -28,7 +28,7 @@ from sqlalchemy.orm import selectinload
 # Importaciones de la nueva estructura de la base de datos y sesión
 from core.database import SessionLocal, Nota, Account
 from utils.db_session import DBSession
-from utils.embeddings import initialize_embeddings
+from utils.embeddings import get_embedding_model
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ async def add_note(account_id: str, title: Optional[str], content: str, category
 
     async with DBSession(SessionLocal) as db:
         # Generar el embedding de la nota
-        embeddings_model = await initialize_embeddings()
+        embeddings_model = get_embedding_model()
         note_embedding = None
         if embeddings_model:
             try:
@@ -82,7 +82,7 @@ async def add_note(account_id: str, title: Optional[str], content: str, category
             "content": new_note.content,
             "category": new_note.category,
             "created_at": new_note.created_at.isoformat(),
-            "team_id": str(new_note.team_id) if new_note.team_id else None,
+            "team_id": str(new_note.team_id) if new_note.team_id is not None else None,
             # No devolvemos el embedding, es muy grande
         }
       
@@ -179,7 +179,7 @@ async def update_note(account_id: str, note_id: int, new_title: Optional[str] = 
 
         # Regenerar embedding si el contenido ha cambiado
         if content_changed:
-            embeddings_model = await initialize_embeddings()
+            embeddings_model = get_embedding_model()
             if embeddings_model:
                 try:
                     note_to_update.embedding = await embeddings_model.aembed_query(note_to_update.content)

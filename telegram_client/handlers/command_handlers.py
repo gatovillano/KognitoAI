@@ -215,7 +215,7 @@ async def open_conversation(update: Update, context: CallbackContext) -> None:
                 # Si no existe, crear un nuevo hilo con ese nombre
                 thread = ChatThread(
                     account_id=account.id,
-                    name=conversation_name,
+                    title=conversation_name,
                     platform='telegram'
                 )
                 db.add(thread)

@@ -239,7 +239,9 @@ export function CommonChat({ threadId }: CommonChatProps) {
           ? 'comprehensiveAnalysis'
           : '';
 
-        const timeout = isComprehensiveAnalysisActive ? 300000 : 120000;
+        // Timeouts aumentados para permitir operaciones largas del LLM
+        // Análisis comprehensivo: 15 minutos, análisis normal: 10 minutos
+        const timeout = isComprehensiveAnalysisActive ? 900000 : 600000;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeout);
 
@@ -258,8 +260,8 @@ export function CommonChat({ threadId }: CommonChatProps) {
         console.error('Error sending message:', error);
         let errorText = 'Lo siento, ocurrió un error al procesar tu mensaje.';
         if (error && error.name === 'AbortError') {
-          errorText =
-            'La solicitud ha tardado demasiado en completarse. Por favor, intenta de nuevo o reduce el alcance de la consulta.';
+          const timeoutMinutes = isComprehensiveAnalysisActive ? 15 : 10;
+          errorText = `La solicitud ha tardado más de ${timeoutMinutes} minutos en completarse. Esto puede ocurrir con operaciones muy complejas como el análisis de repositorios grandes. Por favor, intenta de nuevo o reduce el alcance de la consulta.`;
         }
         const errorMessage = {
           text: errorText,

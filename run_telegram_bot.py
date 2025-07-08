@@ -25,6 +25,8 @@ from core.config import settings
 from telegram_client.bot_manager import bot_manager
 from telegram_client.notification_scheduler import reschedule_pending_reminders
 from core.database import create_tables
+from utils.scheduled_tools_manager import initialize_all_scheduled_tools
+from utils.embeddings import initialize_embeddings
 
 from telegram_client.handlers.command_handlers import register_command_handlers
 from telegram_client.handlers.message_handlers import register_message_handlers
@@ -80,6 +82,19 @@ async def lifespan(app: FastAPI):
     
     # 5. Reprogramar recordatorios pendientes.
     await reschedule_pending_reminders(ptb_app)
+
+    # 6. Inicializar modelo de embeddings.
+    try:
+        await initialize_embeddings()
+        logger.info("✅ Modelo de embeddings inicializado.")
+    except Exception as e:
+        logger.error(f"❌ Error al inicializar embeddings: {e}", exc_info=True)
+        # No es fatal, el bot puede funcionar sin embeddings para algunas funciones
+
+    # 7. Inicializar herramientas programadas automáticas.
+    logger.info("Inicializando herramientas programadas...")
+    await initialize_all_scheduled_tools()
+    logger.info("✅ Herramientas programadas inicializadas.")
 
     # --- LA CORRECCIÓN CLAVE ESTÁ AQUÍ ---
     def done_callback(task: asyncio.Task) -> None:

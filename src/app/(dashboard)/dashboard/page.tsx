@@ -7,15 +7,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Bar, BarChart, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Badge } from '@/components/ui/badge';
 import { InsightDetailDialog } from '@/components/InsightDetailDialog';
-import { HelpCircle, Bot, Library, FileText, FolderKanban, Notebook, Calendar, Search, ScanSearch, BrainCircuit } from 'lucide-react';
+import { HelpCircle, Bot, Library, FileText, FolderKanban, Search, BrainCircuit } from 'lucide-react';
 import Link from 'next/link';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
-import { Button } from '@/components/ui/button';
 import { QuestionSlider } from '@/components/QuestionSlider';
 import { CustomChartTooltip } from '@/components/CustomChartTooltip';
-import { TopicGroupDialog } from '@/components/TopicGroupDialog';
 import { DashboardHelpCarousel } from '@/components/DashboardHelpCarousel';
 import { WelcomeDialog } from '@/components/WelcomeDialog';
 
@@ -58,11 +55,11 @@ interface AnalysisData {
 }
 
 interface Insight {
-  id: string; 
-  type: string; 
-  summary: string; 
-  created_at: string, 
-  related_items: any[];
+  id: string;
+  type: string;
+  summary: string;
+  created_at: string,
+  related_items: any[]; // Made required to match InsightDetailDialog component
   action_suggestion?: string;
   synthetic_name?: string; // Nuevo campo para el nombre sintético
 }
@@ -82,7 +79,17 @@ export default function DashboardPage() {
           apiClient.post('/api/dashboard-insights', { all: false }),
           apiClient.post('/api/get-saved-analyses', { all: true })
         ]);
-        setData(insightsResponse.data);
+
+        // Transform insights data to ensure related_items is always an array
+        const transformedData = {
+          ...insightsResponse.data,
+          proactive_insights: (insightsResponse.data.proactive_insights || []).map((insight: any) => ({
+            ...insight,
+            related_items: insight.related_items || []
+          }))
+        };
+
+        setData(transformedData);
         setAnalysisData(analysesResponse.data);
 
         const hasVisited = localStorage.getItem('hasVisitedDashboard');
@@ -173,7 +180,7 @@ export default function DashboardPage() {
                         taskStatus = statusResponse.data.status;
                         if (taskStatus === 'completed') {
                           // Refresh dashboard data after analysis is complete
-                          const dataResponse = await apiClient.post('/api/dashboard-insights');
+                          const dataResponse = await apiClient.post('/api/dashboard-insights', { all: false });
                           setData(dataResponse.data);
                           toast.success('Análisis semántico completado.', {
                             description: 'Los temas principales han sido actualizados con éxito.',
@@ -250,14 +257,14 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3 px-2">
-            {data.proactive_insights.slice(0, 6).map(insight => ( // Limitar a 6 en el dashboard
+            {(data.proactive_insights || []).slice(0, 6).map(insight => ( // Limitar a 6 en el dashboard
               <Card key={insight.id} className="modern-card border-0 shadow-medium hover:shadow-strong transition-all duration-300 cursor-pointer hover:scale-105 group" onClick={() => setViewingInsight(insight)}>
                 <CardHeader className="pb-3">
                   <div className="flex items-center gap-3">
                      <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
                      {getInsightIcon(insight.type)}
                      <CardTitle className="text-lg font-semibold group-hover:text-primary transition-colors">
-                       {insight.type.charAt(0).toUpperCase() + insight.type.slice(1)}
+                       {(insight.type || '').charAt(0).toUpperCase() + (insight.type || '').slice(1)}
                      </CardTitle>
                   </div>
                 </CardHeader>
@@ -265,12 +272,27 @@ export default function DashboardPage() {
                   <p className="text-sm text-muted-foreground line-clamp-3 mb-4 leading-relaxed">{insight.summary}</p>
                   <div className="text-xs space-y-2">
                     <p className="font-semibold text-foreground">Ítems Relacionados:</p>
-                    {insight.related_items.slice(0, 2).map((item, idx) => (
-                      <p key={idx} className="flex items-center gap-2 text-muted-foreground truncate">
-                        <FileText className="h-3 w-3 text-primary/60" />
-                        <span className="truncate">{item.title || item.reference}</span>
-                      </p>
-                    ))}
+                    {(() => {
+                      // Handle different possible structures of related_items
+                      let items = insight.related_items || [];
+
+                      // If related_items is an object with an 'items' property, use that
+                      if (typeof items === 'object' && !Array.isArray(items) && items.items) {
+                        items = items.items;
+                      }
+
+                      // Ensure we have an array
+                      if (!Array.isArray(items)) {
+                        items = [];
+                      }
+
+                      return items.slice(0, 2).map((item, idx) => (
+                        <p key={idx} className="flex items-center gap-2 text-muted-foreground truncate">
+                          <FileText className="h-3 w-3 text-primary/60" />
+                          <span className="truncate">{item.title || item.reference || 'Sin título'}</span>
+                        </p>
+                      ));
+                    })()}
                   </div>
                 </CardContent>
               </Card>
@@ -346,11 +368,8 @@ export default function DashboardPage() {
       <WelcomeDialog isOpen={isWelcomeDialogOpen} onOpenChange={setIsWelcomeDialogOpen} />
 
       {/* El diálogo para mostrar los detalles */}
-      <InsightDetailDialog 
-        isOpen={!!viewingInsight} 
-        onOpenChange={(open: boolean) => !open && setViewingInsight(null)}
-        insight={viewingInsight}
-      />
+      <InsightDetailDialog isOpen={!!viewingInsight} onOpenChange={(open: boolean) => !open && setViewingInsight(null)} 
+      insight={viewingInsight} />
     </>
   );
 }

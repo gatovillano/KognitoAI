@@ -5,7 +5,7 @@ import { marked } from 'marked';
 import { sentImage } from '@/lib/imageUtils';
 import { toast } from 'sonner';
 import Prism from 'prismjs';
-import 'prismjs/themes/prism-tomorrow.css';
+import '@/styles/code-highlighting.css';
 
 // Importar lenguajes de programación comunes
 import 'prismjs/components/prism-docker';
@@ -111,7 +111,7 @@ const _MarkdownRenderer = ({ content, fontSize = 'text-base' }: MarkdownRenderer
         } catch (e) {
           // No mostrar errores en la consola para evitar molestar al usuario
         }
-        return `<pre><code class="language-${language}">${highlightedCode}</code></pre>`;
+        return `<pre data-language="${language}"><code class="language-${language}">${highlightedCode}</code></pre>`;
       };
       marked.setOptions({
         gfm: true,
@@ -192,16 +192,21 @@ const _MarkdownRenderer = ({ content, fontSize = 'text-base' }: MarkdownRenderer
 
         // Create footer with buttons
         const footer = document.createElement('div');
-        footer.className = 'flex items-center justify-end px-4 py-1.5 border-t';
-        
+        footer.className = 'flex items-center justify-between px-4 py-2 bg-muted/30 border-t border-border/20 rounded-b-2xl';
+
+        // Language label
+        const languageLabel = document.createElement('span');
+        languageLabel.className = 'text-xs font-medium text-muted-foreground uppercase tracking-wide';
+        languageLabel.textContent = language;
+
         const buttonsWrapper = document.createElement('div');
         buttonsWrapper.className = 'flex items-center gap-2';
 
         // Preview Button
         if (language === 'html') {
           const previewBtn = document.createElement('button');
-          previewBtn.className = 'inline-flex items-center justify-center text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-7 px-3 rounded-md';
-          previewBtn.innerHTML = 'Previsualizar';
+          previewBtn.className = 'inline-flex items-center justify-center text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground h-7 px-3 rounded-md border border-border/30 bg-background/50 mr-2';
+          previewBtn.innerHTML = '👁️ Previsualizar';
           previewBtn.onclick = () => handlePreview(codeText);
           buttonsWrapper.appendChild(previewBtn);
         }
@@ -209,17 +214,18 @@ const _MarkdownRenderer = ({ content, fontSize = 'text-base' }: MarkdownRenderer
         // Copy Button
         const copyBtn = document.createElement('button');
         copyBtn.id = `copy-btn-${codeBlockIndex}`;
-        copyBtn.className = 'inline-flex items-center justify-center text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring focus-visible:ring-offset-4 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-7 px-5 rounded-md';
-        copyBtn.innerHTML = copiedStates[codeBlockIndex] ? 'Copiado' : 'Copiar';
+        copyBtn.className = 'inline-flex items-center justify-center text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground h-7 px-3 rounded-md border border-border/30 bg-background/50';
+        copyBtn.innerHTML = copiedStates[codeBlockIndex] ? '✓ Copiado' : '📋 Copiar';
         copyBtn.onclick = () => handleCopy(codeText, codeBlockIndex);
         buttonsWrapper.appendChild(copyBtn);
 
+        footer.appendChild(languageLabel);
         footer.appendChild(buttonsWrapper);
         wrapper.appendChild(footer);
 
-        wrapper.className = 'backdrop-blur-md rounded-3xl'; // Bordes más curvos con rounded-3xl
-        wrapper.style.backgroundColor = '#111213 !important';
-        (block as HTMLElement).style.color = '#ffffff !important'; // Asegura que el texto sea blanco para contrastar con el fondo negro
+        wrapper.className = 'backdrop-blur-md rounded-2xl border border-border/20 bg-muted/50'; // Bordes más curvos con rounded-2xl y fondo adaptativo
+        wrapper.style.backgroundColor = ''; // Remover fondo fijo
+        (block as HTMLElement).style.color = ''; // Remover color fijo para usar el del tema
         block.setAttribute('data-buttons-added', 'true');
       });
     };

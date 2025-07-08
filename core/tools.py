@@ -39,6 +39,8 @@ from tools.update_user_profile import UpdateProfileTool
 from tools.memory_add_tool import MemoryAddTool
 from tools.conversation_history_analyzer_tool import ConversationHistoryAnalyzerTool
 from tools.conversation_context_analyzer_tool import ConversationContextAnalyzerTool
+from tools.memory_search_optimized_tool import MemorySearchOptimizedTool, MemoryContextSearchTool
+from tools.natural_query_interpreter_tool import NaturalQueryInterpreterTool
 
 # Módulo de Gestión de Documentos
 from tools.get_document_list_tool import GetDocumentListTool
@@ -52,6 +54,8 @@ from tools.image_generation_tool import ImageGenerationTool
 from tools.web_scraper_tool import WebScraperTool
 # Importar la FÁBRICA de la herramienta de búsqueda web
 from tools.web_search_tool import get_web_search_tool
+# Importar la herramienta de búsqueda DuckDuckGo
+from tools.ddg_search_tool import create_ddg_search_tool
 from tools.analyze_text_for_insights_tool import AnalyzeTextForInsightsTool
 from tools.analyze_code_for_insights_tool import AnalyzeCodeForInsightsTool
 from tools.github_repo_tool import GitHubRepoTool
@@ -65,7 +69,12 @@ from tools.knowledge_analysis_tool import KnowledgeAnalysisTool
 from tools.comprehensive_web_analysis_tool import ComprehensiveWebAnalysisTool
 from tools.get_analysis_results_tool import GetAnalysisResultsTool
 from tools.scoped_rag_analysis_tool import ScopedRagAnalysisTool
-from tools.vector_db_query_tool import VectorDBQueryTool
+from tools.vector_db_search_tool import VectorDBSearchTool
+from tools.multi_query_search_tool import MultiQuerySearchTool
+from tools.natural_query_interpreter_tool import NaturalQueryInterpreterTool
+from tools.add_web_to_rag_tool import AddWebToRAGTool
+# Módulo de Programación de Herramientas
+from tools.schedule_tool_execution import ScheduleToolExecutionTool, ListScheduledToolsTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -93,11 +102,11 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
         # Agenda y Recordatorios
         ScheduleEventTool, GetAgendaTool, CancelEventTool, SetReminderTool,
         # Perfil y Memoria
-        UpdateProfileTool, MemoryAddTool, ConversationHistoryAnalyzerTool, ConversationContextAnalyzerTool,
+        UpdateProfileTool, MemoryAddTool, ConversationHistoryAnalyzerTool, ConversationContextAnalyzerTool, MemorySearchOptimizedTool, MemoryContextSearchTool, NaturalQueryInterpreterTool,
         # Documentos
         GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool, ExtractDocumentTitlesTool,
         # Creación de Contenido y Búsqueda (excepto WebSearchTool que usa fábrica)
-        ImageGenerationTool, WebScraperTool, AnalyzeTextForInsightsTool, AnalyzeCodeForInsightsTool,
+        ImageGenerationTool, WebScraperTool, AddWebToRAGTool, AnalyzeTextForInsightsTool, AnalyzeCodeForInsightsTool, NaturalQueryInterpreterTool,
         # Herramienta de GitHub
         GitHubRepoTool,
         # Mapa Mental
@@ -111,7 +120,11 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
         ComprehensiveWebAnalysisTool,
         GetAnalysisResultsTool,
         ScopedRagAnalysisTool, # Herramienta de Análisis RAG Focalizado
-        VectorDBQueryTool # Herramienta para consultas a la base de datos vectorial
+        VectorDBSearchTool, # Herramienta para consultas a la base de datos vectorial
+        MultiQuerySearchTool, # Herramienta de búsqueda con múltiples consultas reformuladas
+        # Herramientas de Programación
+        ScheduleToolExecutionTool,
+        ListScheduledToolsTool
     ]
 
     for ToolClass in tool_classes_to_instantiate:
@@ -129,10 +142,10 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
                 ScheduleEventTool, GetAgendaTool, CancelEventTool, SetReminderTool,
                 UpdateProfileTool, MemoryAddTool, ConversationHistoryAnalyzerTool, ConversationContextAnalyzerTool,
                 GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
-                ImageGenerationTool, GetProactiveInsightsTool,
-                ProactiveKnowledgeLinkerTool, KnowledgeAnalysisTool, ComprehensiveWebAnalysisTool,
+                ImageGenerationTool, GetProactiveInsightsTool, NaturalQueryInterpreterTool,
+                ProactiveKnowledgeLinkerTool, KnowledgeAnalysisTool, ComprehensiveWebAnalysisTool, AnalyzeTextForInsightsTool, AnalyzeCodeForInsightsTool,
                 GetAnalysisResultsTool, MindmapGeneratorTool, ImageBackgroundEraserTool, ScopedRagAnalysisTool,
-                VectorDBQueryTool
+                VectorDBSearchTool, MultiQuerySearchTool, ScheduleToolExecutionTool, ListScheduledToolsTool, MemorySearchOptimizedTool, MemoryContextSearchTool
             ]:
                 kwargs = {"account_id": account_id}
                 if ToolClass in [SetReminderTool, ImageGenerationTool, GetDocumentContentTool]:
@@ -212,6 +225,14 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
         logger.debug(f"  [+] Herramienta de fábrica cargada: {web_search_tool_instance.name}")
     except Exception as e:
         logger.error(f"❌ Fallo al instanciar WebSearchTool desde su fábrica: {e}", exc_info=True)
+
+    # Instanciar herramienta DuckDuckGo Search
+    try:
+        ddg_search_tool_instance = create_ddg_search_tool(account_id=account_id)
+        available_tools.append(ddg_search_tool_instance)
+        logger.debug(f"  [+] Herramienta DuckDuckGo cargada: {ddg_search_tool_instance.name}")
+    except Exception as e:
+        logger.error(f"❌ Fallo al instanciar DuckDuckGoSearchTool: {e}", exc_info=True)
     
     # --- Resumen Final de Herramientas Cargadas ---
     logger.info("--- 🧰 Caja de Herramientas Ensamblada ---")

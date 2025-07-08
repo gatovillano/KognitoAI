@@ -2,14 +2,13 @@
 
 import logging
 import uuid
-from typing import List, Optional
+from typing import List, Optional, AsyncGenerator
 
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select, desc, update, or_
+from sqlalchemy import select
 
-from core.config import settings
-from core.database import SessionLocal, Account, PlatformIdentity, TeamMember, delete_accounts_by_ids
+from core.database import SessionLocal, Account, PlatformIdentity, delete_accounts_by_ids
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,9 +17,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session:
+    async with SessionLocal() as session:  # type: ignore
         try:
             yield session
         finally:
@@ -29,7 +28,7 @@ async def get_db() -> AsyncSession:
 # Dependencia para verificar si el usuario es administrador
 async def get_current_admin_account(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)) -> Account:
     account = await db.get(Account, uuid.UUID(current_account_id))
-    if not account or not account.is_admin:
+    if not account or not bool(account.is_admin):  # type: ignore
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes permisos de administrador.")
     return account
 
@@ -64,19 +63,19 @@ async def read_users_me(current_account_id: str = Depends(get_current_account_id
     )
     telegram_id = None
     identity_obj = telegram_identity.scalars().first()
-    if identity_obj and identity_obj.platform_user_id:
+    if identity_obj is not None and getattr(identity_obj, 'platform_user_id', None):
         try:
-            telegram_id = int(identity_obj.platform_user_id)
+            telegram_id = int(getattr(identity_obj, 'platform_user_id', ''))
         except ValueError:
             logger.warning(f"platform_user_id '{identity_obj.platform_user_id}' no es un entero para telegram_id.")
 
     return UserProfileResponse(
         id=str(account.id),
-        name=account.name,
-        email=account.email,
-        username=account.username,
+        name=account.name,  # type: ignore
+        email=account.email,  # type: ignore
+        username=account.username,  # type: ignore
         telegram_id=telegram_id,
-        is_admin=account.is_admin
+        is_admin=bool(account.is_admin)  # type: ignore
     )
 
 # --- Endpoints de Administración de Usuarios (Solo para Admins) ---
@@ -103,19 +102,19 @@ async def list_all_users(
         )
         telegram_id = None
         identity_obj = telegram_identity.scalars().first()
-        if identity_obj and identity_obj.platform_user_id:
+        if identity_obj is not None and getattr(identity_obj, 'platform_user_id', None):
             try:
-                telegram_id = int(identity_obj.platform_user_id)
+                telegram_id = int(getattr(identity_obj, 'platform_user_id', ''))
             except ValueError:
                 pass  # No es un ID numérico válido
 
         users_data.append(UserProfileResponse(
             id=str(account.id),
-            name=account.name,
-            email=account.email,
-            username=account.username,
+            name=account.name,  # type: ignore
+            email=account.email,  # type: ignore
+            username=account.username,  # type: ignore
             telegram_id=telegram_id,
-            is_admin=account.is_admin
+            is_admin=bool(account.is_admin)  # type: ignore
         ))
     return users_data
 

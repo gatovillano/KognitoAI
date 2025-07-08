@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Plus, MessageSquare, BookMarked, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical, FolderKanban, Settings } from 'lucide-react';
+import { Plus, MessageSquare, BookMarked, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical, FolderKanban, Settings, BarChart3, Smartphone } from 'lucide-react';
 import Image from 'next/image';
 import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -27,6 +27,7 @@ interface ChatThread {
   id: string;
   title: string;
   isPinned?: boolean;
+  platform?: string;
   workspace_id?: string | null;
 }
 
@@ -41,6 +42,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
 
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [platformFilter, setPlatformFilter] = useState<'all' | 'web' | 'telegram'>('all');
 
   useEffect(() => {
     const updateActiveWorkspace = async () => {
@@ -92,13 +94,24 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
     setSearchTerm(e.target.value);
   };
 
-  const filteredThreadsBySearch = searchTerm 
-    ? threads.filter(thread => thread.title.toLowerCase().includes(searchTerm.toLowerCase()))
-    : threads;
-  
-  const filteredPinnedThreadsBySearch = searchTerm 
-    ? pinnedThreads.filter(thread => thread.title.toLowerCase().includes(searchTerm.toLowerCase()))
-    : pinnedThreads;
+  const applyFilters = (threadList: ChatThread[]) => {
+    let filtered = threadList;
+
+    // Filtro por búsqueda
+    if (searchTerm) {
+      filtered = filtered.filter(thread => thread.title.toLowerCase().includes(searchTerm.toLowerCase()));
+    }
+
+    // Filtro por plataforma
+    if (platformFilter !== 'all') {
+      filtered = filtered.filter(thread => thread.platform === platformFilter);
+    }
+
+    return filtered;
+  };
+
+  const filteredThreadsBySearch = applyFilters(threads);
+  const filteredPinnedThreadsBySearch = applyFilters(pinnedThreads);
 
   const handleNewChat = async () => {
     try {
@@ -168,7 +181,14 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-auto py-2 px-3"
             )}
           >
-            <MessageSquare className={cn("h-4 w-4 mt-1 flex-shrink-0", !isCollapsed && "mr-2")} />
+            <div className="flex items-center">
+              <MessageSquare className={cn("h-4 w-4 mt-1 flex-shrink-0", !isCollapsed && "mr-2")} />
+              {!isCollapsed && thread.platform === 'telegram' && (
+                <div title="Telegram">
+                  <Smartphone className="h-3 w-3 text-blue-500 mr-1 mt-1 flex-shrink-0" />
+                </div>
+              )}
+            </div>
             {!isCollapsed && (
               <div className="whitespace-normal break-words flex-grow">
                 <InlineMarkdownRenderer content={thread.title} />
@@ -345,6 +365,19 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               {!isCollapsed && <span className="text-sm font-medium">Notas</span>}
             </Button>
           </Link>
+          <Link href="/analysis" passHref onClick={onLinkClick} title="Análisis">
+            <Button
+              variant={pathname.startsWith('/analysis') ? 'secondary' : 'ghost'}
+              className={cn(
+                "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
+                pathname.startsWith('/analysis') && "bg-primary/10 text-primary border border-primary/20"
+              )}
+            >
+              <BarChart3 className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
+              {!isCollapsed && <span className="text-sm font-medium">Análisis</span>}
+            </Button>
+          </Link>
           <Link href="/teams" passHref onClick={onLinkClick} title="Equipos">
             <Button
               variant={pathname.startsWith('/teams') ? 'secondary' : 'ghost'}
@@ -391,7 +424,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               <div className="w-1 h-1 rounded-full bg-primary"></div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Conversaciones</p>
             </div>
-            <div className="px-2">
+            <div className="px-2 space-y-3">
               <input
                 type="text"
                 placeholder="Buscar conversaciones..."
@@ -399,6 +432,33 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                 onChange={handleSearchChange}
                 className="w-full p-3 rounded-xl bg-muted/50 border border-border/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 text-sm text-foreground placeholder:text-muted-foreground transition-all duration-200"
               />
+              <div className="flex gap-1">
+                <Button
+                  variant={platformFilter === 'all' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setPlatformFilter('all')}
+                  className="flex-1 text-xs h-8"
+                >
+                  Todos
+                </Button>
+                <Button
+                  variant={platformFilter === 'web' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setPlatformFilter('web')}
+                  className="flex-1 text-xs h-8"
+                >
+                  Web
+                </Button>
+                <Button
+                  variant={platformFilter === 'telegram' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setPlatformFilter('telegram')}
+                  className="flex-1 text-xs h-8 flex items-center gap-1"
+                >
+                  <Smartphone className="h-3 w-3" />
+                  Telegram
+                </Button>
+              </div>
             </div>
           </div>
         )}
@@ -434,7 +494,9 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground px-2 mb-2">
-                  {searchTerm ? "No se encontraron conversaciones fijadas que coincidan con la búsqueda." : "No hay conversaciones fijadas."}
+                  {searchTerm || platformFilter !== 'all'
+                    ? "No se encontraron conversaciones fijadas que coincidan con los filtros."
+                    : "No hay conversaciones fijadas."}
                 </p>
               )}
             </DropArea>

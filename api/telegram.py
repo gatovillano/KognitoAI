@@ -56,33 +56,37 @@ async def store_user_data(request: StoreUserDataRequest):
 async def bot_create_thread(request: dict):
     """
     Endpoint interno para crear un hilo de conversación desde el bot de Telegram.
-    Maneja diferentes formatos de entrada para mayor flexibilidad.
+    Crea un thread real en la base de datos marcado como platform='telegram'.
     """
     try:
-        chat_id = None
-        thread_name = "default_thread"
-        
-        # Intentar extraer datos del cuerpo de la solicitud
-        if isinstance(request, dict):
-            chat_id = request.get('chat_id')
-            thread_name = request.get('thread_name', thread_name)
-        else:
-            # Si no es un diccionario, intentar parsear como cadena
-            body_str = str(request)
-            if 'chat_id=' in body_str:
-                parts = body_str.split('chat_id=')
-                if len(parts) > 1:
-                    chat_id_part = parts[1].split('&')[0] if '&' in parts[1] else parts[1]
-                    chat_id = int(chat_id_part) if chat_id_part.isdigit() else None
-        
-        if chat_id is None:
-            raise ValueError("No se pudo extraer chat_id de la solicitud")
-            
-        # Generar un UUID válido para el thread_id
+        from core.database import SessionLocal, ChatThread
+        from utils.db_session import DBSession
         import uuid
-        thread_id = str(uuid.uuid4())
-        logger.info(f"Creando hilo de conversación en chat {chat_id} con nombre {thread_name}, thread_id: {thread_id}")
-        return {"status": "ok", "thread_id": thread_id}
+
+        account_id = request.get('account_id')
+        chat_id = request.get('chat_id')
+        thread_name = request.get('thread_name', 'Chat de Telegram')
+
+        if not account_id:
+            raise ValueError("account_id es requerido")
+        if not chat_id:
+            raise ValueError("chat_id es requerido")
+
+        # Crear el thread en la base de datos
+        async with DBSession(SessionLocal) as db:
+            new_thread = ChatThread(
+                account_id=uuid.UUID(account_id),
+                title=thread_name,
+                platform='telegram'
+            )
+            db.add(new_thread)
+            await db.commit()
+            await db.refresh(new_thread)
+
+            thread_id = str(new_thread.id)
+            logger.info(f"Hilo de Telegram creado: {thread_id} para cuenta {account_id} en chat {chat_id}")
+            return {"status": "ok", "thread_id": thread_id, "id": thread_id}
+
     except Exception as e:
         logger.error(f"Error al crear hilo de conversación: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al crear hilo de conversación")
