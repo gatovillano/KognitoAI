@@ -145,6 +145,49 @@ class GitHubRepoTool(BaseTool):
             logger.error(f"Error al listar el árbol de archivos del repositorio {repo_url}: {e}", exc_info=True)
             return f"Error al listar el árbol de archivos: {e}. Asegúrate de que el repositorio existe y que el token tiene los permisos necesarios."
     
+    def _is_text_file(self, file_path: str) -> bool:
+        """
+        Determina si un archivo es de tipo texto basándose en su extensión.
+        """
+        # Extensiones de archivos binarios que deben ser excluidos
+        binary_extensions = {
+            '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.svg', '.webp', '.tiff', '.tif',
+            '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp',
+            '.zip', '.tar', '.gz', '.bz2', '.7z', '.rar', '.exe', '.dll', '.so', '.dylib',
+            '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.wav', '.ogg', '.flac',
+            '.bin', '.dat', '.db', '.sqlite', '.sqlite3', '.mdb', '.accdb',
+            '.ttf', '.otf', '.woff', '.woff2', '.eot',
+            '.class', '.jar', '.war', '.ear', '.pyc', '.pyo', '.o', '.obj',
+            '.dmg', '.iso', '.img', '.vdi', '.vmdk'
+        }
+
+        text_extensions = {
+            '.txt', '.md', '.py', '.js', '.ts', '.jsx', '.tsx', '.html', '.htm', '.css', '.scss', '.sass',
+            '.json', '.xml', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.sh', '.bash', '.zsh',
+            '.sql', '.r', '.R', '.php', '.rb', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.hpp',
+            '.cs', '.vb', '.swift', '.kt', '.scala', '.clj', '.hs', '.elm', '.dart', '.vue', '.svelte',
+            '.dockerfile', '.gitignore', '.gitattributes', '.editorconfig', '.env', '.example',
+            '.lock', '.log', '.csv', '.tsv', '.tex', '.bib', '.rst', '.adoc', '.org', '.wiki'
+        }
+
+        # Obtener extensión del archivo
+        file_extension = '.' + file_path.split('.')[-1].lower() if '.' in file_path else ''
+
+        # Si es una extensión binaria conocida, definitivamente no es texto
+        if file_extension in binary_extensions:
+            return False
+
+        # Archivos sin extensión que suelen ser texto
+        filename = file_path.split('/')[-1].lower()
+        text_filenames = {
+            'readme', 'license', 'changelog', 'makefile', 'dockerfile', 'procfile',
+            'requirements', 'pipfile', 'gemfile', 'package', 'composer', 'cargo'
+        }
+
+        return (file_extension in text_extensions or
+                filename in text_filenames or
+                any(filename.startswith(name) for name in text_filenames))
+
     def _read_file(self, repo_url: str, file_path: str) -> str:
         """
         Lee el contenido de un archivo del repositorio.
@@ -157,9 +200,17 @@ class GitHubRepoTool(BaseTool):
             response.raise_for_status()
             content = response.json()["content"]
             encoding = response.json()["encoding"]
+
+            # Verificar si es un archivo de texto antes de intentar decodificar
+            if not self._is_text_file(file_path):
+                return f"Archivo binario no procesable: {file_path}"
+
             if encoding == "base64":
                 import base64
-                content = base64.b64decode(content).decode("utf-8")
+                try:
+                    content = base64.b64decode(content).decode("utf-8")
+                except UnicodeDecodeError:
+                    return f"Archivo no puede ser decodificado como texto: {file_path}"
             return f"Contenido del archivo {file_path}:\n{content}"
         except Exception as e:
             logger.error(f"Error al leer el archivo {file_path} del repositorio {repo_url}: {e}", exc_info=True)
@@ -288,16 +339,31 @@ class GitHubRepoTool(BaseTool):
                     for item in tree:
                         if item['type'] == 'blob':
                             file_path = item['path']
+
+                            # Verificar si es un archivo de texto antes de procesarlo
+                            if not self._is_text_file(file_path):
+                                logger.info(f"⏭️ Saltando archivo binario: {file_path}")
+                                continue
+
                             content_response = self.session.get(f"{api_url}/contents/{file_path}")
                             content_response.raise_for_status()
                             content_data = content_response.json()
                             content_base64 = content_data["content"]
                             encoding = content_data["encoding"]
-                            
+
                             if encoding == "base64":
-                                decoded_content = base64.b64decode(content_base64).decode("utf-8", errors="ignore")
+                                try:
+                                    decoded_content = base64.b64decode(content_base64).decode("utf-8")
+                                except UnicodeDecodeError:
+                                    logger.warning(f"⚠️ No se puede decodificar como UTF-8: {file_path}")
+                                    continue
                             else:
                                 decoded_content = content_base64
+
+                            # Verificar que el contenido no contenga bytes NUL
+                            if '\x00' in decoded_content:
+                                logger.warning(f"⚠️ Archivo contiene bytes NUL, saltando: {file_path}")
+                                continue
                             
                             # Calcular SHA del contenido
                             content_sha = hashlib.sha256(decoded_content.encode('utf-8')).hexdigest()
@@ -415,6 +481,14 @@ class GitHubRepoTool(BaseTool):
 
                 # 2. Añadir nuevos archivos o actualizar modificados
                 for file_path, github_sha in github_files.items():
+                    # Verificar si es un archivo de texto antes de procesarlo
+                    if not self._is_text_file(file_path):
+                        logger.info(f"⏭️ Saltando archivo binario: {file_path}")
+                        continue
+
+                    # Log adicional para debugging
+                    logger.debug(f"🔍 Procesando archivo de texto: {file_path}")
+
                     content_response = self.session.get(f"{api_url}/contents/{file_path}")
                     content_response.raise_for_status()
                     content_data = content_response.json()
@@ -422,9 +496,27 @@ class GitHubRepoTool(BaseTool):
                     encoding = content_data["encoding"]
 
                     if encoding == "base64":
-                        decoded_content = base64.b64decode(content_base64).decode("utf-8", errors="ignore")
+                        try:
+                            # Primero decodificar de base64 a bytes
+                            decoded_bytes = base64.b64decode(content_base64)
+
+                            # Verificar si contiene bytes NUL (indicativo de archivo binario)
+                            if b'\x00' in decoded_bytes:
+                                logger.warning(f"⚠️ Archivo contiene bytes NUL (binario), saltando: {file_path}")
+                                continue
+
+                            # Intentar decodificar como UTF-8
+                            decoded_content = decoded_bytes.decode("utf-8")
+                        except UnicodeDecodeError:
+                            logger.warning(f"⚠️ No se puede decodificar como UTF-8: {file_path}")
+                            continue
                     else:
                         decoded_content = content_base64
+
+                    # Verificación adicional de bytes NUL en el contenido final
+                    if '\x00' in decoded_content:
+                        logger.warning(f"⚠️ Archivo contiene bytes NUL en contenido final, saltando: {file_path}")
+                        continue
 
                     if file_path in existing_db_docs:
                         db_doc = existing_db_docs[file_path]
@@ -453,17 +545,28 @@ class GitHubRepoTool(BaseTool):
                         logger.info(f"📄 Nuevo documento añadido: {file_path}")
 
                 await db_session.commit()
-                return f"Repositorio {repo_name} actualizado. Archivos nuevos: {new_files}, Archivos actualizados: {updated_files}, Archivos eliminados: {deleted_files}."
+                return (f"Repositorio {repo_name} actualizado. "
+                       f"Archivos nuevos: {new_files}, "
+                       f"Archivos actualizados: {updated_files}, "
+                       f"Archivos eliminados: {deleted_files}.")
 
             finally:
                 await db_session.close()
         except Exception as e:
-            logger.error(f"Error al actualizar documentos del repositorio {repo_url}: {e}", exc_info=True)
+            logger.error(f"Error al actualizar documentos del repositorio {repo_url}: {e}",
+                        exc_info=True)
             return f"Error al actualizar documentos del repositorio: {e}"
 
-    async def _update_knowledge_collection(self, repo_url: str, collection_topic: Optional[str] = None, account_id: Optional[str] = None, workspace_id: Optional[str] = None) -> str:
+    async def _update_knowledge_collection(
+        self,
+        repo_url: str,
+        collection_topic: Optional[str] = None,
+        account_id: Optional[str] = None,
+        workspace_id: Optional[str] = None
+    ) -> str:
         """
-        Actualiza una colección de conocimientos existente desde un repositorio de GitHub, ya sea en una colección RAG específica o como conocimiento general de una cuenta.
+        Actualiza una colección de conocimientos existente desde un repositorio de GitHub,
+        ya sea en una colección RAG específica o como conocimiento general de una cuenta.
         Ahora también re-vectoriza archivos modificados usando document_rag_tool.
         """
         try:
@@ -475,10 +578,10 @@ class GitHubRepoTool(BaseTool):
             import hashlib
             from tools.document_rag_tool import DocumentRAGTool
             from core.memory_manager import remove_document_from_rag
-            
+
             if self.session is None:
                 self.session = requests.Session()
-            
+
             # Obtener información del repositorio
             api_url = self._get_api_url(repo_url)
             repo_info_response = self.session.get(api_url)
@@ -486,13 +589,12 @@ class GitHubRepoTool(BaseTool):
             repo_info = repo_info_response.json()
             repo_name = repo_info["name"]
             default_branch = repo_info.get("default_branch", "main")
-            
+
             # Conectar a la base de datos
             db_session = SessionLocal()
-            
+
             # Instanciar DocumentRAGTool para vectorización
             rag_tool = DocumentRAGTool()
-            
             try:
                 updated_files = 0
                 new_files = 0
@@ -544,25 +646,49 @@ class GitHubRepoTool(BaseTool):
                     
                     # 2. Añadir nuevos archivos o actualizar modificados
                     for file_path, github_sha in github_files.items():
+                        # Verificar si es un archivo de texto antes de procesarlo
+                        if not self._is_text_file(file_path):
+                            logger.info(f"⏭️ Saltando archivo binario: {file_path}")
+                            continue
+
                         content_response = self.session.get(f"{api_url}/contents/{file_path}")
                         content_response.raise_for_status()
                         content_data = content_response.json()
                         content_base64 = content_data["content"]
                         encoding = content_data["encoding"]
-                        
+
                         if encoding == "base64":
-                            decoded_content = base64.b64decode(content_base64).decode("utf-8", errors="ignore")
+                            try:
+                                # Primero decodificar de base64 a bytes
+                                decoded_bytes = base64.b64decode(content_base64)
+
+                                # Verificar si contiene bytes NUL (indicativo de archivo binario)
+                                if b'\x00' in decoded_bytes:
+                                    logger.warning(f"⚠️ Archivo contiene bytes NUL (binario), saltando: {file_path}")
+                                    continue
+
+                                # Intentar decodificar como UTF-8
+                                decoded_content = decoded_bytes.decode("utf-8")
+                            except UnicodeDecodeError:
+                                logger.warning(f"⚠️ No se puede decodificar como UTF-8: {file_path}")
+                                continue
                         else:
                             decoded_content = content_base64
-                        
+
+                        # Verificación adicional de bytes NUL en el contenido final
+                        if '\x00' in decoded_content:
+                            logger.warning(f"⚠️ Archivo contiene bytes NUL en contenido final, saltando: {file_path}")
+                            continue
+
                         # Preparar metadatos para vectorización
+                        file_ext = file_path.split('.')[-1] if '.' in file_path else ''
+                        file_dir = '/'.join(file_path.split('/')[:-1]) if '/' in file_path else ''
                         repo_metadata = {
                             "repo_url": repo_url,
                             "repo_name": repo_name,
-                            "file_extension": file_path.split('.')[-1] if '.' in file_path else '',
-                            "directory": '/'.join(file_path.split('/')[:-1]) if '/' in file_path else ''
+                            "file_extension": file_ext,
+                            "directory": file_dir
                         }
-                        
                         if file_path in existing_db_docs:
                             db_doc = existing_db_docs[file_path]
                             if db_doc.sha != github_sha:

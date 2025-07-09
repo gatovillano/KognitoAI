@@ -35,16 +35,11 @@ async def get_interpreter_llm() -> ChatGoogleGenerativeAI:
         )
     return _interpreter_llm
 
-
 class NaturalQueryInput(BaseModel):
     """Input schema para interpretación de consultas naturales."""
     query: str = Field(
         ..., 
         description="La consulta completa del usuario en lenguaje natural"
-    )
-    account_id: str = Field(
-        ..., 
-        description="ID de la cuenta del usuario"
     )
     workspace_id: Optional[str] = Field(
         None,
@@ -56,7 +51,6 @@ class NaturalQueryInput(BaseModel):
         description="Contexto adicional de la conversación",
         json_schema_extra={"type": "string"}
     )
-
 
 class NaturalQueryInterpreterTool(BaseTool):
     name: str = "natural_query_interpreter"
@@ -142,11 +136,36 @@ Responde SOLO en formato JSON válido:
     async def _arun(
         self,
         query: str,
-        account_id: str,
-        workspace_id: Optional[str] = None,
-        context: Optional[str] = None
+        run_manager = None,
+        **kwargs
     ) -> str:
         """Ejecuta la interpretación y búsqueda automática."""
+        # Extraer parámetros de kwargs
+        workspace_id = kwargs.get('workspace_id')
+        context = kwargs.get('context')
+
+        # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+        
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+        
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
         try:
             logger.info(f"🔍 Interpretando consulta natural: '{query[:100]}...'")
             

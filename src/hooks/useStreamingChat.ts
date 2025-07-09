@@ -28,16 +28,17 @@ export const useStreamingChat = (options: StreamingChatOptions = {}) => {
 
     try {
       // Obtener token de auth
-      const token = localStorage.getItem('auth_token');
+      const token = localStorage.getItem('authToken');
       if (!token) {
         throw new Error('No auth token found');
       }
 
-      // Crear URL con parámetros para el stream
-      const url = new URL('/api/chat/stream', window.location.origin);
-      
+      // Usar la URL base de la API desde la variable de entorno
+      const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8889';
+      const streamUrl = `${apiBaseUrl}/api/chat/stream`;
+
       // Enviar request inicial
-      const response = await fetch('/api/chat/stream', {
+      const response = await fetch(streamUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -52,11 +52,39 @@ class AnalyzeCodeForInsightsTool(BaseTool):
     args_schema: Type[BaseModel] = AnalyzeCodeInput
     return_direct: bool = False
 
-    async def _arun(self, code_content: str, account_id: str = "", file_name: str = "Análisis de Código", save_to_database: bool = False, **kwargs: Any) -> str:
+    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
+
+    def __init__(self, account_id: str = "", **kwargs):
+        super().__init__(**kwargs)
+        self.account_id = account_id
+
+    async def _arun(self, code_content: str, run_manager = None, **kwargs file_name: str = "Análisis de Código", save_to_database: bool = False, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona, delegando en el analizador.
         """
-        logger.info(f"Iniciando análisis de código con AdvancedCodeAnalyzer...")
+                # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+        
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+        
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
+logger.info(f"Iniciando análisis de código con AdvancedCodeAnalyzer...")
         try:
             # Llamamos directamente a la función de análisis
             analysis_result = await analyze_code_content(code_content)

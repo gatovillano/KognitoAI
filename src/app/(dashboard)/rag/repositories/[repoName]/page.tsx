@@ -15,7 +15,6 @@ import { DeleteConfirmationDialog } from '../../delete-confirmation-dialog';
 import { AnalysisResultDialog } from '../../analysis-result-dialog';
 import { CodeAnalysisResultDialog } from '../../code-analysis-result-dialog';
 import { ShareDocumentDialog } from '../../share-document-dialog';
-import { UpdateRepositoryDialog } from '../../update-repository-dialog';
 import type { Document } from '../../columns';
 
 // Definir un tipo extendido para documentos de GitHub que incluye repo_url
@@ -37,7 +36,6 @@ export default function RepositoryDetailPage() {
   const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null);
   const [documentToShare, setDocumentToShare] = useState<Document | null>(null);
   const [isShareOpen, setIsShareOpen] = useState(false);
-  const [isUpdateRepoOpen, setIsUpdateRepoOpen] = useState(false);
   
   // Estados para análisis de documento individual
   const [documentToAnalyze, setDocumentToAnalyze] = useState<Document | null>(null);
@@ -54,6 +52,9 @@ export default function RepositoryDetailPage() {
   const [vectorizationPollingId, setVectorizationPollingId] = useState<string | null>(null);
   const [vectorizationResult, setVectorizationResult] = useState<any>(null);
   const [isVectorizationOpen, setIsVectorizationOpen] = useState(false);
+
+  // Estados para actualización de repositorio
+  const [updatePollingId, setUpdatePollingId] = useState<string | null>(null);
 
   // Estado para el historial de análisis
   const [savedAnalyses, setSavedAnalyses] = useState<any[]>([]);
@@ -121,12 +122,23 @@ export default function RepositoryDetailPage() {
   };
 
   const handleVectorizeRepository = async () => {
-    if (docPollingId || collectionPollingId || vectorizationPollingId) { toast.info('Ya hay un proceso en progreso'); return; }
+    if (docPollingId || collectionPollingId || vectorizationPollingId || updatePollingId) { toast.info('Ya hay un proceso en progreso'); return; }
     try {
       const response = await apiClient.post('/api/github/start-vectorization', { repo_name: repoName });
       setVectorizationPollingId(response.data.task_id);
       toast.info(`Vectorización del repositorio "${repoName}" iniciada`);
     } catch (error) { toast.error('No se pudo iniciar la vectorización del repositorio'); }
+  };
+
+  const handleUpdateRepository = async () => {
+    if (docPollingId || collectionPollingId || vectorizationPollingId || updatePollingId) { toast.info('Ya hay un proceso en progreso'); return; }
+    try {
+      const response = await apiClient.post('/api/github/update-repository', { repo_url: repoUrl });
+      setUpdatePollingId(response.data.task_id);
+      toast.info(`Actualización del repositorio "${repoName}" iniciada en segundo plano`);
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'No se pudo iniciar la actualización del repositorio');
+    }
   };
 
   // Polling para análisis de documento
@@ -184,6 +196,33 @@ export default function RepositoryDetailPage() {
     }, 5000);
     return () => clearInterval(poller);
   }, [vectorizationPollingId]);
+
+  // Polling para actualización de repositorio
+  useEffect(() => {
+    if (!updatePollingId) return;
+    const poller = setInterval(async () => {
+      try {
+        const response = await apiClient.get(`/api/analysis/get-analysis-result/${updatePollingId}`);
+        const { status, result, error } = response.data;
+        if (status === 'completed') {
+          clearInterval(poller);
+          setUpdatePollingId(null);
+          toast.success(`¡Repositorio ${repoName} actualizado correctamente!`);
+          // Recargar la página para mostrar los cambios
+          window.location.reload();
+        } else if (status === 'failed') {
+          clearInterval(poller);
+          setUpdatePollingId(null);
+          toast.error(`Error al actualizar el repositorio: ${error}`);
+        }
+      } catch (err) {
+        clearInterval(poller);
+        setUpdatePollingId(null);
+        toast.error("Error al consultar el estado de la actualización.");
+      }
+    }, 3000); // Polling cada 3 segundos para actualizaciones
+    return () => clearInterval(poller);
+  }, [updatePollingId, repoName]);
 
   // Organizar documentos en una estructura de árbol de carpetas
   interface FolderNode {
@@ -351,11 +390,20 @@ export default function RepositoryDetailPage() {
           <h1 className="text-3xl font-bold break-all">{repoName}</h1>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="border-orange-400 text-orange-400 hover:bg-orange-50" onClick={() => setIsUpdateRepoOpen(true)}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Actualizar Repositorio
+          <Button
+            variant="outline"
+            className="border-orange-400 text-orange-400 hover:bg-orange-50"
+            disabled={!!docPollingId || !!collectionPollingId || !!vectorizationPollingId || !!updatePollingId}
+            onClick={handleUpdateRepository}
+          >
+            {updatePollingId ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
+            {updatePollingId ? 'Actualizando...' : 'Actualizar Repositorio'}
           </Button>
-          <Button variant="outline" className="border-blue-400 text-blue-400 hover:bg-blue-50" disabled={!!docPollingId || !!collectionPollingId} onClick={handleAnalyzeRepository}>
+          <Button variant="outline" className="border-blue-400 text-blue-400 hover:bg-blue-50" disabled={!!docPollingId || !!collectionPollingId || !!updatePollingId} onClick={handleAnalyzeRepository}>
             {collectionPollingId ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
@@ -363,12 +411,19 @@ export default function RepositoryDetailPage() {
             )}
             {collectionPollingId ? 'Analizando...' : 'Analizar Repositorio'}
           </Button>
-          <Button variant="outline" className="border-green-400 text-green-400 hover:bg-green-50" disabled={!!docPollingId || !!collectionPollingId || !!vectorizationPollingId} onClick={handleVectorizeRepository}>
+          <Button variant="outline" className="border-green-400 text-green-400 hover:bg-green-50" disabled={!!docPollingId || !!collectionPollingId || !!vectorizationPollingId || !!updatePollingId} onClick={handleVectorizeRepository}>
             <FileText className="mr-2 h-4 w-4" />
             Vectorizar Repositorio
           </Button>
         </div>
       </div>
+
+      {updatePollingId && (
+        <div className="bg-orange-50 border border-orange-200 text-orange-800 p-3 rounded-md mb-4 flex items-center gap-2 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>Actualizando repositorio "{repoName}" en segundo plano...</span>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="flex justify-center items-center h-full">
@@ -436,13 +491,6 @@ export default function RepositoryDetailPage() {
       <CodeAnalysisResultDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} repoName={repoName} />
       <AnalysisResultDialog isOpen={isVectorizationOpen} onOpenChange={setIsVectorizationOpen} analysis={vectorizationResult} document={{ file_name: repoName, topic: 'Repositories', title: 'Vectorización de ' + repoName, author: '' }} />
       <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={() => {}} document={documentToShare} />
-      <UpdateRepositoryDialog
-        isOpen={isUpdateRepoOpen}
-        onOpenChange={setIsUpdateRepoOpen}
-        onSuccess={() => window.location.reload()}
-        repositoryUrl={repoUrl}
-        repositoryName={repoName}
-      />
     </div>
   );
 }

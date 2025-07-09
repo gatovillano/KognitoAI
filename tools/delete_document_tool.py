@@ -64,7 +64,7 @@ class DeleteDocumentTool(BaseTool):
     args_schema: Type[BaseModel] = DeleteDocumentInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
 
-    async def _arun(self, account_id: str, file_name: Optional[str] = None, topic: Optional[str] = None, **kwargs: Any) -> str:
+    async def _arun(self, file_name: Optional[str] = None, topic: Optional[str] = None, run_manager = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -77,6 +77,28 @@ class DeleteDocumentTool(BaseTool):
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
+                # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+        
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+        
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
         if not file_name and not topic:
             return "Error: Debes proporcionar un nombre de archivo o un tema para poder eliminar documentos."
             

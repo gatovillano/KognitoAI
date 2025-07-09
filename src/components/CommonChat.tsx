@@ -131,12 +131,15 @@ export function CommonChat({ threadId }: CommonChatProps) {
       setMessages((prev) => [...prev, initialAiMessage]);
 
       try {
-        // Usar streaming real
-        const response = await fetch('/api/chat/stream', {
+        // Usar streaming real con la URL correcta de la API
+        const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8889';
+        const streamUrl = `${apiBaseUrl}/api/chat/stream`;
+
+        const response = await fetch(streamUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
           },
           body: JSON.stringify(requestData),
           signal: signal

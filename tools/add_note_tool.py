@@ -14,9 +14,9 @@ y la hace reutilizable y robusta dentro de un backend centralizado.
 
 import logging
 import asyncio
-from typing import Type, Any
+from typing import Type, Any, Optional
 from pydantic import BaseModel, Field
-from langchain.tools import BaseTool
+from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de notas.
 from core.notes_manager import add_note
@@ -33,9 +33,7 @@ class AddNoteInput(BaseModel):
     # El contenido principal de la nota. Es un campo requerido.
     content: str = Field(description="El contenido principal de la nota a guardar.")
     
-    # ¡EL CAMBIO CLAVE! Ahora requerimos el identificador universal de la cuenta.
-    # El LLM debe recibir este ID del contexto de la conversación y pasarlo aquí.
-    account_id: str = Field(description="El identificador universal (UUID) de la cuenta del usuario.")
+
     
     # El título opcional para la nota.
     title: str = Field(default="", description="Un título opcional para la nota.")
@@ -53,17 +51,22 @@ class AddNoteTool(BaseTool):
     description: str = (
         "Útil para cuando un usuario quiere crear o guardar una nueva nota, apunte o idea. "
         "ACTUALIZADO: Ahora soporta aislamiento por workspace y actualiza columnas optimizadas automáticamente. "
-        "Debes proporcionar el contenido y, opcionalmente, un título y una categoría. "
-        "El 'account_id' del usuario es un argumento obligatorio."
+        "Debes proporcionar el contenido y, opcionalmente, un título y una categoría."
     )
     args_schema: Type[BaseModel] = AddNoteInput
+    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
+
+    def __init__(self, account_id: str = "", **kwargs):
+        super().__init__(**kwargs)
+        self.account_id = account_id
 
     async def _arun(
         self,
-        account_id: str,
         content: str,
         title: str = "",
         category: str = "General",
+        run_manager: Optional[Any] = None,
+        **kwargs: Any
     ) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
@@ -72,14 +75,25 @@ class AddNoteTool(BaseTool):
         pasándole los datos validados para crear la nota en la base de datos.
 
         Args:
-            account_id: El UUID de la cuenta del usuario.
             content: El texto de la nota.
             title: El título de la nota (vacío si no se proporciona).
             category: La categoría de la nota (por defecto "General").
+            run_manager: Gestor de ejecución para obtener configuración.
+            **kwargs: Argumentos adicionales.
 
         Returns:
             Una cadena de texto confirmando el resultado de la operación.
         """
+        # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+
+        # Validar que tenemos account_id
         if not account_id or not content:
             return "Error: Se requiere el ID de la cuenta y el contenido para guardar una nota."
         

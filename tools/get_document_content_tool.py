@@ -45,15 +45,6 @@ class GetDocumentContentInput(BaseModel):
         ...,
         description="El nombre exacto del archivo del cual se debe recuperar el contenido completo."
     )
-    account_id: str = Field(
-        default="",
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Si no se proporciona, se usa el del constructor."
-    )
-    telegram_id: Optional[int] = Field(
-        None,
-        description="El ID numérico original de Telegram del usuario. Es necesario para interactuar con sistemas de estado de sesión como `user_data`. Puede ser None si no aplica.",
-        json_schema_extra={"type": "integer"}
-    )
     # --- NUEVO: Parámetro para el ID del workspace ---
     workspace_id: Optional[str] = Field(
         None,
@@ -78,7 +69,7 @@ class GetDocumentContentTool(BaseTool):
 
 
 
-    async def _arun(self, file_name: str, account_id: str = None, telegram_id: Optional[int] = None, workspace_id: Optional[str] = None, run_manager: Optional[Any] = None, **kwargs: Any) -> str:
+    async def _arun(self, file_name: str, workspace_id: Optional[str] = None, run_manager: Optional[Any] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -105,9 +96,9 @@ class GetDocumentContentTool(BaseTool):
             if not config_workspace_id:
                 config_workspace_id = configurable.get('workspace_id')
 
-        # Usar valores de configuración o parámetros
-        effective_account_id = config_account_id or account_id
-        effective_telegram_id = config_telegram_id or telegram_id
+        # Usar valores de configuración o instancia
+        effective_account_id = config_account_id or getattr(self, 'account_id', "")
+        effective_telegram_id = config_telegram_id or getattr(self, 'telegram_id', None)
         effective_workspace_id = config_workspace_id
 
         if not effective_account_id:

@@ -8,7 +8,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2 } from 'lucide-react';
+import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2, FolderPlus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { UploadDocumentDialog } from './upload-document-dialog';
@@ -18,6 +18,8 @@ import { GitHubRepoDialog } from './github-repo-dialog';
 import { EditCollectionDialog } from './edit-collection-dialog';
 import { ShareCollectionDialog } from './share-collection-dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface Collection {
   topic: string;
@@ -32,6 +34,7 @@ const CollectionCard = ({
   onDelete,
   onEdit,
   onShare,
+  onAddToWorkspace,
   isAnalyzing,
 }: {
   collection: Collection;
@@ -39,6 +42,7 @@ const CollectionCard = ({
   onDelete: (topic: string) => void;
   onEdit: (collection: Collection) => void;
   onShare: (collection: Collection) => void;
+  onAddToWorkspace: (collection: Collection) => void;
   isAnalyzing: boolean;
 }) => {
   const router = useRouter();
@@ -97,6 +101,10 @@ const CollectionCard = ({
                   <DropdownMenuItem onClick={() => onShare(collection)}>
                     <Share2 className="mr-2 h-4 w-4" />
                     <span>Compartir</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onAddToWorkspace(collection)}>
+                    <FolderPlus className="mr-2 h-4 w-4" />
+                    <span>Agregar a Workspace</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => onAnalyze(collection.topic)}>
                     <ScanSearch className="mr-2 h-4 w-4" />
@@ -190,10 +198,13 @@ export default function RagCollectionsPage() {
   const [collectionPollingId, setCollectionPollingId] = useState<string | null>(null);
   const [analyzingTopic, setAnalyzingTopic] = useState<string | null>(null);
 
-  // Estados para editar y compartir colecciones
+  // Estados para editar, compartir y agregar a workspace
   const [isEditCollectionOpen, setIsEditCollectionOpen] = useState(false);
   const [isShareCollectionOpen, setIsShareCollectionOpen] = useState(false);
+  const [isAddToWorkspaceOpen, setIsAddToWorkspaceOpen] = useState(false);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
+  const [workspaces, setWorkspaces] = useState<any[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
   
   const router = useRouter();
 
@@ -302,6 +313,17 @@ export default function RagCollectionsPage() {
     setIsShareCollectionOpen(true);
   };
 
+  const handleAddToWorkspace = async (collection: Collection) => {
+    setSelectedCollection(collection);
+    try {
+      const response = await apiClient.get('/api/workspaces');
+      setWorkspaces(response.data);
+      setIsAddToWorkspaceOpen(true);
+    } catch (error) {
+      toast.error('Error al cargar los workspaces.');
+    }
+  };
+
   const handleEditSuccess = () => {
     fetchCollections();
     setSelectedCollection(null);
@@ -310,6 +332,21 @@ export default function RagCollectionsPage() {
   const handleShareSuccess = () => {
     fetchCollections();
     setSelectedCollection(null);
+  };
+
+  const handleAddToWorkspaceConfirm = async () => {
+    if (!selectedCollection || !selectedWorkspaceId) return;
+
+    try {
+      const collectionIdentifier = encodeURIComponent(selectedCollection.topic);
+      await apiClient.post(`/api/workspaces/${selectedWorkspaceId}/collections/${collectionIdentifier}/associate`, {});
+      toast.success(`Colección "${selectedCollection.topic}" agregada al workspace.`);
+      setIsAddToWorkspaceOpen(false);
+      setSelectedCollection(null);
+      setSelectedWorkspaceId(null);
+    } catch (error) {
+      toast.error('Error al agregar la colección al workspace.');
+    }
   };
 
   const renderContent = () => {
@@ -358,6 +395,7 @@ export default function RagCollectionsPage() {
               onDelete={openDeleteDialog}
               onEdit={handleEditCollection}
               onShare={handleShareCollection}
+              onAddToWorkspace={handleAddToWorkspace}
               isAnalyzing={collectionPollingId !== null && analyzingTopic === collection.topic}
             />
           ))}
@@ -447,6 +485,48 @@ export default function RagCollectionsPage() {
         onShareSuccess={handleShareSuccess}
         collection={selectedCollection}
       />
+
+      {/* Diálogo para agregar a workspace */}
+      <Dialog open={isAddToWorkspaceOpen} onOpenChange={setIsAddToWorkspaceOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Agregar Colección a Workspace</DialogTitle>
+            <DialogDescription>
+              Selecciona el workspace al que quieres agregar la colección "{selectedCollection?.topic}".
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="workspace-select" className="text-sm font-medium">
+                Workspace
+              </label>
+              <Select value={selectedWorkspaceId || ''} onValueChange={setSelectedWorkspaceId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecciona un workspace" />
+                </SelectTrigger>
+                <SelectContent>
+                  {workspaces.map((workspace) => (
+                    <SelectItem key={workspace.id} value={workspace.id}>
+                      {workspace.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddToWorkspaceOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleAddToWorkspaceConfirm}
+              disabled={!selectedWorkspaceId}
+            >
+              Agregar a Workspace
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

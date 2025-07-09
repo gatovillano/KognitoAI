@@ -26,10 +26,6 @@ class ConversationContextAnalyzerInput(BaseModel):
     Define el esquema de entrada para la herramienta de análisis de contexto de conversaciones.
     Valida que los argumentos necesarios sean proporcionados por el LLM.
     """
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
     conversation_history: Optional[str] = Field(
         None,
         description="El historial de conversación a analizar. Si no se proporciona, se analizarán las memorias y conversaciones recientes del usuario.",
@@ -62,7 +58,7 @@ class ConversationContextAnalyzerTool(BaseTool):
         super().__init__(**kwargs)
         logger.info("Inicializando ConversationContextAnalyzerTool")
 
-    async def _arun(self, account_id: str, conversation_history: Optional[str] = None, user_query: Optional[str] = None, **kwargs: Any) -> str:
+    async def _arun(self, conversation_history: Optional[str] = None, user_query: Optional[str] = None, run_manager = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -75,6 +71,28 @@ class ConversationContextAnalyzerTool(BaseTool):
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
+                # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+        
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+        
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
         logger.info(f"Ejecutando ConversationContextAnalyzerTool para la cuenta '{account_id}'.")
         try:
             if user_query:

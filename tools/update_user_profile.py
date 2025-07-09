@@ -60,12 +60,8 @@ class UpdateProfileTool(BaseTool):
 
     async def _arun(
         self,
-        account_id: str,
-        nombre: Optional[str] = None,
-        gustos: Optional[str] = None,
-        intereses: Optional[str] = None,
-        otros_datos: Optional[str] = None,
-        **kwargs: Any
+        run_manager = None,
+        **kwargs
     ) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
@@ -76,11 +72,35 @@ class UpdateProfileTool(BaseTool):
             gustos: Los gustos a actualizar.
             intereses: Los intereses a actualizar.
             otros_datos: Otros datos a actualizar.
-            **kwargs: Argumentos adicionales (no utilizados).
-
-        Returns:
-            Un mensaje de texto indicando el resultado de la operación.
         """
+        # Extraer parámetros de kwargs
+        nombre = kwargs.get('nombre')
+        gustos = kwargs.get('gustos')
+        intereses = kwargs.get('intereses')
+        otros_datos = kwargs.get('otros_datos')
+
+        # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+        
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+        
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
         logger.info(f"Ejecutando UpdateProfileTool para la cuenta '{account_id}'.")
 
         # Construir un diccionario solo con los datos que fueron proporcionados.

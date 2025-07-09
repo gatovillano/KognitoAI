@@ -17,7 +17,25 @@ services:
     networks:
       - kognito_network
 
-  # 2. El Cerebro (Servicio Core API)
+  # 2. Base de Datos Vectorial Qdrant
+  # 🔧 Qdrant UI: http://localhost:6333/dashboard
+  # 📊 API: http://localhost:6333
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: kognito_qdrant
+    restart: always
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: 6333
+      QDRANT__SERVICE__GRPC_PORT: 6334
+    networks:
+      - kognito_network
+
+  # 3. El Cerebro (Servicio Core API)
   # 🔧 API accesible en: http://localhost:8889
   # 📚 Documentación: http://localhost:8889/docs
   core:
@@ -28,6 +46,7 @@ services:
     restart: always
     depends_on:
       - db
+      - qdrant
     ports:
       - "${API_PORT:-8889}:8000" # API accesible en localhost:8889
     volumes:
@@ -133,6 +152,33 @@ services:
         DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-telegram_bot_db}
       env_file:
         - ./.env
+
+  # 6. Neo4j - Base de datos de grafos
+  neo4j:
+    image: neo4j:latest  #  Usando la imagen oficial de Neo4j
+    container_name: neo4j_db
+    restart: always
+    ports:
+      - "7474:7474"  #  Para la interfaz web de Neo4j
+      - "7687:7687"  #  Para la conexión Bolt
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}  #  Cuidado con esto en producción
+    volumes:
+      - neo4j_data:/data  #  Persistencia de datos
+    networks:
+      - kognito_network
+
+  # 7. Cognee - Integración directa (comentado - usar como biblioteca Python)
+  # cognee:
+  #   image: cognee/cognee-mcp:main
+  #   container_name: cognee_service
+  #   restart: always
+  #   ports:
+  #     - "8011:8000"
+  #   environment:
+  #     COGNEE_API_URL: ${COGNEE_API_URL}
+  #   networks:
+  #     - kognito_network
         
 networks:
   kognito_network:
@@ -140,5 +186,6 @@ networks:
 
 volumes:
   db_data:
-
+  neo4j_data:
   pgadmin_data:
+  qdrant_data:

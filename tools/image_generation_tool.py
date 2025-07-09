@@ -38,7 +38,6 @@ from telegram_client.bot_manager import bot_manager
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
 
-
 class ImageGenerationInput(BaseModel):
     """
     Define el esquema de entrada para la herramienta de generación de imágenes.
@@ -49,15 +48,10 @@ class ImageGenerationInput(BaseModel):
         description="Una descripción detallada y clara de la imagen que se desea generar. Debería estar en inglés para obtener los mejores resultados."
     )
     # Requerimos ambos IDs por las razones explicadas en la documentación del módulo.
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario."
-    )
     telegram_id: int = Field(
         ...,
         description="El ID numérico original de Telegram del usuario, necesario para guardar la imagen en el estado de la sesión (`user_data`)."
     )
-
 
 class ImageGenerationTool(BaseTool):
     """
@@ -74,7 +68,7 @@ class ImageGenerationTool(BaseTool):
     args_schema: Type[BaseModel] = ImageGenerationInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
 
-    async def _arun(self, prompt: str, account_id: str, telegram_id: int, **kwargs: Any) -> str:
+    async def _arun(self, prompt: str, run_manager = None, **kwargs telegram_id: int, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -87,7 +81,29 @@ class ImageGenerationTool(BaseTool):
         Returns:
             Un mensaje de texto para el agente, indicando el resultado de la operación.
         """
-        logger.info(f"Ejecutando ImageGenerationTool para la cuenta '{account_id}' con el prompt: '{prompt[:100]}...'")
+                # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+        
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+        
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
+logger.info(f"Ejecutando ImageGenerationTool para la cuenta '{account_id}' con el prompt: '{prompt[:100]}...'")
 
         if not prompt or not prompt.strip():
             logger.warning(f"ImageGenerationTool llamada con un prompt vacío para la cuenta '{account_id}'.")

@@ -37,9 +37,10 @@ def setup_llm_detailed_logging(log_level: str = "INFO", log_file: Optional[str] 
         logger = logging.getLogger(logger_name)
         logger.setLevel(level)
 
-        # Evitar propagación para prevenir duplicados
+        # PERMITIR propagación para que los logs aparezcan en docker logs
+        # Solo evitar propagación si hay un archivo de log específico
         if logger_name.startswith("LLMCallback"):
-            logger.propagate = False
+            logger.propagate = True  # Cambiado a True para que aparezcan en docker logs
 
         # Solo añadir handler si no existe
         if not logger.handlers and logger_name.startswith("LLMCallback"):

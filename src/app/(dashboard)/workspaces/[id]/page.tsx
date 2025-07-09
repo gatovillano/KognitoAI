@@ -27,6 +27,7 @@ interface Collection {
   created_at: string;
   description?: string;
   name?: string;
+  document_count?: number; // Añadido para soportar la propiedad document_count
 }
 
 interface Workspace {
@@ -255,7 +256,7 @@ export default function WorkspaceDashboard() {
 
       // Filtrar para mostrar solo las colecciones del contexto general que no están ya en este workspace
       const filteredCollections = allCollections.filter(
-        (col: Collection) => !workspaceCollectionIds.has(col.id) && col.document_count > 0
+        (col: Collection) => !workspaceCollectionIds.has(col.id) && (col.document_count ?? 0) > 0
       );
 
       setAvailableCollections(filteredCollections);

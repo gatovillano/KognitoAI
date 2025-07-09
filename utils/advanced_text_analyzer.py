@@ -39,6 +39,7 @@ class SingleTextAnalysis(BaseModel):
     key_themes: List[ThemeReference] = Field(description="Una lista de hasta 12 conceptos o temas centrales del texto, cada uno con citas del texto y explicación detallada.")
     central_concepts: List[str] = Field(description="Una lista de hasta 8 conceptos centrales del texto en el formato 'CONCEPTO: DEFINICIÓN DETALLADA CON CONTEXTO Y EJEMPLOS'.")
     discipline: List[str] = Field(description="El area, disciplina o campo al que refiere el documento. Por ejemplo si es un documémico y de qué área, o si es un documento técnico, etc.').")
+    sentiment_analysis: str = Field(description="El sentimiento general del texto (ej. 'Positivo', 'Negativo', 'Neutral', 'Mixto').")
     authorial_tone: str = Field(description="El tono o la voz del autor (ej. 'Formal y Académico', 'Informal y Conversacional', 'Urgente y Directo', 'Escéptico y Crítico').")
     knowledge_gaps: List[str] = Field(description="Una lista de 5 a 8 preguntas inteligentes y abiertas que el texto inspira pero no responde. Deben ser preguntas, no afirmaciones.")
     final_reflections: List[str] = Field (description="Una lista de 3 a 5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
@@ -108,7 +109,7 @@ class AdvancedTextAnalyzer:
         if not text or len(text.split()) < 30:
             return SingleTextAnalysis(
                 executive_summary=text, general_analysis="Texto insuficiente para análisis detallado",
-                key_themes=[], central_concepts=[], discipline=[], authorial_tone="N/A",
+                key_themes=[], central_concepts=[], discipline=[], sentiment_analysis="N/A", authorial_tone="N/A",
                 knowledge_gaps=[], final_reflections=[]
             )
 

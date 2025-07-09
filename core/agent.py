@@ -508,14 +508,19 @@ async def create_and_run_agent(
     system_prompt_content = await build_system_prompt(account_id, workspace_id)
     
     # El prompt de ReAct espera un 'input' que contenga toda la información contextual.
-    final_input = f"""{system_prompt_content}
 
---- Consulta Actual del Usuario ---
-{user_message}
-"""
+
+
+
+
+    final_input = f"{system_prompt_content}\n\n--- Consulta Actual del Usuario ---\n{user_message}"
     
     # --- 5. Configurar Herramientas y LLM ---
-    all_tools = get_all_langchain_tools(account_id=account_id, telegram_id=str(telegram_id) if telegram_id else "")
+    all_tools = get_all_langchain_tools(
+        account_id=account_id,
+        telegram_id=str(telegram_id) if telegram_id else "",
+        workspace_id=workspace_id or ""
+    )
     tools = all_tools
 
     # Modos especiales para forzar herramientas (se mantiene la lógica)
@@ -537,19 +542,20 @@ async def create_and_run_agent(
     # Usamos un prompt ReAct personalizado compatible con nuestras variables
     from langchain_core.prompts import PromptTemplate
 
-    # Insertamos las instrucciones de ID y workspace en el prompt de ReAct
+    # Instrucciones para el uso correcto de herramientas
     id_instructions = (
-        f"<b>Instrucciones Críticas de Identificación:</b>\n"
-        f"- Para CUALQUIER herramienta que requiera `account_id`, DEBES usar: <b>{account_id}</b>.\n"
-        f"- Para CUALQUIER herramienta que requiera `telegram_id`, DEBES usar: <b>{telegram_id}</b>.\n"
-        f"\n<b>Instrucciones CRÍTICAS para el uso de herramientas:</b>\n"
-        f"- NUNCA incluyas 'query=' o 'account_id=' en el parámetro de consulta\n"
-        f"- Para comprehensive_web_analyzer: usa SOLO el texto de búsqueda, ejemplo: 'modelos ligeros de IA'\n"
-        f"- Para web_search_tool: usa SOLO el texto de búsqueda, ejemplo: 'modelos ligeros de IA'\n"
-        f"- Para multi_query_search: usa SOLO el texto de búsqueda, ejemplo: 'modelos ligeros de IA'\n"
-        f"- CORRECTO: Action Input: modelos ligeros de reconocimiento de entidades\n"
-        f"- INCORRECTO: Action Input: query='modelos ligeros de reconocimiento de entidades', account_id='...'\n"
-        f"- Los parámetros account_id, workspace_id, etc. se pasan automáticamente por el sistema\n"
+        "\n🔑 INSTRUCCIONES CRÍTICAS - LEE CUIDADOSAMENTE:\n"
+        "- IDENTIFICACIÓN AUTOMÁTICA: Todas las herramientas obtienen automáticamente tu identificación del contexto de la sesión.\n"
+        "- ❌ NUNCA PIDAS AL USUARIO SU account_id - Las herramientas lo obtienen automáticamente.\n"
+        "- Las herramientas obtienen automáticamente tu identificación del contexto de la sesión\n"
+        "- NUNCA incluyas 'account_id' o 'telegram_id' en los parámetros de las herramientas\n"
+        "- Para comprehensive_web_analyzer: usa SOLO el texto de búsqueda, ejemplo: 'modelos ligeros de IA'\n"
+        "- Para web_search_tool: usa SOLO el texto de búsqueda, ejemplo: 'modelos ligeros de IA'\n"
+        "- Para knowledge_base_analyzer: usa SOLO la consulta, ejemplo: 'analiza mis notas sobre IA'\n"
+        "- Para multi_query_search: usa SOLO el texto de búsqueda, ejemplo: 'modelos ligeros de IA'\n"
+        "- CORRECTO: Action Input: modelos ligeros de reconocimiento de entidades\n"
+        "- INCORRECTO: Action Input: query='modelos ligeros de reconocimiento de entidades', account_id='...'\n"
+        "- Excepción: Solo la herramienta `natural_query_interpreter` requiere el `account_id` explícitamente\n"
     )
     if workspace_id:
         id_instructions += f"- Para CUALQUIER herramienta que requiera `workspace_id`, DEBES usar: <b>{workspace_id}</b>.\n"

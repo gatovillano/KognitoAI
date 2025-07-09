@@ -26,7 +26,6 @@ class DocumentRAGInput(BaseModel):
     topic: str = Field(..., description="The topic or category for this document, as specified by the user.")
 
     # Use account_id as the universal identifier for the user account
-    account_id: str = Field(..., description="The unique universal identifier (UUID) of the user's account. This MUST be provided by the LLM.")
 
     # --- NUEVO: Parámetro para el ID del workspace ---
     workspace_id: Optional[str] = Field(
@@ -67,20 +66,29 @@ class DocumentRAGTool(BaseTool):
         extracted_text: str,
         file_name: str,
         topic: str,
-        account_id: str,
         workspace_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        run_manager = None,
         **kwargs: Any
     ) -> str:
         """
         Use the tool asynchronously. Processes the document text for RAG storage.
         Detects if the content is code based on file extension or content patterns and sets the metadata type accordingly.
         """
-        logger.info(f"📊 DocumentRAGTool _arun started for file: {file_name}, topic: {topic}, workspace_id: {workspace_id}, metadata: {metadata}")
-
+        # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
         if not account_id:
-            logger.error("❌ DocumentRAGTool: account_id not found. Cannot process document.")
-            return "Error: User ID not available to process document. Cannot proceed."
+            account_id = getattr(self, 'account_id', "")
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
+        logger.info(f"📊 DocumentRAGTool _arun started for file: {file_name}, topic: {topic}, workspace_id: {workspace_id}, metadata: {metadata}")
 
         metadata_to_pass = metadata if metadata else {}
         

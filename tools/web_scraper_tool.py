@@ -26,13 +26,6 @@ from langchain_core.documents import Document
 
 # WebBaseLoader es una forma conveniente y robusta de cargar contenido web.
 from langchain_community.document_loaders import WebBaseLoader
-from core.config import settings
-from core.database import *
-from core.agent import *
-from core.memory_manager import *
-from core.notes_manager import *
-from core.agenda_manager import *
-from core.reminders_manager import *
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)

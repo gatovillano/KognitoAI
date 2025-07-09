@@ -142,7 +142,7 @@ export function UpdateRepositoryDialog({
                   <li>Sincronizará los archivos con la versión más reciente de GitHub</li>
                   <li>Añadirá nuevos archivos encontrados</li>
                   <li>Actualizará archivos modificados</li>
-                  <li>Re-vectorizará el contenido actualizado</li>
+                  <li>Actualizará directamente desde la URL sin re-vectorizar</li>
                 </ul>
               </div>
             </div>

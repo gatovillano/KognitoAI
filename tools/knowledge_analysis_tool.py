@@ -31,17 +31,11 @@ async def get_interpreter_llm() -> ChatGoogleGenerativeAI:
     return _interpreter_llm
 
 
-# (CAMBIO CLAVE 1) - Añadimos `account_id` al esquema de entrada.
 class KnowledgeAnalysisInput(BaseModel):
     """Esquema de entrada para la Herramienta de Análisis de Conocimiento."""
     query: str = Field(
         ...,
         description="La petición completa del usuario en lenguaje natural, por ejemplo: 'ejecuta un análisis completo de mis notas'.",
-        json_schema_extra={"type": "string"}
-    )
-    account_id: Optional[str] = Field(
-        None,
-        description="El identificador único de la cuenta del usuario. Si no se proporciona, se obtendrá del contexto de ejecución.",
         json_schema_extra={"type": "string"}
     )
 
@@ -56,7 +50,12 @@ class KnowledgeAnalysisTool(BaseTool):
         "Tu trabajo es pasar la petición del usuario en el campo 'query' y el 'account_id' del usuario actual en el campo 'account_id'."
     )
     args_schema: Type[BaseModel] = KnowledgeAnalysisInput
+    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
     return_direct: bool = False
+
+    def __init__(self, account_id: str = "", **kwargs):
+        super().__init__(**kwargs)
+        self.account_id = account_id
 
     async def _interpret_request(self, user_query: str) -> Dict[str, Any]:
         """Usa un LLM para traducir la petición del usuario a una acción estructurada."""
@@ -90,11 +89,9 @@ class KnowledgeAnalysisTool(BaseTool):
             logger.error(f"Error interpretando la petición del usuario: {e}", exc_info=True)
             return {"action": "error", "details": str(e)}
 
-    # (CAMBIO CLAVE 3) - La firma de _arun ahora coincide con los campos del args_schema.
     async def _arun(
         self,
         query: str,
-        account_id: Optional[str] = None,
         run_manager: Optional[Any] = None,
         **kwargs: Any
     ) -> str:
@@ -105,11 +102,14 @@ class KnowledgeAnalysisTool(BaseTool):
         3. Devuelve un mensaje de confirmación al usuario.
         """
 
-        # Si account_id no se proporciona, intentar obtenerlo del contexto de configuración
-        if not account_id and run_manager and hasattr(run_manager, 'config'):
+        # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        if run_manager and hasattr(run_manager, 'config'):
             config = getattr(run_manager, 'config', {})
             configurable = config.get('configurable', {})
             account_id = configurable.get('account_id')
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
 
         # Validar que tenemos account_id
         if not account_id:

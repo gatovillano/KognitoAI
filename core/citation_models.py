@@ -4,7 +4,7 @@
 Modelos de datos para el sistema de citas y fuentes de KognitoAI.
 
 Este módulo define las estructuras de datos necesarias para implementar
-un sistema de citas similar al de OpenWebUI, donde las herramientas
+un sistema de citas, donde las herramientas
 pueden devolver tanto contexto para el LLM como fuentes estructuradas
 para mostrar al usuario.
 """

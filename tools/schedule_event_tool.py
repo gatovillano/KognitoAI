@@ -20,15 +20,12 @@ logger = logging.getLogger(__name__)
 # ¡NUEVO! Clave para pasar el ID del evento al handler
 EVENT_ID_FOR_SCHEDULING_KEY = "event_id_to_schedule"
 
-
 class ScheduleEventInput(BaseModel):
     """
     Define el esquema de entrada para la herramienta. Ya no necesita telegram_id.
     """
     description: str = Field(...)
     natural_language_datetime: str = Field(...)
-    account_id: str = Field(...)
-
 
 class ScheduleEventTool(BaseTool):
     """
@@ -39,11 +36,33 @@ class ScheduleEventTool(BaseTool):
     args_schema: Type[BaseModel] = ScheduleEventInput
     return_direct: bool = False
 
-    async def _arun(self, description: str, natural_language_datetime: str, account_id: str, **kwargs: Any) -> str:
+    async def _arun(self, description: str, natural_language_datetime: str, run_manager = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica: llama al core para crear el evento y luego guarda el
         ID del evento para que el handler programe la notificación.
         """
+        # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+        
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+        
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
         logger.info(f"Ejecutando ScheduleEventTool para la cuenta '{account_id}'...")
         try:
             # Llama a la función del core, que ahora devuelve el objeto del evento

@@ -36,13 +36,7 @@ RAW_DOCUMENT_LIST_KEY = "raw_document_list_for_pagination"
 class GetDocumentListInput(BaseModel):
     """
     Define el esquema de entrada para la herramienta de listado de documentos.
-    Valida que el LLM proporcione el identificador de la cuenta.
     """
-    # Reemplazamos telegram_id por account_id para que sea universal.
-    account_id: str = Field(
-        default="",
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Si no se proporciona, se usa el del constructor."
-    )
     # --- NUEVO: Parámetro para el ID del workspace ---
     workspace_id: Optional[str] = Field(
         None,
@@ -68,7 +62,7 @@ class GetDocumentListTool(BaseTool):
 
 
 
-    async def _arun(self, account_id: str = None, telegram_id: Optional[int] = None, workspace_id: Optional[str] = None, run_manager: Optional[Any] = None, **kwargs: Any) -> str:
+    async def _arun(self, workspace_id: Optional[str] = None, run_manager: Optional[Any] = None, **kwargs: Any) -> str:
         """
         Lógica asíncrona para listar documentos del usuario.
 
@@ -94,9 +88,9 @@ class GetDocumentListTool(BaseTool):
             if not config_workspace_id:
                 config_workspace_id = configurable.get('workspace_id')
 
-        # Usar configuración o parámetros
-        effective_account_id = config_account_id or account_id
-        effective_telegram_id = config_telegram_id or telegram_id
+        # Usar configuración o instancia
+        effective_account_id = config_account_id or getattr(self, 'account_id', "")
+        effective_telegram_id = config_telegram_id or getattr(self, 'telegram_id', None)
         effective_workspace_id = config_workspace_id
 
         if not effective_account_id:

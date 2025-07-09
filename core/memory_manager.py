@@ -179,14 +179,24 @@ class MemoryContext:
 
         try:
             async with DBSession(SessionLocal) as session:
-                # Obtener topics del usuario en el workspace actual
-                query = """
-                    SELECT name, description, is_global
-                    FROM user_document_topics
-                    WHERE account_id = :account_id
-                    AND (workspace_id = :workspace_id OR (workspace_id IS NULL AND is_global = TRUE))
-                    ORDER BY is_global DESC, name ASC
-                """
+                # Obtener topics del usuario en el workspace actual (solo específicos del workspace)
+                if self.workspace_id:
+                    query = """
+                        SELECT name, description, is_global
+                        FROM user_document_topics
+                        WHERE account_id = :account_id
+                        AND workspace_id = :workspace_id
+                        ORDER BY name ASC
+                    """
+                else:
+                    # Para contexto general, incluir solo topics globales
+                    query = """
+                        SELECT name, description, is_global
+                        FROM user_document_topics
+                        WHERE account_id = :account_id
+                        AND workspace_id IS NULL
+                        ORDER BY name ASC
+                    """
 
                 result = await session.execute(text(query), {
                     "account_id": self.account_id,
@@ -1109,11 +1119,10 @@ async def list_user_documents(
 
     OPTIMIZADO: Usa filtros directos en langchain_pg_embedding sin JOINs.
 
-    - Si se proporciona workspace_id, lista los documentos de ese workspace Y del contexto general.
+    - Si se proporciona workspace_id, lista solo los documentos específicos de ese workspace.
     - Si no, lista los documentos de la colección general del usuario o equipo.
 
-    IMPORTANTE: Cuando se especifica workspace_id, también se incluyen los documentos del contexto general
-    (workspace_id = NULL) para permitir el acceso a documentos importados del contexto general.
+    IMPORTANTE: Los workspaces están aislados - solo muestran documentos específicos del workspace.
     """
     logger.info(f"📋 Listando documentos (OPTIMIZADO) para la cuenta {account_id} (Workspace: {workspace_id if workspace_id else 'N/A'})")
 
@@ -1131,9 +1140,8 @@ async def list_user_documents(
                 params["team_id"] = team_id
 
             if workspace_id:
-                # Para workspaces, incluir tanto los documentos específicos del workspace
-                # como los del contexto general (workspace_id IS NULL)
-                clauses.append("(workspace_id = :workspace_id OR workspace_id IS NULL)")
+                # Para workspaces, incluir solo los documentos específicos del workspace
+                clauses.append("workspace_id = :workspace_id")
                 params["workspace_id"] = workspace_id
 
             if topic:
@@ -1372,8 +1380,8 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
     1. Colecciones definidas por el usuario en UserDocumentTopic (incluye vacías)
     2. Colecciones que tienen documentos en langchain_pg_embedding (con conteo)
 
-    IMPORTANTE: Cuando se especifica workspace_id, también se incluyen las colecciones del contexto general
-    (workspace_id = NULL) para permitir el acceso a colecciones importadas del contexto general.
+    IMPORTANTE: Los workspaces están aislados - solo muestran colecciones específicas del workspace.
+    Para acceder a colecciones generales desde un workspace, usar el endpoint /api/list-general-collections.
 
     Args:
         account_id: ID de la cuenta del usuario. Obligatorio para listar colecciones de usuario.
@@ -1392,13 +1400,9 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
             )
 
             if workspace_id:
-                # Para workspaces, incluir tanto las colecciones específicas del workspace
-                # como las del contexto general (workspace_id = NULL)
+                # Para workspaces, incluir solo las colecciones específicas del workspace
                 user_topics_query = user_topics_query.where(
-                    or_(
-                        UserDocumentTopic.workspace_id == uuid.UUID(workspace_id),
-                        UserDocumentTopic.workspace_id.is_(None)
-                    )
+                    UserDocumentTopic.workspace_id == uuid.UUID(workspace_id)
                 )
             elif team_id:
                 user_topics_query = user_topics_query.where(
@@ -1435,9 +1439,8 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
                 params["team_id"] = team_id
 
             if workspace_id:
-                # Para workspaces, incluir tanto las colecciones específicas del workspace
-                # como las del contexto general (workspace_id IS NULL)
-                where_clause_parts.append("(workspace_id = :workspace_id OR workspace_id IS NULL)")
+                # Para workspaces, incluir solo las colecciones específicas del workspace
+                where_clause_parts.append("workspace_id = :workspace_id")
                 params["workspace_id"] = workspace_id
             else:
                 # Para contexto general, incluir solo documentos sin workspace_id

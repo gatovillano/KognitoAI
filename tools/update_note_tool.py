@@ -26,7 +26,6 @@ from core.notes_manager import update_note
 # Configuración del logger para este módulo
 logger = logging.getLogger(__name__)
 
-
 class UpdateNoteInput(BaseModel):
     """
     Schema de entrada para la herramienta de actualización de notas.
@@ -35,10 +34,6 @@ class UpdateNoteInput(BaseModel):
     note_id: int = Field(
         ...,
         description="El ID numérico de la nota que se va a modificar. Este campo es obligatorio."
-    )
-    account_id: str = Field(
-        ...,
-        description="El identificador universal de la cuenta del usuario. Este campo es obligatorio."
     )
     new_content: Optional[str] = Field(
         None,
@@ -56,7 +51,6 @@ class UpdateNoteInput(BaseModel):
         json_schema_extra={"type": "string"}
     )
 
-
 class UpdateNoteTool(BaseTool):
     """
     Una herramienta de LangChain para que el agente pueda modificar notas existentes.
@@ -68,14 +62,20 @@ class UpdateNoteTool(BaseTool):
         "que use la herramienta `get_notes_tool` para listar sus notas y encontrar el ID correcto."
     )
     args_schema: Type[BaseModel] = UpdateNoteInput
+    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
+
+    def __init__(self, account_id: str = "", **kwargs):
+        super().__init__(**kwargs)
+        self.account_id = account_id
 
     async def _arun(
         self,
         note_id: int,
-        account_id: str,
         new_content: Optional[str] = None,
         new_title: Optional[str] = None,
-        new_category: Optional[str] = None
+        new_category: Optional[str] = None,
+        run_manager: Optional[Any] = None,
+        **kwargs: Any
     ) -> str:
         """
         Ejecuta la lógica de actualización de la nota de forma asíncrona.
@@ -83,12 +83,35 @@ class UpdateNoteTool(BaseTool):
         Esta es la corrutina que LangChain llamará. Llama a la función de lógica
         de negocio (`update_note`) con los argumentos validados por Pydantic.
 
+        Args:
+            note_id: El ID de la nota a actualizar.
+            new_content: Nuevo contenido para la nota (opcional).
+            new_title: Nuevo título para la nota (opcional).
+            new_category: Nueva categoría para la nota (opcional).
+            run_manager: Gestor de ejecución para obtener configuración.
+            **kwargs: Argumentos adicionales.
+
         Returns:
             Un mensaje de confirmación o error para que el agente lo interprete.
         """
-        logger.info(f"Ejecutando UpdateNoteTool para la nota {note_id} de la cuenta {account_id[:8]}...")
+        # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return ("Error: No se pudo obtener el account_id. Esta herramienta requiere "
+                   "identificación del usuario.")
+
+        logger.info("Ejecutando UpdateNoteTool para la nota %s de la cuenta %s...",
+                   note_id, account_id[:8] if account_id else "unknown")
         try:
-            # Asumimos que `update_note` será refactorizada para aceptar `account_id` en lugar de `telegram_id`
+            # Llamar a update_note con account_id
             result_message = await update_note(
                 # Cambiar el primer argumento a account_id cuando refactoricemos el manager
                 account_id=account_id, # Argumento ficticio por ahora, deberá ser real
@@ -99,7 +122,8 @@ class UpdateNoteTool(BaseTool):
             )
             return result_message
         except Exception as e:
-            logger.error(f"Error en UpdateNoteTool para la cuenta {account_id[:8]}: {e}", exc_info=True)
+            logger.error("Error en UpdateNoteTool para la cuenta %s: %s",
+                        account_id[:8] if account_id else "unknown", e, exc_info=True)
             return f"Ocurrió un error inesperado al intentar actualizar la nota: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

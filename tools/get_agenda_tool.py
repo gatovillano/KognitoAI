@@ -12,7 +12,7 @@ depender de la plataforma desde la que se realiza la consulta.
 """
 
 import logging
-from typing import Type, Any
+from typing import Type, Any, Optional
 
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
@@ -33,11 +33,6 @@ class GetAgendaInput(BaseModel):
         ...,
         description="El día para el cual se consulta la agenda. Puede ser 'hoy', 'mañana', o una fecha específica como '15 de junio' o 'próximo jueves'."
     )
-    # Cambiamos telegram_id por account_id para que sea universal.
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
 
 
 class GetAgendaTool(BaseTool):
@@ -54,18 +49,31 @@ class GetAgendaTool(BaseTool):
     args_schema: Type[BaseModel] = GetAgendaInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
 
-    async def _arun(self, target_day: str, account_id: str, **kwargs: Any) -> str:
+    async def _arun(self, target_day: str, run_manager: Optional[Any] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
             target_day: El día específico a consultar.
-            account_id: El ID universal de la cuenta del usuario.
+            run_manager: Gestor de ejecución para obtener configuración.
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
             Una cadena de texto con la lista de eventos o un mensaje indicando que no hay eventos.
         """
+        # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
         logger.info(f"Ejecutando GetAgendaTool para la cuenta '{account_id}' en el día: '{target_day}'.")
         try:
             # Llama a la función de lógica de negocio, que ahora debe ser actualizada

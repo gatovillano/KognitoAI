@@ -62,7 +62,7 @@ class VectorDBQueryTool(BaseTool):
     args_schema: Type[BaseModel] = VectorDBQueryInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
 
-    async def _arun(self, query: str, account_id: str, k: int = 5, collection_name: Optional[str] = None, topic: Optional[str] = None, workspace_id: Optional[str] = None, **kwargs: Any) -> str:
+    async def _arun(self, query: str, run_manager = None, **kwargs k: int = 5, collection_name: Optional[str] = None, topic: Optional[str] = None, workspace_id: Optional[str] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -78,7 +78,29 @@ class VectorDBQueryTool(BaseTool):
         Returns:
             Un mensaje de texto con los resultados formateados o un mensaje de error.
         """
-        logger.info(
+                # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+        
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+        
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
+logger.info(
             f"Ejecutando VectorDBQueryTool para la cuenta '{account_id}' con consulta: '{query[:50]}...'"
             f"{f', topic: {topic}' if topic else ''}{f', workspace_id: {workspace_id}' if workspace_id else ''}"
         )

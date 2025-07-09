@@ -11,6 +11,9 @@ httpx
 sqlalchemy[asyncio]
 psycopg[async] # Driver de BD
 pgvector
+neo4j # Driver oficial para Neo4j
+cognee # Biblioteca para procesamiento semántico y grafos
+qdrant-client # Cliente oficial para Qdrant
 
 # --- LangChain y Lógica de IA (Stack de Google) ---
 langchain

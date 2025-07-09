@@ -27,10 +27,6 @@ class GetAnalysisResultsInput(BaseModel):
     Define el esquema de entrada para la herramienta de recuperación de resultados de análisis.
     Valida que el argumento necesario sea proporcionado por el LLM.
     """
-    account_id: str = Field(
-        default="",
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Si no se proporciona, se usa el del constructor."
-    )
     action: str = Field(
         "summary",
         description="La acción a realizar. Puede ser 'summary' para mostrar un resumen de los análisis o 'full_analysis' para mostrar el contenido completo de un análisis específico."
@@ -62,14 +58,16 @@ class GetAnalysisResultsTool(BaseTool):
         "Estos resultados incluyen resúmenes ejecutivos, temas clave, conceptos centrales y relaciones."
     )
     args_schema: Type[BaseModel] = GetAnalysisResultsInput
+    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
     return_direct: bool = False  # El agente debe procesar la respuesta.
 
-    def __init__(self, **kwargs):
+    def __init__(self, account_id: str = "", **kwargs):
         """Inicializa la herramienta con cualquier configuración necesaria."""
         super().__init__(**kwargs)
+        self.account_id = account_id
         logger.info("Inicializando GetAnalysisResultsTool")
 
-    async def _arun(self, account_id: str = None, action: str = "summary", limit: int = 5, document_name: str = "", analysis_id: str = "", run_manager: Optional[Any] = None, **kwargs: Any) -> str:
+    async def _arun(self, action: str = "summary", limit: int = 5, document_name: str = "", analysis_id: str = "", run_manager: Optional[Any] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -91,25 +89,16 @@ class GetAnalysisResultsTool(BaseTool):
             configurable = config.get('configurable', {})
             config_account_id = configurable.get('account_id')
 
-        # Usar configuración o parámetro
-        effective_account_id = config_account_id or account_id
+        # Usar configuración o instancia como fallback
+        effective_account_id = config_account_id or getattr(self, 'account_id', "")
 
         if not effective_account_id:
             return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
 
         logger.info(f"Ejecutando GetAnalysisResultsTool para la cuenta '{effective_account_id}' con acción '{action}', límite de {limit} resultados, documento '{document_name}' y análisis ID '{analysis_id}'.")
         try:
-            # Parsear account_id si viene como JSON
+            # Usar el account_id efectivo
             actual_account_id = effective_account_id
-            if isinstance(account_id, str) and account_id.startswith('{'):
-                try:
-                    import json
-                    parsed_data = json.loads(account_id)
-                    actual_account_id = parsed_data.get('account_id', account_id)
-                    logger.info(f"Account ID parseado desde JSON: {actual_account_id}")
-                except json.JSONDecodeError:
-                    logger.warning(f"No se pudo parsear account_id como JSON: {account_id}")
-                    actual_account_id = account_id
 
             async with DBSession(SessionLocal) as db:
                 try:

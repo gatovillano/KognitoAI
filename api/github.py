@@ -136,7 +136,7 @@ class GitHubVectorizationRequest(BaseModel):
 
 class GitHubUpdateRequest(BaseModel):
     repo_url: str
-    collection_topic: Optional[str] = "repositorio"
+    collection_topic: Optional[str] = None
 
 @router.post("/start-vectorization", status_code=status.HTTP_202_ACCEPTED)
 async def start_vectorization_endpoint(

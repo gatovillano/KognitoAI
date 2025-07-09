@@ -58,6 +58,8 @@ from tools.web_search_tool import get_web_search_tool
 from tools.ddg_search_tool import create_ddg_search_tool
 from tools.analyze_text_for_insights_tool import AnalyzeTextForInsightsTool
 from tools.analyze_code_for_insights_tool import AnalyzeCodeForInsightsTool
+from tools.text_to_knowledge_graph_tool import TextToKnowledgeGraphTool
+from tools.mindmap_to_graph_tool import MindmapToGraphTool
 from tools.github_repo_tool import GitHubRepoTool
 from tools.mindmap_generator_tool import MindmapGeneratorTool
 # Módulo de Procesamiento de Imágenes
@@ -81,13 +83,14 @@ logger = logging.getLogger(__name__)
 
 
 
-def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List[Tool]:
+def get_all_langchain_tools(account_id: str = "", telegram_id: str = "", workspace_id: str = "") -> List[Tool]:
     """
     Recoge, instancia y devuelve una lista de todas las herramientas LangChain disponibles.
 
     Args:
         account_id (str): The account ID of the user, used for tools that require user-specific data.
         telegram_id (str): The Telegram ID of the user, used for specific tools that interact with Telegram.
+        workspace_id (str): The workspace ID of the user, used for tools that require workspace-specific data.
 
     Returns:
         Una lista de objetos `Tool` que el agente podrá utilizar.
@@ -106,7 +109,7 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
         # Documentos
         GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool, ExtractDocumentTitlesTool,
         # Creación de Contenido y Búsqueda (excepto WebSearchTool que usa fábrica)
-        ImageGenerationTool, WebScraperTool, AddWebToRAGTool, AnalyzeTextForInsightsTool, AnalyzeCodeForInsightsTool, NaturalQueryInterpreterTool,
+        ImageGenerationTool, WebScraperTool, AddWebToRAGTool, AnalyzeTextForInsightsTool, AnalyzeCodeForInsightsTool, TextToKnowledgeGraphTool, MindmapToGraphTool, NaturalQueryInterpreterTool,
         # Herramienta de GitHub
         GitHubRepoTool,
         # Mapa Mental
@@ -143,13 +146,22 @@ def get_all_langchain_tools(account_id: str = "", telegram_id: str = "") -> List
                 UpdateProfileTool, MemoryAddTool, ConversationHistoryAnalyzerTool, ConversationContextAnalyzerTool,
                 GetDocumentListTool, GetDocumentContentTool, DeleteDocumentTool, DocumentRAGTool,
                 ImageGenerationTool, GetProactiveInsightsTool, NaturalQueryInterpreterTool,
-                ProactiveKnowledgeLinkerTool, KnowledgeAnalysisTool, ComprehensiveWebAnalysisTool, AnalyzeTextForInsightsTool, AnalyzeCodeForInsightsTool,
+                ProactiveKnowledgeLinkerTool, KnowledgeAnalysisTool, ComprehensiveWebAnalysisTool, AnalyzeTextForInsightsTool, AnalyzeCodeForInsightsTool, TextToKnowledgeGraphTool, MindmapToGraphTool,
                 GetAnalysisResultsTool, MindmapGeneratorTool, ImageBackgroundEraserTool, ScopedRagAnalysisTool,
                 VectorDBSearchTool, MultiQuerySearchTool, ScheduleToolExecutionTool, ListScheduledToolsTool, MemorySearchOptimizedTool, MemoryContextSearchTool
             ]:
                 kwargs = {"account_id": account_id}
                 if ToolClass in [SetReminderTool, ImageGenerationTool, GetDocumentContentTool]:
                     kwargs["telegram_id"] = telegram_id
+                # Agregar workspace_id para herramientas que lo necesiten
+                if workspace_id and ToolClass in [
+                    GetDocumentListTool, GetDocumentContentTool, DocumentRAGTool,
+                    MemorySearchOptimizedTool, MemoryContextSearchTool,
+                    GetProactiveInsightsTool, KnowledgeAnalysisTool,
+                    ComprehensiveWebAnalysisTool, GetAnalysisResultsTool,
+                    ScopedRagAnalysisTool, VectorDBSearchTool, MultiQuerySearchTool
+                ]:
+                    kwargs["workspace_id"] = workspace_id
                 tool_instance = ToolClass(**kwargs)
                 if ToolClass.__name__ == "KnowledgeAnalysisTool":
                     logger.debug(f"  [DEBUG] Intentando instanciar KnowledgeAnalysisTool con kwargs: {kwargs}")

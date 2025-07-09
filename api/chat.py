@@ -220,12 +220,15 @@ async def create_and_run_agent_streaming(
 
         # Configurar historial de chat
         session_id = f"{account_id}_{thread_id}"
-        database_url = os.getenv("DATABASE_URL")
-        if not database_url:
-            raise HTTPException(status_code=500, detail="DATABASE_URL no está configurado")
+        from core.config import settings
+        if not settings.database_url:
+            raise HTTPException(status_code=500, detail="Database URL no está configurado")
+        database_url = settings.database_url.replace("+psycopg", "")
 
+        # Convertir la URL de SQLAlchemy a formato compatible con psycopg
+        db_sync_url = database_url.replace("+psycopg", "")
         chat_message_history = PostgresChatMessageHistory(
-            connection_string=database_url,
+            connection_string=db_sync_url,
             session_id=session_id
         )
 
@@ -252,7 +255,11 @@ async def create_and_run_agent_streaming(
 Responde de manera clara, útil y en español."""
 
         # Configurar herramientas
-        all_tools = get_all_langchain_tools(account_id=account_id, telegram_id=str(telegram_id) if telegram_id else "")
+        all_tools = get_all_langchain_tools(
+            account_id=account_id,
+            telegram_id=str(telegram_id) if telegram_id else "",
+            workspace_id=workspace_id or ""
+        )
         tools = all_tools
 
         if mode == 'knowledgeAnalysis':
@@ -311,10 +318,15 @@ Responde de manera clara, útil y en español."""
             "chat_history": history + [current_human_message],
         }
 
+        # Configurar contexto del agente (igual que en core/agent.py)
+        config_data = {"account_id": account_id, "telegram_id": telegram_id}
+        if workspace_id:
+            config_data["workspace_id"] = workspace_id
+
         full_response = ""
         async for chunk in agent_executor.astream(
             input_data,
-            config={"configurable": {"account_id": account_id, "telegram_id": telegram_id}}
+            config={"configurable": config_data}
         ):
             if "output" in chunk:
                 content = chunk["output"]

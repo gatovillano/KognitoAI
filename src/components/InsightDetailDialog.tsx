@@ -9,7 +9,7 @@ interface Insight {
   type: string;
   summary: string;
   created_at: string;
-  related_items: any[];
+  related_items: any; // Cambiado a 'any' para permitir objetos con propiedad 'items'
   action_suggestion?: string;
   synthetic_name?: string; // Asegúrate de que coincida con la interfaz en page.tsx
 }
@@ -101,7 +101,7 @@ export function InsightDetailDialog({ insight, isOpen, onOpenChange }: { insight
                         items = [];
                       }
 
-                      return items.map((item, index) => (
+                      return items.map((item: any, index: number) => (
                         <motion.div
                           key={index}
                           className="p-4 bg-white/60 dark:bg-slate-900/40 rounded-2xl border border-slate-200/50 dark:border-slate-600/50 hover:bg-white/80 dark:hover:bg-slate-900/60 transition-colors duration-200"

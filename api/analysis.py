@@ -642,15 +642,14 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
 
                             lines = content.split('\n')
                             for line in lines:
-                                if line.startswith('ETIQUETA:'):
-                                    term = line.replace('ETIQUETA:', '').strip()
+                                if 'ETIQUETA:' in line:
+                                    term = line.split('ETIQUETA:')[1].strip()
                                     if term and len(term.split()) <= 3:
                                         representative_term = term
-                                elif line.startswith('DESCRIPCIÓN:'):
-                                    desc = line.replace('DESCRIPCIÓN:', '').strip()
+                                elif 'DESCRIPCIÓN:' in line:
+                                    desc = line.split('DESCRIPCIÓN:')[1].strip()
                                     if desc and len(desc) <= 150:
                                         description = desc
-
                             if not representative_term or representative_term == f"Grupo {cluster_id + 1}":
                                 representative_term = f"Grupo {cluster_id + 1}"
 
@@ -847,7 +846,9 @@ class AnalyzeCodeRequest(BaseModel):
     repo_name: str
 
 class CustomAnalysisRequest(BaseModel):
-    file_name: str
+    file_name: Optional[str] = None  # Opcional cuando se analiza colección completa
+    topic: Optional[str] = None  # Para análisis de colección completa
+    analyze_full_collection: bool = False  # Flag para indicar análisis de colección
     objective: str
     expected_result: Optional[str] = None
     extension: str  # 'brief', 'standard', 'detailed'
@@ -1060,10 +1061,21 @@ async def start_custom_analysis_endpoint(
 ):
     """
     Inicia un análisis personalizado con campos y configuración definidos por el usuario.
+    Puede analizar un documento individual o una colección completa.
     """
+    # Validar que se proporcione file_name o topic según el tipo de análisis
+    if req.analyze_full_collection:
+        if not req.topic:
+            raise HTTPException(status_code=400, detail="El campo 'topic' es requerido para análisis de colección completa")
+        analysis_target = f"Colección: {req.topic}"
+    else:
+        if not req.file_name:
+            raise HTTPException(status_code=400, detail="El campo 'file_name' es requerido para análisis de documento individual")
+        analysis_target = req.file_name
+
     new_task = AnalysisTask(
         account_id=uuid.UUID(current_account_id),
-        file_name=f"Análisis Personalizado: {req.file_name}",
+        file_name=f"Análisis Personalizado: {analysis_target}",
         status="pending",
         analysis_type="custom"
     )
@@ -1076,6 +1088,8 @@ async def start_custom_analysis_endpoint(
         str(new_task.id),
         current_account_id,
         req.file_name,
+        req.topic,
+        req.analyze_full_collection,
         req.objective,
         req.expected_result,
         req.extension,
@@ -1162,7 +1176,7 @@ async def get_all_analysis_endpoint(
                     summary = task.result_payload['resumen_ejecutivo']
                 elif 'resumen_semantico' in task.result_payload:
                     summary = task.result_payload['resumen_semantico'][:200] + "..." if len(task.result_payload['resumen_semantico']) > 200 else task.result_payload['resumen_semantico']
-                elif 'sections' in task.result_payload and task.result_payload['sections']:
+                elif 'sections' in task.result_payload and len(task.result_payload['sections']) > 0:
                     # Para análisis personalizados, extraer resumen de la primera sección
                     first_section = task.result_payload['sections'][0]
                     if 'content' in first_section:
@@ -1171,6 +1185,8 @@ async def get_all_analysis_endpoint(
                     else:
                         sections_count = len(task.result_payload['sections'])
                         summary = f"Análisis personalizado con {sections_count} secciones"
+                elif 'sections' in task.result_payload and len(task.result_payload['sections']) == 0:
+                    summary = "Análisis personalizado sin secciones."
                 elif 'formatted_result' in task.result_payload:
                     summary = str(task.result_payload['formatted_result'])[:200] + "..."
 
@@ -1577,7 +1593,9 @@ async def get_analysis_by_type_endpoint(
 async def run_custom_analysis_and_save(
     task_id: str,
     account_id: str,
-    file_name: str,
+    file_name: Optional[str],
+    topic: Optional[str],
+    analyze_full_collection: bool,
     objective: str,
     expected_result: Optional[str],
     extension: str,
@@ -1585,6 +1603,7 @@ async def run_custom_analysis_and_save(
 ):
     """
     Función en segundo plano para realizar análisis personalizado.
+    Puede analizar un documento individual o una colección completa.
     """
     async with SessionLocal() as db_session: # type: ignore
         try:
@@ -1595,10 +1614,47 @@ async def run_custom_analysis_and_save(
 
             logger.info(f"Iniciando análisis personalizado para tarea {task_id}...")
 
-            # Obtener el contenido del documento
-            text_content = await get_full_document_content(account_id, file_name)
-            if not text_content:
-                raise ValueError("Contenido del documento no encontrado.")
+            # Obtener el contenido según el tipo de análisis
+            if analyze_full_collection:
+                if not topic:
+                    raise ValueError("Topic es requerido para análisis de colección completa.")
+
+                # Obtener todos los documentos de la colección
+                from core.memory_manager import list_documents_in_topic
+                documents = await list_documents_in_topic(account_id, topic)
+
+                if not documents:
+                    raise ValueError(f"No se encontraron documentos en la colección '{topic}'.")
+
+                # Obtener contenido de todos los documentos
+                all_docs_content = []
+                for doc in documents:
+                    doc_content = await get_full_document_content(account_id, doc['file_name'])
+                    if doc_content:
+                        all_docs_content.append({
+                            'title': doc['file_name'],
+                            'content': doc_content
+                        })
+
+                if not all_docs_content:
+                    raise ValueError("No se pudo obtener contenido de los documentos de la colección.")
+
+                # Combinar contenido para análisis
+                combined_content = ""
+                for doc in all_docs_content:
+                    combined_content += f"--- DOCUMENTO: {doc['title']} ---\n{doc['content']}\n\n"
+
+                text_content = combined_content
+                analysis_target = f"Colección '{topic}' ({len(all_docs_content)} documentos)"
+            else:
+                if not file_name:
+                    raise ValueError("file_name es requerido para análisis de documento individual.")
+
+                text_content = await get_full_document_content(account_id, file_name)
+                if not text_content:
+                    raise ValueError("Contenido del documento no encontrado.")
+
+                analysis_target = f"Documento '{file_name}'"
 
             # Preparar el prompt personalizado
             extension_instructions = {
@@ -1611,8 +1667,10 @@ async def run_custom_analysis_and_save(
             for field in fields:
                 field_instructions.append(f"- **{field['name']}**: {field['description']}")
 
+            analysis_type_text = "colección de documentos" if analyze_full_collection else "documento"
+
             prompt = f"""
-Realiza un análisis personalizado del siguiente documento con estas especificaciones:
+Realiza un análisis personalizado de la siguiente {analysis_type_text} con estas especificaciones:
 
 **OBJETIVO DEL ANÁLISIS:**
 {objective}
@@ -1631,9 +1689,9 @@ Realiza un análisis personalizado del siguiente documento con estas especificac
 2. Cada sección debe estar en formato Markdown con el título como ##
 3. Proporciona contenido sustancial para cada campo
 4. Mantén un tono profesional y analítico
-5. Basa tu análisis únicamente en el contenido del documento
+5. {"Si analizas una colección, identifica patrones, conexiones y temas transversales entre documentos" if analyze_full_collection else "Basa tu análisis únicamente en el contenido del documento"}
 
-**DOCUMENTO A ANALIZAR:**
+**{analysis_target.upper()} A ANALIZAR:**
 {text_content}
 
 Responde ÚNICAMENTE con el análisis estructurado en formato Markdown, sin comentarios adicionales.
@@ -1674,13 +1732,18 @@ Responde ÚNICAMENTE con el análisis estructurado en formato Markdown, sin come
                     "objective": objective,
                     "expected_result": expected_result,
                     "extension": extension,
-                    "fields": fields
+                    "fields": fields,
+                    "analyze_full_collection": analyze_full_collection,
+                    "analysis_target": analysis_target
                 },
                 "tool_used": "custom_analysis_tool",
                 "analysis_metadata": {
                     "tool_used": "custom_analysis_tool",
                     "analysis_type": "custom",
                     "file_name": file_name,
+                    "topic": topic,
+                    "analyze_full_collection": analyze_full_collection,
+                    "analysis_target": analysis_target,
                     "fields_count": len(fields),
                     "extension": extension,
                     "created_at": datetime.now().isoformat()

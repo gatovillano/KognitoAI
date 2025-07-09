@@ -18,14 +18,9 @@ logger = logging.getLogger(__name__)
 
 class MultiQuerySearchInput(BaseModel):
     """Esquema de entrada para la herramienta de búsqueda multi-consulta."""
-    
-    account_id: str = Field(
-        ..., 
-        description="ID de la cuenta del usuario",
-        json_schema_extra={"type": "string"}
-    )
+
     query: str = Field(
-        ..., 
+        ...,
         description="Consulta de búsqueda original",
         json_schema_extra={"type": "string"}
     )
@@ -102,12 +97,16 @@ class MultiQuerySearchTool(BaseTool):
         "• Compatible con todos los filtros del sistema (workspace, topic, etc.) "
         "\n⚡ OPTIMIZADO: Aprovecha la infraestructura de búsqueda optimizada de Kognito."
     )
-    
+
     args_schema: Type[BaseModel] = MultiQuerySearchInput
+
+    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
+    def __init__(self, account_id: str = "", **kwargs):
+        super().__init__(**kwargs)
+        self.account_id = account_id
 
     async def _arun(
         self,
-        account_id: str,
         query: str,
         content_type: Union[str, None] = None,
         topic: Union[str, None] = None,
@@ -118,10 +117,40 @@ class MultiQuerySearchTool(BaseTool):
         num_queries: Union[int, None] = 3,
         fusion_method: Union[str, None] = "rrf",
         include_shared: Union[bool, None] = True,
+        run_manager = None,
+        **kwargs
     ) -> str:
         """
         Ejecuta la búsqueda multi-consulta de forma asíncrona.
         """
+        # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return json.dumps({
+                "status": "error",
+                "message": "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario.",
+                "results": []
+            }, ensure_ascii=False, indent=2)
+
+        logger.info(f"Ejecutando MultiQuerySearchTool para la cuenta '{account_id}' con consulta: '{query}'")
+
         try:
             # Determinar visibility_teams basado en include_shared
             visibility_teams = None if include_shared else []
@@ -180,7 +209,6 @@ class MultiQuerySearchTool(BaseTool):
 
     def _run(
         self,
-        account_id: str,
         query: str,
         content_type: Union[str, None] = None,
         topic: Union[str, None] = None,
@@ -191,62 +219,23 @@ class MultiQuerySearchTool(BaseTool):
         num_queries: Union[int, None] = 3,
         fusion_method: Union[str, None] = "rrf",
         include_shared: Union[bool, None] = True,
+        run_manager = None,
+        **kwargs
     ) -> str:
         """
         Ejecuta la búsqueda multi-consulta de forma síncrona.
         """
-        try:
-            # Determinar visibility_teams basado en include_shared
-            visibility_teams = None if include_shared else []
-            
-            results = asyncio.run(multi_query_search(
-                account_id=account_id,
-                query=query,
-                content_type=content_type,
-                topic=topic,
-                category=category,
-                workspace_id=workspace_id,
-                team_id=team_id,
-                visibility_teams=visibility_teams,
-                k=k or 5,
-                num_queries=num_queries or 3,
-                fusion_method=fusion_method or "rrf"
-            ))
-            
-            if not results:
-                return json.dumps({
-                    "status": "no_results",
-                    "message": "No se encontraron resultados relevantes",
-                    "results": []
-                }, ensure_ascii=False, indent=2)
-            
-            # Formatear resultados para mejor legibilidad
-            formatted_results = []
-            for i, result in enumerate(results):
-                formatted_result = {
-                    "rank": i + 1,
-                    "content": result.get('document', ''),
-                    "metadata": result.get('cmetadata', {}),
-                    "topic": result.get('topic'),
-                    "category": result.get('category'),
-                    "similarity_score": result.get('similarity_score')
-                }
-                formatted_results.append(formatted_result)
-            
-            return json.dumps({
-                "status": "success",
-                "query": query,
-                "method": "multi_query_retrieval",
-                "fusion_method": fusion_method or "rrf",
-                "num_queries_generated": num_queries or 3,
-                "total_results": len(formatted_results),
-                "results": formatted_results
-            }, ensure_ascii=False, indent=2)
-            
-        except Exception as e:
-            logger.error(f"❌ Error en MultiQuerySearchTool: {e}", exc_info=True)
-            return json.dumps({
-                "status": "error",
-                "message": f"Error ejecutando búsqueda multi-consulta: {str(e)}",
-                "results": []
-            }, ensure_ascii=False, indent=2)
+        return asyncio.run(self._arun(
+            query=query,
+            content_type=content_type,
+            topic=topic,
+            category=category,
+            workspace_id=workspace_id,
+            team_id=team_id,
+            k=k,
+            num_queries=num_queries,
+            fusion_method=fusion_method,
+            include_shared=include_shared,
+            run_manager=run_manager,
+            **kwargs
+        ))

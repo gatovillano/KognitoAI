@@ -53,7 +53,7 @@ class Config:
         self.llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", 0.4))
 
         self.ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text") # Modelo de embedding de Ollama
-        self.ollama_api_url: str = os.getenv("OLLAMA_API_URL", "http://196.168.100.106:11434") # URL interna del servicio Ollama
+        self.ollama_api_url: str = os.getenv("OLLAMA_API_URL", "http://172.22.0.1:11434") # URL interna del servicio Ollama (Gateway Docker)
 
 
         # --- Configuración de Telegram ---
@@ -92,6 +92,14 @@ class Config:
         self.postgres_db: Optional[str] = os.getenv("POSTGRES_DB")
         # URL de conexión completa, construida en docker-compose.yml, pero leída aquí para validación.
         self.database_url: Optional[str] = os.getenv("DATABASE_URL")
+
+        # --- Configuración de Neo4j (Base de Datos de Grafos) ---
+        self.neo4j_uri: str = os.getenv("NEO4J_URI", "bolt://neo4j_db:7687")
+        self.neo4j_user: str = os.getenv("NEO4J_USER", "neo4j")
+        self.neo4j_password: Optional[str] = os.getenv("NEO4J_PASSWORD")
+
+        # --- Configuración de Cognee (Servicio MCP) ---
+        self.cognee_api_url: str = os.getenv("COGNEE_API_URL", "http://cognee_service:8000")
         
         
         # --- Configuración de RAG (Chunking) ---
@@ -217,6 +225,12 @@ class Config:
             logger.warning("⚠️ ADVERTENCIA: TELEGRAM_WEBAPP_URL no está definido. El panel de control no será accesible.")
         if not self.admin_telegram_ids:
             logger.warning("⚠️ ADVERTENCIA: ADMIN_TELEGRAM_IDS no está configurado. Ningún usuario tendrá privilegios de administrador.")
+
+        # Validaciones para Neo4j y Cognee.
+        if not self.neo4j_password:
+            logger.warning("⚠️ ADVERTENCIA: NEO4J_PASSWORD no está definido. La base de datos de grafos no funcionará.")
+        if not self.cognee_api_url:
+            logger.warning("⚠️ ADVERTENCIA: COGNEE_API_URL no está definido. La integración con Cognee no funcionará.")
         
 # Crear una instancia única de la configuración para que sea importada por otros módulos.
 settings = Config()

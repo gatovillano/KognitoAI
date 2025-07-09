@@ -58,9 +58,8 @@ class ConversationHistoryAnalyzerTool(BaseTool):
 
     async def _arun(
         self,
-        account_id: str,
         thread_ids_str: Optional[str] = None,
-        background_tasks: Optional[BackgroundTasks] = None,
+        run_manager = None,
         **kwargs: Any
     ) -> str:
         """
@@ -75,9 +74,34 @@ class ConversationHistoryAnalyzerTool(BaseTool):
         Returns:
             Un mensaje de texto indicando que el análisis ha sido iniciado.
         """
+                # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+        
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+        
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
         logger.info(f"Ejecutando ConversationHistoryAnalyzerTool para la cuenta '{account_id}'.")
 
         thread_ids = thread_ids_str.split(',') if thread_ids_str else None
+
+        # Obtener background_tasks de kwargs si está disponible
+        background_tasks = kwargs.get('background_tasks')
 
         if background_tasks:
             background_tasks.add_task(self.analyze_conversation_history, account_id, thread_ids)

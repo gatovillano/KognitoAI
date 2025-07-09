@@ -70,7 +70,7 @@ class UpdateDocumentMetadataTool(BaseTool):
     args_schema: Type[BaseModel] = UpdateDocumentMetadataInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
 
-    async def _arun(self, account_id: str, file_name: str, new_title: Optional[str] = None, new_topic: Optional[str] = None, team_id: Optional[str] = None, workspace_id: Optional[str] = None, **kwargs: Any) -> str: # <-- workspace_id añadido aquí
+    async def _arun(self, run_manager = None, **kwargs file_name: str, new_title: Optional[str] = None, new_topic: Optional[str] = None, team_id: Optional[str] = None, workspace_id: Optional[str] = None, **kwargs: Any) -> str: # <-- workspace_id añadido aquí
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 

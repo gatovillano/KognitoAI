@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer'; // Importamos el componente de Markdown
 import apiClient from '@/lib/api';
 import type { Document } from './columns'; // Importamos el tipo
 
@@ -51,7 +52,7 @@ export function PreviewDocumentDialog({ document, isOpen, onOpenChange }: Previe
                 {isLoading ? (
                     <p>Cargando contenido...</p>
                 ) : (
-                    <pre className="text-sm whitespace-pre-wrap font-sans">{content}</pre>
+                    <InlineMarkdownRenderer content={content} />
                 )}
             </ScrollArea>
         </div>

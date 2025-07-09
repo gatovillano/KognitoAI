@@ -80,12 +80,15 @@ class ProactiveKnowledgeLinkerTool(BaseTool):
     args_schema: Type[BaseModel] = ProactiveKnowledgeLinkerInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
 
-    def __init__(self, **kwargs):
+    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
+
+    def __init__(self, account_id: str = "", **kwargs):
         """Inicializa la herramienta con cualquier configuración necesaria."""
         super().__init__(**kwargs)
+        self.account_id = account_id
         logger.info("Inicializando ProactiveKnowledgeLinkerTool")
 
-    async def _arun(self, account_id: str, new_entry_content: str, new_entry_title: Optional[str] = None, new_entry_type: Optional[str] = "general", new_entry_category: Optional[str] = None, user_query: Optional[str] = None, **kwargs: Any) -> str:
+    async def _arun(self, run_manager = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -101,8 +104,37 @@ class ProactiveKnowledgeLinkerTool(BaseTool):
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
+                # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+        
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+        
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
         logger.info(f"Ejecutando ProactiveKnowledgeLinkerTool para la cuenta '{account_id}'.")
         try:
+            # Extraer parámetros de kwargs
+            user_query = kwargs.get('user_query')
+            new_entry_content = kwargs.get('new_entry_content')
+            new_entry_title = kwargs.get('new_entry_title')
+            new_entry_type = kwargs.get('new_entry_type', 'general')
+            new_entry_category = kwargs.get('new_entry_category')
+            
             if user_query:
                 # Análisis bajo demanda basado en la consulta del usuario
                 analysis_request = await interpret_user_request_for_analysis(user_query)

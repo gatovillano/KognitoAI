@@ -56,6 +56,10 @@ export default function RepositoriesPage() {
   const [isCollectionAnalysisOpen, setIsCollectionAnalysisOpen] = useState(false);
   const [collectionPollingId, setCollectionPollingId] = useState<string | null>(null);
 
+  // Estados para actualización de repositorios
+  const [updatePollingId, setUpdatePollingId] = useState<string | null>(null);
+  const [updatingRepoName, setUpdatingRepoName] = useState<string | null>(null);
+
   // Estado para el historial de análisis
   const [savedAnalyses, setSavedAnalyses] = useState<any[]>([]);
 
@@ -164,6 +168,35 @@ export default function RepositoriesPage() {
     return () => clearInterval(poller);
   }, [collectionPollingId, fetchPageData]);
 
+  // --- Polling para Actualización de Repositorios ---
+  useEffect(() => {
+    if (!updatePollingId) return;
+    const poller = setInterval(async () => {
+      try {
+        const response = await apiClient.get(`/api/analysis/get-analysis-result/${updatePollingId}`);
+        const { status, result, error } = response.data;
+        if (status === 'completed') {
+          clearInterval(poller);
+          setUpdatePollingId(null);
+          setUpdatingRepoName(null);
+          toast.success(`¡Repositorio ${updatingRepoName} actualizado correctamente!`);
+          fetchPageData();
+        } else if (status === 'failed') {
+          clearInterval(poller);
+          setUpdatePollingId(null);
+          setUpdatingRepoName(null);
+          toast.error(`Error al actualizar el repositorio: ${error}`);
+        }
+      } catch (err) {
+        clearInterval(poller);
+        setUpdatePollingId(null);
+        setUpdatingRepoName(null);
+        toast.error("Error al consultar el estado de la actualización.");
+      }
+    }, 3000); // Polling cada 3 segundos para actualizaciones
+    return () => clearInterval(poller);
+  }, [updatePollingId, updatingRepoName, fetchPageData]);
+
   // --- Handler para Extraer Títulos de la Colección ---
   const handleExtractTitles = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
@@ -185,9 +218,23 @@ export default function RepositoriesPage() {
   };
 
   // --- Handler para Actualizar Repositorio ---
-  const handleUpdateRepository = (repoName: string, repoUrl: string) => {
-    setRepoToUpdate({ name: repoName, url: repoUrl });
-    setIsUpdateRepoOpen(true);
+  const handleUpdateRepository = async (repoName: string, repoUrl: string) => {
+    if (docPollingId || collectionPollingId || updatePollingId) {
+      toast.info("Ya hay un proceso en progreso.");
+      return;
+    }
+
+    try {
+      const response = await apiClient.post("/api/github/update-repository", {
+        repo_url: repoUrl,
+      });
+
+      setUpdatePollingId(response.data.task_id);
+      setUpdatingRepoName(repoName);
+      toast.info(`Actualización del repositorio "${repoName}" iniciada en segundo plano.`);
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || "Error al iniciar la actualización del repositorio.");
+    }
   };
 
   // Usar datos de repositorios directamente desde la API
@@ -229,10 +276,15 @@ export default function RepositoriesPage() {
         </div>
       </div>
       
-      {(docPollingId || collectionPollingId) && (
+      {(docPollingId || collectionPollingId || updatePollingId) && (
           <div className="bg-muted text-muted-foreground p-3 rounded-md mb-4 flex items-center gap-2 text-sm animate-pulse">
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Un análisis está en progreso. La interfaz sigue siendo funcional...</span>
+              <span>
+                {updatePollingId
+                  ? `Actualizando repositorio "${updatingRepoName}" en segundo plano...`
+                  : "Un análisis está en progreso. La interfaz sigue siendo funcional..."
+                }
+              </span>
           </div>
       )}
 
@@ -260,15 +312,26 @@ export default function RepositoriesPage() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="opacity-0 group-hover:opacity-100 transition-opacity z-30"
+                    className={`transition-opacity z-30 ${
+                      updatePollingId && updatingRepoName === repo.name
+                        ? "opacity-100"
+                        : "opacity-0 group-hover:opacity-100"
+                    }`}
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
                       handleUpdateRepository(repo.name, repo.url);
                     }}
-                    title="Actualizar repositorio"
+                    title={
+                      updatePollingId && updatingRepoName === repo.name
+                        ? "Actualizando..."
+                        : "Actualizar repositorio"
+                    }
+                    disabled={!!updatePollingId && updatingRepoName === repo.name}
                   >
-                    <RefreshCw className="h-4 w-4" />
+                    <RefreshCw className={`h-4 w-4 ${
+                      updatePollingId && updatingRepoName === repo.name ? "animate-spin" : ""
+                    }`} />
                   </Button>
                 </div>
               </Card>

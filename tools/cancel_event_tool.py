@@ -25,7 +25,6 @@ from core.agenda_manager import cancel_event
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
 
-
 class CancelEventInput(BaseModel):
     """
     Define el esquema de entrada para la herramienta de cancelación de eventos.
@@ -36,11 +35,6 @@ class CancelEventInput(BaseModel):
         description="El ID numérico único del evento que se desea cancelar. El usuario debe proporcionar este ID."
     )
     # Cambiamos telegram_id por account_id para que sea universal.
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
-
 
 class CancelEventTool(BaseTool):
     """
@@ -56,7 +50,7 @@ class CancelEventTool(BaseTool):
     args_schema: Type[BaseModel] = CancelEventInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
 
-    async def _arun(self, event_id: int, account_id: str, **kwargs: Any) -> str:
+    async def _arun(self, event_id: int, run_manager = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -68,6 +62,28 @@ class CancelEventTool(BaseTool):
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
+                # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+        
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+        
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
         logger.info(f"Ejecutando CancelEventTool para la cuenta '{account_id}' y el evento ID '{event_id}'.")
         try:
             # Llama a la función de lógica de negocio, que ahora debe ser actualizada

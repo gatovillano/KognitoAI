@@ -38,10 +38,7 @@ class MemoryAddInput(BaseModel):
         ...,
         description="El texto o información específica que debe ser guardado en la memoria a largo plazo."
     )
-    account_id: str = Field(
-        default="",
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Si no se proporciona, se usa el de la configuración del agente."
-    )
+
     # El 'type' ahora es una clasificación general de la memoria.
     type: str = Field(
         "user_memory", # Valor por defecto más específico para memorias del usuario
@@ -85,46 +82,58 @@ class MemoryAddTool(BaseTool):
     )
     args_schema: Type[BaseModel] = MemoryAddInput
     return_direct: bool = False
+    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
 
-    async def _arun(self, content: str, account_id: str = None, type: Optional[str] = "user_memory", category: Optional[str] = None, workspace_id: Optional[str] = None, run_manager: Optional[Any] = None, **kwargs: Any) -> str:
+    def __init__(self, account_id: str = "", **kwargs):
+        super().__init__(**kwargs)
+        self.account_id = account_id
+
+    async def _arun(self, content: str, type: Optional[str] = "user_memory", category: Optional[str] = None, workspace_id: Optional[str] = None, run_manager: Optional[Any] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
             content: El contenido de la memoria a guardar.
-            account_id: El ID universal de la cuenta del usuario.
             type: El tipo general de memoria a guardar (ej. 'user_memory').
             category: La categoría específica de la memoria (ej. 'interes').
             workspace_id: El ID del workspace para asociar la memoria (opcional).
+            run_manager: Gestor de ejecución para obtener configuración.
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
-        # Obtener account_id de la configuración del agente si está disponible
-        config_account_id = None
-        config_workspace_id = workspace_id
+        # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
 
+        # Intentar obtener del contexto del run_manager
         if run_manager and hasattr(run_manager, 'config'):
             config = getattr(run_manager, 'config', {})
             configurable = config.get('configurable', {})
-            config_account_id = configurable.get('account_id')
-            if not config_workspace_id:
-                config_workspace_id = configurable.get('workspace_id')
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+            # También obtener workspace_id si no se proporcionó
+            if not workspace_id:
+                workspace_id = configurable.get('workspace_id')
 
-        # Usar configuración o parámetros
-        effective_account_id = config_account_id or account_id
-        effective_workspace_id = config_workspace_id
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
 
-        if not effective_account_id:
+        # Validar que tenemos account_id
+        if not account_id:
             return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
 
         if not content or not content.strip():
-            logger.warning(f"Se llamó a MemoryAddTool para la cuenta '{effective_account_id}' con contenido vacío.")
+            logger.warning(f"Se llamó a MemoryAddTool para la cuenta '{account_id}' con contenido vacío.")
             return "No se puede guardar contenido vacío en la memoria."
 
         log_content = content[:100] + '...' if len(content) > 100 else content
-        logger.info(f"Ejecutando MemoryAddTool para la cuenta '{effective_account_id}' (Tipo: {type}, Categoría: {category}, Workspace: {effective_workspace_id}): '{log_content}'")
+        logger.info(f"Ejecutando MemoryAddTool para la cuenta '{account_id}' (Tipo: {type}, Categoría: {category}, Workspace: {workspace_id}): '{log_content}'")
 
         try:
             # Asegura que el tipo sea 'user_memory' si no se especifica explícitamente
@@ -132,16 +141,16 @@ class MemoryAddTool(BaseTool):
 
             # Añade la memoria a la base de datos vectorial
             await add_memory_to_vector_db(
-                account_id=effective_account_id,
+                account_id=account_id,
                 content=content,
                 type=final_type,
-                workspace_id=effective_workspace_id,
+                workspace_id=workspace_id,
                 topic=category if category else "general"
             )
-            logger.info(f"Memoria añadida exitosamente para la cuenta '{effective_account_id}'.")
+            logger.info(f"Memoria añadida exitosamente para la cuenta '{account_id}'.")
 
             new_entry = {
-                'account_id': effective_account_id,
+                'account_id': account_id,
                 'content': content,
                 'type': final_type,
                 'category': category if category else "general"
@@ -151,7 +160,7 @@ class MemoryAddTool(BaseTool):
             
             return "La información ha sido añadida a tu memoria a largo plazo."
         except Exception as e:
-            logger.error(f"Error en MemoryAddTool para la cuenta '{effective_account_id}': {e}", exc_info=True)
+            logger.error(f"Error en MemoryAddTool para la cuenta '{account_id}': {e}", exc_info=True)
             return f"Ocurrió un error al intentar guardar la información en tu memoria: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

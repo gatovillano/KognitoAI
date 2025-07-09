@@ -34,10 +34,13 @@ class AnalyzeTextForInsightsTool(BaseTool):
         "ACTUALIZADO: Los resultados pueden almacenarse con tipo 'text_insights' para seguimiento."
     )
     args_schema: Type[BaseModel] = AnalyzeTextInput
+    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
     # La respuesta es rica y estructurada, mejor que el agente la procese.
     return_direct: bool = False
 
-    # El __init__ ya no es necesario, BaseTool se encarga.
+    def __init__(self, account_id: str = "", **kwargs):
+        super().__init__(**kwargs)
+        self.account_id = account_id
 
     async def _arun(self, text: str, **kwargs: Any) -> str:
         """
@@ -81,7 +84,7 @@ class AnalyzeTextForInsightsTool(BaseTool):
         Formatea el resultado del análisis (un objeto SingleTextAnalysis) en una cadena legible.
         """
         # Usamos .join para manejar listas vacías de forma elegante.
-        themes = ", ".join(result.key_themes) if result.key_themes else "No se identificaron temas clave."
+        themes = ", ".join([t.theme for t in result.key_themes]) if result.key_themes else "No se identificaron temas clave."
         
         # Construimos las preguntas con viñetas para mayor claridad.
         questions_list = [f"- {q}" for q in result.knowledge_gaps]

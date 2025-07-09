@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Plus, X, Target, FileText, Sparkles, Settings, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import apiClient from '@/lib/api';
@@ -48,6 +49,7 @@ export function CustomAnalysisDialog({
   const [documents, setDocuments] = useState<any[]>([]);
   const [selectedDocument, setSelectedDocument] = useState<string>('');
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(false);
+  const [analyzeFullCollection, setAnalyzeFullCollection] = useState(false);
 
   const predefinedFields = [
     { name: 'Resumen Ejecutivo', description: 'Síntesis concisa del contenido principal' },
@@ -114,8 +116,8 @@ export function CustomAnalysisDialog({
       return;
     }
 
-    if (!selectedDocument) {
-      toast.error('Selecciona un documento para analizar');
+    if (!analyzeFullCollection && !selectedDocument) {
+      toast.error('Selecciona un documento para analizar o elige analizar la colección completa');
       return;
     }
 
@@ -132,24 +134,34 @@ export function CustomAnalysisDialog({
         ...customFields
       ];
 
-      const response = await apiClient.post('/api/start-custom-analysis', {
-        file_name: selectedDocument,
+      const requestData: any = {
         objective,
         expected_result: expectedResult,
         extension,
-        fields: allFields
-      });
+        fields: allFields,
+        analyze_full_collection: analyzeFullCollection
+      };
 
-      toast.success('Análisis personalizado iniciado correctamente');
+      if (analyzeFullCollection) {
+        requestData.topic = topic;
+      } else {
+        requestData.file_name = selectedDocument;
+      }
+
+      const response = await apiClient.post('/api/start-custom-analysis', requestData);
+
+      const analysisType = analyzeFullCollection ? 'de la colección completa' : `del documento "${selectedDocument}"`;
+      toast.success(`Análisis personalizado ${analysisType} iniciado correctamente`);
       onAnalysisStart?.();
       onOpenChange(false);
-      
+
       // Reset form
       setObjective('');
       setExpectedResult('');
       setExtension('');
       setSelectedDocument('');
       setCustomFields([]);
+      setAnalyzeFullCollection(false);
     } catch (error: any) {
       console.error('Error starting custom analysis:', error);
       toast.error(error.response?.data?.detail || 'Error al iniciar el análisis personalizado');
@@ -178,50 +190,86 @@ export function CustomAnalysisDialog({
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <FileText className="h-4 w-4" />
-                  Documento a analizar
+                  Contenido a analizar
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-2">
-                  <Label htmlFor="document-select">Selecciona un documento de la colección *</Label>
-                  <Select value={selectedDocument} onValueChange={setSelectedDocument} disabled={isLoadingDocuments}>
-                    <SelectTrigger id="document-select">
-                      <SelectValue placeholder={
-                        isLoadingDocuments
-                          ? "Cargando documentos..."
-                          : "Selecciona un documento"
-                      } />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {isLoadingDocuments ? (
-                        <SelectItem value="__loading__" disabled>
-                          <div className="flex items-center gap-2">
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            Cargando documentos...
-                          </div>
-                        </SelectItem>
-                      ) : documents.length > 0 ? (
-                        documents.map((doc) => (
-                          <SelectItem key={doc.file_name} value={doc.file_name}>
-                            <div className="flex flex-col">
-                              <span className="font-medium">{doc.file_name}</span>
-                              {doc.title && (
-                                <span className="text-xs text-muted-foreground">{doc.title}</span>
-                              )}
-                            </div>
-                          </SelectItem>
-                        ))
-                      ) : (
-                        <SelectItem value="__no_documents__" disabled>
-                          No hay documentos en esta colección
-                        </SelectItem>
-                      )}
-                    </SelectContent>
+                <div className="space-y-4">
+                  {/* Opción de colección completa */}
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="analyze-full-collection"
+                      checked={analyzeFullCollection}
+                      onCheckedChange={(checked) => {
+                        setAnalyzeFullCollection(checked as boolean);
+                        if (checked) {
+                          setSelectedDocument('');
+                        }
+                      }}
+                    />
+                    <Label htmlFor="analyze-full-collection" className="text-sm font-medium">
+                      Analizar colección completa ({documents.length} documentos)
+                    </Label>
+                  </div>
+
+                  {/* Descripción de la opción seleccionada */}
+                  {analyzeFullCollection ? (
+                    <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                      <div className="text-sm text-gray-700">
+                        <strong>Análisis de colección completa:</strong> Se analizarán todos los documentos de la colección
+                        para identificar patrones, conexiones y temas transversales entre ellos.
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">
+                      Selecciona un documento específico para análisis individual
+                    </div>
+                  )}
+
+                  {/* Selector de documento individual */}
+                  {!analyzeFullCollection && (
+                    <div className="space-y-2">
+                      <Label htmlFor="document-select">Selecciona un documento específico *</Label>
+                      <Select value={selectedDocument} onValueChange={setSelectedDocument} disabled={isLoadingDocuments}>
+                        <SelectTrigger id="document-select">
+                          <SelectValue placeholder={
+                            isLoadingDocuments
+                              ? "Cargando documentos..."
+                              : "Selecciona un documento"
+                          } />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {isLoadingDocuments ? (
+                            <SelectItem value="__loading__" disabled>
+                              <div className="flex items-center gap-2">
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                Cargando documentos...
+                              </div>
+                            </SelectItem>
+                          ) : documents.length > 0 ? (
+                            documents.map((doc) => (
+                              <SelectItem key={doc.file_name} value={doc.file_name}>
+                                <div className="flex flex-col">
+                                  <span className="font-medium">{doc.file_name}</span>
+                                  {doc.title && (
+                                    <span className="text-xs text-muted-foreground">{doc.title}</span>
+                                  )}
+                                </div>
+                              </SelectItem>
+                            ))
+                          ) : (
+                            <SelectItem value="__no_documents__" disabled>
+                              No hay documentos en esta colección
+                            </SelectItem>
+                          )}
+                        </SelectContent>
                   </Select>
                   {selectedDocument && (
                     <div className="text-xs text-muted-foreground">
                       Documento seleccionado: <span className="font-medium">{selectedDocument}</span>
                     </div>
+                  )}
+                </div>
                   )}
                 </div>
               </CardContent>

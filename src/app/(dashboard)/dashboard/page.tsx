@@ -59,9 +59,9 @@ interface Insight {
   type: string;
   summary: string;
   created_at: string,
-  related_items: any[]; // Made required to match InsightDetailDialog component
   action_suggestion?: string;
   synthetic_name?: string; // Nuevo campo para el nombre sintético
+  related_items: any; // Permitir cualquier tipo para manejar objetos con propiedad 'items'
 }
 
 export default function DashboardPage() {
@@ -286,7 +286,7 @@ export default function DashboardPage() {
                         items = [];
                       }
 
-                      return items.slice(0, 2).map((item, idx) => (
+                      return items.slice(0, 2).map((item: any, idx: number) => (
                         <p key={idx} className="flex items-center gap-2 text-muted-foreground truncate">
                           <FileText className="h-3 w-3 text-primary/60" />
                           <span className="truncate">{item.title || item.reference || 'Sin título'}</span>

@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
     }
     const tg = window.Telegram.WebApp;
+    console.log("Telegram WebApp SDK cargado:", tg);
 
     // --- 2. REFERENCIAS A ELEMENTOS ---
     const elements = {
@@ -72,6 +73,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- 4. LÓGICA DE NAVEGACIÓN ---
     function showView(viewId) {
+        console.log("Cambiando a la vista:", viewId);
         elements.views.forEach(view => view.classList.toggle('active', view.id === viewId));
         updateMainButton(viewId);
 
@@ -81,8 +83,14 @@ document.addEventListener('DOMContentLoaded', function () {
         if (viewId === 'notes-screen') loadNotes();
     }
     
-    elements.iconButtons.forEach(button => button.addEventListener('click', () => showView(button.dataset.targetView)));
-    elements.backButtons.forEach(button => button.addEventListener('click', () => showView('home-screen')));
+    elements.iconButtons.forEach(button => {
+        console.log("Adjuntando listener a icon-button:", button.dataset.targetView);
+        button.addEventListener('click', () => showView(button.dataset.targetView));
+    });
+    elements.backButtons.forEach(button => {
+        console.log("Adjuntando listener a back-button");
+        button.addEventListener('click', () => showView('home-screen'));
+    });
 
     // --- 5. LÓGICA DEL BOTÓN PRINCIPAL DE TELEGRAM ---
     function updateMainButton(currentViewId) {

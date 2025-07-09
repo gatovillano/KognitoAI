@@ -107,8 +107,30 @@ class ScheduleToolExecutionTool(BaseTool):
         Returns:
             Mensaje de confirmación o error
         """
-        logger.info(f"Programando herramienta '{tool_name}' para la cuenta '{account_id}'")
+                # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
         
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+        
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
+        logger.info(f"Programando herramienta para la cuenta '{account_id}'")
+
         try:
             # Validar herramienta disponible
             available_tools = {
@@ -177,10 +199,10 @@ class ScheduleToolExecutionTool(BaseTool):
     
     def _get_daily_analysis_function(self):
         """Retorna la función para análisis diario."""
-        async def daily_analysis_task(account_id: str, **kwargs):
+        async def daily_analysis_task():
             from utils.proactive_knowledge_linker import run_batch_analysis_job
-            logger.info(f"Ejecutando análisis diario programado para cuenta {account_id}")
-            await run_batch_analysis_job(account_id_filter=account_id)
+            logger.info(f"Ejecutando análisis diario programado para cuenta {self.account_id}")
+            await run_batch_analysis_job(account_id_filter=self.account_id)
             return "Análisis diario completado"
         return daily_analysis_task
     
@@ -226,17 +248,39 @@ class ListScheduledToolsTool(BaseTool):
         super().__init__(**kwargs)
         self.account_id = account_id
 
-    async def _arun(self, account_id: str, **kwargs: Any) -> str:
+    async def _arun(self, run_manager = None, **kwargs: Any) -> str:
         """
         Lista las herramientas programadas para la cuenta.
-        
+
         Args:
-            account_id: ID de la cuenta
+            run_manager: Gestor de ejecución para obtener configuración
             **kwargs: Argumentos adicionales
-            
+
         Returns:
             Lista de herramientas programadas
         """
+        # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
         try:
             status = scheduled_tools_manager.get_scheduled_tools_status()
             scheduled_jobs = status.get("scheduled_jobs", {})
@@ -269,7 +313,7 @@ class ListScheduledToolsTool(BaseTool):
                 result += f"   🔧 Estado: {'Activa' if enabled else 'Inactiva'}\n\n"
             
             return result
-            
+
         except Exception as e:
             logger.error(f"Error al listar herramientas programadas: {e}", exc_info=True)
             return f"❌ Error al obtener la lista de herramientas programadas: {str(e)}"

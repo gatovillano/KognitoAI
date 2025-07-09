@@ -22,12 +22,6 @@ logger = logging.getLogger(__name__)
 class ComprehensiveWebAnalysisInput(BaseModel):
     """Input schema for the Comprehensive Web Analysis Tool."""
     query: str = Field(..., description="The user's research query in natural language.")
-    account_id: str = Field(default="", description="The unique ID of the user's account. If not provided, uses the one from agent configuration.")
-    # --- NUEVO: Parámetro para el ID del workspace ---
-    workspace_id: str = Field(
-        default="",
-        description="El ID del workspace (UUID en formato string) para cruzar la información con documentos de un workspace específico, si aplica."
-)
 
 class ComprehensiveWebAnalysisTool(BaseTool):
     """
@@ -43,31 +37,24 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         "Puede opcionalmente cruzar la información con documentos de un `workspace_id` específico." # <-- Descripción actualizada
     )
     args_schema: Type[BaseModel] = ComprehensiveWebAnalysisInput
+    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
     return_direct: bool = False
 
     def __init__(self, account_id: str = "", **kwargs):
-        """Initialize the tool with account_id."""
         super().__init__(**kwargs)
         self.account_id = account_id
 
-    def _extract_urls(self, search_results: str) -> List[str]:
-        """Extracts URLs from the formatted search results string."""
-        urls = re.findall(r"<a href=\'(.*?)\'>", search_results)
-        logger.info(f"Extracted {len(urls)} URLs from search results: {urls}")
-        return urls
-
+  
     async def _arun(\
         self,\
         query: str,\
-        account_id: str = None,\
-        workspace_id: Optional[str] = None, # <-- workspace_id añadido aquí
         run_manager: Optional[CallbackManagerForToolRun] = None,\
         **kwargs: Any\
     ) -> str:
         """Executes the comprehensive analysis tool asynchronously."""
         # Obtener account_id de la configuración del agente si está disponible
         config_account_id = None
-        config_workspace_id = workspace_id
+        config_workspace_id = None
 
         # Intentar múltiples formas de obtener la configuración
         if run_manager:
@@ -96,12 +83,13 @@ class ComprehensiveWebAnalysisTool(BaseTool):
             if not config_workspace_id:
                 config_workspace_id = configurable.get('workspace_id')
 
-        # Usar configuración, parámetros o instancia como fallback
-        effective_account_id = config_account_id or account_id or getattr(self, 'account_id', None)
+        # Usar configuración o instancia como fallback
+
+        effective_account_id = config_account_id or getattr(self, 'account_id', "")
         effective_workspace_id = config_workspace_id
 
         # Log para debugging
-        logger.info(f"🔍 Debug config access - account_id from config: {config_account_id}, from param: {account_id}, from instance: {getattr(self, 'account_id', None)}, effective: {effective_account_id}")
+        logger.info(f"🔍 Debug config access - account_id from config: {config_account_id}, from instance: {getattr(self, 'account_id', None)}, effective: {effective_account_id}")
 
         if not effective_account_id:
             return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
@@ -116,7 +104,8 @@ class ComprehensiveWebAnalysisTool(BaseTool):
             logger.warning("Web search did not yield results or failed.")
             return search_results_str
 
-        urls_to_scrape = self._extract_urls(search_results_str)
+        # Extract URLs using regex
+        urls_to_scrape = re.findall(r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+[^\s]*', search_results_str)
         if not urls_to_scrape:
             logger.warning("No URLs could be extracted from the search results.")
             soup = BeautifulSoup(search_results_str, "html.parser")
@@ -180,7 +169,8 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         --- Fin del Resumen Web ---
 
         --- Información Relevante de la Base de Conocimiento Personal del Usuario ---
-        {{relevant_memories if "No se encontraron" not in relevant_memories else "No se encontró información interna relevante."}}\\n
+
+        {relevant_memories if "No se encontraron" not in relevant_memories else "No se encontró información interna relevante."}\n
         --- Fin de la Información Interna ---
 
         Basándote en TODA la información anterior, por favor, elabora una respuesta final y completa para el usuario.
@@ -188,7 +178,8 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         - Si encuentras conexiones, sinergias o contradicciones entre la información web y el conocimiento del usuario, destácalas.
         - Adopta un tono de asistente útil y experto.
         - Formatea tu respuesta de manera clara y legible usando Markdown.
-        - **Importante:** Al final de tu respuesta, incluye una sección titulada "**Fuentes** donde listes todas las URLs utilizadas en la investigación web ({{', '.join(urls_to_scrape[:5])}}). Asegúrate de que cada URL esté en formato de enlace clickable usando Markdown.\n
+
+        - **Importante:** Al final de tu respuesta, incluye una sección titulada "**Fuentes** donde listes todas las URLs utilizadas en la investigación web ({', '.join(urls_to_scrape[:5])}). Asegúrate de que cada URL esté en formato de enlace clickable usando Markdown.\n
         """
         final_response = await final_analysis_llm.ainvoke([HumanMessage(content=final_prompt)])
 

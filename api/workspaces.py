@@ -201,11 +201,45 @@ async def add_document_to_collection(workspace_id: str, topic: str, request: Doc
     workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace no encontrado o no pertenece al usuario.")
-    
+
     # Aquí iría la lógica para asociar un documento existente a esta colección/workspace.
     # Esto podría implicar actualizar los metadatos del documento.
     # Por ahora, solo devolvemos un mensaje de éxito.
     return {"message": f"Documento {request.document_id} añadido a la colección '{topic}' en el workspace."}
+
+@router.delete("/workspaces/{workspace_id}/collections/{collection_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Eliminar una colección de un workspace")
+async def delete_collection(workspace_id: str, collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    """
+    Elimina una colección específica y todos sus documentos asociados de un workspace.
+    """
+    workspace = await db.scalar(select(Workspace).where(Workspace.id == uuid.UUID(workspace_id), Workspace.account_id == uuid.UUID(current_account_id)))
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado o no pertenece al usuario.")
+
+    try:
+        from urllib.parse import unquote
+        from core.memory_manager import delete_collection
+
+        # Decodificar el collection_id en caso de que esté URL-encoded
+        decoded_collection_id = unquote(collection_id)
+
+        success = await delete_collection(
+            account_id=current_account_id,
+            topic_name=decoded_collection_id,
+            workspace_id=workspace_id
+        )
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"La colección '{decoded_collection_id}' no se encontró en el workspace o ya fue eliminada.")
+
+        logger.info(f"Colección '{decoded_collection_id}' eliminada exitosamente del workspace {workspace_id}")
+        return
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error eliminando colección '{collection_id}' del workspace {workspace_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error al eliminar la colección '{collection_id}'.")
 
 # --- Modelos Pydantic para Hilos de Chat ---
 class ThreadResponse(BaseModel):

@@ -9,7 +9,6 @@ from langchain.tools import BaseTool
 
 class AnalysisResultsInput(BaseModel):
     """Esquema de entrada para obtener resultados de análisis."""
-    account_id: str = Field(..., description="El identificador de la cuenta del usuario")
     analysis_type: Optional[str] = Field(None, description="Tipo de análisis: document, collection, semantic, code, proactive_insight, etc.")
     status: Optional[str] = Field(None, description="Estado del análisis: completed, pending, failed")
     limit: Optional[int] = Field(20, description="Número máximo de resultados a devolver")
@@ -33,26 +32,55 @@ class AnalysisResultsTool(BaseTool):
 
     def _run(
         self,
-        account_id: str,
         analysis_type: Union[str, None] = None,
         status: Union[str, None] = None,
         limit: Union[int, None] = 20,
         include_payload: Union[bool, None] = True,
+        run_manager = None,
+        **kwargs
     ) -> str:
         """Obtiene resultados de análisis."""
         return asyncio.run(self._arun(
-            account_id, analysis_type, status, limit, include_payload
+            analysis_type=analysis_type,
+            status=status,
+            limit=limit,
+            include_payload=include_payload,
+            run_manager=run_manager,
+            **kwargs
         ))
 
     async def _arun(
         self,
-        account_id: str,
         analysis_type: Union[str, None] = None,
         status: Union[str, None] = None,
         limit: Union[int, None] = 20,
         include_payload: Union[bool, None] = True,
+        run_manager = None,
+        **kwargs
     ) -> str:
         """Versión asíncrona para obtener resultados de análisis."""
+        # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
         try:
             async with DBSession(SessionLocal) as session:
                 # Construir consulta base
@@ -158,7 +186,6 @@ class AnalysisResultsTool(BaseTool):
 
 class AnalysisTypesInput(BaseModel):
     """Esquema de entrada para obtener tipos de análisis disponibles."""
-    account_id: str = Field(..., description="El identificador de la cuenta del usuario")
 
 class AnalysisTypesTool(BaseTool):
     """
@@ -172,12 +199,34 @@ class AnalysisTypesTool(BaseTool):
     )
     args_schema = AnalysisTypesInput
 
-    def _run(self, account_id: str) -> str:
+    def _run(self, run_manager = None, **kwargs) -> str:
         """Obtiene tipos de análisis disponibles."""
-        return asyncio.run(self._arun(account_id))
+        return asyncio.run(self._arun(run_manager=run_manager, **kwargs))
 
-    async def _arun(self, account_id: str) -> str:
+    async def _arun(self, run_manager = None, **kwargs) -> str:
         """Versión asíncrona para obtener tipos de análisis."""
+        # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
         try:
             # Definir tipos de análisis disponibles con descripciones
             available_types = {

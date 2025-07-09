@@ -134,15 +134,36 @@ class AddWebToRAGTool(BaseTool):
     async def _arun(
         self,
         url: str,
-        topic: str,
-        account_id: str,
+        topic: str, run_manager = None, **kwargs
         workspace_id: Optional[str] = None,
         custom_title: Optional[str] = None,
         **kwargs: Any
     ) -> str:
         """Ejecuta la herramienta de forma asíncrona."""
         
-        logger.info(f"🚀 Iniciando AddWebToRAG para URL: {url}, topic: {topic}, workspace: {workspace_id}")
+                # Obtener account_id del contexto de configuración o instancia
+        account_id = None
+        account_id_source = "unknown"
+        
+        # Intentar obtener del contexto del run_manager
+        if run_manager and hasattr(run_manager, 'config'):
+            config = getattr(run_manager, 'config', {})
+            configurable = config.get('configurable', {})
+            account_id = configurable.get('account_id')
+            if account_id:
+                account_id_source = "run_manager.config.configurable"
+        
+        # Fallback: obtener de la instancia
+        if not account_id:
+            account_id = getattr(self, 'account_id', "")
+            if account_id:
+                account_id_source = "self.account_id"
+
+        # Validar que tenemos account_id
+        if not account_id:
+            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
+
+logger.info(f"🚀 Iniciando AddWebToRAG para URL: {url}, topic: {topic}, workspace: {workspace_id}")
         
         try:
             # 1. Validar URL
