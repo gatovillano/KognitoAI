@@ -24,10 +24,13 @@ import asyncio
 import re
 from bs4 import BeautifulSoup
 import aiohttp
+from typing import List
 
 # Importaciones de LangChain y del proyecto
 from langchain_core.tools import Tool
 from core.config import settings
+from core.citation_models import Source, ToolOutputWithSources  # Importamos las clases necesarias
+
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -41,7 +44,7 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
-async def search_and_summarize_web(query: str) -> str:
+async def search_and_summarize_web(query: str) -> ToolOutputWithSources:
     """
     Realiza una búsqueda web asíncrona, procesa los resultados y los formatea
     para que el agente de LangChain los pueda interpretar y sintetizar.
@@ -50,13 +53,13 @@ async def search_and_summarize_web(query: str) -> str:
         query: La pregunta o término de búsqueda proporcionado por el LLM.
 
     Returns:
-        Una cadena de texto formateada con los resultados de la búsqueda,
+        Un objeto ToolOutputWithSources conteniendo los resultados de la búsqueda y las fuentes,
         lista para ser procesada por el agente, o un mensaje de error.
     """
     brave_api_key = settings.brave_search_api_key
     if not brave_api_key:
         logger.error("❌ La API key de Brave Search (BRAVE_SEARCH_API_KEY) no está configurada.")
-        return "Error: La funcionalidad de búsqueda web no está configurada en el servidor."
+        return ToolOutputWithSources(context_for_llm="Error: La funcionalidad de búsqueda web no está configurada en el servidor.", sources=[])
 
     brave_api_url = "https://api.search.brave.com/res/v1/web/search"
     params = {"q": query, "count": 10, "safesearch": "moderate"}
@@ -70,21 +73,21 @@ async def search_and_summarize_web(query: str) -> str:
 
     try:
         async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(brave_api_url, params=params, timeout=10) as response: # type: ignore
+            async with session.get(brave_api_url, params=params, timeout=10) as response:  # type: ignore
                 response.raise_for_status()
                 json_resp = await response.json()
 
         if "web" not in json_resp or "results" not in json_resp["web"]:
             logger.warning(f"⚠️ La respuesta de Brave Search no contenía 'web' o 'results' para la consulta: '{query}'.")
-            return "La búsqueda web no devolvió resultados en el formato esperado."
+            return ToolOutputWithSources(context_for_llm="La búsqueda web no devolvió resultados en el formato esperado.", sources=[])
 
-        raw_results = json_resp["web"]["results"]  
+        raw_results = json_resp["web"]["results"]
         if not raw_results:
             logger.info(f"ℹ️ No se encontraron resultados relevantes para la consulta: '{query}'")
-            return "No se encontraron resultados relevantes para tu búsqueda."
+            return ToolOutputWithSources(context_for_llm="No se encontraron resultados relevantes para tu búsqueda.", sources=[])
 
         snippets_to_summarize = []
-        source_list = []
+        sources: List[Source] = []
         for idx, item in enumerate(raw_results, 1):
             title = clean_text(item.get("title", ""))
             snippet_html = item.get("description", "")
@@ -93,29 +96,27 @@ async def search_and_summarize_web(query: str) -> str:
                 soup = BeautifulSoup(snippet_html, "html.parser")
                 clean_snippet = soup.get_text().strip()
                 snippets_to_summarize.append(f"Fuente {idx}: {title}\nContenido: {clean_snippet}")
-                source_list.append(f"{idx}. {title} - <a href='{url}'>Visitar enlace</a>")
+                sources.append(Source(id=idx, title=title, url=url, snippet=clean_snippet)) # Usamos la clase Source
+
 
         if not snippets_to_summarize:
-            return "No se encontraron resultados de búsqueda con suficiente contenido para analizar."
+            return ToolOutputWithSources(context_for_llm="No se encontraron resultados de búsqueda con suficiente contenido para analizar.", sources=[])
 
         combined_snippets = "\n\n".join(snippets_to_summarize)
-        
         final_response = (
             "Aquí están los resultados de la búsqueda web. Por favor, envia una respuesta comppleta final para el usuario "
             "basándote en esta información. IMPORTANTE, Debes mostrar el formato que te proporciono en la lista de fuentes.\n\n"
             f"--- Contexto de los Resultados de Búsqueda ---\n{combined_snippets}\n\n"
-            f"--- Lista de Fuentes ---\n" + "\n".join(source_list)
         )
-        
         logger.info(f"✅ Resultados de búsqueda procesados exitosamente para la consulta: '{query}'")
-        return final_response
+        return ToolOutputWithSources(context_for_llm=final_response, sources=sources)
 
     except aiohttp.ClientError as e:
         logger.error(f"❌ Error HTTP durante la búsqueda en Brave para '{query}': {e}", exc_info=True)
-        return f"Error de conexión con el servicio de búsqueda web: {e}"
+        return ToolOutputWithSources(context_for_llm=f"Error de conexión con el servicio de búsqueda web: {e}", sources=[])
     except Exception as e:
         logger.error(f"❌ Error inesperado en search_and_summarize_web para '{query}': {e}", exc_info=True)
-        return f"Ocurrió un error inesperado al realizar la búsqueda web: {e}"
+        return ToolOutputWithSources(context_for_llm=f"Ocurrió un error inesperado al realizar la búsqueda web: {e}", sources=[])
 
 
 def get_web_search_tool() -> Tool:

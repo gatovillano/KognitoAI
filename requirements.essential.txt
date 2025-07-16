@@ -1,0 +1,34 @@
+# requirements.essential.txt
+# Solo las dependencias absolutamente esenciales para que el sistema funcione
+
+# Frameworks web básicos
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.0
+
+# Base de datos
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+psycopg2-binary
+
+# Autenticación y seguridad
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
+
+# HTTP y utilidades
+httpx
+aiofiles
+python-dotenv
+
+# LangChain básico
+langchain
+langchain-core
+langchain-community
+langchain-openai
+
+# IA básica
+openai
+
+# Migraciones de BD
+alembic

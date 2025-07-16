@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,6 +32,11 @@ import {
   Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+const GraphVisualization = dynamic(
+  () => import('@/components/KnowledgeGraph/GraphVisualization').then(mod => mod.GraphVisualization),
+  { ssr: false }
+);
 
 interface Analysis {
   id: string;
@@ -293,6 +299,16 @@ export default function AnalysisPage() {
           Explora todos tus análisis de documentos, colecciones, mapas mentales e insights proactivos en un solo lugar.
         </p>
       </div>
+
+      {/* Sección de Visualización de Grafos */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Visualización de Grafo de Conocimiento</CardTitle>
+        </CardHeader>
+        <CardContent className="h-[600px] w-full">
+          <GraphVisualization workspaceId="default_workspace" />
+        </CardContent>
+      </Card>
 
       {/* Filtros y búsqueda */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">

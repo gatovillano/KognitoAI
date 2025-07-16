@@ -31,10 +31,6 @@ class GetNotesInput(BaseModel):
     Define los parámetros de entrada para la herramienta `get_notes_tool`.
     El `account_id` es el único campo estrictamente requerido.
     """
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID) de la cuenta del usuario. Este campo ES OBLIGATORIO."
-    )
     category: Optional[str] = Field(
         None,
         description="Filtra las notas por una categoría específica. Ejemplo: 'Trabajo', 'Ideas'.",
@@ -57,12 +53,13 @@ class GetNotesTool(BaseTool):
         "Si el usuario solo dice 'muéstrame mis notas', no se necesita 'category' ni 'search_query'."
     
     args_schema: Type[BaseModel] = GetNotesInput
+    account_id: str
 
     async def _arun(
         self,
-        account_id: str,
         category: Optional[str] = None,
-        search_query: Optional[str] = None
+        search_query: Optional[str] = None,
+        **kwargs: Any,
     ) -> str:
         """
         Ejecuta la herramienta de forma asíncrona.
@@ -71,7 +68,6 @@ class GetNotesTool(BaseTool):
         y los filtros opcionales para devolver la lista de notas al agente.
 
         Args:
-            account_id: El UUID de la cuenta del usuario.
             category: La categoría por la que filtrar (opcional).
             search_query: El término de búsqueda para filtrar (opcional).
 
@@ -79,22 +75,20 @@ class GetNotesTool(BaseTool):
             Una cadena de texto con la lista de notas formateada o un mensaje
             indicando que no se encontraron notas.
         """
-        if not account_id:
-            # Esta comprobación es una defensa adicional. Pydantic ya debería haberlo validado.
+        if not self.account_id:
             logger.error("Se intentó llamar a GetNotesTool sin un account_id.")
             return "Error: No se pudo identificar la cuenta del usuario para buscar las notas."
 
-        logger.info(f"Buscando notas para la cuenta {account_id} con filtros: Categoria='{category}', Query='{search_query}'")
+        logger.info(f"Buscando notas para la cuenta {self.account_id} con filtros: Categoria='{category}', Query='{search_query}'")
 
         try:
-            # Llamamos a la función de lógica de negocio con el account_id
             return await get_notes(
-                account_id=account_id,
+                account_id=self.account_id,
                 category=category,
                 search_query=search_query
             )
         except Exception as e:
-            logger.error(f"Error al ejecutar get_notes para la cuenta {account_id}: {e}", exc_info=True)
+            logger.error(f"Error al ejecutar get_notes para la cuenta {self.account_id}: {e}", exc_info=True)
             return "Ocurrió un error inesperado al intentar buscar tus notas."
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

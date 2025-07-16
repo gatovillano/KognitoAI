@@ -13,13 +13,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     ffmpeg \
     graphviz \
-    && rm -rf /var/lib/apt/lists/* \    
+    gcc \
+    g++ \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Usa el archivo de requerimientos unificado.
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
+# Usa el archivo de requerimientos unificado y script de instalación robusto
+COPY requirements-build.txt requirements.txt install_requirements.sh ./
+
+# Hacer el script ejecutable e instalar dependencias de forma robusta
+RUN chmod +x install_requirements.sh && ./install_requirements.sh
 RUN python -m spacy download en_core_web_sm
 COPY . .
 

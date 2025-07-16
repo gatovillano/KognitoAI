@@ -1,0 +1,15 @@
+# requirements-build.txt
+# Dependencias que requieren compilación y deben instalarse primero
+
+# Dependencias de compilación base
+Cython>=0.29.0
+numpy>=1.21.0
+setuptools>=60.0.0
+wheel>=0.37.0
+
+# Dependencias científicas que requieren compilación
+scipy>=1.7.0
+hdbscan>=0.8.0
+
+# Dependencias adicionales para Cognee
+pddlpy

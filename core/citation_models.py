@@ -26,7 +26,6 @@ class SourceType(str, Enum):
 class Source(BaseModel):
     """
     Representa una fuente individual que puede ser citada en una respuesta.
-    
     Attributes:
         id: Identificador único de la fuente (usado para citas [1], [2], etc.)
         title: Título descriptivo de la fuente
@@ -46,10 +45,8 @@ class Source(BaseModel):
 class ToolOutputWithSources(BaseModel):
     """
     Estructura de salida estándar para herramientas que pueden proporcionar fuentes.
-    
     Esta clase define el formato que deben devolver las herramientas cuando
     quieren proporcionar tanto contexto para el LLM como fuentes para citar.
-    
     Attributes:
         context_for_llm: Texto formateado para incluir en el prompt del LLM
         sources: Lista de fuentes que pueden ser citadas
@@ -63,10 +60,8 @@ class ToolOutputWithSources(BaseModel):
 class CitationResponse(BaseModel):
     """
     Respuesta completa del agente que incluye tanto el texto generado como las fuentes.
-    
     Esta es la estructura final que se envía al frontend, combinando la respuesta
     del LLM con las fuentes estructuradas para mostrar al usuario.
-    
     Attributes:
         response_text: Texto de respuesta generado por el LLM (puede incluir citas [1], [2])
         sources: Lista de fuentes citadas en la respuesta
@@ -75,7 +70,6 @@ class CitationResponse(BaseModel):
     response_text: str = Field(..., description="Respuesta del LLM")
     sources: List[Source] = Field(default_factory=list, description="Fuentes citadas")
     has_citations: bool = Field(default=False, description="Indica si hay citas en la respuesta")
-    
     @property
     def source_count(self) -> int:
         """Retorna el número de fuentes disponibles."""
@@ -85,37 +79,31 @@ class CitationResponse(BaseModel):
 def format_context_with_sources(sources: List[Source]) -> str:
     """
     Formatea una lista de fuentes en un contexto legible para el LLM.
-    
     Args:
         sources: Lista de fuentes a formatear
-        
     Returns:
         Texto formateado con las fuentes numeradas para incluir en el prompt
     """
     if not sources:
         return ""
-    
     context_parts = []
     for source in sources:
         context_parts.append(
             f"Fuente [{source.id}] - {source.title}:\n{source.snippet}\nURL: {source.url}\n"
         )
-    
     return "\n".join(context_parts)
 
 
-def create_web_source(source_id: int, title: str, url: str, snippet: str, 
-                     metadata: Optional[Dict[str, Any]] = None) -> Source:
+def create_web_source(source_id: int, title: str, url: str, snippet: str,
+                       metadata: Optional[Dict[str, Any]] = None) -> Source:
     """
     Función helper para crear una fuente web.
-    
     Args:
         source_id: ID único de la fuente
         title: Título de la página web
         url: URL de la página
         snippet: Fragmento relevante del contenido
         metadata: Metadatos adicionales (ej: fecha, autor, etc.)
-        
     Returns:
         Objeto Source configurado para fuente web
     """
@@ -130,17 +118,15 @@ def create_web_source(source_id: int, title: str, url: str, snippet: str,
 
 
 def create_document_source(source_id: int, title: str, file_path: str, snippet: str,
-                          metadata: Optional[Dict[str, Any]] = None) -> Source:
+                            metadata: Optional[Dict[str, Any]] = None) -> Source:
     """
     Función helper para crear una fuente de documento.
-    
     Args:
         source_id: ID único de la fuente
         title: Nombre del documento
         file_path: Ruta o identificador del archivo
         snippet: Fragmento relevante del documento
         metadata: Metadatos adicionales (ej: página, sección, etc.)
-        
     Returns:
         Objeto Source configurado para documento
     """
@@ -155,17 +141,15 @@ def create_document_source(source_id: int, title: str, file_path: str, snippet: 
 
 
 def create_memory_source(source_id: int, title: str, memory_id: str, snippet: str,
-                        metadata: Optional[Dict[str, Any]] = None) -> Source:
+                          metadata: Optional[Dict[str, Any]] = None) -> Source:
     """
     Función helper para crear una fuente de memoria/conocimiento.
-    
     Args:
         source_id: ID único de la fuente
         title: Título descriptivo de la memoria
         memory_id: Identificador de la memoria en la base de datos
         snippet: Fragmento relevante de la memoria
         metadata: Metadatos adicionales (ej: fecha, workspace, etc.)
-        
     Returns:
         Objeto Source configurado para memoria
     """

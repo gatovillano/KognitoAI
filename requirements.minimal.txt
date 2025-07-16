@@ -1,0 +1,40 @@
+# requirements.minimal.txt
+# Solo las dependencias absolutamente esenciales para que el sistema arranque
+
+# === CORE WEB FRAMEWORK ===
+fastapi
+uvicorn
+pydantic
+email-validator
+
+# === DATABASE BÁSICO ===
+sqlalchemy
+asyncpg
+psycopg2-binary
+psycopg
+pgvector
+alembic
+
+# === AUTHENTICATION & SECURITY ===
+python-jose[cryptography]
+PyJWT
+passlib[bcrypt]
+python-multipart
+
+# === HTTP & UTILITIES ===
+httpx
+aiofiles
+python-dotenv
+pytz
+
+# === AI BÁSICO (sin versiones específicas para evitar conflictos) ===
+openai
+numpy
+pandas
+
+# === PROCESSING BÁSICO ===
+requests
+beautifulsoup4
+
+# === DEVELOPMENT ===
+pytest

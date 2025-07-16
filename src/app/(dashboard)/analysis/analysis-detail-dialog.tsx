@@ -128,6 +128,31 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
     return [];
   };
 
+  // Helper function to extract themes from ThemeReference objects
+  const extractThemes = (themes: any): any[] => {
+    if (!Array.isArray(themes)) return [];
+    return themes.map(theme => {
+      // Si es un objeto ThemeReference con estructura {theme: string, related_quotes: [...]}
+      if (typeof theme === 'object' && theme.theme) {
+        return {
+          name: theme.theme,
+          quotes: theme.related_quotes || [],
+          description: theme.theme // Para compatibilidad con el frontend
+        };
+      }
+      // Si es un string simple
+      if (typeof theme === 'string') {
+        return { name: theme, description: theme, quotes: [] };
+      }
+      // Si es otro tipo de objeto (para compatibilidad con otros análisis)
+      return {
+        name: theme.topic || theme.component || theme.description || theme.name || 'Tema sin nombre',
+        description: theme.description || theme.component || theme.topic || theme.name || '',
+        quotes: theme.quotes || theme.related_quotes || []
+      };
+    });
+  };
+
   const getQuestions = () => {
     const data = analysis.full_data;
     return ensureArray(
@@ -406,7 +431,7 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
 
       default:
         // Para document, collection, mindmap, semantic
-        const keyThemes = ensureArray(data?.key_themes || data?.temas_clave_avanzados || data?.grouped_topics);
+        const keyThemes = extractThemes(data?.key_themes || data?.temas_clave_avanzados || data?.grouped_topics);
         const centralConcepts = ensureArray(data?.central_concepts || data?.conceptos_centrales);
         const relationships = ensureArray(data?.concept_relationships || data?.relaciones_conceptos);
         const questions = getQuestions();
@@ -438,11 +463,33 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
                   <CardTitle>Temas Clave</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="space-y-3">
                     {keyThemes.map((theme: any, i: number) => (
-                      <Badge key={i} variant="secondary">
-                        {typeof theme === 'string' ? theme : theme.topic || theme.component || theme.description || 'N/A'}
-                      </Badge>
+                      <div key={i} className="border rounded-lg p-3 bg-muted/30">
+                        <Badge className="mb-2">
+                          {theme.name || theme.description || 'Tema sin nombre'}
+                        </Badge>
+                        {theme.quotes && theme.quotes.length > 0 && (
+                          <div className="mt-2 space-y-2">
+                            <h4 className="text-sm font-medium text-muted-foreground">Citas relacionadas:</h4>
+                            {theme.quotes.slice(0, 2).map((quote: any, qIndex: number) => (
+                              <blockquote key={qIndex} className="text-xs italic text-muted-foreground border-l-2 border-primary/20 pl-3 py-1">
+                                "{quote.quote || quote}"
+                                {quote.document_title && (
+                                  <cite className="block text-xs font-medium mt-1">
+                                    — {quote.document_title}
+                                  </cite>
+                                )}
+                              </blockquote>
+                            ))}
+                            {theme.quotes.length > 2 && (
+                              <p className="text-xs text-muted-foreground">
+                                +{theme.quotes.length - 2} citas más...
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     ))}
                   </div>
                 </CardContent>

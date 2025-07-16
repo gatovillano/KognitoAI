@@ -36,10 +36,6 @@ class UpdateNoteInput(BaseModel):
         ...,
         description="El ID numérico de la nota que se va a modificar. Este campo es obligatorio."
     )
-    account_id: str = Field(
-        ...,
-        description="El identificador universal de la cuenta del usuario. Este campo es obligatorio."
-    )
     new_content: Optional[str] = Field(
         None,
         description="El nuevo contenido para la nota. Si se proporciona, reemplazará completamente el contenido anterior.",
@@ -68,14 +64,15 @@ class UpdateNoteTool(BaseTool):
         "que use la herramienta `get_notes_tool` para listar sus notas y encontrar el ID correcto."
     )
     args_schema: Type[BaseModel] = UpdateNoteInput
+    account_id: str
 
     async def _arun(
         self,
         note_id: int,
-        account_id: str,
         new_content: Optional[str] = None,
         new_title: Optional[str] = None,
-        new_category: Optional[str] = None
+        new_category: Optional[str] = None,
+        **kwargs: Any,
     ) -> str:
         """
         Ejecuta la lógica de actualización de la nota de forma asíncrona.
@@ -86,12 +83,10 @@ class UpdateNoteTool(BaseTool):
         Returns:
             Un mensaje de confirmación o error para que el agente lo interprete.
         """
-        logger.info(f"Ejecutando UpdateNoteTool para la nota {note_id} de la cuenta {account_id[:8]}...")
+        logger.info(f"Ejecutando UpdateNoteTool para la nota {note_id} de la cuenta {self.account_id[:8]}...")
         try:
-            # Asumimos que `update_note` será refactorizada para aceptar `account_id` en lugar de `telegram_id`
             result_message = await update_note(
-                # Cambiar el primer argumento a account_id cuando refactoricemos el manager
-                account_id=account_id, # Argumento ficticio por ahora, deberá ser real
+                account_id=self.account_id,
                 note_id=note_id,
                 new_content=new_content,
                 new_title=new_title,
@@ -99,7 +94,7 @@ class UpdateNoteTool(BaseTool):
             )
             return result_message
         except Exception as e:
-            logger.error(f"Error en UpdateNoteTool para la cuenta {account_id[:8]}: {e}", exc_info=True)
+            logger.error(f"Error en UpdateNoteTool para la cuenta {self.account_id[:8]}: {e}", exc_info=True)
             return f"Ocurrió un error inesperado al intentar actualizar la nota: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

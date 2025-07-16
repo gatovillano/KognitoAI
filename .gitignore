@@ -17,3 +17,9 @@ credentials
 migrations
 run_migration.sh
 debug_metadata.py
+kognito-ai.code-workspace
+*.cache
+*.kilocode
+*.qodo
+
+config/neo4j/neo4j.conf

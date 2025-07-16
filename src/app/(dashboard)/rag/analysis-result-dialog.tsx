@@ -41,11 +41,36 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
     return [];
   };
 
+  // Helper function to extract themes from ThemeReference objects
+  const extractThemes = (themes: any): any[] => {
+    if (!Array.isArray(themes)) return [];
+    return themes.map(theme => {
+      // Si es un objeto ThemeReference con estructura {theme: string, related_quotes: [...]}
+      if (typeof theme === 'object' && theme.theme) {
+        return {
+          name: theme.theme,
+          quotes: theme.related_quotes || [],
+          description: theme.theme // Para compatibilidad con el frontend
+        };
+      }
+      // Si es un string simple
+      if (typeof theme === 'string') {
+        return { name: theme, description: theme, quotes: [] };
+      }
+      // Si es otro tipo de objeto
+      return {
+        name: theme.component || theme.description || theme.name || 'Tema sin nombre',
+        description: theme.description || theme.component || theme.name || '',
+        quotes: theme.quotes || theme.related_quotes || []
+      };
+    });
+  };
+
   // Map backend field names to frontend expected field names
   const mappedAnalysis = {
     resumen_ejecutivo: analysis.executive_summary || analysis.resumen_ejecutivo || 'No summary available',
     analisis_general: analysis.general_analysis || analysis.analisis_general || 'No hay análisis general disponible',
-    temas_clave_avanzados: ensureArray(analysis.key_themes || analysis.temas_clave_avanzados || analysis.code_structure),
+    temas_clave_avanzados: extractThemes(analysis.key_themes || analysis.temas_clave_avanzados || analysis.code_structure),
     conceptos_centrales: ensureArray(analysis.central_concepts || analysis.conceptos_centrales || analysis.design_patterns),
     relaciones_conceptos: ensureArray(analysis.concept_relationships || analysis.relaciones_conceptos || analysis.dependencies),
     preguntas_para_explorar: ensureArray(analysis.knowledge_gaps || analysis.preguntas_para_explorar || analysis.potential_issues),
@@ -71,18 +96,40 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                 </div>
                 <div>
                     <h3 className="font-semibold mb-2">Análisis General</h3>
-                    <div className="text-sm text-muted-foreground p-3 bg-blue-50 border-l-4 border-blue-200 rounded-md">
+                    <div className="text-sm text-muted-foreground p-3 bg-muted border-l-4 border-blue-200 rounded-md">
                         <InlineMarkdownRenderer content={mappedAnalysis.analisis_general} />
                     </div>
                 </div>
                 <div>
-                    <h3 className="font-semibold mb-2">Temas Clave Avanzados</h3>
-                    <div className="flex flex-wrap gap-2">
+                    <h3 className="font-semibold mb-2">Temas Clave</h3>
+                    <div className="space-y-3">
                         {Array.isArray(mappedAnalysis.temas_clave_avanzados) && mappedAnalysis.temas_clave_avanzados.length > 0 ? (
                             mappedAnalysis.temas_clave_avanzados.map((topic: any, i: number) => (
-                                <Badge key={i} title={topic.description || ''}>
-                                    {typeof topic === 'string' ? topic : topic.component || topic.description || 'N/A'}
-                                </Badge>
+                                <div key={i} className="border rounded-lg p-3 bg-muted/30">
+                                    <Badge className="mb-2">
+                                        {topic.name || topic.description || 'Tema sin nombre'}
+                                    </Badge>
+                                    {topic.quotes && topic.quotes.length > 0 && (
+                                        <div className="mt-2 space-y-2">
+                                            <h4 className="text-sm font-medium text-muted-foreground">Citas relacionadas:</h4>
+                                            {topic.quotes.slice(0, 2).map((quote: any, qIndex: number) => (
+                                                <blockquote key={qIndex} className="text-xs italic text-muted-foreground border-l-2 border-primary/20 pl-3 py-1">
+                                                    "{quote.quote || quote}"
+                                                    {quote.document_title && (
+                                                        <cite className="block text-xs font-medium mt-1">
+                                                            — {quote.document_title}
+                                                        </cite>
+                                                    )}
+                                                </blockquote>
+                                            ))}
+                                            {topic.quotes.length > 2 && (
+                                                <p className="text-xs text-muted-foreground">
+                                                    +{topic.quotes.length - 2} citas más...
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                             ))
                         ) : (
                             <p className="text-sm text-muted-foreground">No hay temas clave disponibles.</p>
@@ -160,7 +207,7 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                         <h3 className="font-semibold mb-2">Reflexiones Finales</h3>
                         <div className="space-y-2">
                             {mappedAnalysis.reflexiones_finales.map((reflection: string, i: number) => (
-                                <div key={i} className="text-sm text-muted-foreground p-3 bg-green-50 border-l-4 border-green-200 rounded-md">
+                                <div key={i} className="text-sm text-muted-foreground p-3 bg-muted-50 border-l-4 border-green-200 rounded-md">
                                     <InlineMarkdownRenderer content={reflection} />
                                 </div>
                             ))}

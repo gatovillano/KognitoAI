@@ -11,7 +11,7 @@ const apiClient = axios.create({
   timeout: 900000, // 15 minutos en milisegundos
 });
 
-// El interceptor para el token no cambia
+// Interceptor para manejar tokens
 apiClient.interceptors.request.use(
   (config) => {
     if (typeof window !== 'undefined') {
@@ -25,6 +25,26 @@ apiClient.interceptors.request.use(
     return config;
   },
   (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Interceptor para manejar errores de autenticación
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && typeof window !== 'undefined') {
+      // Token JWT inválido, limpiar localStorage
+      console.warn('🔑 Token JWT inválido detectado, limpiando localStorage...');
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('access_token');
+
+      // Solo redirigir si no estamos ya en la página de login
+      if (!window.location.pathname.includes('/login')) {
+        console.warn('🔄 Redirigiendo al login...');
+        window.location.href = '/login';
+      }
+    }
     return Promise.reject(error);
   }
 );

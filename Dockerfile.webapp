@@ -7,7 +7,8 @@ WORKDIR /app
 
 # Copiar el archivo de requerimientos específico para telegram_panel
 COPY requirements.webapp.txt .
-RUN pip install --no-cache-dir -r requirements.webapp.txt
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir --timeout 300 --retries 5 -r requirements.webapp.txt
 
 # Copiar todo el contexto del proyecto
 COPY . .

@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
@@ -83,7 +83,7 @@ export default function ChatLandingPage() {
     }
   };
 
-  const handleChatSubmit = async (e?: React.FormEvent) => {
+  const handleChatSubmit = useCallback(async (e?: React.FormEvent) => {
     if (e) {
       e.preventDefault();
     }
@@ -91,29 +91,105 @@ export default function ChatLandingPage() {
 
     setIsResponding(true);
     try {
+      // Si el modo de análisis integral está activo, llamar directamente a la herramienta
+      if (isComprehensiveAnalysisActive) {
+        if (!user || !user.id) {
+          throw new Error('User not authenticated for tool execution');
+        }
+        toast.info('Ejecutando Búsqueda Analítica...');
+        // Aquí se puede añadir la lógica para obtener el workspace_id si es necesario
+        // Por ahora, lo dejamos como null para que el backend lo maneje
+        const toolExecutionResponse = await apiClient.post('/api/execute-tool', {
+          tool_name: 'comprehensive_web_analyzer',
+          query: chatInput,
+          account_id: user.id,
+          workspace_id: null, // O el ID del workspace si se puede obtener del contexto del frontend
+        });
+        toast.success('Búsqueda Analítica completada.');
+        console.log('Resultado de la herramienta:', toolExecutionResponse.data.result);
+        // Aquí puedes decidir cómo mostrar el resultado de la herramienta al usuario.
+        // Por ejemplo, podrías enviarlo a un nuevo hilo de chat o mostrarlo en un modal.
+        // Por ahora, solo lo logueamos y reseteamos el input.
+        setChatInput('');
+        setIsComprehensiveAnalysisActive(false); // Desactivar el modo después de la ejecución
+        setIsInputMoved(true); // Para que el input se mueva si no hay chat
+        // Podríamos redirigir a una página de chat con el resultado
+        // router.push(`/chat/${newThread.id}?result=${encodeURIComponent(toolExecutionResponse.data.result)}`);
+        return; // Salir de la función, ya que la herramienta se ejecutó directamente
+      }
+
+      // Lógica existente para el chat normal
       const response = await apiClient.post('/api/threads', {});
       const newThread = response.data;
       console.log('New Thread ID:', newThread.id);
       if (!newThread.id) {
         throw new Error('ID del nuevo hilo de chat no encontrado en la respuesta de la API');
       }
-      // Send the first message to the new thread
+
       const mode = isKnowledgeAnalysisActive
         ? 'knowledgeAnalysis'
         : isWebSearchActive
         ? 'webSearch'
-        : isComprehensiveAnalysisActive
-        ? 'comprehensiveAnalysis'
-        : '';
+        : 'none'; // Cambiado para evitar que comprehensiveAnalysis se active aquí
       if (!user) {
         throw new Error('User not authenticated');
       }
-      await apiClient.post('/api/chat', {
+
+      const requestData = {
         thread_id: newThread.id,
         account_id: user.id,
         user_message: chatInput,
         mode: mode,
+      };
+
+      const baseURL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || 'http://localhost:8889';
+      const streamResponse = await fetch(`${baseURL}/api/chat/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+        },
+        body: JSON.stringify(requestData),
       });
+
+      if (!streamResponse.ok) {
+        throw new Error(`HTTP error! status: ${streamResponse.status}`);
+      }
+
+      const reader = streamResponse.body?.getReader();
+      if (!reader) {
+        throw new Error('No reader available');
+      }
+
+      const decoder = new TextDecoder();
+      let fullResponse = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.type === 'chunk') {
+                fullResponse += data.content;
+                // No actualizamos el UI aquí, solo esperamos el fin del stream
+              } else if (data.type === 'done') {
+                break;
+              } else if (data.type === 'error') {
+                throw new Error(data.message);
+              }
+            } catch (parseError) {
+              console.warn('Error parsing streaming data:', parseError);
+            }
+          }
+        }
+      }
+
       setIsInputMoved(true); // Trigger the animation to move input downwards
       router.push(`/chat/${newThread.id}`);
     } catch (error: any) {
@@ -127,7 +203,15 @@ export default function ChatLandingPage() {
     } finally {
       setIsResponding(false);
     }
-  };
+  }, [
+    chatInput,
+    isResponding,
+    isKnowledgeAnalysisActive,
+    isWebSearchActive,
+    isComprehensiveAnalysisActive,
+    user,
+    router,
+  ]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -219,7 +303,7 @@ export default function ChatLandingPage() {
         </div>
 
         {/* Input usando ChatInputBar */}
-        <motion.div 
+        <motion.div
           className="w-full max-w-4xl"
           animate={{
             y: isInputMoved ? 300 : 0,

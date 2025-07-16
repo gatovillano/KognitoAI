@@ -65,7 +65,7 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-6xl max-h-[90vh]">
+        <DialogContent className="max-w-4xl max-h-[85vh]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BarChart3 className="h-5 w-5" />
@@ -88,9 +88,9 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
               <TabsTrigger value="gaps">Brechas</TabsTrigger>
             </TabsList>
 
-            <ScrollArea className="h-[60vh] mt-4">
+            <ScrollArea className="h-[55vh] mt-4">
               {/* Pestaña de Resumen */}
-              <TabsContent value="overview" className="space-y-4">
+              <TabsContent value="overview" className="space-y-3">
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -106,7 +106,7 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
                 </Card>
               </TabsContent>
               {/* Pestaña de Temas Transversales */}
-              <TabsContent value="themes" className="space-y-4">
+              <TabsContent value="themes" className="space-y-3">
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -137,7 +137,7 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
                 </Card>
               </TabsContent>
               {/* Pestaña de Conceptos Centrales */}
-              <TabsContent value="concepts" className="space-y-4">
+              <TabsContent value="concepts" className="space-y-3">
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -160,7 +160,7 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
               </TabsContent>
 
               {/* Pestaña de Conexiones */}
-              <TabsContent value="connections" className="space-y-4">
+              <TabsContent value="connections" className="space-y-3">
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -169,14 +169,14 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       {mappedAnalysis.conexiones_identificadas?.map((conn: any, index: number) => (
                         <div
                           key={index}
-                          className="p-4 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
+                          className="p-3 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
                           onClick={() => handleConnectionClick(conn)}
                         >
-                          <div className="font-semibold text-sm mb-2">
+                          <div className="font-semibold text-sm mb-1">
                             {conn.documentos.join(' ↔ ')}
                           </div>
                           <div className="text-sm text-muted-foreground">
@@ -190,7 +190,7 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
               </TabsContent>
 
               {/* Pestaña de Relaciones */}
-              <TabsContent value="relationships" className="space-y-4">
+              <TabsContent value="relationships" className="space-y-3">
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -213,7 +213,7 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
               </TabsContent>
 
               {/* Pestaña de Insights */}
-              <TabsContent value="insights" className="space-y-4">
+              <TabsContent value="insights" className="space-y-3">
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -250,7 +250,7 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
               </TabsContent>
 
               {/* Pestaña de Reflexiones */}
-              <TabsContent value="reflections" className="space-y-4">
+              <TabsContent value="reflections" className="space-y-3">
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -273,7 +273,7 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
               </TabsContent>
 
               {/* Pestaña de Brechas de Conocimiento */}
-              <TabsContent value="gaps" className="space-y-4">
+              <TabsContent value="gaps" className="space-y-3">
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">

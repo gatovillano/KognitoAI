@@ -155,7 +155,16 @@ class GetAnalysisResultsTool(BaseTool):
                         if 'key_themes' in analysis.result_payload and analysis.result_payload['key_themes']:
                             response_lines.append("   - **Temas Clave**:")
                             for theme in analysis.result_payload['key_themes']:
-                                response_lines.append(f"     - {theme}")
+                                if isinstance(theme, dict) and 'theme' in theme:
+                                    # Es un objeto ThemeReference
+                                    theme_text = theme['theme']
+                                    if 'related_quotes' in theme and theme['related_quotes']:
+                                        quote_count = len(theme['related_quotes'])
+                                        theme_text += f" ({quote_count} cita{'s' if quote_count > 1 else ''})"
+                                    response_lines.append(f"     - {theme_text}")
+                                else:
+                                    # Es un string u otro tipo
+                                    response_lines.append(f"     - {theme}")
                         elif 'temas_clave_avanzados' in analysis.result_payload and analysis.result_payload['temas_clave_avanzados']:
                             response_lines.append("   - **Temas Clave**:")
                             for theme in analysis.result_payload['temas_clave_avanzados']:
@@ -210,7 +219,16 @@ class GetAnalysisResultsTool(BaseTool):
                             if 'key_themes' in analysis.result_payload and analysis.result_payload['key_themes']:
                                 response_lines.append("   - **Temas Clave**:")
                                 for theme in analysis.result_payload['key_themes']:
-                                    response_lines.append(f"     - {theme}")
+                                    if isinstance(theme, dict) and 'theme' in theme:
+                                        # Es un objeto ThemeReference
+                                        theme_text = theme['theme']
+                                        if 'related_quotes' in theme and theme['related_quotes']:
+                                            quote_count = len(theme['related_quotes'])
+                                            theme_text += f" ({quote_count} cita{'s' if quote_count > 1 else ''})"
+                                        response_lines.append(f"     - {theme_text}")
+                                    else:
+                                        # Es un string u otro tipo
+                                        response_lines.append(f"     - {theme}")
                             elif 'temas_clave_avanzados' in analysis.result_payload and analysis.result_payload['temas_clave_avanzados']:
                                 response_lines.append("   - **Temas Clave**:")
                                 for theme in analysis.result_payload['temas_clave_avanzados']:

@@ -32,10 +32,6 @@ class ProfileUpdateInput(BaseModel):
     Valida que los argumentos necesarios, especialmente el `account_id`, sean proporcionados.
     """
     # El cambio más importante: requerimos el identificador universal.
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
     # Los demás campos son opcionales, permitiendo actualizaciones parciales del perfil.
     nombre: Optional[str] = Field(default=None, description="El nombre del usuario.", json_schema_extra={"type": "string"})
     gustos: Optional[str] = Field(default=None, description="Los gustos o preferencias del usuario.", json_schema_extra={"type": "string"})
@@ -57,10 +53,10 @@ class UpdateProfileTool(BaseTool):
     )
     args_schema: Type[BaseModel] = ProfileUpdateInput
     return_direct: bool = False
+    account_id: str
 
     async def _arun(
         self,
-        account_id: str,
         nombre: Optional[str] = None,
         gustos: Optional[str] = None,
         intereses: Optional[str] = None,
@@ -71,7 +67,6 @@ class UpdateProfileTool(BaseTool):
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
-            account_id: El ID universal de la cuenta del usuario.
             nombre: El nombre del usuario a actualizar.
             gustos: Los gustos a actualizar.
             intereses: Los intereses a actualizar.
@@ -81,7 +76,7 @@ class UpdateProfileTool(BaseTool):
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
-        logger.info(f"Ejecutando UpdateProfileTool para la cuenta '{account_id}'.")
+        logger.info(f"Ejecutando UpdateProfileTool para la cuenta '{self.account_id}'.")
 
         # Construir un diccionario solo con los datos que fueron proporcionados.
         # Esto evita sobreescribir campos existentes con None si no se especifican.
@@ -95,17 +90,17 @@ class UpdateProfileTool(BaseTool):
         }
 
         if not update_data:
-            logger.warning(f"UpdateProfileTool fue llamada para la cuenta '{account_id}' pero no se proporcionaron datos para actualizar.")
+            logger.warning(f"UpdateProfileTool fue llamada para la cuenta '{self.account_id}' pero no se proporcionaron datos para actualizar.")
             return "No se proporcionó información específica del perfil para actualizar."
 
         try:
             # Llama a la función de lógica de negocio, que ahora debe ser actualizada
             # para aceptar 'account_id' en lugar de 'telegram_id'.
-            await update_user_profile(account_id=account_id, **update_data)
-            logger.info(f"Perfil actualizado exitosamente para la cuenta '{account_id}'.")
+            await update_user_profile(account_id=self.account_id, **update_data)
+            logger.info(f"Perfil actualizado exitosamente para la cuenta '{self.account_id}'.")
             return "La información de tu perfil ha sido actualizada."
         except Exception as e:
-            logger.error(f"Error en UpdateProfileTool para la cuenta '{account_id}': {e}", exc_info=True)
+            logger.error(f"Error en UpdateProfileTool para la cuenta '{self.account_id}': {e}", exc_info=True)
             return f"Ocurrió un error inesperado al actualizar tu perfil: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

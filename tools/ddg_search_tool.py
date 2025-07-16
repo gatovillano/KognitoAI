@@ -10,8 +10,12 @@ from pydantic import BaseModel, Field
 from langchain.tools import BaseTool
 from langchain_core.callbacks import AsyncCallbackManagerForToolRun
 
+# Importamos las clases necesarias
+from core.citation_models import Source, ToolOutputWithSources
+
 try:
     from ddgs import DDGS
+
     DDG_AVAILABLE = True
 except ImportError:
     DDG_AVAILABLE = False
@@ -20,6 +24,7 @@ except ImportError:
 # Configurar logging
 logger = logging.getLogger(__name__)
 
+
 class DuckDuckGoSearchInput(BaseModel):
     """Input schema for DuckDuckGo search tool."""
     query: str = Field(
@@ -27,14 +32,13 @@ class DuckDuckGoSearchInput(BaseModel):
         json_schema_extra={"type": "string"}
     )
 
+
 class DuckDuckGoSearchTool(BaseTool):
     """
     Herramienta de búsqueda web usando DuckDuckGo Search API.
-    
     Esta herramienta realiza búsquedas web usando DuckDuckGo y devuelve
     resultados formateados con títulos, snippets y URLs.
     """
-    
     name: str = "ddg_search_tool"
     description: str = (
         "Herramienta de búsqueda web usando DuckDuckGo. "
@@ -51,33 +55,29 @@ class DuckDuckGoSearchTool(BaseTool):
         self.account_id = account_id
 
     async def _arun(
-        self,
-        query: str,
-        run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
-        **kwargs
-    ) -> str:
+            self,
+            query: str,
+            run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
+            **kwargs
+    ) -> ToolOutputWithSources:  # Cambiamos el tipo de retorno a ToolOutputWithSources
         """Ejecuta la búsqueda en DuckDuckGo de forma asíncrona."""
-        
         logger.info(f"🦆 Realizando búsqueda en DuckDuckGo con la consulta: '{query}'")
-        
         try:
             # Realizar búsqueda usando DuckDuckGo
             search_results = await self._search_duckduckgo(query)
-            
             if not search_results:
                 logger.warning(f"⚠️ No se encontraron resultados para la consulta: '{query}'")
-                return "No se encontraron resultados de búsqueda para la consulta proporcionada."
-            
+                return ToolOutputWithSources(context_for_llm="No se encontraron resultados de búsqueda para la consulta proporcionada.", sources=[])
+
             # Formatear resultados
-            formatted_results = self._format_results(search_results, query)
-            
+            formatted_results, sources = self._format_results(search_results, query)  # Modificamos para obtener las fuentes
             logger.info(f"✅ Resultados de búsqueda DuckDuckGo procesados exitosamente para la consulta: '{query}'")
-            return formatted_results
-            
+            return ToolOutputWithSources(context_for_llm=formatted_results, sources=sources)  # Devolvemos ToolOutputWithSources
+
         except Exception as e:
             error_msg = f"❌ Error al realizar búsqueda en DuckDuckGo: {str(e)}"
             logger.error(error_msg)
-            return f"Error al realizar la búsqueda: {str(e)}"
+            return ToolOutputWithSources(context_for_llm=f"Error al realizar la búsqueda: {str(e)}", sources=[])
 
     async def _search_duckduckgo(self, query: str) -> List[Dict[str, Any]]:
         """
@@ -112,37 +112,38 @@ class DuckDuckGoSearchTool(BaseTool):
                     timelimit=None
                 ))
 
-                results = []
-                for result in search_results:
-                    results.append({
-                        'title': result.get('title', 'Sin título'),
-                        'snippet': result.get('body', 'Sin descripción disponible'),
-                        'url': result.get('href', ''),
-                        'source': 'DuckDuckGo Web'
-                    })
+            results = []
+            for idx, result in enumerate(search_results, 1):
+                results.append({
+                    'id': idx,  # Agregamos un ID único
+                    'title': result.get('title', 'Sin título'),
+                    'snippet': result.get('body', 'Sin descripción disponible'),
+                    'url': result.get('href', ''),
+                    'source': 'DuckDuckGo Web'
+                })
 
-                return results
+            return results
 
         except Exception as e:
             logger.error(f"Error en búsqueda síncrona DuckDuckGo: {str(e)}")
             return []
 
-    def _format_results(self, results: list, query: str) -> str:
+    def _format_results(self, results: list, query: str) -> tuple[str, List[Source]]:  # Modificamos el tipo de retorno
         """
         Formatea los resultados de búsqueda en un formato legible.
         """
         if not results:
-            return "No se encontraron resultados de búsqueda."
-        
+            return "No se encontraron resultados de búsqueda.", []
+
         snippets_to_summarize = []
-        source_list = []
-        
-        for idx, result in enumerate(results, 1):
+        sources: List[Source] = []  # Inicializamos la lista de fuentes
+        for result in results:
             title = result.get('title', 'Sin título')
             snippet = result.get('snippet', 'Sin descripción disponible')
             url = result.get('url', '')
-            source = result.get('source', 'DuckDuckGo')
-            
+            source_name = result.get('source', 'DuckDuckGo')  # Renombramos la variable para evitar confusión
+            idx = result.get('id', 1)  # Obtenemos el ID único
+
             # Limpiar y preparar el snippet
             if snippet and len(snippet.strip()) > 20:
                 # Información detallada para el LLM
@@ -150,24 +151,16 @@ class DuckDuckGoSearchTool(BaseTool):
                 detailed_info += f"Contenido: {snippet}\n"
                 if url:
                     detailed_info += f"URL: {url}\n"
-                detailed_info += f"Proveedor: {source}\n"
-                
+                detailed_info += f"Proveedor: {source_name}\n"
                 snippets_to_summarize.append(detailed_info)
-                
-                # Lista de fuentes formateada para mostrar al usuario
-                source_entry = f"**{idx}. {title}**"
-                source_entry += f" (Fuente: {source})"
-                if url:
-                    source_entry += f"\n   🔗 [Ver fuente completa]({url})"
-                else:
-                    source_entry += f"\n   📄 Información de DuckDuckGo"
-                source_list.append(source_entry)
-        
+
+                # Creamos el objeto Source y lo agregamos a la lista
+                sources.append(Source(id=idx, title=title, url=url, snippet=snippet))
+
         if not snippets_to_summarize:
-            return "No se encontraron resultados de búsqueda con suficiente contenido para analizar."
-        
+            return "No se encontraron resultados de búsqueda con suficiente contenido para analizar.", []
+
         combined_snippets = "\n\n".join(snippets_to_summarize)
-        
         final_response = (
             "Aquí están los resultados de la búsqueda web con DuckDuckGo. INSTRUCCIONES IMPORTANTES para tu respuesta:\n\n"
             "1. Proporciona una respuesta DETALLADA y COMPLETA basada en la información encontrada\n"
@@ -177,12 +170,9 @@ class DuckDuckGoSearchTool(BaseTool):
             "5. Si hay información contradictoria entre fuentes, menciónalo\n"
             "6. Mantén un tono conversacional pero informativo\n\n"
             f"--- INFORMACIÓN DETALLADA DE LAS FUENTES ---\n{combined_snippets}\n\n"
-            f"--- FUENTES (INCLUIR OBLIGATORIAMENTE AL FINAL) ---\n" + "\n".join(source_list) + "\n\n"
-            "RECUERDA: Tu respuesta debe ser detallada, informativa y SIEMPRE incluir la sección de fuentes con los enlaces."
         )
-        
         logger.info(f"✅ Resultados de búsqueda DuckDuckGo procesados exitosamente para la consulta: '{query}'")
-        return final_response
+        return final_response, sources  # Devolvemos la respuesta formateada y la lista de fuentes
 
     def _run(self, query: str, **kwargs) -> str:
         """Versión síncrona (no implementada, usa la versión async)."""
@@ -193,10 +183,8 @@ class DuckDuckGoSearchTool(BaseTool):
 def create_ddg_search_tool(account_id: str) -> DuckDuckGoSearchTool:
     """
     Crea una instancia de DuckDuckGoSearchTool con el account_id especificado.
-    
     Args:
         account_id: ID de la cuenta del usuario
-        
     Returns:
         DuckDuckGoSearchTool: Instancia configurada de la herramienta
     """

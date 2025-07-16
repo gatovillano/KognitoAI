@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel
 import logging
+from sqlalchemy import select # Importar select
 
 from core.config import settings
 import requests
@@ -82,6 +83,12 @@ async def bot_create_thread(request: dict):
             db.add(new_thread)
             await db.commit()
             await db.refresh(new_thread)
+            # Verificación adicional de visibilidad del hilo recién creado
+            verified_thread = await db.scalar(select(ChatThread).where(ChatThread.id == new_thread.id))
+            if verified_thread:
+                logger.info(f"VERIFICACIÓN: Hilo {verified_thread.id} es visible inmediatamente después de la creación.")
+            else:
+                logger.warning(f"VERIFICACIÓN: Hilo {new_thread.id} NO es visible inmediatamente después de la creación.")
 
             thread_id = str(new_thread.id)
             logger.info(f"Hilo de Telegram creado: {thread_id} para cuenta {account_id} en chat {chat_id}")

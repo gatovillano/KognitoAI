@@ -8,7 +8,9 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Sparkles } from 'lucide-react';
+import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Sparkles, ChevronDown, MoreHorizontal, Network } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { useWebSocket } from '@/hooks/useWebSocket';
 import { toast } from 'sonner';
 
 import { DataTable } from '../data-table';
@@ -62,6 +64,31 @@ export default function CollectionDetailPage() {
 
   // Estado para el historial de análisis
   const [savedAnalyses, setSavedAnalyses] = useState([]);
+
+  // Estados para procesamiento de grafos de conocimiento
+  const [isProcessingKnowledgeGraph, setIsProcessingKnowledgeGraph] = useState(false);
+
+  // WebSocket para actualizaciones en tiempo real
+  const { isConnected } = useWebSocket({
+    onTitleUpdated: (data) => {
+      // Actualizar la lista de documentos cuando se actualiza un título
+      setDocuments(prevDocs =>
+        prevDocs.map(doc =>
+          doc.file_name === data.file_name
+            ? { ...doc, title: data.new_title }
+            : doc
+        )
+      );
+    },
+    onTitleExtractionStarted: (data) => {
+      console.log('🚀 Extracción de títulos iniciada:', data);
+    },
+    onTitleExtractionCompleted: (data) => {
+      console.log('✅ Extracción de títulos completada:', data);
+      // Recargar la página para mostrar todos los cambios
+      fetchPageData();
+    }
+  });
 
   const fetchPageData = useCallback(async () => {
     setIsLoading(true);
@@ -182,6 +209,29 @@ export default function CollectionDetailPage() {
     } catch (error) { toast.error("No se pudo iniciar el resumen semántico de la colección."); }
   };
 
+  // --- Handler para Procesar Grafos de Conocimiento ---
+  const handleProcessKnowledgeGraph = async () => {
+    if (isProcessingKnowledgeGraph) {
+      toast.info("Ya hay un procesamiento de grafo en progreso.");
+      return;
+    }
+
+    setIsProcessingKnowledgeGraph(true);
+    const toastId = toast.loading(`Procesando grafo de conocimiento para "${topic}"...`);
+
+    try {
+      const response = await apiClient.post('/api/process-knowledge-graph', { topic });
+      toast.success(
+        `¡Procesamiento iniciado! ${response.data.documents_count} documentos serán procesados.`,
+        { id: toastId }
+      );
+    } catch (error) {
+      toast.error("Error al iniciar el procesamiento del grafo de conocimiento.", { id: toastId });
+    } finally {
+      setIsProcessingKnowledgeGraph(false);
+    }
+  };
+
   const columns = useMemo(() => getColumns(
       (doc) => setDocumentToPreview(doc),
       (doc) => setDocumentToEdit(doc),
@@ -204,26 +254,58 @@ export default function CollectionDetailPage() {
           </Link>
           <h1 className="text-3xl font-bold break-all">Colección: {topic}</h1>
         </div>
-        <div className="flex items-center gap-2">
-          <Button onClick={handleAnalyzeCollection} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
-            {collectionPollingId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ScanSearch className="mr-2 h-4 w-4" />}
-            Analizar Colección
-          </Button>
-          <Button onClick={() => setIsUploadOpen(true)}>
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Botón Principal */}
+          <Button onClick={() => setIsUploadOpen(true)} size="lg" className="bg-primary hover:bg-primary/90">
             <Upload className="mr-2 h-4 w-4" />
-            Subir a esta Colección
+            Subir Documentos
           </Button>
-          <Button onClick={handleExtractTitles} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
-            <Text className="mr-2 h-4 w-4" />
-            Extraer Títulos
-          </Button>
-          <Button onClick={handleSemanticSummary} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
-            <ScanSearch className="mr-2 h-4 w-4" />
-            Resumen Semántico
-          </Button>
-          <Button onClick={() => setIsCustomAnalysisOpen(true)} variant="outline">
-            <Sparkles className="mr-2 h-4 w-4" />
-            Análisis Personalizado
+
+          {/* Menú de Análisis */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="gap-2" disabled={!!docPollingId || !!collectionPollingId}>
+                {collectionPollingId ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ScanSearch className="h-4 w-4" />
+                )}
+                <span className="hidden sm:inline">Análisis</span>
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={handleAnalyzeCollection} disabled={!!docPollingId || !!collectionPollingId}>
+                <ScanSearch className="mr-2 h-4 w-4" />
+                <span>Analizar Colección</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleSemanticSummary} disabled={!!docPollingId || !!collectionPollingId}>
+                <ScanSearch className="mr-2 h-4 w-4" />
+                <span>Resumen Semántico</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setIsCustomAnalysisOpen(true)}>
+                <Sparkles className="mr-2 h-4 w-4" />
+                <span>Análisis Personalizado</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleExtractTitles} disabled={!!docPollingId || !!collectionPollingId}>
+                <Text className="mr-2 h-4 w-4" />
+                <span>Extraer Títulos</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Botón de Grafos de Conocimiento */}
+          <Button
+            onClick={handleProcessKnowledgeGraph}
+            variant="outline"
+            disabled={isProcessingKnowledgeGraph}
+            className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50"
+          >
+            <Network className="h-4 w-4" />
+            <span className="hidden sm:inline">
+              {isProcessingKnowledgeGraph ? "Procesando..." : "Crear Grafo"}
+            </span>
           </Button>
         </div>
       </div>
@@ -275,27 +357,87 @@ export default function CollectionDetailPage() {
                       </div>
                     </AccordionTrigger>
                     <AccordionContent>
-                      <Button variant="link" className="p-0 h-auto" onClick={() => {
-                        if (analysis.file_name.startsWith('Resumen Semántico:')) {
-                          setSemanticAnalysisResult(analysis.result_payload);
-                          setIsSemanticAnalysisOpen(true);
-                        } else if (analysis.file_name.startsWith('Colección:')) {
-                          console.log('📁 Abriendo análisis de colección');
-                          setCollectionAnalysisResult(analysis.result_payload);
-                          setIsCollectionAnalysisOpen(true);
-                        } else if (analysis.file_name.startsWith('Análisis Personalizado:')) {
-                          console.log('✨ Abriendo análisis personalizado');
-                          setCustomAnalysisResult(analysis.result_payload);
-                          setIsCustomAnalysisResultOpen(true);
-                        } else {
-                          console.log('📄 Abriendo análisis de documento');
-                          setDocAnalysisResult(analysis.result_payload);
-                          setDocumentToAnalyze({ file_name: analysis.file_name, topic, title: '', author: '' });
-                          setIsDocAnalysisOpen(true);
-                        }
-                      }}>
-                        Ver Resultados Detallados
-                      </Button>
+                      <div className="space-y-3">
+                        {/* Mostrar resumen según el tipo de análisis */}
+                        {analysis.file_name.startsWith('Colección:') && analysis.result_payload?.collection_summary && (
+                          <div className="p-3 bg-muted rounded-lg">
+                            <h4 className="font-medium text-sm mb-2">Resumen de la Colección:</h4>
+                            <p className="text-sm text-muted-foreground overflow-hidden" style={{
+                              display: '-webkit-box',
+                              WebkitLineClamp: 3,
+                              WebkitBoxOrient: 'vertical'
+                            }}>
+                              {analysis.result_payload.collection_summary}
+                            </p>
+                          </div>
+                        )}
+
+                        {analysis.file_name.startsWith('Resumen Semántico:') && analysis.result_payload?.resumen_semantico && (
+                          <div className="p-3 bg-muted rounded-lg">
+                            <h4 className="font-medium text-sm mb-2">Resumen Semántico:</h4>
+                            <p className="text-sm text-muted-foreground overflow-hidden" style={{
+                              display: '-webkit-box',
+                              WebkitLineClamp: 3,
+                              WebkitBoxOrient: 'vertical'
+                            }}>
+                              {analysis.result_payload.resumen_semantico}
+                            </p>
+                          </div>
+                        )}
+
+                        {analysis.file_name.startsWith('Análisis Personalizado:') && analysis.result_payload?.analysis_result && (
+                          <div className="p-3 bg-muted rounded-lg">
+                            <h4 className="font-medium text-sm mb-2">Resultado del Análisis:</h4>
+                            <p className="text-sm text-muted-foreground overflow-hidden" style={{
+                              display: '-webkit-box',
+                              WebkitLineClamp: 3,
+                              WebkitBoxOrient: 'vertical'
+                            }}>
+                              {typeof analysis.result_payload.analysis_result === 'string'
+                                ? analysis.result_payload.analysis_result
+                                : JSON.stringify(analysis.result_payload.analysis_result).substring(0, 200) + '...'}
+                            </p>
+                          </div>
+                        )}
+
+                        {!analysis.file_name.startsWith('Colección:') &&
+                         !analysis.file_name.startsWith('Resumen Semántico:') &&
+                         !analysis.file_name.startsWith('Análisis Personalizado:') &&
+                         analysis.result_payload?.resumen_ejecutivo && (
+                          <div className="p-3 bg-muted rounded-lg">
+                            <h4 className="font-medium text-sm mb-2">Resumen Ejecutivo:</h4>
+                            <p className="text-sm text-muted-foreground overflow-hidden" style={{
+                              display: '-webkit-box',
+                              WebkitLineClamp: 3,
+                              WebkitBoxOrient: 'vertical'
+                            }}>
+                              {analysis.result_payload.resumen_ejecutivo}
+                            </p>
+                          </div>
+                        )}
+
+                        <Button variant="link" className="p-0 h-auto" onClick={() => {
+                          if (analysis.file_name.startsWith('Resumen Semántico:')) {
+                            setSemanticAnalysisResult(analysis.result_payload);
+                            setIsSemanticAnalysisOpen(true);
+                          } else if (analysis.file_name.startsWith('Colección:')) {
+                            console.log('📁 Abriendo análisis de colección');
+                            setCollectionAnalysisResult(analysis.result_payload);
+                            setIsCollectionAnalysisOpen(true);
+                          } else if (analysis.file_name.startsWith('Análisis Personalizado:')) {
+                            console.log('✨ Abriendo análisis personalizado');
+                            setCustomAnalysisResult(analysis.result_payload);
+                            setIsCustomAnalysisResultOpen(true);
+                          } else {
+                            console.log('📄 Abriendo análisis de documento');
+                            setDocAnalysisResult(analysis.result_payload);
+                            setDocumentToAnalyze({ file_name: analysis.file_name, topic, title: '', author: '' });
+                            setIsDocAnalysisOpen(true);
+                          }
+                        }}>
+                          Ver Resultados Detallados →
+                        </Button>
+                      </div>
                     </AccordionContent>
                   </AccordionItem>
                 ))}

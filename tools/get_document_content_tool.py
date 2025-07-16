@@ -45,21 +45,6 @@ class GetDocumentContentInput(BaseModel):
         ...,
         description="El nombre exacto del archivo del cual se debe recuperar el contenido completo."
     )
-    account_id: str = Field(
-        default="",
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Si no se proporciona, se usa el del constructor."
-    )
-    telegram_id: Optional[int] = Field(
-        None,
-        description="El ID numérico original de Telegram del usuario. Es necesario para interactuar con sistemas de estado de sesión como `user_data`. Puede ser None si no aplica.",
-        json_schema_extra={"type": "integer"}
-    )
-    # --- NUEVO: Parámetro para el ID del workspace ---
-    workspace_id: Optional[str] = Field(
-        None,
-        description="El ID del workspace (UUID en formato string) para recuperar el documento de un workspace específico, si aplica.",
-        json_schema_extra={"type": "string"}
-    )
 
 
 class GetDocumentContentTool(BaseTool):
@@ -69,66 +54,50 @@ class GetDocumentContentTool(BaseTool):
     """
     name: str = "get_document_content_tool"
     description: str = (
-        "Recupera el contenido textual completo de un documento previamente subido por el usuario. "
-        "Úsala cuando el usuario pida 'ver', 'leer', 'muéstrame' o 'dame el texto completo' de un documento específico. "
-        "Debes proporcionar el `file_name` exacto."
+        "La herramienta principal para leer y recuperar el contenido textual completo de un documento específico "
+        "que ha sido subido previamente por el usuario. Esencial para tareas que requieren analizar, "
+        "resumir, o procesar el contenido de un archivo. Úsala siempre que el usuario pida explícitamente "
+        "leer, ver, analizar o trabajar con el contenido de un documento por su `file_name`."
     )
     args_schema: Type[BaseModel] = GetDocumentContentInput
-    return_direct: bool = False  # El agente debe procesar la respuesta.
+    return_direct: bool = False
+    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    telegram_id: Optional[str] = None
 
-
-
-    async def _arun(self, file_name: str, account_id: str = None, telegram_id: Optional[int] = None, workspace_id: Optional[str] = None, run_manager: Optional[Any] = None, **kwargs: Any) -> str:
+    async def _arun(self, file_name: str, run_manager: Optional[Any] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
             file_name: El nombre del archivo a recuperar.
-            account_id: El ID universal de la cuenta del usuario.
-            telegram_id: El ID de Telegram para la gestión de estado de sesión (opcional).
-            workspace_id: El ID del workspace para filtrar documentos (opcional).
+            run_manager: El gestor de ejecución que contiene la configuración del agente.
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
             El contenido completo del documento o un mensaje de error.
         """
-        # Obtener valores de la configuración del agente si están disponibles
-        config_account_id = None
-        config_telegram_id = None
-        config_workspace_id = workspace_id
+        effective_workspace_id = None
+        if run_manager and hasattr(run_manager, 'configurable') and run_manager.configurable:
+            effective_workspace_id = run_manager.configurable.get('workspace_id')
 
-        if run_manager and hasattr(run_manager, 'config'):
-            config = getattr(run_manager, 'config', {})
-            configurable = config.get('configurable', {})
-            config_account_id = configurable.get('account_id')
-            config_telegram_id = configurable.get('telegram_id')
-            if not config_workspace_id:
-                config_workspace_id = configurable.get('workspace_id')
-
-        # Usar valores de configuración o parámetros
-        effective_account_id = config_account_id or account_id
-        effective_telegram_id = config_telegram_id or telegram_id
-        effective_workspace_id = config_workspace_id
-
-        if not effective_account_id:
+        if not self.account_id:
             return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
 
-        logger.info(f"Ejecutando GetDocumentContentTool para la cuenta '{effective_account_id}' y el archivo '{file_name}' en workspace: '{effective_workspace_id}'.")
+        logger.info(f"Ejecutando GetDocumentContentTool para la cuenta '{self.account_id}' y el archivo '{file_name}' en workspace: '{effective_workspace_id}'.")
         try:
-            # --- MODIFICACIÓN: Pasar workspace_id a get_full_document_content ---
             full_content = await get_full_document_content(
-                account_id=effective_account_id,
+                account_id=self.account_id,
                 file_name=file_name,
-                team_id=None, # Mantener None o pasar team_id si aplica en tu lógica
-                workspace_id=effective_workspace_id # <-- Pasar el workspace_id
+                team_id=None,
+                workspace_id=effective_workspace_id
             )
 
             if full_content:
-                if effective_telegram_id is not None:
-                    user_data = bot_manager.get_user_data(effective_telegram_id)
+                if self.telegram_id is not None:
+                    user_data = bot_manager.get_user_data(int(self.telegram_id))
                     user_data[DOCUMENT_NAME_KEY] = file_name
                     await bot_manager.flush_persistence()
-                    logger.info(f"Guardado '{file_name}' en user_data para el usuario de Telegram {effective_telegram_id} para paginación.")
+                    logger.info(f"Guardado '{file_name}' en user_data para el usuario de Telegram {self.telegram_id} para paginación.")
                 
                 response_text = (
                     f"Contenido completo del documento '{file_name}'"
@@ -146,7 +115,7 @@ class GetDocumentContentTool(BaseTool):
                 return error_message
 
         except Exception as e:
-            logger.error(f"Error en GetDocumentContentTool para la cuenta '{effective_account_id}' y archivo '{file_name}' (workspace: {effective_workspace_id}): {e}", exc_info=True)
+            logger.error(f"Error en GetDocumentContentTool para la cuenta '{self.account_id}' y archivo '{file_name}' (workspace: {effective_workspace_id}): {e}", exc_info=True)
             return f"Ocurrió un error inesperado al recuperar el contenido del documento: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

@@ -37,10 +37,6 @@ class DeleteNoteInput(BaseModel):
         description="El ID numérico único de la nota que se va a eliminar. El usuario debe proporcionar este ID."
     )
     # Cambiamos telegram_id por account_id para que sea universal.
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
 
 
 class DeleteNoteTool(BaseTool):
@@ -56,29 +52,27 @@ class DeleteNoteTool(BaseTool):
         "se le debe sugerir que primero liste sus notas con `get_notes_tool` para encontrar el ID correcto."
     )
     args_schema: Type[BaseModel] = DeleteNoteInput
-    return_direct: bool = False  # El agente debe procesar la respuesta antes de mostrarla.
+    return_direct: bool = False
+    account_id: str
 
-    async def _arun(self, note_id: int, account_id: str, **kwargs: Any) -> str:
+    async def _arun(self, note_id: int, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
             note_id: El ID de la nota a eliminar.
-            account_id: El ID universal de la cuenta del usuario.
             **kwargs: Argumentos adicionales (no utilizados aquí).
 
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
-        logger.info(f"Ejecutando DeleteNoteTool para la cuenta '{account_id}' y la nota ID '{note_id}'.")
+        logger.info(f"Ejecutando DeleteNoteTool para la cuenta '{self.account_id}' y la nota ID '{note_id}'.")
         try:
-            # Llama a la función de lógica de negocio, que ahora también debe ser actualizada
-            # para aceptar 'account_id' en lugar de 'telegram_id'.
-            result_message = await delete_note(account_id=account_id, note_id=note_id)
-            logger.info(f"Herramienta de eliminación de nota completada para la cuenta '{account_id}'. Mensaje: {result_message}")
+            result_message = await delete_note(account_id=self.account_id, note_id=note_id)
+            logger.info(f"Herramienta de eliminación de nota completada para la cuenta '{self.account_id}'. Mensaje: {result_message}")
             return result_message
         except Exception as e:
-            logger.error(f"Error en DeleteNoteTool para la cuenta '{account_id}': {e}", exc_info=True)
+            logger.error(f"Error en DeleteNoteTool para la cuenta '{self.account_id}': {e}", exc_info=True)
             return f"Ocurrió un error inesperado al intentar eliminar la nota: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

@@ -550,9 +550,10 @@ async def list_team_shared_items(team_id: str, current_account_id: str = Depends
     
     # Obtener documentos compartidos con el equipo usando las columnas optimizadas
 
-    # Consulta optimizada usando team_id directamente con SQL directo para evitar problemas con DISTINCT ON
+    # Consulta optimizada usando team_id directamente con SQL directo
+    # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
     document_list_query = text("""
-        SELECT DISTINCT ON (cmetadata->>'file_name')
+        SELECT DISTINCT ON (cmetadata->>'document_id')
                cmetadata->>'file_name' AS file_name,
                cmetadata->>'title' AS title,
                topic AS topic,
@@ -560,7 +561,7 @@ async def list_team_shared_items(team_id: str, current_account_id: str = Depends
         FROM langchain_pg_embedding
         WHERE team_id = :team_id
           AND cmetadata->>'type' = 'document_chunk'
-        ORDER BY cmetadata->>'file_name', id
+        ORDER BY cmetadata->>'document_id', id
     """)
 
     documents_result = await db.execute(document_list_query, {"team_id": str(team_uuid)})

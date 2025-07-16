@@ -89,11 +89,11 @@ export function InsightDetailDialog({ insight, isOpen, onOpenChange }: { insight
                   <div className="space-y-3 text-sm">
                     {(() => {
                       // Handle different possible structures of related_items
-                      let items = insight.related_items || [];
+                      let items: any = insight.related_items || [];
 
                       // If related_items is an object with an 'items' property, use that
-                      if (typeof items === 'object' && !Array.isArray(items) && items.items) {
-                        items = items.items;
+                      if (typeof items === 'object' && !Array.isArray(items) && (items as any).items) {
+                        items = (items as any).items;
                       }
 
                       // Ensure we have an array
@@ -101,7 +101,7 @@ export function InsightDetailDialog({ insight, isOpen, onOpenChange }: { insight
                         items = [];
                       }
 
-                      return items.map((item, index) => (
+                      return items.map((item: any, index: number) => (
                         <motion.div
                           key={index}
                           className="p-4 bg-white/60 dark:bg-slate-900/40 rounded-2xl border border-slate-200/50 dark:border-slate-600/50 hover:bg-white/80 dark:hover:bg-slate-900/60 transition-colors duration-200"

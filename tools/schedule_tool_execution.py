@@ -74,11 +74,7 @@ class ScheduleToolExecutionTool(BaseTool):
     """
     args_schema: Type[BaseModel] = ScheduleToolExecutionInput
     return_direct: bool = False
-    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
-
-    def __init__(self, account_id: str, **kwargs):
-        super().__init__(**kwargs)
-        self.account_id = account_id
+    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
 
     async def _arun(
         self,
@@ -220,11 +216,7 @@ class ListScheduledToolsTool(BaseTool):
     description: str = "Útil para ver qué herramientas están programadas para ejecutarse automáticamente"
     args_schema: Type[BaseModel] = ListScheduledToolsInput
     return_direct: bool = False
-    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
-
-    def __init__(self, account_id: str, **kwargs):
-        super().__init__(**kwargs)
-        self.account_id = account_id
+    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
 
     async def _arun(self, account_id: str, **kwargs: Any) -> str:
         """

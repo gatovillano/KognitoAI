@@ -36,10 +36,6 @@ class CancelEventInput(BaseModel):
         description="El ID numérico único del evento que se desea cancelar. El usuario debe proporcionar este ID."
     )
     # Cambiamos telegram_id por account_id para que sea universal.
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
 
 
 class CancelEventTool(BaseTool):
@@ -54,29 +50,27 @@ class CancelEventTool(BaseTool):
         "sugerirle que primero consulte su agenda con la herramienta `get_agenda_tool` para encontrar el ID."
     )
     args_schema: Type[BaseModel] = CancelEventInput
-    return_direct: bool = False  # El agente debe procesar la respuesta.
+    return_direct: bool = False
+    account_id: str
 
-    async def _arun(self, event_id: int, account_id: str, **kwargs: Any) -> str:
+    async def _arun(self, event_id: int, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
             event_id: El ID del evento a cancelar.
-            account_id: El ID universal de la cuenta del usuario.
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
-        logger.info(f"Ejecutando CancelEventTool para la cuenta '{account_id}' y el evento ID '{event_id}'.")
+        logger.info(f"Ejecutando CancelEventTool para la cuenta '{self.account_id}' y el evento ID '{event_id}'.")
         try:
-            # Llama a la función de lógica de negocio, que ahora debe ser actualizada
-            # para aceptar 'account_id' en lugar de 'telegram_id'.
-            success, message = await cancel_event(account_id=account_id, event_id=event_id)
-            logger.info(f"Herramienta de cancelación de evento completada para la cuenta '{account_id}'. Mensaje: {message}")
+            success, message = await cancel_event(account_id=self.account_id, event_id=event_id)
+            logger.info(f"Herramienta de cancelación de evento completada para la cuenta '{self.account_id}'. Mensaje: {message}")
             return message
         except Exception as e:
-            logger.error(f"Error en CancelEventTool para la cuenta '{account_id}': {e}", exc_info=True)
+            logger.error(f"Error en CancelEventTool para la cuenta '{self.account_id}': {e}", exc_info=True)
             return f"Ocurrió un error inesperado al intentar cancelar el evento: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

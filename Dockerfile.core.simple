@@ -1,0 +1,71 @@
+# Dockerfile.core.simple
+# Versión simplificada que usa mirrors estables desde el inicio
+
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+ENV PYTHONPATH /app
+
+# Configurar pip para usar mirrors estables desde el inicio
+RUN pip config set global.index-url https://pypi.douban.com/simple/ && \
+    pip config set global.trusted-host pypi.douban.com && \
+    pip config set global.timeout 300 && \
+    pip config set global.retries 10
+
+# Instalar dependencias del sistema
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    ffmpeg \
+    graphviz \
+    gcc \
+    g++ \
+    python3-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Actualizar pip con el mirror configurado
+RUN pip install --upgrade pip
+
+# Copiar archivos de requerimientos
+COPY requirements-build.txt requirements.txt ./
+
+# Instalar dependencias críticas una por una para mejor debugging
+RUN pip install --no-cache-dir wheel setuptools && \
+    pip install --no-cache-dir numpy && \
+    pip install --no-cache-dir cython && \
+    pip install --no-cache-dir pydantic && \
+    pip install --no-cache-dir fastapi && \
+    pip install --no-cache-dir uvicorn
+
+# Instalar dependencias de compilación
+RUN pip install --no-cache-dir -r requirements-build.txt || \
+    (echo "Instalación masiva falló, instalando individualmente..." && \
+     while IFS= read -r line; do \
+       if [[ ! -z "$line" && ! "$line" =~ ^[[:space:]]*# ]]; then \
+         echo "Instalando: $line" && \
+         pip install --no-cache-dir "$line" || echo "Falló: $line"; \
+       fi; \
+     done < requirements-build.txt)
+
+# Instalar dependencias principales
+RUN pip install --no-cache-dir -r requirements.txt || \
+    (echo "Instalación masiva falló, instalando individualmente..." && \
+     while IFS= read -r line; do \
+       if [[ ! -z "$line" && ! "$line" =~ ^[[:space:]]*# ]]; then \
+         echo "Instalando: $line" && \
+         pip install --no-cache-dir "$line" || echo "Falló: $line"; \
+       fi; \
+     done < requirements.txt)
+
+# Copiar el código de la aplicación
+COPY . .
+
+# Exponer el puerto
+EXPOSE 8000
+
+# Comando por defecto
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

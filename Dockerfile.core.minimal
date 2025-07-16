@@ -1,0 +1,49 @@
+# Dockerfile.core.minimal
+# Versión ultra-minimalista que evita descargas problemáticas
+
+# Usar una imagen que ya tiene muchas dependencias científicas
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+ENV PYTHONPATH /app
+
+# Instalar dependencias del sistema esenciales + pipeline híbrido
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    curl \
+    gcc \
+    g++ \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# NO actualizar pip para evitar problemas de conectividad
+# Usar la versión que viene con la imagen base
+
+# Copiar archivos de requirements completo
+COPY requirements.complete.txt ./
+
+# Instalar dependencias completas con versiones flexibles
+RUN pip install --no-cache-dir \
+    --timeout 300 \
+    --retries 5 \
+    -r requirements.complete.txt
+
+# Crear directorio y copiar script de descarga de modelos
+RUN mkdir -p ./scripts
+COPY scripts/download_small_models.py ./scripts/
+
+# Pre-descargar solo modelos pequeños (spaCy ~15MB + SentenceTransformers ~22MB)
+RUN python scripts/download_small_models.py || echo "Model download failed, will download at runtime"
+
+# Copiar el resto del código después de instalar dependencias
+COPY . .
+
+# Exponer el puerto
+EXPOSE 8000
+
+# Comando simplificado
+CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

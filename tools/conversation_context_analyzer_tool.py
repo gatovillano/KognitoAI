@@ -26,10 +26,6 @@ class ConversationContextAnalyzerInput(BaseModel):
     Define el esquema de entrada para la herramienta de análisis de contexto de conversaciones.
     Valida que los argumentos necesarios sean proporcionados por el LLM.
     """
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
     conversation_history: Optional[str] = Field(
         None,
         description="El historial de conversación a analizar. Si no se proporciona, se analizarán las memorias y conversaciones recientes del usuario.",
@@ -55,19 +51,14 @@ class ConversationContextAnalyzerTool(BaseTool):
         "puede ser llamada bajo demanda para análisis específicos."
     )
     args_schema: Type[BaseModel] = ConversationContextAnalyzerInput
-    return_direct: bool = False  # El agente debe procesar la respuesta.
+    return_direct: bool = False
+    account_id: str
 
-    def __init__(self, **kwargs):
-        """Inicializa la herramienta con cualquier configuración necesaria."""
-        super().__init__(**kwargs)
-        logger.info("Inicializando ConversationContextAnalyzerTool")
-
-    async def _arun(self, account_id: str, conversation_history: Optional[str] = None, user_query: Optional[str] = None, **kwargs: Any) -> str:
+    async def _arun(self, conversation_history: Optional[str] = None, user_query: Optional[str] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
-            account_id: El ID universal de la cuenta del usuario.
             conversation_history: El historial de conversación a analizar (opcional).
             user_query: Consulta del usuario para análisis bajo demanda (opcional).
             **kwargs: Argumentos adicionales (no utilizados).
@@ -75,22 +66,19 @@ class ConversationContextAnalyzerTool(BaseTool):
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
-        logger.info(f"Ejecutando ConversationContextAnalyzerTool para la cuenta '{account_id}'.")
+        logger.info(f"Ejecutando ConversationContextAnalyzerTool para la cuenta '{self.account_id}'.")
         try:
             if user_query:
-                # Análisis bajo demanda basado en la consulta del usuario
                 logger.info(f"Análisis bajo demanda con consulta: {user_query}")
-                return await self._analyze_with_query(account_id, user_query)
+                return await self._analyze_with_query(self.account_id, user_query)
             elif conversation_history:
-                # Análisis de historial de conversación proporcionado
-                logger.info(f"Análisis de historial de conversación proporcionado para la cuenta '{account_id}'.")
-                return await self._analyze_conversation_history(account_id, conversation_history)
+                logger.info(f"Análisis de historial de conversación proporcionado para la cuenta '{self.account_id}'.")
+                return await self._analyze_conversation_history(self.account_id, conversation_history)
             else:
-                # Análisis automático de conversaciones y memorias recientes
-                logger.info(f"Análisis automático de contexto para la cuenta '{account_id}'.")
-                return await self._analyze_recent_context(account_id)
+                logger.info(f"Análisis automático de contexto para la cuenta '{self.account_id}'.")
+                return await self._analyze_recent_context(self.account_id)
         except Exception as e:
-            logger.error(f"Error en ConversationContextAnalyzerTool para la cuenta '{account_id}': {e}", exc_info=True)
+            logger.error(f"Error en ConversationContextAnalyzerTool para la cuenta '{self.account_id}': {e}", exc_info=True)
             return f"Ocurrió un error inesperado al iniciar el análisis de contexto: {e}"
 
     async def _analyze_with_query(self, account_id: str, user_query: str) -> str:
@@ -132,8 +120,23 @@ class ConversationContextAnalyzerTool(BaseTool):
         """
         Formatea el resultado del análisis en una cadena legible.
         """
-        # Usamos .join para manejar listas vacías de forma elegante.
-        themes = ", ".join(result.key_themes) if result.key_themes else "No se identificaron temas clave."
+        # Formatear temas clave manejando objetos ThemeReference
+        if result.key_themes:
+            themes_formatted = []
+            for theme in result.key_themes:
+                if hasattr(theme, 'theme'):
+                    # Es un objeto ThemeReference
+                    theme_text = f"{theme.theme}"
+                    if hasattr(theme, 'related_quotes') and theme.related_quotes:
+                        quote_count = len(theme.related_quotes)
+                        theme_text += f" ({quote_count} cita{'s' if quote_count > 1 else ''})"
+                    themes_formatted.append(theme_text)
+                else:
+                    # Es un string u otro tipo
+                    themes_formatted.append(str(theme))
+            themes = ", ".join(themes_formatted)
+        else:
+            themes = "No se identificaron temas clave."
         
         # Construimos las preguntas con viñetas para mayor claridad.
         questions_list = [f"- {q}" for q in result.knowledge_gaps]

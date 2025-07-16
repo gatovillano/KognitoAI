@@ -27,6 +27,7 @@ interface Collection {
   created_at: string;
   description?: string;
   name?: string;
+  document_count?: number;
 }
 
 interface Workspace {
@@ -250,12 +251,14 @@ export default function WorkspaceDashboard() {
         topic: col.topic || col.title || '',
         workspace_id: col.workspace_id || '',
         created_at: col.created_at || new Date().toISOString(),
-        description: col.description || `Colección con ${col.document_count || 0} documentos`
+        description: col.description || (col.document_count > 0 ? `${col.document_count} documentos` : 'Colección vacía'),
+        document_count: col.document_count || 0
       }));
 
       // Filtrar para mostrar solo las colecciones del contexto general que no están ya en este workspace
+      // Incluir tanto colecciones con documentos como colecciones vacías
       const filteredCollections = allCollections.filter(
-        (col: Collection) => !workspaceCollectionIds.has(col.id) && col.document_count > 0
+        (col: Collection) => !workspaceCollectionIds.has(col.id)
       );
 
       setAvailableCollections(filteredCollections);
@@ -668,11 +671,16 @@ export default function WorkspaceDashboard() {
                 availableCollections.map(col => (
                   <div
                     key={col.id}
-                    className={`p-2 cursor-pointer rounded-md border ${selectedCollectionId === col.id ? 'border-primary bg-primary/10' : 'border-transparent'}`}
+                    className={`p-3 cursor-pointer rounded-md border ${selectedCollectionId === col.id ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted/50'}`}
                     onClick={() => setSelectedCollectionId(col.id)}
                   >
-                    <p className="font-medium">{col.title}</p>
-                    {col.description && <p className="text-sm text-muted-foreground">{col.description}</p>}
+                    <div className="flex items-center justify-between">
+                      <p className="font-medium">{col.title}</p>
+                      <span className="text-xs bg-muted px-2 py-1 rounded-full">
+                        {col.document_count || 0} docs
+                      </span>
+                    </div>
+                    {col.description && <p className="text-sm text-muted-foreground mt-1">{col.description}</p>}
                   </div>
                 ))
               )}
