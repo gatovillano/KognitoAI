@@ -39,17 +39,8 @@ async def get_interpreter_llm() -> ChatGoogleGenerativeAI:
 class NaturalQueryInput(BaseModel):
     """Input schema para interpretación de consultas naturales."""
     query: str = Field(
-        ..., 
+        ...,
         description="La consulta completa del usuario en lenguaje natural"
-    )
-    account_id: str = Field(
-        ..., 
-        description="ID de la cuenta del usuario"
-    )
-    workspace_id: Optional[str] = Field(
-        None,
-        description="ID del workspace actual del usuario",
-        json_schema_extra={"type": "string"}
     )
     context: Optional[str] = Field(
         None,
@@ -118,11 +109,17 @@ Responde SOLO en formato JSON válido:
             content = response.content
             
             # Extraer JSON de la respuesta
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            json_match = re.search(r'\{.*\}', str(content), re.DOTALL)
             if json_match:
                 content = json_match.group(0)
             
-            result = json.loads(content)
+            if not isinstance(content, (dict, list)):
+                result = json.loads(content)
+            else:
+                result = content
+            # Ensure return type is always Dict[str, Any]
+            if isinstance(result, list):
+                result = {"results": result}
             logger.info(f"🎯 Consulta interpretada: {result}")
             return result
             
@@ -142,15 +139,27 @@ Responde SOLO en formato JSON válido:
     async def _arun(
         self,
         query: str,
-        account_id: str,
-        workspace_id: Optional[str] = None,
-        context: Optional[str] = None
+        context: Optional[str] = None,
+        run_manager: Optional[Any] = None,
+        **kwargs: Any,
     ) -> str:
         """Ejecuta la interpretación y búsqueda automática."""
         try:
             logger.info(f"🔍 Interpretando consulta natural: '{query[:100]}...'")
             
+            # Obtener account_id de la configuración
+            account_id = None
+            workspace_id = None
+            if run_manager and hasattr(run_manager, 'config'):
+                config = run_manager.config['configurable']
+                account_id = config.get('account_id')
+                workspace_id = config.get('workspace_id')
+            
+            if not account_id:
+                return "Error: No se pudo obtener el account_id desde la configuración del agente."
+            
             # 1. Interpretar la consulta
+            logger.info(f"run_manager.config: {run_manager.config}")
             interpretation = await self._interpret_query(query, context or "")
             
             # 2. Extraer parámetros

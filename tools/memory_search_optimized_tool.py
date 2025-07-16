@@ -7,7 +7,6 @@ from langchain_core.tools import BaseTool
 
 class MemorySearchOptimizedInput(BaseModel):
     """Esquema de entrada para la herramienta de búsqueda optimizada de memoria."""
-    account_id: str = Field(..., description="El identificador de la cuenta del usuario")
     query: str = Field(..., description="La consulta de búsqueda")
     content_type: Optional[str] = Field(None, description="Tipo de contenido: user_memories, user_documents, team_memories, team_documents", json_schema_extra={"type": "string"})
     topic: Optional[str] = Field(None, description="Topic organizacional específico del usuario", json_schema_extra={"type": "string"})
@@ -40,15 +39,10 @@ class MemorySearchOptimizedTool(BaseTool):
         "\n⚡ OPTIMIZADO: 10-50x más rápido con aislamiento automático por workspace."
     )
     args_schema: Type[BaseModel] = MemorySearchOptimizedInput
-    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
-
-    def __init__(self, account_id: str = "", **kwargs):
-        super().__init__(**kwargs)
-        self.account_id = account_id
+    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
 
     def _run(
         self,
-        account_id: str,
         query: str,
         content_type: Union[str, None] = None,
         topic: Union[str, None] = None,
@@ -66,7 +60,7 @@ class MemorySearchOptimizedTool(BaseTool):
         """
         try:
             results = asyncio.run(search_vector_db_optimized(
-                account_id=account_id,
+                account_id=self.account_id,
                 query=query,
                 content_type=content_type,
                 topic=topic,
@@ -120,7 +114,6 @@ class MemorySearchOptimizedTool(BaseTool):
 
     async def _arun(
         self,
-        account_id: str,
         query: str,
         content_type: Union[str, None] = None,
         topic: Union[str, None] = None,
@@ -133,7 +126,7 @@ class MemorySearchOptimizedTool(BaseTool):
         """Versión asíncrona de la búsqueda optimizada."""
         try:
             results = await search_vector_db_optimized(
-                account_id=account_id,
+                account_id=self.account_id,
                 query=query,
                 content_type=content_type,
                 topic=topic,
@@ -188,7 +181,6 @@ class MemorySearchOptimizedTool(BaseTool):
 
 class MemoryContextSearchInput(BaseModel):
     """Esquema de entrada para búsqueda con MemoryContext."""
-    account_id: str = Field(..., description="El identificador de la cuenta del usuario")
     query: str = Field(..., description="La consulta de búsqueda")
     workspace_id: Optional[str] = Field(None, description="ID del workspace actual (NULL = General)", json_schema_extra={"type": "string"})
     team_id: Optional[str] = Field(None, description="ID del team actual", json_schema_extra={"type": "string"})
@@ -214,9 +206,10 @@ class MemoryContextSearchTool(BaseTool):
     )
     args_schema: Type[BaseModel] = MemoryContextSearchInput
 
+    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+
     def _run(
         self,
-        account_id: str,
         query: str,
         workspace_id: Union[str, None] = None,
         team_id: Union[str, None] = None,
@@ -228,13 +221,12 @@ class MemoryContextSearchTool(BaseTool):
     ) -> str:
         """Realiza búsqueda con MemoryContext."""
         return asyncio.run(self._arun(
-            account_id, query, workspace_id, team_id, search_type, 
+            query, workspace_id, team_id, search_type,
             topic, category, k, include_shared
         ))
 
     async def _arun(
         self,
-        account_id: str,
         query: str,
         workspace_id: Union[str, None] = None,
         team_id: Union[str, None] = None,
@@ -246,9 +238,8 @@ class MemoryContextSearchTool(BaseTool):
     ) -> str:
         """Versión asíncrona de búsqueda con MemoryContext."""
         try:
-            # Crear contexto de memoria
             context = await create_memory_context(
-                account_id=account_id,
+                account_id=self.account_id,
                 workspace_id=workspace_id,
                 team_id=team_id
             )

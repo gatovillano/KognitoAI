@@ -19,6 +19,9 @@ from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 
 from core.config import settings
+from core.database import get_db_session, Account # Importar Account y get_db_session
+from sqlalchemy.ext.asyncio import AsyncSession # Importar AsyncSession
+from sqlalchemy import select # Importar select
 
 logger = logging.getLogger(__name__)
 
@@ -97,3 +100,51 @@ async def get_current_account_id(token: str = Depends(oauth2_scheme)) -> str:
         raise credentials_exception
         
     return account_id
+
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    session: AsyncSession = Depends(get_db_session)
+) -> dict:
+    """
+    Dependencia de FastAPI para obtener información completa del usuario actual.
+
+    Extrae el token del header, lo valida y devuelve información del usuario.
+    Si el token es inválido o no se proporciona, lanza una HTTPException 401.
+    """
+    from core.database import Account # Necesitamos importar Account para el tipo
+
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="No se pudieron validar las credenciales",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    account_id = decode_access_token(token)
+
+    if account_id is None:
+        raise credentials_exception
+
+    # Obtener información del usuario desde la base de datos
+    try:
+        # Ahora usamos la sesión inyectada directamente
+        query = select(Account).where(
+            Account.id == account_id,
+            Account.is_active == True
+        )
+        result = await session.execute(query)
+        user_account = result.scalars().first()
+
+        if not user_account:
+            raise credentials_exception
+
+        return {
+            "account_id": str(user_account.id), # Convertir UUID a str
+            "email": user_account.email,
+            "username": user_account.username,
+            "is_active": user_account.is_active,
+            "created_at": user_account.created_at.isoformat() # Convertir datetime a str
+        }
+
+    except Exception as e:
+        logger.error(f"Error obteniendo información del usuario: {e}")
+        raise credentials_exception

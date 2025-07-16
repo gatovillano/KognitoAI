@@ -39,11 +39,6 @@ class KnowledgeAnalysisInput(BaseModel):
         description="La petición completa del usuario en lenguaje natural, por ejemplo: 'ejecuta un análisis completo de mis notas'.",
         json_schema_extra={"type": "string"}
     )
-    account_id: Optional[str] = Field(
-        None,
-        description="El identificador único de la cuenta del usuario. Si no se proporciona, se obtendrá del contexto de ejecución.",
-        json_schema_extra={"type": "string"}
-    )
 
 
 class KnowledgeAnalysisTool(BaseTool):
@@ -53,9 +48,10 @@ class KnowledgeAnalysisTool(BaseTool):
         "Se utiliza para iniciar un análisis profundo de la base de conocimiento de un usuario (notas, documentos) para encontrar conexiones. "
         "ACTUALIZADO: Ahora usa búsquedas optimizadas 10-50x más rápidas con aislamiento por workspace. "
         "Activa esta herramienta si el usuario pide 'analizar mis notas', 'buscar nuevas conexiones', o 'revisar mis documentos sobre un tema'. "
-        "Tu trabajo es pasar la petición del usuario en el campo 'query' y el 'account_id' del usuario actual en el campo 'account_id'."
+        "Tu trabajo es pasar la petición del usuario en el campo 'query'."
     )
     args_schema: Type[BaseModel] = KnowledgeAnalysisInput
+    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
     return_direct: bool = False
 
     async def _interpret_request(self, user_query: str) -> Dict[str, Any]:
@@ -81,60 +77,74 @@ class KnowledgeAnalysisTool(BaseTool):
             import re
             
             # Extract JSON from response content if it's embedded in text
-            content = response.content
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
-            if json_match:
-                content = json_match.group(0)
-            return json.loads(content)
+            raw_content = response.content
+            
+            if isinstance(raw_content, dict):
+                return raw_content
+            elif isinstance(raw_content, str):
+                json_match = re.search(r'\{.*\}', raw_content, re.DOTALL)
+                if json_match:
+                    content_to_parse = json_match.group(0)
+                else:
+                    content_to_parse = raw_content
+                return json.loads(content_to_parse)
+            elif isinstance(raw_content, list):
+                for item in raw_content:
+                    if isinstance(item, dict):
+                        return item
+                    elif isinstance(item, str):
+                        json_match = re.search(r'\{.*\}', item, re.DOTALL)
+                        if json_match:
+                            return json.loads(json_match.group(0))
+                        else:
+                            try:
+                                return json.loads(item)
+                            except json.JSONDecodeError:
+                                continue
+                raise ValueError("No se pudo encontrar un objeto JSON válido en la lista de contenido.")
+            else:
+                raise TypeError(f"Tipo de contenido inesperado de la respuesta del LLM: {type(raw_content)}")
         except Exception as e:
             logger.error(f"Error interpretando la petición del usuario: {e}", exc_info=True)
             return {"action": "error", "details": str(e)}
 
-    # (CAMBIO CLAVE 3) - La firma de _arun ahora coincide con los campos del args_schema.
     async def _arun(
         self,
         query: str,
-        account_id: Optional[str] = None,
         run_manager: Optional[Any] = None,
         **kwargs: Any
     ) -> str:
         """
-        Ejecuta la herramienta de forma asíncrona.
+        Ejecuta la herramienta de forma asíncronas.
         1. Interpreta la petición.
         2. Llama a la función de análisis con los parámetros correctos.
         3. Devuelve un mensaje de confirmación al usuario.
         """
 
-        # Si account_id no se proporciona, intentar obtenerlo del contexto de configuración
-        if not account_id and run_manager and hasattr(run_manager, 'config'):
-            config = getattr(run_manager, 'config', {})
-            configurable = config.get('configurable', {})
-            account_id = configurable.get('account_id')
-
-        # Validar que tenemos account_id
-        if not account_id:
+        # Validar que tenemos account_id (ahora se inyecta en el constructor)
+        if not self.account_id:
             return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
 
-        logger.info(f"KnowledgeAnalysisTool activada para la cuenta {account_id} con la consulta: '{query}'")
+        logger.info(f"KnowledgeAnalysisTool activada para la cuenta {self.account_id} con la consulta: '{query}'")
         
         # 1. Interpretar la intención del usuario
         intent = await self._interpret_request(query)
         action = intent.get("action")
         params = intent.get("parameters", {})
-        logger.info(f"Intención interpretada para la cuenta {account_id}: {intent}")
+        logger.info(f"Intención interpretada para la cuenta {self.account_id}: {intent}")
 
         # 2. Disparar la acción de análisis en segundo plano
         response_message = "Se ha producido un error inesperado al procesar tu solicitud."
         
         if action == "run_full_analysis":
             start_time = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
-            asyncio.create_task(run_batch_analysis_job(account_id_filter=account_id, since_timestamp=start_time))
+            asyncio.create_task(run_batch_analysis_job(account_id_filter=self.account_id, since_timestamp=start_time))
             response_message = "¡Entendido! He iniciado un análisis completo de tu base de conocimiento en segundo plano."
 
         elif action == "analyze_recent_items":
             days = params.get("days_ago", 1)
             start_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
-            asyncio.create_task(run_batch_analysis_job(account_id_filter=account_id, since_timestamp=start_time))
+            asyncio.create_task(run_batch_analysis_job(account_id_filter=self.account_id, since_timestamp=start_time))
             response_message = f"¡Claro! Estoy analizando tus notas de los últimos {days} días en segundo plano."
 
         elif action == "analyze_specific_topic":
@@ -142,7 +152,7 @@ class KnowledgeAnalysisTool(BaseTool):
             if not keywords:
                 return "No pude identificar un tema específico en tu petición."
             start_time = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
-            asyncio.create_task(run_batch_analysis_job(account_id_filter=account_id, since_timestamp=start_time, topic_keywords=keywords))
+            asyncio.create_task(run_batch_analysis_job(account_id_filter=self.account_id, since_timestamp=start_time, topic_keywords=keywords))
             response_message = f"¡Perfecto! He comenzado a buscar conexiones sobre '{', '.join(keywords)}' en segundo plano."
         
         return response_message

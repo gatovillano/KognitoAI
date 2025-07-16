@@ -2,17 +2,20 @@
 
 import logging
 import asyncio
-from typing import Any, Type, List, Optional
+from typing import Any, Type, List, Optional, cast
 import re
 
-from pydantic.v1 import BaseModel, Field
+from langchain_core.tools import Tool
+from core.citation_models import ToolOutputWithSources
+
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.messages import HumanMessage
 from bs4 import BeautifulSoup
 
 # Import functionalities from other tools and modules
-from tools.web_search_tool import search_and_summarize_web
+from tools.web_search_tool import get_web_search_tool
 from tools.web_scraper_tool import WebScraperTool
 from core.memory_manager import get_relevant_memories # <-- Esta ya soporta workspace_id
 from core.llm_manager import get_fast_llm
@@ -44,6 +47,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
     )
     args_schema: Type[BaseModel] = ComprehensiveWebAnalysisInput
     return_direct: bool = False
+    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
 
     def __init__(self, account_id: str = "", **kwargs):
         """Initialize the tool with account_id."""
@@ -59,7 +63,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
     async def _arun(\
         self,\
         query: str,\
-        account_id: str = None,\
+        account_id: str = "",\
         workspace_id: Optional[str] = None, # <-- workspace_id añadido aquí
         run_manager: Optional[CallbackManagerForToolRun] = None,\
         **kwargs: Any\
@@ -97,7 +101,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
                 config_workspace_id = configurable.get('workspace_id')
 
         # Usar configuración, parámetros o instancia como fallback
-        effective_account_id = config_account_id or account_id or getattr(self, 'account_id', None)
+        effective_account_id = config_account_id or account_id or getattr(self, 'account_id', "") or ""
         effective_workspace_id = config_workspace_id
 
         # Log para debugging
@@ -111,15 +115,21 @@ class ComprehensiveWebAnalysisTool(BaseTool):
 
         # Step 1: Web Search
         logger.info("Step 1: Performing web search...")
-        search_results_str = await search_and_summarize_web(query)
-        if "Error" in search_results_str or "No se encontraron" in search_results_str:
-            logger.warning("Web search did not yield results or failed.")
-            return search_results_str
+        web_search_tool_instance = get_web_search_tool()
+        if web_search_tool_instance.coroutine is None:
+            logger.error("Error: web_search_tool_instance.coroutine is None. This should not happen.")
+            return "Error interno: La herramienta de búsqueda web no está configurada correctamente."
+        
+        search_results_obj = cast(ToolOutputWithSources, await web_search_tool_instance.coroutine(query))
+        search_context = search_results_obj.context_for_llm
+        if "Error" in search_context or "No se encontraron" in search_context:
+            logger.warning("Web search did not yield results or failed. Returning raw search results.")
+            return search_results_obj.context_for_llm
 
-        urls_to_scrape = self._extract_urls(search_results_str)
+        urls_to_scrape = self._extract_urls(search_results_obj.context_for_llm)
         if not urls_to_scrape:
             logger.warning("No URLs could be extracted from the search results.")
-            soup = BeautifulSoup(search_results_str, "html.parser")
+            soup = BeautifulSoup(search_results_obj.context_for_llm, "html.parser")
             return f"No pude extraer URLs específicas, pero aquí tienes un resumen de la búsqueda:\n\n{soup.get_text()}"
 
         # Step 2: Web Scraping
@@ -187,8 +197,8 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         - Sintetiza los hallazgos clave.
         - Si encuentras conexiones, sinergias o contradicciones entre la información web y el conocimiento del usuario, destácalas.
         - Adopta un tono de asistente útil y experto.
-        - Formatea tu respuesta de manera clara y legible usando Markdown.
-        - **Importante:** Al final de tu respuesta, incluye una sección titulada "**Fuentes** donde listes todas las URLs utilizadas en la investigación web ({{', '.join(urls_to_scrape[:5])}}). Asegúrate de que cada URL esté en formato de enlace clickable usando Markdown.\n
+        - Formatea tu respuesta de manera clara y legible usando Markdown.\n
+        - **Importante:** Al final de tu respuesta, incluye una sección titulada "**Fuentes** donde listes todas las URLs utilizadas en la investigación web ({', '.join([f'[{url.split("//")[1].split("/")[0]}](<{url}>)' for url in urls_to_scrape[:5]])}). Asegúrate de que cada URL esté en formato de enlace clickable usando Markdown.\n
         """
         final_response = await final_analysis_llm.ainvoke([HumanMessage(content=final_prompt)])
 

@@ -33,11 +33,12 @@ export const useStreamingChat = (options: StreamingChatOptions = {}) => {
         throw new Error('No auth token found');
       }
 
-      // Crear URL con parámetros para el stream
-      const url = new URL('/api/chat/stream', window.location.origin);
-      
+      // Crear URL con la base URL correcta
+      const baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8889';
+      const streamUrl = `${baseURL}/api/chat/stream`;
+
       // Enviar request inicial
-      const response = await fetch('/api/chat/stream', {
+      const response = await fetch(streamUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

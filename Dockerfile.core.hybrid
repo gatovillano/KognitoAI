@@ -1,0 +1,62 @@
+# Dockerfile.core.hybrid
+# Versión optimizada que incluye dependencias para pipeline híbrido sin problemas de build
+
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+ENV PYTHONPATH /app
+
+# Instalar dependencias del sistema esenciales
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    curl \
+    wget \
+    gcc \
+    g++ \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copiar requirements y usar instalación por etapas
+COPY requirements.txt ./
+
+# Instalar dependencias básicas primero (más estables)
+RUN pip install --no-cache-dir --timeout 300 --retries 3 \
+    fastapi uvicorn sqlalchemy psycopg[async] pgvector \
+    langchain langchain-core langchain-community langchain-google-genai \
+    httpx python-telegram-bot
+
+# Instalar dependencias científicas (pueden ser problemáticas)
+RUN pip install --no-cache-dir --timeout 300 --retries 3 \
+    numpy scipy scikit-learn
+
+# Instalar spaCy y modelo básico
+RUN pip install --no-cache-dir --timeout 300 --retries 3 spacy && \
+    python -m spacy download en_core_web_sm || echo "spaCy model download failed, will download at runtime"
+
+# Instalar SentenceTransformers (puede ser lento)
+RUN pip install --no-cache-dir --timeout 300 --retries 3 \
+    sentence-transformers || echo "SentenceTransformers install failed, will install at runtime"
+
+# Instalar el resto de dependencias
+RUN pip install --no-cache-dir --timeout 300 --retries 3 \
+    -r requirements.txt || echo "Some packages failed, continuing..."
+
+# Copiar código
+COPY . .
+
+# Script de inicialización que descarga modelos faltantes
+RUN echo '#!/bin/bash\n\
+# Descargar modelos faltantes al iniciar el contenedor\n\
+python -c "import spacy; spacy.load(\"en_core_web_sm\")" 2>/dev/null || python -m spacy download en_core_web_sm\n\
+python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer(\"paraphrase-multilingual-MiniLM-L12-v2\")" 2>/dev/null || echo "SentenceTransformers will download on first use"\n\
+exec "$@"' > /app/init.sh && chmod +x /app/init.sh
+
+EXPOSE 8000
+
+# Usar script de inicialización
+ENTRYPOINT ["/app/init.sh"]
+CMD ["uvicorn", "run_api:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

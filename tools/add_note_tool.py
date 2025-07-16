@@ -35,7 +35,6 @@ class AddNoteInput(BaseModel):
     
     # ¡EL CAMBIO CLAVE! Ahora requerimos el identificador universal de la cuenta.
     # El LLM debe recibir este ID del contexto de la conversación y pasarlo aquí.
-    account_id: str = Field(description="El identificador universal (UUID) de la cuenta del usuario.")
     
     # El título opcional para la nota.
     title: str = Field(default="", description="Un título opcional para la nota.")
@@ -57,13 +56,14 @@ class AddNoteTool(BaseTool):
         "El 'account_id' del usuario es un argumento obligatorio."
     )
     args_schema: Type[BaseModel] = AddNoteInput
+    account_id: str
 
     async def _arun(
         self,
-        account_id: str,
         content: str,
         title: str = "",
         category: str = "General",
+        **kwargs: Any,
     ) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
@@ -72,7 +72,6 @@ class AddNoteTool(BaseTool):
         pasándole los datos validados para crear la nota en la base de datos.
 
         Args:
-            account_id: El UUID de la cuenta del usuario.
             content: El texto de la nota.
             title: El título de la nota (vacío si no se proporciona).
             category: La categoría de la nota (por defecto "General").
@@ -80,17 +79,17 @@ class AddNoteTool(BaseTool):
         Returns:
             Una cadena de texto confirmando el resultado de la operación.
         """
-        if not account_id or not content:
+        if not self.account_id or not content:
             return "Error: Se requiere el ID de la cuenta y el contenido para guardar una nota."
         
         try:
             result_dict = await add_note(
-                account_id=account_id,
+                account_id=self.account_id,
                 content=content,
                 title=title if title else None,
                 category=category if category else None
             )
-            logger.info(f"Nota añadida exitosamente para la cuenta {account_id}.")
+            logger.info(f"Nota añadida exitosamente para la cuenta {self.account_id}.")
             
             # Crear mensaje de confirmación a partir del diccionario retornado
             note_title = result_dict.get('title', 'Sin título')
@@ -99,7 +98,7 @@ class AddNoteTool(BaseTool):
             
             return result_message 
         except Exception as e:
-            logger.error(f"Error en AddNoteTool para la cuenta {account_id}: {e}", exc_info=True)
+            logger.error(f"Error en AddNoteTool para la cuenta {self.account_id}: {e}", exc_info=True)
 
             return f"Ocurrió un error al intentar guardar la nota: {e}"
     def _run(self, *args: Any, **kwargs: Any) -> Any:

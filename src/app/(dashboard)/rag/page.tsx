@@ -8,7 +8,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2 } from 'lucide-react';
+import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2, Upload, CheckCircle, XCircle, Clock, Network, ChevronDown, Settings } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { UploadDocumentDialog } from './upload-document-dialog';
@@ -24,6 +24,17 @@ interface Collection {
   document_count: number;
   description?: string;
   team_shared?: boolean;
+  has_knowledge_graph?: boolean;
+}
+
+interface UploadTask {
+  id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  file_names: string[];
+  topic: string;
+  progress?: number;
+  error_message?: string;
+  created_at: string;
 }
 
 const CollectionCard = ({
@@ -33,12 +44,14 @@ const CollectionCard = ({
   onEdit,
   onShare,
   isAnalyzing,
+  onProcessKnowledgeGraph,
 }: {
   collection: Collection;
   onAnalyze: (topic: string) => void;
   onDelete: (topic: string) => void;
   onEdit: (collection: Collection) => void;
   onShare: (collection: Collection) => void;
+  onProcessKnowledgeGraph: (topic: string) => void;
   isAnalyzing: boolean;
 }) => {
   const router = useRouter();
@@ -90,6 +103,14 @@ const CollectionCard = ({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()} data-dropdown-content>
+                  <DropdownMenuItem onClick={() => onAnalyze(collection.topic)}>
+                    <ScanSearch className="mr-2 h-4 w-4" />
+                    <span>Analizar Colección</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onProcessKnowledgeGraph(collection.topic)}>
+                    <Network className="mr-2 h-4 w-4" />
+                    <span>Crear Grafo</span>
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => onEdit(collection)}>
                     <Edit className="mr-2 h-4 w-4" />
                     <span>Editar</span>
@@ -97,10 +118,6 @@ const CollectionCard = ({
                   <DropdownMenuItem onClick={() => onShare(collection)}>
                     <Share2 className="mr-2 h-4 w-4" />
                     <span>Compartir</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => onAnalyze(collection.topic)}>
-                    <ScanSearch className="mr-2 h-4 w-4" />
-                    <span>Analizar Colección</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => onDelete(collection.topic)} className="text-red-500 focus:text-red-500 focus:bg-destructive/10">
                     <Trash2 className="mr-2 h-4 w-4" />
@@ -128,6 +145,77 @@ const CollectionCard = ({
         </CardFooter>
       </Card>
     </motion.div>
+  );
+};
+
+const UploadProgressIndicator = ({ tasks }: { tasks: UploadTask[] }) => {
+  if (tasks.length === 0) return null;
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return <Clock className="h-4 w-4 text-yellow-500" />;
+      case 'processing':
+        return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
+      case 'completed':
+        return <CheckCircle className="h-4 w-4 text-green-500" />;
+      case 'failed':
+        return <XCircle className="h-4 w-4 text-red-500" />;
+      default:
+        return <Upload className="h-4 w-4 text-gray-500" />;
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return 'En cola';
+      case 'processing':
+        return 'Procesando';
+      case 'completed':
+        return 'Completado';
+      case 'failed':
+        return 'Error';
+      default:
+        return 'Desconocido';
+    }
+  };
+
+  return (
+    <div className="mb-6">
+      <Card className="border-l-4 border-l-blue-500 bg-blue-50/50 dark:bg-blue-950/20">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Upload className="h-5 w-5 text-blue-600" />
+            Procesando Documentos
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {tasks.map((task) => (
+            <div key={task.id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-lg border">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                {getStatusIcon(task.status)}
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm truncate">
+                    {task.file_names.length === 1
+                      ? task.file_names[0]
+                      : `${task.file_names.length} archivos`}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Colección: {task.topic}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-700">
+                  {getStatusText(task.status)}
+                </span>
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
   );
 };
 
@@ -179,11 +267,18 @@ const StaticCollectionCard = ({
 export default function RagCollectionsPage() {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  
+
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isGitHubRepoOpen, setIsGitHubRepoOpen] = useState(false);
   const [deletingTopic, setDeletingTopic] = useState<string | null>(null);
+
+  // Estados para el seguimiento de tareas de subida
+  const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
+  const [isPollingUploadTasks, setIsPollingUploadTasks] = useState(false);
+
+  // Estados para procesamiento de grafos de conocimiento
+  const [isProcessingKnowledgeGraph, setIsProcessingKnowledgeGraph] = useState(false);
   
   const [collectionAnalysisResult, setCollectionAnalysisResult] = useState<any>(null);
   const [isCollectionAnalysisOpen, setIsCollectionAnalysisOpen] = useState(false);
@@ -209,7 +304,40 @@ export default function RagCollectionsPage() {
     }
   }, []);
 
-  useEffect(() => { fetchCollections(); }, [fetchCollections]);
+  const fetchUploadTasks = useCallback(async () => {
+    try {
+      const response = await apiClient.get('/api/upload-tasks');
+      const tasks = response.data.filter((task: UploadTask) =>
+        task.status === 'pending' || task.status === 'processing'
+      );
+      setUploadTasks(tasks);
+
+      // Si hay tareas activas, iniciar polling
+      if (tasks.length > 0 && !isPollingUploadTasks) {
+        setIsPollingUploadTasks(true);
+      } else if (tasks.length === 0 && isPollingUploadTasks) {
+        setIsPollingUploadTasks(false);
+      }
+    } catch (error) {
+      console.error('Error al cargar tareas de subida:', error);
+    }
+  }, [isPollingUploadTasks]);
+
+  useEffect(() => {
+    fetchCollections();
+    fetchUploadTasks();
+  }, [fetchCollections, fetchUploadTasks]);
+
+  // Polling para tareas de subida activas
+  useEffect(() => {
+    if (!isPollingUploadTasks) return;
+
+    const poller = setInterval(async () => {
+      await fetchUploadTasks();
+    }, 3000); // Polling cada 3 segundos
+
+    return () => clearInterval(poller);
+  }, [isPollingUploadTasks, fetchUploadTasks]);
 
   const handleCollectionCreated = async (newTopic: string) => {
     // Recargar las colecciones para mostrar la nueva
@@ -312,6 +440,35 @@ export default function RagCollectionsPage() {
     setSelectedCollection(null);
   };
 
+  const handleProcessKnowledgeGraph = async (topic?: string) => {
+    if (isProcessingKnowledgeGraph) {
+      toast.info("Ya hay un procesamiento de grafo en progreso.");
+      return;
+    }
+
+    setIsProcessingKnowledgeGraph(true);
+    const toastId = toast.loading(
+      topic
+        ? `Procesando grafo de conocimiento para "${topic}"...`
+        : "Procesando grafo de conocimiento para todos los documentos..."
+    );
+
+    try {
+      const response = await apiClient.post('/api/process-knowledge-graph',
+        topic ? { topic } : {}
+      );
+
+      toast.success(
+        `¡Procesamiento iniciado! ${response.data.documents_count} documentos serán procesados.`,
+        { id: toastId }
+      );
+    } catch (error) {
+      toast.error("Error al iniciar el procesamiento del grafo de conocimiento.", { id: toastId });
+    } finally {
+      setIsProcessingKnowledgeGraph(false);
+    }
+  };
+
   const renderContent = () => {
     if (isLoading) {
       return <p className="text-center py-10">Cargando colecciones...</p>;
@@ -358,6 +515,7 @@ export default function RagCollectionsPage() {
               onDelete={openDeleteDialog}
               onEdit={handleEditCollection}
               onShare={handleShareCollection}
+              onProcessKnowledgeGraph={handleProcessKnowledgeGraph}
               isAnalyzing={collectionPollingId !== null && analyzingTopic === collection.topic}
             />
           ))}
@@ -396,23 +554,46 @@ export default function RagCollectionsPage() {
           </h1>
           <p className="text-muted-foreground mt-2">Organiza tus documentos en bases de conocimiento.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button onClick={() => setIsGitHubRepoOpen(true)} className="bg-primary hover:bg-primary/90">
-            <Github className="mr-2 h-4 w-4" />
-            Añadir Repositorio
-          </Button>
-          <Button size="lg" onClick={() => setIsUploadOpen(true)} className="bg-primary hover:bg-primary/90">
-            <Plus className="mr-2 h-5 w-5" />
-            Subir Documento
+        <div className="flex items-center gap-3">
+          {/* Menú de Acciones Avanzadas */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="gap-2">
+                <Settings className="h-4 w-4" />
+                <span className="hidden sm:inline">Acciones</span>
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={() => setIsGitHubRepoOpen(true)}>
+                <Github className="mr-2 h-4 w-4" />
+                <span>Añadir Repositorio</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => handleProcessKnowledgeGraph()}
+                disabled={isProcessingKnowledgeGraph}
+              >
+                <Network className="mr-2 h-4 w-4" />
+                <span>{isProcessingKnowledgeGraph ? "Procesando Grafos..." : "Crear Grafos de Conocimiento"}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Botón Principal */}
+          <Button size="lg" onClick={() => setIsUploadOpen(true)} className="bg-primary hover:bg-primary/90 gap-2">
+            <Plus className="h-5 w-5" />
+            <span>Subir Documento</span>
           </Button>
         </div>
       </div>
 
+      <UploadProgressIndicator tasks={uploadTasks} />
+
       {renderContent()}
 
-      <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={fetchCollections} />
+      <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={() => { fetchCollections(); fetchUploadTasks(); }} />
       <CreateCollectionDialog isOpen={isCreateOpen} onOpenChange={setIsCreateOpen} onCreateSuccess={handleCollectionCreated} />
-      <GitHubRepoDialog isOpen={isGitHubRepoOpen} onOpenChange={setIsGitHubRepoOpen} onSuccess={fetchCollections} />
+      <GitHubRepoDialog isOpen={isGitHubRepoOpen} onOpenChange={setIsGitHubRepoOpen} onSuccess={() => { fetchCollections(); fetchUploadTasks(); }} />
       <CollectionAnalysisDialog
         isOpen={isCollectionAnalysisOpen}
         onOpenChange={handleAnalysisDialogClose}

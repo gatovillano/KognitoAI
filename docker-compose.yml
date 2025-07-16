@@ -23,11 +23,12 @@ services:
   core:
     build:
       context: .
-      dockerfile: Dockerfile.core
+      dockerfile: Dockerfile.core.minimal
     container_name: kognito_core # Nombre explícito
     restart: always
     depends_on:
       - db
+      - neo4j # El core ahora depende de la base de datos de grafos
     ports:
       - "${API_PORT:-8889}:8000" # API accesible en localhost:8889
     volumes:
@@ -76,6 +77,8 @@ services:
         NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-https://apibase.gatoslibres.art}"
     container_name: kognito_frontend
     restart: always
+    environment:
+      NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-https://apibase.gatoslibres.art}"
     # 📍 IMPORTANTE: Frontend accesible en http://localhost:8880
     # (El puerto 3000 que aparece en logs es interno del contenedor)
     ports:
@@ -95,23 +98,6 @@ services:
     # El 'links' es opcional en redes modernas, pero no hace daño
     links:
       - core
-
-  # 5. PGAdmin para administración visual de la base de datos
-  pgadmin:
-    image: dpage/pgadmin4
-    container_name: kognito_pgadmin
-    restart: always
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@kognito.local}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin123}
-    ports:
-      - "5056:80"
-    depends_on:
-      - db
-    networks:
-      - kognito_network
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
 
 
   telegram_panel:
@@ -134,11 +120,63 @@ services:
       env_file:
         - ./.env
         
+  # 6. Base de Datos de Grafos (Neo4j)
+  # 🌐 Acceso al Browser: http://localhost:7474
+  # 🔌 Conexión Bolt: bolt://localhost:7687
+  neo4j:
+    image: neo4j:5.15-community
+    container_name: kognito_neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      # MODIFICACIÓN: Eliminamos el montaje de la configuración específica que está causando problemas
+      # - neo4j_conf:/conf
+      # - ./config/neo4j/neo4j.conf:/var/lib/neo4j/conf/neo4j.conf
+    environment:
+      NEO4J_AUTH: none
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+      # Configuración para evitar reinicios
+      NEO4J_dbms_default__database: "neo4j"
+      NEO4J_dbms_allow__upgrade: "true"
+      # Configuración de memoria optimizada
+      NEO4J_server_memory_heap_initial__size: "2G"
+      NEO4J_server_memory_heap_max__size: "4G"
+      NEO4J_server_memory_pagecache_size: "512m"
+      # Configuraciones de red estables
+      NEO4J_server_default__listen__address: "0.0.0.0"
+      NEO4J_server_bolt_listen__address: "0.0.0.0:7687"
+      NEO4J_server_http_listen__address: "0.0.0.0:7474"
+      # Configuración de logs usando formato correcto (cambiado del inválido NEO4J_server_logs_user_level)
+      NEO4J_dbms_logs_debug_level: "DEBUG"
+      # Corregido: Cambiamos 'true' por un valor válido de la enumeración [OFF, INFO, VERBOSE]
+      NEO4J_dbms_logs_query_enabled: "INFO"
+      # Evitar problemas de concurrencia
+      NEO4J_dbms_security_auth__enabled: "false"
+      NEO4J_dbms_connector_bolt_enabled: "true"
+      NEO4J_dbms_connector_http_enabled: "true"
+      # Deshabilitamos la validación estricta para evitar problemas de configuración
+      NEO4J_server_config_strict__validation_enabled: "false"
+      NEO4J_dbms_memory_transaction_total_max: "6G"   
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell 'RETURN 1' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    networks:
+      - kognito_network
+
 networks:
   kognito_network:
     driver: bridge
 
 volumes:
   db_data:
-
   pgadmin_data:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_conf:

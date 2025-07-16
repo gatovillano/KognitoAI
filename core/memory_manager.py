@@ -1140,20 +1140,21 @@ async def list_user_documents(
                 clauses.append("topic = :topic")
                 params["topic"] = topic
 
-            # Consulta optimizada para obtener documentos únicos
+            # Consulta optimizada para obtener documentos únicos por document_id
+            # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
             query_str = f"""
-                SELECT DISTINCT ON (cmetadata->>'file_name')
+                SELECT DISTINCT ON (cmetadata->>'document_id')
                        cmetadata->>'file_name' AS file_name,
                        topic AS topic,
                        cmetadata->>'title' AS title,
                        cmetadata->>'author' AS author,
                        cmetadata->>'document_id' AS document_id,
-                       workspace_id AS workspace_id,
-                       team_id AS team_id,
+                       workspace_id::text AS workspace_id,
+                       team_id::text AS team_id,
                        CASE WHEN team_id IS NOT NULL THEN true ELSE false END AS team_shared
                 FROM langchain_pg_embedding
                 WHERE {" AND ".join(clauses)}
-                ORDER BY cmetadata->>'file_name', id;
+                ORDER BY cmetadata->>'document_id', id;
             """
 
             logger.info(f"🔧 Query SQL optimizada: {query_str}")
@@ -1203,20 +1204,21 @@ async def list_user_documents_all_teams(
                 clauses.append("topic = :topic")
                 params["topic"] = topic
 
-            # Consulta optimizada para obtener documentos únicos
+            # Consulta optimizada para obtener documentos únicos por document_id
+            # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
             query_str = f"""
-                SELECT DISTINCT ON (cmetadata->>'file_name')
+                SELECT DISTINCT ON (cmetadata->>'document_id')
                        cmetadata->>'file_name' AS file_name,
                        topic AS topic,
                        cmetadata->>'title' AS title,
                        cmetadata->>'author' AS author,
                        cmetadata->>'document_id' AS document_id,
-                       workspace_id AS workspace_id,
-                       team_id AS team_id,
+                       workspace_id::text AS workspace_id,
+                       team_id::text AS team_id,
                        CASE WHEN team_id IS NOT NULL THEN true ELSE false END AS team_shared
                 FROM langchain_pg_embedding
                 WHERE {" AND ".join(clauses)}
-                ORDER BY cmetadata->>'file_name', id;
+                ORDER BY cmetadata->>'document_id', id;
             """
 
             logger.info(f"🔧 Query SQL para todos los documentos: {query_str}")
@@ -1372,8 +1374,8 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
     1. Colecciones definidas por el usuario en UserDocumentTopic (incluye vacías)
     2. Colecciones que tienen documentos en langchain_pg_embedding (con conteo)
 
-    IMPORTANTE: Cuando se especifica workspace_id, también se incluyen las colecciones del contexto general
-    (workspace_id = NULL) para permitir el acceso a colecciones importadas del contexto general.
+    IMPORTANTE: Cuando se especifica workspace_id, se incluyen SOLO las colecciones específicas de ese workspace.
+    Para acceder a colecciones del contexto general, no se debe especificar workspace_id.
 
     Args:
         account_id: ID de la cuenta del usuario. Obligatorio para listar colecciones de usuario.
@@ -1392,13 +1394,9 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
             )
 
             if workspace_id:
-                # Para workspaces, incluir tanto las colecciones específicas del workspace
-                # como las del contexto general (workspace_id = NULL)
+                # Para workspaces, incluir SOLO las colecciones específicas del workspace
                 user_topics_query = user_topics_query.where(
-                    or_(
-                        UserDocumentTopic.workspace_id == uuid.UUID(workspace_id),
-                        UserDocumentTopic.workspace_id.is_(None)
-                    )
+                    UserDocumentTopic.workspace_id == uuid.UUID(workspace_id)
                 )
             elif team_id:
                 user_topics_query = user_topics_query.where(
@@ -1435,9 +1433,8 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
                 params["team_id"] = team_id
 
             if workspace_id:
-                # Para workspaces, incluir tanto las colecciones específicas del workspace
-                # como las del contexto general (workspace_id IS NULL)
-                where_clause_parts.append("(workspace_id = :workspace_id OR workspace_id IS NULL)")
+                # Para workspaces, incluir SOLO las colecciones específicas del workspace
+                where_clause_parts.append("workspace_id = :workspace_id")
                 params["workspace_id"] = workspace_id
             else:
                 # Para contexto general, incluir solo documentos sin workspace_id

@@ -34,10 +34,6 @@ class GetAgendaInput(BaseModel):
         description="El día para el cual se consulta la agenda. Puede ser 'hoy', 'mañana', o una fecha específica como '15 de junio' o 'próximo jueves'."
     )
     # Cambiamos telegram_id por account_id para que sea universal.
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
 
 
 class GetAgendaTool(BaseTool):
@@ -52,29 +48,27 @@ class GetAgendaTool(BaseTool):
         "o '¿Tengo algo para el 25 de diciembre?'."
     )
     args_schema: Type[BaseModel] = GetAgendaInput
-    return_direct: bool = False  # El agente debe procesar la respuesta.
+    return_direct: bool = False
+    account_id: str
 
-    async def _arun(self, target_day: str, account_id: str, **kwargs: Any) -> str:
+    async def _arun(self, target_day: str, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
             target_day: El día específico a consultar.
-            account_id: El ID universal de la cuenta del usuario.
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
             Una cadena de texto con la lista de eventos o un mensaje indicando que no hay eventos.
         """
-        logger.info(f"Ejecutando GetAgendaTool para la cuenta '{account_id}' en el día: '{target_day}'.")
+        logger.info(f"Ejecutando GetAgendaTool para la cuenta '{self.account_id}' en el día: '{target_day}'.")
         try:
-            # Llama a la función de lógica de negocio, que ahora debe ser actualizada
-            # para aceptar 'account_id' en lugar de 'telegram_id'.
-            agenda_string = await get_agenda_for_day(account_id=account_id, target_day=target_day)
-            logger.info(f"Herramienta de consulta de agenda completada para la cuenta '{account_id}'.")
+            agenda_string = await get_agenda_for_day(account_id=self.account_id, target_day=target_day)
+            logger.info(f"Herramienta de consulta de agenda completada para la cuenta '{self.account_id}'.")
             return agenda_string
         except Exception as e:
-            logger.error(f"Error en GetAgendaTool para la cuenta '{account_id}': {e}", exc_info=True)
+            logger.error(f"Error en GetAgendaTool para la cuenta '{self.account_id}': {e}", exc_info=True)
             return f"Ocurrió un error inesperado al intentar consultar tu agenda: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

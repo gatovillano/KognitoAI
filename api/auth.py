@@ -21,7 +21,7 @@ from core.config import settings
 from core.database import SessionLocal, Account, PlatformIdentity, VerificationCode, get_account_by_telegram_id, find_telegram_identity
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from utils.security import get_password_hash, verify_password, create_access_token, get_current_account_id
+from utils.security import get_password_hash, verify_password, create_access_token, get_current_account_id, oauth2_scheme
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -142,10 +142,10 @@ async def login_for_access_token(request: LoginRequest, db: AsyncSession = Depen
     return TokenResponse(access_token=access_token)
 
 def verify_telegram_hash(data: TelegramLoginRequest, bot_token: str) -> bool:
-    """Verifica el hash de los datos de login de Telegram (método oficial)."""
+    """Verifica el hash de los datos de login de Telegram (método Login Widget oficial)."""
     data_dict = data.dict(exclude={'hash'})
     data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data_dict.items()) if v is not None)
-    # CORRECT: secret key is SHA256 of the bot token (not HMAC)
+    # Para Telegram Login Widget oficial, la clave secreta es SHA256 del bot token
     secret_key = hashlib.sha256(bot_token.encode()).digest()
     calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(calculated_hash, data.hash)
@@ -161,7 +161,7 @@ async def handle_telegram_login(login_data: TelegramLoginRequest, db: AsyncSessi
     logger.warning(f"Incoming Telegram login data: {login_data}")
     data_dict = login_data.dict(exclude={'hash'})
     data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data_dict.items()) if v is not None)
-    secret_key = hmac.new("WebAppData".encode(), settings.telegram_bot_token.encode(), hashlib.sha256).digest()
+    secret_key = hashlib.sha256(settings.telegram_bot_token.encode()).digest()
     calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
     logger.warning(f"Calculated hash: {calculated_hash}, Provided hash: {login_data.hash}")
 
@@ -277,7 +277,80 @@ async def verify_code_and_get_token(request_data: AuthVerifyCode, db: AsyncSessi
 
     # Creamos el token de acceso
     access_token = create_access_token(data={"sub": str(identity.account_id)})
+
+    # DEBUG: Log token generation
+    if settings.debug_mode:
+        logger.warning(f"🔑 Token generado para account_id: {identity.account_id}")
+        logger.warning(f"🔑 Token prefix: {access_token[:50]}...")
+
+        # Verificar inmediatamente el token generado
+        from utils.security import decode_access_token
+        test_decode = decode_access_token(access_token)
+        logger.warning(f"🔑 Verificación inmediata del token: {test_decode}")
+
     return TokenResponse(access_token=access_token)
+
+@router.post("/auth/refresh-token", response_model=TokenResponse, summary="Refrescar token")
+async def refresh_token(current_account_id: str = Depends(get_current_account_id)):
+    """Genera un nuevo token para el usuario actual (útil cuando hay problemas de JWT)."""
+    access_token = create_access_token(data={"sub": current_account_id})
+    return TokenResponse(access_token=access_token)
+
+@router.get("/auth/debug-token", summary="Debug token (solo en modo debug)")
+async def debug_token(token: str = Depends(oauth2_scheme)):
+    """Endpoint para debuggear problemas de JWT (solo disponible en modo debug)."""
+    if not settings.debug_mode:
+        raise HTTPException(status_code=404, detail="Endpoint no disponible")
+
+    try:
+        from utils.security import decode_access_token
+        account_id = decode_access_token(token)
+        return {
+            "token_valid": account_id is not None,
+            "account_id": account_id,
+            "jwt_secret_key_prefix": settings.jwt_secret_key[:10] + "...",
+            "debug_mode": settings.debug_mode
+        }
+    except Exception as e:
+        return {
+            "token_valid": False,
+            "error": str(e),
+            "jwt_secret_key_prefix": settings.jwt_secret_key[:10] + "...",
+            "debug_mode": settings.debug_mode
+        }
+
+@router.post("/auth/emergency-token", response_model=TokenResponse, summary="Token de emergencia (solo debug)")
+async def emergency_token(telegram_id: str, db: AsyncSession = Depends(get_db)):
+    """Genera un token de emergencia para un usuario de Telegram (solo en modo debug)."""
+    if not settings.debug_mode:
+        raise HTTPException(status_code=404, detail="Endpoint no disponible")
+
+    try:
+        # Buscar la identidad de Telegram
+        identity = await find_telegram_identity(db, telegram_id)
+        if not identity:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+        # Generar nuevo token
+        access_token = create_access_token(data={"sub": str(identity.account_id)})
+        return TokenResponse(access_token=access_token)
+
+    except Exception as e:
+        logger.error(f"Error generando token de emergencia: {e}")
+        raise HTTPException(status_code=500, detail="Error generando token")
+
+@router.get("/auth/clear-tokens", summary="Limpiar tokens del frontend (solo debug)")
+async def clear_frontend_tokens():
+    """Endpoint para indicar al frontend que limpie sus tokens (solo en modo debug)."""
+    if not settings.debug_mode:
+        raise HTTPException(status_code=404, detail="Endpoint no disponible")
+
+    return {
+        "action": "clear_tokens",
+        "message": "Limpia localStorage.removeItem('authToken') y localStorage.removeItem('access_token')",
+        "jwt_secret_prefix": settings.jwt_secret_key[:10] + "...",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
 
 @router.post("/get-system-prompt")
 async def get_system_prompt(user_id: int = Depends(get_validated_user_id), db: AsyncSession = Depends(get_db)):

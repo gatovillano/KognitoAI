@@ -35,11 +35,6 @@ class AddWebToRAGInput(BaseModel):
         description="Tema o categoría bajo la cual guardar el contenido web",
         json_schema_extra={"type": "string"}
     )
-    account_id: str = Field(
-        ..., 
-        description="ID de la cuenta del usuario",
-        json_schema_extra={"type": "string"}
-    )
     workspace_id: Optional[str] = Field(
         None, 
         description="ID del workspace (opcional)",
@@ -131,11 +126,12 @@ class AddWebToRAGTool(BaseTool):
             logger.error(f"❌ Error extrayendo contenido de {url}: {e}")
             raise Exception(f"Error al extraer contenido: {str(e)}")
     
+    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+
     async def _arun(
         self,
         url: str,
         topic: str,
-        account_id: str,
         workspace_id: Optional[str] = None,
         custom_title: Optional[str] = None,
         **kwargs: Any
@@ -145,11 +141,9 @@ class AddWebToRAGTool(BaseTool):
         logger.info(f"🚀 Iniciando AddWebToRAG para URL: {url}, topic: {topic}, workspace: {workspace_id}")
         
         try:
-            # 1. Validar URL
             if not url.startswith(('http://', 'https://')):
                 return "❌ Error: La URL debe comenzar con http:// o https://"
             
-            # 2. Extraer contenido web
             try:
                 content, extracted_title = await self._scrape_web_content(url)
             except Exception as e:
@@ -158,7 +152,6 @@ class AddWebToRAGTool(BaseTool):
             if not content or len(content.strip()) < 50:
                 return "❌ Error: No se pudo extraer contenido suficiente de la URL"
             
-            # 3. Preparar metadatos
             file_name = custom_title or extracted_title or self._extract_domain_name(url)
             
             metadata = {
@@ -169,11 +162,10 @@ class AddWebToRAGTool(BaseTool):
                 "type": "document_chunk"
             }
             
-            # 4. Procesar para RAG
             logger.info(f"📊 Procesando contenido para RAG: {file_name}")
             
             chunks_added = await process_document_for_rag(
-                account_id=account_id,
+                account_id=self.account_id,
                 file_name=file_name,
                 extracted_text=content,
                 topic=topic,

@@ -40,15 +40,6 @@ class SetReminderInput(BaseModel):
         description="Una descripción relativa o absoluta del tiempo para el recordatorio. Ejemplos: 'en 20 minutos', 'dentro de 3 horas', 'a las 10pm'."
     )
     # Cambiamos telegram_id por account_id para que sea universal.
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
-
-    telegram_id: int = Field(
-        ...,
-        description="El ID numérico de Telegram del usuario. Es necesario para enviar el recordatorio."
-    )
 
 
 class SetReminderTool(BaseTool):
@@ -63,35 +54,34 @@ class SetReminderTool(BaseTool):
         "No uses esta herramienta para eventos complejos o citas con fechas lejanas; para eso usa `schedule_event_tool`."
     )
     args_schema: Type[BaseModel] = SetReminderInput
-    return_direct: bool = False  # El agente debe procesar la respuesta.
+    return_direct: bool = False
+    account_id: str
+    telegram_id: str = Field(..., description="El ID de Telegram del usuario, inyectado automáticamente.")
 
-    async def _arun(self, text: str, natural_language_time: str, account_id: str, telegram_id: int, **kwargs: Any) -> str:
+    async def _arun(self, text: str, natural_language_time: str, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
             text: El contenido del recordatorio.
             natural_language_time: El texto con la descripción del tiempo.
-            account_id: El ID universal de la cuenta del usuario.
-            telegram_id: El ID de Telegram para programar la notificación.
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
-        logger.info(f"Ejecutando SetReminderTool para la cuenta '{account_id}' con texto: '{text}'")
+        logger.info(f"Ejecutando SetReminderTool para la cuenta '{self.account_id}' con texto: '{text}'")
         try:
-            # ¡CORREGIDO! Pasamos el `telegram_id` que ahora requiere la función.
             success, message = await set_simple_reminder(
-                account_id=account_id,
-                telegram_id=telegram_id,
+                account_id=self.account_id,
+                telegram_id=int(self.telegram_id),
                 text=text,
                 natural_language_time=natural_language_time
             )
-            logger.info(f"Herramienta de recordatorio simple completada para la cuenta '{account_id}'. Mensaje: {message}")
+            logger.info(f"Herramienta de recordatorio simple completada para la cuenta '{self.account_id}'. Mensaje: {message}")
             return message
         except Exception as e:
-            logger.error(f"Error en SetReminderTool para la cuenta '{account_id}': {e}", exc_info=True)
+            logger.error(f"Error en SetReminderTool para la cuenta '{self.account_id}': {e}", exc_info=True)
             return f"Ocurrió un error inesperado al intentar programar tu recordatorio: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

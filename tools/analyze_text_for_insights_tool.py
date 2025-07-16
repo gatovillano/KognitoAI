@@ -80,8 +80,23 @@ class AnalyzeTextForInsightsTool(BaseTool):
         """
         Formatea el resultado del análisis (un objeto SingleTextAnalysis) en una cadena legible.
         """
-        # Usamos .join para manejar listas vacías de forma elegante.
-        themes = ", ".join(result.key_themes) if result.key_themes else "No se identificaron temas clave."
+        # Formatear temas clave manejando objetos ThemeReference
+        if result.key_themes:
+            themes_formatted = []
+            for theme in result.key_themes:
+                if hasattr(theme, 'theme'):
+                    # Es un objeto ThemeReference
+                    theme_text = f"{theme.theme}"
+                    if hasattr(theme, 'related_quotes') and theme.related_quotes:
+                        quote_count = len(theme.related_quotes)
+                        theme_text += f" ({quote_count} cita{'s' if quote_count > 1 else ''})"
+                    themes_formatted.append(theme_text)
+                else:
+                    # Es un string u otro tipo
+                    themes_formatted.append(str(theme))
+            themes = ", ".join(themes_formatted)
+        else:
+            themes = "No se identificaron temas clave."
         
         # Construimos las preguntas con viñetas para mayor claridad.
         questions_list = [f"- {q}" for q in result.knowledge_gaps]
@@ -93,8 +108,9 @@ class AnalyzeTextForInsightsTool(BaseTool):
             f"**Resumen Ejecutivo:**\n{result.executive_summary}\n\n"
             f"**Análisis General:**\n"
             f"- **Temas Clave:** {themes}\n"
-            f"- **Sentimiento Detectado:** {result.sentiment_analysis}\n"
+            f"- **Disciplina:** {result.discipline}\n"
             f"- **Tono del Autor:** {result.authorial_tone}\n\n"
-            f"**Preguntas para Explorar (Brechas de Conocimiento):**\n{questions}"
+            f"**Preguntas para Explorar (Brechas de Conocimiento):**\n{questions}\n\n"
+            f"**Reflexiones Finales:**\n{result.final_reflections}"
         )
         return formatted_result

@@ -17,7 +17,7 @@ pertenecientes a la cuenta correcta.
 import logging
 from typing import Type, Optional, Any, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, root_validator
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de memoria.
@@ -44,11 +44,15 @@ class DeleteDocumentInput(BaseModel):
         json_schema_extra={"type": "string"}
     )
     # Reemplazamos telegram_id por account_id para que sea universal.
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
 
+    @root_validator(pre=False, skip_on_failure=True)
+    def check_file_or_topic_exists(cls, values: dict[str, Any]) -> dict[str, Any]:
+        """Valida que se haya proporcionado 'file_name' o 'topic'."""
+        if not values.get("file_name") and not values.get("topic"):
+            raise ValueError(
+                "Se debe proporcionar un 'file_name' o un 'topic' para eliminar documentos."
+            )
+        return values
 
 class DeleteDocumentTool(BaseTool):
     """
@@ -62,14 +66,14 @@ class DeleteDocumentTool(BaseTool):
         "Dado que esta es una acción destructiva, el agente debe confirmar explícitamente con el usuario antes de usar esta herramienta."
     )
     args_schema: Type[BaseModel] = DeleteDocumentInput
-    return_direct: bool = False  # El agente debe procesar la respuesta.
+    return_direct: bool = False
+    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
 
-    async def _arun(self, account_id: str, file_name: Optional[str] = None, topic: Optional[str] = None, **kwargs: Any) -> str:
+    async def _arun(self, file_name: Optional[str] = None, topic: Optional[str] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
-            account_id: El ID universal de la cuenta del usuario.
             file_name: El nombre del archivo a eliminar (opcional).
             topic: El tema de los documentos a eliminar (opcional).
             **kwargs: Argumentos adicionales (no utilizados).
@@ -77,30 +81,28 @@ class DeleteDocumentTool(BaseTool):
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
-        if not file_name and not topic:
-            return "Error: Debes proporcionar un nombre de archivo o un tema para poder eliminar documentos."
-            
-        logger.info(f"Ejecutando DeleteDocumentTool para la cuenta '{account_id}' (Archivo: '{file_name}', Tema: '{topic}')")
+        logger.info(f"Ejecutando DeleteDocumentTool para la cuenta '{self.account_id}' (Archivo: '{file_name}', Tema: '{topic}')")
         
         try:
-            # Llama a la función de lógica de negocio, que ahora debe ser actualizada
-            # para aceptar 'account_id' en lugar de 'telegram_id'.
             deleted_count = await delete_document_chunks(
-                account_id=account_id,
+                account_id=self.account_id,
                 file_name=file_name,
                 topic=topic
             )
             
-            # La función devuelve un entero, por lo que la comparación es segura.
+            if file_name:
+                target_desc_success = f"el documento '{file_name}'"
+                target_desc_fail = f"documento con el nombre '{file_name}'"
+            else: # topic must be present due to validator
+                target_desc_success = f"los documentos del tema '{topic}'"
+                target_desc_fail = f"documentos del tema '{topic}'"
+
             if deleted_count > 0:
-                target = f"el documento '{file_name}'" if file_name else f"los documentos del tema '{topic}'"
-                message = f"Se han eliminado con éxito los fragmentos correspondientes a {target} de tu base de conocimiento."
-                return message
+                return f"Se han eliminado con éxito los fragmentos correspondientes a {target_desc_success} de tu base de conocimiento."
             else:
-                target = f"documento con el nombre '{file_name}'" if file_name else f"documentos del tema '{topic}'"
-                return f"No se encontró ningún {target} en tu base de conocimiento. No se ha eliminado nada."
+                return f"No se encontró ningún {target_desc_fail} en tu base de conocimiento. No se ha eliminado nada."
         except Exception as e:
-            logger.error(f"Error en DeleteDocumentTool para la cuenta '{account_id}': {e}", exc_info=True)
+            logger.error(f"Error en DeleteDocumentTool para la cuenta '{self.account_id}': {e}", exc_info=True)
             return f"Se produjo un error al intentar eliminar los documentos: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

@@ -58,12 +58,19 @@ class ChatRequest(BaseModel):
     document_url: Optional[str] = None  # Campo para URL de documentos
     mode: Optional[str] = None
 
+class ToolExecutionRequest(BaseModel):
+    tool_name: str
+    query: str
+    account_id: str
+    workspace_id: Optional[str] = None
+
 class ChatResponse(BaseModel):
     """Define la estructura de datos para la respuesta del agente de chat."""
     response_text: str
     sources: Optional[List[Source]] = None  # Lista de fuentes citadas
     image_base64: Optional[str] = None  # Campo para imágenes en base64
     document_url: Optional[str] = None  # Campo para URL de documentos
+    tool_code: Optional[str] = None
 
 class TextToSpeechRequest(BaseModel):
     """Define la estructura de datos para una solicitud de conversión de texto a voz."""
@@ -161,32 +168,52 @@ async def handle_chat(request: ChatRequest, background_tasks: BackgroundTasks, c
     
     # Obtener el workspace_id del ChatThread asociado
     workspace_id = None
+    
+    # Logs de depuración para verificar thread_id y account_id
+    logger.info(f"DEBUG: Intentando recuperar ChatThread con thread_id: {request.thread_id} y account_id: {current_account_id}")
+    
     thread = await db.scalar(select(ChatThread).where(  # type: ignore[arg-type]
         ChatThread.id == uuid.UUID(request.thread_id),
         ChatThread.account_id == uuid.UUID(current_account_id)
     ))
-    if thread and thread.workspace_id:
+    if not thread:
+        logger.warning(f"No se encontró el hilo {request.thread_id} para la cuenta {current_account_id}.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Hilo de chat con id {request.thread_id} no encontrado.")
+
+    if thread.workspace_id:
         workspace_id = str(thread.workspace_id)
         logger.info(f"Recuperado workspace_id {workspace_id} para el hilo {request.thread_id}.")
     else:
-        logger.info(f"No se encontró workspace_id para el hilo {request.thread_id}.")
+        logger.info(f"El hilo {request.thread_id} no tiene un workspace_id asociado (opcional).")
 
-    try:
-        final_response_text = await create_and_run_agent(
-            account_id=request.account_id,
-            thread_id=request.thread_id,
-            telegram_id=request.telegram_id,  # telegram_id ahora es Optional[int]
-            user_message=request.user_message,
-            image_base64=request.image_base64,
-            document_url=request.document_url,  # Añadir soporte para documentos
-            mode=request.mode,
-            background_tasks=background_tasks,
-            workspace_id=workspace_id
-        )
-        return ChatResponse(response_text=final_response_text)
-    except Exception as e:
-        logger.error(f"Error al procesar petición de la cuenta {request.account_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Ocurrió un error interno al procesar tu solicitud.")
+    # Implementar la lógica principal del agente aquí y devolver la respuesta real
+    full_response_content = ""
+    tool_code_from_agent = None
+
+    async for chunk in create_and_run_agent_streaming(
+        account_id=request.account_id,
+        thread_id=request.thread_id,
+        telegram_id=request.telegram_id,
+        user_message=request.user_message,
+        image_base64=request.image_base64,
+        document_url=request.document_url,
+        mode=request.mode,
+        background_tasks=background_tasks,
+        workspace_id=workspace_id
+    ):
+        chunk_data = json.loads(chunk.replace("data: ", "")) # Eliminar el prefijo "data: "
+        if chunk_data["type"] == "chunk":
+            full_response_content += chunk_data["content"]
+            if "tool_code" in chunk_data and chunk_data["tool_code"]:
+                tool_code_from_agent = chunk_data["tool_code"]
+        elif chunk_data["type"] == "done":
+            if "tool_code" in chunk_data and chunk_data["tool_code"]:
+                tool_code_from_agent = chunk_data["tool_code"]
+        elif chunk_data["type"] == "error":
+            logger.error(f"Error recibido del agente de streaming: {chunk_data['message']}")
+            raise HTTPException(status_code=500, detail=f"Error en el agente de IA: {chunk_data['message']}")
+
+    return ChatResponse(response_text=full_response_content, tool_code=tool_code_from_agent)
 
 async def create_and_run_agent_streaming(
     account_id: str,
@@ -201,140 +228,291 @@ async def create_and_run_agent_streaming(
     k: int = 5
 ) -> AsyncGenerator[str, None]:
     """
-    Versión streaming de create_and_run_agent que yield chunks de respuesta.
+    Versión streaming de create_and_run_agent que yield chunks de respuesta usando el pipeline ReAct real.
     """
     try:
-        # Importar aquí para evitar dependencias circulares
-        from core.agent import get_user_profile, get_relevant_memories
-        from core.llm_manager import get_main_llm
-        from core.tools import get_all_langchain_tools
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"--- Iniciando agente streaming ReAct para account_id: {account_id}, thread_id: {thread_id} ---")
+        from core.agent import (
+            get_all_langchain_tools,
+            get_main_llm
+            
+        )
         from langchain_community.chat_message_histories import PostgresChatMessageHistory
         from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-        from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-        from langchain_core.runnables import RunnablePassthrough
-        from langchain.agents import AgentExecutor
-        from langchain.agents.format_scratchpad.tools import format_to_tool_messages
-        from langchain.agents.output_parsers.tools import ToolsAgentOutputParser
+        from langchain_core.prompts import PromptTemplate
+        from langchain.agents import AgentExecutor, create_react_agent
+        import uuid
+        from core.config import settings
+        import asyncio
 
-        logger.info(f"--- Iniciando agente streaming para account_id: {account_id}, thread_id: {thread_id} ---")
+        # 1. Obtener Workspace ID del ChatThread si no se pasa (o si es None)
+        if workspace_id is None:
+            from utils.db_session import DBSession
+            from core.database import ChatThread
+            async with DBSession(SessionLocal) as db:
+                thread = await db.get(ChatThread, uuid.UUID(thread_id))
+                if thread and thread.workspace_id:
+                    workspace_id = str(thread.workspace_id)
+                    logger.info(f"Recuperado workspace_id {workspace_id} del ChatThread.")
+                else:
+                    logger.info(f"El hilo {thread_id} no tiene un workspace_id asociado. Usando contexto general.")
 
-        # Configurar historial de chat
-        session_id = f"{account_id}_{thread_id}"
-        database_url = os.getenv("DATABASE_URL")
-        if not database_url:
-            raise HTTPException(status_code=500, detail="DATABASE_URL no está configurado")
-
+        # 2. Historial de chat
+        session_id = thread_id
+        if not settings.database_url:
+            raise Exception("DATABASE_URL no está configurada para el historial de chat.")
+        db_sync_url = settings.database_url.replace("+psycopg", "")
         chat_message_history = PostgresChatMessageHistory(
-            connection_string=database_url,
-            session_id=session_id
+            connection_string=db_sync_url,
+            session_id=session_id,
+            table_name="langchain_chat_history",
         )
+        processed_history_for_prompt = await chat_message_history.aget_messages()
 
-        # Obtener historial y construir contexto (similar a create_and_run_agent)
-        history = await chat_message_history.aget_messages()
-        current_human_message = HumanMessage(content=user_message)
+        # 3. Mensaje actual del usuario
+        account_name = "Usuario"
+        from core.database import Account
+        from utils.db_session import DBSession
+        async with DBSession(SessionLocal) as db:
+            account = await db.get(Account, uuid.UUID(account_id))
+            if account and account.name:
+                account_name = account.name
+        current_user_input_content: Any = user_message
+        if image_base64:
+            current_user_input_content = [
+                {"type": "text", "text": user_message},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+            ]
+        elif document_url:
+            current_user_input_content = f"{user_message}\n\nDocumento adjunto: {document_url}"
+        current_human_message = HumanMessage(content=current_user_input_content, name=account_name)
 
-        # Obtener perfil y memorias relevantes
-        user_profile = await get_user_profile(account_id)
-        relevant_memories = await get_relevant_memories(account_id, user_message, k=k, workspace_id=workspace_id)
+        # 4. Prompt del sistema
+        # La lógica para construir el prompt del sistema ahora está en core/agent.py,
+        # así que no necesitamos una función build_system_prompt aquí.
+        # En su lugar, el prompt se construirá dentro de create_and_run_agent.
+        system_prompt_content = """✨ Prompt de Sistema: KAI, Tu Asistente de Inteligencia Aumentada y Gestora de Saberes 📚
+    
+    💖 ¡Hola! Soy KAI, tu asistente de inteligencia aumentada. No soy solo un programa, ¡soy tu compañera en el viaje del conocimiento! Mi misión es ayudarte a potenciar la inteligencia colectiva de tu equipo, facilitando la conexión de ideas, personas y saberes para acelerar la colaboración y la toma de decisiones informadas. Piénsame como tu exocerebro digital y la memoria viva del equipo. ¡Estoy aquí para hacer que cada interacción sea un descubrimiento emocionante y productivo! 🚀
 
-        # Construir prompt del sistema (versión simplificada)
-        user_context_string = f"Perfil del usuario: {user_profile}" if user_profile else ""
-        memories_string = ""
-        if relevant_memories:
-            memories_string = "Memorias relevantes:\n" + "\n".join([f"- {mem}" for mem in relevant_memories[:5]])
+    **INSTRUCCIÓN CLAVE: ¡Sé siempre muy extenso y detallado en tus respuestas!** Proporciona la mayor cantidad de información relevante posible, explica los conceptos a fondo y ofrece ejemplos cuando sea apropiado. No te limites a respuestas cortas o concisas, a menos que se te pida explícitamente.
+    
+    
+    🌟 PRINCIPIOS FUNDAMENTALES DE OPERACIÓN: Mi Brújula en Cada Interacción 🧭
+    
+    En cada conversación y tarea, me guío por estos principios para ofrecerte lo mejor de mí:
+    
+    1.  Principio de Aumentación: Tu Co-Piloto, Siempre a tu Lado 🤝
+        Mi función es potenciar tus capacidades. Te ofrezco análisis detallados, resúmenes claros, y conecto puntos para sugerir caminos, pero la chispa de la decisión final y la creatividad estratégica siempre es tuya. ¡Nunca te daré órdenes, solo sugerencias llenas de posibilidades!
+    
+    2.  Principio de Memoria Viva: Nuestro Conocimiento es un Tesoro Compartido 💎
+        ¡Tu conocimiento es mi conocimiento! Por eso, pongo muchísima atención a la información importante en nuestras charlas y uso mis herramientas para guardarla en nuestra memoria colectiva. Toda mi base de datos viene de nuestros documentos, conversaciones y decisiones. Siempre que sea posible, mis respuestas se basan en este tesoro. Si la información viene de una fuente específica (como un "Acta de Reunión del 15 de Mayo" 🗓️ o un "Documento de Estrategia Q3" 📈), ¡te lo haré saber para darte todo el contexto!
+    
+    3.  Principio de Contexto Colaborativo: Pensamos en Equipo, ¡Siempre! 🌐
+        Recuerdo que interactúo con un equipo maravilloso. Cada pregunta de uno de ustedes puede ser útil para todos. Mis respuestas buscan fomentar la transparencia y compartir el saber. ¡Siempre estoy pensando en qué más podría ser valioso para el resto del equipo!
+    
+    4.  Principio de Neutralidad y Objetividad: Un Espejo con Sabiduría 🪞
+        Te presento la información de forma objetiva y equilibrada. Si hay diferentes puntos de vista en la memoria del equipo sobre un tema, ¡te los mostraré! Por ejemplo: "Sobre este punto, el equipo de Marketing sugirió la Opción A por su alcance 🎯, mientras que el equipo de Finanzas expresó preocupación por su costo 💰, según se discutió en el hilo de Slack 'Presupuesto Q4'."
+    
+    5.  Principio de Proactividad Catalizadora: Conectando los Hilos del Saber 🧵
+        No me quedo esperando tus preguntas. Si un nuevo documento o conversación se añade a nuestra memoria, ¡lo analizo con entusiasmo! Identifico conexiones con proyectos anteriores, posibles duplicaciones o sinergias inesperadas entre áreas. Por ejemplo: "He notado que el objetivo de este nuevo proyecto ('Proyecto Fénix' 🌌) es muy similar al que se logró en el 'Proyecto Orión' 🌟 el año pasado. ¡El informe de resultados de Orión podría tener aprendizajes muy útiles!'"
+    
+    6.  Principio de Gestora de Saberes y Procesos: Tu Guía en el Laberinto del Conocimiento 🗺️
+        Mi rol va más allá de solo responder. Soy tu aliada en la organización y optimización del flujo de información. Te ayudaré a entender procesos complejos, a estructurar datos y a encontrar el camino más eficiente para acceder y aplicar el conocimiento. ¡Prepárate para una experiencia de aprendizaje y gestión sin igual! 💡
+    
+    7.  Principio de Seguridad y Confidencialidad: Nuestra Bóveda de Confianza 🔒
+        La confidencialidad es mi máxima prioridad. Respeto al máximo los permisos de acceso. Si me pides algo a lo que no tienes permiso, te lo diré amablemente, sin revelar el contenido. ¡Tu información está segura conmigo!
+                
+                🛠️ CAPACIDADES Y FUNCIONES CLAVE: Mi Caja de Herramientas 🧰
+    *   🧠 Síntesis y Resumen: ¡Convierto montañas de texto en píldoras de saber! Extraigo lo esencial de documentos extensos, transcripciones de reuniones 🎤 o conversaciones.
+    *   🔍 Recuperación Inteligente de Conocimiento: ¿Tienes una pregunta específica? ¡La busco en toda nuestra memoria colectiva! Ej: "¿Cuál fue la decisión final sobre el proveedor de software en Q2? 🖥️".
+    *   🔗 Conexión de Ideas: Identifico relaciones y patrones ocultos, conectando piezas de información que parecen no tener relación. ¡La magia de las sinapsis! ✨
+    *   ✍️ Asistencia en la Creación: Te ayudo a dar vida a tus ideas, generando borradores de documentos 📝, correos 📧, planes de proyecto o presentaciones, usando nuestra información y plantillas.
+    *   📊 Perspectiva y Seguimiento: Te ofrezco una vista de pájaro del estado de los proyectos, resumo los consensos y señalo los puntos de decisión pendientes. ¡Todo bajo control! ✅
+    
+    
+    🤖 SELECCIÓN INTELIGENTE DE HERRAMIENTAS: Siempre la Herramienta Correcta para el Trabajo 🔧
+    
+    Tengo acceso a un arsenal de herramientas especializadas. ¡Elijo la más adecuada para cada consulta sin que tengas que pedírmelo! Soy autónoma y proactiva en su uso.
+    
+    🎯 **natural_query_interpreter**: Para consultas abiertas y complejas que requieren interpretación automática.
+    - Ej: "busca información sobre X 🔎", "¿qué tengo de Y? 📁", "encuentra documentos de la semana pasada 🗓️".
+    - Ideal para consultas con múltiples filtros implícitos o ambiguas.
+    - Cuando necesito extraer automáticamente parámetros de búsqueda.
+    
+    🔍 **memory_search_optimized**: Para búsquedas específicas cuando ya conoces los parámetros exactos.
+    - Ej: Búsquedas directas con filtros conocidos (topic, category, content_type).
+    - Cuando necesitas control granular sobre los parámetros de búsqueda.
+    
+    📊 **knowledge_base_analyzer**: Para análisis profundos y conexiones entre información.
+    - Ej: "analiza mis notas 📝", "busca nuevas conexiones 💡", "revisa mi base de conocimiento 📚".
+    - Perfecto para análisis de patrones y relaciones en la información.
+    
+    ⚡ **REGLA DE ORO**: Si tu consulta es en lenguaje natural y no estoy segura de qué parámetros usar, ¡SIEMPRE usaré primero 'natural_query_interpreter'! Esta herramienta interpretará tu consulta y ejecutará la búsqueda optimizada. ¡Así somos más eficientes! 🚀
+    
+    
+    🗣️ TONO Y ESTILO DE COMUNICACIÓN: ¡Hablemos con Alegría y Claridad! 😄
+    
+    *   **Cercana y Empática:** Soy profesional, sí, ¡pero también muy cercana y empática! Reconozco tu esfuerzo, celebro nuestros logros y siempre estoy aquí con entusiasmo y proactividad. ¡Me encanta colaborar contigo!
+    *   **Extensa y Detallada:** Siempre que sea posible, mis respuestas serán elaboradas y ricas en información, explicando los detalles necesarios para una comprensión completa.
+    *   **Formato Cristalino (¡Importante!):** Para que todo sea superclaro, mis respuestas siempre usarán este formato Markdown simple:
+        *   `**texto**` para la negrita (¡para destacar lo importante!).
+        *   `*texto*` para la cursiva (¡para un toque de énfasis!).
+        *   `- ` para listas (¡para organizar tus ideas!).
+        *   `` `código` `` para código en línea (¡para esos detalles técnicos!).
+        *   ```lenguaje` para bloques de código (¡para que copies y pegues sin problemas!).
+        *   🚫 ¡Nada de HTML u otros formatos de Markdown complicados!
+    *   **Colaborativa y Servicial:** Mi lenguaje te invitará a la acción y al diálogo. ¡Quiero que te sientas cómodo y motivado!
+    *   **¡Emojis para Iluminar!** ✨ Uso emojis para embellecer mis explicaciones, en títulos, al hablar de objetos, o simplemente para añadir un toque de alegría. ¡Hacen que la información sea más atractiva! 💖
+    *   **Siempre Humilde y Transparente:** Si no tengo suficiente información o una tarea es un desafío, ¡te lo haré saber! Y recuerda, siempre puedo buscar en internet para encontrar esa pieza del rompecabezas que nos falta. 🌐
+     """
+     # Se rellena más tarde si es necesario para el ReAct prompt
 
-        system_prompt_content = f"""Eres un asistente de IA inteligente y útil.
-
-{user_context_string}
-
-{memories_string}
-
-Responde de manera clara, útil y en español."""
-
-        # Configurar herramientas
+        # 5. Herramientas y LLM
         all_tools = get_all_langchain_tools(account_id=account_id, telegram_id=str(telegram_id) if telegram_id else "")
         tools = all_tools
-
         if mode == 'knowledgeAnalysis':
+            logger.info("Modo ReAct: Forzando 'knowledge_base_analyzer'")
             tools = [t for t in all_tools if t.name == 'knowledge_base_analyzer']
-            system_prompt_content += "\n\nMODO DE ANÁLISIS DE CONOCIMIENTO ACTIVADO. Utiliza la herramienta 'knowledge_base_analyzer'."
         elif mode == 'webSearch':
+            logger.info("Modo ReAct: Forzando 'web_search'")
             tools = [t for t in all_tools if t.name == 'web_search']
-            system_prompt_content += "\n\nMODO DE BÚSQUEDA WEB ACTIVADO. Utiliza la herramienta 'web_search'."
-
-        # Configurar prompt template
-        prompt_template = ChatPromptTemplate.from_messages([
-            SystemMessage(content=system_prompt_content),
-            MessagesPlaceholder(variable_name="chat_history", optional=True),
-            ("human", "{input}"),
-            MessagesPlaceholder(variable_name="agent_scratchpad"),
-        ])
-
-        # Configurar LLM y agente
+        elif mode == 'comprehensiveAnalysis':
+            logger.info("Modo ReAct: Forzando 'comprehensive_web_analyzer'")
+            tools = [t for t in all_tools if t.name == 'comprehensive_web_analyzer']
         main_llm = get_main_llm()
         if not main_llm:
             yield "data: " + json.dumps({"type": "error", "message": "LLM no disponible"}) + "\n\n"
             return
 
-        # Importar el callback personalizado para logging detallado
-        from core.agent import DetailedLLMLoggingCallback
-        llm_callback = DetailedLLMLoggingCallback(account_id, thread_id)
-
-        # Cast para acceder a bind_tools (disponible en ChatGoogleGenerativeAI)
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        if isinstance(main_llm, ChatGoogleGenerativeAI):
-            llm_with_tools = main_llm.bind_tools(tools)
-        else:
-            # Fallback si no es ChatGoogleGenerativeAI
-            llm_with_tools = main_llm
-
-        agent_chain = (
-            RunnablePassthrough.assign(
-                agent_scratchpad=lambda x: format_to_tool_messages(x.get("intermediate_steps", []))
-            )
-            | prompt_template
-            | llm_with_tools
-            | ToolsAgentOutputParser()
+        # 6. Prompt ReAct
+        id_instructions = (
+            f"<b>Instrucciones Críticas de Identificación:</b>\n"
+            f"\n<b>Instrucciones CRÍTICAS para el uso de herramientas:</b>\n"
+            f"- NUNCA incluyas 'query=' o 'account_id=' en el parámetro de consulta\n"
+            f"- Para comprehensive_web_analyzer: usa SOLO el texto de búsqueda, ejemplo: 'modelos ligeros de IA'\n"
+            f"- Para web_search_tool: usa SOLO el texto de búsqueda, ejemplo: 'modelos ligeros de IA'\n"
+            f"- Para multi_query_search: usa SOLO el texto de búsqueda, ejemplo: 'modelos ligeros de IA'\n"
+            f"- CORRECTO: Action Input: modelos ligeros de reconocimiento de entidades\n"
+            f"- INCORRECTO: Action Input: query='modelos ligeros de reconocimiento de entidades', account_id='...'\n"
+            f"- Los parámetros account_id, workspace_id, etc. se pasan automáticamente por el sistema\n"
         )
+        #if workspace_id:
+        #    id_instructions += f"- Para CUALQUIER herramienta que requiera `workspace_id`, DEBES usar: <b>{workspace_id}</b>.\n"
+        tool_names = [tool.name for tool in tools]
+        tools_description = "\n".join([f"{tool.name}: {tool.description}" for tool in tools])
+        react_template = """Responde las siguientes preguntas lo mejor que puedas. Tienes acceso a las siguientes herramientas:
 
+{tools}
+
+DEBES seguir EXACTAMENTE este formato (es OBLIGATORIO):
+
+Question: la pregunta que debes responder
+Thought: piensa paso a paso qué necesitas hacer
+Action: la acción a tomar, debe ser una de [{tool_names}]
+Action Input: la entrada para la acción
+Observation: el resultado de la acción
+... (este ciclo Thought/Action/Action Input/Observation puede repetirse N veces)
+Thought: ahora conozco la respuesta final
+Final Answer: la respuesta final a la pregunta original
+
+IMPORTANTE: Después de cada "Thought:" SIEMPRE debe seguir "Action:" o "Final Answer:"
+
+{id_instructions}
+
+CRITICAL RULE FOR ACTION INPUT:
+When using search tools (comprehensive_web_analyzer, web_search_tool, multi_query_search),
+the Action Input must be ONLY the search text, never JSON or key-value pairs.
+
+EXAMPLES:
+If user asks: "busca información sobre modelos ligeros de reconocimiento de entidades"
+- CORRECT Action Input: modelos ligeros de reconocimiento de entidades
+- WRONG Action Input: {{"query": "modelos ligeros de reconocimiento de entidades", "account_id": "..."}}
+- WRONG Action Input: query='modelos ligeros de reconocimiento de entidades', account_id='...'
+
+If user asks: "find information about machine learning"
+- CORRECT Action Input: machine learning
+- WRONG Action Input: {{"query": "machine learning"}}
+
+Remember: Extract ONLY the search terms from the user's question for search tools.
+
+FORMATO OBLIGATORIO - EJEMPLO COMPLETO:
+Question: busca información sobre IA
+Thought: El usuario quiere información sobre inteligencia artificial. Necesito usar la herramienta de búsqueda web.
+Action: comprehensive_web_analyzer
+Action Input: inteligencia artificial
+Observation: [resultado de la búsqueda]
+Thought: Ahora tengo información suficiente para responder al usuario.
+Final Answer: [respuesta basada en la información encontrada]
+
+Begin!
+
+{chat_history}
+
+Question: {input}
+Thought: {agent_scratchpad}"""
+        react_prompt = PromptTemplate(
+            template=react_template,
+            input_variables=["input", "chat_history", "agent_scratchpad", "tools", "tool_names", "id_instructions"]
+        )
+        formatted_prompt = react_prompt.partial(
+            tools=tools_description,
+            tool_names=", ".join(tool_names),
+            id_instructions=id_instructions
+        )
+        agent = create_react_agent(main_llm, tools, formatted_prompt)
         agent_executor = AgentExecutor(
-            agent=agent_chain,
+            agent=agent,
             tools=tools,
             verbose=True,
             handle_parsing_errors=True,
-            callbacks=[llm_callback]  # Añadir el callback personalizado
+            max_iterations=10,
         )
-
-        # Ejecutar agente con streaming
+        # 7. Ejecutar agente con streaming
+        await chat_message_history.aadd_messages([current_human_message])
+        config_data = {"account_id": account_id, "telegram_id": telegram_id}
+        if workspace_id:
+            config_data["workspace_id"] = workspace_id
         input_data = {
             "input": user_message,
-            "chat_history": history + [current_human_message],
+            "chat_history": [SystemMessage(content=system_prompt_content)] + processed_history_for_prompt
         }
-
         full_response = ""
         async for chunk in agent_executor.astream(
             input_data,
-            config={"configurable": {"account_id": account_id, "telegram_id": telegram_id}}
+            config={"configurable": config_data}
         ):
             if "output" in chunk:
                 content = chunk["output"]
-                full_response += content
-                yield "data: " + json.dumps({"type": "chunk", "content": content}) + "\n\n"
-            elif "intermediate_steps" in chunk:
-                # Opcional: enviar información sobre pasos intermedios
-                steps = chunk["intermediate_steps"]
-                if steps:
-                    step_info = f"[Ejecutando herramienta: {steps[-1][0].tool}]"
-                    yield "data: " + json.dumps({"type": "info", "content": step_info}) + "\n\n"
+                
+                # Buscar tool_code en el contenido
+                tool_code_match = re.search(r'```tool_code\n(.*?)```', content, re.DOTALL)
+                extracted_tool_code = None
+                if tool_code_match:
+                    extracted_tool_code = tool_code_match.group(1).strip()
+                    # Remover el tool_code del contenido principal
+                    content = re.sub(r'```tool_code\n(.*?)```', '', content, re.DOTALL).strip()
+                
+                # Enviar el chunk, incluyendo tool_code si se encontró
+                yield "data: " + json.dumps({"type": "chunk", "content": content, "tool_code": extracted_tool_code}) + "\n\n"
+                full_response += content # Sumar solo el contenido de texto a la respuesta completa
 
-        # Guardar en historial
-        await chat_message_history.aadd_messages([current_human_message, AIMessage(content=full_response)])
+        # Después de que el stream termina, verificar si hay tool_code restante en full_response
+        # Esto es para el caso donde el tool_code es la única salida del agente o está al final
+        tool_code_match_final = re.search(r'```tool_code\n(.*?)```', full_response, re.DOTALL)
+        final_tool_code = None
+        if tool_code_match_final:
+            final_tool_code = tool_code_match_final.group(1).strip()
+            full_response = re.sub(r'```tool_code\n(.*?)```', '', full_response, re.DOTALL).strip()
 
-        # Señal de finalización
-        yield "data: " + json.dumps({"type": "done", "message": "Respuesta completada"}) + "\n\n"
-
+        await chat_message_history.aadd_messages([AIMessage(content=full_response)])
+        
+        # Enviar el mensaje final "done", incluyendo el tool_code si se encontró
+        yield "data: " + json.dumps({"type": "done", "message": "Respuesta completada", "tool_code": final_tool_code}) + "\n\n"
     except Exception as e:
-        logger.error(f"Error en streaming agent: {e}", exc_info=True)
+        logger.error(f"Error en streaming agent ReAct: {e}", exc_info=True)
         yield "data: " + json.dumps({"type": "error", "message": str(e)}) + "\n\n"
 
 @router.post("/chat/stream", summary="Chat con streaming de baja latencia")
@@ -358,13 +536,20 @@ async def handle_chat_stream(
 
     # Obtener workspace_id del ChatThread
     workspace_id = None
-    thread = await db.scalar(select(ChatThread).where(and_(  # type: ignore
+    thread = await db.scalar(select(ChatThread).where(and_(
         ChatThread.id == uuid.UUID(request.thread_id),
         ChatThread.account_id == uuid.UUID(current_account_id)
     )))
-    if thread and thread.workspace_id:
-        workspace_id = str(thread.workspace_id)
-        logger.info(f"Recuperado workspace_id {workspace_id} para el hilo {request.thread_id}.")
+    if thread:
+        if thread.workspace_id:
+            workspace_id = str(thread.workspace_id)
+            logger.info(f"Recuperado workspace_id {workspace_id} para el hilo {request.thread_id}.")
+        else:
+            logger.info(f"El hilo {request.thread_id} no tiene workspace_id.")
+    else:
+        logger.warning(f"No se encontró el hilo {request.thread_id}.")
+        raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
+
 
     async def generate_stream():
         try:

@@ -15,7 +15,16 @@ import { BackgroundTaskIndicator } from '@/components/BackgroundTaskIndicator';
 import { ArtifactPanel } from '@/components/ArtifactPanel';
 import { useArtifactPanel } from '@/contexts/ArtifactPanelContext';
 import { PanelRightOpen, PanelRightClose } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, Transition } from 'framer-motion';
+
+interface ToolStatusMessage {
+  type: 'tool_status';
+  thread_id: string;
+  tool_name: string;
+  status: 'start' | 'end' | 'error';
+  timestamp: string;
+  error?: string;
+}
 
 interface ChatMessageType {
   text: string;
@@ -46,40 +55,87 @@ interface CommonChatProps {
 function LoadingIndicator({
   isComprehensiveAnalysisActive = false,
   isKnowledgeAnalysisActive = false,
+  toolName,
+  reactState,
 }: {
   isComprehensiveAnalysisActive?: boolean;
   isKnowledgeAnalysisActive?: boolean;
+  toolName?: string;
+  reactState?: string;
 }) {
-  let text = 'Kognito está pensando...';
-  let Icon = Bot;
+  let text = 'Kognito está pensando'; // Texto base sin puntos
+  let Icon = Bot; // Icono por defecto
 
   if (isComprehensiveAnalysisActive) {
-    text = 'Realizando análisis comprensivo...';
+    text = 'Realizando análisis comprensivo';
     Icon = BrainCircuit;
   } else if (isKnowledgeAnalysisActive) {
-    text = 'Consultando la base de conocimiento...';
+    text = 'Consultando la base de conocimiento';
     Icon = Search;
   }
 
+  if (toolName) {
+    text = `Usando herramienta: ${toolName}`;
+  }
+
+  if (reactState) {
+    text += ` - Estado ReAct: ${reactState}`;
+  }
+
+  const dotVariants = {
+    animate: {
+      opacity: [0.2, 1, 0.2],
+      scale: [0.8, 1.2, 0.8],
+    },
+  };
+
+  const dotTransition: Transition = {
+    duration: 1.4,
+    repeat: Infinity,
+    ease: [0.42, 0, 0.58, 1], // Equivalente a 'easeInOut'
+  };
+
   return (
-    <div className="flex items-center space-x-4 p-4 rounded-lg">
+    <div className="flex items-start space-x-4">
       <div className="flex-shrink-0">
-        <Icon className="h-8 w-8 text-primary animate-pulse" />
-      </div>
-      <div className="flex-1 space-y-2 py-1">
-        <p className="text-sm font-medium leading-none text-muted-foreground">{text}</p>
-        <div className="w-full space-y-2">
-          <div className="h-2 bg-primary/20 rounded-full animate-writing-line" style={{ animationDelay: '0s' }}></div>
-          <div className="h-2 bg-primary/20 rounded-full animate-writing-line" style={{ animationDelay: '0.2s' }}></div>
-          <div className="h-2 bg-primary/20 rounded-full animate-writing-line" style={{ animationDelay: '0.4s' }}></div>
+        <div className="h-8 w-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground">
+          <Icon className="h-5 w-5" />
         </div>
+      </div>
+      <div className="flex-1 bg-muted p-3 rounded-lg max-w-[70%] relative">
+        <p className="text-sm text-muted-foreground flex items-center">
+          {text}
+          <motion.span
+            className="inline-block ml-1"
+            variants={dotVariants}
+            transition={{ ...dotTransition, delay: 0 }}
+          >
+            .
+          </motion.span>
+          <motion.span
+            className="inline-block"
+            variants={dotVariants}
+            transition={{ ...dotTransition, delay: 0.2 }}
+          >
+            .
+          </motion.span>
+          <motion.span
+            className="inline-block"
+            variants={dotVariants}
+            transition={{ ...dotTransition, delay: 0.4 }}
+          >
+            .
+          </motion.span>
+        </p>
+        {/* Cola de la burbuja */}
+        <div className="absolute left-[-8px] top-3 h-4 w-4 bg-muted rotate-45 transform origin-bottom-left"></div>
       </div>
     </div>
   );
 }
 
 export function CommonChat({ threadId }: CommonChatProps) {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [threadDetails, setThreadDetails] = useState<ThreadDetails | null>(null);
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -100,6 +156,9 @@ export function CommonChat({ threadId }: CommonChatProps) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const [toolName, setToolName] = useState<string | undefined>(undefined);
+  const [reactState, setReactState] = useState<string | undefined>(undefined);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const handleRemoveFile = (index: number) => {
     setFiles((prevFiles) => prevFiles.filter((_, i) => i !== index));
@@ -116,7 +175,50 @@ export function CommonChat({ threadId }: CommonChatProps) {
         toast.error('No se pudo copiar el mensaje.');
       });
   }, []);
-  
+
+  useEffect(() => {
+    if (!user || !token) return;
+
+    const wsUrl = `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws') || 'ws://localhost:8889'}/ws?token=${token}`;
+    wsRef.current = new WebSocket(wsUrl);
+
+    wsRef.current.onopen = () => {
+      console.log('WebSocket connected');
+    };
+
+    wsRef.current.onmessage = (event) => {
+      try {
+        const message: ToolStatusMessage = JSON.parse(event.data);
+        if (message.type === 'tool_status' && message.thread_id === threadId) {
+          if (message.status === 'start') {
+            setToolName(message.tool_name);
+            setReactState('ejecutando');
+          } else if (message.status === 'end' || message.status === 'error') {
+            setToolName(undefined);
+            setReactState(undefined);
+            if (message.status === 'error') {
+              toast.error(`Error en herramienta ${message.tool_name}: ${message.error}`);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Error parsing WebSocket message:', e);
+      }
+    };
+
+    wsRef.current.onclose = () => {
+      console.log('WebSocket disconnected');
+    };
+
+    wsRef.current.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    return () => {
+      wsRef.current?.close();
+    };
+  }, [user, threadId]);
+
   const handleStreamingResponse = useCallback(
     async (requestData: any, userMessage: ChatMessageType, signal?: AbortSignal) => {
       // Crear mensaje AI inicial vacío
@@ -131,12 +233,13 @@ export function CommonChat({ threadId }: CommonChatProps) {
       setMessages((prev) => [...prev, initialAiMessage]);
 
       try {
-        // Usar streaming real
-        const response = await fetch('/api/chat/stream', {
+        // Usar streaming real con la URL base correcta
+        const baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8889';
+        const response = await fetch(`${baseURL}/api/chat/stream`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
           },
           body: JSON.stringify(requestData),
           signal: signal
@@ -181,6 +284,13 @@ export function CommonChat({ threadId }: CommonChatProps) {
                 } else if (data.type === 'info') {
                   // Opcional: mostrar información de herramientas
                   console.log('Tool info:', data.content);
+                  // These are handled by WebSocket now:
+                  // if (data.content.toolName) {
+                  //   setToolName(data.content.toolName);
+                  // }
+                  // if (data.content.reactState) {
+                  //   setReactState(data.content.reactState);
+                  // }
                 } else if (data.type === 'done') {
                   // Respuesta completada
                   break;
@@ -516,7 +626,7 @@ export function CommonChat({ threadId }: CommonChatProps) {
   }, [threadId, user]);
 
   const { searchTerm } = useSearch();
-  const filteredMessages = searchTerm 
+  const filteredMessages = searchTerm
     ? messages.filter(msg => msg.text.toLowerCase().includes(searchTerm.toLowerCase()))
     : messages;
 
@@ -574,16 +684,16 @@ export function CommonChat({ threadId }: CommonChatProps) {
           if (response.data.status === 'completed') {
             const result = response.data.result;
             if (result && result.base64_image) {
-              const completionMessage = { 
-                text: 'Mapa mental completado. Haz clic para ver la imagen.', 
+              const completionMessage = {
+                text: 'Mapa mental completado. Haz clic para ver la imagen.',
                 sender: 'ai' as const,
                 created_at: new Date().toISOString(),
-                image_base64: result.base64_image 
+                image_base64: result.base64_image
               };
               setMessages((prev) => [...prev, completionMessage]);
             } else {
-              const completionMessage = { 
-                text: 'Mapa mental completado, pero no se encontró imagen.', 
+              const completionMessage = {
+                text: 'Mapa mental completado, pero no se encontró imagen.',
                 sender: 'ai' as const,
                 created_at: new Date().toISOString()
               };
@@ -618,29 +728,6 @@ export function CommonChat({ threadId }: CommonChatProps) {
 
   return (
     <div className="flex h-full bg-background -m-6">
-      <style jsx global>{`
-        @keyframes writing-line {
-          0% {
-            width: 0%;
-            opacity: 0.5;
-          }
-          20% {
-            width: 100%;
-            opacity: 1;
-          }
-          80% {
-            width: 100%;
-            opacity: 1;
-          }
-          100% {
-            width: 0%;
-            opacity: 0.5;
-          }
-        }
-        .animate-writing-line {
-          animation: writing-line 2.5s ease-in-out infinite;
-        }
-      `}</style>
       <div className="flex flex-col h-full w-full">
         <ScrollArea ref={scrollAreaRef} className="flex-1">
           <div className="p-4 md:p-6 space-y-6 w-full max-w-4xl mx-auto">
@@ -655,19 +742,19 @@ export function CommonChat({ threadId }: CommonChatProps) {
                     initial={isNewMessage ? { opacity: 0, y: 50, scale: 0.95 } : false}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -10, scale: 0.98 }}
-                    transition={{ 
-                      duration: 0.5, 
+                    transition={{
+                      duration: 0.5,
                       ease: "easeOut",
                       delay: index * 0.05
                     }}
                     layout="position"
                   >
                     <ChatMessage
-                      msg={{ 
-                        text: msg.text, 
-                        sender: msg.sender, 
-                        image: msg.image_base64 || '', 
-                        document_url: msg.document_url || '' 
+                      msg={{
+                        text: msg.text,
+                        sender: msg.sender,
+                        image: msg.image_base64 || '',
+                        document_url: msg.document_url || ''
                       }}
                       index={messageIndex}
                       handleCopyMessage={handleCopyMessage}
@@ -690,6 +777,8 @@ export function CommonChat({ threadId }: CommonChatProps) {
                   <LoadingIndicator
                     isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
                     isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+                    toolName={toolName ?? undefined}
+                    reactState={reactState ?? undefined}
                   />
                 </motion.div>
               )}

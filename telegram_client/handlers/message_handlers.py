@@ -26,7 +26,7 @@ import tempfile
 import os
 import base64
 import json
-from typing import Optional
+from typing import Optional, Dict, Any # <-- Añadir Dict y Any
 import httpx
 from io import BytesIO
 import uuid
@@ -140,9 +140,12 @@ async def handle_chat_response(update: Update, context: CallbackContext, respons
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
 
+    # Asegurarse de que context.user_data es un diccionario
+    user_data: Dict[str, Any] = context.user_data if context.user_data is not None else {}
+
     # 1. Comprobar si hay una imagen generada para enviar (desde BytesIO)
-    if GENERATED_IMAGE_KEY in context.user_data:
-        image_bytesio = context.user_data.pop(GENERATED_IMAGE_KEY)
+    if GENERATED_IMAGE_KEY in user_data:
+        image_bytesio = user_data.pop(GENERATED_IMAGE_KEY)
         logger.info(f"Enviando imagen generada al usuario {user_id} desde BytesIO...")
         image_bytesio.seek(0)
         try:
@@ -153,8 +156,8 @@ async def handle_chat_response(update: Update, context: CallbackContext, respons
             # Si falla el envío de la imagen, enviamos el texto de todas formas (caerá al caso 4).
 
     # 2. Comprobar si hay una ruta de imagen generada para enviar (desde archivo temporal)
-    if 'generated_image_path' in context.user_data:
-        image_path = context.user_data.pop('generated_image_path')
+    if 'generated_image_path' in user_data:
+        image_path = user_data.pop('generated_image_path')
         logger.info(f"Enviando imagen generada al usuario {user_id} desde archivo {image_path}...")
         try:
             with open(image_path, 'rb') as image_file:
@@ -165,7 +168,7 @@ async def handle_chat_response(update: Update, context: CallbackContext, respons
             # Si falla el envío de la imagen, enviamos el texto de todas formas (caerá al caso 5).
 
     # 2. Comprobar si hay un documento para paginar
-    document_title = context.user_data.pop(DOCUMENT_NAME_KEY, None)
+    document_title = user_data.pop(DOCUMENT_NAME_KEY, None)
     if document_title:
         logger.info(f"Paginando el documento '{document_title}' para el usuario {user_id}...")
         chunks = split_text_into_pages(response_text, 3500) # Límite de caracteres para asegurar espacio de encabezado/pie.
@@ -175,9 +178,9 @@ async def handle_chat_response(update: Update, context: CallbackContext, respons
             parse_mode=ParseMode.HTML,
             prefix=f"doc_{uuid.uuid4().hex[:6]}" # Prefijo único para la sesión del paginador
         )
-        if PAGINATOR_SESSIONS_KEY not in context.user_data:
-            context.user_data[PAGINATOR_SESSIONS_KEY] = {}
-        context.user_data[PAGINATOR_SESSIONS_KEY][paginator.session_id] = paginator
+        if PAGINATOR_SESSIONS_KEY not in user_data:
+            user_data[PAGINATOR_SESSIONS_KEY] = {}
+        user_data[PAGINATOR_SESSIONS_KEY][paginator.session_id] = paginator
         first_page, markup = paginator.get_page()
         try:
             await context.bot.send_message(
@@ -415,8 +418,17 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
             error_detail = e.response.json().get("detail", e.response.text)
         except Exception:
             error_detail = e.response.text if e.response.text else "Error desconocido del servidor."
+        
         logger.error(f"Error de API al procesar mensaje para la cuenta {account_id_log}: {error_detail}")
-        error_msg = "No pude procesar tu mensaje. Hubo un problema con el servidor: {}".format(error_detail)
+
+        # Detectar error de "hilo no encontrado" y resetear el thread_id
+        if "No se encontró hilo con id" in error_detail:
+            logger.warning(f"Detectado error 'hilo no encontrado' para {current_thread_id}. Reseteando CURRENT_CHAT_THREAD_ID_KEY.")
+            context.chat_data[CURRENT_CHAT_THREAD_ID_KEY] = None
+            error_msg = "Lo siento, parece que nuestra conversación anterior se perdió. He iniciado un nuevo chat para ti. Por favor, intenta tu mensaje de nuevo."
+        else:
+            error_msg = "No pude procesar tu mensaje. Hubo un problema con el servidor: {}".format(error_detail)
+        
         await update.message.reply_text(error_msg)
     except Exception as e:
         account_id_log = str(account.id) if account else "Desconocida"
@@ -468,7 +480,9 @@ async def text_message_handler(update: Update, context: CallbackContext) -> None
     
     await process_and_get_response(update, context, user_message=message.text)
     # Después de procesar el mensaje, verificar si hay una imagen en user_data para enviar.
-    if GENERATED_IMAGE_KEY in context.user_data:
+    # Asegurarse de que context.user_data es un diccionario
+    user_data: Dict[str, Any] = context.user_data if context.user_data is not None else {}
+    if GENERATED_IMAGE_KEY in user_data:
         await handle_chat_response(update, context, response_text="¡Hecho! He generado la imagen.")
     return None # Importante: Retornar None para detener la propagación.
 

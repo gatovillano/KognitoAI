@@ -14,14 +14,16 @@ from api.documents import router as documents_router
 from api.notes import router as notes_router
 from api.agenda import router as agenda_router
 from api.teams import router as teams_router
+from api.knowledge_graph import router as knowledge_graph_router
 from core.config import settings
 from core.database import create_tables
 from core.llm_manager import initialize_llms
 from core.websocket_manager import connect_websocket, disconnect_websocket
 from utils.security import decode_access_token
 from utils.embeddings import initialize_embeddings
+from utils.ascii_logo import print_startup_logo
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Configurar logging detallado para LangChain y componentes del LLM
@@ -76,6 +78,7 @@ app.mount("/telegram_panel", StaticFiles(directory="telegram_panel"), name="tele
 @app.on_event("startup")
 async def startup_event():
     """Se ejecuta una vez al arrancar el servidor. Inicializa recursos críticos."""
+    print_startup_logo("1.0.0")
     logger.info("El servidor central está arrancando...")
     if not settings.jwt_secret_key:
         logger.error("ERROR FATAL: JWT_SECRET_KEY no está configurada. El servicio de autenticación no funcionará.")
@@ -153,6 +156,7 @@ app.include_router(github_router, prefix="/api/github", tags=["github"])
 app.include_router(telegram_router, prefix="", tags=["telegram"])
 app.include_router(logs_router, prefix="/api", tags=["logs"])
 app.include_router(scheduled_tools_router, prefix="/api", tags=["scheduled-tools"])
+app.include_router(knowledge_graph_router, prefix="/api", tags=["knowledge-graph"])
 
 if __name__ == "__main__":
     import uvicorn

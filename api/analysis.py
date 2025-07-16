@@ -1,7 +1,7 @@
 import logging
 from langchain.schema.messages import HumanMessage
 import uuid
-from typing import List, Optional
+from typing import List, Optional, cast
 from datetime import datetime
 
 from core.llm_manager import get_fast_llm
@@ -156,17 +156,20 @@ async def get_saved_analyses_endpoint(
                 # Para workspaces específicos, incluir solo análisis de ese workspace
                 if analysis_workspace_id == req.workspace_id:
                     filtered_analyses.append(analysis)
-            elif req.workspace_id is None:
-                # Para contexto general, incluir solo análisis sin workspace_id
-                if analysis_workspace_id is None:
-                    filtered_analyses.append(analysis)
-            else:
-                # Si no se especifica workspace_id, incluir todos
+            elif analysis_workspace_id is None: # Si req.workspace_id es None, incluir solo análisis sin workspace_id
                 filtered_analyses.append(analysis)
-
+            # Si req.workspace_id está presente pero analysis_workspace_id no coincide, no se añade.
+ 
         return filtered_analyses[:50]  # Limitar a 50 después del filtrado
     else:
-        return all_analyses[:50]
+        # Si req.topic no está especificado, filtramos por workspace_id si se proporciona,
+        # o solo por análisis sin workspace_id si req.workspace_id es None.
+        if req.workspace_id:
+            return [a for a in all_analyses if a.result_payload and a.result_payload.get('workspace_id') == req.workspace_id][:50]
+        elif req.workspace_id is None:
+            return [a for a in all_analyses if not a.result_payload or a.result_payload.get('workspace_id') is None][:50]
+        else:
+            return all_analyses[:50] # Esto no debería ocurrir si req.workspace_id es Optional[str]
 
 class DeleteAnalysisRequest(BaseModel):
     task_id: str
@@ -1156,42 +1159,50 @@ async def get_all_analysis_endpoint(
             tool_used = "Desconocido"
 
             if task.result_payload is not None:
-                if 'executive_summary' in task.result_payload:
-                    summary = task.result_payload['executive_summary']
-                elif 'resumen_ejecutivo' in task.result_payload:
-                    summary = task.result_payload['resumen_ejecutivo']
-                elif 'resumen_semantico' in task.result_payload:
-                    summary = task.result_payload['resumen_semantico'][:200] + "..." if len(task.result_payload['resumen_semantico']) > 200 else task.result_payload['resumen_semantico']
-                elif 'sections' in task.result_payload and task.result_payload['sections']:
+                # Asegurarse de que result_payload es un diccionario
+                payload_dict = task.result_payload if isinstance(task.result_payload, dict) else {}
+ 
+                if 'executive_summary' in payload_dict:
+                    summary = payload_dict['executive_summary']
+                elif 'resumen_ejecutivo' in payload_dict:
+                    summary = payload_dict['resumen_ejecutivo']
+                elif 'resumen_semantico' in payload_dict:
+                    sem_summary = str(payload_dict['resumen_semantico']) # Convertir a str para len()
+                    summary = sem_summary[:200] + "..." if len(sem_summary) > 200 else sem_summary
+                elif 'sections' in payload_dict and isinstance(payload_dict['sections'], list) and len(cast(list, payload_dict['sections'])) > 0:
                     # Para análisis personalizados, extraer resumen de la primera sección
-                    first_section = task.result_payload['sections'][0]
+                    first_section = payload_dict['sections'][0]
                     if 'content' in first_section:
                         content = str(first_section['content'])
                         summary = content[:200] + "..." if len(content) > 200 else content
                     else:
-                        sections_count = len(task.result_payload['sections'])
+                        sections_list = cast(list, payload_dict['sections'])
+                        sections_count = len(sections_list)
                         summary = f"Análisis personalizado con {sections_count} secciones"
-                elif 'formatted_result' in task.result_payload:
-                    summary = str(task.result_payload['formatted_result'])[:200] + "..."
-
+                elif 'sections' in payload_dict:
+                    # Si existe 'sections' pero está vacío
+                    summary = "Análisis personalizado sin contenido"
+                elif 'formatted_result' in payload_dict:
+                    summary = str(payload_dict['formatted_result'])[:200] + "..."
+ 
                 # Obtener herramienta usada desde los metadatos o inferir basándose en la estructura
-                if 'tool_used' in task.result_payload:
-                    tool_used = task.result_payload['tool_used']
-                elif 'analysis_metadata' in task.result_payload and 'tool_used' in task.result_payload['analysis_metadata']:
-                    tool_used = task.result_payload['analysis_metadata']['tool_used']
+                if 'tool_used' in payload_dict:
+                    tool_used = payload_dict['tool_used']
+                elif 'analysis_metadata' in payload_dict and 'tool_used' in payload_dict['analysis_metadata']:
+                    tool_used = payload_dict['analysis_metadata']['tool_used']
                 else:
                     # Fallback: inferir basándose en la estructura del payload y file_name
-                    if 'code_structure' in task.result_payload and 'design_patterns' in task.result_payload:
+                    if 'code_structure' in payload_dict and 'design_patterns' in payload_dict:
                         tool_used = "advanced_code_analyzer.py"
-                    elif 'grouped_topics' in task.result_payload and 'detailed_clusters' in task.result_payload:
+                    elif 'grouped_topics' in payload_dict and 'detailed_clusters' in payload_dict:
                         tool_used = "semantic_topic_analysis_tool.py"
                     elif file_name == "Semantic Topic Analysis":
                         tool_used = "semantic_topic_analysis_tool.py"
-                    elif 'resumen_semantico' in task.result_payload and 'temas_transversales' in task.result_payload:
+                    elif 'resumen_semantico' in payload_dict and 'temas_transversales' in payload_dict:
                         tool_used = "semantic_summary_analysis"
-                    elif 'cross_cutting_themes' in task.result_payload:
+                    elif 'cross_cutting_themes' in payload_dict:
                         tool_used = "advanced_text_analyzer.py (colección)"
-                    elif 'key_themes' in task.result_payload and 'central_concepts' in task.result_payload:
+                    elif 'key_themes' in payload_dict and 'central_concepts' in payload_dict:
                         tool_used = "advanced_text_analyzer.py (documento)"
                     elif file_name.startswith("Resumen Semántico:"):
                         tool_used = "semantic_summary_analysis"
@@ -1199,7 +1210,7 @@ async def get_all_analysis_endpoint(
                         tool_used = "collection_analysis_tool.py"
                     elif "repositorio" in file_name.lower() or file_name.endswith(".git"):
                         tool_used = "advanced_code_analyzer.py"
-                    elif analysis_type == "custom" or 'sections' in task.result_payload:
+                    elif analysis_type == "custom" or 'sections' in payload_dict:
                         tool_used = "custom_analysis_tool"
                     elif analysis_type == "document":
                         tool_used = "document_analysis_tool.py"

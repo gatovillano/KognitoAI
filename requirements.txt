@@ -18,6 +18,13 @@ langchain-core
 langchain-community
 langchain-google-genai
 langgraph
+
+# --- Modelos Especializados para Pipeline Híbrido ---
+spacy>=3.7.0
+sentence-transformers>=2.2.0
+scikit-learn>=1.3.0
+pandas>=2.0.0
+numpy>=1.24.0
 langchain-postgres
 langchain-google-vertexai
 
@@ -47,14 +54,14 @@ python-docx
 passlib
 bcrypt
 pydantic[email]
-scipy
-spacy
-numpy
 textblob
 keybert
 transformers
-hdbscan
 graphviz
 # Dependencias para eliminación de fondo de imagen
 rembg
 Pillow
+
+# --- Dependencias para integración con Cognee ---
+cognee
+neo4j

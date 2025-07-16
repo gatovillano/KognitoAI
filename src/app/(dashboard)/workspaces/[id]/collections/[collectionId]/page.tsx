@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Brain } from 'lucide-react';
+import { useWebSocket } from '@/hooks/useWebSocket';
 import { toast } from 'sonner';
 
 import { DataTable } from '@/app/(dashboard)/rag/data-table';
@@ -57,6 +58,24 @@ export default function WorkspaceCollectionDetailPage() {
 
   // Estado para el historial de análisis
   const [savedAnalyses, setSavedAnalyses] = useState([]);
+
+  // WebSocket para actualizaciones en tiempo real
+  const { isConnected } = useWebSocket({
+    onTitleUpdated: (data) => {
+      // Actualizar la lista de documentos cuando se actualiza un título
+      setDocuments(prevDocs =>
+        prevDocs.map(doc =>
+          doc.file_name === data.file_name
+            ? { ...doc, title: data.new_title }
+            : doc
+        )
+      );
+    },
+    onTitleExtractionCompleted: (data) => {
+      // Recargar la página para mostrar todos los cambios
+      fetchPageData();
+    }
+  });
 
   const fetchPageData = useCallback(async () => {
     if (!workspaceId || !collectionId) return;

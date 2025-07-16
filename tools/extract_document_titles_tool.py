@@ -20,6 +20,7 @@ from core.config import settings
 from sqlalchemy import create_engine
 from core.memory_manager import update_document_metadata, get_full_document_content
 from core.llm_manager import get_fast_llm
+from core.websocket_manager import send_personal_message
 import logging
 
 
@@ -32,10 +33,6 @@ class ExtractDocumentTitlesInput(BaseModel):
     Define el esquema de entrada para la herramienta de extracción de títulos de documentos.
     Valida que el argumento necesario sea proporcionado por el LLM.
     """
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
     topic: Optional[str] = Field(
         None,
         description="El tema o categoría de los documentos a procesar. Si no se proporciona, se procesarán todos los documentos del usuario.",
@@ -57,14 +54,14 @@ class ExtractDocumentTitlesTool(BaseTool):
         "con LangChain y PGVector, permitiendo almacenar información estructurada junto con los embeddings vectoriales."
     )
     args_schema: Type[BaseModel] = ExtractDocumentTitlesInput
-    return_direct: bool = False  # El agente debe procesar la respuesta.
+    return_direct: bool = False
+    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
 
-    async def _arun(self, account_id: str, topic: Optional[str] = None, file_name: Optional[str] = None, **kwargs: Any) -> str:
+    async def _arun(self, topic: Optional[str] = None, file_name: Optional[str] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
-            account_id: El ID universal de la cuenta del usuario.
             topic: El tema de los documentos a procesar (opcional).
             file_name: El nombre del archivo específico a procesar (opcional).
             **kwargs: Argumentos adicionales (no utilizados).
@@ -72,18 +69,16 @@ class ExtractDocumentTitlesTool(BaseTool):
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
-        logger.info(f"Ejecutando ExtractDocumentTitlesTool para la cuenta '{account_id}' con tema: '{topic}', archivo: '{file_name}'.")
+        logger.info(f"Ejecutando ExtractDocumentTitlesTool para la cuenta '{self.account_id}' con tema: '{topic}', archivo: '{file_name}'.")
         try:
             if not settings.database_url:
                 raise ValueError("Database URL is not configured")
                 
-            # Engine síncrono para conectar con la base de datos
             PGVECTOR_SYNC_ENGINE = create_engine(settings.database_url)
             metadata = MetaData()
             langchain_pg_collection = Table('langchain_pg_collection', metadata, autoload_with=PGVECTOR_SYNC_ENGINE)
             langchain_pg_embedding = Table('langchain_pg_embedding', metadata, autoload_with=PGVECTOR_SYNC_ENGINE)
 
-            # Crear una tabla temporal para almacenar el estado del proceso si no existe
             async with DBSession(SessionLocal) as db:
                 await db.execute(text("""
                     CREATE TABLE IF NOT EXISTS process_status (
@@ -97,22 +92,20 @@ class ExtractDocumentTitlesTool(BaseTool):
                 """))
                 await db.commit()
 
-                # Inicializar el estado del proceso
                 await db.execute(text("""
                     INSERT INTO process_status (account_id, status, progress, total, message)
                     VALUES (:account_id, 'in_progress', 0, 0, 'Iniciando proceso de extracción de títulos...')
                     ON CONFLICT (account_id) DO UPDATE
                     SET status = 'in_progress', progress = 0, total = 0, message = 'Iniciando proceso de extracción de títulos...', last_updated = CURRENT_TIMESTAMP
-                """), {"account_id": account_id})
+                """), {"account_id": self.account_id})
                 await db.commit()
 
-                # Construir la consulta optimizada usando las nuevas columnas directamente
                 clauses = [
                     "account_id = :account_id",
                     "content_type = 'user_documents'",
                     "cmetadata->>'type' = 'document_chunk'"
                 ]
-                params = {"account_id": account_id}
+                params = {"account_id": self.account_id}
 
                 if topic:
                     clauses.append("topic = :topic")
@@ -121,7 +114,8 @@ class ExtractDocumentTitlesTool(BaseTool):
                     clauses.append("cmetadata->>'file_name' = :fname")
                     params["fname"] = file_name
 
-                select_sql = text("SELECT DISTINCT ON (cmetadata->>'file_name') * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses) + " ORDER BY cmetadata->>'file_name', id")
+                # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
+                select_sql = text("SELECT DISTINCT ON (cmetadata->>'document_id') * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses) + " ORDER BY cmetadata->>'document_id', id")
                 logger.info(f"Ejecutando consulta SQL: {select_sql} con parámetros: {params}")
                 result = await db.execute(select_sql, params)
                 chunks = result.mappings().all()
@@ -134,9 +128,15 @@ class ExtractDocumentTitlesTool(BaseTool):
                         UPDATE process_status
                         SET status = 'completed', message = :message, last_updated = CURRENT_TIMESTAMP
                         WHERE account_id = :account_id
-                    """), {"account_id": account_id, "message": message})
+                    """), {"account_id": self.account_id, "message": message})
                     await db.commit()
                     return message
+
+                await send_personal_message(self.account_id, {
+                    "type": "title_extraction_started",
+                    "total_documents": len(chunks),
+                    "message": f"Iniciando extracción de títulos para {len(chunks)} documento(s)..."
+                })
 
                 # Actualizar el total de documentos a procesar
                 total_docs = len(chunks)
@@ -145,7 +145,7 @@ class ExtractDocumentTitlesTool(BaseTool):
                     UPDATE process_status
                     SET total = :total, message = :message, last_updated = CURRENT_TIMESTAMP
                     WHERE account_id = :account_id
-                """), {"account_id": account_id, "total": total_docs, "message": message})
+                """), {"account_id": self.account_id, "total": total_docs, "message": message})
                 await db.commit()
 
                 updated_count = 0
@@ -158,7 +158,7 @@ class ExtractDocumentTitlesTool(BaseTool):
                         UPDATE process_status
                         SET status = 'error', message = 'LLM no disponible para extracción de títulos.', last_updated = CURRENT_TIMESTAMP
                         WHERE account_id = :account_id
-                    """), {"account_id": account_id})
+                    """), {"account_id": self.account_id})
                     await db.commit()
                     raise ValueError("LLM no disponible para extracción de títulos.")
                 for chunk in chunks:
@@ -175,7 +175,7 @@ class ExtractDocumentTitlesTool(BaseTool):
                             ORDER BY (cmetadata->>'chunk_index')::integer ASC
                             LIMIT 3
                         """)
-                        chunk_result = await db.execute(first_chunk_query, {"account_id": account_id, "file_name": file_name})
+                        chunk_result = await db.execute(first_chunk_query, {"account_id": self.account_id, "file_name": file_name})
                         first_chunk = chunk_result.mappings().first()
                         
                         if first_chunk and 'document' in first_chunk:
@@ -196,10 +196,18 @@ class ExtractDocumentTitlesTool(BaseTool):
                                 potential_title = potential_title.strip()
                                 if potential_title and potential_title != 'Sin título' and len(potential_title) > 5 and len(potential_title) < 250:
                                     logger.info(f"Título extraído por LLM para {file_name}: {potential_title}")
-                                    success = await update_document_metadata(account_id, file_name, new_title=potential_title, new_topic=None)
+                                    success = await update_document_metadata(self.account_id, file_name, new_title=potential_title, new_topic=None)
                                     if success:
                                         updated_count += 1
                                         logger.info(f"Actualizado título para el documento {file_name}.")
+
+                                        await send_personal_message(self.account_id, {
+                                            "type": "title_updated",
+                                            "file_name": file_name,
+                                            "new_title": potential_title,
+                                            "progress": processed_count,
+                                            "total": total_docs
+                                        })
                                     else:
                                         logger.warning(f"No se pudo actualizar el título para el documento {file_name}.")
                                 else:
@@ -215,10 +223,18 @@ class ExtractDocumentTitlesTool(BaseTool):
                                         break
                                 if potential_title and len(potential_title) > 5 and len(potential_title) < 250:
                                     logger.info(f"Título de respaldo extraído para {file_name}: {potential_title}")
-                                    success = await update_document_metadata(account_id, file_name, new_title=potential_title, new_topic=None)
+                                    success = await update_document_metadata(self.account_id, file_name, new_title=potential_title, new_topic=None)
                                     if success:
                                         updated_count += 1
                                         logger.info(f"Actualizado título de respaldo para el documento {file_name}.")
+
+                                        await send_personal_message(self.account_id, {
+                                            "type": "title_updated",
+                                            "file_name": file_name,
+                                            "new_title": potential_title,
+                                            "progress": processed_count,
+                                            "total": total_docs
+                                        })
                                     else:
                                         logger.warning(f"No se pudo actualizar el título de respaldo para el documento {file_name}.")
                                 else:
@@ -234,31 +250,39 @@ class ExtractDocumentTitlesTool(BaseTool):
                         UPDATE process_status
                         SET progress = :progress, message = :message, last_updated = CURRENT_TIMESTAMP
                         WHERE account_id = :account_id
-                    """), {"account_id": account_id, "progress": processed_count, "message": f"Procesando documento {processed_count} de {total_docs}..."})
+                    """), {"account_id": self.account_id, "progress": processed_count, "message": f"Procesando documento {processed_count} de {total_docs}..."})
                     await db.commit()
 
                 if updated_count > 0:
-                    logger.info(f"Se actualizaron los títulos de {updated_count} documentos para la cuenta {account_id}.")
+                    logger.info(f"Se actualizaron los títulos de {updated_count} documentos para la cuenta {self.account_id}.")
                     final_message = f"Se han procesado y actualizado los títulos de {updated_count} {'documento' if file_name else 'documentos'} en tu base de conocimiento."
                 else:
-                    logger.info(f"No se encontraron títulos para actualizar en los documentos de la cuenta {account_id}.")
+                    logger.info(f"No se encontraron títulos para actualizar en los documentos de la cuenta {self.account_id}.")
                     final_message = f"No se encontraron títulos para actualizar en {'el documento ' + file_name if file_name else 'los documentos de tu base de conocimiento'}."
                 
                 await db.execute(text("""
                     UPDATE process_status
                     SET status = 'completed', progress = :progress, message = :message, last_updated = CURRENT_TIMESTAMP
                     WHERE account_id = :account_id
-                """), {"account_id": account_id, "progress": processed_count, "message": final_message})
+                """), {"account_id": self.account_id, "progress": processed_count, "message": final_message})
                 await db.commit()
+
+                await send_personal_message(self.account_id, {
+                    "type": "title_extraction_completed",
+                    "updated_count": updated_count,
+                    "total_processed": processed_count,
+                    "message": final_message
+                })
+
                 return final_message
         except Exception as e:
-            logger.error(f"Error en ExtractDocumentTitlesTool para la cuenta '{account_id}': {e}", exc_info=True)
+            logger.error(f"Error en ExtractDocumentTitlesTool para la cuenta '{self.account_id}': {e}", exc_info=True)
             async with DBSession(SessionLocal) as db:
                 await db.execute(text("""
                     UPDATE process_status
                     SET status = 'error', message = :message, last_updated = CURRENT_TIMESTAMP
                     WHERE account_id = :account_id
-                """), {"account_id": account_id, "message": f"Ocurrió un error inesperado: {str(e)}"})
+                """), {"account_id": self.account_id, "message": f"Ocurrió un error inesperado: {str(e)}"})
                 await db.commit()
             return f"Ocurrió un error inesperado al intentar extraer y actualizar los títulos de los documentos: {e}"
 

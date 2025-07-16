@@ -34,10 +34,6 @@ class ProactiveKnowledgeLinkerInput(BaseModel):
     Define el esquema de entrada para la herramienta de vinculación proactiva de conocimiento.
     Valida que los argumentos necesarios sean proporcionados por el LLM.
     """
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
     new_entry_content: str = Field(
         ...,
         description="El contenido de la nueva entrada (nota, memoria, documento) a analizar para generar insights proactivos."
@@ -79,18 +75,18 @@ class ProactiveKnowledgeLinkerTool(BaseTool):
     )
     args_schema: Type[BaseModel] = ProactiveKnowledgeLinkerInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
+    account_id: str # Se mantiene aquí, ya que es donde se inyecta
 
     def __init__(self, **kwargs):
         """Inicializa la herramienta con cualquier configuración necesaria."""
         super().__init__(**kwargs)
         logger.info("Inicializando ProactiveKnowledgeLinkerTool")
 
-    async def _arun(self, account_id: str, new_entry_content: str, new_entry_title: Optional[str] = None, new_entry_type: Optional[str] = "general", new_entry_category: Optional[str] = None, user_query: Optional[str] = None, **kwargs: Any) -> str:
+    async def _arun(self, new_entry_content: str, new_entry_title: Optional[str] = None, new_entry_type: Optional[str] = "general", new_entry_category: Optional[str] = None, user_query: Optional[str] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
-            account_id: El ID universal de la cuenta del usuario.
             new_entry_content: El contenido de la nueva entrada a analizar.
             new_entry_title: El título de la nueva entrada (opcional).
             new_entry_type: El tipo de la nueva entrada (opcional, por defecto 'general').
@@ -101,7 +97,7 @@ class ProactiveKnowledgeLinkerTool(BaseTool):
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
-        logger.info(f"Ejecutando ProactiveKnowledgeLinkerTool para la cuenta '{account_id}'.")
+        logger.info(f"Ejecutando ProactiveKnowledgeLinkerTool para la cuenta '{self.account_id}'.")
         try:
             if user_query:
                 # Análisis bajo demanda basado en la consulta del usuario
@@ -110,23 +106,23 @@ class ProactiveKnowledgeLinkerTool(BaseTool):
                 params = analysis_request.get("parameters", {})
                 
                 if action == "run_full_analysis":
-                    asyncio.create_task(run_batch_analysis_job(account_id_filter=account_id))
+                    asyncio.create_task(run_batch_analysis_job(account_id_filter=self.account_id))
                     return "Análisis completo de conocimiento iniciado. Se generarán insights en segundo plano."
                 elif action == "analyze_recent_items":
                     days_ago = params.get("days_ago", 7)
                     since_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days_ago)
-                    asyncio.create_task(run_batch_analysis_job(account_id_filter=account_id, since_timestamp=since_date))
+                    asyncio.create_task(run_batch_analysis_job(account_id_filter=self.account_id, since_timestamp=since_date))
                     return f"Análisis de ítems recientes (últimos {days_ago} días) iniciado. Se generarán insights en segundo plano."
                 elif action == "analyze_specific_topic":
                     keywords = params.get("topic_keywords", [])
-                    asyncio.create_task(run_batch_analysis_job(account_id_filter=account_id, topic_keywords=keywords))
+                    asyncio.create_task(run_batch_analysis_job(account_id_filter=self.account_id, topic_keywords=keywords))
                     return f"Análisis sobre temas específicos ({', '.join(keywords)}) iniciado. Se generarán insights en segundo plano."
                 else:
                     return "No se reconoció una acción de análisis válida en tu solicitud."
             else:
                 # Análisis de nueva entrada
                 new_entry = {
-                    'account_id': account_id,
+                    'account_id': self.account_id, # Usamos self.account_id aquí
                     'content': new_entry_content,
                     'title': new_entry_title,
                     'type': new_entry_type,
@@ -135,10 +131,10 @@ class ProactiveKnowledgeLinkerTool(BaseTool):
                 }
                 # Programar el análisis como tarea en segundo plano para no bloquear
                 asyncio.create_task(proactive_knowledge_linker_trigger(new_entry))
-                logger.info(f"Análisis proactivo programado para la cuenta '{account_id}'.")
+                logger.info(f"Análisis proactivo programado para la cuenta '{self.account_id}'.")
                 return "Análisis proactivo de la nueva entrada iniciado para notas. Se generarán insights en segundo plano. Para documentos, el análisis se realiza una vez al día por la noche."
         except Exception as e:
-            logger.error(f"Error en ProactiveKnowledgeLinkerTool para la cuenta '{account_id}': {e}", exc_info=True)
+            logger.error(f"Error en ProactiveKnowledgeLinkerTool para la cuenta '{self.account_id}': {e}", exc_info=True)
             return f"Ocurrió un error inesperado al iniciar el análisis proactivo: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

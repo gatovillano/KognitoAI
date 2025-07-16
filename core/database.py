@@ -122,9 +122,10 @@ class Account(Base):
     # AÑADIDO: Relación con la nueva tabla de temas/colecciones de documentos definidos por el usuario
     user_document_topics = relationship("UserDocumentTopic", back_populates="account", cascade="all, delete-orphan")
 
-    # NUEVO: Relaciones con las tablas de análisis
+    # NUEVO: Relaciones con las tablas de análisis y tareas
     analysis_tasks = relationship("AnalysisTask", back_populates="account", cascade="all, delete-orphan")
     mindmap_tasks = relationship("MindmapTask", back_populates="account", cascade="all, delete-orphan")
+    upload_tasks = relationship("UploadTask", back_populates="account", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Account(id={self.id}, name='{self.name}')>"
@@ -495,6 +496,30 @@ class MindmapTask(Base):
     # Relación con Account
     account = relationship("Account", back_populates="mindmap_tasks")
 
+
+class UploadTask(Base):
+    """Guarda el estado y resultado de las tareas de subida de documentos."""
+    __tablename__ = "upload_tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+
+    file_names = Column(JSONB, nullable=False)  # Lista de nombres de archivos
+    topic = Column(String, nullable=False)  # Colección de destino
+    workspace_id = Column(String, nullable=True)  # ID del workspace si aplica
+    status = Column(String, default="pending", index=True, nullable=False)  # pending, processing, completed, failed
+    progress = Column(Integer, default=0)  # Progreso en porcentaje (0-100)
+
+    result_payload = Column(JSONB, nullable=True)  # Resultado de la subida
+    error_message = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
+    # Relación con Account
+    account = relationship("Account", back_populates="upload_tasks")
+
+
 class GitHubDocument(Base):
     """
     Representa un documento individual de un repositorio de GitHub almacenado como conocimiento.
@@ -549,22 +574,30 @@ async def create_tables():
             await conn.run_sync(Base.metadata.create_all)
             logger.info("Tablas de la base de datos verificadas/creadas.")
             
-            # Asegura que las columnas personalizadas existan en langchain_pg_embedding
-            await conn.execute(text("""
-                ALTER TABLE IF EXISTS langchain_pg_embedding 
-                ADD COLUMN IF NOT EXISTS account_id UUID,
-                ADD COLUMN IF NOT EXISTS content_type VARCHAR(50),
-                ADD COLUMN IF NOT EXISTS topic VARCHAR(255),
-                ADD COLUMN IF NOT EXISTS category VARCHAR(255),
-                ADD COLUMN IF NOT EXISTS workspace_id UUID,
-                ADD COLUMN IF NOT EXISTS team_id UUID,
-                ADD COLUMN IF NOT EXISTS visibility_teams UUID[];
-                
-                CREATE INDEX IF NOT EXISTS idx_langchain_pg_embedding_account_id ON langchain_pg_embedding(account_id);
-                CREATE INDEX IF NOT EXISTS idx_langchain_pg_embedding_workspace_id ON langchain_pg_embedding(workspace_id);
-                CREATE INDEX IF NOT EXISTS idx_langchain_pg_embedding_team_id ON langchain_pg_embedding(team_id);
-            """))
-            logger.info("Columnas personalizadas en langchain_pg_embedding verificadas/creadas.")
+            # Intentar agregar columnas personalizadas a langchain_pg_embedding si existe
+            try:
+                await conn.execute(text("""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'langchain_pg_embedding') THEN
+                            ALTER TABLE langchain_pg_embedding
+                            ADD COLUMN IF NOT EXISTS account_id UUID,
+                            ADD COLUMN IF NOT EXISTS content_type VARCHAR(50),
+                            ADD COLUMN IF NOT EXISTS topic VARCHAR(255),
+                            ADD COLUMN IF NOT EXISTS category VARCHAR(255),
+                            ADD COLUMN IF NOT EXISTS workspace_id UUID,
+                            ADD COLUMN IF NOT EXISTS team_id UUID,
+                            ADD COLUMN IF NOT EXISTS visibility_teams UUID[];
+
+                            CREATE INDEX IF NOT EXISTS idx_langchain_pg_embedding_account_id ON langchain_pg_embedding(account_id);
+                            CREATE INDEX IF NOT EXISTS idx_langchain_pg_embedding_workspace_id ON langchain_pg_embedding(workspace_id);
+                            CREATE INDEX IF NOT EXISTS idx_langchain_pg_embedding_team_id ON langchain_pg_embedding(team_id);
+                        END IF;
+                    END $$;
+                """))
+                logger.info("Columnas personalizadas en langchain_pg_embedding verificadas/creadas.")
+            except Exception as e:
+                logger.warning(f"No se pudieron agregar columnas personalizadas a langchain_pg_embedding (la tabla será creada por LangChain cuando sea necesaria): {e}")
     except Exception as e:
         logger.error(f"❌ ERROR CRÍTICO al crear tablas de la base de datos: {e}", exc_info=True)
         raise

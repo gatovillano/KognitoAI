@@ -274,11 +274,11 @@ export default function DashboardPage() {
                     <p className="font-semibold text-foreground">Ítems Relacionados:</p>
                     {(() => {
                       // Handle different possible structures of related_items
-                      let items = insight.related_items || [];
+                      let items: any = insight.related_items || [];
 
                       // If related_items is an object with an 'items' property, use that
-                      if (typeof items === 'object' && !Array.isArray(items) && items.items) {
-                        items = items.items;
+                      if (typeof items === 'object' && !Array.isArray(items) && (items as any).items) {
+                        items = (items as any).items;
                       }
 
                       // Ensure we have an array
@@ -286,7 +286,7 @@ export default function DashboardPage() {
                         items = [];
                       }
 
-                      return items.slice(0, 2).map((item, idx) => (
+                      return items.slice(0, 2).map((item: any, idx: number) => (
                         <p key={idx} className="flex items-center gap-2 text-muted-foreground truncate">
                           <FileText className="h-3 w-3 text-primary/60" />
                           <span className="truncate">{item.title || item.reference || 'Sin título'}</span>

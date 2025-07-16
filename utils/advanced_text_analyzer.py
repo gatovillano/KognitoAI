@@ -131,10 +131,19 @@ class AdvancedTextAnalyzer:
            - Contribuciones originales o innovadoras
            - Limitaciones o sesgos identificados
 
-        3. **Temas clave**: Hasta 12 temas importantes del texto. Para cada tema:
-           - Usa el nombre del documento como "document_title"
-           - Incluye citas textuales completas y relevantes como "quote"
+        3. **Temas clave**: Hasta 12 temas importantes del texto. ESTRUCTURA REQUERIDA para cada tema:
+           {{
+             "theme": "Nombre del tema específico",
+             "related_quotes": [
+               {{
+                 "document_title": "{document_title}",
+                 "quote": "Cita textual completa del documento (párrafo u oración completa)"
+               }}
+             ]
+           }}
+           - Cada tema debe tener al menos 1-2 citas relevantes del texto
            - Las citas deben ser párrafos u oraciones completas, no fragmentos cortados
+           - Usa nombres de temas específicos y descriptivos
 
         4. **Conceptos centrales**: Hasta 8 conceptos en formato 'CONCEPTO: DEFINICIÓN DETALLADA CON CONTEXTO Y EJEMPLOS'
 
@@ -148,7 +157,7 @@ class AdvancedTextAnalyzer:
 
         Para los temas clave y conceptos centrales, utiliza nombres precisos y relevantes al contexto del texto, priorizando términos específicos del dominio o categorías reconocibles por el usuario.
 
-        IMPORTANTE: Para los temas clave, usa "{document_title}" como document_title, y extrae citas textuales reales del contenido.
+        IMPORTANTE: Los temas clave deben seguir EXACTAMENTE la estructura JSON mostrada arriba, con "theme" y "related_quotes" como campos obligatorios.
 
         Texto a analizar:
         ---

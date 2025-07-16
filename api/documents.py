@@ -4,11 +4,12 @@ import logging
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, status, Form, File, UploadFile, Body
+from fastapi import APIRouter, HTTPException, Depends, status, Form, File, UploadFile, Body, BackgroundTasks
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
+import asyncio
 
-from core.database import SessionLocal, TeamMember, LangchainPgCollection
+from core.database import SessionLocal, TeamMember, LangchainPgCollection, UploadTask
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.document_parser import extract_text_and_metadata_from_document
@@ -21,7 +22,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_db() -> AsyncSession:
+from typing import AsyncGenerator
+# ...
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
     async with SessionLocal() as session:
         try:
@@ -29,38 +32,143 @@ async def get_db() -> AsyncSession:
         finally:
             await session.close()
 
+async def process_upload_task(task_id: str, account_id: str, file_data_list: List[dict], topic: str, workspace_id: Optional[str] = None):
+    """Función que procesa la subida de documentos en segundo plano."""
+    async with SessionLocal() as db_session:
+        try:
+            # 1. Marcar la tarea como 'processing'
+            stmt_processing = update(UploadTask).where(UploadTask.id == uuid.UUID(task_id)).values(
+                status="processing",
+                progress=0
+            )
+            await db_session.execute(stmt_processing)
+            await db_session.commit()
+
+            logger.info(f"Iniciando procesamiento de subida para tarea {task_id}...")
+
+            processed_files = 0
+            total_files = len(file_data_list)
+
+            for i, file_data in enumerate(file_data_list):
+                try:
+                    # Actualizar progreso
+                    progress = int((i / total_files) * 90)  # Hasta 90% durante el procesamiento
+                    stmt_progress = update(UploadTask).where(UploadTask.id == uuid.UUID(task_id)).values(
+                        progress=progress
+                    )
+                    await db_session.execute(stmt_progress)
+                    await db_session.commit()
+
+                    # Procesar el archivo
+                    file_name_str = file_data['filename'] if file_data['filename'] is not None else "unknown_file"
+                    extracted_text, metadata = extract_text_and_metadata_from_document(
+                        file_name_str,
+                        file_data['content']
+                    )
+
+                    if not extracted_text:
+                        logger.warning(f"No se pudo extraer texto del archivo '{file_data['filename']}'. Omitiendo.")
+                        continue
+
+                    await process_document_for_rag(
+                        account_id=account_id,
+                        file_name=file_name_str,
+                        extracted_text=extracted_text,
+                        topic=topic,
+                        metadata={"original_filename": file_name_str},
+                        workspace_id=workspace_id
+                    )
+                    processed_files += 1
+
+                except Exception as e:
+                    logger.error(f"Error al procesar archivo {file_data['filename']}: {e}", exc_info=True)
+
+            # 2. Marcar la tarea como completada
+            result_payload = {
+                "processed_files": processed_files,
+                "total_files": total_files,
+                "topic": topic,
+                "message": f"{processed_files}/{total_files} archivo(s) procesado(s) y añadido(s) a la colección '{topic}'."
+            }
+
+            stmt_completed = update(UploadTask).where(UploadTask.id == uuid.UUID(task_id)).values(
+                status="completed",
+                progress=100,
+                result_payload=result_payload
+            )
+            await db_session.execute(stmt_completed)
+            await db_session.commit()
+
+            logger.info(f"Tarea de subida {task_id} completada exitosamente.")
+
+        except Exception as e:
+            logger.error(f"Error en la tarea de subida {task_id}: {e}", exc_info=True)
+            # Marcar la tarea como fallida
+            stmt_failed = update(UploadTask).where(UploadTask.id == uuid.UUID(task_id)).values(
+                status="failed",
+                error_message=str(e)
+            )
+            await db_session.execute(stmt_failed)
+            await db_session.commit()
+
 @router.post("/upload-document")
 async def upload_document_endpoint(
+    background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
     files: List[UploadFile] = File(...),
     topic: str = Form(...),
-    workspace_id: Optional[str] = Form(None)  # Añadir parámetro para workspace_id
+    workspace_id: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db)
 ):
+    """Inicia una tarea de subida de documentos y devuelve un ID de tarea."""
     account_id_uuid = uuid.UUID(current_account_id)
-    processed_files = 0
+
+    # Leer y almacenar los datos de los archivos
+    file_data_list = []
+    file_names = []
+
     for file in files:
         try:
             content_bytes = await file.read()
-            extracted_text, metadata = extract_text_and_metadata_from_document(file.filename, content_bytes)
-            if not extracted_text:
-                logger.warning(f"No se pudo extraer texto del archivo '{file.filename}'. Omitiendo.")
-                continue
-
-            await process_document_for_rag(
-                account_id=str(account_id_uuid),
-                file_name=file.filename,
-                extracted_text=extracted_text,
-                topic=topic,
-                metadata={"original_filename": file.filename},
-                workspace_id=workspace_id  # Pasar workspace_id a la función
-            )
-            processed_files += 1
+            file_data_list.append({
+                'filename': file.filename,
+                'content': content_bytes
+            })
+            file_names.append(file.filename)
         except Exception as e:
-            logger.error(f"Fallo al procesar el archivo {file.filename} para la cuenta {account_id_uuid}: {e}", exc_info=True)
+            logger.error(f"Error al leer archivo {file.filename}: {e}", exc_info=True)
+            raise HTTPException(status_code=400, detail=f"Error al leer archivo {file.filename}")
 
-    if processed_files == 0 and files:
-        raise HTTPException(status_code=500, detail="No se pudo procesar ninguno de los archivos.")
-    return {"message": f"{processed_files}/{len(files)} archivo(s) procesado(s) y añadido(s) a tu base de conocimiento en la categoría '{topic}'."}
+    if not file_data_list:
+        raise HTTPException(status_code=400, detail="No se pudieron leer los archivos.")
+
+    # Crear la tarea de subida
+    new_task = UploadTask(
+        account_id=account_id_uuid,
+        file_names=file_names,
+        topic=topic,
+        workspace_id=workspace_id,
+        status="pending",
+        progress=0
+    )
+    db.add(new_task)
+    await db.commit()
+    await db.refresh(new_task)
+
+    # Iniciar la tarea en segundo plano
+    background_tasks.add_task(
+        process_upload_task,
+        str(new_task.id),
+        current_account_id,
+        file_data_list,
+        topic,
+        workspace_id
+    )
+
+    return {
+        "task_id": str(new_task.id),
+        "message": f"Subida de {len(files)} archivo(s) iniciada en segundo plano para la colección '{topic}'."
+    }
 
 @router.post("/upload-chat-file")
 async def upload_chat_file_endpoint(
@@ -77,7 +185,8 @@ async def upload_chat_file_endpoint(
     for file in files:
         try:
             content_bytes = await file.read()
-            extracted_text, metadata = extract_text_and_metadata_from_document(file.filename, content_bytes)
+            file_name_str = file.filename if file.filename is not None else "unknown_file"
+            extracted_text, metadata = extract_text_and_metadata_from_document(file_name_str, content_bytes)
             if not extracted_text:
                 logger.warning(f"No se pudo extraer texto del archivo '{file.filename}'. Omitiendo.")
                 continue
@@ -89,7 +198,7 @@ async def upload_chat_file_endpoint(
 
             await process_document_for_rag(
                 account_id=str(account_id_uuid),
-                file_name=file.filename,
+                file_name=file_name_str,
                 extracted_text=extracted_text,
                 topic=f"chat_{thread_id}",
                 metadata=metadata
@@ -213,7 +322,7 @@ async def extract_titles_endpoint(request: ExtractTitleRequest, current_account_
     
     logger.info(f"Extrayendo títulos para la cuenta: {current_account_id}, tema: {request.topic}, archivo: {request.file_name}")
     try:
-        tool = ExtractDocumentTitlesTool()
+        tool = ExtractDocumentTitlesTool(account_id=current_account_id)
         if request.file_name:
             # Ejecutar el proceso en segundo plano para un documento específico
             asyncio.create_task(tool._arun(account_id=current_account_id, topic=request.topic, file_name=request.file_name))
@@ -311,14 +420,9 @@ async def list_general_collections_endpoint(current_account_id: str = Depends(ge
     # Obtener solo colecciones del contexto general (sin workspace_id)
     collections = await list_user_collections(current_account_id, workspace_id=None)
 
-    # Filtrar para asegurar que solo devolvemos colecciones sin workspace_id
-    general_collections = []
-    for collection in collections:
-        # Verificar que la colección realmente no tenga workspace_id en la base de datos
-        if collection.get('document_count', 0) > 0:  # Solo colecciones con documentos
-            general_collections.append(collection)
-
-    return general_collections
+    # Devolver todas las colecciones del contexto general (incluidas las vacías)
+    # Las colecciones vacías también pueden ser útiles para asociar a workspaces
+    return collections
 
 class DeleteCollectionRequest(BaseModel):
     """Define la estructura para eliminar una colección específica."""
@@ -414,7 +518,7 @@ async def add_web_to_rag_endpoint(
     """
     try:
         # Crear instancia de la herramienta
-        tool = AddWebToRAGTool()
+        tool = AddWebToRAGTool(account_id=current_account_id)
 
         # Ejecutar la herramienta
         result = await tool._arun(
@@ -434,3 +538,124 @@ async def add_web_to_rag_endpoint(
     except Exception as e:
         logger.error(f"Error en add_web_to_rag_endpoint para la cuenta {current_account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error al procesar la URL: {str(e)}")
+
+@router.get("/upload-tasks")
+async def get_upload_tasks_endpoint(
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Obtiene todas las tareas de subida del usuario."""
+    try:
+        stmt = select(UploadTask).where(UploadTask.account_id == uuid.UUID(current_account_id)).order_by(UploadTask.created_at.desc())
+        result = await db.execute(stmt)
+        tasks = result.scalars().all()
+
+        return [
+            {
+                "id": str(task.id),
+                "status": task.status,
+                "file_names": task.file_names,
+                "topic": task.topic,
+                "workspace_id": task.workspace_id,
+                "progress": task.progress,
+                "error_message": task.error_message,
+                "created_at": task.created_at.isoformat(),
+                "updated_at": task.updated_at.isoformat() if task.updated_at else None
+            }
+            for task in tasks
+        ]
+    except Exception as e:
+        logger.error(f"Error al obtener tareas de subida para la cuenta {current_account_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error al obtener las tareas de subida.")
+
+@router.get("/upload-task/{task_id}")
+async def get_upload_task_endpoint(
+    task_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Obtiene el estado de una tarea de subida específica."""
+    try:
+        task = await db.get(UploadTask, uuid.UUID(task_id))
+        if not task or str(task.account_id) != current_account_id:
+            raise HTTPException(status_code=404, detail="Tarea no encontrada.")
+
+        return {
+            "id": str(task.id),
+            "status": task.status,
+            "file_names": task.file_names,
+            "topic": task.topic,
+            "workspace_id": task.workspace_id,
+            "progress": task.progress,
+            "result": task.result_payload,
+            "error_message": task.error_message,
+            "created_at": task.created_at.isoformat(),
+            "updated_at": task.updated_at.isoformat() if task.updated_at else None
+        }
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de tarea inválido.")
+    except Exception as e:
+        logger.error(f"Error al obtener tarea de subida {task_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error al obtener la tarea de subida.")
+
+@router.post("/process-knowledge-graph")
+async def process_knowledge_graph_endpoint(
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    topic: Optional[str] = None
+):
+    """Procesa todos los documentos del usuario para crear grafos de conocimiento con Cognee."""
+    try:
+        from tools.cognee_knowledge_graph_tool import CogneeKnowledgeGraphTool
+        from core.memory_manager import list_user_documents
+
+        # Obtener documentos del usuario
+        if topic:
+            documents = await list_user_documents(current_account_id, topic=topic)
+        else:
+            documents = await list_user_documents(current_account_id)
+
+        if not documents:
+            return {"message": "No se encontraron documentos para procesar."}
+
+        # Preparar documentos para Cognee
+        cognee_documents = []
+        for doc in documents:
+            cognee_documents.append({
+                "content": doc.get("content", ""),
+                "title": doc.get("file_name", "Documento sin título"),
+                "metadata": {
+                    "file_name": doc.get("file_name"),
+                    "topic": doc.get("topic"),
+                    "account_id": current_account_id
+                }
+            })
+
+        # Ejecutar procesamiento en segundo plano
+        async def process_in_background():
+            try:
+                tool = CogneeKnowledgeGraphTool(account_id=current_account_id)
+                import json
+                tool_input = {
+                    "action": "process_documents",
+                    "documents": cognee_documents,
+                    "dataset_name": f"kognito_{current_account_id}"
+                }
+                result = await tool._arun(
+                    tool_input_json=json.dumps(tool_input)
+                )
+                logger.info(f"Procesamiento de grafo completado para {current_account_id}: {result}")
+            except Exception as e:
+                logger.error(f"Error en procesamiento de grafo para {current_account_id}: {e}", exc_info=True)
+
+        background_tasks.add_task(process_in_background)
+
+        return {
+            "message": f"Procesamiento de grafo de conocimiento iniciado para {len(cognee_documents)} documentos.",
+            "documents_count": len(cognee_documents),
+            "topic": topic or "todos"
+        }
+
+    except Exception as e:
+        logger.error(f"Error al iniciar procesamiento de grafo: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error al iniciar el procesamiento del grafo de conocimiento.")
