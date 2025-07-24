@@ -161,7 +161,7 @@ async def list_collections(current_account_id: str = Depends(get_current_account
  
 @router.post("/collections", status_code=status.HTTP_201_CREATED, summary="Crear una nueva colección")
 async def create_collection(request: CollectionCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
-    
+    logger.info(f"Petición para crear colección: {request.topic}, workspace: {workspace_id}, account: {current_account_id}")
     return {"message": f"Colección '{request.topic}' lista para ser usada."}
  
 @router.post("/collections/{collection_id}/associate", status_code=status.HTTP_200_OK, summary="Asociar una colección existente a un workspace")

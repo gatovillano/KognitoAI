@@ -35,9 +35,11 @@ export function WorkspaceDialog({ isOpen, onClose, onSuccess, workspace }: Works
       if (workspace) {
         await apiClient.put(`/api/workspaces/${workspace.id}`, { name, system_prompt: systemPrompt || null });
       } else {
-        await apiClient.post('/api/workspaces', { name, system_prompt: systemPrompt || null });
+        const response = await apiClient.post('/api/workspaces', { name, system_prompt: systemPrompt || null });
+        console.log('Workspace creation API response:', response.data);
       }
       onSuccess();
+      console.log('onSuccess called after workspace submission.');
       onClose();
     } catch (error) {
       console.error('Error saving workspace:', error);

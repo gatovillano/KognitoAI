@@ -200,10 +200,12 @@ export default function WorkspaceDashboard() {
   };
 
   const handleCreateCollectionSuccess = (newTopic: string) => {
+    console.log(`handleCreateCollectionSuccess called for new topic: ${newTopic}`);
     // Actualizar la lista de colecciones después de crear una nueva
     const fetchCollections = async () => {
       try {
         const collectionsResponse = await apiClient.get(`/api/workspaces/${workspaceId}/collections`);
+        console.log('Fetched collections after creation:', collectionsResponse.data);
         setCollections(collectionsResponse.data);
       } catch (error) {
         console.error('Error fetching collections:', error);

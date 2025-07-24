@@ -27,6 +27,7 @@ export default function WorkspacesPage() {
   const fetchWorkspaces = async () => {
     try {
       const response = await apiClient.get<Workspace[]>('/api/workspaces');
+      console.log('Fetched workspaces:', response.data);
       setWorkspaces(response.data);
     } catch (error) {
       console.error('Error fetching workspaces:', error);
@@ -45,6 +46,7 @@ export default function WorkspacesPage() {
   const handleDelete = async (workspaceId: string) => {
     try {
       await apiClient.delete(`/api/workspaces/${workspaceId}`);
+      console.log(`Workspace with ID ${workspaceId} deleted.`);
       fetchWorkspaces();
     } catch (error) {
       console.error('Error deleting workspace:', error);
