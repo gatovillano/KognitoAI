@@ -28,6 +28,7 @@ import asyncio
 from typing import Optional, List, Any, cast
 import uuid
 import os
+import json # Importar el módulo json
 
 # --- Langchain Core ---
 from langchain.agents import AgentExecutor
@@ -37,9 +38,10 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain.agents.output_parsers.tools import ToolsAgentOutputParser
 from langchain.agents.format_scratchpad.tools import format_to_tool_messages
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.agents import AgentAction, AgentFinish # Importar AgentAction y AgentFinish
 from sqlalchemy import update
 
 # --- Módulos del Proyecto ---
@@ -199,31 +201,27 @@ async def force_update_thread_title(thread_id: str):
         except Exception as e:
             logger.error(f"Error al forzar la actualización del título del hilo {thread_id}: {e}")
 
-async def force_update_all_thread_titles():
+async def force_update_all_thread_titles(account_id: str):
     """
-    Fuerza la actualización de títulos de todos los hilos de chat existentes usando el LLM de tareas rápidas.
-    Si el hilo tiene más de 5 mensajes y el título es 'Nuevo Chat', o si tiene más de 20 y el título es distinto, se actualiza.
+    Fuerza la actualización de títulos de todos los hilos de chat para una cuenta específica.
     """
-    from core.database import SessionLocal, ChatThread
-    logger.info("Forzando actualización de títulos de todos los hilos...")
+    logger.info(f"Forzando actualización de títulos de todos los hilos para la cuenta {account_id}...")
     async with DBSession(SessionLocal) as db:
-        threads = (await db.execute(select(ChatThread))).scalars().all()
-        for thread in threads:
-            session_id = str(thread.id)
-            db_url = settings.database_url or os.getenv("DATABASE_URL")
-            if not db_url:
-                logger.error("DATABASE_URL no está configurada para el historial de chat.")
-                continue
-            db_sync_url = db_url.replace("+psycopg", "")
-            from langchain_community.chat_message_histories import PostgresChatMessageHistory
-            chat_message_history = PostgresChatMessageHistory(
-                connection_string=db_sync_url,
-                session_id=session_id,
-                table_name="langchain_chat_history",
-            )
-            messages = await chat_message_history.aget_messages()
-            await update_thread_title_if_needed(str(thread.id), messages)
-    logger.info("Actualización de títulos completada.")
+        # Seleccionar solo los hilos de la cuenta especificada
+        threads = (await db.execute(
+            select(ChatThread).where(ChatThread.account_id == uuid.UUID(account_id))
+        )).scalars().all()
+
+        if not threads:
+            logger.info(f"No se encontraron hilos para la cuenta {account_id}.")
+            return
+
+        # Crear tareas para actualizar títulos en paralelo
+        tasks = [force_update_thread_title(str(thread.id)) for thread in threads]
+        # Usar asyncio.gather para ejecutar las tareas concurrentemente
+        await asyncio.gather(*tasks)
+
+    logger.info(f"Actualización de títulos completada para la cuenta {account_id}.")
 
 # ==============================================================================
 # SECCIÓN 3: EJECUCIÓN PRINCIPAL DEL AGENTE
@@ -513,9 +511,9 @@ async def create_and_run_agent(
     )
 
     agent_executor = AgentExecutor(
-        agent=agent_chain, 
-        tools=tools, 
-        verbose=True, 
+        agent=agent_chain,
+        tools=tools,
+        verbose=True,
         handle_parsing_errors=True
     )
 

@@ -29,8 +29,9 @@ def setup_llm_detailed_logging(log_level: str = "INFO", log_file: Optional[str] 
     loggers_config = {
         "LLMCallback": logging.INFO,  # Nuestro callback personalizado
         "core.agent": logging.INFO,   # Logs del agente
-        "langchain.agents.agent": logging.WARNING,  # Solo errores de LangChain
-        "langchain_google_genai": logging.WARNING,  # Solo errores del modelo
+        "langchain.agents.agent": logging.DEBUG,  # Cambiado a DEBUG para depuración
+        "langchain_google_genai": logging.DEBUG,  # Cambiado a DEBUG para depuración
+        "tools.github_repo_tool": logging.DEBUG, # Añadido para ver logs de la herramienta
     }
 
     for logger_name, level in loggers_config.items():
@@ -114,10 +115,10 @@ def enable_verbose_langchain_logging() -> None:
     
     for logger_name in verbose_loggers:
         logger = logging.getLogger(logger_name)
-        logger.setLevel(logging.DEBUG)
+        logger.setLevel(logging.INFO)
         
         # Asegurar que los mensajes se propaguen
-        logger.propagate = True
+        logger.propagate = False
     
     logging.getLogger(__name__).info("🔍 Logging verbose de LangChain habilitado")
 

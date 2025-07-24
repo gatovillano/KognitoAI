@@ -23,7 +23,7 @@ from utils.security import decode_access_token
 from utils.embeddings import initialize_embeddings
 from utils.ascii_logo import print_startup_logo
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Configurar logging detallado para LangChain y componentes del LLM
@@ -31,7 +31,7 @@ from utils.llm_logging_config import setup_llm_detailed_logging, create_llm_log_
 
 # Configurar logging detallado del LLM
 setup_llm_detailed_logging(
-    log_level="DEBUG",
+    log_level="INFO",
     log_file=create_llm_log_filename()
 )
 

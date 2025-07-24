@@ -214,9 +214,6 @@ USER_DOCUMENTS_PREFIX = "user_documents_"
 
 PGVECTOR_SYNC_ENGINE = create_engine(settings.database_url or "postgresql://postgres:postgres@localhost:5432/postgres")
 
-metadata = MetaData()
-langchain_pg_collection = Table('langchain_pg_collection', metadata, autoload_with=PGVECTOR_SYNC_ENGINE)
-langchain_pg_embedding = Table('langchain_pg_embedding', metadata, autoload_with=PGVECTOR_SYNC_ENGINE)
 
 
 async def create_memory_context(
@@ -1471,7 +1468,9 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
                         "description": None
                     }
             
-            return list(collections_map.values())
+            final_collections = list(collections_map.values())
+            logger.info(f"✅ Colecciones finales para la cuenta {account_id}, workspace {workspace_id}: {final_collections}")
+            return final_collections
             
         except Exception as e:
             logger.error(f"❌ Error listando colecciones (temas) de documentos para la cuenta {account_id}: {e}", exc_info=True)

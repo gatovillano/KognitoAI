@@ -26,8 +26,8 @@ import { ShareDocumentDialog } from '@/app/(dashboard)/rag/share-document-dialog
 
 export default function WorkspaceCollectionDetailPage() {
   const params = useParams();
-  const workspaceId = params.id as string;
-  const collectionId = params.collectionId as string;
+  const workspaceId = (params?.id as string) || '';
+  const collectionId = (params?.collectionId as string) || '';
   const [collectionName, setCollectionName] = useState('');
 
   const [documents, setDocuments] = useState<Document[]>([]);

@@ -1,8 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    allowedDevOrigins: ['kognito.gatoslibres.art'],
-  },
+  // Eliminado allowedDevOrigins de experimental ya que no es una opción válida en Next.js 15.4.1
+  experimental: {},
 };
 
 export default nextConfig;

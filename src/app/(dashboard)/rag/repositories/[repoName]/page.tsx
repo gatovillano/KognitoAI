@@ -26,7 +26,7 @@ interface GitHubDocument extends Document {
 export default function RepositoryDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const repoName = params.repoName as string;
+  const repoName = (params?.repoName as string) || '';
   const [documents, setDocuments] = useState<GitHubDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [repoUrl, setRepoUrl] = useState<string>('');

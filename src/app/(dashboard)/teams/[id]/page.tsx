@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 export default function TeamDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const teamId = params.id as string;
+  const teamId = (params?.id as string) || '';
   const [team, setTeam] = useState<any>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [documents, setDocuments] = useState<any[]>([]);

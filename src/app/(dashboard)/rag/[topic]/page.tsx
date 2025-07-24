@@ -29,7 +29,7 @@ import { ShareDocumentDialog } from '../share-document-dialog';
 
 export default function CollectionDetailPage() {
   const params = useParams();
-  const topic = decodeURIComponent(params.topic as string);
+  const topic = decodeURIComponent((params?.topic as string) || '');
 
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);

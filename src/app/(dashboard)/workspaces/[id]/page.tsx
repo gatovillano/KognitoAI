@@ -38,7 +38,7 @@ interface Workspace {
 export default function WorkspaceDashboard() {
   const router = useRouter();
   const params = useParams();
-  const workspaceId = params.id as string;
+  const workspaceId = (params?.id as string) || '';
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [chats, setChats] = useState<ChatThread[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
