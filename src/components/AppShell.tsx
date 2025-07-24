@@ -29,14 +29,14 @@ export function AppShell({ children }: AppShellProps) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const pathname = usePathname();
   const router = useRouter();
-  const isChatContext = pathname.includes('/chat/');
+  const isChatContext = pathname?.includes('/chat/');
   
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   
   // Detectar si estamos en un chat de workspace
-  const workspaceMatch = pathname.match(/\/workspaces\/([a-f0-9-]+)\/chat\/([a-f0-9-]+)/);
+  const workspaceMatch = pathname?.match(/\/workspaces\/([a-f0-9-]+)\/chat\/([a-f0-9-]+)/);
   const isWorkspaceChat = !!workspaceMatch;
   const workspaceId = workspaceMatch?.[1];
 

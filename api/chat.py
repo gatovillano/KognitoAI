@@ -411,8 +411,8 @@ DEBES seguir EXACTAMENTE este formato (es OBLIGATORIO):
 
 Question: la pregunta que debes responder
 Thought: piensa paso a paso qué necesitas hacer
-Action: la acción a tomar, debe ser una de [{tool_names}]
-Action Input: la entrada para la acción
+Action: la acción a tomar, debe ser una de [{tool_names}] No siempre necesitas una herramienta, evalúa con criterio
+Action Input: la entrada para la acción (si aplica)
 Observation: el resultado de la acción
 ... (este ciclo Thought/Action/Action Input/Observation puede repetirse N veces)
 Thought: ahora conozco la respuesta final
@@ -446,6 +446,9 @@ Action Input: inteligencia artificial
 Observation: [resultado de la búsqueda]
 Thought: Ahora tengo información suficiente para responder al usuario.
 Final Answer: [respuesta basada en la información encontrada]
+
+DEBES EVALUAR MUY BIEN SI ES NECESARIO EL USO DE HERRAMIETNAS O NO. NO SIEMPRE SE REQUIERE BUSCAR INFORMACIÓN PORQUE MUCHAS VECES BASTA CON CONTINUAR LA CONVERSACIÓN O UTILIZAR TU PROPIA INFORACIÓN
+EVITA USAR HERRAMIENTAS EN TODOS LOS TURNOS. SI PUEDES RESOLVERLO CON RESPUESTAS DE CALIDAD SIN USARLAS, HAZLO. 
 
 Begin!
 
@@ -698,3 +701,20 @@ async def generate_thread_title(thread_id: str, current_account_id: str = Depend
     except Exception as e:
         logger.error(f"Error al generar título para el hilo {thread_id} para la cuenta {current_account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Ocurrió un error al generar el título del hilo de chat.")
+
+@router.post("/threads/generate-all-titles", summary="Generar títulos para todos los hilos de chat")
+async def generate_all_thread_titles(
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id)
+):
+    """
+    Inicia una tarea en segundo plano para generar títulos para todos los hilos de chat del usuario.
+    """
+    try:
+        from core.agent import force_update_all_thread_titles
+        logger.info(f"Iniciando tarea en segundo plano para generar todos los títulos para la cuenta {current_account_id}")
+        background_tasks.add_task(force_update_all_thread_titles, current_account_id)
+        return {"message": "El proceso de nombrar todas las conversaciones ha comenzado en segundo plano."}
+    except Exception as e:
+        logger.error(f"Error al iniciar la generación de todos los títulos para la cuenta {current_account_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ocurrió un error al iniciar el proceso.")

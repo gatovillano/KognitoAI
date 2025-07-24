@@ -15,6 +15,7 @@ import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { InlineMarkdownRenderer } from './InlineMarkdownRenderer';
+import { toast } from 'sonner';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 
@@ -46,7 +47,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
 
   useEffect(() => {
     const updateActiveWorkspace = async () => {
-      const threadIdMatch = pathname.match(/\/chat\/([a-f0-9-]+)/);
+      const threadIdMatch = pathname?.match(/\/chat\/([a-f0-9-]+)/);
       if (threadIdMatch) {
         try {
           const response = await apiClient.get<ChatThread>(`/api/threads/${threadIdMatch[1]}`);
@@ -56,7 +57,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           setActiveWorkspaceId(null);
         }
       } else {
-        const workspaceIdMatch = pathname.match(/\/workspaces\/([a-f0-9-]+)(?:\/chat\/[a-f0-9-]+)?/);
+        const workspaceIdMatch = pathname?.match(/\/workspaces\/([a-f0-9-]+)(?:\/chat\/[a-f0-9-]+)?/);
         if (workspaceIdMatch) {
           setActiveWorkspaceId(workspaceIdMatch[1]);
         } else {
@@ -125,6 +126,19 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
       }
     } catch (error) {
       console.error('Error creating new chat:', error);
+    }
+  };
+
+  const handleRenameAllThreads = async () => {
+    toast.info("Iniciando el proceso para nombrar todas las conversaciones. Esto puede tardar unos minutos...");
+    try {
+      const response = await apiClient.post('/api/threads/generate-all-titles');
+      toast.success(response.data.message || "Proceso iniciado correctamente. Los títulos se actualizarán en breve.");
+      // Opcionalmente, se podría implementar un mecanismo de sondeo o usar WebSockets
+      // para refrescar la lista de hilos automáticamente cuando el proceso termine.
+    } catch (error) {
+      console.error('Error starting the process to rename all threads:', error);
+      toast.error("Hubo un error al iniciar el proceso. Por favor, inténtalo de nuevo.");
     }
   };
 
@@ -315,11 +329,11 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
         <nav className="space-y-2 w-full">
           <Link href="/dashboard" passHref onClick={onLinkClick} title="Escritorio">
             <Button
-              variant={pathname.startsWith('/dashboard') ? 'secondary' : 'ghost'}
+              variant={pathname?.startsWith('/dashboard') ? 'secondary' : 'ghost'}
               className={cn(
                 "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
                 isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
-                pathname.startsWith('/dashboard') && "bg-primary/10 text-primary border border-primary/20"
+                pathname?.startsWith('/dashboard') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
               <Bot className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
@@ -328,11 +342,11 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           </Link>
           <Link href="/rag" passHref onClick={onLinkClick} title="Gestión de Conocimientos">
             <Button
-              variant={pathname.startsWith('/rag') ? 'secondary' : 'ghost'}
+              variant={pathname?.startsWith('/rag') ? 'secondary' : 'ghost'}
               className={cn(
                 "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
                 isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
-                pathname.startsWith('/rag') && "bg-primary/10 text-primary border border-primary/20"
+                pathname?.startsWith('/rag') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
               <BookMarked className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
@@ -341,11 +355,11 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           </Link>
           <Link href="/agenda" passHref onClick={onLinkClick} title="Agenda">
             <Button
-              variant={pathname.startsWith('/agenda') ? 'secondary' : 'ghost'}
+              variant={pathname?.startsWith('/agenda') ? 'secondary' : 'ghost'}
               className={cn(
                 "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
                 isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
-                pathname.startsWith('/agenda') && "bg-primary/10 text-primary border border-primary/20"
+                pathname?.startsWith('/agenda') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
               <Calendar className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
@@ -354,11 +368,11 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           </Link>
           <Link href="/notes" passHref onClick={onLinkClick} title="Notas">
             <Button
-              variant={pathname.startsWith('/notes') ? 'secondary' : 'ghost'}
+              variant={pathname?.startsWith('/notes') ? 'secondary' : 'ghost'}
               className={cn(
                 "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
                 isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
-                pathname.startsWith('/notes') && "bg-primary/10 text-primary border border-primary/20"
+                pathname?.startsWith('/notes') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
               <Notebook className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
@@ -367,11 +381,11 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           </Link>
           <Link href="/analysis" passHref onClick={onLinkClick} title="Análisis">
             <Button
-              variant={pathname.startsWith('/analysis') ? 'secondary' : 'ghost'}
+              variant={pathname?.startsWith('/analysis') ? 'secondary' : 'ghost'}
               className={cn(
                 "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
                 isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
-                pathname.startsWith('/analysis') && "bg-primary/10 text-primary border border-primary/20"
+                pathname?.startsWith('/analysis') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
               <BarChart3 className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
@@ -380,11 +394,11 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           </Link>
           <Link href="/teams" passHref onClick={onLinkClick} title="Equipos">
             <Button
-              variant={pathname.startsWith('/teams') ? 'secondary' : 'ghost'}
+              variant={pathname?.startsWith('/teams') ? 'secondary' : 'ghost'}
               className={cn(
                 "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
                 isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
-                pathname.startsWith('/teams') && "bg-primary/10 text-primary border border-primary/20"
+                pathname?.startsWith('/teams') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
               <Users className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
@@ -393,11 +407,11 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           </Link>
           <Link href="/workspaces" passHref onClick={onLinkClick} title="Workspaces">
             <Button
-              variant={pathname.startsWith('/workspaces') ? 'secondary' : 'ghost'}
+              variant={pathname?.startsWith('/workspaces') ? 'secondary' : 'ghost'}
               className={cn(
                 "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
                 isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
-                pathname.startsWith('/workspaces') && "bg-primary/10 text-primary border border-primary/20"
+                pathname?.startsWith('/workspaces') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
               <Bot className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
@@ -406,11 +420,11 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           </Link>
           <Link href="/chat" passHref onClick={onLinkClick} title="Chat">
             <Button
-              variant={pathname.startsWith('/chat') ? 'secondary' : 'ghost'}
+              variant={pathname?.startsWith('/chat') ? 'secondary' : 'ghost'}
               className={cn(
                 "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
                 isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
-                pathname.startsWith('/chat') && "bg-primary/10 text-primary border border-primary/20"
+                pathname?.startsWith('/chat') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
               <MessageSquare className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
@@ -420,9 +434,24 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
         </nav>
         {!isCollapsed && (
           <div className="mt-8 mb-6">
-            <div className="flex items-center gap-2 mb-4 px-2">
-              <div className="w-1 h-1 rounded-full bg-primary"></div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Conversaciones</p>
+            <div className="flex items-center justify-between gap-2 mb-4 px-2">
+              <div className="flex items-center gap-2">
+                <div className="w-1 h-1 rounded-full bg-primary"></div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Conversaciones</p>
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 p-0 rounded-full hover:bg-muted">
+                    <MoreVertical className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleRenameAllThreads}>
+                    <Sparkles className="mr-2 h-4 w-4 text-yellow-500" />
+                    <span>Nombrar todos</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
             <div className="px-2 space-y-3">
               <input

@@ -21,8 +21,8 @@ export default function EditNotePage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const noteId = params.id as string;
-  const fromTeam = searchParams.get('fromTeam');
+  const noteId = (params?.id as string) || '';
+  const fromTeam = searchParams?.get('fromTeam');
 
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('');

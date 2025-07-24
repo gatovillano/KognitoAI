@@ -734,20 +734,19 @@ export function CommonChat({ threadId }: CommonChatProps) {
             <AnimatePresence initial={false}>
               {filteredMessages.slice(-50).map((msg, index) => {
                 const messageIndex = filteredMessages.length - 50 + index;
-                const isNewMessage = index >= filteredMessages.slice(-50).length - 2;
+                const isLastMessage = index === filteredMessages.slice(-50).length - 1;
                 
                 return (
                   <motion.div
                     key={`${msg.created_at}-${messageIndex}`}
-                    initial={isNewMessage ? { opacity: 0, y: 50, scale: 0.95 } : false}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -10, scale: 0.98 }}
+                    initial={isLastMessage ? { opacity: 0, y: 20 } : false}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
                     transition={{
                       duration: 0.5,
                       ease: "easeOut",
-                      delay: index * 0.05
                     }}
-                    layout="position"
+                    // layout="position" // Eliminado para evitar que los mensajes antiguos se animen al añadir uno nuevo.
                   >
                     <ChatMessage
                       msg={{

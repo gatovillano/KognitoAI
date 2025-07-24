@@ -139,7 +139,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, de
                     <Input 
                       type="file" 
                       multiple 
-                      accept=".pdf,.docx,.txt,.md"
+                      accept=".pdf,.docx,.txt,.md,.html"
                       onChange={(e) => field.onChange(e.target.files)}
                     />
                   </FormControl>

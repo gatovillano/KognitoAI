@@ -15,8 +15,8 @@ interface Workspace {
 export default function WorkspaceChatPage() {
   const params = useParams();
   const router = useRouter();
-  const workspaceId = params.id as string;
-  const chatId = params.chat_id as string;
+  const workspaceId = (params?.id as string) || '';
+  const chatId = (params?.chat_id as string) || '';
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [loading, setLoading] = useState(true);
 
