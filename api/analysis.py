@@ -379,7 +379,7 @@ class AnalyzeCollectionRequest(BaseModel):
     topic: str
     workspace_id: Optional[str] = None
 
-async def run_collection_analysis_and_save(task_id: str, account_id: str, topic: str):
+async def run_collection_analysis_and_save(task_id: str, account_id: str, topic: str, workspace_id: Optional[str] = None):
     """
     Obtiene todos los documentos de una colección, los analiza y guarda el resultado.
     """
@@ -394,16 +394,17 @@ async def run_collection_analysis_and_save(task_id: str, account_id: str, topic:
             # 1. Obtener todos los documentos de la colección
             all_docs_in_topic = []
             # (Aquí usamos la función combinada que incluye documentos de GitHub)
-            doc_list = await list_all_user_documents(account_id)
-            filtered_doc_list = [doc for doc in doc_list if doc.get('topic') == topic]
+            doc_list = await list_all_user_documents(account_id, topic=topic)
             
-            for doc_meta in filtered_doc_list:
-                content = await get_full_document_content(account_id, doc_meta['file_name'])
-                if content:
-                    all_docs_in_topic.append({
-                        "title": doc_meta.get('title', doc_meta['file_name']),
-                        "content": content
-                    })
+            for doc_meta in doc_list:
+                # Asegurarse de que el documento pertenece al topic y workspace_id si se especifica
+                if doc_meta.get('topic') == topic and (workspace_id is None or doc_meta.get('workspace_id') == workspace_id):
+                    content = await get_full_document_content(account_id, doc_meta['file_name'], workspace_id=workspace_id)
+                    if content:
+                        all_docs_in_topic.append({
+                            "title": doc_meta.get('title', doc_meta['file_name']),
+                            "content": content
+                        })
 
             if not all_docs_in_topic:
                 raise ValueError(f"No se encontraron documentos con contenido en la colección '{topic}'.")
@@ -457,7 +458,7 @@ async def start_collection_analysis_endpoint(
     await db.commit()
     await db.refresh(new_task)
     
-    background_tasks.add_task(run_collection_analysis_and_save, str(new_task.id), current_account_id, req.topic)
+    background_tasks.add_task(run_collection_analysis_and_save, str(new_task.id), current_account_id, req.topic, req.workspace_id)
     
     return {"task_id": str(new_task.id)}
 

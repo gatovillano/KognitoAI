@@ -21,6 +21,7 @@ import logging
 import asyncio
 import uuid
 import json
+import urllib.parse # Importar urllib.parse
 from sqlalchemy import select, text, create_engine, delete, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List, Union, Dict, Any
@@ -619,7 +620,7 @@ async def search_vector_db_optimized(
 
         if topic:
             sql_query += " AND topic = :topic"
-            query_params["topic"] = topic
+            query_params["topic"] = urllib.parse.unquote(topic) # Decodificar el topic para la consulta
             logger.info(f"🏷️ Filtro topic: {topic}")
 
         if category:
@@ -814,7 +815,10 @@ async def process_document_for_rag(
         if workspace_id:
             # Para colecciones de workspace, el nombre de la colección en PGVector será una combinación de workspace_id y topic
             # Esto asegura unicidad para colecciones con el mismo nombre en diferentes workspaces.
-            langchain_collection_name = f"workspace_documents_{workspace_id}_{topic}"
+            # Asegurarse de que el topic esté decodificado antes de usarlo en el nombre de la colección.
+            # Aunque el frontend ya decodifica, una doble verificación no hace daño.
+            decoded_topic = urllib.parse.unquote(topic)
+            langchain_collection_name = f"workspace_documents_{workspace_id}_{decoded_topic}"
             scope = "workspace"
         elif is_global:
             langchain_collection_name = GLOBAL_COLLECTION_NAME
@@ -992,7 +996,7 @@ async def delete_document_chunks(
 
             if topic:
                 clauses.append("topic = :topic")
-                params["topic"] = topic
+                params["topic"] = urllib.parse.unquote(topic)
 
             if team_id:
                 clauses.append("team_id = :team_id")
@@ -1205,7 +1209,7 @@ async def list_user_documents_all_teams(
 
             if topic:
                 clauses.append("topic = :topic")
-                params["topic"] = topic
+                params["topic"] = urllib.parse.unquote(topic) # Decodificar el topic para la consulta
 
             # Consulta optimizada para obtener documentos únicos por document_id
             # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
@@ -1313,7 +1317,8 @@ async def update_document_metadata(
             if new_title is not None:
                 values_to_update['title'] = new_title
             if new_topic is not None:
-                values_to_update['topic'] = new_topic
+                decoded_new_topic = urllib.parse.unquote(new_topic)
+                values_to_update['topic'] = decoded_new_topic
             if workspace_id:
                 values_to_update['workspace_id'] = str(workspace_id)
 
@@ -1328,8 +1333,8 @@ async def update_document_metadata(
 
             update_params = params.copy()
             update_params.update({
-                "new_cmetadata": json.dumps(values_to_update),  # Serializar a JSON string para PostgreSQL
-                "topic_column": new_topic if new_topic is not None else current_cmetadata.get('topic')
+                "new_cmetadata": json.dumps(values_to_update),
+                "topic_column": decoded_new_topic if new_topic is not None else current_cmetadata.get('topic')
             })
 
             logger.info(f"🔧 Query SQL optimizada: {update_sql}")
@@ -1462,7 +1467,7 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
             
             # 3. Actualizar conteos y agregar colecciones que solo existen en embeddings
             for collection in embedding_collections:
-                topic_name = collection["topic"]
+                topic_name = urllib.parse.unquote(collection["topic"]) # Decodificar el topic
                 if topic_name in collections_map:
                     # Actualizar el conteo para colecciones definidas por el usuario
                     collections_map[topic_name]["document_count"] = collection["document_count"]
@@ -1535,7 +1540,7 @@ async def create_empty_collection(
                 account_id=uuid.UUID(account_id),
                 workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
                 team_id=uuid.UUID(team_id) if team_id else None,
-                name=topic_name,
+                name=urllib.parse.unquote(topic_name),
                 description=description
             )
             
@@ -1599,12 +1604,12 @@ async def update_collection_metadata(
 
             # Actualizar los campos en UserDocumentTopic
             if new_topic_name is not None:
-                collection.name = new_topic_name
+                collection.name = urllib.parse.unquote(new_topic_name)
             if new_description is not None:
                 collection.description = new_description
 
             # 2. Si se cambió el nombre, actualizar también en langchain_pg_embedding
-            if new_topic_name is not None and new_topic_name != old_topic_name:
+            if new_topic_name is not None and urllib.parse.unquote(new_topic_name) != old_topic_name:
                 # Construir filtros para langchain_pg_embedding
                 clauses = [
                     "account_id = :account_id",
@@ -1637,21 +1642,21 @@ async def update_collection_metadata(
                 if current_cmetadata:
                     # Actualizar metadatos preservando otros campos
                     values_to_update = current_cmetadata.copy()
-                    values_to_update['topic'] = new_topic_name
+                    values_to_update['topic'] = urllib.parse.unquote(new_topic_name)
 
                     # Actualizar tanto cmetadata como la columna topic
                     update_sql = text(f"""
                         UPDATE langchain_pg_embedding
                         SET
                             cmetadata = :new_cmetadata,
-                            topic = :new_topic_name
+                            topic = :new_topic_name_decoded
                         WHERE {" AND ".join(clauses)}
                     """)
 
                     update_params = params.copy()
                     update_params.update({
                         "new_cmetadata": json.dumps(values_to_update),
-                        "new_topic_name": new_topic_name
+                        "new_topic_name_decoded": urllib.parse.unquote(new_topic_name)
                     })
 
                     result = await db.execute(update_sql, update_params)
@@ -1802,6 +1807,11 @@ async def delete_collection(
                     UserDocumentTopic.team_id.is_(None)
                 )
             
+            # Asegurarse de decodificar el nombre del topic al eliminar
+            delete_query = delete_query.where(
+                UserDocumentTopic.name == urllib.parse.unquote(topic_name)
+            )
+
             result = await db.execute(delete_query)
             await db.commit()
             
@@ -1857,6 +1867,10 @@ async def extract_titles_and_update_metadata(account_id: str, topic: Optional[st
             if team_id:
                 clauses.append("team_id = :team_id")
                 params["team_id"] = team_id
+            
+            if topic: # Asegurarse de decodificar el topic aquí también para la consulta
+                clauses.append("topic = :topic")
+                params["topic"] = urllib.parse.unquote(topic)
 
             select_sql = text("SELECT * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses))
             logger.info(f"🔧 Ejecutando consulta SQL optimizada: {select_sql} con parámetros: {params}")

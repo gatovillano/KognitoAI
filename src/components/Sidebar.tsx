@@ -192,7 +192,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
             variant={pathname === `/chat/${thread.id}` ? "secondary" : "ghost"}
             className={cn(
               "w-full font-normal items-start text-left transition-all duration-200 hover:bg-muted rounded-xl",
-              isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-8 py-1.5 px-2"
+              isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start py-1.5 px-2"
             )}
           >
             <div className="flex items-center">
