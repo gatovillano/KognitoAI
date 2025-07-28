@@ -99,15 +99,9 @@ export default function WorkspaceCollectionDetailPage() {
     setIsLoading(true);
     try {
       const [collectionRes, docsRes, analysesRes] = await Promise.all([
-<<<<<<< HEAD
         apiClient.get(`/api/collections/${collectionId}?workspace_id=${workspaceId}`),
         apiClient.get(`/api/collections/${collectionId}/documents?workspace_id=${workspaceId}`),
         apiClient.post('/api/get-saved-analyses', { topic: collectionId, workspace_id: workspaceId })
-=======
-        apiClient.get(`/api/workspaces/${workspaceId}/collections/${collectionId}`),
-        apiClient.get(`/api/workspaces/${workspaceId}/collections/${collectionId}/documents`),
-        apiClient.post('/api/get-saved-analyses', { topic: collectionId }) // Asumiendo que el topic es el collectionId
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
       ]);
       
       console.log('API Response for collection details:', collectionRes.data);
