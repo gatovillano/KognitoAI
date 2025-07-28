@@ -51,7 +51,6 @@ class AddNoteTool(BaseTool):
     name: str = "add_note_tool"
     description: str = (
         "Útil para cuando un usuario quiere crear o guardar una nueva nota, apunte o idea. "
-        "ACTUALIZADO: Ahora soporta aislamiento por workspace y actualiza columnas optimizadas automáticamente. "
         "Debes proporcionar el contenido y, opcionalmente, un título y una categoría. "
         "El 'account_id' del usuario es un argumento obligatorio."
     )

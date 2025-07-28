@@ -9,7 +9,7 @@ Esta herramienta permite al agente de IA procesar documentos almacenados y extra
 import logging
 from typing import Type, Optional, Any
 
-from pydantic import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa las dependencias necesarias para interactuar con la base de datos y el LLM.
@@ -22,7 +22,9 @@ from core.memory_manager import update_document_metadata, get_full_document_cont
 from core.llm_manager import get_fast_llm
 from core.websocket_manager import send_personal_message
 import logging
-
+from typing import Optional, Any, Type
+from pydantic.v1 import BaseModel, Field
+from langchain_core.tools import BaseTool
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -35,8 +37,7 @@ class ExtractDocumentTitlesInput(BaseModel):
     """
     topic: Optional[str] = Field(
         None,
-        description="El tema o categoría de los documentos a procesar. Si no se proporciona, se procesarán todos los documentos del usuario.",
-        json_schema_extra={"type": "string"}
+        description="El tema o categoría de los documentos a procesar. Si no se proporciona, se procesarán todos los documentos del usuario."
     )
 
 
@@ -71,9 +72,13 @@ class ExtractDocumentTitlesTool(BaseTool):
         """
         logger.info(f"Ejecutando ExtractDocumentTitlesTool para la cuenta '{self.account_id}' con tema: '{topic}', archivo: '{file_name}'.")
         try:
+<<<<<<< HEAD
             if not settings.database_url:
                 raise ValueError("Database URL is not configured")
                 
+=======
+            # Engine síncrono para conectar con la base de datos
+>>>>>>> parent of 9cadb85 (Refactor UI, enhance RAG capabilities, and improve tool functionalities)
             PGVECTOR_SYNC_ENGINE = create_engine(settings.database_url)
             metadata = MetaData()
             langchain_pg_collection = Table('langchain_pg_collection', metadata, autoload_with=PGVECTOR_SYNC_ENGINE)
@@ -100,22 +105,45 @@ class ExtractDocumentTitlesTool(BaseTool):
                 """), {"account_id": self.account_id})
                 await db.commit()
 
+<<<<<<< HEAD
                 clauses = [
                     "account_id = :account_id",
                     "content_type = 'user_documents'",
                     "cmetadata->>'type' = 'document_chunk'"
                 ]
                 params = {"account_id": self.account_id}
+=======
+                # Obtener el UUID de la colección para el usuario
+                col_q = text("SELECT uuid FROM langchain_pg_collection WHERE name = :cname")
+                res = await db.execute(col_q, {"cname": f"user_memories_{account_id}"})
+                collection_uuid = res.scalar_one_or_none()
+                if not collection_uuid:
+                    logger.info(f"No existe la colección 'user_memories_{account_id}', no hay documentos para procesar.")
+                    await db.execute(text("""
+                        UPDATE process_status
+                        SET status = 'completed', message = 'No se encontraron documentos para procesar en tu base de conocimiento.', last_updated = CURRENT_TIMESTAMP
+                        WHERE account_id = :account_id
+                    """), {"account_id": account_id})
+                    await db.commit()
+                    return "No se encontraron documentos para procesar en tu base de conocimiento."
+>>>>>>> parent of 9cadb85 (Refactor UI, enhance RAG capabilities, and improve tool functionalities)
 
+                # Construir la consulta para obtener los documentos
+                clauses = ["collection_id = :col_id", "cmetadata->>'type' = 'document_chunk'"]
+                params = {"col_id": collection_uuid}
                 if topic:
-                    clauses.append("topic = :topic")
-                    params["topic"] = topic
+                    clauses.append("cmetadata->>'topic' = :tpc")
+                    params["tpc"] = topic
                 if file_name:
                     clauses.append("cmetadata->>'file_name' = :fname")
                     params["fname"] = file_name
 
+<<<<<<< HEAD
                 # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
                 select_sql = text("SELECT DISTINCT ON (cmetadata->>'document_id') * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses) + " ORDER BY cmetadata->>'document_id', id")
+=======
+                select_sql = text("SELECT DISTINCT ON (cmetadata->>'file_name') * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses))
+>>>>>>> parent of 9cadb85 (Refactor UI, enhance RAG capabilities, and improve tool functionalities)
                 logger.info(f"Ejecutando consulta SQL: {select_sql} con parámetros: {params}")
                 result = await db.execute(select_sql, params)
                 chunks = result.mappings().all()
@@ -168,14 +196,17 @@ class ExtractDocumentTitlesTool(BaseTool):
                         first_chunk_query = text("""
                             SELECT document
                             FROM langchain_pg_embedding
-                            WHERE account_id = :account_id
-                            AND content_type = 'user_documents'
+                            WHERE collection_id = :col_id
                             AND cmetadata->>'file_name' = :file_name
                             AND cmetadata->>'type' = 'document_chunk'
                             ORDER BY (cmetadata->>'chunk_index')::integer ASC
                             LIMIT 3
                         """)
+<<<<<<< HEAD
                         chunk_result = await db.execute(first_chunk_query, {"account_id": self.account_id, "file_name": file_name})
+=======
+                        chunk_result = await db.execute(first_chunk_query, {"col_id": collection_uuid, "file_name": file_name})
+>>>>>>> parent of 9cadb85 (Refactor UI, enhance RAG capabilities, and improve tool functionalities)
                         first_chunk = chunk_result.mappings().first()
                         
                         if first_chunk and 'document' in first_chunk:

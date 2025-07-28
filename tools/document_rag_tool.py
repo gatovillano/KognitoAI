@@ -10,7 +10,11 @@ vectorial del usuario. Es útil cuando un usuario sube un documento y desea que 
 
 import logging
 import os
+<<<<<<< HEAD
 from typing import Any, Dict, List, Optional, Type
+=======
+from typing import Any, Optional, Dict
+>>>>>>> parent of 9cadb85 (Refactor UI, enhance RAG capabilities, and improve tool functionalities)
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
@@ -26,6 +30,7 @@ class DocumentRAGInput(BaseModel):
     extracted_text: str = Field(..., description="The complete text content extracted from the document.")
     file_name: str = Field(..., description="The original name of the document file.")
     topic: str = Field(..., description="The topic or category for this document, as specified by the user.")
+<<<<<<< HEAD
 
 
     workspace_id: Optional[str] = Field(
@@ -34,6 +39,12 @@ class DocumentRAGInput(BaseModel):
         json_schema_extra={"type": "string"}
     )
 
+=======
+    
+    # Use account_id as the universal identifier for the user account
+    account_id: str = Field(..., description="The unique universal identifier (UUID) of the user's account. This MUST be provided by the LLM.")
+    
+>>>>>>> parent of 9cadb85 (Refactor UI, enhance RAG capabilities, and improve tool functionalities)
     metadata: Optional[Dict[str, Any]] = Field(
         None,
         description="Optional dictionary of additional document metadata for filtering. The LLM should extract these from the user's query or the document itself.",
@@ -59,11 +70,12 @@ class DocumentRAGTool(BaseTool):
     Use this when the user uploads a document AND indicates it should be saved for future reference.
     The LLM must extract all relevant data and provide the user's 'account_id'.
     """
-    args_schema: Type[BaseModel] = DocumentRAGInput
+    args_schema: type[BaseModel] = DocumentRAGInput
     return_direct: bool = False
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
 
     async def _arun(
+<<<<<<< HEAD
             self,
             extracted_text: str,
             file_name: str,
@@ -72,10 +84,20 @@ class DocumentRAGTool(BaseTool):
             metadata: Optional[Dict[str, Any]] = None,
             **kwargs: Any
     ) -> ToolOutputWithSources:
+=======
+        self, 
+        extracted_text: str, 
+        file_name: str, 
+        topic: str, 
+        account_id: str, 
+        metadata: Optional[Dict[str, Any]] = None, 
+        **kwargs: Any
+    ) -> str:
+>>>>>>> parent of 9cadb85 (Refactor UI, enhance RAG capabilities, and improve tool functionalities)
         """
         Use the tool asynchronously. Processes the document text for RAG storage and returns source information.
         """
-        logger.info(f"📊 DocumentRAGTool _arun started for file: {file_name}, topic: {topic}, workspace_id: {workspace_id}, metadata: {metadata}")
+        logger.info(f"📊 DocumentRAGTool _arun started for file: {file_name}, topic: {topic}, metadata: {metadata}")
 
         if not self.account_id:
             logger.error("❌ DocumentRAGTool: account_id not found. Cannot process document.")
@@ -98,7 +120,6 @@ class DocumentRAGTool(BaseTool):
                 file_name=file_name,
                 extracted_text=extracted_text,
                 topic=topic,
-                workspace_id=workspace_id,
                 metadata=metadata_to_pass
             )
 

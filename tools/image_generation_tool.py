@@ -24,7 +24,7 @@ import logging
 from typing import Any, Type
 from io import BytesIO
 
-from pydantic import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importaciones de la lógica de negocio y gestión de estado
