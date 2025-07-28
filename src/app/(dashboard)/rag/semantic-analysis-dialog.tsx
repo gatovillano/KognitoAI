@@ -21,16 +21,8 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
   const [selectedTheme, setSelectedTheme] = useState<any>(null);
   const [isThemeDialogOpen, setIsThemeDialogOpen] = useState(false);
   const [isKnowledgeGapsDialogOpen, setIsKnowledgeGapsDialogOpen] = useState(false);
-  const [selectedConcept, setSelectedConcept] = useState<string | null>(null);
-  const [isConceptDialogOpen, setIsConceptDialogOpen] = useState(false);
 
-  if (!analysis) {
-    console.log("❌ SemanticAnalysisDialog: No analysis data provided");
-    return null;
-  }
-
-  console.log("🧠 SemanticAnalysisDialog - Analysis object:", analysis);
-  console.log("🧠 SemanticAnalysisDialog - Topic:", topic);
+  if (!analysis) return null;
 
   // El análisis semántico tiene una estructura específica
   const semanticData = {
@@ -41,16 +33,9 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
     patrones_semanticos: analysis.patrones_semanticos || {}
   };
 
-
-
   const handleThemeClick = (theme: any) => {
     setSelectedTheme(theme);
     setIsThemeDialogOpen(true);
-  };
-
-  const handleConceptClick = (concept: string) => {
-    setSelectedConcept(concept);
-    setIsConceptDialogOpen(true);
   };
 
   return (
@@ -118,19 +103,10 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                       {semanticData.conceptos_centrales.map((concepto: string, index: number) => (
-                        <div
-                          key={index}
-                          className="p-4 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors border border-transparent hover:border-muted-foreground/20"
-                          onClick={() => handleConceptClick(concepto)}
-                        >
-                          <div className="text-sm font-medium">
-                            {concepto}
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-1">
-                            Haz clic para ver más detalles
-                          </div>
+                        <div key={index} className="p-2 bg-muted rounded-md text-sm">
+                          {concepto}
                         </div>
                       ))}
                     </div>
@@ -199,24 +175,16 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {semanticData.brechas_conocimiento.slice(0, 3).map((brecha: string, index: number) => (
-                        <div key={index} className="p-4 bg-muted/50 border-l-4 border-muted-foreground/30 rounded-r-lg">
-                          <div className="text-sm text-foreground">
-                            {brecha}
-                          </div>
+                        <div key={index} className="p-2 bg-orange-50 border-l-4 border-orange-200 text-sm">
+                          {brecha}
                         </div>
                       ))}
                       {semanticData.brechas_conocimiento.length > 3 && (
-                        <div className="text-center">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setIsKnowledgeGapsDialogOpen(true)}
-                          >
-                            Ver todas las {semanticData.brechas_conocimiento.length} brechas
-                          </Button>
-                        </div>
+                        <p className="text-xs text-muted-foreground text-center">
+                          +{semanticData.brechas_conocimiento.length - 3} brechas más...
+                        </p>
                       )}
                     </div>
                   </CardContent>
@@ -262,77 +230,6 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsThemeDialogOpen(false)}>Cerrar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Diálogo para mostrar detalles del concepto */}
-      <Dialog open={isConceptDialogOpen} onOpenChange={setIsConceptDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Detalles del Concepto</DialogTitle>
-          </DialogHeader>
-          {selectedConcept && (
-            <ScrollArea className="max-h-[60vh] pr-4">
-              <div className="space-y-4">
-                <div>
-                  <h4 className="font-semibold text-lg mb-3">
-                    {selectedConcept.split(':')[0]}
-                  </h4>
-                  <div className="p-4 bg-muted/50 rounded-lg">
-                    <p className="text-sm leading-relaxed">
-                      {selectedConcept.split(':').slice(1).join(':').trim()}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-6">
-                  <h5 className="font-semibold mb-3 text-sm">Definición y contexto:</h5>
-                  <div className="p-4 bg-blue-50/50 border-l-4 border-blue-200 rounded-r-lg">
-                    {(() => {
-                      // Parsear el concepto en formato "CONCEPTO: DEFINICIÓN"
-                      const conceptParts = selectedConcept?.split(':');
-                      if (conceptParts && conceptParts.length >= 2) {
-                        const conceptName = conceptParts[0].trim();
-                        const conceptDefinition = conceptParts.slice(1).join(':').trim();
-                        return (
-                          <div className="space-y-3">
-                            <div>
-                              <h6 className="font-medium text-sm text-blue-800 mb-1">Concepto:</h6>
-                              <p className="text-sm font-semibold">{conceptName}</p>
-                            </div>
-                            <div>
-                              <h6 className="font-medium text-sm text-blue-800 mb-1">Definición:</h6>
-                              <p className="text-sm text-muted-foreground leading-relaxed">{conceptDefinition}</p>
-                            </div>
-                            <div className="mt-4 pt-3 border-t border-blue-200">
-                              <p className="text-xs text-blue-600">
-                                💡 Este concepto fue identificado como central en el análisis semántico de la colección.
-                                Para profundizar, puedes realizar una búsqueda dirigida en la colección.
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      } else {
-                        return (
-                          <div className="space-y-3">
-                            <p className="text-sm text-muted-foreground leading-relaxed">{selectedConcept}</p>
-                            <div className="mt-4 pt-3 border-t border-blue-200">
-                              <p className="text-xs text-blue-600">
-                                💡 Este concepto fue identificado como central en el análisis semántico de la colección.
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      }
-                    })()}
-                  </div>
-                </div>
-              </div>
-            </ScrollArea>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsConceptDialogOpen(false)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -20,7 +20,6 @@ import { DeleteConfirmationDialog } from '../delete-confirmation-dialog';
 import { AnalysisResultDialog } from '../analysis-result-dialog';
 import { CollectionAnalysisDialog } from '../collection-analysis-dialog'; // Aunque no lo iniciamos aquí, lo necesitamos por si el usuario abre un análisis guardado de colección
 import { SemanticAnalysisDialog } from '../semantic-analysis-dialog';
-import { CodeAnalysisResultDialog } from '../code-analysis-result-dialog';
 
 export default function AllDocumentsPage() {
   const [documents, setDocuments] = useState<Document[]>([]);

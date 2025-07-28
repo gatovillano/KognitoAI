@@ -25,14 +25,10 @@ interface AnalysisResultDialogProps {
 export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange }: AnalysisResultDialogProps) {
   const [isQuestionsDialogOpen, setIsQuestionsDialogOpen] = useState(false);
 
-  if (!analysis) {
-    console.log("❌ AnalysisResultDialog: No analysis data provided");
-    return null;
-  }
+  if (!analysis) return null;
 
   // Log the analysis object for debugging
-  console.log("📊 AnalysisResultDialog - Analysis object:", analysis);
-  console.log("📄 AnalysisResultDialog - Document:", document);
+  console.log("Analysis object:", analysis);
 
   // Helper function to ensure array
   const ensureArray = (value: any): string[] => {
@@ -69,19 +65,22 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
   // Map backend field names to frontend expected field names
   const mappedAnalysis = {
     resumen_ejecutivo: analysis.executive_summary || analysis.resumen_ejecutivo || 'No summary available',
+<<<<<<< HEAD
     analisis_general: analysis.general_analysis || analysis.analisis_general || 'No hay análisis general disponible',
     temas_clave_avanzados: extractThemes(analysis.key_themes || analysis.temas_clave_avanzados || analysis.code_structure),
+=======
+    temas_clave_avanzados: ensureArray(analysis.key_themes || analysis.temas_clave_avanzados || analysis.code_structure),
+>>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
     conceptos_centrales: ensureArray(analysis.central_concepts || analysis.conceptos_centrales || analysis.design_patterns),
     relaciones_conceptos: ensureArray(analysis.concept_relationships || analysis.relaciones_conceptos || analysis.dependencies),
     preguntas_para_explorar: ensureArray(analysis.knowledge_gaps || analysis.preguntas_para_explorar || analysis.potential_issues),
-    recomendaciones: ensureArray(analysis.recommendations),
-    reflexiones_finales: ensureArray(analysis.final_reflections || analysis.reflexiones_finales || [])
+    recomendaciones: ensureArray(analysis.recommendations)
   };
 
   return (
     <>
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Resultados del Análisis</DialogTitle>
           <DialogDescription className="truncate">
@@ -95,6 +94,7 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                     <p className="text-sm text-muted-foreground p-3 bg-muted rounded-md whitespace-pre-wrap">{mappedAnalysis.resumen_ejecutivo}</p>
                 </div>
                 <div>
+<<<<<<< HEAD
                     <h3 className="font-semibold mb-2">Análisis General</h3>
                     <div className="text-sm text-muted-foreground p-3 bg-muted border-l-4 border-blue-200 rounded-md">
                         <InlineMarkdownRenderer content={mappedAnalysis.analisis_general} />
@@ -103,6 +103,10 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                 <div>
                     <h3 className="font-semibold mb-2">Temas Clave</h3>
                     <div className="space-y-3">
+=======
+                    <h3 className="font-semibold mb-2">Temas Clave Avanzados</h3>
+                    <div className="flex flex-wrap gap-2">
+>>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
                         {Array.isArray(mappedAnalysis.temas_clave_avanzados) && mappedAnalysis.temas_clave_avanzados.length > 0 ? (
                             mappedAnalysis.temas_clave_avanzados.map((topic: any, i: number) => (
                                 <div key={i} className="border rounded-lg p-3 bg-muted/30">
@@ -202,6 +206,7 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                         )}
                     </ul>
                 </div>
+<<<<<<< HEAD
                 {mappedAnalysis.reflexiones_finales.length > 0 && (
                     <div>
                         <h3 className="font-semibold mb-2">Reflexiones Finales</h3>
@@ -214,6 +219,8 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                         </div>
                     </div>
                 )}
+=======
+>>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
             </div>
         </ScrollArea>
         <div className="flex justify-between mt-4">

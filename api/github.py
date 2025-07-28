@@ -223,7 +223,7 @@ async def update_repository_endpoint(
             str(new_task.id),
             current_account_id,
             req.repo_url,
-            req.collection_topic
+            req.collection_topic or "repositorio"
         )
 
         return {"task_id": str(new_task.id), "message": f"Actualización del repositorio iniciada en segundo plano."}
@@ -234,11 +234,9 @@ async def update_repository_endpoint(
             detail=f"Error al iniciar actualización: {str(e)}"
         )
 
-async def update_repository_task(task_id: str, account_id: str, repo_url: str, collection_topic: Optional[str]):
+async def update_repository_task(task_id: str, account_id: str, repo_url: str, collection_topic: str):
     """
     Tarea en segundo plano para actualizar un repositorio de GitHub.
-    Si collection_topic es None, actualiza solo los documentos sin vectorizar.
-    Si collection_topic tiene valor, actualiza la colección RAG.
     """
     from core.database import SessionLocal, AnalysisTask
     from sqlalchemy import update
@@ -255,20 +253,11 @@ async def update_repository_task(task_id: str, account_id: str, repo_url: str, c
 
             # Usar el GitHubRepoTool para actualizar el repositorio
             github_tool = GitHubRepoTool()
-
-            if collection_topic:
-                # Actualizar colección RAG con vectorización
-                result = await github_tool._update_knowledge_collection(
-                    repo_url=repo_url,
-                    collection_topic=collection_topic,
-                    account_id=account_id
-                )
-            else:
-                # Actualizar solo documentos sin vectorizar (para sección repositorios)
-                result = await github_tool._update_repository_documents(
-                    repo_url=repo_url,
-                    account_id=account_id
-                )
+            result = await github_tool._update_knowledge_collection(
+                repo_url=repo_url,
+                collection_topic=collection_topic,
+                account_id=account_id
+            )
 
             # Marcar la tarea como completada con el resultado
             stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(

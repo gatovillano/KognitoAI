@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class ComprehensiveWebAnalysisInput(BaseModel):
     """Input schema for the Comprehensive Web Analysis Tool."""
     query: str = Field(..., description="The user's research query in natural language.")
-    account_id: str = Field(default="", description="The unique ID of the user's account. If not provided, uses the one from agent configuration.")
+    account_id: str = Field(..., description="The unique ID of the user's account.")
     # --- NUEVO: Parámetro para el ID del workspace ---
     workspace_id: str = Field(
         default="",
@@ -49,11 +49,6 @@ class ComprehensiveWebAnalysisTool(BaseTool):
     return_direct: bool = False
     account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
 
-    def __init__(self, account_id: str = "", **kwargs):
-        """Initialize the tool with account_id."""
-        super().__init__(**kwargs)
-        self.account_id = account_id
-
     def _extract_urls(self, search_results: str) -> List[str]:
         """Extracts URLs from the formatted search results string."""
         urls = re.findall(r"<a href=\'(.*?)\'>", search_results)
@@ -63,12 +58,17 @@ class ComprehensiveWebAnalysisTool(BaseTool):
     async def _arun(\
         self,\
         query: str,\
+<<<<<<< HEAD
         account_id: str = "",\
+=======
+        account_id: str,\
+>>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
         workspace_id: Optional[str] = None, # <-- workspace_id añadido aquí
         run_manager: Optional[CallbackManagerForToolRun] = None,\
         **kwargs: Any\
     ) -> str:
         """Executes the comprehensive analysis tool asynchronously."""
+<<<<<<< HEAD
         # Obtener account_id de la configuración del agente si está disponible
         config_account_id = None
         config_workspace_id = workspace_id
@@ -111,6 +111,9 @@ class ComprehensiveWebAnalysisTool(BaseTool):
             return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
 
         logger.info(f"--- Running Comprehensive Web Analysis for account {effective_account_id} (Workspace: {effective_workspace_id if effective_workspace_id else 'N/A'}) ---")
+=======
+        logger.info(f"--- Running Comprehensive Web Analysis for account {account_id} (Workspace: {workspace_id if workspace_id else 'N/A'}) ---")
+>>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
         logger.info(f"Query: {query}")
 
         # Step 1: Web Search
@@ -172,7 +175,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         # Step 4: Knowledge Base Integration
         logger.info("Step 4: Searching internal knowledge base...")
         # --- MODIFICACIÓN: Pasar workspace_id a get_relevant_memories ---
-        relevant_memories = await get_relevant_memories(effective_account_id, web_summary, k=5, workspace_id=effective_workspace_id)
+        relevant_memories = await get_relevant_memories(account_id, web_summary, k=5, workspace_id=workspace_id)
 
         # Step 5: Final Combined Analysis
         logger.info("Step 5: Performing final combined analysis...")

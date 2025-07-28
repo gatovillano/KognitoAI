@@ -80,7 +80,7 @@ export function UpdateRepositoryDialog({
     try {
       const response = await apiClient.post("/api/github/update-repository", {
         repo_url: repositoryUrl,
-        // No enviar collection_topic para que actualice solo documentos sin vectorizar
+        collection_topic: "repositorio",
       });
 
       setTaskId(response.data.task_id);

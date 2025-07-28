@@ -31,13 +31,9 @@ interface CodeAnalysisResultDialogProps {
 }
 
 export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenChange }: CodeAnalysisResultDialogProps) {
-  if (!analysis) {
-    console.log("❌ CodeAnalysisResultDialog: No analysis data provided");
-    return null;
-  }
+  if (!analysis) return null;
 
-  console.log("💻 CodeAnalysisResultDialog - Analysis object:", analysis);
-  console.log("💻 CodeAnalysisResultDialog - Repo name:", repoName);
+  console.log("Code Analysis object:", analysis);
 
   // Helper function to ensure array and handle different data structures
   const ensureCodeArray = (value: any): CodeAnalysisItem[] => {

@@ -241,13 +241,7 @@ export default function WorkspaceDashboard() {
   const handleOpenAddExistingCollectionDialog = async () => {
     setLoadingCollections(true);
     try {
-      // Obtener colecciones del contexto general (sin workspace_id)
-      const response = await apiClient.post('/api/list-general-collections', {});
-
-      // Obtener colecciones ya asociadas a este workspace
-      const workspaceCollectionsResponse = await apiClient.get(`/api/workspaces/${workspaceId}/collections`);
-      const workspaceCollectionIds = new Set(workspaceCollectionsResponse.data.map((col: any) => col.id));
-
+      const response = await apiClient.post('/api/list-collections', {});
       const allCollections = response.data.map((col: any) => ({
         id: col.topic || col.id || col.title || `collection-${Math.random().toString(36).substr(2, 9)}`,
         title: col.topic || col.title || 'Sin título',
@@ -258,13 +252,18 @@ export default function WorkspaceDashboard() {
         description: col.description || (col.document_count > 0 ? `${col.document_count} documentos` : 'Colección vacía'),
         document_count: col.document_count || 0
       }));
+<<<<<<< HEAD
 
       // Filtrar para mostrar solo las colecciones del contexto general que no están ya en este workspace
       // Incluir tanto colecciones con documentos como colecciones vacías
       const filteredCollections = allCollections.filter(
         (col: Collection) => !workspaceCollectionIds.has(col.id)
+=======
+      // Filtrar para mostrar solo las colecciones que no están ya en este workspace
+      const filteredCollections = allCollections.filter(
+        (col: Collection) => !collections.some(existingCol => existingCol.id === col.id)
+>>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
       );
-
       setAvailableCollections(filteredCollections);
       setCollectionDialogOpen(true);
     } catch (error) {
