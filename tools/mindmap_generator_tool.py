@@ -54,7 +54,6 @@ class MindmapGeneratorTool(BaseTool):
         from core.database import SessionLocal, MindmapTask
         from sqlalchemy import update
         import uuid
-        from datetime import datetime
 
         try:
             # 1. Extraer temas clave del documento utilizando la función existente
@@ -79,25 +78,12 @@ class MindmapGeneratorTool(BaseTool):
             try:
                 # Usamos el account_id pasado como parámetro, si está disponible, de lo contrario usamos el de la instancia
                 account_id_value = uuid.UUID(account_id) if account_id else (uuid.UUID(self.account_id) if self.account_id else None)
-                # Crear payload con metadata de herramienta
-                result_payload = {
-                    "base64_image": base64_image,
-                    "tool_used": "mindmap_generator_tool.py",
-                    "analysis_metadata": {
-                        "tool_used": "mindmap_generator_tool.py",
-                        "analysis_type": "mindmap",
-                        "topic": topic_hint if topic_hint else "Tema Principal",
-                        "concept_query": concept_query,
-                        "created_at": datetime.now().isoformat()
-                    }
-                }
-
                 new_task = MindmapTask(
                     id=uuid.UUID(task_id),
                     account_id=account_id_value if account_id_value else None,
                     topic=topic_hint if topic_hint else "Tema Principal",
                     status="completed",
-                    result_payload=result_payload
+                    result_payload={"base64_image": base64_image}
                 )
                 db_session.add(new_task)
                 try:

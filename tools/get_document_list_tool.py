@@ -17,10 +17,14 @@ correctamente si es necesario.
 """
 
 import logging
+<<<<<<< HEAD
 import asyncio
 from typing import Any, List, Dict, Type, Optional, Union
+=======
+from typing import Any, List, Dict, Type, Optional
+>>>>>>> parent of 9cadb85 (Refactor UI, enhance RAG capabilities, and improve tool functionalities)
 
-from pydantic import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importaciones de la lógica de negocio y gestión de estado
@@ -49,8 +53,7 @@ class GetDocumentListInput(BaseModel):
 >>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
     workspace_id: Optional[str] = Field(
         None,
-        description="El ID del workspace (UUID en formato string) para listar documentos del workspace, si aplica.",
-        json_schema_extra={"type": "string"}
+        description="El ID del workspace (UUID en formato string) para listar documentos del workspace, si aplica."
     )
 
 
@@ -63,7 +66,7 @@ class GetDocumentListTool(BaseTool):
     description: str = (
         "Recupera una lista de todos los documentos (junto con sus temas, títulos y autores) "
         "que el usuario ha subido previamente a su base de conocimiento. "
-        "ACTUALIZADO: Permite listar documentos generales o documentos específicos de un workspace con aislamiento optimizado. "
+        "Permite listar documentos generales o documentos específicos de un workspace. " # <-- Descripción actualizada
         "Úsala cuando el usuario pida explícitamente ver sus documentos guardados."
     )
     args_schema: Type[BaseModel] = GetDocumentListInput

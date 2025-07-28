@@ -15,9 +15,13 @@ pertenecientes a la cuenta correcta.
 """
 
 import logging
-from typing import Type, Optional, Any, Union
+from typing import Type, Optional, Any
 
+<<<<<<< HEAD
 from pydantic import BaseModel, Field, root_validator
+=======
+from pydantic.v1 import BaseModel, Field
+>>>>>>> parent of 9cadb85 (Refactor UI, enhance RAG capabilities, and improve tool functionalities)
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de memoria.
@@ -35,13 +39,11 @@ class DeleteDocumentInput(BaseModel):
     # El LLM puede proporcionar uno de estos dos, pero no ambos son obligatorios a la vez.
     file_name: Optional[str] = Field(
         None,
-        description="El nombre exacto del archivo a eliminar. Se puede omitir si se proporciona un 'topic'.",
-        json_schema_extra={"type": "string"}
+        description="El nombre exacto del archivo a eliminar. Se puede omitir si se proporciona un 'topic'."
     )
     topic: Optional[str] = Field(
         None,
-        description="El tema o categoría de los documentos a eliminar. Eliminará todos los documentos asociados a este tema. Se puede omitir si se proporciona 'file_name'.",
-        json_schema_extra={"type": "string"}
+        description="El tema o categoría de los documentos a eliminar. Eliminará todos los documentos asociados a este tema. Se puede omitir si se proporciona 'file_name'."
     )
     # Reemplazamos telegram_id por account_id para que sea universal.
 
