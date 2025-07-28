@@ -6,9 +6,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Expand, HelpCircle, FileText, Network, Lightbulb, Link, Search, BarChart3 } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
+import { Expand, HelpCircle } from 'lucide-react';
 import { QuestionSliderDialog } from '@/components/QuestionSliderDialog';
 
 interface CollectionAnalysisProps {
@@ -25,13 +24,7 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
   const [isThemeDialogOpen, setIsThemeDialogOpen] = useState(false);
   const [isKnowledgeGapsDialogOpen, setIsKnowledgeGapsDialogOpen] = useState(false);
 
-  if (!analysis) {
-    console.log("❌ CollectionAnalysisDialog: No analysis data provided");
-    return null;
-  }
-
-  console.log("📁 CollectionAnalysisDialog - Analysis object:", analysis);
-  console.log("📁 CollectionAnalysisDialog - Topic:", topic);
+  if (!analysis) return null;
 
   // Map backend field names to frontend expected field names
   const mappedAnalysis = {
@@ -40,10 +33,7 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
     conceptos_centrales: analysis.central_concepts || [],
     relaciones_conceptos: analysis.concept_relationships || [],
     conexiones_identificadas: analysis.identified_connections || [],
-    brechas_conocimiento: analysis.emergent_knowledge_gaps || [],
-    reflexiones_finales: analysis.final_reflections || [],
-    insights_coleccion: analysis.collection_insights || [],
-    notas_metodologicas: analysis.methodological_notes || []
+    brechas_conocimiento: analysis.emergent_knowledge_gaps || []
   };
 
   // Adjust the conexiones_identificadas to match expected structure if necessary
@@ -65,16 +55,15 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
+<<<<<<< HEAD
         <DialogContent className="max-w-4xl max-h-[85vh]">
+=======
+        <DialogContent className="max-w-3xl">
+>>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <BarChart3 className="h-5 w-5" />
-              Análisis Completo de la Colección "{topic}"
-            </DialogTitle>
-            <DialogDescription>
-              Análisis profundo e interactivo de la colección con temas transversales, conexiones y brechas de conocimiento
-            </DialogDescription>
+            <DialogTitle>Análisis de la Colección "{topic}"</DialogTitle>
           </DialogHeader>
+<<<<<<< HEAD
 
           <Tabs defaultValue="overview" className="w-full">
             <TabsList className="grid w-full grid-cols-4 lg:grid-cols-8 text-xs">
@@ -291,43 +280,87 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
                   </CardHeader>
                   <CardContent>
                     {mappedAnalysis.brechas_conocimiento && mappedAnalysis.brechas_conocimiento.length > 0 ? (
+=======
+          <ScrollArea className="max-h-[70vh] pr-4">
+              <div className="space-y-6">
+                  <div>
+                      <h3 className="font-semibold mb-2">Resumen General de la Colección</h3>
+                      <p className="text-sm text-muted-foreground p-3 bg-muted rounded-md whitespace-pre-wrap">{mappedAnalysis.resumen_general_coleccion}</p>
+                  </div>
+                  <div>
+                      <h3 className="font-semibold mb-2">Temas Transversales</h3>
+                      <div className="flex flex-wrap gap-2">
+                          {mappedAnalysis.temas_transversales?.map((t: any) => (
+                              <Badge 
+                                key={typeof t === 'string' ? t : t.theme} 
+                                className="cursor-pointer hover:bg-muted/80" 
+                                onClick={() => handleThemeClick(t)}
+                              >
+                                {typeof t === 'string' ? t : t.theme}
+                              </Badge>
+                          ))}
+                      </div>
+                  </div>
+                  <div>
+                      <h3 className="font-semibold mb-2">Conceptos Centrales</h3>
+                      <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                          {mappedAnalysis.conceptos_centrales?.map((concept: string, i: number) => <li key={i}>{concept}</li>)}
+                      </ul>
+                  </div>
+                  <div>
+                      <h3 className="font-semibold mb-2">Relaciones entre Conceptos</h3>
+                      <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                          {mappedAnalysis.relaciones_conceptos?.map((relation: string, i: number) => <li key={i}>{relation}</li>)}
+                      </ul>
+                  </div>
+                  <div>
+                      <h3 className="font-semibold mb-2">Conexiones Identificadas</h3>
+>>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
                       <div className="space-y-3">
-                        {mappedAnalysis.brechas_conocimiento.slice(0, 5).map((brecha: string, index: number) => (
-                          <div key={index} className="p-4 bg-orange-50 border-l-4 border-orange-200 rounded-r-lg">
-                            <div className="text-sm font-medium text-orange-800">
-                              {brecha}
+                         {mappedAnalysis.conexiones_identificadas?.map((conn: any, i: number) => (
+                          <div key={i} className="text-sm border-l-2 border-primary pl-3 cursor-pointer hover:bg-muted/80" onClick={() => handleConnectionClick(conn)}>
+                              <p className="font-semibold">{conn.documentos.join(' ↔ ')}</p>
+                              <p className="text-muted-foreground">{conn.insight}</p>
+                          </div>
+                         ))}
+                      </div>
+                  </div>
+                   <div>
+                      <h3 className="font-semibold mb-4">Brechas de Conocimiento</h3>
+                      {mappedAnalysis.brechas_conocimiento && mappedAnalysis.brechas_conocimiento.length > 0 ? (
+                        <Card
+                          className="cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-300 border-2 hover:border-primary/20 group"
+                          onClick={() => setIsKnowledgeGapsDialogOpen(true)}
+                        >
+                          <CardContent className="p-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <HelpCircle className="h-5 w-5 text-primary" />
+                                <span className="font-medium text-sm">
+                                  {mappedAnalysis.brechas_conocimiento.length} pregunta{mappedAnalysis.brechas_conocimiento.length !== 1 ? 's' : ''} para explorar
+                                </span>
+                              </div>
+                              <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                <Expand className="h-4 w-4 text-muted-foreground" />
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                        {mappedAnalysis.brechas_conocimiento.length > 5 && (
-                          <div className="text-center">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setIsKnowledgeGapsDialogOpen(true)}
-                            >
-                              Ver todas las {mappedAnalysis.brechas_conocimiento.length} brechas
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="text-center text-muted-foreground py-8">
-                        No se identificaron brechas de conocimiento
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </ScrollArea>
-          </Tabs>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => onOpenChange(false)}>Cerrar</Button>
-          </DialogFooter>
+                            <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">
+                              {mappedAnalysis.brechas_conocimiento[0]}
+                            </p>
+                            <div className="mt-3 text-xs text-primary/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1">
+                              <Expand className="h-3 w-3" />
+                              Haz clic para ver todas las preguntas
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No hay brechas de conocimiento identificadas.</p>
+                      )}
+                  </div>
+              </div>
+          </ScrollArea>
         </DialogContent>
       </Dialog>
-
 
       {/* Diálogo secundario para mostrar detalles de la conexión */}
       <Dialog open={isConnectionDialogOpen} onOpenChange={setIsConnectionDialogOpen}>
