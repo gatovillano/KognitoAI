@@ -1,23 +1,24 @@
+
 # 🧠 Guía de Uso de Cognee en KognitoAI
 
 ## 📋 Índice
-1. [¿Qué es Cognee?](#qué-es-cognee)
-2. [Configuración Inicial](#configuración-inicial)
-3. [Uso Básico](#uso-básico)
-4. [Herramienta del Agente](#herramienta-del-agente)
-5. [Ejemplos Prácticos](#ejemplos-prácticos)
-6. [Visualización](#visualización)
-7. [Solución de Problemas](#solución-de-problemas)
+1.  [¿Qué es Cognee?](#qué-es-cognee)
+2.  [Configuración Inicial](#configuración-inicial)
+3.  [Uso Básico](#uso-básico)
+4.  [Herramienta del Agente](#herramienta-del-agente)
+5.  [Ejemplos Prácticos](#ejemplos-prácticos)
+6.  [Visualización](#visualización)
+7.  [Solución de Problemas](#solución-de-problemas)
 
 ## 🤔 ¿Qué es Cognee?
 
 Cognee es una biblioteca de Python que permite crear **grafos de conocimiento** automáticamente a partir de documentos de texto. En KognitoAI, Cognee:
 
-- 📄 **Procesa documentos** y extrae entidades y relaciones
-- 🔗 **Crea grafos de conocimiento** en Neo4j
-- 🔍 **Permite búsquedas semánticas** avanzadas
-- 💡 **Genera insights** y patrones de conocimiento
-- 🧠 **Integra con LLMs** para análisis inteligente
+-   📄 **Procesa documentos** y extrae entidades y relaciones
+-   🔗 **Crea grafos de conocimiento** en Neo4j
+-   🔍 **Permite búsquedas semánticas** avanzadas
+-   💡 **Genera insights** y patrones de conocimiento
+-   🧠 **Integra con LLMs** para análisis inteligente
 
 ## ⚙️ Configuración Inicial
 
@@ -96,25 +97,25 @@ La herramienta `cognee_knowledge_graph` tiene tres acciones principales:
 Procesa documentos y crea el grafo de conocimiento.
 
 **Parámetros:**
-- `documents`: Lista de documentos con `id`, `title`, `content`, `metadata`
-- `dataset_name`: Nombre del dataset (opcional)
-- `account_id`: ID de la cuenta del usuario
+-   `documents`: Lista de documentos con `id`, `title`, `content`, `metadata`
+-   `dataset_name`: Nombre del dataset (opcional)
+-   `account_id`: ID de la cuenta del usuario
 
 ### 2. **search_graph**
 Busca información específica en el grafo.
 
 **Parámetros:**
-- `query`: Consulta de búsqueda en lenguaje natural
-- `dataset_name`: Nombre del dataset
-- `account_id`: ID de la cuenta del usuario
+-   `query`: Consulta de búsqueda en lenguaje natural
+-   `dataset_name`: Nombre del dataset
+-   `account_id`: ID de la cuenta del usuario
 
 ### 3. **get_insights**
 Obtiene insights y patrones del grafo.
 
 **Parámetros:**
-- `query`: Tema para obtener insights
-- `dataset_name`: Nombre del dataset
-- `account_id`: ID de la cuenta del usuario
+-   `query`: Tema para obtener insights
+-   `dataset_name`: Nombre del dataset
+-   `account_id`: ID de la cuenta del usuario
 
 ## 📚 Ejemplos Prácticos
 
@@ -161,11 +162,11 @@ result = await tool._arun(
 
 ### Neo4j Browser
 
-1. Abre http://localhost:7474 en tu navegador
-2. Conecta con:
-   - **URI**: `bolt://localhost:7687`
-   - **Usuario**: `neo4j`
-   - **Contraseña**: tu password del .env
+1.  Abre http://localhost:7474 en tu navegador
+2.  Conecta con:
+    -   **URI**: `bolt://localhost:7687`
+    -   **Usuario**: `neo4j`
+    -   **Contraseña**: tu password del .env
 
 ### Consultas Cypher Útiles
 
@@ -234,9 +235,9 @@ docker compose build core
 ## 💡 Consejos y Mejores Prácticas
 
 ### 1. **Organización de Datasets**
-- Usa nombres descriptivos: `investigacion_ia`, `estrategia_2024`
-- Separa por cuenta: automáticamente se agrega `_{account_id}`
-- Agrupa documentos relacionados en el mismo dataset
+-   Usa nombres descriptivos: `investigacion_ia`, `estrategia_2024`
+-   Separa por cuenta: automáticamente se agrega `_{account_id}`
+-   Agrupa documentos relacionados en el mismo dataset
 
 ### 2. **Estructura de Documentos**
 ```python
@@ -254,28 +255,28 @@ docker compose build core
 ```
 
 ### 3. **Consultas Efectivas**
-- Usa lenguaje natural: "¿Qué dice sobre machine learning?"
-- Sé específico: "Estrategias de IA para 2024"
-- Combina conceptos: "Relación entre transformers y BERT"
+-   Usa lenguaje natural: "¿Qué dice sobre machine learning?"
+-   Sé específico: "Estrategias de IA para 2024"
+-   Combina conceptos: "Relación entre transformers y BERT"
 
 ### 4. **Monitoreo**
-- Revisa los logs del contenedor core
-- Usa Neo4j Browser para verificar el grafo
-- Prueba consultas simples antes de las complejas
+-   Revisa los logs del contenedor core
+-   Usa Neo4j Browser para verificar el grafo
+-   Prueba consultas simples antes de las complejas
 
 ## 🔄 Integración con Otras Herramientas
 
 Cognee se integra perfectamente con otras herramientas de KognitoAI:
 
-- **📄 Documentos**: Procesa documentos existentes del sistema
-- **🔍 Búsqueda**: Combina con herramientas de búsqueda web
-- **💭 Memoria**: Complementa el sistema de memoria vectorial
-- **📊 Análisis**: Enriquece análisis con grafos de conocimiento
+-   📄 **Documentos**: Procesa documentos existentes del sistema
+-   🔍 **Búsqueda**: Combina con herramientas de búsqueda web
+-   💭 **Memoria**: Complementa el sistema de memoria vectorial
+-   📊 **Análisis**: Enriquece análisis con grafos de conocimiento
 
 ## 📈 Próximos Pasos
 
-1. **Experimenta** con tus propios documentos
-2. **Integra** Cognee en tu flujo de trabajo
-3. **Combina** con otras herramientas del sistema
-4. **Visualiza** los grafos en Neo4j Browser
-5. **Optimiza** las consultas según tus necesidades
+1.  **Experimenta** con tus propios documentos
+2.  **Integra** Cognee en tu flujo de trabajo
+3.  **Combina** con otras herramientas del sistema
+4.  **Visualiza** los grafos en Neo4j Browser
+5.  **Optimiza** las consultas según tus necesidades

@@ -30,11 +30,18 @@ export function DeleteConfirmationDialog({ document, isOpen, onOpenChange, onDel
     setIsDeleting(true);
     toast.info(`Eliminando ${document.file_name}...`);
     
-    const formData = new FormData();
-    formData.append('file_name', document.file_name);
+    const requestBody: { file_name: string; topic?: string; workspace_id?: string; } = {
+      file_name: document.file_name,
+    };
+    if (document.topic) {
+      requestBody.topic = document.topic;
+    }
+    if (document.workspace_id) {
+      requestBody.workspace_id = document.workspace_id;
+    }
 
     try {
-      await apiClient.post('/api/delete-document', formData);
+      await apiClient.post('/api/delete-document', requestBody);
       toast.success('Documento eliminado con éxito.');
       onDeleteSuccess();
       onOpenChange(false);

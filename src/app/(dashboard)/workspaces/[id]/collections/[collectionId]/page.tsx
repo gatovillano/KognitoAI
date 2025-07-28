@@ -11,6 +11,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Brain } from 'lucide-react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { toast } from 'sonner';
+import UploadProgressIndicator from '@/components/UploadProgressIndicator';
 
 import { DataTable } from '@/app/(dashboard)/rag/data-table';
 import { getColumns, type Document } from '@/app/(dashboard)/rag/columns';
@@ -29,6 +30,9 @@ export default function WorkspaceCollectionDetailPage() {
   const workspaceId = (params?.id as string) || '';
   const collectionId = (params?.collectionId as string) || '';
   const [collectionName, setCollectionName] = useState('');
+
+  console.log('Workspace ID:', workspaceId);
+  console.log('Collection ID (from URL):', collectionId);
 
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -82,12 +86,14 @@ export default function WorkspaceCollectionDetailPage() {
     setIsLoading(true);
     try {
       const [collectionRes, docsRes, analysesRes] = await Promise.all([
-        apiClient.get(`/api/workspaces/${workspaceId}/collections/${collectionId}`),
-        apiClient.get(`/api/workspaces/${workspaceId}/collections/${collectionId}/documents`),
+        apiClient.get(`/api/collections/${collectionId}?workspace_id=${workspaceId}`),
+        apiClient.get(`/api/collections/${collectionId}/documents?workspace_id=${workspaceId}`),
         apiClient.post('/api/get-saved-analyses', { topic: collectionId, workspace_id: workspaceId })
       ]);
       
-      setCollectionName(collectionRes.data.name || collectionRes.data.title || 'Colección sin nombre');
+      console.log('API Response for collection details:', collectionRes.data);
+      console.log('API Response for collection documents:', docsRes.data);
+      setCollectionName(collectionRes.data.name || collectionRes.data.title || collectionRes.data.topic || 'Colección sin nombre');
       setDocuments(docsRes.data);
       setSavedAnalyses(analysesRes.data);
     } catch (error) {

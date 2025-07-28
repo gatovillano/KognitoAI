@@ -187,10 +187,15 @@ async def handle_chat(request: ChatRequest, background_tasks: BackgroundTasks, c
         logger.info(f"El hilo {request.thread_id} no tiene un workspace_id asociado (opcional).")
 
     # Implementar la lógica principal del agente aquí y devolver la respuesta real
-    full_response_content = ""
-    tool_code_from_agent = None
+    # La lógica de streaming ahora se maneja dentro de create_and_run_agent_streaming
+    # y solo el "Final Answer" se propaga como contenido.
+    # Los pasos intermedios (actions, observations) no deben ser parte del content.
+    # Por lo tanto, simplemente consumimos el generador y obtenemos la respuesta final.
+    final_agent_response = ""
+    final_tool_code = None
+    final_sources = []
 
-    async for chunk in create_and_run_agent_streaming(
+    async for chunk_str in create_and_run_agent_streaming(
         account_id=request.account_id,
         thread_id=request.thread_id,
         telegram_id=request.telegram_id,
@@ -201,19 +206,17 @@ async def handle_chat(request: ChatRequest, background_tasks: BackgroundTasks, c
         background_tasks=background_tasks,
         workspace_id=workspace_id
     ):
-        chunk_data = json.loads(chunk.replace("data: ", "")) # Eliminar el prefijo "data: "
-        if chunk_data["type"] == "chunk":
-            full_response_content += chunk_data["content"]
-            if "tool_code" in chunk_data and chunk_data["tool_code"]:
-                tool_code_from_agent = chunk_data["tool_code"]
-        elif chunk_data["type"] == "done":
-            if "tool_code" in chunk_data and chunk_data["tool_code"]:
-                tool_code_from_agent = chunk_data["tool_code"]
+        chunk_data = json.loads(chunk_str.replace("data: ", ""))
+        if chunk_data["type"] == "done":
+            final_agent_response = chunk_data.get("message", "") # Esto debería ser la Final Answer
+            final_tool_code = chunk_data.get("tool_code")
+            final_sources = chunk_data.get("sources", [])
         elif chunk_data["type"] == "error":
             logger.error(f"Error recibido del agente de streaming: {chunk_data['message']}")
             raise HTTPException(status_code=500, detail=f"Error en el agente de IA: {chunk_data['message']}")
+        # Ignoramos los chunks de tipo "chunk" aquí, porque create_and_run_agent_streaming ya maneja qué enviar.
 
-    return ChatResponse(response_text=full_response_content, tool_code=tool_code_from_agent)
+    return ChatResponse(response_text=final_agent_response, tool_code=final_tool_code, sources=final_sources)
 
 async def create_and_run_agent_streaming(
     account_id: str,

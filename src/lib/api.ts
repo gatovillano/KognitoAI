@@ -3,7 +3,7 @@ import axios from 'axios';
 
 const apiClient = axios.create({
   // Usar variable de entorno o fallback a desarrollo local
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8889',
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'https://apibase.gatoslibres.art', // Cambiado a HTTPS para depuración
   headers: {
     'Content-Type': 'application/json',
   },
@@ -20,7 +20,8 @@ apiClient.interceptors.request.use(
         config.headers.Authorization = `Bearer ${token}`;
       }
       // Log the full URL of the request to verify the base URL
-      console.log('Request URL:', `${config.baseURL || ''}${config.url || ''}`);
+      console.log('DEBUG (Frontend): Request URL:', `${config.baseURL || ''}${config.url || ''}`);
+      console.log('DEBUG (Frontend): Current baseURL:', config.baseURL);
     }
     return config;
   },

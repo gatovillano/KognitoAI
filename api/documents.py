@@ -3,6 +3,13 @@
 import logging
 import uuid
 from typing import List, Optional
+from pydantic import BaseModel # Importar BaseModel
+
+class DeleteDocumentRequest(BaseModel):
+    file_name: str
+    topic: Optional[str] = None
+    workspace_id: Optional[str] = None
+
 
 from fastapi import APIRouter, HTTPException, Depends, status, Form, File, UploadFile, Body, BackgroundTasks
 from pydantic import BaseModel
@@ -163,7 +170,10 @@ async def upload_document_endpoint(
         file_data_list,
         topic,
         workspace_id
+        
     )
+
+    logger.info(f"Backend (process_upload_task): workspace_id = {workspace_id}")
 
     return {
         "task_id": str(new_task.id),
@@ -212,46 +222,69 @@ async def upload_chat_file_endpoint(
         raise HTTPException(status_code=500, detail="No se pudo procesar ninguno de los archivos.")
     return {"message": f"{processed_files}/{len(files)} archivo(s) subido(s) y procesado(s) para el contexto del hilo {thread_id}."}
 
-class ListDocumentsRequest(BaseModel):
-    """Define la estructura para filtrar documentos opcionalmente por topic."""
-    topic: Optional[str] = None
-
 @router.post("/list-documents")
 async def list_documents_endpoint(
-    request: Optional[ListDocumentsRequest] = Body(None),
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    topic: Optional[str] = Body(None), # Recibe el topic directamente
+    workspace_id: Optional[str] = Body(None)
 ):
     """Lista los documentos subidos por el usuario, incluyendo documentos compartidos con equipos.
     Opcionalmente filtra por topic específico. Protegido por JWT."""
     account_id_uuid = uuid.UUID(current_account_id)
-    topic_filter = request.topic if request else None
+    topic_filter = topic # Ahora el topic ya viene directamente
+    logger.info(f"list_documents_endpoint called with account_id={current_account_id}, topic_filter={topic_filter}, workspace_id={workspace_id}")
     
-    # Obtener TODOS los documentos del usuario (incluyendo compartidos y no compartidos)
-    # Para la vista personal, el usuario debe ver todos sus documentos independientemente del team_id
-    all_user_docs = await list_user_documents_all_teams(str(account_id_uuid), topic=topic_filter)
-    logger.info(f"All user documents for account {current_account_id} (topic: {topic_filter}): {len(all_user_docs)} documents found")
+    # Usar list_user_documents para filtrar por workspace_id
+    # Si workspace_id es None, list_user_documents listará documentos con workspace_id IS NULL
+    # Si topic_filter es None, list_user_documents listará todos los topics para ese workspace_id
+    
+    documents = await list_user_documents(
+        account_id=str(account_id_uuid),
+        topic=topic_filter,
+        workspace_id=workspace_id
+    )
+    
+    logger.info(f"Documents found for account {current_account_id} (topic: {topic_filter}, workspace_id: {workspace_id}): {len(documents)} documents")
+    
+    return documents
 
-    combined_docs_list = all_user_docs
+@router.post("/list-all-user-documents")
+async def list_all_user_documents_endpoint(
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Lista TODOS los documentos subidos por el usuario, ignorando el workspace_id y el topic.
+    Protegido por JWT. Utiliza list_user_documents_all_teams."""
+    account_id_uuid = uuid.UUID(current_account_id)
+    logger.info(f"list_all_user_documents_endpoint called for account_id={current_account_id}")
     
-    # Debug logging para investigar problema de filtrado
-    logger.info(f"🔍 DEBUG: Total combined documents for account {current_account_id}: {len(combined_docs_list)} documents")
-    for doc in combined_docs_list:
-        logger.info(f"🔍 DEBUG: Documento - file_name: '{doc.get('file_name')}', topic: '{doc.get('topic')}'")
-    
-    return combined_docs_list
+    all_user_docs = await list_user_documents_all_teams(str(account_id_uuid))
+    logger.info(f"All user documents for account {current_account_id}: {len(all_user_docs)} documents found")
 
-@router.post("/delete-document")  # Cambiado a POST porque el frontend web lo usa con FormData
-async def delete_document_endpoint(current_account_id: str = Depends(get_current_account_id), file_name: str = Form(...), db: AsyncSession = Depends(get_db)):
+    return all_user_docs
+
+@router.post("/delete-document")
+async def delete_document_endpoint(
+    request: DeleteDocumentRequest, # Cambiado a Request Body
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
     """Elimina documentos de la base de conocimiento del usuario. Protegido por JWT."""
-    logger.info(f"Received delete request for file_name: '{file_name}' from account: {current_account_id}")
-    if not file_name or file_name.strip() == "":
+    logger.info(f"Received delete request for file_name: '{request.file_name}', topic: '{request.topic}', workspace_id: '{request.workspace_id}' from account: {current_account_id}")
+    logger.info(f"Delete request parameters (from JSON): file_name='{request.file_name}', topic='{request.topic}', workspace_id='{request.workspace_id}'")
+    if not request.file_name or request.file_name.strip() == "":
         logger.warning(f"Validation failed: file_name is empty for account: {current_account_id}")
         raise HTTPException(status_code=422, detail="El nombre del archivo no puede estar vacío.")
     account_id_uuid = uuid.UUID(current_account_id)
-    success = await delete_document_chunks(str(account_id_uuid), file_name)
+    success = await delete_document_chunks(
+        account_id=str(account_id_uuid),
+        file_name=request.file_name,
+        topic=request.topic, # Pasado a delete_document_chunks
+        workspace_id=request.workspace_id # Pasado a delete_document_chunks
+    )
     if not success: raise HTTPException(status_code=404, detail="Documento no encontrado o ya eliminado.")
-    return {"message": f"El documento '{file_name}' ha sido eliminado."}
+    return {"message": f"El documento '{request.file_name}' ha sido eliminado."}
 
 class UpdateMetadataRequest(BaseModel):
     """Define la estructura de datos para actualizar los metadatos de un documento."""

@@ -278,6 +278,7 @@ class UserDocumentTopic(Base):
 
     name = Column(String(255), nullable=False, comment="El nombre del tema/colección (corresponde al 'topic' en cmetadata).")
     description = Column(Text, nullable=True, comment="Descripción opcional de la colección.")
+    is_global = Column(Boolean, default=False, nullable=False, comment="Indica si esta colección es accesible globalmente (fuera de un workspace/equipo específico).")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
 

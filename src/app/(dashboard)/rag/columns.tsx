@@ -11,6 +11,7 @@ export type Document = {
   title: string | null;
   author: string | null;
   team_shared?: boolean | string; // Indicates if shared with a team, can be boolean or team name/id
+  workspace_id?: string | null; // Añadido para soportar eliminación en workspaces
 };
 
 // La función ahora recibe los handlers para cada acción
