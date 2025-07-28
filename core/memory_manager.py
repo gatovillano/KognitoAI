@@ -214,6 +214,9 @@ USER_DOCUMENTS_PREFIX = "user_documents_"
 
 PGVECTOR_SYNC_ENGINE = create_engine(settings.database_url or "postgresql://postgres:postgres@localhost:5432/postgres")
 
+metadata = MetaData()
+langchain_pg_collection = Table('langchain_pg_collection', metadata, autoload_with=PGVECTOR_SYNC_ENGINE)
+langchain_pg_embedding = Table('langchain_pg_embedding', metadata, autoload_with=PGVECTOR_SYNC_ENGINE)
 
 
 async def create_memory_context(
@@ -809,9 +812,9 @@ async def process_document_for_rag(
         # Si se proporciona workspace_id, la colección será específica de ese workspace.
         # Si no, será una colección de usuario/equipo/global.
         if workspace_id:
-            # Para colecciones de workspace, el nombre de la colección en PGVector será el topic
-            # El topic es el nombre de la colección dentro del workspace.
-            langchain_collection_name = topic # El topic es el nombre de la colección
+            # Para colecciones de workspace, el nombre de la colección en PGVector será una combinación de workspace_id y topic
+            # Esto asegura unicidad para colecciones con el mismo nombre en diferentes workspaces.
+            langchain_collection_name = f"workspace_documents_{workspace_id}_{topic}"
             scope = "workspace"
         elif is_global:
             langchain_collection_name = GLOBAL_COLLECTION_NAME
@@ -1128,10 +1131,13 @@ async def list_user_documents(
                 params["team_id"] = team_id
 
             if workspace_id:
-                # Para workspaces, incluir tanto los documentos específicos del workspace
-                # como los del contexto general (workspace_id IS NULL)
-                clauses.append("(workspace_id = :workspace_id OR workspace_id IS NULL)")
+                # Para workspaces, incluir SOLO los documentos específicos de ese workspace
+                clauses.append("workspace_id = :workspace_id")
                 params["workspace_id"] = workspace_id
+            else:
+                # Si workspace_id es None, significa que estamos en la vista general,
+                # por lo que solo se deben mostrar documentos con workspace_id IS NULL.
+                clauses.append("workspace_id IS NULL")
 
             if topic:
                 clauses.append("topic = :topic")
@@ -1154,8 +1160,8 @@ async def list_user_documents(
                 ORDER BY cmetadata->>'document_id', id;
             """
 
-            logger.info(f"🔧 Query SQL optimizada: {query_str}")
-            logger.info(f"📋 Parámetros: {params}")
+            logger.debug(f"🔧 Query SQL optimizada (final): {query_str}")
+            logger.debug(f"📋 Parámetros (final): {params}")
 
             document_list_query = text(query_str)
             document_list_result = await db.execute(document_list_query, params)
@@ -1436,14 +1442,14 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
             else:
                 # Para contexto general, incluir solo documentos sin workspace_id
                 where_clause_parts.append("workspace_id IS NULL")
-
+    
             final_where_clause = " AND ".join(where_clause_parts)
-
+    
             collections_query = text(
                 f"""
                 SELECT
                     topic AS topic,
-                    COUNT(DISTINCT cmetadata->>'file_name') as document_count
+                    COUNT(DISTINCT cmetadata->>'document_id') as document_count
                 FROM langchain_pg_embedding
                 WHERE {final_where_clause}
                 GROUP BY topic
@@ -1468,9 +1474,7 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
                         "description": None
                     }
             
-            final_collections = list(collections_map.values())
-            logger.info(f"✅ Colecciones finales para la cuenta {account_id}, workspace {workspace_id}: {final_collections}")
-            return final_collections
+            return list(collections_map.values())
             
         except Exception as e:
             logger.error(f"❌ Error listando colecciones (temas) de documentos para la cuenta {account_id}: {e}", exc_info=True)

@@ -192,19 +192,19 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
             variant={pathname === `/chat/${thread.id}` ? "secondary" : "ghost"}
             className={cn(
               "w-full font-normal items-start text-left transition-all duration-200 hover:bg-muted rounded-xl",
-              isCollapsed ? "justify-center h-10 w-10 p-0" : "justify-start h-auto py-2 px-3"
+              isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-8 py-1.5 px-2"
             )}
           >
             <div className="flex items-center">
-              <MessageSquare className={cn("h-4 w-4 mt-1 flex-shrink-0", !isCollapsed && "mr-2")} />
+              <MessageSquare className={cn("h-3.5 w-3.5 flex-shrink-0", !isCollapsed && "mr-1.5")} />
               {!isCollapsed && thread.platform === 'telegram' && (
                 <div title="Telegram">
-                  <Smartphone className="h-3 w-3 text-blue-500 mr-1 mt-1 flex-shrink-0" />
+                  <Smartphone className="h-2.5 w-2.5 text-blue-500 mr-1 flex-shrink-0" />
                 </div>
               )}
             </div>
             {!isCollapsed && (
-              <div className="whitespace-normal break-words flex-grow">
+              <div className="whitespace-normal break-words flex-grow text-xs">
                 <InlineMarkdownRenderer content={thread.title} />
               </div>
             )}
@@ -213,16 +213,16 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <div
-                        className="h-6 w-6 p-0 cursor-pointer flex items-center justify-center"
+                        className="h-5 w-5 p-0 cursor-pointer flex items-center justify-center"
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
                         }}
                       >
-                        <MoreVertical className="h-4 w-4 text-muted-foreground" />
+                        <MoreVertical className="h-3 w-3 text-muted-foreground" />
                       </div>
                     </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuContent align="end" className="w-40 text-xs">
                     <DropdownMenuItem
                       onClick={(e) => {
                         e.preventDefault();
@@ -230,7 +230,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                         isPinned ? handleUnpinThread(thread) : handlePinThread(thread);
                       }}
                     >
-                      <Pin className={cn("h-4 w-4 mr-2", isPinned && "text-primary")} />
+                      <Pin className={cn("h-3.5 w-3.5 mr-1.5", isPinned && "text-primary")} />
                       {isPinned ? "Desfijar" : "Fijar"}
                     </DropdownMenuItem>
                     <DropdownMenuItem
@@ -243,11 +243,11 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                           if (newTitle) {
                             const updatedThread = { ...thread, title: newTitle };
                             if (isPinned) {
-                              setPinnedThreads((prev) => 
+                              setPinnedThreads((prev) =>
                                 prev.map(t => t.id === thread.id ? updatedThread : t)
                               );
                             } else {
-                              setThreads((prev) => 
+                              setThreads((prev) =>
                                 prev.map(t => t.id === thread.id ? updatedThread : t)
                               );
                             }
@@ -257,7 +257,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                         }
                       }}
                     >
-                      <Sparkles className="h-4 w-4 mr-2 text-yellow-500" />
+                      <Sparkles className="h-3.5 w-3.5 mr-1.5 text-yellow-500" />
                       <span>Nombrar</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
@@ -311,9 +311,9 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
             onClick={handleNewChat}
             variant="ghost"
             size="icon"
-            className="hover:bg-primary/10 hover:text-primary rounded-xl transition-all duration-200"
+            className="h-8 w-8 hover:bg-primary/10 hover:text-primary rounded-xl transition-all duration-200"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-3.5 w-3.5" />
           </Button>
         )}
       </div>
@@ -326,18 +326,31 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Herramientas</p>
           </div>
         )}
-        <nav className="space-y-2 w-full">
+        <nav className="space-y-1 w-full">
+          <Link href="/chat" passHref onClick={onLinkClick} title="Chat">
+            <Button
+              variant={pathname?.startsWith('/chat') ? 'secondary' : 'ghost'}
+              className={cn(
+                "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
+                pathname?.startsWith('/chat') && "bg-primary/10 text-primary border border-primary/20"
+              )}
+            >
+              <MessageSquare className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
+              {!isCollapsed && <span className="text-xs font-medium">Chat</span>}
+            </Button>
+          </Link>
           <Link href="/dashboard" passHref onClick={onLinkClick} title="Escritorio">
             <Button
               variant={pathname?.startsWith('/dashboard') ? 'secondary' : 'ghost'}
               className={cn(
                 "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
-                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
+                isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
                 pathname?.startsWith('/dashboard') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
-              <Bot className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Escritorio</span>}
+              <Bot className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
+              {!isCollapsed && <span className="text-xs font-medium">Escritorio</span>}
             </Button>
           </Link>
           <Link href="/rag" passHref onClick={onLinkClick} title="Gestión de Conocimientos">
@@ -345,12 +358,12 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               variant={pathname?.startsWith('/rag') ? 'secondary' : 'ghost'}
               className={cn(
                 "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
-                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
+                isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
                 pathname?.startsWith('/rag') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
-              <BookMarked className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Conocimientos</span>}
+              <BookMarked className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
+              {!isCollapsed && <span className="text-xs font-medium">Conocimientos</span>}
             </Button>
           </Link>
           <Link href="/agenda" passHref onClick={onLinkClick} title="Agenda">
@@ -358,12 +371,12 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               variant={pathname?.startsWith('/agenda') ? 'secondary' : 'ghost'}
               className={cn(
                 "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
-                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
+                isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
                 pathname?.startsWith('/agenda') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
-              <Calendar className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Agenda</span>}
+              <Calendar className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
+              {!isCollapsed && <span className="text-xs font-medium">Agenda</span>}
             </Button>
           </Link>
           <Link href="/notes" passHref onClick={onLinkClick} title="Notas">
@@ -371,12 +384,12 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               variant={pathname?.startsWith('/notes') ? 'secondary' : 'ghost'}
               className={cn(
                 "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
-                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
+                isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
                 pathname?.startsWith('/notes') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
-              <Notebook className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Notas</span>}
+              <Notebook className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
+              {!isCollapsed && <span className="text-xs font-medium">Notas</span>}
             </Button>
           </Link>
           <Link href="/analysis" passHref onClick={onLinkClick} title="Análisis">
@@ -384,12 +397,12 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               variant={pathname?.startsWith('/analysis') ? 'secondary' : 'ghost'}
               className={cn(
                 "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
-                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
+                isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
                 pathname?.startsWith('/analysis') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
-              <BarChart3 className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Análisis</span>}
+              <BarChart3 className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
+              {!isCollapsed && <span className="text-xs font-medium">Análisis</span>}
             </Button>
           </Link>
           <Link href="/teams" passHref onClick={onLinkClick} title="Equipos">
@@ -397,12 +410,12 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               variant={pathname?.startsWith('/teams') ? 'secondary' : 'ghost'}
               className={cn(
                 "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
-                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
+                isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
                 pathname?.startsWith('/teams') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
-              <Users className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Equipos</span>}
+              <Users className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
+              {!isCollapsed && <span className="text-xs font-medium">Equipos</span>}
             </Button>
           </Link>
           <Link href="/workspaces" passHref onClick={onLinkClick} title="Workspaces">
@@ -410,25 +423,12 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               variant={pathname?.startsWith('/workspaces') ? 'secondary' : 'ghost'}
               className={cn(
                 "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
-                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
+                isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
                 pathname?.startsWith('/workspaces') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
-              <Bot className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Workspaces</span>}
-            </Button>
-          </Link>
-          <Link href="/chat" passHref onClick={onLinkClick} title="Chat">
-            <Button
-              variant={pathname?.startsWith('/chat') ? 'secondary' : 'ghost'}
-              className={cn(
-                "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
-                isCollapsed ? "justify-center h-12 w-12 p-0" : "justify-start h-12 px-4",
-                pathname?.startsWith('/chat') && "bg-primary/10 text-primary border border-primary/20"
-              )}
-            >
-              <MessageSquare className={cn("h-5 w-5 transition-transform group-hover:scale-110", !isCollapsed && "mr-3")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Chat</span>}
+              <Bot className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
+              {!isCollapsed && <span className="text-xs font-medium">Workspaces</span>}
             </Button>
           </Link>
         </nav>
@@ -441,32 +441,32 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-6 w-6 p-0 rounded-full hover:bg-muted">
-                    <MoreVertical className="h-4 w-4 text-muted-foreground" />
+                  <Button variant="ghost" size="icon" className="h-5 w-5 p-0 rounded-full hover:bg-muted">
+                    <MoreVertical className="h-3.5 w-3.5 text-muted-foreground" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align="end" className="text-xs">
                   <DropdownMenuItem onClick={handleRenameAllThreads}>
-                    <Sparkles className="mr-2 h-4 w-4 text-yellow-500" />
+                    <Sparkles className="mr-1.5 h-3.5 w-3.5 text-yellow-500" />
                     <span>Nombrar todos</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
-            <div className="px-2 space-y-3">
+            <div className="px-2 space-y-1.5">
               <input
                 type="text"
                 placeholder="Buscar conversaciones..."
                 value={searchTerm}
                 onChange={handleSearchChange}
-                className="w-full p-3 rounded-xl bg-muted/50 border border-border/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 text-sm text-foreground placeholder:text-muted-foreground transition-all duration-200"
+                className="w-full py-1.5 px-3 text-xs rounded-full bg-muted/50 border border-border/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 text-foreground placeholder:text-muted-foreground transition-all duration-200"
               />
-              <div className="flex gap-1">
+              <div className="flex gap-0.5">
                 <Button
                   variant={platformFilter === 'all' ? 'secondary' : 'ghost'}
                   size="sm"
                   onClick={() => setPlatformFilter('all')}
-                  className="flex-1 text-xs h-8"
+                  className="flex-1 text-xs h-7"
                 >
                   Todos
                 </Button>
@@ -474,7 +474,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                   variant={platformFilter === 'web' ? 'secondary' : 'ghost'}
                   size="sm"
                   onClick={() => setPlatformFilter('web')}
-                  className="flex-1 text-xs h-8"
+                  className="flex-1 text-xs h-7"
                 >
                   Web
                 </Button>
@@ -482,7 +482,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                   variant={platformFilter === 'telegram' ? 'secondary' : 'ghost'}
                   size="sm"
                   onClick={() => setPlatformFilter('telegram')}
-                  className="flex-1 text-xs h-8 flex items-center gap-1"
+                  className="flex-1 text-xs h-7 flex items-center gap-0.5"
                 >
                   <Smartphone className="h-3 w-3" />
                   Telegram
@@ -492,8 +492,8 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           </div>
         )}
         {isCollapsed && (
-          <Button onClick={handleNewChat} variant="ghost" size="icon" className="mb-4 rounded-full hover:bg-muted" title="Nuevo Chat">
-            <Plus className="h-4 w-4" />
+          <Button onClick={handleNewChat} variant="ghost" size="icon" className="mb-2 h-7 w-7 rounded-full hover:bg-muted" title="Nuevo Chat">
+            <Plus className="h-3 w-3" />
           </Button>
         )}
       </div>
@@ -516,7 +516,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           {!isCollapsed && !isPinnedCollapsed && (
             <DropArea onDrop={(thread, isPinned) => !isPinned && handlePinThread(thread)}>
               {filteredPinnedThreadsBySearch.length > 0 ? (
-                <div className="space-y-1">
+                <div className="space-y-2">
                   {filteredPinnedThreadsBySearch.map((thread) => (
                     <ThreadItem key={thread.id} thread={thread} isPinned={true} />
                   ))}
@@ -545,7 +545,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           )}
           {!isRecentCollapsed && (
             <DropArea onDrop={(thread, isPinned) => isPinned && handleUnpinThread(thread)}>
-              <div className="space-y-1">
+              <div className="space-y-2">
                 {filteredThreadsBySearch.map((thread) => (
                   <ThreadItem key={thread.id} thread={thread} isPinned={false} />
                 ))}
@@ -556,28 +556,28 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
       </ScrollArea>
 
       {/* Usuario */}
-      <div className={cn("mt-auto w-full pt-6 border-t border-border/50", isCollapsed && "flex flex-col items-center")}>
+      <div className={cn("mt-auto w-full pt-4 border-t border-border/50", isCollapsed && "flex flex-col items-center")}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
               className={cn(
-                "w-full h-auto py-4 transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
-                isCollapsed ? "h-12 w-12 p-0" : "justify-start gap-3"
+                "w-full h-auto py-2 transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                isCollapsed ? "h-10 w-10 p-0" : "justify-start gap-2"
               )}
             >
               <div className="relative">
-                <Avatar className="h-10 w-10 border-2 border-primary/20">
+                <Avatar className="h-8 w-8 border-2 border-primary/20">
                   <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />
-                  <AvatarFallback className="bg-primary text-primary-foreground font-semibold text-sm">
+                  <AvatarFallback className="bg-primary text-primary-foreground font-semibold text-xs">
                     {user?.username?.slice(0, 2).toUpperCase() || "KA"}
                   </AvatarFallback>
                 </Avatar>
-                <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-background"></div>
+                <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-background"></div>
               </div>
               {!isCollapsed && (
                 <div className="flex flex-col items-start overflow-hidden flex-1">
-                  <span className="font-semibold text-sm truncate w-full text-left text-foreground group-hover:text-primary transition-colors">
+                  <span className="font-semibold text-xs truncate w-full text-left text-foreground group-hover:text-primary transition-colors">
                     {user?.username || "Usuario"}
                   </span>
                   <span className="text-xs text-muted-foreground truncate w-full text-left">
@@ -585,27 +585,27 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                   </span>
                 </div>
               )}
-              {!isCollapsed && <Settings className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />}
+              {!isCollapsed && <Settings className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary transition-colors" />}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuContent align="end" className="w-52 text-sm">
             <div className="flex items-center justify-start gap-2 p-2">
-              <div className="flex flex-col space-y-1 leading-none">
-                {user?.username && <p className="font-medium">{user.username}</p>}
-                {user?.email && <p className="w-[200px] truncate text-sm text-muted-foreground">{user.email}</p>}
+              <div className="flex flex-col space-y-0.5 leading-none">
+                {user?.username && <p className="font-medium text-sm">{user.username}</p>}
+                {user?.email && <p className="w-[180px] truncate text-xs text-muted-foreground">{user.email}</p>}
               </div>
             </div>
             <DropdownMenuSeparator />
             {user?.is_admin && (
               <DropdownMenuItem asChild>
                 <Link href="/admin" onClick={onLinkClick}>
-                  <Users className="mr-2 h-4 w-4" />
+                  <Users className="mr-1.5 h-3.5 w-3.5" />
                   <span>Administración</span>
                 </Link>
               </DropdownMenuItem>
             )}
             <DropdownMenuItem onClick={logout}>
-              <LogOut className="mr-2 h-4 w-4" />
+              <LogOut className="mr-1.5 h-3.5 w-3.5" />
               <span>Cerrar Sesión</span>
             </DropdownMenuItem>
           </DropdownMenuContent>

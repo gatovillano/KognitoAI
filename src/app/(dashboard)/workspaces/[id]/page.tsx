@@ -82,7 +82,7 @@ export default function WorkspaceDashboard() {
         setChatMessages(messagesMap);
 
         // Obtener colecciones asociadas con el workspace
-        const collectionsResponse = await apiClient.get(`/api/workspaces/${workspaceId}/collections`);
+        const collectionsResponse = await apiClient.get(`/api/collections?workspace_id=${workspaceId}`);
         setCollections(collectionsResponse.data);
       } catch (error) {
         console.error('Error fetching workspace data:', error);
@@ -192,7 +192,9 @@ export default function WorkspaceDashboard() {
   };
 
   const handleCollectionClick = (collectionId: string) => {
-    router.push(`/workspaces/${workspaceId}/collections/${collectionId}`);
+    // Asegurarse de que el collectionId esté codificado para la URL
+    const encodedCollectionId = encodeURIComponent(collectionId);
+    router.push(`/workspaces/${workspaceId}/collections/${encodedCollectionId}`);
   };
 
   const handleCloseCollectionDialog = () => {
@@ -347,39 +349,72 @@ export default function WorkspaceDashboard() {
   };
 
   const handleRenameCollection = async () => {
-    if (selectedCollection && newCollectionTitle) {
-      try {
-        await apiClient.put(`/api/workspaces/${workspaceId}/collections/${selectedCollection.id}`, { 
-          title: newCollectionTitle, 
-          description: newCollectionDescription 
-        });
-        setCollections((prevCollections) =>
-          prevCollections.map((col) =>
-            col.id === selectedCollection.id ? { ...col, title: newCollectionTitle, description: newCollectionDescription } : col
-          )
-        );
-      } catch (error) {
-        console.error('Error al renombrar la colección:', error);
-        alert('Error al renombrar la colección.');
-      } finally {
-        handleCloseRenameCollectionDialog();
-      }
-    } else {
+  if (selectedCollection && newCollectionTitle) {
+    // Asegurarse de que el collectionIdentifier tenga un valor válido
+    const collectionIdentifier = encodeURIComponent(selectedCollection.topic || selectedCollection.title || selectedCollection.id || '');
+    if (!collectionIdentifier) {
+      console.error('DEBUG (Frontend): collectionIdentifier es nulo o vacío para renombrar.');
+      alert('No se pudo identificar la colección para renombrar.');
+      handleCloseRenameCollectionDialog();
+      return;
+    }
+    const url = `/api/collections/${collectionIdentifier}?workspace_id=${workspaceId}`;
+    const data = {
+      topic: newCollectionTitle,
+      description: newCollectionDescription
+    };
+    console.log('DEBUG (Frontend): Renaming collection PUT request URL:', url);
+    console.log('DEBUG (Frontend): Renaming collection PUT request data:', data);
+    console.log('DEBUG (Frontend): Selected collection for rename:', selectedCollection);
+    try {
+      await apiClient.put(url, data);
+      setCollections((prevCollections) =>
+        prevCollections.map((col) =>
+          col.id === selectedCollection.id ? { ...col, title: newCollectionTitle, name: newCollectionTitle, description: newCollectionDescription, topic: newCollectionTitle } : col
+        )
+      );
+    } catch (error) {
+      console.error('Error al renombrar la colección:', error);
+      alert('Error al renombrar la colección.');
+    } finally {
       handleCloseRenameCollectionDialog();
     }
-  };
+  } else {
+    handleCloseRenameCollectionDialog();
+  }
+};
 
-  const handleDeleteCollection = async (collectionId: string) => {
-    if (confirm('¿Estás seguro de que deseas eliminar esta colección? Esta acción no se puede deshacer.')) {
-      try {
-        await apiClient.delete(`/api/workspaces/${workspaceId}/collections/${collectionId}`);
-        setCollections((prevCollections) => prevCollections.filter((col) => col.id !== collectionId));
-      } catch (error) {
-        console.error('Error al eliminar la colección:', error);
-        alert('Error al eliminar la colección.');
+const handleDeleteCollection = async (collectionId: string) => {
+  if (confirm('¿Estás seguro de que deseas eliminar esta colección? Esta acción no se puede deshacer.')) {
+    try {
+      const collectionToDelete = collections.find(col => col.id === collectionId);
+      if (collectionToDelete) {
+        // Asegurarse de que el collectionIdentifier tenga un valor válido
+        const collectionIdentifier = encodeURIComponent(collectionToDelete.topic || collectionToDelete.title || collectionToDelete.id || '');
+        if (!collectionIdentifier) {
+          console.error('DEBUG (Frontend): collectionIdentifier es nulo o vacío para eliminar.');
+          alert('No se pudo identificar la colección para eliminar.');
+          return;
+        }
+        const url = `/api/collections/${collectionIdentifier}?workspace_id=${workspaceId}`;
+        console.log('DEBUG (Frontend): Deleting collection DELETE request URL:', url);
+        console.log('DEBUG (Frontend): Collection to delete:', collectionToDelete);
+        try {
+          await apiClient.delete(url);
+          setCollections((prevCollections) => prevCollections.filter((col) => col.id !== collectionId));
+        } catch (error) {
+          console.error('Error al eliminar la colección:', error);
+          alert('Error al eliminar la colección.');
+        }
+      } else {
+        alert('Colección no encontrada para eliminar.');
       }
+    } catch (error) {
+      console.error('Error general al eliminar la colección:', error);
+      alert('Error general al eliminar la colección.');
     }
-  };
+  }
+};
 
   if (loading) {
     return (

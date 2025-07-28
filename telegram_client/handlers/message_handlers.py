@@ -371,7 +371,7 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
             api_payload["thread_id"] = str(uuid.uuid4())
         
         # 4. Realizar la llamada a la API del agente.
-        chat_api_url = f"{API_BASE_URL}/api/chat"
+        chat_api_url = f"{API_BASE_URL}/api/chat/stream" # Cambiado a endpoint de streaming
         # Obtener token JWT para el usuario (si no existe en chat_data, solicitarlo)
         jwt_token = context.chat_data.get("jwt_token")
         if not jwt_token:
@@ -399,17 +399,50 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
                 await update.message.reply_text("No se pudo autenticar tu sesión. Intenta de nuevo más tarde.")
                 return None
         headers = {"Authorization": f"Bearer {jwt_token}"}
-        async with httpx.AsyncClient() as client:
-            response = await client.post(chat_api_url, json=api_payload, headers=headers, timeout=300.0)
-            response.raise_for_status()
         
-        api_response = response.json()
-        response_text = api_response.get("response_text", "No recibí una respuesta válida del servidor.")
-
-        # 5. Pasar la respuesta a la función que la envía al usuario.
-        # Antes de enviar la respuesta, esperar un breve momento para permitir que la imagen se almacene en user_data.
-        await asyncio.sleep(2)  # Esperar 2 segundos para que la API de almacenamiento de imagen complete.
-        await handle_chat_response(update, context, response_text)
+        full_response_content = ""
+        async with httpx.AsyncClient(timeout=None) as client: # Timeout ilimitado para streaming
+            async with client.stream("POST", chat_api_url, json=api_payload, headers=headers) as response:
+                response.raise_for_status()
+                async for chunk_bytes in response.aiter_bytes():
+                    chunk_str = chunk_bytes.decode("utf-8")
+                    # Los chunks pueden venir con 'data: ' al principio y '}\n\n' al final
+                    if chunk_str.startswith("data: "):
+                        chunk_str = chunk_str[len("data: "):].strip()
+                    if chunk_str.endswith("}\n\n"):
+                        chunk_str = chunk_str[:-len("\n\n")]
+                    
+                    try:
+                        chunk_data = json.loads(chunk_str)
+                        if chunk_data.get("type") == "chunk":
+                            content = chunk_data.get("content", "")
+                            full_response_content += content
+                            # Puedes enviar chunks parciales a Telegram si quieres un efecto de "typing"
+                            # Por ahora, acumulamos y enviamos al final.
+                            # await handle_chat_response(update, context, content) # Si quieres streaming en Telegram
+                        elif chunk_data.get("type") == "done":
+                            # El mensaje "Respuesta completada" viene aquí. No lo enviamos al usuario.
+                            # Solo usamos esto como señal de finalización.
+                            logger.info("Stream de respuesta completado por el agente.")
+                            break # Salir del bucle de streaming
+                        elif chunk_data.get("type") == "error":
+                            error_message = chunk_data.get("message", "Error desconocido en el stream.")
+                            logger.error(f"Error en el stream del agente: {error_message}")
+                            await update.message.reply_text(f"Hubo un error en la respuesta del agente: {error_message}")
+                            return None
+                    except json.JSONDecodeError as de:
+                        logger.warning(f"Error decodificando chunk JSON: {de}. Chunk: {chunk_str}")
+                        # Esto puede ocurrir si los chunks no están bien formados o se reciben fragmentos.
+                        # Podemos acumular y reintentar parsear si es necesario.
+                        continue
+                    except Exception as e:
+                        logger.error(f"Error inesperado procesando chunk de stream: {e}", exc_info=True)
+                        await update.message.reply_text("Ocurrió un error inesperado al procesar la respuesta.")
+                        return None
+        
+        # 5. Pasar la respuesta acumulada a la función que la envía al usuario.
+        # Ya no necesitamos esperar 2 segundos aquí, ya que el stream ya terminó.
+        await handle_chat_response(update, context, full_response_content)
 
     except httpx.HTTPStatusError as e:
         account_id_log = str(account.id) if account else "Desconocida"

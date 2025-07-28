@@ -28,12 +28,13 @@ const formSchema = z.object({
 interface UploadDocumentDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  onUploadSuccess: () => void;
+  onUploadSuccess: (fileNames: string[], topic: string) => void;
+  onUploadStart: (fileNames: string[], topic: string) => void; // Nueva prop
   defaultTopic?: string;
   workspaceId?: string;
 }
 
-export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, defaultTopic, workspaceId }: UploadDocumentDialogProps) {
+export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, onUploadStart, defaultTopic, workspaceId }: UploadDocumentDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
@@ -64,6 +65,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, de
     formData.append('topic', topicForUpload);
     if (workspaceId) {
       formData.append('workspace_id', workspaceId);
+    console.log("Frontend: workspaceId = " + workspaceId);
     }
     for (let i = 0; i < values.files.length; i++) {
       formData.append('files', values.files[i]);
@@ -75,6 +77,9 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, de
       id: 'upload-progress'
     });
 
+    // Obtener los nombres de los archivos para pasarlos al indicador de progreso
+    const fileNames = Array.from(values.files).map(file => file.name);
+    onUploadStart(fileNames, topicForUpload); // Notificar el inicio de la carga
     onOpenChange(false); // Cerrar el diálogo inmediatamente para permitir interacción
 
     try {
@@ -86,7 +91,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, de
       toast.success('¡Documentos subidos con éxito!', {
         id: 'upload-progress'
       });
-      onUploadSuccess();
+      onUploadSuccess(fileNames, topicForUpload);
       form.reset();
     } catch (error) {
       toast.error('Error al subir documentos', {

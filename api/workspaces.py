@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, AsyncGenerator, cast
 from urllib.parse import unquote
 
-from fastapi import APIRouter, HTTPException, Depends, status, Query, Form
+from fastapi import APIRouter, HTTPException, Depends, status, Query, Form, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -17,7 +17,7 @@ from core.agent import create_thread_for_account, force_update_thread_title
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain_core.messages import HumanMessage, AIMessage
 from core.config import settings
-from core.memory_manager import list_user_collections, list_user_documents
+from core.memory_manager import list_user_collections, list_user_documents, process_document_for_rag # Importar process_document_for_rag
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -107,6 +107,8 @@ class CollectionResponse(BaseModel):
 
 class CollectionCreateRequest(BaseModel):
     topic: str
+    description: Optional[str] = None
+    workspaceId: Optional[str] = None # Añadido para recibir el workspaceId del frontend
 
 class DocumentToCollectionRequest(BaseModel):
     document_id: str
@@ -123,11 +125,13 @@ class DocumentResponse(BaseModel):
 # --- Endpoints para Colecciones ---
 @router.get("/collections/{collection_id}", response_model=CollectionResponse, summary="Obtener detalles de una colección")
 async def get_collection_details(collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
+    logger.info(f"API: get_collection_details - collection_id: {collection_id}, account_id: {current_account_id}, workspace_id: {workspace_id}")
     
     decoded_collection_id = unquote(collection_id)
+    logger.info(f"API: get_collection_details - decoded_collection_id: {decoded_collection_id}")
     
     collections = await list_user_collections(account_id=current_account_id, workspace_id=workspace_id)
-    logger.info(f"Buscando colección '{decoded_collection_id}' en {len(collections)} colecciones para workspace: {workspace_id}.")
+    logger.info(f"API: get_collection_details - collections found: {len(collections)}")
     
     collection = None
     for c in collections:
@@ -136,52 +140,213 @@ async def get_collection_details(collection_id: str, current_account_id: str = D
             break
             
     if not collection:
-        logger.warning(f"Colección '{decoded_collection_id}' no encontrada. Colecciones disponibles: {[c.get('topic') for c in collections]}")
+        logger.warning(f"API: get_collection_details - Colección '{decoded_collection_id}' no encontrada.")
+        logger.warning(f"API: get_collection_details - Colección '{decoded_collection_id}' no encontrada para la cuenta {current_account_id} y workspace {workspace_id}.")
         raise HTTPException(status_code=404, detail=f"Colección '{decoded_collection_id}' no encontrada.")
-        
+    
+    logger.info(f"API: get_collection_details - Returning collection: {collection}")
     return CollectionResponse(id=collection['topic'], name=collection['topic'], document_count=collection['document_count'])
  
 @router.get("/collections/{collection_id}/documents", response_model=List[DocumentResponse], summary="Listar documentos de una colección")
 async def list_collection_documents(collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
- 
+    logger.info(f"API: list_collection_documents - collection_id: {collection_id}, account_id: {current_account_id}, workspace_id: {workspace_id}")
     try:
         decoded_collection_id = unquote(collection_id)
-        logger.info(f"Listando documentos de la colección '{decoded_collection_id}' para workspace: {workspace_id}")
+        logger.info(f"API: list_collection_documents - decoded_collection_id: {decoded_collection_id}")
  
         documents = await list_user_documents(account_id=current_account_id, workspace_id=workspace_id, topic=decoded_collection_id)
+        logger.info(f"API: list_collection_documents - documents found: {len(documents)}")
         return [DocumentResponse(**doc) for doc in documents]
     except Exception as e:
-        logger.error(f"Error listando documentos de la colección '{collection_id}' para workspace {workspace_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error al obtener documentos de la colección '{collection_id}'.")
+        logger.error(f"API: Error listando documentos de la colección '{collection_id}' para workspace {workspace_id}: {e}", exc_info=True)
+        # En lugar de 500, devolver una lista vacía si no hay documentos
+        return []
 @router.get("/collections", response_model=List[CollectionResponse], summary="Listar colecciones del usuario")
 async def list_collections(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
-    
+    logger.info(f"API: list_collections - Listando colecciones para account_id: {current_account_id}, workspace_id recibido: {workspace_id}")
     collections = await list_user_collections(account_id=current_account_id, workspace_id=workspace_id)
+    logger.info(f"API: list_collections - Collections retrieved from memory_manager: {collections}")
     return [CollectionResponse(id=c['topic'], name=c['topic'], document_count=c['document_count']) for c in collections]
  
 @router.post("/collections", status_code=status.HTTP_201_CREATED, summary="Crear una nueva colección")
-async def create_collection(request: CollectionCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
-    logger.info(f"Petición para crear colección: {request.topic}, workspace: {workspace_id}, account: {current_account_id}")
-    return {"message": f"Colección '{request.topic}' lista para ser usada."}
+async def create_collection(request: CollectionCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)): # Eliminado Query(None) para workspace_id
+    logger.info(f"API: create_collection - Petición para crear colección: {request.topic}, description: {request.description}, workspaceId: {request.workspaceId}, account: {current_account_id}")
+    from core.memory_manager import create_empty_collection
+    success = await create_empty_collection(
+        account_id=current_account_id,
+        topic_name=request.topic,
+        description=request.description,
+        workspace_id=request.workspaceId
+    )
+    if not success:
+        logger.error(f"API: create_collection - No se pudo crear la colección o ya existe: {request.topic}")
+        raise HTTPException(status_code=400, detail="No se pudo crear la colección o ya existe.")
+    logger.info(f"API: create_collection - Colección '{request.topic}' creada y asociada al workspace {request.workspaceId if request.workspaceId else 'global'} con éxito.")
+    return {"message": f"Colección '{request.topic}' creada y lista para ser usada en el workspace {request.workspaceId if request.workspaceId else 'global'}."}
  
 @router.post("/collections/{collection_id}/associate", status_code=status.HTTP_200_OK, summary="Asociar una colección existente a un workspace")
 async def associate_collection_to_workspace(collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
+    logger.info(f"API: associate_collection_to_workspace - collection_id: {collection_id}, account_id: {current_account_id}, workspace_id: {workspace_id}")
     from core.memory_manager import update_collection_workspace
     
     if not workspace_id:
+        logger.error("API: associate_collection_to_workspace - Se requiere un workspace_id para asociar una colección.")
         raise HTTPException(status_code=400, detail="Se requiere un workspace_id para asociar una colección.")
     
     decoded_collection_id = unquote(collection_id)
+    logger.info(f"API: associate_collection_to_workspace - decoded_collection_id: {decoded_collection_id}")
     success = await update_collection_workspace(current_account_id, decoded_collection_id, workspace_id)
     if not success:
+        logger.error(f"API: associate_collection_to_workspace - Colección no encontrada o no se pudo asociar al workspace: {decoded_collection_id}")
         raise HTTPException(status_code=404, detail="Colección no encontrada o no se pudo asociar al workspace.")
     
+    logger.info(f"API: associate_collection_to_workspace - Colección '{decoded_collection_id}' asociada al workspace con éxito.")
     return {"message": f"Colección '{decoded_collection_id}' asociada al workspace con éxito.", "id": decoded_collection_id, "workspace_id": workspace_id}
  
 @router.post("/collections/{topic}/documents", status_code=status.HTTP_201_CREATED, summary="Añadir un documento a una colección")
-async def add_document_to_collection(topic: str, request: DocumentToCollectionRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
+async def add_document_to_collection(
+    topic: str,
+    file: UploadFile = File(...),
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+    workspace_id: Optional[str] = Query(None)
+):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="El nombre del archivo no puede estar vacío.")
+
+    logger.info(f"API: add_document_to_collection - topic: {topic}, file_name: {file.filename}, account_id: {current_account_id}, workspace_id: {workspace_id}")
     
-    return {"message": f"Documento {request.document_id} añadido a la colección '{topic}'."}
+    # Decodificar el topic si viene codificado en la URL
+    decoded_topic = unquote(topic)
+
+    # Leer el contenido del archivo
+    file_content = await file.read()
+    
+    # Llamar a la función de procesamiento de documentos
+    await process_document_for_rag(
+        file_name=file.filename,
+        extracted_text=file_content.decode('utf-8'), # Asumimos UTF-8, ajustar si es necesario
+        account_id=current_account_id,
+        topic=decoded_topic,
+        workspace_id=workspace_id
+    )
+    logger.info(f"Documento '{file.filename}' subido y procesado exitosamente en la colección '{decoded_topic}' para el workspace '{workspace_id}'.")
+    return {"message": f"Documento {file.filename} añadido a la colección '{decoded_topic}'."}
+
+@router.put("/collections/{collection_id}", response_model=CollectionResponse, summary="Actualizar metadatos de una colección (renombrar)")
+async def update_collection(
+    collection_id: str,
+    request: CollectionCreateRequest, # Reutilizar para new_topic y description
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+    workspace_id: Optional[str] = Query(None)
+):
+    from core.memory_manager import update_collection_metadata
+    
+    decoded_collection_id = unquote(collection_id)
+    
+    success = await update_collection_metadata(
+        account_id=current_account_id,
+        old_topic_name=decoded_collection_id,
+        new_topic_name=request.topic,
+        new_description=request.description,
+        workspace_id=workspace_id
+    )
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Colección no encontrada o no se pudo actualizar.")
+        
+    # Devolver la información actualizada de la colección
+    collections = await list_user_collections(account_id=current_account_id, workspace_id=workspace_id)
+    collection = next((c for c in collections if c.get('topic') == request.topic), None)
+    
+    if not collection:
+        raise HTTPException(status_code=500, detail="Error al recuperar la colección actualizada.")
+        
+    return CollectionResponse(id=collection['topic'], name=collection['topic'], document_count=collection['document_count'])
+
+@router.delete("/collections/{collection_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Eliminar una colección")
+async def delete_collection(
+    collection_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+    workspace_id: Optional[str] = Query(None)
+):
+    from core.memory_manager import delete_collection
+    
+    decoded_collection_id = unquote(collection_id)
+    
+    success = await delete_collection(
+        account_id=current_account_id,
+        topic_name=decoded_collection_id,
+        workspace_id=workspace_id
+    )
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Colección no encontrada o no se pudo eliminar.")
+    
+    return
+
+@router.put("/collections/{collection_id}", summary="Actualizar metadatos de una colección")
+async def update_collection_api(
+    collection_id: str,
+    request: CollectionCreateRequest, # Reutilizamos CollectionCreateRequest para nombre y descripción
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+    workspace_id: Optional[str] = Query(None)
+):
+    logger.info(f"PUT /collections/{collection_id} - Petición recibida. decoded_collection_id='{unquote(collection_id)}', workspace_id='{workspace_id}', new_topic_name='{request.topic}', new_description='{request.description}'")
+    from core.memory_manager import update_collection_metadata
+    decoded_collection_id = unquote(collection_id)
+    
+    success = await update_collection_metadata(
+        account_id=current_account_id,
+        old_topic_name=decoded_collection_id,
+        new_topic_name=request.topic,
+        new_description=request.description,
+        workspace_id=workspace_id
+    )
+    logger.info(f"PUT /collections/{collection_id} - Resultado de update_collection_metadata: {success}")
+    if not success:
+        logger.warning(f"PUT /collections/{collection_id} - Falló la actualización. Colección no encontrada o no se pudo actualizar.")
+        raise HTTPException(status_code=404, detail="Colección no encontrada o no se pudo actualizar.")
+    
+    logger.info(f"PUT /collections/{collection_id} - Colección actualizada con éxito.")
+    # Devolver la información actualizada de la colección si la operación fue exitosa
+    # Esto asegura que el frontend pueda actualizar su estado correctamente.
+    collections = await list_user_collections(account_id=current_account_id, workspace_id=workspace_id)
+    collection = next((c for c in collections if c.get('topic') == request.topic), None)
+    
+    if not collection:
+        logger.error(f"PUT /collections/{collection_id} - Error al recuperar la colección actualizada después de la actualización exitosa.")
+        raise HTTPException(status_code=500, detail="Error al recuperar la colección actualizada.")
+        
+    return CollectionResponse(id=collection['topic'], name=collection['topic'], document_count=collection['document_count'])
+
+
+@router.delete("/collections/{collection_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Eliminar una colección")
+async def delete_collection_api(
+    collection_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+    workspace_id: Optional[str] = Query(None)
+):
+    logger.info(f"DELETE /collections/{collection_id} - Petición recibida. decoded_collection_id='{unquote(collection_id)}', workspace_id='{workspace_id}'")
+    from core.memory_manager import delete_collection
+    decoded_collection_id = unquote(collection_id)
+    
+    success = await delete_collection(
+        account_id=current_account_id,
+        topic_name=decoded_collection_id,
+        workspace_id=workspace_id
+    )
+    logger.info(f"DELETE /collections/{collection_id} - Resultado de delete_collection: {success}")
+    if not success:
+        logger.warning(f"DELETE /collections/{collection_id} - Falló la eliminación. Colección no encontrada o no se pudo eliminar.")
+        raise HTTPException(status_code=404, detail="Colección no encontrada o no se pudo eliminar.")
+    
+    logger.info(f"DELETE /collections/{collection_id} - Colección eliminada con éxito.")
+    return # Retorna 204 No Content por defecto si no hay HTTPException
 
 # --- Modelos Pydantic para Hilos de Chat ---
 class ThreadResponse(BaseModel):

@@ -25,6 +25,7 @@ from utils.ascii_logo import print_startup_logo
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+logger.propagate = False # Evitar la duplicación de logs del logger principal
 
 # Configurar logging detallado para LangChain y componentes del LLM
 from utils.llm_logging_config import setup_llm_detailed_logging, create_llm_log_filename, enable_verbose_langchain_logging, disable_noisy_loggers
