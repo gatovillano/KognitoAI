@@ -45,12 +45,10 @@ interface ThreadDetails {
   id: string;
   title: string;
   workspace_id?: string;
-  system_prompt?: string; // Añadir esta línea
 }
 
 interface CommonChatProps {
   threadId: string;
-  systemPrompt?: string;
 }
 
 // Nuevo componente de indicador de carga con animación de escritura
@@ -136,10 +134,9 @@ function LoadingIndicator({
   );
 }
 
-export function CommonChat({ threadId, systemPrompt: initialSystemPrompt }: CommonChatProps) {
+export function CommonChat({ threadId }: CommonChatProps) {
   const { user, token } = useAuth();
   const [threadDetails, setThreadDetails] = useState<ThreadDetails | null>(null);
-  const [systemPrompt, setSystemPrompt] = useState<string | undefined>(initialSystemPrompt);
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isResponding, setIsResponding] = useState(false);
@@ -223,7 +220,7 @@ export function CommonChat({ threadId, systemPrompt: initialSystemPrompt }: Comm
   }, [user, threadId]);
 
   const handleStreamingResponse = useCallback(
-    async (requestData: any, userMessage: ChatMessageType, signal?: AbortSignal, systemPrompt?: string) => {
+    async (requestData: any, userMessage: ChatMessageType, signal?: AbortSignal) => {
       // Crear mensaje AI inicial vacío
       const initialAiMessage = {
         text: '',
@@ -320,7 +317,7 @@ export function CommonChat({ threadId, systemPrompt: initialSystemPrompt }: Comm
         throw error;
       }
     },
-    [threadId, artifacts, threadDetails?.system_prompt]
+    [threadId, artifacts]
   );
 
   const handleSendMessage = useCallback(
@@ -406,7 +403,6 @@ export function CommonChat({ threadId, systemPrompt: initialSystemPrompt }: Comm
           image_base64: imageBase64,
           document_url: documentUrl,
           mode: mode,
-          system_prompt: threadDetails?.system_prompt || undefined, // Pasar el system_prompt del workspace
         }, userMessage, controller.signal);
 
         clearTimeout(timeoutId);
@@ -617,7 +613,6 @@ export function CommonChat({ threadId, systemPrompt: initialSystemPrompt }: Comm
             apiClient.get(`/api/threads/${threadId}/messages`),
           ]);
           setThreadDetails(threadRes.data);
-          setSystemPrompt(threadRes.data.system_prompt); // Actualizar systemPrompt desde threadDetails
           setMessages(messagesRes.data);
         } catch (error) {
           console.error('Error fetching chat data:', error);
@@ -628,7 +623,7 @@ export function CommonChat({ threadId, systemPrompt: initialSystemPrompt }: Comm
       };
       fetchChatData();
     }
-  }, [threadId, user, setSystemPrompt]); // Añadir setSystemPrompt a las dependencias
+  }, [threadId, user]);
 
   const { searchTerm } = useSearch();
   const filteredMessages = searchTerm

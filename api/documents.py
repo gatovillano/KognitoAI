@@ -72,11 +72,7 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
 
                     # Procesar el archivo
                     file_name_str = file_data['filename'] if file_data['filename'] is not None else "unknown_file"
-                    # Ejecutar la función sincrónica en un executor para no bloquear el bucle de eventos
-                    loop = asyncio.get_running_loop()
-                    extracted_text, metadata = await loop.run_in_executor(
-                        None,  # Usa el ThreadPoolExecutor por defecto
-                        extract_text_and_metadata_from_document,
+                    extracted_text, metadata = extract_text_and_metadata_from_document(
                         file_name_str,
                         file_data['content']
                     )

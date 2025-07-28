@@ -23,10 +23,8 @@ from core.agent import create_and_run_agent
 from utils.audio_transcriber import transcribe_audio_file
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 from sqlalchemy import select, and_
 from core.database import SessionLocal, ChatThread
-from core.database import Workspace
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -96,7 +94,7 @@ async def text_to_speech(request: TextToSpeechRequest):
     # 1. Eliminar bloques de código cercados (```...```)
     text_to_speak = re.sub(r'```.*?```', '', text_to_speak, flags=re.DOTALL)
     # 2. Eliminar código en línea (`...`)
-    #text_to_speak = re.sub(r'`[^`]*`', '', text_to_speak)
+    text_to_speak = re.sub(r'`[^`]*`', '', text_to_speak)
     # 3. Eliminar caracteres de puntuación que no se quieren leer
     text_to_speak = re.sub(r'[\[\]{}()#*_]', '', text_to_speak)
     # 4. Limpiar espacios en blanco múltiples
@@ -590,29 +588,12 @@ async def handle_chat_stream(
 @router.get("/threads", summary="Obtener lista de hilos de chat")
 async def get_threads(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
     """
-    Endpoint para obtener la lista de todos los hilos de chat del usuario autenticado,
-    incluyendo el system_prompt del workspace asociado si existe.
+    Endpoint para obtener la lista de todos los hilos de chat del usuario autenticado.
     """
     try:
-        threads = await db.execute(
-            select(ChatThread)
-            .options(selectinload(ChatThread.workspace)) # Cargar el workspace relacionado
-            .where(ChatThread.account_id == uuid.UUID(current_account_id))
-        )
+        threads = await db.execute(select(ChatThread).where(ChatThread.account_id == uuid.UUID(current_account_id)))
         thread_list = threads.scalars().all()
-        
-        response_threads = []
-        for thread in thread_list:
-            system_prompt = thread.workspace.system_prompt if thread.workspace else None
-            response_threads.append({
-                "id": str(thread.id),
-                "title": thread.title,
-                "isPinned": thread.is_pinned,
-                "platform": thread.platform,
-                "workspace_id": str(thread.workspace_id) if thread.workspace_id else None,
-                "system_prompt": system_prompt # Incluir el system_prompt
-            })
-        return response_threads
+        return [{"id": str(thread.id), "title": thread.title, "isPinned": thread.is_pinned, "platform": thread.platform, "workspace_id": str(thread.workspace_id) if thread.workspace_id else None} for thread in thread_list]
     except Exception as e:
         logger.error(f"Error al obtener la lista de hilos para la cuenta {current_account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Ocurrió un error al obtener la lista de hilos de chat.")
@@ -620,35 +601,18 @@ async def get_threads(current_account_id: str = Depends(get_current_account_id),
 @router.get("/threads/{thread_id}", summary="Obtener detalles de un hilo de chat")
 async def get_thread(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
     """
-    Endpoint para obtener los detalles de un hilo de chat específico, incluyendo el system_prompt del workspace si aplica.
+    Endpoint para obtener los detalles de un hilo de chat específico.
     """
     try:
-        # Usar selectinload para cargar el workspace junto con el ChatThread
-        thread = await db.scalar(
-            select(ChatThread)
-            .options(selectinload(ChatThread.workspace)) # Cargar el workspace relacionado
-            .where(
-                ChatThread.id == uuid.UUID(thread_id),
-                ChatThread.account_id == uuid.UUID(current_account_id)
-            )
-        )
+        thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
         if not thread:
             raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
-        
-        system_prompt = thread.workspace.system_prompt if thread.workspace else None
-
-        return {
-            "id": str(thread.id),
-            "title": thread.title,
-            "isPinned": thread.is_pinned,
-            "platform": thread.platform,
-            "workspace_id": str(thread.workspace_id) if thread.workspace_id else None,
-            "system_prompt": system_prompt # Incluir el system_prompt
-        }
+        return {"id": str(thread.id), "title": thread.title, "isPinned": thread.is_pinned, "platform": thread.platform, "workspace_id": str(thread.workspace_id) if thread.workspace_id else None}
     except ValueError:
         logger.error(f"El thread_id proporcionado no es un UUID válido: {thread_id}")
         raise HTTPException(status_code=400, detail="El thread_id proporcionado no tiene un formato válido.")
     except HTTPException:
+        # Re-raise HTTPExceptions (like 404) without modification
         raise
     except Exception as e:
         logger.error(f"Error al obtener detalles del hilo {thread_id} para la cuenta {current_account_id}: {e}", exc_info=True)

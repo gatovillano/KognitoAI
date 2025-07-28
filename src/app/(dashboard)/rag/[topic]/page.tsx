@@ -57,6 +57,7 @@ export default function CollectionDetailPage() {
 
   // Estado para el historial de análisis
   const [savedAnalyses, setSavedAnalyses] = useState([]);
+<<<<<<< HEAD
   interface UploadTask {
     id: string;
     fileNames: string[];
@@ -65,6 +66,8 @@ export default function CollectionDetailPage() {
     progress: number;
   }
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]); // Nuevo estado para tareas de carga
+=======
+>>>>>>> parent of 23dd267 (Redesign chat input bar with circular layout and add URL decoding for topic handling)
 
   // Estados para procesamiento de grafos de conocimiento
   const [isProcessingKnowledgeGraph, setIsProcessingKnowledgeGraph] = useState(false);
@@ -443,23 +446,7 @@ export default function CollectionDetailPage() {
       </Card>
 
       {/* Diálogos */}
-      <UploadDocumentDialog
-        isOpen={isUploadOpen}
-        onOpenChange={setIsUploadOpen}
-        onUploadSuccess={fetchPageData}
-        defaultTopic={topic}
-        onUploadStart={(fileNames, topic) => {
-          // Crear una tarea de carga y añadirla al estado
-          const newUploadTask = {
-            id: `upload-${Date.now()}`, // ID único
-            fileNames: fileNames,
-            topic: topic,
-            status: 'pending',
-            progress: 0
-          };
-          setUploadTasks(prev => [...prev, newUploadTask]);
-        }}
-      />
+      <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={fetchPageData} defaultTopic={topic} />
       <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchPageData} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />
