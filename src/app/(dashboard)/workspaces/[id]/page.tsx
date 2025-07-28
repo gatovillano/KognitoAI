@@ -252,17 +252,9 @@ export default function WorkspaceDashboard() {
         description: col.description || (col.document_count > 0 ? `${col.document_count} documentos` : 'Colección vacía'),
         document_count: col.document_count || 0
       }));
-<<<<<<< HEAD
-
-      // Filtrar para mostrar solo las colecciones del contexto general que no están ya en este workspace
-      // Incluir tanto colecciones con documentos como colecciones vacías
-      const filteredCollections = allCollections.filter(
-        (col: Collection) => !workspaceCollectionIds.has(col.id)
-=======
       // Filtrar para mostrar solo las colecciones que no están ya en este workspace
       const filteredCollections = allCollections.filter(
         (col: Collection) => !collections.some(existingCol => existingCol.id === col.id)
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
       );
       setAvailableCollections(filteredCollections);
       setCollectionDialogOpen(true);

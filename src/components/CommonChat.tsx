@@ -236,7 +236,6 @@ export function CommonChat({ threadId, systemPrompt: initialSystemPrompt }: Comm
       setMessages((prev) => [...prev, initialAiMessage]);
 
       try {
-<<<<<<< HEAD
         // Usar streaming real con la URL base correcta
         const baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8889';
         const response = await fetch(`${baseURL}/api/chat/stream`, {
@@ -312,35 +311,6 @@ export function CommonChat({ threadId, systemPrompt: initialSystemPrompt }: Comm
         if (fullResponse && fullResponse.includes("ID de tarea:")) {
           const taskId = fullResponse.split("ID de tarea:")[1].trim().split(".")[0];
           setBackgroundTasks((prev) => [...prev, { taskId, type: 'mindmap' }]);
-=======
-        const response = await apiClient.post('/api/chat', requestData);
-        const data = response.data;
-        const aiResponse = data.response_text;
-
-        if (aiResponse && aiResponse.includes("ID de tarea:")) {
-          const taskId = aiResponse.split("ID de tarea:")[1].trim().split(".")[0];
-          setBackgroundTasks((prev) => [...prev, { taskId, type: 'mindmap' }]);
-        }
-
-        setMessages((prev) => {
-          const newMessages = [...prev];
-          const lastMessage = newMessages[newMessages.length - 1];
-          if (lastMessage && lastMessage.sender === 'ai') {
-            lastMessage.text = aiResponse;
-            lastMessage.image_base64 = data.image_base64 || '';
-            lastMessage.document_url = data.document_url || '';
-          }
-          return newMessages;
-        });
-
-        if (data.image_base64) {
-          setArtifacts((prev) => [...prev, {
-            id: Date.now(),
-            content: data.image_base64,
-            type: 'svg',
-            version: 1
-          }]);
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
         }
 
         // Historial se actualiza automáticamente vía estado

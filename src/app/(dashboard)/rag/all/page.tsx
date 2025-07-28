@@ -30,6 +30,8 @@ export default function AllDocumentsPage() {
   const [documentToPreview, setDocumentToPreview] = useState<Document | null>(null);
   const [documentToEdit, setDocumentToEdit] = useState<Document | null>(null);
   const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null);
+  const [uploadingFiles, setUploadingFiles] = useState<string[]>([]);
+  const [uploadTopic, setUploadTopic] = useState<string>('');
   
   // Estados para el análisis
   const [documentToAnalyze, setDocumentToAnalyze] = useState<Document | null>(null);
@@ -107,6 +109,11 @@ export default function AllDocumentsPage() {
       toast.error('No se pudo iniciar el análisis del documento');
     }
   }, [docPollingId]);
+
+  const handleUploadStart = useCallback((fileNames: string[], topic: string) => {
+    setUploadingFiles(fileNames);
+    setUploadTopic(topic);
+  }, []);
   
   const columns = useMemo(() => getColumns(
       (doc) => setDocumentToPreview(doc),
@@ -177,7 +184,12 @@ export default function AllDocumentsPage() {
       </div>
 
       {/* Diálogos */}
-      <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={fetchPageData} />
+      <UploadDocumentDialog
+        isOpen={isUploadOpen}
+        onOpenChange={setIsUploadOpen}
+        onUploadSuccess={fetchPageData}
+        onUploadStart={handleUploadStart}
+      />
       <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchPageData} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />

@@ -44,6 +44,8 @@ export default function RepositoriesPage() {
   const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null);
   const [documentToShare, setDocumentToShare] = useState<Document | null>(null);
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState<string[]>([]);
+  const [uploadTopic, setUploadTopic] = useState<string>('');
   
   // Estados para análisis de documento individual
   const [documentToAnalyze, setDocumentToAnalyze] = useState<Document | null>(null);
@@ -190,6 +192,11 @@ export default function RepositoriesPage() {
     setIsUpdateRepoOpen(true);
   };
 
+  const handleUploadStart = useCallback((fileNames: string[], topic: string) => {
+    setUploadingFiles(fileNames);
+    setUploadTopic(topic);
+  }, []);
+
   // Usar datos de repositorios directamente desde la API
   const repositories = useMemo(() => {
     return repositoriesData.map(repo => ({
@@ -320,7 +327,13 @@ export default function RepositoriesPage() {
       </div>
 
       {/* Diálogos */}
-      <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={fetchPageData} defaultTopic="Repositories" />
+      <UploadDocumentDialog
+        isOpen={isUploadOpen}
+        onOpenChange={setIsUploadOpen}
+        onUploadSuccess={fetchPageData}
+        onUploadStart={handleUploadStart}
+        defaultTopic="Repositories"
+      />
       <GitHubRepoDialog isOpen={isGitHubRepoOpen} onOpenChange={setIsGitHubRepoOpen} onSuccess={fetchPageData} />
       <UpdateRepositoryDialog
         isOpen={isUpdateRepoOpen}

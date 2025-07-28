@@ -8,13 +8,9 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-<<<<<<< HEAD
 import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Sparkles, ChevronDown, MoreHorizontal, Network } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useWebSocket } from '@/hooks/useWebSocket';
-=======
-import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text } from 'lucide-react';
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
 import { toast } from 'sonner';
 
 import { DataTable } from '../data-table';
@@ -61,7 +57,14 @@ export default function CollectionDetailPage() {
 
   // Estado para el historial de análisis
   const [savedAnalyses, setSavedAnalyses] = useState([]);
-  const [uploadTasks, setUploadTasks] = useState([]); // Nuevo estado para tareas de carga
+  interface UploadTask {
+    id: string;
+    fileNames: string[];
+    topic: string;
+    status: string;
+    progress: number;
+  }
+  const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]); // Nuevo estado para tareas de carga
 
   // Estados para procesamiento de grafos de conocimiento
   const [isProcessingKnowledgeGraph, setIsProcessingKnowledgeGraph] = useState(false);
@@ -258,7 +261,6 @@ export default function CollectionDetailPage() {
             <Upload className="mr-2 h-4 w-4" />
             Subir Documentos
           </Button>
-<<<<<<< HEAD
 
           {/* Menú de Análisis */}
           <DropdownMenu>
@@ -282,7 +284,7 @@ export default function CollectionDetailPage() {
                 <ScanSearch className="mr-2 h-4 w-4" />
                 <span>Resumen Semántico</span>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setIsCustomAnalysisOpen(true)}>
+              <DropdownMenuItem onClick={() => setIsDocAnalysisOpen(true)}>
                 <Sparkles className="mr-2 h-4 w-4" />
                 <span>Análisis Personalizado</span>
               </DropdownMenuItem>
@@ -305,15 +307,6 @@ export default function CollectionDetailPage() {
             <span className="hidden sm:inline">
               {isProcessingKnowledgeGraph ? "Procesando..." : "Crear Grafo"}
             </span>
-=======
-          <Button onClick={handleExtractTitles} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
-            <Text className="mr-2 h-4 w-4" />
-            Extraer Títulos
-          </Button>
-          <Button onClick={handleSemanticSummary} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
-            <ScanSearch className="mr-2 h-4 w-4" />
-            Resumen Semántico
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
           </Button>
         </div>
       </div>
@@ -357,7 +350,6 @@ export default function CollectionDetailPage() {
                       </div>
                     </AccordionTrigger>
                     <AccordionContent>
-<<<<<<< HEAD
                       <div className="space-y-3">
                         {/* Mostrar resumen según el tipo de análisis */}
                         {analysis.file_name.startsWith('Colección:') && analysis.result_payload?.collection_summary && (
@@ -427,8 +419,8 @@ export default function CollectionDetailPage() {
                             setIsCollectionAnalysisOpen(true);
                           } else if (analysis.file_name.startsWith('Análisis Personalizado:')) {
                             console.log('✨ Abriendo análisis personalizado');
-                            setCustomAnalysisResult(analysis.result_payload);
-                            setIsCustomAnalysisResultOpen(true);
+                            setDocAnalysisResult(analysis.result_payload);
+                            setIsDocAnalysisOpen(true);
                           } else {
                             console.log('📄 Abriendo análisis de documento');
                             setDocAnalysisResult(analysis.result_payload);
@@ -439,23 +431,6 @@ export default function CollectionDetailPage() {
                           Ver Resultados Detallados →
                         </Button>
                       </div>
-=======
-                      <Button variant="link" className="p-0 h-auto" onClick={() => {
-                        if (analysis.file_name.startsWith('Resumen Semántico:')) {
-                          setSemanticAnalysisResult(analysis.result_payload);
-                          setIsSemanticAnalysisOpen(true);
-                        } else if (analysis.file_name.startsWith('Colección:')) {
-                          setCollectionAnalysisResult(analysis.result_payload);
-                          setIsCollectionAnalysisOpen(true);
-                        } else {
-                          setDocAnalysisResult(analysis.result_payload);
-                          setDocumentToAnalyze({ file_name: analysis.file_name, topic, title: '', author: '' });
-                          setIsDocAnalysisOpen(true);
-                        }
-                      }}>
-                        Ver Resultados Detallados
-                      </Button>
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
                     </AccordionContent>
                   </AccordionItem>
                 ))}
