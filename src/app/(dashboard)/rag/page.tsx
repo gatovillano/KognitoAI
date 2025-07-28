@@ -591,20 +591,7 @@ export default function RagCollectionsPage() {
 
       {renderContent()}
 
-      <UploadDocumentDialog
-        isOpen={isUploadOpen}
-        onOpenChange={setIsUploadOpen}
-        onUploadSuccess={() => { fetchCollections(); fetchUploadTasks(); }}
-        onUploadStart={(fileNames, topic) => {
-          setUploadTasks(prevTasks => [...prevTasks, {
-            id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
-            file_names: fileNames,
-            topic: topic,
-            status: 'pending',
-            created_at: new Date().toISOString()
-          }]);
-        }}
-      />
+      <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={() => { fetchCollections(); fetchUploadTasks(); }} />
       <CreateCollectionDialog isOpen={isCreateOpen} onOpenChange={setIsCreateOpen} onCreateSuccess={handleCollectionCreated} />
       <GitHubRepoDialog isOpen={isGitHubRepoOpen} onOpenChange={setIsGitHubRepoOpen} onSuccess={() => { fetchCollections(); fetchUploadTasks(); }} />
       <CollectionAnalysisDialog

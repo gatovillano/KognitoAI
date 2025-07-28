@@ -10,7 +10,6 @@ import { CommonChat } from '@/components/CommonChat';
 interface Workspace {
   id: string;
   name: string;
-  system_prompt?: string;
 }
 
 export default function WorkspaceChatPage() {
@@ -63,7 +62,7 @@ export default function WorkspaceChatPage() {
   return (
     <div className="flex h-screen flex-col">
       <div className="flex-4 overflow-auto" style={{ height: '100vh' }}>
-        <CommonChat threadId={chatId} systemPrompt={workspace.system_prompt} />
+        <CommonChat threadId={chatId} />
       </div>
     </div>
   );
