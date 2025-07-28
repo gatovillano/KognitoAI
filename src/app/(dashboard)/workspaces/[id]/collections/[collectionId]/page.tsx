@@ -25,31 +25,18 @@ import { CollectionAnalysisDialog } from '@/app/(dashboard)/rag/collection-analy
 import { SemanticAnalysisDialog } from '@/app/(dashboard)/rag/semantic-analysis-dialog';
 import { ShareDocumentDialog } from '@/app/(dashboard)/rag/share-document-dialog';
 
-interface UploadTask {
-  id: string;
-  file_names: string[];
-  topic: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  progress?: number;
-  error_message?: string;
-}
-
 export default function WorkspaceCollectionDetailPage() {
   const params = useParams();
   const workspaceId = (params?.id as string) || '';
-  const encodedCollectionId = (params?.collectionId as string) || '';
-  const collectionId = decodeURIComponent(encodedCollectionId); // Decodificar el ID de la colección
+  const collectionId = (params?.collectionId as string) || '';
   const [collectionName, setCollectionName] = useState('');
 
   console.log('Workspace ID:', workspaceId);
-  console.log('Collection ID (encoded from URL):', encodedCollectionId);
-  console.log('Collection ID (decoded):', collectionId);
+  console.log('Collection ID (from URL):', collectionId);
 
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]); // Nuevo estado para tareas de carga
-
   // Estados para diálogos
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [documentToPreview, setDocumentToPreview] = useState<Document | null>(null);
@@ -111,12 +98,6 @@ export default function WorkspaceCollectionDetailPage() {
       setSavedAnalyses(analysesRes.data);
     } catch (error) {
       toast.error('Error al cargar los datos de la colección.');
-      // En caso de error al cargar, marcar las tareas de carga pendientes como fallidas
-      setUploadTasks(prevTasks =>
-        prevTasks.map(task =>
-          task.status === 'pending' ? { ...task, status: 'failed', error_message: 'Error al cargar los datos de la colección.' } : task
-        )
-      );
       console.error(error);
     } finally {
       setIsLoading(false);
@@ -126,39 +107,6 @@ export default function WorkspaceCollectionDetailPage() {
   useEffect(() => {
     fetchPageData();
   }, [fetchPageData]);
-
-  // --- Handlers de Carga ---
-  const handleUploadStart = useCallback((fileNames: string[], topic: string) => {
-    const newUploadTask: UploadTask = {
-      id: Date.now().toString() + Math.random().toString(36).substring(2, 9), // ID temporal único
-      file_names: fileNames,
-      topic: topic,
-      status: 'pending',
-    };
-    setUploadTasks(prevTasks => [...prevTasks, newUploadTask]);
-  }, []);
-
-  const handleUploadSuccess = useCallback((fileNames: string[], topic: string) => {
-    setUploadTasks(prevTasks =>
-      prevTasks.map(task =>
-        // Asumimos que el primer archivo en la lista y el tema son suficientes para identificar la tarea
-        task.file_names[0] === fileNames[0] && task.topic === topic && task.status === 'pending'
-          ? { ...task, status: 'completed' }
-          : task
-      )
-    );
-    fetchPageData(); // Recargar los documentos después de una carga exitosa
-  }, [fetchPageData]);
-
-  const handleUploadError = useCallback((fileNames: string[], topic: string, errorMessage: string) => {
-    setUploadTasks(prevTasks =>
-      prevTasks.map(task =>
-        task.file_names[0] === fileNames[0] && task.topic === topic && task.status === 'pending'
-          ? { ...task, status: 'failed', error_message: errorMessage }
-          : task
-      )
-    );
-  }, []);
 
   // --- Handlers de Análisis ---
 
@@ -306,8 +254,6 @@ export default function WorkspaceCollectionDetailPage() {
         </div>
       )}
 
-      <UploadProgressIndicator tasks={uploadTasks} /> {/* Indicador de carga */}
-
       <Card className="flex-grow mb-6">
         <CardHeader>
           <CardTitle>Documentos en la Colección</CardTitle>
@@ -368,14 +314,7 @@ export default function WorkspaceCollectionDetailPage() {
       </Card>
 
       {/* Diálogos */}
-      <UploadDocumentDialog
-        isOpen={isUploadOpen}
-        onOpenChange={setIsUploadOpen}
-        onUploadSuccess={handleUploadSuccess}
-        onUploadStart={handleUploadStart} // Pasar el nuevo handler
-        defaultTopic={collectionId}
-        workspaceId={workspaceId}
-      />
+      <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={fetchPageData} defaultTopic={collectionId} workspaceId={workspaceId} />
       <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchPageData} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />
