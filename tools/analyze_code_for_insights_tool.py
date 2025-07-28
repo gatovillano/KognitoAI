@@ -2,19 +2,14 @@
 
 import logging
 import asyncio
-import uuid
-from datetime import datetime
 from typing import Any, Type
 
-from pydantic import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importamos la FUNCIÓN del analizador, no una clase o instancia.
 # Y también el modelo de datos para type hinting.
 from utils.advanced_code_analyzer import analyze_code_content, CodeAnalysisResult
-
-# Importamos las dependencias de base de datos
-from core.database import SessionLocal, AnalysisTask
 
 logger = logging.getLogger(__name__)
 
@@ -23,18 +18,6 @@ class AnalyzeCodeInput(BaseModel):
     code_content: str = Field(
         ...,
         description="El contenido del código o repositorio que se va a analizar en profundidad."
-    )
-    account_id: str = Field(
-        default="",
-        description="ID de la cuenta del usuario para guardar el análisis en la base de datos. Opcional para compatibilidad."
-    )
-    file_name: str = Field(
-        default="Análisis de Código",
-        description="Nombre del archivo o descripción del código analizado."
-    )
-    save_to_database: bool = Field(
-        default=False,
-        description="Si se debe guardar el resultado en la base de datos de análisis. Por defecto False para compatibilidad."
     )
 
 class AnalyzeCodeForInsightsTool(BaseTool):
@@ -46,13 +29,12 @@ class AnalyzeCodeForInsightsTool(BaseTool):
     description: str = (
         "Útil para un análisis exhaustivo de un fragmento de código o repositorio. Devuelve un resumen ejecutivo, "
         "la estructura del código, patrones de diseño, dependencias, posibles problemas y recomendaciones "
-        "para mejorar la calidad del código. "
-        "ACTUALIZADO: Los resultados pueden almacenarse con tipo 'code_insights' para seguimiento."
+        "para mejorar la calidad del código."
     )
     args_schema: Type[BaseModel] = AnalyzeCodeInput
     return_direct: bool = False
 
-    async def _arun(self, code_content: str, account_id: str = "", file_name: str = "Análisis de Código", save_to_database: bool = False, **kwargs: Any) -> str:
+    async def _arun(self, code_content: str, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona, delegando en el analizador.
         """
@@ -61,32 +43,19 @@ class AnalyzeCodeForInsightsTool(BaseTool):
             # Llamamos directamente a la función de análisis
             analysis_result = await analyze_code_content(code_content)
             logger.info("Análisis de código completado exitosamente.")
-
-            # Guardar en base de datos si está habilitado y se proporciona account_id
-            if save_to_database and account_id:
-                await self._save_to_database(analysis_result, account_id, file_name)
-            elif save_to_database and not account_id:
-                logger.warning("save_to_database=True pero no se proporcionó account_id. Saltando guardado en BD.")
-
             return self._format_result(analysis_result)
         except Exception as e:
             logger.error(f"Error durante el análisis de código: {e}", exc_info=True)
             return f"Ocurrió un error al intentar analizar el código: {str(e)}"
 
-    def _run(self, code_content: str, account_id: str = "", file_name: str = "Análisis de Código", save_to_database: bool = False, **kwargs: Any) -> str:
+    def _run(self, code_content: str, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma síncrona.
         Este es el patrón recomendado por LangChain para envolver una función async.
         """
         logger.info("Ejecutando análisis de código en modo síncrono...")
         try:
-            result = asyncio.run(self._arun(
-                code_content=code_content,
-                account_id=account_id,
-                file_name=file_name,
-                save_to_database=save_to_database,
-                **kwargs
-            ))
+            result = asyncio.run(self._arun(code_content=code_content, **kwargs))
             return result
         except RuntimeError as e:
             logger.warning(f"RuntimeError en _run, podría indicar un loop de eventos activo: {e}. "
@@ -149,69 +118,3 @@ class AnalyzeCodeForInsightsTool(BaseTool):
             f"**Recomendaciones:**\n{recommendations}"
         )
         return formatted_result
-
-    async def _save_to_database(self, analysis_result: CodeAnalysisResult, account_id: str, file_name: str) -> None:
-        """
-        Guarda el resultado del análisis en la base de datos.
-        """
-        try:
-            logger.info(f"Guardando análisis de código en la base de datos para account_id: {account_id}")
-
-            # Convertir el resultado a diccionario si es necesario
-            if isinstance(analysis_result, CodeAnalysisResult):
-                result_dict = analysis_result.model_dump()
-            else:
-                result_dict = analysis_result
-
-            # Agregar metadata de herramienta utilizada
-            result_payload = {
-                **result_dict,
-                "tool_used": "analyze_code_for_insights_tool.py",
-                "analysis_metadata": {
-                    "tool_used": "analyze_code_for_insights_tool.py",
-                    "analysis_type": "code_insights",
-                    "created_at": datetime.now().isoformat(),
-                    "file_name": file_name
-                }
-            }
-
-            # Crear nueva tarea de análisis
-            async with SessionLocal() as db_session:  # type: ignore
-                new_task = AnalysisTask(
-                    account_id=uuid.UUID(account_id),
-                    file_name=file_name,
-                    status="completed",
-                    analysis_type="code_insights",
-                    result_payload=result_payload
-                )
-                db_session.add(new_task)
-                await db_session.commit()
-                await db_session.refresh(new_task)
-
-                logger.info(f"Análisis de código guardado exitosamente con ID: {new_task.id}")
-
-        except Exception as e:
-            logger.error(f"Error al guardar el análisis en la base de datos: {e}", exc_info=True)
-            # No lanzamos la excepción para que el análisis continúe aunque falle el guardado
-
-
-# Función auxiliar para usar la herramienta con guardado en base de datos
-async def analyze_code_and_save(code_content: str, account_id: str, file_name: str = "Análisis de Código") -> str:
-    """
-    Función auxiliar para analizar código y guardarlo automáticamente en la base de datos.
-
-    Args:
-        code_content: El contenido del código a analizar
-        account_id: ID de la cuenta del usuario
-        file_name: Nombre descriptivo del análisis
-
-    Returns:
-        str: Resultado formateado del análisis
-    """
-    tool = AnalyzeCodeForInsightsTool()
-    return await tool._arun(
-        code_content=code_content,
-        account_id=account_id,
-        file_name=file_name,
-        save_to_database=True
-    )

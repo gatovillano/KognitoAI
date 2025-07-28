@@ -23,11 +23,7 @@ async def get_interpreter_llm() -> ChatGoogleGenerativeAI:
     global _interpreter_llm
     if _interpreter_llm is None:
         logger.info("Inicializando modelo Gemini para la herramienta de análisis...")
-        _interpreter_llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            temperature=0.0,
-            disable_streaming=False  # Habilita streaming
-        )
+        _interpreter_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.0)
     return _interpreter_llm
 
 
@@ -46,7 +42,6 @@ class KnowledgeAnalysisTool(BaseTool):
     # (CAMBIO CLAVE 2) - Descripción más directa y con instrucciones para el LLM.
     description: str = (
         "Se utiliza para iniciar un análisis profundo de la base de conocimiento de un usuario (notas, documentos) para encontrar conexiones. "
-        "ACTUALIZADO: Ahora usa búsquedas optimizadas 10-50x más rápidas con aislamiento por workspace. "
         "Activa esta herramienta si el usuario pide 'analizar mis notas', 'buscar nuevas conexiones', o 'revisar mis documentos sobre un tema'. "
         "Tu trabajo es pasar la petición del usuario en el campo 'query'."
     )
