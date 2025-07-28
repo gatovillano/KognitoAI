@@ -10,7 +10,7 @@ información sobre resúmenes, temas clave, conceptos centrales y relaciones.
 """
 
 import logging
-from typing import Type, Any, List, Dict, Optional
+from typing import Type, Any, List, Dict
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from sqlalchemy import select
@@ -28,8 +28,8 @@ class GetAnalysisResultsInput(BaseModel):
     Valida que el argumento necesario sea proporcionado por el LLM.
     """
     account_id: str = Field(
-        default="",
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Si no se proporciona, se usa el del constructor."
+        ...,
+        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
     )
     action: str = Field(
         "summary",
@@ -69,7 +69,7 @@ class GetAnalysisResultsTool(BaseTool):
         super().__init__(**kwargs)
         logger.info("Inicializando GetAnalysisResultsTool")
 
-    async def _arun(self, account_id: str = None, action: str = "summary", limit: int = 5, document_name: str = "", analysis_id: str = "", run_manager: Optional[Any] = None, **kwargs: Any) -> str:
+    async def _arun(self, account_id: str, action: str = "summary", limit: int = 5, document_name: str = "", analysis_id: str = "", **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -84,39 +84,10 @@ class GetAnalysisResultsTool(BaseTool):
         Returns:
             Un mensaje de texto con los resultados de análisis formateados o un mensaje indicando que no hay resultados.
         """
-        # Obtener account_id de la configuración del agente si está disponible
-        config_account_id = None
-        if run_manager and hasattr(run_manager, 'config'):
-            config = getattr(run_manager, 'config', {})
-            configurable = config.get('configurable', {})
-            config_account_id = configurable.get('account_id')
-
-        # Usar configuración o parámetro
-        effective_account_id = config_account_id or account_id
-
-        if not effective_account_id:
-            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
-
-        logger.info(f"Ejecutando GetAnalysisResultsTool para la cuenta '{effective_account_id}' con acción '{action}', límite de {limit} resultados, documento '{document_name}' y análisis ID '{analysis_id}'.")
+        logger.info(f"Ejecutando GetAnalysisResultsTool para la cuenta '{account_id}' con acción '{action}', límite de {limit} resultados, documento '{document_name}' y análisis ID '{analysis_id}'.")
         try:
-            # Parsear account_id si viene como JSON
-            actual_account_id = effective_account_id
-            if isinstance(account_id, str) and account_id.startswith('{'):
-                try:
-                    import json
-                    parsed_data = json.loads(account_id)
-                    actual_account_id = parsed_data.get('account_id', account_id)
-                    logger.info(f"Account ID parseado desde JSON: {actual_account_id}")
-                except json.JSONDecodeError:
-                    logger.warning(f"No se pudo parsear account_id como JSON: {account_id}")
-                    actual_account_id = account_id
-
             async with DBSession(SessionLocal) as db:
-                try:
-                    account_uuid = uuid.UUID(actual_account_id)
-                except ValueError as e:
-                    logger.error(f"Error al convertir account_id a UUID: {actual_account_id} - {e}")
-                    return f"Error: ID de cuenta inválido: {actual_account_id}"
+                account_uuid = uuid.UUID(account_id)
                 if action == "full_analysis":
                     if not analysis_id:
                         return "Error: Debes proporcionar un ID de análisis para la acción 'full_analysis'."

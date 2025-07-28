@@ -1444,10 +1444,14 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
                 # Para workspaces, incluir SOLO las colecciones específicas del workspace
                 where_clause_parts.append("workspace_id = :workspace_id")
                 params["workspace_id"] = workspace_id
+<<<<<<< HEAD
             else:
                 # Para contexto general, incluir solo documentos sin workspace_id
                 where_clause_parts.append("workspace_id IS NULL")
     
+=======
+
+>>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
             final_where_clause = " AND ".join(where_clause_parts)
     
             collections_query = text(

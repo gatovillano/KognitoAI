@@ -8,9 +8,13 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+<<<<<<< HEAD
 import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Sparkles, ChevronDown, MoreHorizontal, Network } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useWebSocket } from '@/hooks/useWebSocket';
+=======
+import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text } from 'lucide-react';
+>>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
 import { toast } from 'sonner';
 
 import { DataTable } from '../data-table';
@@ -23,8 +27,6 @@ import { DeleteConfirmationDialog } from '../delete-confirmation-dialog';
 import { AnalysisResultDialog } from '../analysis-result-dialog';
 import { CollectionAnalysisDialog } from '../collection-analysis-dialog';
 import { SemanticAnalysisDialog } from '../semantic-analysis-dialog';
-import { CustomAnalysisDialog } from '../custom-analysis-dialog';
-import { CustomAnalysisResultDialog } from '../custom-analysis-result-dialog';
 import { ShareDocumentDialog } from '../share-document-dialog';
 
 export default function CollectionDetailPage() {
@@ -56,11 +58,6 @@ export default function CollectionDetailPage() {
   // Estados para análisis semántico
   const [semanticAnalysisResult, setSemanticAnalysisResult] = useState<any>(null);
   const [isSemanticAnalysisOpen, setIsSemanticAnalysisOpen] = useState(false);
-
-  // Estados para análisis personalizado
-  const [isCustomAnalysisOpen, setIsCustomAnalysisOpen] = useState(false);
-  const [customAnalysisResult, setCustomAnalysisResult] = useState<any>(null);
-  const [isCustomAnalysisResultOpen, setIsCustomAnalysisResultOpen] = useState(false);
 
   // Estado para el historial de análisis
   const [savedAnalyses, setSavedAnalyses] = useState([]);
@@ -96,7 +93,7 @@ export default function CollectionDetailPage() {
     try {
       const [docsRes, analysesRes] = await Promise.all([
         apiClient.post('/api/list-documents', { topic: topic }),
-        apiClient.post('/api/get-saved-analyses', { topic: topic, workspace_id: null })
+        apiClient.post('/api/get-saved-analyses', { topic: topic })
       ]);
       
       // Ya no necesitamos filtrar en el frontend, el backend lo hace
@@ -261,6 +258,7 @@ export default function CollectionDetailPage() {
             <Upload className="mr-2 h-4 w-4" />
             Subir Documentos
           </Button>
+<<<<<<< HEAD
 
           {/* Menú de Análisis */}
           <DropdownMenu>
@@ -307,6 +305,15 @@ export default function CollectionDetailPage() {
             <span className="hidden sm:inline">
               {isProcessingKnowledgeGraph ? "Procesando..." : "Crear Grafo"}
             </span>
+=======
+          <Button onClick={handleExtractTitles} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
+            <Text className="mr-2 h-4 w-4" />
+            Extraer Títulos
+          </Button>
+          <Button onClick={handleSemanticSummary} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
+            <ScanSearch className="mr-2 h-4 w-4" />
+            Resumen Semántico
+>>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
           </Button>
         </div>
       </div>
@@ -344,20 +351,13 @@ export default function CollectionDetailPage() {
                   <AccordionItem value={`item-${analysis.id}`} key={analysis.id}>
                     <AccordionTrigger>
                       <div className="flex items-center gap-2 text-left flex-1 min-w-0">
-                        {analysis.file_name.startsWith('Colección:') ? (
-                          <FolderKanban className="h-4 w-4" />
-                        ) : analysis.file_name.startsWith('Análisis Personalizado:') ? (
-                          <Sparkles className="h-4 w-4 text-pink-500" />
-                        ) : analysis.file_name.startsWith('Resumen Semántico:') ? (
-                          <Text className="h-4 w-4 text-purple-500" />
-                        ) : (
-                          <FileText className="h-4 w-4" />
-                        )}
+                        {analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
                         <span className="font-medium truncate">{analysis.file_name}</span>
                         <span className="ml-auto text-xs text-muted-foreground pr-4">{new Date(analysis.created_at).toLocaleDateString()}</span>
                       </div>
                     </AccordionTrigger>
                     <AccordionContent>
+<<<<<<< HEAD
                       <div className="space-y-3">
                         {/* Mostrar resumen según el tipo de análisis */}
                         {analysis.file_name.startsWith('Colección:') && analysis.result_payload?.collection_summary && (
@@ -439,6 +439,23 @@ export default function CollectionDetailPage() {
                           Ver Resultados Detallados →
                         </Button>
                       </div>
+=======
+                      <Button variant="link" className="p-0 h-auto" onClick={() => {
+                        if (analysis.file_name.startsWith('Resumen Semántico:')) {
+                          setSemanticAnalysisResult(analysis.result_payload);
+                          setIsSemanticAnalysisOpen(true);
+                        } else if (analysis.file_name.startsWith('Colección:')) {
+                          setCollectionAnalysisResult(analysis.result_payload);
+                          setIsCollectionAnalysisOpen(true);
+                        } else {
+                          setDocAnalysisResult(analysis.result_payload);
+                          setDocumentToAnalyze({ file_name: analysis.file_name, topic, title: '', author: '' });
+                          setIsDocAnalysisOpen(true);
+                        }
+                      }}>
+                        Ver Resultados Detallados
+                      </Button>
+>>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
                     </AccordionContent>
                   </AccordionItem>
                 ))}
@@ -474,18 +491,6 @@ export default function CollectionDetailPage() {
       <AnalysisResultDialog isOpen={isDocAnalysisOpen} onOpenChange={setIsDocAnalysisOpen} analysis={docAnalysisResult} document={documentToAnalyze ?? { file_name: '', topic: topic, title: '', author: '' }} />
       <CollectionAnalysisDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} topic={topic} />
       <SemanticAnalysisDialog isOpen={isSemanticAnalysisOpen} onOpenChange={setIsSemanticAnalysisOpen} analysis={semanticAnalysisResult} topic={topic} />
-      <CustomAnalysisDialog
-        isOpen={isCustomAnalysisOpen}
-        onOpenChange={setIsCustomAnalysisOpen}
-        document={documentToAnalyze ?? { file_name: '', topic: topic, title: '', author: '' }}
-        topic={topic}
-        onAnalysisStart={fetchPageData}
-      />
-      <CustomAnalysisResultDialog
-        isOpen={isCustomAnalysisResultOpen}
-        onOpenChange={setIsCustomAnalysisResultOpen}
-        analysisResult={customAnalysisResult}
-      />
       <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={fetchPageData} document={documentToShare} />
     </div>
   );
