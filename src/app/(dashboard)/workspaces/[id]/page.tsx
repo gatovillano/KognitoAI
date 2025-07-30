@@ -349,16 +349,18 @@ export default function WorkspaceDashboard() {
       handleCloseRenameCollectionDialog();
       return;
     }
-    const url = `/api/collections/${collectionIdentifier}?workspace_id=${workspaceId}`;
+    const url = `/api/update-collection`; // Cambiar a la ruta POST
     const data = {
-      topic: newCollectionTitle,
-      description: newCollectionDescription
+      old_topic: selectedCollection.topic || selectedCollection.name || selectedCollection.title || selectedCollection.id, // Usar el topic/nombre actual
+      new_topic: newCollectionTitle,
+      new_description: newCollectionDescription,
+      workspace_id: workspaceId // Asegurarse de pasar el workspace_id
     };
-    console.log('DEBUG (Frontend): Renaming collection PUT request URL:', url);
-    console.log('DEBUG (Frontend): Renaming collection PUT request data:', data);
+    console.log('DEBUG (Frontend): Renaming collection POST request URL:', url);
+    console.log('DEBUG (Frontend): Renaming collection POST request data:', data);
     console.log('DEBUG (Frontend): Selected collection for rename:', selectedCollection);
     try {
-      await apiClient.put(url, data);
+      await apiClient.post(url, data); // Cambiar a POST
       setCollections((prevCollections) =>
         prevCollections.map((col) =>
           col.id === selectedCollection.id ? { ...col, title: newCollectionTitle, name: newCollectionTitle, description: newCollectionDescription, topic: newCollectionTitle } : col
@@ -387,11 +389,15 @@ const handleDeleteCollection = async (collectionId: string) => {
           alert('No se pudo identificar la colección para eliminar.');
           return;
         }
-        const url = `/api/collections/${collectionIdentifier}?workspace_id=${workspaceId}`;
-        console.log('DEBUG (Frontend): Deleting collection DELETE request URL:', url);
+        const url = `/api/delete-collection`; // Cambiar a la ruta POST para eliminar
+        const data = {
+          topic: collectionIdentifier,
+          workspace_id: workspaceId // Asegurarse de pasar el workspace_id
+        };
+        console.log('DEBUG (Frontend): Deleting collection POST request URL:', url);
         console.log('DEBUG (Frontend): Collection to delete:', collectionToDelete);
         try {
-          await apiClient.delete(url);
+          await apiClient.post(url, data); // Cambiar a POST
           setCollections((prevCollections) => prevCollections.filter((col) => col.id !== collectionId));
         } catch (error) {
           console.error('Error al eliminar la colección:', error);

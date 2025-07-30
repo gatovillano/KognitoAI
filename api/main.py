@@ -86,7 +86,7 @@ async def startup_event():
         raise RuntimeError("JWT_SECRET_KEY no está configurada")
     try:
         await create_tables()
-        logger.info("Tablas de la base de datos verificadas/creadas.")
+        logger.info("Metadatos de tablas de LangChain inicializados.")
         await initialize_llms()
         logger.info("Modelos de Lenguaje (LLMs) inicializados.")
         await initialize_embeddings()

@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +11,7 @@ import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import { Code, FileText, Settings, AlertTriangle, Lightbulb, GitBranch } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
+import { useTextToSpeech } from '@/hooks/useTextToSpeech';
 
 interface CodeAnalysisItem {
   component?: string;

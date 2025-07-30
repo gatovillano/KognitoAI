@@ -1,7 +1,7 @@
 // En: src/app/(dashboard)/notes/edit/[id]/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -111,8 +111,44 @@ export default function EditNotePage() {
     }
   }, [isLoading, noteId]);
 
+  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const autoSaveNote = useCallback(async (currentTitle: string, currentCategory: string, currentContent: string, isNewNote: boolean) => {
+    if (isNewNote) return; // No auto-guardar notas nuevas hasta que se guarden manualmente por primera vez
+
+    const markdownContent = turndownService.turndown(currentContent);
+
+    const payload = {
+      note_id: parseInt(noteId),
+      title: currentTitle,
+      category: currentCategory,
+      content: markdownContent,
+    };
+
+    let endpoint = '/api/update-note';
+    let requestPayload;
+    if (fromTeam) {
+      endpoint = `/api/teams/${fromTeam}/shared-items/update`;
+      requestPayload = {
+        type: 'note',
+        itemId: noteId,
+        title: currentTitle,
+        content: markdownContent,
+      };
+    } else {
+      requestPayload = payload;
+    }
+
+    try {
+      await apiClient.post(endpoint, requestPayload);
+      console.log("Nota auto-guardada.");
+    } catch (error) {
+      console.error("Error al auto-guardar la nota:", error);
+      // Opcional: toast.error("Error al auto-guardar la nota.");
+    }
+  }, [noteId, fromTeam, turndownService]);
+
   const handleSave = async () => {
-    // Convertimos el HTML de Tiptap a Markdown antes de guardar
     const markdownContent = turndownService.turndown(content);
 
     const payload = {
@@ -138,13 +174,35 @@ export default function EditNotePage() {
     const toastId = toast.loading("Guardando nota...");
 
     try {
-        await apiClient.post(endpoint, requestPayload);
+        const response = await apiClient.post(endpoint, requestPayload);
         toast.success("¡Nota guardada!", { id: toastId });
-        router.push(fromTeam ? `/teams/${fromTeam}/dashboard` : '/notes');
+        if (noteId === 'new' && response.data?.id) {
+          router.replace(`/notes/edit/${response.data.id}`); // Reemplazar la URL para que el auto-guardado funcione con el nuevo ID
+        } else {
+          router.push(fromTeam ? `/teams/${fromTeam}/dashboard` : '/notes');
+        }
     } catch (error) {
         toast.error("Error al guardar la nota.", { id: toastId });
     }
   };
+
+  useEffect(() => {
+    if (noteId === 'new') return; // No auto-guardar si es una nota nueva sin guardar
+
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
+    }
+
+    autoSaveTimeoutRef.current = setTimeout(() => {
+      autoSaveNote(title, category, content, noteId === 'new');
+    }, 3000); // Auto-guardar después de 3 segundos de inactividad
+
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+      }
+    };
+  }, [title, category, content, autoSaveNote, noteId]);
 
   const handleShare = async () => {
     if (noteId === 'new') return;

@@ -12,6 +12,7 @@ import { ArrowLeft, Upload, History, Loader2, ScanSearch, FileText, FolderKanban
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { toast } from 'sonner';
 import UploadProgressIndicator from '@/components/UploadProgressIndicator';
+import type { UploadTask } from '@/components/UploadProgressIndicator';
 
 import { DataTable } from '@/app/(dashboard)/rag/data-table';
 import { getColumns, type Document } from '@/app/(dashboard)/rag/columns';
@@ -24,12 +25,24 @@ import { AnalysisResultDialog } from '@/app/(dashboard)/rag/analysis-result-dial
 import { CollectionAnalysisDialog } from '@/app/(dashboard)/rag/collection-analysis-dialog';
 import { SemanticAnalysisDialog } from '@/app/(dashboard)/rag/semantic-analysis-dialog';
 import { ShareDocumentDialog } from '@/app/(dashboard)/rag/share-document-dialog';
+import { CollectionDisplay } from '@/components/CollectionDisplay';
+
+interface Collection {
+  topic: string;
+  document_count: number;
+  description?: string;
+  team_shared?: boolean;
+  has_knowledge_graph?: boolean;
+}
 
 export default function WorkspaceCollectionDetailPage() {
   const params = useParams();
   const workspaceId = (params?.id as string) || '';
   const collectionId = (params?.collectionId as string) || '';
-  const [collectionName, setCollectionName] = useState('');
+  const [collectionData, setCollectionData] = useState<Collection | null>(null);
+
+  // Estado para rastrear las tareas de subida en progreso
+  const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
 
   console.log('Workspace ID:', workspaceId);
   console.log('Collection ID (from URL):', collectionId);
@@ -78,6 +91,54 @@ export default function WorkspaceCollectionDetailPage() {
     onTitleExtractionCompleted: (data) => {
       // Recargar la página para mostrar todos los cambios
       fetchPageData();
+    },
+    onUploadStarted: (data) => {
+      setUploadTasks(prevTasks => {
+        if (prevTasks.some(task => task.id === data.task_id)) return prevTasks;
+        return [...prevTasks, {
+          id: data.task_id,
+          status: 'pending',
+          file_names: data.file_names,
+          topic: data.topic,
+          created_at: data.created_at
+        }];
+      });
+    },
+    onUploadProgress: (data) => {
+      setUploadTasks(prevTasks =>
+        prevTasks.map(task =>
+          task.id === data.task_id
+            ? { ...task, status: 'processing', progress: data.progress }
+            : task
+        )
+      );
+    },
+    onUploadCompleted: (data) => {
+      setUploadTasks(prevTasks =>
+        prevTasks.map(task =>
+          task.id === data.task_id
+            ? { ...task, status: 'completed', progress: 100 }
+            : task
+        )
+      );
+      toast.success(`Archivos procesados correctamente.`);
+      fetchPageData();
+      setTimeout(() => {
+        setUploadTasks(prevTasks => prevTasks.filter(task => task.id !== data.task_id));
+      }, 5000);
+    },
+    onUploadFailed: (data) => {
+      setUploadTasks(prevTasks =>
+        prevTasks.map(task =>
+          task.id === data.task_id
+            ? { ...task, status: 'failed', error_message: data.error_message }
+            : task
+        )
+      );
+      toast.error(`La subida falló: ${data.error_message}`);
+      setTimeout(() => {
+        setUploadTasks(prevTasks => prevTasks.filter(task => task.id !== data.task_id));
+      }, 5000);
     }
   });
 
@@ -93,7 +154,7 @@ export default function WorkspaceCollectionDetailPage() {
       
       console.log('API Response for collection details:', collectionRes.data);
       console.log('API Response for collection documents:', docsRes.data);
-      setCollectionName(collectionRes.data.name || collectionRes.data.title || collectionRes.data.topic || 'Colección sin nombre');
+      setCollectionData(collectionRes.data);
       setDocuments(docsRes.data);
       setSavedAnalyses(analysesRes.data);
     } catch (error) {
@@ -107,6 +168,7 @@ export default function WorkspaceCollectionDetailPage() {
   useEffect(() => {
     fetchPageData();
   }, [fetchPageData]);
+
 
   // --- Handlers de Análisis ---
 
@@ -125,7 +187,7 @@ export default function WorkspaceCollectionDetailPage() {
     try {
       const response = await apiClient.post('/api/start-collection-analysis', { topic: collectionId, workspace_id: workspaceId });
       setCollectionPollingId(response.data.task_id);
-      toast.info(`Análisis de la colección "${collectionName}" iniciado.`);
+      toast.info(`Análisis de la colección "${collectionData?.topic}" iniciado.`);
     } catch (error) { toast.error("No se pudo iniciar el análisis de la colección."); }
   };
 
@@ -180,7 +242,7 @@ export default function WorkspaceCollectionDetailPage() {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     try {
       const response = await apiClient.post('/api/extract-title', { topic: collectionId, workspace_id: workspaceId });
-      toast.info(`Extracción de títulos para la colección "${collectionName}" iniciada.`);
+      toast.info(`Extracción de títulos para la colección "${collectionData?.topic}" iniciada.`);
       fetchPageData();
     } catch (error) { toast.error("No se pudo iniciar la extracción de títulos."); }
   };
@@ -191,7 +253,7 @@ export default function WorkspaceCollectionDetailPage() {
     try {
       const response = await apiClient.post('/api/start-semantic-summary', { topic: collectionId, workspace_id: workspaceId });
       setCollectionPollingId(response.data.task_id);
-      toast.info(`Resumen semántico de la colección "${collectionName}" iniciado.`);
+      toast.info(`Resumen semántico de la colección "${collectionData?.topic}" iniciado.`);
     } catch (error) { toast.error("No se pudo iniciar el resumen semántico de la colección."); }
   };
 
@@ -225,7 +287,7 @@ export default function WorkspaceCollectionDetailPage() {
             <ArrowLeft className="h-4 w-4 mr-2" />
             Volver al Workspace
           </Link>
-          <h1 className="text-3xl font-bold break-all">Colección: {collectionName}</h1>
+          <h1 className="text-3xl font-bold break-all">Colección: {collectionData?.topic}</h1>
         </div>
         <div className="flex items-center gap-2">
           <Button onClick={handleAnalyzeCollection} variant="outline" disabled={!!docPollingId || !!collectionPollingId}>
@@ -314,7 +376,14 @@ export default function WorkspaceCollectionDetailPage() {
       </Card>
 
       {/* Diálogos */}
-      <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={fetchPageData} defaultTopic={collectionId} workspaceId={workspaceId} />
+      <UploadDocumentDialog
+        isOpen={isUploadOpen}
+        onOpenChange={setIsUploadOpen}
+        onUploadSuccess={() => { /* WebSocket handles updates */ }}
+        onUploadStart={() => { /* WebSocket handles updates */ }}
+        defaultTopic={collectionId}
+        workspaceId={workspaceId}
+      />
       <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchPageData} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />
@@ -322,6 +391,11 @@ export default function WorkspaceCollectionDetailPage() {
       <CollectionAnalysisDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} topic={collectionId} />
       <SemanticAnalysisDialog isOpen={isSemanticAnalysisOpen} onOpenChange={setIsSemanticAnalysisOpen} analysis={semanticAnalysisResult} topic={collectionId} />
       <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={fetchPageData} document={documentToShare} />
+
+      {/* Indicador de progreso de subida */}
+      {uploadTasks.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-50 w-80"><UploadProgressIndicator tasks={uploadTasks} /></div>
+      )}
     </div>
   );
 }

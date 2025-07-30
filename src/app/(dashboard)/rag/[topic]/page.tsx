@@ -21,6 +21,7 @@ import { PreviewDocumentDialog } from '../preview-document-dialog';
 import { EditDocumentDialog } from '../edit-document-dialog';
 import { DeleteConfirmationDialog } from '../delete-confirmation-dialog';
 import { AnalysisResultDialog } from '../analysis-result-dialog';
+import UploadProgressIndicator, { UploadTask } from '@/components/UploadProgressIndicator';
 import { CollectionAnalysisDialog } from '../collection-analysis-dialog';
 import { SemanticAnalysisDialog } from '../semantic-analysis-dialog';
 import { ShareDocumentDialog } from '../share-document-dialog';
@@ -31,6 +32,9 @@ export default function CollectionDetailPage() {
 
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Estado para rastrear las tareas de subida en progreso
+  const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
   
   // Estados para diálogos
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -57,17 +61,6 @@ export default function CollectionDetailPage() {
 
   // Estado para el historial de análisis
   const [savedAnalyses, setSavedAnalyses] = useState([]);
-<<<<<<< HEAD
-  interface UploadTask {
-    id: string;
-    fileNames: string[];
-    topic: string;
-    status: string;
-    progress: number;
-  }
-  const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]); // Nuevo estado para tareas de carga
-=======
->>>>>>> parent of 23dd267 (Redesign chat input bar with circular layout and add URL decoding for topic handling)
 
   // Estados para procesamiento de grafos de conocimiento
   const [isProcessingKnowledgeGraph, setIsProcessingKnowledgeGraph] = useState(false);
@@ -91,6 +84,50 @@ export default function CollectionDetailPage() {
       console.log('✅ Extracción de títulos completada:', data);
       // Recargar la página para mostrar todos los cambios
       fetchPageData();
+    },
+    onUploadStarted: (data) => {
+      setUploadTasks(prev => {
+        if (prev.some(task => task.id === data.task_id)) return prev;
+        return [...prev, {
+          id: data.task_id,
+          status: 'pending',
+          file_names: data.file_names,
+          topic: data.topic,
+          created_at: data.created_at
+        }];
+      });
+    },
+    onUploadProgress: (data) => {
+      setUploadTasks(prev => prev.map(task =>
+        task.id === data.task_id ? { ...task, status: 'processing', progress: data.progress } : task
+      ));
+    },
+    onUploadCompleted: (data) => {
+      setUploadTasks(prevTasks =>
+        prevTasks.map(task =>
+          task.id === data.task_id
+            ? { ...task, status: 'completed', progress: 100 }
+            : task
+        )
+      );
+      toast.success(`Archivos procesados correctamente.`);
+      fetchPageData();
+      setTimeout(() => {
+        setUploadTasks(prevTasks => prevTasks.filter(task => task.id !== data.task_id));
+      }, 5000);
+    },
+    onUploadFailed: (data) => {
+      setUploadTasks(prevTasks =>
+        prevTasks.map(task =>
+          task.id === data.task_id
+            ? { ...task, status: 'failed', error_message: data.error_message }
+            : task
+        )
+      );
+      toast.error(`La subida falló: ${data.error_message}`);
+      setTimeout(() => {
+        setUploadTasks(prevTasks => prevTasks.filter(task => task.id !== data.task_id));
+      }, 5000);
     }
   });
 
@@ -321,6 +358,10 @@ export default function CollectionDetailPage() {
         </div>
       )}
 
+      {uploadTasks.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-50 w-80"><UploadProgressIndicator tasks={uploadTasks} /></div>
+      )}
+
       <Card className="flex-grow mb-6">
         <CardHeader>
           <CardTitle>Documentos en la Colección</CardTitle>
@@ -446,7 +487,13 @@ export default function CollectionDetailPage() {
       </Card>
 
       {/* Diálogos */}
-      <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={fetchPageData} defaultTopic={topic} />
+      <UploadDocumentDialog
+        isOpen={isUploadOpen}
+        onOpenChange={setIsUploadOpen}
+        onUploadSuccess={() => { /* WebSocket handles updates */ }}
+        onUploadStart={() => { /* WebSocket handles updates */ }}
+        defaultTopic={topic}
+      />
       <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchPageData} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />

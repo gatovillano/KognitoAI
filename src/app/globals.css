@@ -113,6 +113,13 @@
 }
 
 @layer base {
+  html {
+    /* Reduce el tamaño de fuente base del navegador (normalmente 16px) a 14px.
+       Esto hará que todas las unidades `rem` sean más pequeñas, escalando
+       proporcionalmente toda la interfaz de usuario. */
+    font-size: 16px;
+  }
+
   * {
     @apply border-border;
   }
@@ -418,35 +425,3 @@
 .micro-interaction:active {
   transform: scale(0.98);
 }
-
-/* Esquina curva para unir sidebar y header */
-.curved-corner {
-  position: relative;
-}
-
-.curved-corner::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  width: 20px;
-  height: 20px;
-  background: hsl(var(--background));
-  border-top-right-radius: 20px;
-  z-index: 1;
-}
-
-.curved-corner::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  width: 20px;
-  height: 20px;
-  background: hsl(var(--card) / 0.8);
-  border-top-right-radius: 16px;
-  z-index: 2;
-  margin: 2px;
-}
-
-
