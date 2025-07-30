@@ -101,7 +101,7 @@ export default function NotesPage() {
         className="h-full"
       >
         <Card
-          className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full"
+          className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full min-h-[200px]"
           style={{ opacity: isDragging ? 0.5 : 1 }}
           onClick={() => {
             setViewingNote(note);
@@ -114,7 +114,7 @@ export default function NotesPage() {
                 <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                   <Notebook className="h-5 w-5 text-primary" />
                 </div>
-                <span className="font-semibold text-lg truncate">{note.title || 'Nota sin título'}</span>
+                <span className="font-semibold text-lg">{note.title || 'Nota sin título'}</span>
               </div>
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <Button

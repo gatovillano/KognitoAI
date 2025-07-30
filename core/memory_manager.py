@@ -1636,7 +1636,7 @@ async def update_collection_metadata(
                     update_embeddings_sql = text(f"""
                         UPDATE langchain_pg_embedding
                         SET
-                            cmetadata = jsonb_set(cmetadata, '{{topic}}', :new_cmetadata_topic::jsonb),
+                            cmetadata = jsonb_set(cmetadata, '{{topic}}', CAST(:new_cmetadata_topic AS jsonb)),
                             topic = :new_topic_name
                         WHERE {" AND ".join(clauses)}
                     """)
