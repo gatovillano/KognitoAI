@@ -7,6 +7,7 @@ Esta herramienta permite al agente de IA procesar documentos almacenados y extra
 """
 
 import logging
+import uuid
 from typing import Type, Optional, Any
 
 from pydantic.v1 import BaseModel, Field
@@ -21,10 +22,6 @@ from sqlalchemy import create_engine
 from core.memory_manager import update_document_metadata, get_full_document_content
 from core.llm_manager import get_fast_llm
 from core.websocket_manager import send_personal_message
-import logging
-from typing import Optional, Any, Type
-from pydantic.v1 import BaseModel, Field
-from langchain_core.tools import BaseTool
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -38,6 +35,10 @@ class ExtractDocumentTitlesInput(BaseModel):
     topic: Optional[str] = Field(
         None,
         description="El tema o categoría de los documentos a procesar. Si no se proporciona, se procesarán todos los documentos del usuario."
+    )
+    collection_id: Optional[str] = Field(
+        None,
+        description="El ID de la colección de documentos a procesar. Si se proporciona, solo se procesarán los documentos de esta colección."
     )
 
 
@@ -57,8 +58,13 @@ class ExtractDocumentTitlesTool(BaseTool):
     args_schema: Type[BaseModel] = ExtractDocumentTitlesInput
     return_direct: bool = False
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="El ID del workspace actual, inyectado automáticamente.")
 
-    async def _arun(self, topic: Optional[str] = None, file_name: Optional[str] = None, **kwargs: Any) -> str:
+    def _run(self, *args: Any, **kwargs: Any) -> str:
+        """Síncrono: Esta herramienta solo soporta ejecución asíncrona."""
+        raise NotImplementedError("ExtractDocumentTitlesTool solo soporta ejecución asíncrona. Usa _arun en su lugar.")
+
+    async def _arun(self, topic: Optional[str] = None, file_name: Optional[str] = None, collection_id: Optional[str] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -72,16 +78,11 @@ class ExtractDocumentTitlesTool(BaseTool):
         """
         logger.info(f"Ejecutando ExtractDocumentTitlesTool para la cuenta '{self.account_id}' con tema: '{topic}', archivo: '{file_name}'.")
         try:
-<<<<<<< HEAD
             if not settings.database_url:
                 raise ValueError("Database URL is not configured")
                 
-=======
-            # Engine síncrono para conectar con la base de datos
->>>>>>> parent of 9cadb85 (Refactor UI, enhance RAG capabilities, and improve tool functionalities)
             PGVECTOR_SYNC_ENGINE = create_engine(settings.database_url)
             metadata = MetaData()
-            langchain_pg_collection = Table('langchain_pg_collection', metadata, autoload_with=PGVECTOR_SYNC_ENGINE)
             langchain_pg_embedding = Table('langchain_pg_embedding', metadata, autoload_with=PGVECTOR_SYNC_ENGINE)
 
             async with DBSession(SessionLocal) as db:
@@ -105,45 +106,32 @@ class ExtractDocumentTitlesTool(BaseTool):
                 """), {"account_id": self.account_id})
                 await db.commit()
 
-<<<<<<< HEAD
                 clauses = [
                     "account_id = :account_id",
-                    "content_type = 'user_documents'",
+                    "content_type = 'user_documents'", # Asumimos que siempre son user_documents
                     "cmetadata->>'type' = 'document_chunk'"
                 ]
                 params = {"account_id": self.account_id}
-=======
-                # Obtener el UUID de la colección para el usuario
-                col_q = text("SELECT uuid FROM langchain_pg_collection WHERE name = :cname")
-                res = await db.execute(col_q, {"cname": f"user_memories_{account_id}"})
-                collection_uuid = res.scalar_one_or_none()
-                if not collection_uuid:
-                    logger.info(f"No existe la colección 'user_memories_{account_id}', no hay documentos para procesar.")
-                    await db.execute(text("""
-                        UPDATE process_status
-                        SET status = 'completed', message = 'No se encontraron documentos para procesar en tu base de conocimiento.', last_updated = CURRENT_TIMESTAMP
-                        WHERE account_id = :account_id
-                    """), {"account_id": account_id})
-                    await db.commit()
-                    return "No se encontraron documentos para procesar en tu base de conocimiento."
->>>>>>> parent of 9cadb85 (Refactor UI, enhance RAG capabilities, and improve tool functionalities)
 
-                # Construir la consulta para obtener los documentos
-                clauses = ["collection_id = :col_id", "cmetadata->>'type' = 'document_chunk'"]
-                params = {"col_id": collection_uuid}
+                # Añadir filtro por workspace_id si está disponible
+                if self.workspace_id and isinstance(self.workspace_id, str) and self.workspace_id.strip():
+                    try:
+                        uuid.UUID(self.workspace_id)
+                        clauses.append("workspace_id = :ws_id")
+                        params["ws_id"] = self.workspace_id
+                    except ValueError:
+                        logger.warning(f"workspace_id '{self.workspace_id}' no es un UUID válido. Omitiendo filtro.")
+
                 if topic:
-                    clauses.append("cmetadata->>'topic' = :tpc")
+                    clauses.append("topic = :tpc") # Usar directamente la columna 'topic'
                     params["tpc"] = topic
-                if file_name:
-                    clauses.append("cmetadata->>'file_name' = :fname")
-                    params["fname"] = file_name
+                # Eliminar el filtro por collection_id si se usa topic, o si collection_id es None
+                if collection_id: # Este collection_id se refiere a 'user_documents' o 'user_memories'
+                    clauses.append("collection_id = :col_id")
+                    params["col_id"] = collection_id
 
-<<<<<<< HEAD
                 # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
                 select_sql = text("SELECT DISTINCT ON (cmetadata->>'document_id') * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses) + " ORDER BY cmetadata->>'document_id', id")
-=======
-                select_sql = text("SELECT DISTINCT ON (cmetadata->>'file_name') * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses))
->>>>>>> parent of 9cadb85 (Refactor UI, enhance RAG capabilities, and improve tool functionalities)
                 logger.info(f"Ejecutando consulta SQL: {select_sql} con parámetros: {params}")
                 result = await db.execute(select_sql, params)
                 chunks = result.mappings().all()
@@ -193,20 +181,35 @@ class ExtractDocumentTitlesTool(BaseTool):
                     file_name = chunk['cmetadata'].get('file_name')
                     if file_name:
                         # Obtener solo el primer fragmento del documento para mayor eficiencia
-                        first_chunk_query = text("""
-                            SELECT document
-                            FROM langchain_pg_embedding
-                            WHERE collection_id = :col_id
-                            AND cmetadata->>'file_name' = :file_name
-                            AND cmetadata->>'type' = 'document_chunk'
-                            ORDER BY (cmetadata->>'chunk_index')::integer ASC
-                            LIMIT 3
-                        """)
-<<<<<<< HEAD
-                        chunk_result = await db.execute(first_chunk_query, {"account_id": self.account_id, "file_name": file_name})
-=======
-                        chunk_result = await db.execute(first_chunk_query, {"col_id": collection_uuid, "file_name": file_name})
->>>>>>> parent of 9cadb85 (Refactor UI, enhance RAG capabilities, and improve tool functionalities)
+                        first_chunk_query_clauses = [
+                            "account_id = :account_id",
+                            "cmetadata->>'file_name' = :file_name",
+                            "cmetadata->>'type' = 'document_chunk'"
+                        ]
+                        first_chunk_params = {
+                            "account_id": self.account_id,
+                            "file_name": file_name
+                        }
+                        # Añadir filtro por workspace_id si está disponible
+                        if self.workspace_id and isinstance(self.workspace_id, str) and self.workspace_id.strip():
+                            try:
+                                uuid.UUID(self.workspace_id)
+                                first_chunk_query_clauses.append("workspace_id = :ws_id")
+                                first_chunk_params["ws_id"] = self.workspace_id
+                            except ValueError:
+                                logger.warning(f"workspace_id '{self.workspace_id}' no es un UUID válido. Omitiendo filtro.")
+
+                        if topic:
+                            first_chunk_query_clauses.append("topic = :tpc")
+                            first_chunk_params["tpc"] = topic
+                        # Solo añadir el filtro collection_id si se proporciona y no se usa topic
+                        elif collection_id: # Este collection_id se refiere a 'user_documents' o 'user_memories'
+                            first_chunk_query_clauses.append("collection_id = :col_id")
+                            first_chunk_params["col_id"] = collection_id
+
+                        first_chunk_query = text("SELECT document FROM langchain_pg_embedding WHERE " + " AND ".join(first_chunk_query_clauses) + " ORDER BY (cmetadata->>'chunk_index')::integer ASC LIMIT 3")
+                        logger.info(f"Valores para first_chunk_query: {first_chunk_params}")
+                        chunk_result = await db.execute(first_chunk_query, first_chunk_params)
                         first_chunk = chunk_result.mappings().first()
                         
                         if first_chunk and 'document' in first_chunk:
@@ -272,51 +275,36 @@ class ExtractDocumentTitlesTool(BaseTool):
                                     logger.info(f"No se encontró un título de respaldo válido para {file_name}.")
                         else:
                             logger.warning(f"No se pudo obtener el primer fragmento del documento {file_name}.")
-                    else:
-                        logger.warning(f"Fragmento sin 'file_name' en cmetadata: {chunk['cmetadata']}")
                     
                     processed_count += 1
                     # Actualizar el progreso
                     await db.execute(text("""
                         UPDATE process_status
-                        SET progress = :progress, message = :message, last_updated = CURRENT_TIMESTAMP
+                        SET status = 'in_progress', progress = :progress, total = :total, message = :message, last_updated = CURRENT_TIMESTAMP
                         WHERE account_id = :account_id
-                    """), {"account_id": self.account_id, "progress": processed_count, "message": f"Procesando documento {processed_count} de {total_docs}..."})
+                    """), {"account_id": self.account_id, "progress": processed_count, "total": total_docs, "message": f"Procesado {processed_count}/{total_docs} documentos."})
                     await db.commit()
-
-                if updated_count > 0:
-                    logger.info(f"Se actualizaron los títulos de {updated_count} documentos para la cuenta {self.account_id}.")
-                    final_message = f"Se han procesado y actualizado los títulos de {updated_count} {'documento' if file_name else 'documentos'} en tu base de conocimiento."
-                else:
-                    logger.info(f"No se encontraron títulos para actualizar en los documentos de la cuenta {self.account_id}.")
-                    final_message = f"No se encontraron títulos para actualizar en {'el documento ' + file_name if file_name else 'los documentos de tu base de conocimiento'}."
                 
+                final_message = f"Proceso de extracción de títulos completado. Se actualizaron {updated_count} de {total_docs} documentos."
                 await db.execute(text("""
                     UPDATE process_status
-                    SET status = 'completed', progress = :progress, message = :message, last_updated = CURRENT_TIMESTAMP
+                    SET status = 'completed', message = :message, last_updated = CURRENT_TIMESTAMP
                     WHERE account_id = :account_id
-                """), {"account_id": self.account_id, "progress": processed_count, "message": final_message})
+                """), {"account_id": self.account_id, "message": final_message})
                 await db.commit()
-
-                await send_personal_message(self.account_id, {
-                    "type": "title_extraction_completed",
-                    "updated_count": updated_count,
-                    "total_processed": processed_count,
-                    "message": final_message
-                })
-
                 return final_message
+
         except Exception as e:
-            logger.error(f"Error en ExtractDocumentTitlesTool para la cuenta '{self.account_id}': {e}", exc_info=True)
+            logger.error(f"Error inesperado en ExtractDocumentTitlesTool: {e}", exc_info=True)
+            await send_personal_message(self.account_id, {
+                "type": "error",
+                "message": f"Ocurrió un error inesperado durante la extracción de títulos: {e}"
+            })
             async with DBSession(SessionLocal) as db:
                 await db.execute(text("""
                     UPDATE process_status
-                    SET status = 'error', message = :message, last_updated = CURRENT_TIMESTAMP
+                    SET status = 'failed', message = :message, last_updated = CURRENT_TIMESTAMP
                     WHERE account_id = :account_id
-                """), {"account_id": self.account_id, "message": f"Ocurrió un error inesperado: {str(e)}"})
+                """), {"account_id": self.account_id, "message": f"Error inesperado: {e}"})
                 await db.commit()
-            return f"Ocurrió un error inesperado al intentar extraer y actualizar los títulos de los documentos: {e}"
-
-    def _run(self, *args: Any, **kwargs: Any) -> Any:
-        """La ejecución síncrona no está soportada en nuestra arquitectura asíncrona."""
-        raise NotImplementedError("extract_document_titles_tool no soporta ejecución síncrona.")
+            return "Ocurrió un error inesperado durante la extracción de títulos."

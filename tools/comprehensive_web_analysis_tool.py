@@ -58,17 +58,12 @@ class ComprehensiveWebAnalysisTool(BaseTool):
     async def _arun(\
         self,\
         query: str,\
-<<<<<<< HEAD
         account_id: str = "",\
-=======
-        account_id: str,\
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
         workspace_id: Optional[str] = None, # <-- workspace_id añadido aquí
         run_manager: Optional[CallbackManagerForToolRun] = None,\
         **kwargs: Any\
     ) -> str:
         """Executes the comprehensive analysis tool asynchronously."""
-<<<<<<< HEAD
         # Obtener account_id de la configuración del agente si está disponible
         config_account_id = None
         config_workspace_id = workspace_id
@@ -111,9 +106,6 @@ class ComprehensiveWebAnalysisTool(BaseTool):
             return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
 
         logger.info(f"--- Running Comprehensive Web Analysis for account {effective_account_id} (Workspace: {effective_workspace_id if effective_workspace_id else 'N/A'}) ---")
-=======
-        logger.info(f"--- Running Comprehensive Web Analysis for account {account_id} (Workspace: {workspace_id if workspace_id else 'N/A'}) ---")
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
         logger.info(f"Query: {query}")
 
         # Step 1: Web Search

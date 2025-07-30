@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   title: "Kognito AI",
   description: "Plataforma de IA para productividad y colaboración",
   icons: {
-    icon: "/favicon.ico",
+    icon: "/logo-simple.png",
   },
 };
 

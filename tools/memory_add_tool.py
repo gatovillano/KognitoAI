@@ -38,14 +38,10 @@ class MemoryAddInput(BaseModel):
         ...,
         description="El texto o información específica que debe ser guardado en la memoria a largo plazo."
     )
-<<<<<<< HEAD
-    # Eliminado: account_id. Ahora solo se obtiene de la configuración del agente.
-=======
     account_id: str = Field(
         ...,
         description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
     )
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
     # El 'type' ahora es una clasificación general de la memoria.
     type: str = Field(
         "user_memory", # Valor por defecto más específico para memorias del usuario
@@ -91,11 +87,7 @@ class MemoryAddTool(BaseTool):
     return_direct: bool = False
     account_id: str
 
-<<<<<<< HEAD
     async def _arun(self, content: str, type: Optional[str] = "user_memory", category: Optional[str] = None, workspace_id: Optional[str] = None, run_manager: Optional[Any] = None, **kwargs: Any) -> str:
-=======
-    async def _arun(self, content: str, account_id: str, type: Optional[str] = "user_memory", category: Optional[str] = None, workspace_id: Optional[str] = None, **kwargs: Any) -> str:
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -109,7 +101,6 @@ class MemoryAddTool(BaseTool):
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
-<<<<<<< HEAD
         if not self.account_id:
             return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
 
@@ -119,39 +110,20 @@ class MemoryAddTool(BaseTool):
 
         log_content = content[:100] + '...' if len(content) > 100 else content
         logger.info(f"Ejecutando MemoryAddTool para la cuenta '{self.account_id}' (Tipo: {type}, Categoría: {category}, Workspace: {workspace_id}): '{log_content}'")
-=======
-        if not content or not content.strip():
-            logger.warning(f"Se llamó a MemoryAddTool para la cuenta '{account_id}' con contenido vacío.")
-            return "No se puede guardar contenido vacío en la memoria."
-
-        log_content = content[:100] + '...' if len(content) > 100 else content
-        logger.info(f"Ejecutando MemoryAddTool para la cuenta '{account_id}' (Tipo: {type}, Categoría: {category}, Workspace: {workspace_id}): '{log_content}'")
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
 
         try:
             final_type = type if type else "user_memory"
             await add_memory_to_vector_db(
-<<<<<<< HEAD
                 account_id=self.account_id,
-=======
-                account_id=account_id,
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
                 content=content,
                 type=final_type,
                 workspace_id=workspace_id,
                 topic=category if category else "general"
             )
-<<<<<<< HEAD
             logger.info(f"Memoria añadida exitosamente para la cuenta '{self.account_id}'.")
 
             new_entry = {
                 'account_id': self.account_id,
-=======
-            logger.info(f"Memoria añadida exitosamente para la cuenta '{account_id}'.")
-
-            new_entry = {
-                'account_id': account_id,
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
                 'content': content,
                 'type': final_type,
                 'category': category if category else "general"
@@ -160,11 +132,7 @@ class MemoryAddTool(BaseTool):
             
             return "La información ha sido añadida a tu memoria a largo plazo."
         except Exception as e:
-<<<<<<< HEAD
             logger.error(f"Error en MemoryAddTool para la cuenta '{self.account_id}': {e}", exc_info=True)
-=======
-            logger.error(f"Error en MemoryAddTool para la cuenta '{account_id}': {e}", exc_info=True)
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
             return f"Ocurrió un error al intentar guardar la información en tu memoria: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

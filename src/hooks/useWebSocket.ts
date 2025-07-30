@@ -10,6 +10,10 @@ interface UseWebSocketOptions {
   onTitleUpdated?: (data: { file_name: string; new_title: string; progress: number; total: number }) => void;
   onTitleExtractionStarted?: (data: { total_documents: number; message: string }) => void;
   onTitleExtractionCompleted?: (data: { updated_count: number; total_processed: number; message: string }) => void;
+  onUploadStarted?: (data: { task_id: string; file_names: string[]; topic: string; created_at: string; }) => void;
+  onUploadProgress?: (data: { task_id: string; progress: number; message: string; }) => void;
+  onUploadCompleted?: (data: { task_id: string; message: string; }) => void;
+  onUploadFailed?: (data: { task_id: string; error_message: string; }) => void;
 }
 
 export const useWebSocket = (options: UseWebSocketOptions = {}) => {
@@ -28,7 +32,12 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
         return;
       }
 
-      const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws?token=${encodeURIComponent(token)}`;
+      // Usar NEXT_PUBLIC_API_URL para la conexión WebSocket
+      // Reemplazar http/https por ws/wss
+      const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8889'; // Fallback por si no está definida
+      const wsProtocol = apiBaseUrl.startsWith('https') ? 'wss' : 'ws';
+      const wsHost = apiBaseUrl.replace(/^https?:\/\//, '');
+      const wsUrl = `${wsProtocol}://${wsHost}/ws?token=${encodeURIComponent(token)}`;
       
       wsRef.current = new WebSocket(wsUrl);
 
@@ -81,6 +90,50 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
               toast.success(`✅ Extracción completada`, {
                 description: `${message.updated_count} títulos actualizados`
               });
+              break;
+
+            case 'upload_started':
+              if (options.onUploadStarted) {
+                options.onUploadStarted({
+                  task_id: message.task_id,
+                  file_names: message.file_names,
+                  topic: message.topic,
+                  created_at: message.created_at
+                });
+              }
+              toast.info(`📤 Subida iniciada: ${message.file_names.join(', ')} a la colección ${message.topic}`);
+              break;
+
+            case 'upload_progress':
+              if (options.onUploadProgress) {
+                options.onUploadProgress({
+                  task_id: message.task_id,
+                  progress: message.progress,
+                  message: message.message
+                });
+              }
+              // Opcional: mostrar progreso si es relevante
+              // toast.info(`Progreso de subida para ${message.task_id}: ${message.progress}%`);
+              break;
+
+            case 'upload_completed':
+              if (options.onUploadCompleted) {
+                options.onUploadCompleted({
+                  task_id: message.task_id,
+                  message: message.message
+                });
+              }
+              toast.success(`✅ Subida completada: ${message.message}`);
+              break;
+
+            case 'upload_failed':
+              if (options.onUploadFailed) {
+                options.onUploadFailed({
+                  task_id: message.task_id,
+                  error_message: message.error_message
+                });
+              }
+              toast.error(`❌ Subida fallida: ${message.error_message}`);
               break;
 
             default:

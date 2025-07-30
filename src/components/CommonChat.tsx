@@ -15,7 +15,6 @@ import { BackgroundTaskIndicator } from '@/components/BackgroundTaskIndicator';
 import { ArtifactPanel } from '@/components/ArtifactPanel';
 import { useArtifactPanel } from '@/contexts/ArtifactPanelContext';
 import { PanelRightOpen, PanelRightClose } from 'lucide-react';
-import { motion, AnimatePresence, Transition } from 'framer-motion';
 
 interface ToolStatusMessage {
   type: 'tool_status';
@@ -82,18 +81,6 @@ function LoadingIndicator({
     text += ` - Estado ReAct: ${reactState}`;
   }
 
-  const dotVariants = {
-    animate: {
-      opacity: [0.2, 1, 0.2],
-      scale: [0.8, 1.2, 0.8],
-    },
-  };
-
-  const dotTransition: Transition = {
-    duration: 1.4,
-    repeat: Infinity,
-    ease: [0.42, 0, 0.58, 1], // Equivalente a 'easeInOut'
-  };
 
   return (
     <div className="flex items-start space-x-4">
@@ -105,27 +92,9 @@ function LoadingIndicator({
       <div className="flex-1 bg-muted p-3 rounded-lg max-w-[70%] relative">
         <p className="text-sm text-muted-foreground flex items-center">
           {text}
-          <motion.span
-            className="inline-block ml-1"
-            variants={dotVariants}
-            transition={{ ...dotTransition, delay: 0 }}
-          >
-            .
-          </motion.span>
-          <motion.span
-            className="inline-block"
-            variants={dotVariants}
-            transition={{ ...dotTransition, delay: 0.2 }}
-          >
-            .
-          </motion.span>
-          <motion.span
-            className="inline-block"
-            variants={dotVariants}
-            transition={{ ...dotTransition, delay: 0.4 }}
-          >
-            .
-          </motion.span>
+          <span className="inline-block ml-1">.</span>
+          <span className="inline-block">.</span>
+          <span className="inline-block">.</span>
         </p>
         {/* Cola de la burbuja */}
         <div className="absolute left-[-8px] top-3 h-4 w-4 bg-muted rotate-45 transform origin-bottom-left"></div>
@@ -731,22 +700,13 @@ export function CommonChat({ threadId }: CommonChatProps) {
       <div className="flex flex-col h-full w-full">
         <ScrollArea ref={scrollAreaRef} className="flex-1">
           <div className="p-4 md:p-6 space-y-6 w-full max-w-4xl mx-auto">
-            <AnimatePresence initial={false}>
+            <div>
               {filteredMessages.slice(-50).map((msg, index) => {
                 const messageIndex = filteredMessages.length - 50 + index;
-                const isLastMessage = index === filteredMessages.slice(-50).length - 1;
                 
                 return (
-                  <motion.div
+                  <div
                     key={`${msg.created_at}-${messageIndex}`}
-                    initial={isLastMessage ? { opacity: 0, y: 20 } : false}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    transition={{
-                      duration: 0.5,
-                      ease: "easeOut",
-                    }}
-                    // layout="position" // Eliminado para evitar que los mensajes antiguos se animen al añadir uno nuevo.
                   >
                     <ChatMessage
                       msg={{
@@ -763,36 +723,27 @@ export function CommonChat({ threadId }: CommonChatProps) {
                       playingMessageIndex={playingMessageIndex}
                       isAudioPaused={isAudioPaused}
                     />
-                  </motion.div>
+                  </div>
                 );
               })}
               {isResponding && (
-                <motion.div
-                  initial={{ opacity: 0, y: 30 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.4, ease: "easeOut" }}
-                >
+                <div>
                   <LoadingIndicator
                     isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
                     isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
                     toolName={toolName ?? undefined}
                     reactState={reactState ?? undefined}
                   />
-                </motion.div>
+                </div>
               )}
               {backgroundTasks.map((task) => (
-                <motion.div
+                <div
                   key={task.taskId}
-                  initial={{ opacity: 0, y: 30 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.4, ease: "easeOut" }}
                 >
                   <BackgroundTaskIndicator task={task} />
-                </motion.div>
+                </div>
               ))}
-            </AnimatePresence>
+            </div>
           </div>
         </ScrollArea>
         <div className="w-full max-w-4xl mx-auto">

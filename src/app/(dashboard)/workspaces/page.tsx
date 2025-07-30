@@ -61,7 +61,7 @@ export default function WorkspacesPage() {
             <Bot className="mr-3 h-8 w-8 text-primary" />
             Workspaces
           </h1>
-          <p className="text-muted-foreground mt-2">Organiza y gestiona tus espacios de trabajo especializados</p>
+          <p className="text-muted-foreground mt-2">Organiza y gestiona tus espacios de trabajo especializados. Crea un espacio con un asistente con sus propias indicaciones de sistema. Dentro podrás gestionar colecciones de conocimiento a las que tendrá acceso tu asistente de forma aislada del resto del contexto personal.</p>
         </div>
         <Button size="lg" onClick={() => {
           setSelectedWorkspace(null);

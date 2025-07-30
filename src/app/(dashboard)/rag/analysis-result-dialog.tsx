@@ -1,7 +1,7 @@
 // En: src/app/(dashboard)/rag/analysis-result-dialog.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -9,10 +9,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
-import { Expand, HelpCircle } from 'lucide-react';
+import { Expand, HelpCircle, Volume2, Loader2, Pause } from 'lucide-react';
 import { QuestionSliderDialog } from '@/components/QuestionSliderDialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
+import { useTextToSpeech } from '@/hooks/useTextToSpeech';
 import { type Document } from './columns'; // Importamos el tipo
 
 interface AnalysisResultDialogProps {
@@ -24,6 +25,7 @@ interface AnalysisResultDialogProps {
 
 export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange }: AnalysisResultDialogProps) {
   const [isQuestionsDialogOpen, setIsQuestionsDialogOpen] = useState(false);
+  const { play, stop, isLoading, isPlaying, activeText } = useTextToSpeech();
 
   if (!analysis) return null;
 
@@ -74,6 +76,15 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
     reflexiones_finales: ensureArray(analysis.final_reflections || analysis.reflexiones_finales)
   };
 
+  const handlePlayPause = (text: string) => {
+    play(text);
+  };
+
+  const isSummaryPlaying = isPlaying && activeText === mappedAnalysis.resumen_ejecutivo;
+  const isGeneralAnalysisPlaying = isPlaying && activeText === mappedAnalysis.analisis_general;
+  const isSummaryLoading = isLoading && activeText === mappedAnalysis.resumen_ejecutivo;
+  const isGeneralAnalysisLoading = isLoading && activeText === mappedAnalysis.analisis_general;
+
   return (
     <>
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -87,11 +98,33 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
         <ScrollArea className="max-h-[60vh] pr-4">
             <div className="space-y-6">
                 <div>
-                    <h3 className="font-semibold mb-2">Resumen Ejecutivo por IA</h3>
+                    <div className="flex justify-between items-center mb-2">
+                      <h3 className="font-semibold">Resumen Ejecutivo por IA</h3>
+                      <Button variant="ghost" size="icon" onClick={() => handlePlayPause(mappedAnalysis.resumen_ejecutivo)} disabled={isLoading && !isSummaryLoading}>
+                        {isSummaryLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : isSummaryPlaying ? (
+                          <Pause className="h-4 w-4" />
+                        ) : (
+                          <Volume2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
                     <p className="text-sm text-muted-foreground p-3 bg-muted rounded-md whitespace-pre-wrap">{mappedAnalysis.resumen_ejecutivo}</p>
                 </div>
                 <div>
-                    <h3 className="font-semibold mb-2">Análisis General</h3>
+                    <div className="flex justify-between items-center mb-2">
+                      <h3 className="font-semibold">Análisis General</h3>
+                      <Button variant="ghost" size="icon" onClick={() => handlePlayPause(mappedAnalysis.analisis_general)} disabled={isLoading && !isGeneralAnalysisLoading}>
+                        {isGeneralAnalysisLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : isGeneralAnalysisPlaying ? (
+                          <Pause className="h-4 w-4" />
+                        ) : (
+                          <Volume2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
                     <div className="text-sm text-muted-foreground p-3 bg-muted border-l-4 border-blue-200 rounded-md">
                         <InlineMarkdownRenderer content={mappedAnalysis.analisis_general} />
                     </div>

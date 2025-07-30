@@ -97,7 +97,7 @@ class Account(Base):
     custom_system_prompt = Column(Text, nullable=True, comment="Prompt de sistema personalizado para la IA de esta cuenta.")
     is_admin = Column(Boolean, default=False, nullable=False, comment="Indica si esta cuenta tiene privilegios de administrador.")
     is_active = Column(Boolean, default=True, nullable=False, comment="Indica si esta cuenta está activa y puede usar el sistema.")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 
     # --- Relaciones con otros modelos ---
     # Una cuenta puede tener múltiples identidades de plataforma.
@@ -164,7 +164,7 @@ class Team(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False, comment="Nombre del equipo.")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
     admin_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, comment="ID del administrador del equipo.")
 
     # Relaciones
@@ -192,7 +192,7 @@ class TeamMember(Base):
     id = Column(Integer, primary_key=True)
     team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False, index=True)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
-    joined_at = Column(DateTime(timezone=True), server_default=func.now())
+    joined_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 
     # Relaciones
     team = relationship("Team", back_populates="members")
@@ -215,7 +215,7 @@ class Workspace(Base):
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     system_prompt = Column(Text, nullable=True, comment="Prompt de sistema específico para este espacio de trabajo.")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 
     # Relaciones
     account = relationship("Account", back_populates="workspaces")
@@ -235,7 +235,7 @@ class LangchainPgCollection(Base):
     """
     __tablename__ = "langchain_pg_collection"
 
-    uuid = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    uuid = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4) # Cambiado 'id' a 'uuid'
     name = Column(String(255), unique=True, nullable=False)
     cmetadata = Column(JSONB, nullable=True) # Metadatos de la colección, si los hay
     
@@ -244,6 +244,40 @@ class LangchainPgCollection(Base):
     
     def __repr__(self):
         return f"<LangchainPgCollection(uuid={self.uuid}, name='{self.name}')>"
+
+
+class LangchainPgEmbedding(Base):
+    """
+    Mapea la tabla 'langchain_pg_embedding' de LangChain.
+    Esta tabla almacena todos los embeddings vectoriales con columnas optimizadas para búsquedas directas.
+    """
+    __tablename__ = "langchain_pg_embedding"
+
+    id = Column(String, primary_key=True)
+    collection_id = Column(UUID(as_uuid=True), nullable=True)
+    embedding = Column(Vector(), nullable=True) # El tamaño del vector se infiere o se especifica en la configuración
+    document = Column(String, nullable=True)
+    cmetadata = Column(JSONB, nullable=True)
+    custom_id = Column(String, nullable=True)
+    uuid = Column(UUID(as_uuid=True), default=uuid.uuid4, nullable=True)
+    account_id = Column(UUID(as_uuid=True), nullable=True, index=True) # ⭐ COLUMNA DIRECTA
+    content_type = Column(String(50), nullable=True) # ⭐ COLUMNA DIRECTA
+    workspace_id = Column(UUID(as_uuid=True), nullable=True, index=True) # ⭐ COLUMNA DIRECTA
+    topic = Column(String(100), nullable=True) # ⭐ COLUMNA DIRECTA
+    category = Column(String(50), nullable=True) # ⭐ COLUMNA DIRECTA
+    team_id = Column(UUID(as_uuid=True), nullable=True, index=True) # ⭐ COLUMNA DIRECTA
+    visibility_teams = Column(JSONB, nullable=True) # ⭐ COLUMNA DIRECTA
+
+    # Índices adicionales para las columnas directas
+    __table_args__ = (
+        Index('idx_langchain_pg_embedding_account_id', account_id),
+        Index('idx_langchain_pg_embedding_workspace_id', workspace_id),
+        Index('idx_langchain_pg_embedding_team_id', team_id),
+        Index('ix_cmetadata_gin', cmetadata, postgresql_using="gin"),
+    )
+
+    def __repr__(self):
+        return f"<LangchainPgEmbedding(id={self.id}, account_id={self.account_id}, topic='{self.topic}')>"
 
 # ELIMINADO: La clase 'WorkspaceCollectionAssociation' ya no es necesaria y se elimina por completo.
 # class WorkspaceCollectionAssociation(Base):
@@ -255,7 +289,7 @@ class LangchainPgCollection(Base):
 #     id = Column(Integer, primary_key=True, autoincrement=True)
 #     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=False, index=True)
 #     langchain_collection_id = Column(UUID(as_uuid=True), ForeignKey("langchain_pg_collection.uuid", ondelete='CASCADE'), nullable=False, index=True)
-#     created_at = Column(DateTime(timezone=True), server_default=func.now())
+#     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 #     workspace = relationship("Workspace", back_populates="collection_associations")
 #     langchain_collection = relationship("LangchainPgCollection", back_populates="workspace_associations")
 #     __table_args__ = (UniqueConstraint('workspace_id', 'langchain_collection_id', name='_workspace_langchain_collection_uc'),)
@@ -278,9 +312,8 @@ class UserDocumentTopic(Base):
 
     name = Column(String(255), nullable=False, comment="El nombre del tema/colección (corresponde al 'topic' en cmetadata).")
     description = Column(Text, nullable=True, comment="Descripción opcional de la colección.")
-    is_global = Column(Boolean, default=False, nullable=False, comment="Indica si esta colección es accesible globalmente (fuera de un workspace/equipo específico).")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
 
     # Relaciones
     account = relationship("Account", back_populates="user_document_topics")
@@ -308,7 +341,7 @@ class UserDocumentTopic(Base):
 #     content = Column(Text, nullable=False)
 #     embedding = Column(Vector(384), nullable=False)
 #     type = Column(String, default="general_memory")
-#     created_at = Column(DateTime(timezone=True), default=func.now())
+#     created_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"))
 #     account = relationship("Account", back_populates="memories")
 #     team = relationship("Team", back_populates="memories")
 #     def __repr__(self):
@@ -346,8 +379,8 @@ class Nota(Base):
     title = Column(String, nullable=True)
     content = Column(Text, nullable=False)
     category = Column(String, default="General")
-    created_at = Column(DateTime(timezone=True), default=func.now())
-    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
     embedding = Column(Vector(384), nullable=True)
 
     account = relationship("Account", back_populates="notas")
@@ -416,7 +449,7 @@ class ChatThread(Base):
 
     title = Column(String, default="Nuevo Chat")
     platform = Column(String, default="web", nullable=False, comment="Plataforma de origen: 'web', 'telegram'")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
     is_pinned = Column(Boolean, default=False, nullable=False)
     # Usamos JSONB para almacenar una lista flexible de etiquetas.
     tags = Column(JSONB, nullable=True)
@@ -435,7 +468,7 @@ class ProactiveInsight(Base):
     confidence_score = Column(Float, nullable=False)
     action_suggestion = Column(Text, nullable=True)
     related_items = Column(JSONB, nullable=True)  # Se almacena la lista de ítems como JSON (incluye tool_used en metadata)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False)
 
     account = relationship("Account", back_populates="proactive_insights")
     team = relationship("Team", back_populates="proactive_insights")
@@ -449,7 +482,7 @@ class VerificationCode(Base):
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
     code = Column(String(6), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 
     account = relationship("Account")
 
@@ -468,8 +501,8 @@ class AnalysisTask(Base):
     result_payload = Column(JSONB, nullable=True) # Aquí guardamos el JSON completo del análisis (incluye tool_used en metadata)
     error_message = Column(Text, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
 
     # Relación con Account
     account = relationship("Account", back_populates="analysis_tasks")
@@ -491,8 +524,8 @@ class MindmapTask(Base):
     result_payload = Column(JSONB, nullable=True) # Aquí guardamos el resultado del mapa mental (incluye tool_used en metadata)
     error_message = Column(Text, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
 
     # Relación con Account
     account = relationship("Account", back_populates="mindmap_tasks")
@@ -514,8 +547,8 @@ class UploadTask(Base):
     result_payload = Column(JSONB, nullable=True)  # Resultado de la subida
     error_message = Column(Text, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
 
     # Relación con Account
     account = relationship("Account", back_populates="upload_tasks")
@@ -542,8 +575,8 @@ class GitHubDocument(Base):
     # Columna de embedding para búsquedas semánticas o análisis
     embedding = Column(Vector(384), nullable=True, comment="Embedding vectorial del contenido del documento para búsquedas semánticas.")
     
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
 
     # Relaciones (opcionales, dependiendo de cómo se use)
     workspace = relationship("Workspace", backref="github_documents")
@@ -575,30 +608,10 @@ async def create_tables():
             await conn.run_sync(Base.metadata.create_all)
             logger.info("Tablas de la base de datos verificadas/creadas.")
             
-            # Intentar agregar columnas personalizadas a langchain_pg_embedding si existe
-            try:
-                await conn.execute(text("""
-                    DO $$
-                    BEGIN
-                        IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'langchain_pg_embedding') THEN
-                            ALTER TABLE langchain_pg_embedding
-                            ADD COLUMN IF NOT EXISTS account_id UUID,
-                            ADD COLUMN IF NOT EXISTS content_type VARCHAR(50),
-                            ADD COLUMN IF NOT EXISTS topic VARCHAR(255),
-                            ADD COLUMN IF NOT EXISTS category VARCHAR(255),
-                            ADD COLUMN IF NOT EXISTS workspace_id UUID,
-                            ADD COLUMN IF NOT EXISTS team_id UUID,
-                            ADD COLUMN IF NOT EXISTS visibility_teams UUID[];
-
-                            CREATE INDEX IF NOT EXISTS idx_langchain_pg_embedding_account_id ON langchain_pg_embedding(account_id);
-                            CREATE INDEX IF NOT EXISTS idx_langchain_pg_embedding_workspace_id ON langchain_pg_embedding(workspace_id);
-                            CREATE INDEX IF NOT EXISTS idx_langchain_pg_embedding_team_id ON langchain_pg_embedding(team_id);
-                        END IF;
-                    END $$;
-                """))
-                logger.info("Columnas personalizadas en langchain_pg_embedding verificadas/creadas.")
-            except Exception as e:
-                logger.warning(f"No se pudieron agregar columnas personalizadas a langchain_pg_embedding (la tabla será creada por LangChain cuando sea necesaria): {e}")
+            # La lógica de añadir columnas personalizadas a langchain_pg_embedding ya no es necesaria aquí,
+            # porque ahora se define como un modelo ORM completo y sus columnas e índices se crean
+            # automáticamente con Base.metadata.create_all.
+            # Se puede eliminar el bloque try-except anterior que manejaba esto.
     except Exception as e:
         logger.error(f"❌ ERROR CRÍTICO al crear tablas de la base de datos: {e}", exc_info=True)
         raise

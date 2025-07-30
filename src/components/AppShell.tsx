@@ -74,13 +74,13 @@ export function AppShell({ children }: AppShellProps) {
       {isDesktop ? (
         <div className="fixed inset-0 bg-background">
           <div
-            className={`bg-card/80 backdrop-blur-xl transition-all duration-500 ease-in-out ${isSidebarCollapsed ? 'w-20' : 'w-80'} h-full overflow-y-auto fixed left-0 top-0 z-10 shadow-medium border-r border-border/20`}
+            className={`bg-card/80 backdrop-blur-xl transition-all duration-500 ease-in-out ${isSidebarCollapsed ? 'w-16' : 'w-64'} h-full overflow-y-auto fixed left-0 top-0 z-10 shadow-medium border-r border-border/20`}
           >
             <Sidebar isCollapsed={isSidebarCollapsed} />
           </div>
 
-          <div className={`fixed top-0 bottom-0 right-0 flex flex-col transition-all duration-500 ease-in-out ${isSidebarCollapsed ? 'left-20' : 'left-80'}`}>
-            <header className="flex h-16 items-center gap-4 bg-card/80 backdrop-blur-xl px-6 shrink-0 shadow-soft curved-corner">
+          <div className={`fixed top-0 bottom-0 right-0 flex flex-col transition-all duration-500 ease-in-out ${isSidebarCollapsed ? 'left-16' : 'left-64'}`}>
+            <header className="flex h-16 items-center gap-4 bg-card/80 backdrop-blur-xl px-6 shrink-0 shadow-soft border-b border-border/20">
               <Button
                 variant="ghost"
                 size="icon"

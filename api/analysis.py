@@ -8,7 +8,7 @@ from core.llm_manager import get_fast_llm
 
 from fastapi import APIRouter, HTTPException, Depends, status, Form, BackgroundTasks
 from pydantic import BaseModel
-from sqlalchemy import select, desc, or_, update, func, String
+from sqlalchemy import select, desc, or_, and_, update, func, String
 
 from core.database import SessionLocal, AnalysisTask, ProactiveInsight, MindmapTask
 from utils.security import get_current_account_id
@@ -75,6 +75,7 @@ async def list_all_user_documents(account_id: str, topic: Optional[str] = None):
 class GetSavedAnalysesRequest(BaseModel):
     topic: Optional[str] = None  # Para filtrar por colección
     all: bool = False  # Para obtener todos los análisis sin filtrar por colección
+    workspace_id: Optional[str] = None  # Para filtrar por workspace
 
 @router.post("/get-saved-analyses")
 async def get_saved_analyses_endpoint(
@@ -101,23 +102,27 @@ async def get_saved_analyses_endpoint(
         
         # 1. Obtenemos los nombres de los archivos que pertenecen a este topic.
         #    (Usamos la función combinada que incluye documentos de GitHub)
-        all_user_docs = await list_all_user_documents(current_account_id)
+        all_user_docs = await list_all_user_documents(current_account_id, topic=req.topic)
         files_in_topic = [
             doc['file_name'] for doc in all_user_docs if doc.get('topic') == req.topic
         ]
         
         # 2. Construimos la condición del WHERE
         #    Queremos análisis cuyo 'file_name' sea uno de los archivos de la colección,
-        #    O que sea el análisis de la propia colección.
+        #    O que sea el análisis de la propia colección, O que sea un análisis semántico.
         collection_reference_name = f"Colección: {req.topic}"
-        
+        semantic_reference_name = f"Resumen Semántico: {req.topic}"
+
         # Usamos or_() para combinar las condiciones
-        final_stmt = base_stmt.where(
-            or_(
-                AnalysisTask.file_name.in_(files_in_topic),
-                AnalysisTask.file_name == collection_reference_name
-            )
-        )
+        conditions = [
+            AnalysisTask.file_name.in_(files_in_topic),
+            AnalysisTask.file_name == collection_reference_name,
+            AnalysisTask.file_name == semantic_reference_name
+        ]
+
+        final_stmt = base_stmt.where(or_(*conditions))
+
+        # No filtrar por workspace_id en la consulta SQL, lo haremos después
     elif req.all:
         # Si se pide 'all', no aplicamos más filtros.
         final_stmt = base_stmt
@@ -126,10 +131,9 @@ async def get_saved_analyses_endpoint(
         final_stmt = base_stmt
 
     # Ordenamos y limitamos la consulta final
-    final_stmt = final_stmt.order_by(desc(AnalysisTask.created_at)).limit(50)
-    
+    final_stmt = final_stmt.order_by(desc(AnalysisTask.created_at)).limit(100)  # Obtener más para filtrar después
+
     results = await db.execute(final_stmt)
-<<<<<<< HEAD
     all_analyses = results.scalars().all()
 
     # Filtrar por workspace_id después de obtener los resultados
@@ -166,9 +170,6 @@ async def get_saved_analyses_endpoint(
             return [a for a in all_analyses if not a.result_payload or a.result_payload.get('workspace_id') is None][:50]
         else:
             return all_analyses[:50] # Esto no debería ocurrir si req.workspace_id es Optional[str]
-=======
-    return results.scalars().all()
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
 
 class DeleteAnalysisRequest(BaseModel):
     task_id: str
@@ -296,7 +297,7 @@ async def run_document_analysis_and_save(task_id: str, account_id: str, file_nam
             if not text_content: raise ValueError("Contenido del documento no encontrado.")
 
             # 2. Realizar el análisis pesado
-            analysis_result = await text_analyzer.analyze_single_text(text_content)
+            analysis_result = await text_analyzer.analyze_single_text(text_content, document_title=file_name)
 
             # 3. Guardar el resultado y marcar como 'completed'
             # Asegurarse de que el resultado sea un diccionario
@@ -757,16 +758,44 @@ async def run_semantic_summary_analysis(task_id: str, account_id: str, topic: st
             if not all_chunks:
                 raise ValueError(f"No se encontró contenido para analizar en la colección '{topic}'")
 
-            # Preparar contenido para análisis semántico
-            combined_content = "\n\n".join([chunk.get('content', '') for chunk in all_chunks[:100]])  # Limitar para evitar tokens excesivos
-
-            # Usar el analizador de texto avanzado para análisis semántico
+            # Preparar contenido para análisis semántico manteniendo la información de documentos originales
             from utils.advanced_text_analyzer import AdvancedTextAnalyzer
             analyzer = AdvancedTextAnalyzer()
 
-            # Realizar análisis semántico de la colección
+            # Agrupar chunks por documento para mantener la procedencia
+            documents_content = {}
+            for chunk in all_chunks[:100]:  # Limitar para evitar tokens excesivos
+                file_name = chunk.get('metadata', {}).get('file_name', 'Documento desconocido')
+                if file_name not in documents_content:
+                    documents_content[file_name] = []
+                documents_content[file_name].append(chunk.get('content', ''))
+
             # Preparar documentos en el formato esperado por analyze_collection
-            documents_for_analysis = [{"title": f"Colección {topic}", "content": combined_content}]
+            documents_for_analysis = []
+            for file_name, content_chunks in documents_content.items():
+                # Filtrar contenido que parece ser bibliografía o metadatos
+                filtered_chunks = []
+                for chunk in content_chunks:
+                    # Filtrar chunks que parecen ser bibliografía, URLs, o metadatos
+                    if not (
+                        chunk.lower().startswith(('http', 'www', 'doi:', 'isbn:', 'referencias:', 'bibliografía:')) or
+                        len(chunk.split()) < 10 or  # Chunks muy cortos
+                        chunk.count('http') > 2 or  # Chunks con muchas URLs
+                        chunk.count('@') > 2  # Chunks con muchos emails/citas académicas
+                    ):
+                        filtered_chunks.append(chunk)
+
+                if filtered_chunks:  # Solo incluir documentos con contenido sustantivo
+                    combined_content = "\n\n".join(filtered_chunks[:10])  # Máximo 10 chunks por documento
+                    documents_for_analysis.append({
+                        "title": file_name,
+                        "content": combined_content
+                    })
+
+            if not documents_for_analysis:
+                raise ValueError(f"No se encontró contenido sustantivo para analizar en la colección '{topic}'")
+
+            # Realizar análisis semántico de la colección
             semantic_analysis = await analyzer.analyze_collection(documents_for_analysis)
 
             # Crear resultado estructurado
@@ -819,6 +848,13 @@ async def run_semantic_summary_analysis(task_id: str, account_id: str, topic: st
 
 class AnalyzeCodeRequest(BaseModel):
     repo_name: str
+
+class CustomAnalysisRequest(BaseModel):
+    file_name: str
+    objective: str
+    expected_result: Optional[str] = None
+    extension: str  # 'brief', 'standard', 'detailed'
+    fields: List[dict]  # Lista de campos con name y description
 
 class GetAllAnalysisRequest(BaseModel):
     limit: Optional[int] = 20
@@ -1018,6 +1054,39 @@ async def start_code_analysis_endpoint(
     
     return {"task_id": str(new_task.id)}
 
+@router.post("/start-custom-analysis", status_code=202, summary="Iniciar análisis personalizado")
+async def start_custom_analysis_endpoint(
+    req: CustomAnalysisRequest,
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Inicia un análisis personalizado con campos y configuración definidos por el usuario.
+    """
+    new_task = AnalysisTask(
+        account_id=uuid.UUID(current_account_id),
+        file_name=f"Análisis Personalizado: {req.file_name}",
+        status="pending",
+        analysis_type="custom"
+    )
+    db.add(new_task)
+    await db.commit()
+    await db.refresh(new_task)
+
+    background_tasks.add_task(
+        run_custom_analysis_and_save,
+        str(new_task.id),
+        current_account_id,
+        req.file_name,
+        req.objective,
+        req.expected_result,
+        req.extension,
+        req.fields
+    )
+
+    return {"task_id": str(new_task.id)}
+
 @router.post("/get-all-analysis")
 async def get_all_analysis_endpoint(
     req: GetAllAnalysisRequest,
@@ -1031,12 +1100,16 @@ async def get_all_analysis_endpoint(
     account_uuid = uuid.UUID(current_account_id)
     all_analysis = []
 
-    # 1. Obtener AnalysisTask (análisis de documentos, colecciones, código)
-    if not req.analysis_type or req.analysis_type in ['document', 'collection', 'code']:
+    # 1. Obtener AnalysisTask (análisis de documentos, colecciones, código, semánticos)
+    if not req.analysis_type or req.analysis_type in ['document', 'collection', 'code', 'semantic_summary', 'semantic', 'custom']:
         analysis_stmt = select(AnalysisTask).where(
             AnalysisTask.account_id == account_uuid,
             AnalysisTask.status == "completed"
         ).order_by(AnalysisTask.updated_at.desc())
+
+        # Filtrar por analysis_type específico si se solicita
+        if req.analysis_type:
+            analysis_stmt = analysis_stmt.where(AnalysisTask.analysis_type == req.analysis_type)
 
         if req.search_query:
             analysis_stmt = analysis_stmt.where(
@@ -1050,18 +1123,34 @@ async def get_all_analysis_endpoint(
         analysis_tasks = analysis_results.scalars().all()
 
         for task in analysis_tasks:
-            # Determinar el tipo específico basado en el file_name
+            # Determinar el tipo específico basado en el file_name y analysis_type
             file_name = str(task.file_name) if task.file_name is not None else ""
-            if file_name.startswith("Colección:"):
+            task_analysis_type = getattr(task, 'analysis_type', None)
+
+            # Usar el analysis_type de la tarea si está disponible, sino inferir del file_name
+            if task_analysis_type == "semantic_summary":
+                analysis_type = "semantic_summary"
+                title = file_name
+            elif file_name.startswith("Resumen Semántico:"):
+                analysis_type = "semantic_summary"
+                title = file_name
+            elif task_analysis_type == "collection" or file_name.startswith("Colección:"):
                 analysis_type = "collection"
                 title = file_name
-            elif file_name == "Semantic Topic Analysis":
+            elif file_name == "Semantic Topic Analysis" or task_analysis_type == "semantic":
                 analysis_type = "semantic"
                 title = "Análisis Semántico de Temas"
-            elif "repositorio" in file_name.lower() or file_name.endswith(".git"):
+            elif task_analysis_type == "code" or "repositorio" in file_name.lower() or file_name.endswith(".git") or "Análisis de Repositorio:" in file_name:
                 analysis_type = "code"
-                title = f"Análisis de Código: {file_name}"
+                title = file_name if "Análisis de Repositorio:" in file_name else f"Análisis de Código: {file_name}"
+            elif task_analysis_type == "custom" or file_name.startswith("Análisis Personalizado:"):
+                analysis_type = "custom"
+                title = file_name
+            elif task_analysis_type == "document":
+                analysis_type = "document"
+                title = file_name if file_name.startswith("Análisis de Documento:") else f"Análisis de Documento: {file_name}"
             else:
+                # Fallback: inferir del contenido del resultado
                 analysis_type = "document"
                 title = f"Análisis de Documento: {file_name}"
 
@@ -1070,7 +1159,6 @@ async def get_all_analysis_endpoint(
             tool_used = "Desconocido"
 
             if task.result_payload is not None:
-<<<<<<< HEAD
                 # Asegurarse de que result_payload es un diccionario
                 payload_dict = task.result_payload if isinstance(task.result_payload, dict) else {}
  
@@ -1097,15 +1185,6 @@ async def get_all_analysis_endpoint(
                 elif 'formatted_result' in payload_dict:
                     summary = str(payload_dict['formatted_result'])[:200] + "..."
  
-=======
-                if 'executive_summary' in task.result_payload:
-                    summary = task.result_payload['executive_summary']
-                elif 'resumen_ejecutivo' in task.result_payload:
-                    summary = task.result_payload['resumen_ejecutivo']
-                elif 'formatted_result' in task.result_payload:
-                    summary = str(task.result_payload['formatted_result'])[:200] + "..."
-
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
                 # Obtener herramienta usada desde los metadatos o inferir basándose en la estructura
                 if 'tool_used' in payload_dict:
                     tool_used = payload_dict['tool_used']
@@ -1119,25 +1198,20 @@ async def get_all_analysis_endpoint(
                         tool_used = "semantic_topic_analysis_tool.py"
                     elif file_name == "Semantic Topic Analysis":
                         tool_used = "semantic_topic_analysis_tool.py"
-<<<<<<< HEAD
                     elif 'resumen_semantico' in payload_dict and 'temas_transversales' in payload_dict:
                         tool_used = "semantic_summary_analysis"
                     elif 'cross_cutting_themes' in payload_dict:
-=======
-                    elif 'cross_cutting_themes' in task.result_payload:
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
                         tool_used = "advanced_text_analyzer.py (colección)"
                     elif 'key_themes' in payload_dict and 'central_concepts' in payload_dict:
                         tool_used = "advanced_text_analyzer.py (documento)"
+                    elif file_name.startswith("Resumen Semántico:"):
+                        tool_used = "semantic_summary_analysis"
                     elif file_name.startswith("Colección:"):
                         tool_used = "collection_analysis_tool.py"
                     elif "repositorio" in file_name.lower() or file_name.endswith(".git"):
                         tool_used = "advanced_code_analyzer.py"
-<<<<<<< HEAD
                     elif analysis_type == "custom" or 'sections' in payload_dict:
                         tool_used = "custom_analysis_tool"
-=======
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
                     elif analysis_type == "document":
                         tool_used = "document_analysis_tool.py"
                     else:
@@ -1510,3 +1584,133 @@ async def get_analysis_by_type_endpoint(
     except Exception as e:
         logger.error(f"Error obteniendo análisis por tipo: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+async def run_custom_analysis_and_save(
+    task_id: str,
+    account_id: str,
+    file_name: str,
+    objective: str,
+    expected_result: Optional[str],
+    extension: str,
+    fields: List[dict]
+):
+    """
+    Función en segundo plano para realizar análisis personalizado.
+    """
+    async with SessionLocal() as db_session: # type: ignore
+        try:
+            # Marcar la tarea como 'processing'
+            stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
+            await db_session.execute(stmt_processing)
+            await db_session.commit()
+
+            logger.info(f"Iniciando análisis personalizado para tarea {task_id}...")
+
+            # Obtener el contenido del documento
+            text_content = await get_full_document_content(account_id, file_name)
+            if not text_content:
+                raise ValueError("Contenido del documento no encontrado.")
+
+            # Preparar el prompt personalizado
+            extension_instructions = {
+                'brief': 'Sé conciso y directo. Máximo 2 páginas.',
+                'standard': 'Proporciona un análisis completo pero equilibrado. Entre 3-5 páginas.',
+                'detailed': 'Realiza un análisis exhaustivo y detallado. Mínimo 5 páginas.'
+            }
+
+            field_instructions = []
+            for field in fields:
+                field_instructions.append(f"- **{field['name']}**: {field['description']}")
+
+            prompt = f"""
+Realiza un análisis personalizado del siguiente documento con estas especificaciones:
+
+**OBJETIVO DEL ANÁLISIS:**
+{objective}
+
+**RESULTADO ESPERADO:**
+{expected_result or 'Análisis estructurado según los campos especificados'}
+
+**EXTENSIÓN:**
+{extension_instructions.get(extension, 'Análisis estándar')}
+
+**CAMPOS REQUERIDOS:**
+{chr(10).join(field_instructions)}
+
+**INSTRUCCIONES:**
+1. Estructura tu respuesta usando exactamente los campos especificados como títulos de sección
+2. Cada sección debe estar en formato Markdown con el título como ##
+3. Proporciona contenido sustancial para cada campo
+4. Mantén un tono profesional y analítico
+5. Basa tu análisis únicamente en el contenido del documento
+
+**DOCUMENTO A ANALIZAR:**
+{text_content}
+
+Responde ÚNICAMENTE con el análisis estructurado en formato Markdown, sin comentarios adicionales.
+"""
+
+            # Obtener LLM para el análisis
+            from core.llm_manager import get_fast_llm
+            llm = get_fast_llm()
+            if not llm:
+                raise ValueError("LLM no disponible para análisis personalizado.")
+
+            # Realizar el análisis
+            from langchain.schema.messages import HumanMessage
+            response = await llm.ainvoke([HumanMessage(content=prompt)])
+            analysis_content = response.content.strip()
+
+            # Parsear el contenido en secciones
+            sections = {}
+            current_section = None
+            current_content = []
+
+            for line in analysis_content.split('\n'):
+                if line.startswith('## '):
+                    if current_section:
+                        sections[current_section] = '\n'.join(current_content).strip()
+                    current_section = line[3:].strip()
+                    current_content = []
+                else:
+                    current_content.append(line)
+
+            if current_section:
+                sections[current_section] = '\n'.join(current_content).strip()
+
+            # Crear el resultado estructurado
+            result_payload = {
+                "sections": sections,
+                "custom_config": {
+                    "objective": objective,
+                    "expected_result": expected_result,
+                    "extension": extension,
+                    "fields": fields
+                },
+                "tool_used": "custom_analysis_tool",
+                "analysis_metadata": {
+                    "tool_used": "custom_analysis_tool",
+                    "analysis_type": "custom",
+                    "file_name": file_name,
+                    "fields_count": len(fields),
+                    "extension": extension,
+                    "created_at": datetime.now().isoformat()
+                }
+            }
+
+            # Marcar como completado
+            stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="completed",
+                result_payload=result_payload
+            )
+            await db_session.execute(stmt_completed)
+            await db_session.commit()
+
+            logger.info(f"Análisis personalizado para tarea {task_id} completado con {len(sections)} secciones.")
+
+        except Exception as e:
+            logger.error(f"Fallo en tarea de análisis personalizado {task_id}: {e}", exc_info=True)
+            stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="failed", error_message=str(e))
+            await db_session.execute(stmt_failed)
+            await db_session.commit()
