@@ -1,67 +1,82 @@
-# requirements.txt
-# Dependencias unificadas para todos los servicios de Python de Kognito AI.
+# requirements.complete.txt
+# Dependencias completas con versiones flexibles para evitar conflictos
 
-# --- Frameworks Principales ---
-fastapi
-uvicorn[standard]
-python-telegram-bot[job-queue]
-httpx
+# === FRAMEWORKS PRINCIPALES ===
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+python-telegram-bot[job-queue]>=20.0
+httpx>=0.24.0
 
-# --- Base de Datos y ORM ---
-sqlalchemy[asyncio]
-psycopg[async] # Driver de BD
-pgvector
+# === BASE DE DATOS Y ORM ===
+sqlalchemy[asyncio]>=2.0.0
+psycopg[async]>=3.1.0
+psycopg2-binary>=2.9.0
+pgvector>=0.2.0
+alembic>=1.12.0
 
-# --- LangChain y Lógica de IA (Stack de Google) ---
-langchain
-langchain-core
-langchain-community
-langchain-google-genai
-langgraph
+# === PYDANTIC Y VALIDACIÓN ===
+pydantic[email]>=2.0.0
+email-validator>=2.0.0
 
-# --- Modelos Especializados para Pipeline Híbrido ---
+# === LANGCHAIN Y LÓGICA DE IA ===
+langchain>=0.1.0
+langchain-core>=0.1.0
+langchain-community>=0.0.30
+langchain-google-genai>=1.0.0
+langgraph>=0.0.40
+langchain-postgres>=0.0.6
+langchain-google-vertexai>=1.0.0
+
+# === AUTENTICACIÓN Y CREDENCIALES ===
+google-auth>=2.20.0
+google-auth-httplib2>=0.1.0
+google-api-python-client>=2.90.0
+PyJWT>=2.8.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.0
+
+# === UTILIDADES Y HERRAMIENTAS ===
+tiktoken>=0.5.0
+beautifulsoup4>=4.12.0
+aiohttp>=3.8.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+pytz>=2023.3
+dateparser>=1.1.0
+emoji>=2.8.0
+aiofiles>=23.2.0
+python-multipart>=0.0.6
+fake-useragent>=1.4.0
+ddgs>=3.9.0
+
+# === PROCESAMIENTO DE AUDIO Y DOCUMENTOS ===
+faster-whisper>=0.9.0
+pdfminer.six>=20221105
+python-docx>=1.1.0
+
+# === PROCESAMIENTO DE TEXTO Y NLP ===
 spacy>=3.7.0
-sentence-transformers>=2.2.0
-scikit-learn>=1.3.0
-pandas>=2.0.0
+textblob>=0.17.0
+keybert>=0.8.0
+transformers>=4.30.0
+
+# === VISUALIZACIÓN Y GRÁFICOS ===
+graphviz>=0.20.0
+
+# === PROCESAMIENTO DE IMÁGENES ===
+rembg>=2.0.0
+Pillow>=10.0.0
+
+# === INTEGRACIÓN CON COGNEE ===
+cognee>=0.1.0
+langchain-cognee>=0.1.0
+neo4j>=5.15.0
+
+# === CIENTÍFICAS Y ML ===
 numpy>=1.24.0
-langchain-postgres
-langchain-google-vertexai
+pandas>=2.0.0
 
-# --- Autenticación y Credenciales ---
-google-auth
-google-auth-httplib2
-google-api-python-client
-PyJWT
-
-# --- Utilidades y Herramientas ---
-tiktoken
-beautifulsoup4
-aiohttp
-requests
-python-dotenv
-pytz
-dateparser
-emoji
-aiofiles
-python-multipart
-fake-useragent
-ddgs
-# --- Procesamiento de Audio y Documentos ---
-faster-whisper
-pdfminer.six
-python-docx
-passlib
-bcrypt
-pydantic[email]
-textblob
-keybert
-transformers
-graphviz
-# Dependencias para eliminación de fondo de imagen
-rembg
-Pillow
-
-# --- Dependencias para integración con Cognee ---
-cognee
-neo4j
+# === DESARROLLO Y TESTING ===
+pytest>=7.4.0
+black>=23.11.0
+flake8>=6.1.0
