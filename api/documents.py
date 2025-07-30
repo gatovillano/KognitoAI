@@ -5,7 +5,6 @@ import uuid
 from typing import List, Optional
 from pydantic import BaseModel # Importar BaseModel
 
-<<<<<<< HEAD
 class DeleteDocumentRequest(BaseModel):
     file_name: str
     topic: Optional[str] = None
@@ -13,9 +12,6 @@ class DeleteDocumentRequest(BaseModel):
 
 
 from fastapi import APIRouter, HTTPException, Depends, status, Form, File, UploadFile, Body, BackgroundTasks
-=======
-from fastapi import APIRouter, HTTPException, Depends, status, Form, File, UploadFile
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
 from pydantic import BaseModel
 from sqlalchemy import select, text, update
 import asyncio
@@ -226,24 +222,12 @@ async def upload_chat_file_endpoint(
         raise HTTPException(status_code=500, detail="No se pudo procesar ninguno de los archivos.")
     return {"message": f"{processed_files}/{len(files)} archivo(s) subido(s) y procesado(s) para el contexto del hilo {thread_id}."}
 
-<<<<<<< HEAD
 @router.post("/list-documents")
 async def list_documents_endpoint(
     current_account_id: str = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db),
     topic: Optional[str] = Body(None), # Recibe el topic directamente
     workspace_id: Optional[str] = Body(None)
-=======
-class ListDocumentsRequest(BaseModel):
-    """Define la estructura para filtrar documentos opcionalmente por topic."""
-    topic: Optional[str] = None
-
-@router.post("/list-documents")  # Cambiado a POST porque el frontend web lo usa con FormData
-async def list_documents_endpoint(
-    request: Optional[ListDocumentsRequest] = None,
-    current_account_id: str = Depends(get_current_account_id), 
-    db: AsyncSession = Depends(get_db)
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
 ):
     """Lista los documentos subidos por el usuario, incluyendo documentos compartidos con equipos. 
     Opcionalmente filtra por topic específico. Protegido por JWT."""
@@ -307,6 +291,7 @@ class UpdateMetadataRequest(BaseModel):
     file_name: str
     new_title: Optional[str] = None
     new_topic: Optional[str] = None
+    workspace_id: Optional[str] = None
 
 @router.post("/update-document-metadata")
 async def update_document_metadata_endpoint(
@@ -321,7 +306,8 @@ async def update_document_metadata_endpoint(
         str(account_id_uuid), 
         request.file_name, 
         request.new_title, 
-        request.new_topic
+        request.new_topic,
+        workspace_id=request.workspace_id
     )
     if not success:
         raise HTTPException(status_code=404, detail="Documento no encontrado o no actualizado.")
@@ -460,7 +446,6 @@ async def list_collections_endpoint(current_account_id: str = Depends(get_curren
     collections = await list_user_collections(current_account_id)
     return collections
 
-<<<<<<< HEAD
 @router.post("/list-general-collections", summary="Listar solo las colecciones del contexto general")
 async def list_general_collections_endpoint(current_account_id: str = Depends(get_current_account_id)):
     """
@@ -474,8 +459,6 @@ async def list_general_collections_endpoint(current_account_id: str = Depends(ge
     # Las colecciones vacías también pueden ser útiles para asociar a workspaces
     return collections
 
-=======
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
 class DeleteCollectionRequest(BaseModel):
     """Define la estructura para eliminar una colección específica."""
     topic: str

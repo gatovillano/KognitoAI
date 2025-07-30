@@ -408,7 +408,6 @@ class GitHubRepoTool(BaseTool):
             logger.error(f"Error al añadir el repositorio {repo_url} como colección de conocimientos: {e}", exc_info=True)
             return f"Error al añadir el repositorio como colección de conocimientos: {e}"
 
-<<<<<<< HEAD
     async def _update_repository_documents(self, repo_url: str, account_id: str, workspace_id: Optional[str] = None) -> str:
         """
         Actualiza solo los documentos textuales de un repositorio de GitHub sin vectorizar.
@@ -532,9 +531,6 @@ class GitHubRepoTool(BaseTool):
             return f"Error al actualizar documentos del repositorio: {e}"
 
     async def _update_knowledge_collection(self, repo_url: str, collection_topic: Optional[str] = None, account_id: Optional[str] = None, workspace_id: Optional[str] = None, vectorize: bool = False) -> str:
-=======
-    async def _update_knowledge_collection(self, repo_url: str, collection_topic: Optional[str] = None, account_id: Optional[str] = None, workspace_id: Optional[str] = None) -> str:
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
         """
         Actualiza una colección de conocimientos existente desde un repositorio de GitHub, ya sea en una colección RAG específica o como conocimiento general de una cuenta.
         Controla la re-vectorización con el parámetro 'vectorize'.

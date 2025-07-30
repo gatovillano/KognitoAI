@@ -17,11 +17,7 @@ pertenecientes a la cuenta correcta.
 import logging
 from typing import Type, Optional, Any
 
-<<<<<<< HEAD
 from pydantic import BaseModel, Field, root_validator
-=======
-from pydantic.v1 import BaseModel, Field
->>>>>>> parent of 9cadb85 (Refactor UI, enhance RAG capabilities, and improve tool functionalities)
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de memoria.

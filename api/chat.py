@@ -423,6 +423,9 @@ Final Answer: la respuesta final a la pregunta original
 
 IMPORTANTE: Después de cada "Thought:" SIEMPRE debe seguir "Action:" o "Final Answer:"
 
+DEBES EVALUAR MUY BIEN SI ES NECESARIO EL USO DE HERRAMIENTAS O NO. NO SIEMPRE SE REQUIERE BUSCAR INFORMACIÓN PORQUE MUCHAS VECES BASTA CON CONTINUAR LA CONVERSACIÓN O UTILIZAR TU PROPIA INFORACIÓN
+EVITA USAR HERRAMIENTAS EN TODOS LOS TURNOS. SI PUEDES RESOLVERLO CON RESPUESTAS DE CALIDAD SIN USARLAS, HAZLO.
+
 {id_instructions}
 
 CRITICAL RULE FOR ACTION INPUT:
@@ -448,10 +451,8 @@ Action: comprehensive_web_analyzer
 Action Input: inteligencia artificial
 Observation: [resultado de la búsqueda]
 Thought: Ahora tengo información suficiente para responder al usuario.
+**Debes ser muy extenso y detallado en tu respuesta final. Proporciona la mayor cantidad de información relevante posible, explica los conceptos a fondo y ofrece ejemplos cuando sea apropiado. No te limites a respuestas cortas o concisas.**
 Final Answer: [respuesta basada en la información encontrada]
-
-DEBES EVALUAR MUY BIEN SI ES NECESARIO EL USO DE HERRAMIETNAS O NO. NO SIEMPRE SE REQUIERE BUSCAR INFORMACIÓN PORQUE MUCHAS VECES BASTA CON CONTINUAR LA CONVERSACIÓN O UTILIZAR TU PROPIA INFORACIÓN
-EVITA USAR HERRAMIENTAS EN TODOS LOS TURNOS. SI PUEDES RESOLVERLO CON RESPUESTAS DE CALIDAD SIN USARLAS, HAZLO. 
 
 Begin!
 

@@ -2,7 +2,7 @@
 
 import logging
 import asyncio
-from typing import List, Dict, Optional, TypeVar, cast
+from typing import List, Dict, Optional, TypeVar, cast, Type
 
 # LangChain y Pydantic para robustez y estructura
 from langchain_core.messages import HumanMessage
@@ -35,22 +35,25 @@ class ThemeReference(BaseModel):
 class SingleTextAnalysis(BaseModel):
     """Define la estructura de salida para el análisis de un único texto."""
     executive_summary: str = Field(description="Un resumen conciso que captura la esencia y las conclusiones principales del texto.")
-    key_themes: List[ThemeReference] = Field(description="Una lista de hasta 8 conceptos o temas centrales del texto, cada uno con citas del texto.")
-    central_concepts: List[str] = Field(description="Una lista de hasta 5 conceptos centrales del texto en el formato 'CONCEPTO: DEFINICIÓN DETALLADA'.")
+    general_analysis: str = Field(description="Un análisis general extenso del documento que profundiza en el contexto, metodología, argumentos principales, implicaciones y relevancia (500-1000 palabras). Utiliza separación de parrafos pra facilitar la lectura")
+    key_themes: List[ThemeReference] = Field(description="Una lista de hasta 12 conceptos o temas centrales del texto, cada uno con citas del texto y explicación detallada.")
+    central_concepts: List[str] = Field(description="Una lista de hasta 8 conceptos centrales del texto en el formato 'CONCEPTO: DEFINICIÓN DETALLADA CON CONTEXTO Y EJEMPLOS'.")
     discipline: List[str] = Field(description="El area, disciplina o campo al que refiere el documento. Por ejemplo si es un documémico y de qué área, o si es un documento técnico, etc.').")
     authorial_tone: str = Field(description="El tono o la voz del autor (ej. 'Formal y Académico', 'Informal y Conversacional', 'Urgente y Directo', 'Escéptico y Crítico').")
-    knowledge_gaps: List[str] = Field(description="Una lista de 3 a 5 preguntas inteligentes y abiertas que el texto inspira pero no responde. Deben ser preguntas, no afirmaciones.")
-    final_reflections: List[str] = Field (description="Reflexiuón final sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales pouedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
+    knowledge_gaps: List[str] = Field(description="Una lista de 5 a 8 preguntas inteligentes y abiertas que el texto inspira pero no responde. Deben ser preguntas, no afirmaciones.")
+    final_reflections: List[str] = Field (description="Una lista de 3 a 5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
 
 class CollectionAnalysis(BaseModel):
     """Define la estructura de salida para el análisis de una colección de textos."""
-    collection_summary: str = Field(description="Un resumen analítico que sintetiza la información de TODOS los documentos como un todo. No es necesario que sea tan corto")
+    collection_summary: str = Field(description="Un resumen analítico que sintetiza la información de TODOS los documentos como un todo. Debe ser comprehensivo y detallado (200-300 palabras)")
     cross_cutting_themes: List[ThemeReference] = Field(description="Lista de hasta 10 temas recurrentes de los documentos que puedes identificar, cada uno con citas relacionadas de los documentos. Puedes agruparlos en algún concepto que los englobe cuando hay similitud semántica")
-    central_concepts: List[str] = Field(description="Una lista de hasta 5 conceptos, ideas o tesis centrales de la colección en el formato 'CONCEPTO: DEFINICIÓN'.")
-    concept_relationships: List[str] = Field(description="Una lista de hasta 5 descripciones de cómo los conceptos centrales se relacionan entre sí en la colección.")
-    identified_connections: List[CollectionConnection] = Field(description="Lista de insights específicos que conectan dos o más documentos.")
-    emergent_knowledge_gaps: List[str] = Field(description="Lista de preguntas o áreas que la colección en su conjunto no responde o deja abiertas.")
-    final_reflections: List[str] = Field (description="Reflexiuón final sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales pouedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
+    central_concepts: List[str] = Field(description="Una lista de hasta 8 conceptos, ideas o tesis centrales de la colección en el formato 'CONCEPTO: DEFINICIÓN DETALLADA'. Destaca con negrita el nombre de los conceptos")
+    concept_relationships: List[str] = Field(description="Una lista de hasta 8 descripciones detalladas de cómo los conceptos centrales se relacionan entre sí en la colección.")
+    identified_connections: List[CollectionConnection] = Field(description="Lista de insights específicos que conectan dos o más documentos. Incluye sinergias, evoluciones, contradicciones o complementariedades.")
+    emergent_knowledge_gaps: List[str] = Field(description="Lista de 5-8 preguntas inteligentes o áreas que la colección en su conjunto no responde o deja abiertas.")
+    final_reflections: List[str] = Field(description="3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
+    collection_insights: List[str] = Field(description="3-5 insights únicos que emergen del análisis conjunto de todos los documentos, que no serían evidentes analizando documentos individuales")
+    methodological_notes: List[str] = Field(description="2-3 observaciones sobre la metodología, enfoque o perspectiva común en los documentos analizados")
 
 
 # --- Clase Principal del Analizador ---
@@ -68,14 +71,16 @@ class AdvancedTextAnalyzer:
             logger.info("Inicializando modelo Gemini para análisis de texto avanzado...")
             # Aquí puedes poner el nombre del modelo que prefieras de tu config
             self._gemini_model = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash",
+                model="gemini-2.0-flash",
                 temperature=0.1,
                 disable_streaming=False  # Habilita streaming
             )
             logger.info("Modelo Gemini inicializado.")
         return self._gemini_model
 
-    async def _run_analysis_with_parser(self, prompt: str, output_parser: PydanticOutputParser) -> BaseModel:
+    _PydanticType = TypeVar('_PydanticType', bound=BaseModel)
+
+    async def _run_analysis_with_parser(self, prompt: str, output_parser: PydanticOutputParser, pydantic_object: Type[_PydanticType]) -> _PydanticType:
         """
         Función centralizada y robusta para ejecutar una llamada al LLM y parsear la salida.
         """
@@ -93,29 +98,29 @@ class AdvancedTextAnalyzer:
                 response_content = str(response_content)
 
             parsed_output = await output_parser.aparse(response_content)
-            return parsed_output
+            return cast(pydantic_object, parsed_output)
         except Exception as e:
             logger.error(f"Fallo en el pipeline de análisis y parseo del LLM: {e}", exc_info=True)
             raise ValueError(f"No se pudo obtener una respuesta JSON válida del LLM. Error: {e}")
 
-    async def analyze_single_text(self, text: str) -> SingleTextAnalysis:
+    async def analyze_single_text(self, text: str, document_title: str = "Documento analizado") -> SingleTextAnalysis:
         """
         Ejecuta un análisis completo y estructurado sobre un único fragmento de texto.
         """
         if not text or len(text.split()) < 30:
             return SingleTextAnalysis(
-                executive_summary=text, key_themes=[], central_concepts=[],
-                discipline=[], authorial_tone="N/A", knowledge_gaps=[], final_reflections=[]
+                executive_summary=text, general_analysis="Texto insuficiente para análisis detallado",
+                key_themes=[], central_concepts=[], discipline=[], authorial_tone="N/A",
+                knowledge_gaps=[], final_reflections=[]
             )
 
         prompt = f"""
-<<<<<<< HEAD
         Eres un analista experto en análisis textual de conocimientos. Realiza un análisis exhaustivo y detallado del siguiente texto.
 
         INSTRUCCIONES ESPECÍFICAS:
         1. **Resumen ejecutivo**: Conciso pero completo (50-80 palabras)
 
-        2. **Análisis general**: EXTENSO y profundo (400-600 palabras) que incluya:
+        2. **Análisis general**: EXTENSO y profundo (500-1000 palabras) redactado en varios párrafos separados para facilitar la lectura, que incluya:
            - Contexto histórico, teórico o práctico del documento
            - Metodología o enfoque utilizado por el autor
            - Argumentos principales y su estructura lógica
@@ -142,7 +147,7 @@ class AdvancedTextAnalyzer:
            - Las citas deben ser párrafos u oraciones completas, no fragmentos cortados
            - Usa nombres de temas específicos y descriptivos
 
-        4. **Conceptos centrales**: Hasta 8 conceptos en formato 'CONCEPTO: DEFINICIÓN DETALLADA CON CONTEXTO Y EJEMPLOS'
+        4. **Conceptos centrales**: Hasta 8 conceptos en formato 'CONCEPTO: DEFINICIÓN DETALLADA CON CONTEXTO Y EJEMPLOS. Destaca los conceptos en negrita'
 
         5. **Disciplina**: Área(s) de conocimiento específica(s)
 
@@ -155,11 +160,6 @@ class AdvancedTextAnalyzer:
         Para los temas clave y conceptos centrales, utiliza nombres precisos y relevantes al contexto del texto, priorizando términos específicos del dominio o categorías reconocibles por el usuario.
 
         IMPORTANTE: Los temas clave deben seguir EXACTAMENTE la estructura JSON mostrada arriba, con "theme" y "related_quotes" como campos obligatorios.
-=======
-        Eres un analista experto en analisis textual de conocimientos. Analiza el siguiente texto en profundidad.
-        Extrae el resumen, los temas clave, los conceptos centrales con sus definiciones, el área de conocimiento, el tono del autor y las brechas de conocimiento que revela.
-        Para los temas clave y conceptos centrales, utiliza nombres precisos y relevantes al contexto del texto, priorizando términos específicos del dominio o categorías reconocibles por el usuario. Los conceptos centrales deben estar en el formato 'CONCEPTO: DEFINICIÓN'.
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
 
         Texto a analizar:
         ---
@@ -167,7 +167,7 @@ class AdvancedTextAnalyzer:
         ---
         """
         parser = PydanticOutputParser(pydantic_object=SingleTextAnalysis)
-        result = await self._run_analysis_with_parser(prompt, parser)
+        result = await self._run_analysis_with_parser(prompt, parser, SingleTextAnalysis)
         return cast(SingleTextAnalysis, result)
 
     async def analyze_collection(self, documents: List[Dict[str, str]]) -> CollectionAnalysis:
@@ -175,7 +175,17 @@ class AdvancedTextAnalyzer:
         Analiza una colección de documentos para encontrar temas transversales, conexiones y brechas de conocimiento emergentes.
         """
         if not documents:
-            raise ValueError("La colección de documentos está vacía.")
+            return CollectionAnalysis(
+                collection_summary="No se proporcionaron textos para analizar.",
+                cross_cutting_themes=[],
+                central_concepts=[],
+                concept_relationships=[],
+                identified_connections=[],
+                emergent_knowledge_gaps=[],
+                final_reflections=[],
+                collection_insights=[],
+                methodological_notes=[]
+            )
             
         full_context_text = ""
         for i, doc in enumerate(documents):
@@ -183,6 +193,7 @@ class AdvancedTextAnalyzer:
             content_snippet = (doc.get('content', '')[:1000] + '...') if len(doc.get('content', '')) > 1000 else doc.get('content', '')
             full_context_text += f"--- INICIO DOCUMENTO: '{title}' ---\n{content_snippet}\n--- FIN DOCUMENTO: '{title}' ---\n\n"
 
+        output_parser = PydanticOutputParser(pydantic_object=CollectionAnalysis)
         prompt = f"""
         Eres un analista de investigación experto en síntesis de conocimiento. Analiza esta colección de documentos.
         Tu tarea es encontrar las conexiones, patrones, temas emergentes con citas relacionadas de los documentos, conceptos centrales con sus definiciones y las relaciones entre estos conceptos que existen **entre** ellos.
@@ -191,8 +202,7 @@ class AdvancedTextAnalyzer:
         Colección de documentos:
         {full_context_text}
         """
-        parser = PydanticOutputParser(pydantic_object=CollectionAnalysis)
-        result = await self._run_analysis_with_parser(prompt, parser)
+        result = await self._run_analysis_with_parser(prompt, output_parser, CollectionAnalysis)
         return cast(CollectionAnalysis, result)
 
 # --- INSTANCIA ÚNICA ---

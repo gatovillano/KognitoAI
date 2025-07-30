@@ -26,6 +26,7 @@ langchain
 langchain-core
 langchain-community
 langchain-openai
+langchain-postgres
 
 # IA básica
 openai

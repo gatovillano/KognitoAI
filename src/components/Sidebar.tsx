@@ -204,7 +204,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             </div>
             {!isCollapsed && (
-              <div className="whitespace-normal break-words flex-grow text-xs">
+              <div className="whitespace-normal break-words flex-grow text-sm">
                 <InlineMarkdownRenderer content={thread.title} />
               </div>
             )}
@@ -222,7 +222,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                         <MoreVertical className="h-3 w-3 text-muted-foreground" />
                       </div>
                     </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-40 text-xs">
+                  <DropdownMenuContent align="end" className="w-40 text-sm">
                     <DropdownMenuItem
                       onClick={(e) => {
                         e.preventDefault();
@@ -302,7 +302,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           {!isCollapsed && (
             <div className="flex flex-col">
               <span className="font-bold text-xl text-foreground">Kognito</span>
-              <span className="text-xs text-muted-foreground">AI Labs</span>
+              <span className="text-sm text-muted-foreground">AI Labs</span>
             </div>
           )}
         </div>
@@ -323,7 +323,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
         {!isCollapsed && (
           <div className="flex items-center gap-2 mb-4 px-2">
             <div className="w-1 h-1 rounded-full bg-primary"></div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Herramientas</p>
+            <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Herramientas</p>
           </div>
         )}
         <nav className="space-y-1 w-full">
@@ -337,7 +337,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <MessageSquare className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Chat</span>}
+              {!isCollapsed && <span className="text-sm font-medium">Chat</span>}
             </Button>
           </Link>
           <Link href="/dashboard" passHref onClick={onLinkClick} title="Escritorio">
@@ -350,7 +350,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <Bot className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Escritorio</span>}
+              {!isCollapsed && <span className="text-sm font-medium">Escritorio</span>}
             </Button>
           </Link>
           <Link href="/rag" passHref onClick={onLinkClick} title="Gestión de Conocimientos">
@@ -363,7 +363,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <BookMarked className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Conocimientos</span>}
+              {!isCollapsed && <span className="text-sm font-medium">Conocimientos</span>}
             </Button>
           </Link>
           <Link href="/agenda" passHref onClick={onLinkClick} title="Agenda">
@@ -376,7 +376,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <Calendar className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Agenda</span>}
+              {!isCollapsed && <span className="text-sm font-medium">Agenda</span>}
             </Button>
           </Link>
           <Link href="/notes" passHref onClick={onLinkClick} title="Notas">
@@ -389,7 +389,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <Notebook className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Notas</span>}
+              {!isCollapsed && <span className="text-sm font-medium">Notas</span>}
             </Button>
           </Link>
           <Link href="/analysis" passHref onClick={onLinkClick} title="Análisis">
@@ -402,7 +402,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <BarChart3 className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Análisis</span>}
+              {!isCollapsed && <span className="text-sm font-medium">Análisis</span>}
             </Button>
           </Link>
           <Link href="/teams" passHref onClick={onLinkClick} title="Equipos">
@@ -415,7 +415,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <Users className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Equipos</span>}
+              {!isCollapsed && <span className="text-sm font-medium">Equipos</span>}
             </Button>
           </Link>
           <Link href="/workspaces" passHref onClick={onLinkClick} title="Workspaces">
@@ -428,7 +428,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <Bot className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Workspaces</span>}
+              {!isCollapsed && <span className="text-sm font-medium">Workspaces</span>}
             </Button>
           </Link>
         </nav>

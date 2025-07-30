@@ -45,8 +45,6 @@ class GetDocumentContentInput(BaseModel):
         ...,
         description="El nombre exacto del archivo del cual se debe recuperar el contenido completo."
     )
-<<<<<<< HEAD
-=======
     account_id: str = Field(
         ...,
         description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
@@ -60,7 +58,6 @@ class GetDocumentContentInput(BaseModel):
         None,
         description="El ID del workspace (UUID en formato string) para recuperar el documento de un workspace específico, si aplica."
     )
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
 
 
 class GetDocumentContentTool(BaseTool):
@@ -80,11 +77,7 @@ class GetDocumentContentTool(BaseTool):
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
     telegram_id: Optional[str] = None
 
-<<<<<<< HEAD
-    async def _arun(self, file_name: str, run_manager: Optional[Any] = None, **kwargs: Any) -> str:
-=======
-    async def _arun(self, file_name: str, account_id: str, telegram_id: Optional[int] = None, workspace_id: Optional[str] = None, **kwargs: Any) -> str: # <-- workspace_id añadido aquí
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
+    async def _arun(self, file_name: str, account_id: str, telegram_id: Optional[int] = None, workspace_id: Optional[str] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -96,34 +89,9 @@ class GetDocumentContentTool(BaseTool):
         Returns:
             El contenido completo del documento o un mensaje de error.
         """
-<<<<<<< HEAD
-        effective_workspace_id = None
-        if run_manager and hasattr(run_manager, 'configurable') and run_manager.configurable:
-            effective_workspace_id = run_manager.configurable.get('workspace_id')
-
-        if not self.account_id:
-            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
-
-        logger.info(f"Ejecutando GetDocumentContentTool para la cuenta '{self.account_id}' y el archivo '{file_name}' en workspace: '{effective_workspace_id}'.")
-=======
         logger.info(f"Ejecutando GetDocumentContentTool para la cuenta '{account_id}' y el archivo '{file_name}' en workspace: '{workspace_id}'.")
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
         try:
             full_content = await get_full_document_content(
-<<<<<<< HEAD
-                account_id=self.account_id,
-                file_name=file_name,
-                team_id=None,
-                workspace_id=effective_workspace_id
-            )
-
-            if full_content:
-                if self.telegram_id is not None:
-                    user_data = bot_manager.get_user_data(int(self.telegram_id))
-                    user_data[DOCUMENT_NAME_KEY] = file_name
-                    await bot_manager.flush_persistence()
-                    logger.info(f"Guardado '{file_name}' en user_data para el usuario de Telegram {self.telegram_id} para paginación.")
-=======
                 account_id=account_id,
                 file_name=file_name,
                 team_id=None, # Mantener None o pasar team_id si aplica en tu lógica
@@ -136,7 +104,6 @@ class GetDocumentContentTool(BaseTool):
                     user_data[DOCUMENT_NAME_KEY] = file_name
                     await bot_manager.flush_persistence()
                     logger.info(f"Guardado '{file_name}' en user_data para el usuario de Telegram {telegram_id} para paginación.")
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
                 
                 response_text = (
                     f"Contenido completo del documento '{file_name}'"
@@ -154,11 +121,7 @@ class GetDocumentContentTool(BaseTool):
                 return error_message
 
         except Exception as e:
-<<<<<<< HEAD
-            logger.error(f"Error en GetDocumentContentTool para la cuenta '{self.account_id}' y archivo '{file_name}' (workspace: {effective_workspace_id}): {e}", exc_info=True)
-=======
             logger.error(f"Error en GetDocumentContentTool para la cuenta '{account_id}' y archivo '{file_name}' (workspace: {workspace_id}): {e}", exc_info=True)
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
             return f"Ocurrió un error inesperado al recuperar el contenido del documento: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

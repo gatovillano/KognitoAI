@@ -14,6 +14,8 @@ interface Collection {
   topic: string;
   description?: string;
   document_count: number;
+  workspace_id?: string; // Add workspace_id
+  team_id?: string;     // Add team_id
 }
 
 interface EditCollectionDialogProps {
@@ -21,9 +23,11 @@ interface EditCollectionDialogProps {
   onOpenChange: (open: boolean) => void;
   onEditSuccess: () => void;
   collection: Collection | null;
+  workspaceId?: string; // Pass workspaceId from parent
+  teamId?: string;     // Pass teamId from parent
 }
 
-export function EditCollectionDialog({ isOpen, onOpenChange, onEditSuccess, collection }: EditCollectionDialogProps) {
+export function EditCollectionDialog({ isOpen, onOpenChange, onEditSuccess, collection, workspaceId, teamId }: EditCollectionDialogProps) {
   const [topicName, setTopicName] = useState('');
   const [description, setDescription] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -45,10 +49,12 @@ export function EditCollectionDialog({ isOpen, onOpenChange, onEditSuccess, coll
     
     setIsLoading(true);
     try {
-      await apiClient.post('/api/update-collection', { 
+      await apiClient.post('/api/update-collection', {
         old_topic: collection.topic,
         new_topic: topicName.trim() !== collection.topic ? topicName.trim() : undefined,
-        new_description: description.trim() !== (collection.description || '') ? description.trim() : undefined
+        new_description: description.trim() !== (collection.description || '') ? description.trim() : undefined,
+        workspace_id: workspaceId, // Pass workspaceId
+        team_id: teamId           // Pass teamId
       });
       
       toast.success(`Colección "${topicName}" actualizada exitosamente.`);

@@ -52,6 +52,162 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = settings.chunk_size
 
 
+async def search_vector_db_optimized(
+    account_id: str,
+    query: str,
+    content_type: str | None = None,
+    topic: str | None = None,
+    category: str | None = None,
+    workspace_id: str | None = None,
+    team_id: str | None = None,
+    visibility_teams: List[str] | None = None,
+    k: int | None = 5,
+) -> List[Dict]:
+    """
+    Búsqueda vectorial optimizada usando las nuevas columnas directamente (sin JOINs).
+
+    Args:
+        account_id: El ID de la cuenta del usuario.
+        query: La consulta de búsqueda.
+        content_type: Tipo de contenido (user_memories, user_documents, team_memories, team_documents).
+        topic: Topic organizacional del usuario.
+        category: Categoría automática del LLM.
+        workspace_id: ID del workspace (NULL = General).
+        team_id: ID del team propietario.
+        visibility_teams: Lista de teams con acceso.
+        k: Número máximo de resultados.
+
+    Returns:
+        Lista de diccionarios con los resultados de la búsqueda.
+    """
+    logger.info(f"🚀 Búsqueda vectorial optimizada para account_id: {account_id}")
+    logger.info(f"📝 Query: '{query}'")
+    logger.info(f"📂 Content type: {content_type}")
+    logger.info(f"🏷️ Topic: {topic}")
+    logger.info(f"🔖 Category: {category}")
+    logger.info(f"🏢 Workspace ID: {workspace_id}")
+    logger.info(f"👥 Team ID: {team_id}")
+    logger.info(f"👁️ Visibility teams: {visibility_teams}")
+    logger.info(f"📊 K (límite): {k}")
+
+    try:
+        # 1. Construir la consulta SQL optimizada (sin JOINs)
+        sql_query = """
+            SELECT
+                document,
+                cmetadata,
+                topic,
+                category,
+                workspace_id,
+                team_id,
+                visibility_teams,
+                (embedding <-> CAST(:query_embedding AS vector)) AS similarity_score
+            FROM langchain_pg_embedding
+            WHERE account_id = :account_id
+        """
+
+        query_params = {
+            "account_id": account_id,
+            "k": k
+        }
+
+        # 2. Agregar filtros opcionales
+        if content_type:
+            sql_query += " AND content_type = :content_type"
+            query_params["content_type"] = content_type
+            logger.info(f"📂 Filtro content_type: {content_type}")
+
+        if topic:
+            sql_query += " AND topic = :topic"
+            query_params["topic"] = topic
+            logger.info(f"🏷️ Filtro topic: {topic}")
+
+        if category:
+            sql_query += " AND category = :category"
+            query_params["category"] = category
+            logger.info(f"🔖 Filtro category: {category}")
+
+        if workspace_id:
+            sql_query += " AND workspace_id = :workspace_id"
+            query_params["workspace_id"] = workspace_id
+            logger.info(f"🏢 Filtro workspace_id: {workspace_id}")
+        elif workspace_id is None:
+            # Buscar solo en General (workspace_id IS NULL)
+            sql_query += " AND workspace_id IS NULL"
+            logger.info("🏢 Filtro: Solo workspace General")
+
+        if team_id:
+            sql_query += " AND team_id = :team_id"
+            query_params["team_id"] = team_id
+            logger.info(f"👥 Filtro team_id: {team_id}")
+
+        # 3. Filtro de visibilidad para teams
+        if visibility_teams:
+            # El usuario puede ver contenido si:
+            # - Es el propietario (account_id match)
+            # - Su team está en visibility_teams
+            # - El contenido es de su team
+            # The `?|` operator checks if the JSONB array on the left has any elements
+            # in common with the text array on the right. This is safe to parameterize.
+            # We also check if the content's team_id is one of the user's teams.
+            sql_query += " AND (visibility_teams ?| :visibility_teams OR team_id = ANY(:visibility_teams))"
+            query_params["visibility_teams"] = visibility_teams
+            logger.info(f"👁️ Filtro visibilidad teams (parametrizado): {visibility_teams}")
+
+        # 4. Ordenar por similarity score y limitar
+        sql_query += " ORDER BY similarity_score LIMIT :k"
+
+        logger.info(f"🔧 Query SQL optimizada: {sql_query}")
+
+        # 5. Obtener embedding de la consulta
+        embeddings = get_embedding_model()
+        if not embeddings:
+            logger.error("❌ No se pudo obtener el modelo de embeddings")
+            return []
+
+        logger.info("🧠 Generando embedding para la consulta...")
+        query_embedding = await embeddings.aembed_query(query)
+        query_params["query_embedding"] = query_embedding
+        logger.info(f"✅ Embedding generado. Dimensiones: {len(query_embedding) if query_embedding else 'None'}")
+
+        # 6. Ejecutar consulta
+        logger.info("🚀 Ejecutando consulta SQL optimizada...")
+        async with DBSession(SessionLocal) as session:
+            results = await session.execute(text(sql_query), query_params)
+            rows = results.fetchall()
+
+        logger.info(f"📊 Resultados obtenidos: {len(rows)}")
+
+        # 7. Procesar resultados
+        processed_results = []
+        for i, row in enumerate(rows):
+            document, cmetadata, topic_col, category_col, workspace_id_col, team_id_col, visibility_teams_col, similarity_score = row
+
+            # Convertir UUIDs a string para evitar errores de serialización JSON
+            workspace_id_str = str(workspace_id_col) if workspace_id_col else None
+            team_id_str = str(team_id_col) if team_id_col else None
+
+            result_item = {
+                "content": document,
+                "metadata": cmetadata,
+                "topic": topic_col,
+                "category": category_col,
+                "workspace_id": workspace_id_str,
+                "team_id": team_id_str,
+                "visibility_teams": visibility_teams_col,
+                "similarity_score": similarity_score,
+            }
+            processed_results.append(result_item)
+            logger.info(f"📄 Resultado {i+1}: score={similarity_score:.4f}, topic={topic_col}, category={category_col}")
+
+        logger.info(f"✅ Búsqueda optimizada completada. Resultados: {len(processed_results)}")
+        return processed_results
+
+    except Exception as e:
+        logger.error(f"❌ Error en search_vector_db_optimized: {e}", exc_info=True)
+        return []
+
+
 class MemoryContext:
     """
     Context Manager para aislamiento automático de memoria por workspace y teams.
@@ -336,6 +492,7 @@ async def _update_embedding_columns_after_insert(
         return 0
 
 
+
 async def get_user_profile(account_id: str) -> Optional[Perfil]:
     """
     Obtiene el perfil de un usuario a partir de su account_id universal.
@@ -552,158 +709,6 @@ async def get_relevant_memories(
 
 
 
-async def search_vector_db_optimized(
-    account_id: str,
-    query: str,
-    content_type: str | None = None,
-    topic: str | None = None,
-    category: str | None = None,
-    workspace_id: str | None = None,
-    team_id: str | None = None,
-    visibility_teams: List[str] | None = None,
-    k: int | None = 5,
-) -> List[Dict]:
-    """
-    Búsqueda vectorial optimizada usando las nuevas columnas directamente (sin JOINs).
-
-    Args:
-        account_id: El ID de la cuenta del usuario.
-        query: La consulta de búsqueda.
-        content_type: Tipo de contenido (user_memories, user_documents, team_memories, team_documents).
-        topic: Topic organizacional del usuario.
-        category: Categoría automática del LLM.
-        workspace_id: ID del workspace (NULL = General).
-        team_id: ID del team propietario.
-        visibility_teams: Lista de teams con acceso.
-        k: Número máximo de resultados.
-
-    Returns:
-        Lista de diccionarios con los resultados de la búsqueda.
-    """
-    logger.info(f"🚀 Búsqueda vectorial optimizada para account_id: {account_id}")
-    logger.info(f"📝 Query: '{query}'")
-    logger.info(f"📂 Content type: {content_type}")
-    logger.info(f"🏷️ Topic: {topic}")
-    logger.info(f"🔖 Category: {category}")
-    logger.info(f"🏢 Workspace ID: {workspace_id}")
-    logger.info(f"👥 Team ID: {team_id}")
-    logger.info(f"👁️ Visibility teams: {visibility_teams}")
-    logger.info(f"📊 K (límite): {k}")
-
-    try:
-        # 1. Construir la consulta SQL optimizada (sin JOINs)
-        sql_query = """
-            SELECT
-                document,
-                cmetadata,
-                topic,
-                category,
-                workspace_id,
-                team_id,
-                visibility_teams,
-                (embedding <-> CAST(:query_embedding AS vector)) AS similarity_score
-            FROM langchain_pg_embedding
-            WHERE account_id = :account_id
-        """
-
-        query_params = {
-            "account_id": account_id,
-            "k": k
-        }
-
-        # 2. Agregar filtros opcionales
-        if content_type:
-            sql_query += " AND content_type = :content_type"
-            query_params["content_type"] = content_type
-            logger.info(f"📂 Filtro content_type: {content_type}")
-
-        if topic:
-            sql_query += " AND topic = :topic"
-            query_params["topic"] = topic
-            logger.info(f"🏷️ Filtro topic: {topic}")
-
-        if category:
-            sql_query += " AND category = :category"
-            query_params["category"] = category
-            logger.info(f"🔖 Filtro category: {category}")
-
-        if workspace_id:
-            sql_query += " AND workspace_id = :workspace_id"
-            query_params["workspace_id"] = workspace_id
-            logger.info(f"🏢 Filtro workspace_id: {workspace_id}")
-        elif workspace_id is None:
-            # Buscar solo en General (workspace_id IS NULL)
-            sql_query += " AND workspace_id IS NULL"
-            logger.info("🏢 Filtro: Solo workspace General")
-
-        if team_id:
-            sql_query += " AND team_id = :team_id"
-            query_params["team_id"] = team_id
-            logger.info(f"👥 Filtro team_id: {team_id}")
-
-        # 3. Filtro de visibilidad para teams
-        if visibility_teams:
-            # El usuario puede ver contenido si:
-            # - Es el propietario (account_id match)
-            # - Su team está en visibility_teams
-            # - El contenido es de su team
-            teams_condition = " OR ".join([f"visibility_teams ? '{team}'" for team in visibility_teams])
-            teams_condition += f" OR team_id = ANY(ARRAY{visibility_teams})"
-            sql_query += f" AND ({teams_condition})"
-            logger.info(f"👁️ Filtro visibilidad teams: {visibility_teams}")
-
-        # 4. Ordenar por similarity score y limitar
-        sql_query += " ORDER BY similarity_score LIMIT :k"
-
-        logger.info(f"🔧 Query SQL optimizada: {sql_query}")
-
-        # 5. Obtener embedding de la consulta
-        embeddings = get_embedding_model()
-        if not embeddings:
-            logger.error("❌ No se pudo obtener el modelo de embeddings")
-            return []
-
-        logger.info("🧠 Generando embedding para la consulta...")
-        query_embedding = await embeddings.aembed_query(query)
-        query_params["query_embedding"] = query_embedding
-        logger.info(f"✅ Embedding generado. Dimensiones: {len(query_embedding) if query_embedding else 'None'}")
-
-        # 6. Ejecutar consulta
-        logger.info("🚀 Ejecutando consulta SQL optimizada...")
-        async with DBSession(SessionLocal) as session:
-            results = await session.execute(text(sql_query), query_params)
-            rows = results.fetchall()
-
-        logger.info(f"📊 Resultados obtenidos: {len(rows)}")
-
-        # 7. Procesar resultados
-        processed_results = []
-        for i, row in enumerate(rows):
-            document, cmetadata, topic_col, category_col, workspace_id_col, team_id_col, visibility_teams_col, similarity_score = row
-
-            # Convertir UUIDs a string para evitar errores de serialización JSON
-            workspace_id_str = str(workspace_id_col) if workspace_id_col else None
-            team_id_str = str(team_id_col) if team_id_col else None
-
-            result_item = {
-                "content": document,
-                "metadata": cmetadata,
-                "topic": topic_col,
-                "category": category_col,
-                "workspace_id": workspace_id_str,
-                "team_id": team_id_str,
-                "visibility_teams": visibility_teams_col,
-                "similarity_score": similarity_score,
-            }
-            processed_results.append(result_item)
-            logger.info(f"📄 Resultado {i+1}: score={similarity_score:.4f}, topic={topic_col}, category={category_col}")
-
-        logger.info(f"✅ Búsqueda optimizada completada. Resultados: {len(processed_results)}")
-        return processed_results
-
-    except Exception as e:
-        logger.error(f"❌ Error en search_vector_db_optimized: {e}", exc_info=True)
-        return []
 
 
 async def search_vector_db(
@@ -812,9 +817,9 @@ async def process_document_for_rag(
         # Si se proporciona workspace_id, la colección será específica de ese workspace.
         # Si no, será una colección de usuario/equipo/global.
         if workspace_id:
-            # Para colecciones de workspace, el nombre de la colección en PGVector será una combinación de workspace_id y topic
-            # Esto asegura unicidad para colecciones con el mismo nombre en diferentes workspaces.
-            langchain_collection_name = f"workspace_documents_{workspace_id}_{topic}"
+            # Para colecciones de workspace, el nombre de la colección en PGVector será el topic
+            # El topic es el nombre de la colección dentro del workspace.
+            langchain_collection_name = topic # El topic es el nombre de la colección
             scope = "workspace"
         elif is_global:
             langchain_collection_name = GLOBAL_COLLECTION_NAME
@@ -1131,8 +1136,9 @@ async def list_user_documents(
                 params["team_id"] = team_id
 
             if workspace_id:
-                # Para workspaces, incluir SOLO los documentos específicos de ese workspace
-                clauses.append("workspace_id = :workspace_id")
+                # Para workspaces, incluir tanto los documentos específicos del workspace
+                # como los del contexto general (workspace_id IS NULL)
+                clauses.append("(workspace_id = :workspace_id OR workspace_id IS NULL)")
                 params["workspace_id"] = workspace_id
             else:
                 # Si workspace_id es None, significa que estamos en la vista general,
@@ -1160,8 +1166,8 @@ async def list_user_documents(
                 ORDER BY cmetadata->>'document_id', id;
             """
 
-            logger.debug(f"🔧 Query SQL optimizada (final): {query_str}")
-            logger.debug(f"📋 Parámetros (final): {params}")
+            logger.info(f"🔧 Query SQL optimizada: {query_str}")
+            logger.info(f"📋 Parámetros: {params}")
 
             document_list_query = text(query_str)
             document_list_result = await db.execute(document_list_query, params)
@@ -1442,15 +1448,14 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
             else:
                 # Para contexto general, incluir solo documentos sin workspace_id
                 where_clause_parts.append("workspace_id IS NULL")
-    
 
             final_where_clause = " AND ".join(where_clause_parts)
-    
+
             collections_query = text(
                 f"""
                 SELECT
                     topic AS topic,
-                    COUNT(DISTINCT cmetadata->>'document_id') as document_count
+                    COUNT(DISTINCT cmetadata->>'file_name') as document_count
                 FROM langchain_pg_embedding
                 WHERE {final_where_clause}
                 GROUP BY topic
@@ -1577,94 +1582,73 @@ async def update_collection_metadata(
 
     async with DBSession(SessionLocal) as db:
         try:
-            # 1. Actualizar en UserDocumentTopic
-            query = select(UserDocumentTopic).where(
-                UserDocumentTopic.account_id == uuid.UUID(account_id),
-                UserDocumentTopic.name == old_topic_name
-            )
-
-            if workspace_id:
-                query = query.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
-            elif team_id:
-                query = query.where(UserDocumentTopic.team_id == uuid.UUID(team_id))
-            else:
-                query = query.where(
-                    UserDocumentTopic.workspace_id.is_(None),
-                    UserDocumentTopic.team_id.is_(None)
+            # Iniciar transacción
+            async with db.begin():
+                # 1. Actualizar la definición de la colección en UserDocumentTopic
+                update_topic_stmt = update(UserDocumentTopic).where(
+                    UserDocumentTopic.account_id == uuid.UUID(account_id),
+                    UserDocumentTopic.name == old_topic_name
                 )
-
-            collection = await db.scalar(query)
-            if not collection:
-                logger.warning(f"No se encontró la colección '{old_topic_name}' para actualizar.")
-                return False
-
-            # Actualizar los campos en UserDocumentTopic
-            if new_topic_name is not None:
-                collection.name = new_topic_name
-            if new_description is not None:
-                collection.description = new_description
-
-            # 2. Si se cambió el nombre, actualizar también en langchain_pg_embedding
-            if new_topic_name is not None and new_topic_name != old_topic_name:
-                # Construir filtros para langchain_pg_embedding
-                clauses = [
-                    "account_id = :account_id",
-                    "topic = :old_topic_name",
-                    "cmetadata->>'type' = 'document_chunk'"
-                ]
-                params: Dict[str, Any] = {
-                    "account_id": account_id,
-                    "old_topic_name": old_topic_name
-                }
-
+                
                 if workspace_id:
-                    clauses.append("workspace_id = :workspace_id")
-                    params["workspace_id"] = workspace_id
+                    update_topic_stmt = update_topic_stmt.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
                 elif team_id:
-                    clauses.append("team_id = :team_id")
-                    params["team_id"] = team_id
+                    update_topic_stmt = update_topic_stmt.where(UserDocumentTopic.team_id == uuid.UUID(team_id))
+                else:
+                    update_topic_stmt = update_topic_stmt.where(UserDocumentTopic.workspace_id.is_(None), UserDocumentTopic.team_id.is_(None))
 
-                # Obtener cmetadata actual para preservar otros metadatos
-                select_sql = text(f"""
-                    SELECT cmetadata
-                    FROM langchain_pg_embedding
-                    WHERE {" AND ".join(clauses)}
-                    LIMIT 1
-                """)
+                values_to_update = {}
+                if new_topic_name is not None:
+                    values_to_update['name'] = new_topic_name
+                if new_description is not None:
+                    values_to_update['description'] = new_description
 
-                cmetadata_result = await db.execute(select_sql, params)
-                current_cmetadata = cmetadata_result.scalar_one_or_none()
+                if values_to_update:
+                    result_topic = await db.execute(update_topic_stmt.values(**values_to_update))
+                    if result_topic.rowcount == 0:
+                        logger.warning(f"No se encontró la colección '{old_topic_name}' en UserDocumentTopic para actualizar.")
+                        # No retornamos False todavía, puede que solo existan en embeddings
 
-                if current_cmetadata:
-                    # Actualizar metadatos preservando otros campos
-                    values_to_update = current_cmetadata.copy()
-                    values_to_update['topic'] = new_topic_name
+                # 2. Si se cambió el nombre, actualizar todos los chunks en langchain_pg_embedding
+                if new_topic_name is not None and new_topic_name != old_topic_name:
+                    clauses = [
+                        "account_id = :account_id",
+                        "topic = :old_topic_name",
+                        "cmetadata->>'type' = 'document_chunk'"
+                    ]
+                    params: Dict[str, Any] = {
+                        "account_id": account_id,
+                        "old_topic_name": old_topic_name,
+                        "new_topic_name": new_topic_name,
+                        "new_cmetadata_topic": json.dumps(new_topic_name)
+                    }
 
-                    # Actualizar tanto cmetadata como la columna topic
-                    update_sql = text(f"""
+                    if workspace_id:
+                        clauses.append("workspace_id = :workspace_id")
+                        params["workspace_id"] = workspace_id
+                    elif team_id:
+                        clauses.append("team_id = :team_id")
+                        params["team_id"] = team_id
+                    else:
+                        clauses.append("workspace_id IS NULL")
+
+                    # Usamos jsonb_set para actualizar solo el campo 'topic' en cmetadata
+                    update_embeddings_sql = text(f"""
                         UPDATE langchain_pg_embedding
                         SET
-                            cmetadata = :new_cmetadata,
+                            cmetadata = jsonb_set(cmetadata, '{{topic}}', :new_cmetadata_topic::jsonb),
                             topic = :new_topic_name
                         WHERE {" AND ".join(clauses)}
                     """)
 
-                    update_params = params.copy()
-                    update_params.update({
-                        "new_cmetadata": json.dumps(values_to_update),
-                        "new_topic_name": new_topic_name
-                    })
+                    result_embeddings = await db.execute(update_embeddings_sql, params)
+                    logger.info(f"✅ Se actualizaron {result_embeddings.rowcount} chunks en langchain_pg_embedding con el nuevo nombre de colección.")
 
-                    result = await db.execute(update_sql, update_params)
-                    logger.info(f"✅ Se actualizaron {result.rowcount} documentos con el nuevo nombre de colección.")
-
-            await db.commit()
             logger.info(f"✅ Colección '{old_topic_name}' actualizada exitosamente.")
             return True
 
         except Exception as e:
             logger.error(f"❌ Error actualizando colección '{old_topic_name}': {e}", exc_info=True)
-            await db.rollback()
             return False
 
 async def update_collection_workspace(

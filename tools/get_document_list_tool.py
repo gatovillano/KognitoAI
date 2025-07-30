@@ -17,12 +17,8 @@ correctamente si es necesario.
 """
 
 import logging
-<<<<<<< HEAD
 import asyncio
 from typing import Any, List, Dict, Type, Optional, Union
-=======
-from typing import Any, List, Dict, Type, Optional
->>>>>>> parent of 9cadb85 (Refactor UI, enhance RAG capabilities, and improve tool functionalities)
 
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
@@ -42,15 +38,6 @@ class GetDocumentListInput(BaseModel):
     """
     Define el esquema de entrada para la herramienta de listado de documentos.
     """
-<<<<<<< HEAD
-=======
-    # Reemplazamos telegram_id por account_id para que sea universal.
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
-    # --- NUEVO: Parámetro para el ID del workspace ---
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
     workspace_id: Optional[str] = Field(
         None,
         description="El ID del workspace (UUID en formato string) para listar documentos del workspace, si aplica."
@@ -73,36 +60,6 @@ class GetDocumentListTool(BaseTool):
     return_direct: bool = False
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
 
-<<<<<<< HEAD
-    async def _arun(
-        self,
-        workspace_id: Optional[str] = None,
-        run_manager: Optional[Any] = None,
-        **kwargs: Any,
-    ) -> str:
-        """Lógica asíncrona para listar documentos del usuario."""
-        if not self.account_id:
-            return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
-
-        effective_workspace_id = workspace_id
-        # La lógica para obtener workspace_id del run_manager puede permanecer como un fallback útil.
-        if not effective_workspace_id and run_manager and hasattr(run_manager, 'configurable') and run_manager.configurable:
-            effective_workspace_id = run_manager.configurable.get('workspace_id')
-
-        logger.info(
-            f"Ejecutando GetDocumentListTool para la cuenta '{self.account_id}' con workspace_id: '{effective_workspace_id}'."
-        )
-        try:
-            documents_list = await list_user_documents(
-                account_id=self.account_id, team_id=None, workspace_id=effective_workspace_id
-            )
-
-            if not documents_list:
-                logger.info(
-                    f"No se encontraron documentos para la cuenta '{self.account_id}' en el workspace '{effective_workspace_id}'." if effective_workspace_id else f"No se encontraron documentos para la cuenta '{self.account_id}'."
-                )
-                return "No tienes ningún documento guardado en tu base de conocimiento todavía. ¡Puedes subir uno cuando quieras!" if not effective_workspace_id else f"No se encontraron documentos en el workspace '{effective_workspace_id}'. ¡Puedes subir uno a este workspace!"
-=======
     async def _arun(self, account_id: str, telegram_id: Optional[int] = None, workspace_id: Optional[str] = None, **kwargs: Any) -> str: # <-- workspace_id añadido aquí
         """
         Lógica asíncrona para listar documentos del usuario.
@@ -129,7 +86,6 @@ class GetDocumentListTool(BaseTool):
             if not documents_list:
                 logger.info(f"No se encontraron documentos para la cuenta '{account_id}' en el workspace '{workspace_id}'." if workspace_id else f"No se encontraron documentos para la cuenta '{account_id}'.")
                 return "No tienes ningún documento guardado en tu base de conocimiento todavía. ¡Puedes subir uno cuando quieras!" if not workspace_id else f"No se encontraron documentos en el workspace '{workspace_id}'. ¡Puedes subir uno a este workspace!"
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
             
             response_message = f"He encontrado {len(documents_list)} documento(s) en tu base de conocimiento"
             if workspace_id:
@@ -142,7 +98,6 @@ class GetDocumentListTool(BaseTool):
             if len(documents_list) > 5:
                 response_message += "\n(Y otros más...)"
             
-<<<<<<< HEAD
             logger.info(
                 f"✅ Lista de documentos recuperada exitosamente para la cuenta '{self.account_id}' con workspace_id: '{effective_workspace_id}'."
             )
@@ -152,12 +107,6 @@ class GetDocumentListTool(BaseTool):
                 f"Error en GetDocumentListTool para la cuenta '{self.account_id}' con workspace_id '{effective_workspace_id}': {e}",
                 exc_info=True,
             )
-=======
-            logger.info(f"✅ Lista de documentos recuperada exitosamente para la cuenta '{account_id}' con workspace_id: '{workspace_id}'.")
-            return response_message
-        except Exception as e:
-            logger.error(f"Error en GetDocumentListTool para la cuenta '{account_id}' con workspace_id '{workspace_id}': {e}", exc_info=True)
->>>>>>> parent of 8b033aa (Feat: Implement workspace-level data filtering and enhance analysis)
             return "Ocurrió un error inesperado al intentar listar tus documentos."
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

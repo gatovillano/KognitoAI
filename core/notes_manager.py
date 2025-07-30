@@ -135,8 +135,199 @@ async def get_notes(account_id: str, category: Optional[str] = None, search_quer
         for note in notes:
             title = f"<b>{note.title}</b>" if note.title else "Nota sin título"
             response_lines.append(f"\n- <b>ID: {note.id}</b> | {title} (Categoría: {note.category})\n  <i>{note.content}</i>")
-
+        
         return "\n".join(response_lines)
+
+"""
+Gestor de Lógica de Negocio para las Notas.
+
+Este módulo encapsula toda la lógica para interactuar con la tabla `notas` en la
+base de datos. Proporciona una clase `NotesManager` que centraliza las operaciones
+CRUD (Crear, Leer, Actualizar, Eliminar) sobre las notas.
+"""
+
+import logging
+from typing import Any, Optional, List, Dict
+import uuid
+
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.database import Nota, TeamMember
+from utils.embeddings import get_embedding_model
+
+logger = logging.getLogger(__name__)
+
+class NotesManager:
+    """Gestiona la lógica de negocio relacionada con las notas."""
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def add_note(self, account_id: str, title: Optional[str], content: str, category: Optional[str] = None, team_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Añade una nueva nota a la base de datos para una cuenta o equipo.
+        """
+        logger.info(f"Añadiendo nueva nota para la cuenta {account_id} con título '{title}'")
+        effective_category = category if category and category.strip() else "General"
+
+        embeddings_model = get_embedding_model()
+        note_embedding = None
+        if embeddings_model:
+            try:
+                note_embedding = await embeddings_model.aembed_query(content)
+            except Exception as e:
+                logger.error(f"Error generando embedding para la nota: {e}", exc_info=True)
+
+        new_note = Nota(
+            account_id=uuid.UUID(account_id),
+            team_id=uuid.UUID(team_id) if team_id else None,
+            title=title,
+            content=content,
+            category=effective_category,
+            embedding=note_embedding
+        )
+        self.db.add(new_note)
+        await self.db.commit()
+        await self.db.refresh(new_note)
+        logger.info(f"Nota '{title}' añadida exitosamente con ID {new_note.id}.")
+
+        return {
+            "id": new_note.id,
+            "title": new_note.title,
+            "content": new_note.content,
+            "category": new_note.category,
+            "created_at": new_note.created_at.isoformat(),
+            "team_id": str(new_note.team_id) if new_note.team_id else None,
+        }
+
+    async def get_notes_as_dicts(self, account_id: str, search_query: Optional[str] = None, team_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Recupera notas como una lista de diccionarios.
+        """
+        stmt = select(Nota).where(Nota.account_id == uuid.UUID(account_id))
+        if team_id:
+            stmt = stmt.where(Nota.team_id == uuid.UUID(team_id))
+        else: # Por defecto, solo notas personales si no se especifica equipo
+            stmt = stmt.where(Nota.team_id.is_(None))
+            
+        if search_query:
+            stmt = stmt.where(Nota.title.ilike(f"%{search_query}%") | Nota.content.ilike(f"%{search_query}%"))
+        
+        stmt = stmt.order_by(Nota.created_at.desc())
+        result = await self.db.execute(stmt)
+        notes = result.scalars().all()
+
+        return [
+            {
+                "id": note.id, "title": note.title, "content": note.content,
+                "category": note.category, "created_at": note.created_at.isoformat(),
+                "updated_at": note.updated_at.isoformat(),
+                "team_id": str(note.team_id) if note.team_id else None,
+                "team_shared": bool(note.team_id)
+            } for note in notes
+        ]
+
+    async def list_all_notes(self, account_id: str, search_query: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Devuelve todas las notas de un usuario, incluyendo personales y compartidas por equipos.
+        """
+        account_uuid = uuid.UUID(account_id)
+        logger.info(f"Listando todas las notas para la cuenta {account_id}")
+
+        # 1. Obtener notas personales
+        personal_notes = await self.get_notes_as_dicts(account_id=account_id, search_query=search_query)
+        
+        # 2. Obtener equipos del usuario
+        member_teams_result = await self.db.execute(
+            select(TeamMember).where(TeamMember.account_id == account_uuid)
+        )
+        team_ids = [str(team.team_id) for team in member_teams_result.scalars().all()]
+        
+        # 3. Obtener notas de cada equipo
+        team_notes = []
+        for team_id in team_ids:
+            notes_for_team = await self.get_notes_as_dicts(account_id=account_id, search_query=search_query, team_id=team_id)
+            team_notes.extend(notes_for_team)
+            
+        # 4. Combinar y eliminar duplicados
+        combined_notes = {note['id']: note for note in personal_notes + team_notes}
+        return list(combined_notes.values())
+
+    async def update_note(self, account_id: str, note_id: int, new_title: Optional[str] = None, new_content: Optional[str] = None, new_category: Optional[str] = None) -> bool:
+        """
+        Actualiza una nota existente. Devuelve True si fue exitoso, False en caso contrario.
+        """
+        stmt = select(Nota).where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
+        note_to_update = (await self.db.execute(stmt)).scalars().first()
+
+        if not note_to_update:
+            logger.warning(f"Nota {note_id} no encontrada para la cuenta {account_id}.")
+            return False
+
+        update_data = {}
+        content_changed = False
+        if new_title is not None:
+            update_data['title'] = new_title
+        if new_content is not None and note_to_update.content != new_content:
+            update_data['content'] = new_content
+            content_changed = True
+        if new_category is not None:
+            update_data['category'] = new_category
+
+        if content_changed:
+            embeddings_model = get_embedding_model()
+            if embeddings_model:
+                try:
+                    embedding = await embeddings_model.aembed_query(new_content)
+                    if embedding:
+                        update_data['embedding'] = embedding
+                except Exception as e:
+                    logger.error(f"Error al actualizar embedding para la nota {note_id}: {e}", exc_info=True)
+                    # No relanzamos el error para no interrumpir la actualización de la nota
+        
+        if update_data:
+            await self.db.execute(
+                update(Nota)
+                .where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
+                .values(**update_data)
+            )
+            await self.db.commit()
+        logger.info(f"Nota {note_id} actualizada para la cuenta {account_id}.")
+        return True
+
+    async def delete_note(self, account_id: str, note_id: int) -> bool:
+        """
+        Elimina una nota. Devuelve True si fue exitoso, False en caso contrario.
+        """
+        stmt = select(Nota).where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
+        note_to_delete = (await self.db.execute(stmt)).scalars().first()
+        
+        if not note_to_delete:
+            logger.warning(f"Nota {note_id} no encontrada para eliminar para la cuenta {account_id}.")
+            return False
+            
+        await self.db.delete(note_to_delete)
+        await self.db.commit()
+        logger.info(f"Nota {note_id} eliminada para la cuenta {account_id}.")
+        return True
+
+    async def unshare_note(self, note_id: int, account_id: str) -> bool:
+        """
+        Quita la asociación de una nota con un equipo.
+        """
+        result = await self.db.execute(
+            update(Nota)
+            .where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
+            .values(team_id=None)
+        )
+        await self.db.commit()
+        
+        if result.rowcount == 0:
+            logger.warning(f"No se pudo des-compartir la nota {note_id} para la cuenta {account_id}. Puede que no exista o no pertenezca al usuario.")
+            return False
+        
+        logger.info(f"Nota {note_id} des-compartida para la cuenta {account_id}.")
+        return True
 
 
 async def update_note(account_id: str, note_id: int, new_title: Optional[str] = None, new_content: Optional[str] = None, new_category: Optional[str] = None, team_id: Optional[str] = None) -> str:
