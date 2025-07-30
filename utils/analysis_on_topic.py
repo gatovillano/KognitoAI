@@ -138,7 +138,7 @@ async def perform_background_analysis(
             # Actualizar estado y resultado de la tarea
             update_result_query = text("""
                 UPDATE analysis_tasks
-                SET status = :status, result_payload = :result_payload::jsonb, updated_at = NOW()
+                SET status = :status, result_payload = CAST(:result_payload AS jsonb), updated_at = NOW()
                 WHERE id = :task_id
             """)
             await db.execute(update_result_query, {
