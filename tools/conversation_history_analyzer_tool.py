@@ -13,6 +13,7 @@ import logging
 from typing import Any, Dict, Optional, Type, List
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
+from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
@@ -31,10 +32,8 @@ class ConversationAnalysisInput(BaseModel):
     Define el esquema de entrada para la herramienta de análisis de historial de conversaciones.
     Valida que el argumento necesario, `account_id`, sea proporcionado.
     """
-    thread_ids_str: Optional[str] = Field(
-        default=None,
-        description="Cadena de texto opcional con IDs de hilos de chat específicos a analizar, separados por comas. Si no se proporciona, se analizarán todos los hilos del usuario."
-    )
+    # Los parámetros de contexto se moverán a los atributos de la clase
+    pass
 
 
 class ConversationHistoryAnalyzerTool(BaseTool):
@@ -50,11 +49,16 @@ class ConversationHistoryAnalyzerTool(BaseTool):
     )
     args_schema: Type[BaseModel] = ConversationAnalysisInput
     return_direct: bool = False
-    account_id: str
+
+    # Parámetros de contexto
+    account_id: Optional[str] = Field(None, description="ID de la cuenta del usuario.")
+    workspace_id: Optional[UUID] = Field(None, description="ID del espacio de trabajo actual.")
+    telegram_id: Optional[int] = Field(None, description="ID del usuario de Telegram.")
+    thread_id: Optional[UUID] = Field(None, description="ID del hilo de conversación actual.")
 
     async def _arun(
         self,
-        thread_ids_str: Optional[str] = None,
+        thread_ids_str: Optional[str] = None,  # Esto es un argumento, no un contexto de la herramienta
         background_tasks: Optional[BackgroundTasks] = None,
         **kwargs: Any
     ) -> str:
@@ -62,24 +66,29 @@ class ConversationHistoryAnalyzerTool(BaseTool):
         Ejecuta la lógica de la herramienta de forma asíncrona, iniciando un análisis en segundo plano.
 
         Args:
-            thread_ids: Lista opcional de IDs de hilos de chat específicos a analizar.
+            thread_ids_str: Cadena opcional de IDs de hilos de chat específicos a analizar, separados por comas.
             background_tasks: Objeto BackgroundTasks para programar la tarea en segundo plano.
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
             Un mensaje de texto indicando que el análisis ha sido iniciado.
         """
+        if self.account_id is None:
+            logger.error("ConversationHistoryAnalyzerTool requiere un 'account_id' para ejecutarse.")
+            return "Error: No se ha proporcionado un ID de cuenta. No se puede iniciar el análisis."
+
         logger.info(f"Ejecutando ConversationHistoryAnalyzerTool para la cuenta '{self.account_id}'.")
+        logger.info(f"Workspace ID: {self.workspace_id}, Telegram ID: {self.telegram_id}, Thread ID: {self.thread_id}")
 
         thread_ids = thread_ids_str.split(',') if thread_ids_str else None
 
         if background_tasks:
-            background_tasks.add_task(self.analyze_conversation_history, self.account_id, thread_ids)
+            background_tasks.add_task(self.analyze_conversation_history, str(self.account_id), thread_ids)
             logger.info(f"Análisis de historial de conversaciones programado en segundo plano para la cuenta '{self.account_id}'.")
             return "Análisis de historial de conversaciones iniciado en segundo plano. Los resultados se guardarán en tu perfil pronto."
         else:
             logger.warning(f"No se proporcionó BackgroundTasks; ejecutando análisis sincrónicamente para la cuenta '{self.account_id}'.")
-            await self.analyze_conversation_history(self.account_id, thread_ids)
+            await self.analyze_conversation_history(str(self.account_id), thread_ids)
             return "Análisis de historial de conversaciones completado. Los resultados han sido guardados en tu perfil."
 
 
@@ -92,29 +101,30 @@ class ConversationHistoryAnalyzerTool(BaseTool):
             thread_ids: Lista opcional de IDs de hilos de chat específicos a analizar.
         """
         try:
-            logger.info(f"Iniciando análisis de historial de conversaciones para la cuenta '{account_id}'.")
+            logger.info(f"Iniciando análisis de historial de conversaciones para la cuenta '{account_id}'.") # Usar account_id del parámetro
             async with SessionLocal() as db_session:
                 # Obtener los hilos de chat del usuario
+                # Usar account_id del parámetro para el filtrado
                 if thread_ids:
                     threads_query = select(ChatThread).where(
-                        ChatThread.account_id == account_id,
+                        ChatThread.account_id == account_id, # Usar account_id del parámetro
                         ChatThread.id.in_(thread_ids)
                     )
                 else:
-                    threads_query = select(ChatThread).where(ChatThread.account_id == account_id)
+                    threads_query = select(ChatThread).where(ChatThread.account_id == account_id) # Usar account_id del parámetro
 
                 threads_result = await db_session.execute(threads_query)
                 threads = threads_result.scalars().all()
 
                 if not threads:
-                    logger.warning(f"No se encontraron hilos de chat para la cuenta '{account_id}'.")
+                    logger.warning(f"No se encontraron hilos de chat para la cuenta '{account_id}'.") # Usar account_id del parámetro
 
                     return None
 
                 # Obtener el historial de mensajes de cada hilo
                 all_messages = []
                 if settings.database_url is None:
-                    logger.error(f"Configuración de base de datos faltante para la cuenta '{account_id}'.")
+                    logger.error(f"Configuración de base de datos faltante para la cuenta '{self.account_id}'.")
 
                     return None
                 db_sync_url = settings.database_url.replace("+psycopg", "")
@@ -128,7 +138,7 @@ class ConversationHistoryAnalyzerTool(BaseTool):
                     all_messages.extend(messages)
 
                 if not all_messages:
-                    logger.warning(f"No se encontraron mensajes en los hilos de chat para la cuenta '{account_id}'.")
+                    logger.warning(f"No se encontraron mensajes en los hilos de chat para la cuenta '{self.account_id}'.")
 
                     return None
 
@@ -140,7 +150,7 @@ class ConversationHistoryAnalyzerTool(BaseTool):
                 # Utilizar el LLM para extraer intereses y temas clave
                 llm = get_fast_llm()
                 if not llm:
-                    logger.error(f"No hay LLM disponible para analizar el historial de la cuenta '{account_id}'.")
+                    logger.error(f"No hay LLM disponible para analizar el historial de la cuenta '{self.account_id}'.")
 
                     return None
 
@@ -172,17 +182,17 @@ class ConversationHistoryAnalyzerTool(BaseTool):
                 # Actualizar el perfil del usuario con la información extraída
                 if intereses or temas_clave:
                     await update_user_profile(
-                        account_id=account_id,
+                        account_id=account_id, # Usar account_id del parámetro
                         intereses=intereses.strip() if intereses else None,
                         otros_datos=temas_clave.strip() if temas_clave else None
                     )
-                    logger.info(f"Perfil actualizado con intereses y temas clave para la cuenta '{account_id}'.")
+                    logger.info(f"Perfil actualizado con intereses y temas clave para la cuenta '{account_id}'.") # Usar account_id del parámetro
                 else:
-                    logger.warning(f"No se extrajeron intereses ni temas clave para la cuenta '{account_id}'.")
+                    logger.warning(f"No se extrajeron intereses ni temas clave para la cuenta '{account_id}'.") # Usar account_id del parámetro
                 return None
 
         except Exception as e:
-            logger.error(f"Error durante el análisis de historial de conversaciones para la cuenta '{account_id}': {e}", exc_info=True)
+            logger.error(f"Error durante el análisis de historial de conversaciones para la cuenta '{self.account_id}': {e}", exc_info=True)
             return None
 
     def _extract_message_content(self, msg: Any) -> str:

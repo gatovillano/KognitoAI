@@ -1,7 +1,7 @@
 // src/app/(dashboard)/admin/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -23,18 +23,24 @@ interface User {
   is_admin: boolean;
 }
 
-export default function AdminPage() {
+interface PageProps {
+  params: Promise<{ id: string }>;
+}
+
+export default function AdminPage({ params }: PageProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
   const router = useRouter();
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+  // Type assertion to treat params as a synchronous object
+  const syncParams = params as unknown as { id: string };
+  const { id: adminId } = syncParams; // Using adminId to avoid conflict if 'id' is used elsewhere
 
-  const fetchUsers = async () => {
+  
+
+  const fetchUsers = useCallback(async () => {
     try {
       setLoading(true);
       const response = await apiClient.get('/api/admin/users');
@@ -53,7 +59,11 @@ export default function AdminPage() {
       //   router.push('/dashboard'); 
       // }
     }
-  };
+  }, [toast]); // Add dependencies for fetchUsers here if any
+
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
 
   const handleSelectUser = (userId: string, isSelected: boolean) => {
     setSelectedUsers((prevSelected) => {

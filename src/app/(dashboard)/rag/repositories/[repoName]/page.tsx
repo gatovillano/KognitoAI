@@ -24,7 +24,8 @@ interface GitHubDocument extends Document {
 }
 
 export default function RepositoryDetailPage() {
-  const params = useParams();
+  const rawParams = useParams();
+  const params = { ...rawParams }; // Create a shallow copy
   const router = useRouter();
   const repoName = (params?.repoName as string) || '';
   const [documents, setDocuments] = useState<GitHubDocument[]>([]);

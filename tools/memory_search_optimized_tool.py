@@ -11,8 +11,6 @@ class MemorySearchOptimizedInput(BaseModel):
     content_type: Optional[str] = Field(None, description="Tipo de contenido: user_memories, user_documents, team_memories, team_documents", json_schema_extra={"type": "string"})
     topic: Optional[str] = Field(None, description="Topic organizacional específico del usuario", json_schema_extra={"type": "string"})
     category: Optional[str] = Field(None, description="Categoría automática del LLM", json_schema_extra={"type": "string"})
-    workspace_id: Optional[str] = Field(None, description="ID del workspace (NULL = General)", json_schema_extra={"type": "string"})
-    team_id: Optional[str] = Field(None, description="ID del team propietario", json_schema_extra={"type": "string"})
     k: Optional[int] = Field(10, description="Número máximo de resultados a devolver", json_schema_extra={"type": "integer"})
     include_shared: Union[bool, None] = Field(True, description="Si incluir contenido compartido con teams", json_schema_extra={"type": "boolean"})
 
@@ -40,6 +38,8 @@ class MemorySearchOptimizedTool(BaseTool):
     )
     args_schema: Type[BaseModel] = MemorySearchOptimizedInput
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="ID del workspace (NULL = General), inyectado automáticamente.")
+    team_id: Optional[str] = Field(None, description="ID del team propietario, inyectado automáticamente.")
 
     def _run(
         self,
@@ -47,8 +47,6 @@ class MemorySearchOptimizedTool(BaseTool):
         content_type: Union[str, None] = None,
         topic: Union[str, None] = None,
         category: Union[str, None] = None,
-        workspace_id: Union[str, None] = None,
-        team_id: Union[str, None] = None,
         k: Union[int, None] = 10,
         include_shared: Union[bool, None] = True,
     ) -> str:
@@ -65,8 +63,8 @@ class MemorySearchOptimizedTool(BaseTool):
                 content_type=content_type,
                 topic=topic,
                 category=category,
-                workspace_id=workspace_id,
-                team_id=team_id,
+                workspace_id=self.workspace_id,
+                team_id=self.team_id,
                 visibility_teams=[] if not include_shared else None,  # TODO: obtener teams del usuario
                 k=k,
             ))
@@ -98,8 +96,8 @@ class MemorySearchOptimizedTool(BaseTool):
                     "content_type": content_type,
                     "topic": topic,
                     "category": category,
-                    "workspace_id": workspace_id,
-                    "team_id": team_id,
+                    "workspace_id": self.workspace_id,
+                    "team_id": self.team_id,
                     "include_shared": include_shared
                 },
                 "results": formatted_results
@@ -118,8 +116,6 @@ class MemorySearchOptimizedTool(BaseTool):
         content_type: Union[str, None] = None,
         topic: Union[str, None] = None,
         category: Union[str, None] = None,
-        workspace_id: Union[str, None] = None,
-        team_id: Union[str, None] = None,
         k: Union[int, None] = 10,
         include_shared: Union[bool, None] = True,
     ) -> str:
@@ -131,8 +127,8 @@ class MemorySearchOptimizedTool(BaseTool):
                 content_type=content_type,
                 topic=topic,
                 category=category,
-                workspace_id=workspace_id,
-                team_id=team_id,
+                workspace_id=self.workspace_id,
+                team_id=self.team_id,
                 visibility_teams=[] if not include_shared else None,  # TODO: obtener teams del usuario
                 k=k,
             )
@@ -164,8 +160,8 @@ class MemorySearchOptimizedTool(BaseTool):
                     "content_type": content_type,
                     "topic": topic,
                     "category": category,
-                    "workspace_id": workspace_id,
-                    "team_id": team_id,
+                    "workspace_id": self.workspace_id,
+                    "team_id": self.team_id,
                     "include_shared": include_shared
                 },
                 "results": formatted_results

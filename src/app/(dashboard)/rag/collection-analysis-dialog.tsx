@@ -57,7 +57,7 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-4xl max-h-[85vh]">
           <DialogHeader>
-            <DialogTitle>Análisis de la Colección "{topic}"</DialogTitle>
+            <DialogTitle>Análisis de la Colección &quot;{topic}&quot;</DialogTitle>
           </DialogHeader>
           <ScrollArea className="max-h-[70vh] pr-4">
               <div className="space-y-6">

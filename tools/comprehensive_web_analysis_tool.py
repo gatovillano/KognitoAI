@@ -1,5 +1,6 @@
 # tools/comprehensive_web_analysis_tool.py
 
+import json
 import logging
 import asyncio
 from typing import Any, Type, List, Optional, cast
@@ -19,19 +20,14 @@ from tools.web_search_tool import get_web_search_tool
 from tools.web_scraper_tool import WebScraperTool
 from core.memory_manager import get_relevant_memories # <-- Esta ya soporta workspace_id
 from core.llm_manager import get_fast_llm
+from utils.multi_query_retriever import MultiQueryRetriever, multi_query_search
 
 logger = logging.getLogger(__name__)
 
 class ComprehensiveWebAnalysisInput(BaseModel):
     """Input schema for the Comprehensive Web Analysis Tool."""
     query: str = Field(..., description="The user's research query in natural language.")
-    account_id: str = Field(..., description="The unique ID of the user's account.")
     # --- NUEVO: Parámetro para el ID del workspace ---
-    workspace_id: str = Field(
-        default="",
-        description="El ID del workspace (UUID en formato string) para cruzar la información con documentos de un workspace específico, si aplica."
-)
-
 class ComprehensiveWebAnalysisTool(BaseTool):
     """
     A comprehensive tool that orchestrates web searching, scraping, and knowledge base analysis
@@ -47,7 +43,10 @@ class ComprehensiveWebAnalysisTool(BaseTool):
     )
     args_schema: Type[BaseModel] = ComprehensiveWebAnalysisInput
     return_direct: bool = False
-    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
+    account_id: Optional[str] = Field(None, description="ID de la cuenta asociada a esta herramienta.")
+    workspace_id: Optional[str] = Field(None, description="El ID del workspace (UUID en formato string) para cruzar la información con documentos de un workspace específico, si aplica.")
+    telegram_id: Optional[str] = Field(None, description="El ID del usuario de Telegram, si la solicitud proviene de Telegram.")
+    thread_id: Optional[str] = Field(None, description="El ID del hilo de conversación, si aplica.")
 
     def _extract_urls(self, search_results: str) -> List[str]:
         """Extracts URLs from the formatted search results string."""
@@ -55,52 +54,19 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         logger.info(f"Extracted {len(urls)} URLs from search results: {urls}")
         return urls
 
-    async def _arun(\
-        self,\
-        query: str,\
-        account_id: str = "",\
-        workspace_id: Optional[str] = None, # <-- workspace_id añadido aquí
-        run_manager: Optional[CallbackManagerForToolRun] = None,\
-        **kwargs: Any\
+    async def _arun(
+        self,
+        query: str,
+        run_manager: Optional[CallbackManagerForToolRun] = None,
+        **kwargs: Any
     ) -> str:
         """Executes the comprehensive analysis tool asynchronously."""
-        # Obtener account_id de la configuración del agente si está disponible
-        config_account_id = None
-        config_workspace_id = workspace_id
-
-        # Intentar múltiples formas de obtener la configuración
-        if run_manager:
-            # Método 1: Acceso directo a config
-            if hasattr(run_manager, 'config'):
-                config = getattr(run_manager, 'config', {})
-                configurable = config.get('configurable', {})
-                config_account_id = configurable.get('account_id')
-                if not config_workspace_id:
-                    config_workspace_id = configurable.get('workspace_id')
-
-            # Método 2: Buscar en kwargs del run_manager
-            elif hasattr(run_manager, 'kwargs'):
-                run_kwargs = getattr(run_manager, 'kwargs', {})
-                config = run_kwargs.get('config', {})
-                configurable = config.get('configurable', {})
-                config_account_id = configurable.get('account_id')
-                if not config_workspace_id:
-                    config_workspace_id = configurable.get('workspace_id')
-
-        # Método 3: Buscar en kwargs generales
-        if not config_account_id and 'config' in kwargs:
-            config = kwargs.get('config', {})
-            configurable = config.get('configurable', {})
-            config_account_id = configurable.get('account_id')
-            if not config_workspace_id:
-                config_workspace_id = configurable.get('workspace_id')
-
-        # Usar configuración, parámetros o instancia como fallback
-        effective_account_id = config_account_id or account_id or getattr(self, 'account_id', "") or ""
-        effective_workspace_id = config_workspace_id
+        # Usar account_id y workspace_id de los atributos de la instancia
+        effective_account_id = self.account_id
+        effective_workspace_id = self.workspace_id
 
         # Log para debugging
-        logger.info(f"🔍 Debug config access - account_id from config: {config_account_id}, from param: {account_id}, from instance: {getattr(self, 'account_id', None)}, effective: {effective_account_id}")
+        logger.info(f"🔍 Debug config access - effective account_id: {effective_account_id}, effective workspace_id: {effective_workspace_id}")
 
         if not effective_account_id:
             return "Error: No se pudo obtener el account_id. Esta herramienta requiere identificación del usuario."
@@ -108,81 +74,186 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         logger.info(f"--- Running Comprehensive Web Analysis for account {effective_account_id} (Workspace: {effective_workspace_id if effective_workspace_id else 'N/A'}) ---")
         logger.info(f"Query: {query}")
 
-        # Step 1: Web Search
-        logger.info("Step 1: Performing web search...")
-        web_search_tool_instance = get_web_search_tool()
-        if web_search_tool_instance.coroutine is None:
-            logger.error("Error: web_search_tool_instance.coroutine is None. This should not happen.")
-            return "Error interno: La herramienta de búsqueda web no está configurada correctamente."
-        
-        search_results_obj = cast(ToolOutputWithSources, await web_search_tool_instance.coroutine(query))
-        search_context = search_results_obj.context_for_llm
-        if "Error" in search_context or "No se encontraron" in search_context:
-            logger.warning("Web search did not yield results or failed. Returning raw search results.")
-            return search_results_obj.context_for_llm
+        max_iterations = 3
+        iteration_count = 0
+        combined_web_content_accumulated = ""
+        urls_to_scrape_accumulated = []
+        original_query = query # Guardar la consulta original
 
-        urls_to_scrape = self._extract_urls(search_results_obj.context_for_llm)
-        if not urls_to_scrape:
-            logger.warning("No URLs could be extracted from the search results.")
-            soup = BeautifulSoup(search_results_obj.context_for_llm, "html.parser")
-            return f"No pude extraer URLs específicas, pero aquí tienes un resumen de la búsqueda:\n\n{soup.get_text()}"
+        # Bucle para decisiones impulsadas por LLM
+        while iteration_count < max_iterations:
+            iteration_count += 1
+            logger.info(f"--- Iteration {iteration_count} of {max_iterations} ---")
 
-        # Step 2: Web Scraping
-        logger.info(f"Step 2: Scraping content from {len(urls_to_scrape)} URLs...")
-        scraper = WebScraperTool()
-        scraping_tasks = [scraper._arun(url=url) for url in urls_to_scrape[:10]]
-        scraped_contents = await asyncio.gather(*scraping_tasks, return_exceptions=True)
+            # Step 1: Web Search
+            logger.info("Step 1: Performing web search...")
+            web_search_tool_instance = get_web_search_tool()
+            if web_search_tool_instance._arun is None:
+                logger.error("Error: web_search_tool_instance._arun is None. This should not happen.")
+                return "Error interno: La herramienta de búsqueda web no está configurada correctamente."
+            
+            # Solicitamos 80 resultados como se pidió
+            search_results_obj = cast(ToolOutputWithSources, await web_search_tool_instance._arun(query, max_results=80))
+            search_context = search_results_obj.context_for_llm
+            if "Error" in search_context or "No se encontraron" in search_context:
+                logger.warning("Web search did not yield results or failed. Returning raw search results.")
+                # Si no hay resultados de búsqueda, no tiene sentido continuar el bucle.
+                if not combined_web_content_accumulated.strip():
+                    return search_results_obj.context_for_llm
+                else:
+                    break # Si ya hay contenido acumulado, intentar finalizar con lo que se tiene.
 
-        combined_web_content = ""
-        for i, content in enumerate(scraped_contents):
-            if isinstance(content, Exception):
-                logger.error(f"Error scraping URL {urls_to_scrape[i]}: {content}")
-            elif content:
-                combined_web_content += f"--- Contenido de {urls_to_scrape[i]} ---\n{content}\n\n"
-        
-        if not combined_web_content.strip():
-            logger.warning("Scraping did not yield any content.")
-            return "No se pudo extraer contenido de las páginas web encontradas. Puede que estén protegidas o sean incompatibles."
+            urls_to_scrape = self._extract_urls(search_results_obj.context_for_llm)
+            if not urls_to_scrape:
+                logger.warning("No URLs could be extracted from the search results.")
+                soup = BeautifulSoup(search_results_obj.context_for_llm, "html.parser")
+                # Si no hay URLs pero sí contenido de búsqueda, acumular el texto plano de la búsqueda.
+                if soup.get_text().strip():
+                    combined_web_content_accumulated += f"--- Resumen de Búsqueda (Iteración {iteration_count}) ---\n{soup.get_text()}\n\n"
+                if not combined_web_content_accumulated.strip():
+                    return f"No pude extraer URLs específicas, pero aquí tienes un resumen de la búsqueda:\n\n{soup.get_text()}"
+                else:
+                    break # Si ya hay contenido acumulado, intentar finalizar con lo que se tiene.
 
-        # Step 3: Initial Web Synthesis
-        logger.info("Step 3: Synthesizing web content...")
-        synthesis_llm = get_fast_llm()
-        if not synthesis_llm:
-            return "Error: El modelo de lenguaje para síntesis no está disponible."
+            # Step 2: Web Scraping
+            logger.info(f"Step 2: Scraping content from {len(urls_to_scrape)} URLs...")
+            scraper = WebScraperTool()
+            scraping_tasks = [scraper._arun(url=url) for url in urls_to_scrape[:10]]
+            scraped_contents = await asyncio.gather(*scraping_tasks, return_exceptions=True)
 
-        synthesis_prompt = f"""
-        Eres un analista de investigación. A continuación se presenta el contenido extraído de varias páginas web sobre el tema '{query}'.
-        Tu tarea es crear un analisis claro y profundo de esta información.
-        Identifica los puntos clave, las conclusiones principales y cualquier dato relevante.
+            current_iteration_web_content = ""
+            for i, content in enumerate(scraped_contents):
+                if isinstance(content, Exception):
+                    logger.error(f"Error scraping URL {urls_to_scrape[i]}: {content}")
+                elif content:
+                    current_iteration_web_content += f"--- Contenido de {urls_to_scrape[i]} ---\n{content}\n\n"
+                    urls_to_scrape_accumulated.append(urls_to_scrape[i]) # Acumular URLs
 
-        --- INICIO DEL CONTENIDO WEB ---
-        {combined_web_content}
-        --- FIN DEL CONTENIDO WEB ---
+            if not current_iteration_web_content.strip():
+                logger.warning("Scraping did not yield any content for this iteration.")
+                if not combined_web_content_accumulated.strip():
+                    return "No se pudo extraer contenido de las páginas web encontradas. Puede que estén protegidas o sean incompatibles."
+                else:
+                    break # Si ya hay contenido acumulado, intentar finalizar con lo que se tiene.
+            
+            combined_web_content_accumulated += current_iteration_web_content # Acumular contenido web
 
-        Por favor, genera el analisis:
-        """
-        web_summary_response = await synthesis_llm.ainvoke([HumanMessage(content=synthesis_prompt)])
-        web_summary = web_summary_response.content
+            # Step 3: Initial Web Synthesis
+            logger.info("Step 3: Synthesizing web content...")
+            synthesis_llm = get_fast_llm()
+            if not synthesis_llm:
+                return "Error: El modelo de lenguaje para síntesis no está disponible."
 
-        # Step 4: Knowledge Base Integration
-        logger.info("Step 4: Searching internal knowledge base...")
-        # --- MODIFICACIÓN: Pasar workspace_id a get_relevant_memories ---
-        relevant_memories = await get_relevant_memories(account_id, web_summary, k=5, workspace_id=workspace_id)
+            synthesis_prompt = f"""
+            Eres un analista de investigación. A continuación se presenta el contenido extraído de varias páginas web sobre el tema '{query}'.
+            Tu tarea es crear un analisis claro y profundo de esta información.
+            Identifica los puntos clave, las conclusiones principales y cualquier dato relevante.
 
-        # Step 5: Final Combined Analysis
-        logger.info("Step 5: Performing final combined analysis...")
+            --- INICIO DEL CONTENIDO WEB ---
+            {current_iteration_web_content}
+            --- FIN DEL CONTENIDO WEB ---
+
+            Por favor, genera el analisis:
+            """
+            web_summary_response = await synthesis_llm.ainvoke([HumanMessage(content=synthesis_prompt)])
+            web_summary = web_summary_response.content
+
+            # Step 4: Knowledge Base Integration
+            logger.info("Step 4: Searching internal knowledge base using MultiQueryRetriever...")
+            # Integración de MultiQueryRetriever
+            # Se usa web_summary directamente para la consulta de RAG, ya que es concisa.
+            relevant_memories_obj = await multi_query_search(
+                account_id=effective_account_id,
+                query=web_summary,
+                workspace_id=effective_workspace_id,
+                k=20,
+                # El LLM para la generación de sub-queries es manejado internamente por MultiQueryRetriever
+            )
+            # Formatear los resultados de multi_query_search para el prompt final
+            relevant_memories = "\n\n".join([mem.get('snippet', '') for mem in relevant_memories_obj if mem.get('snippet')])
+            if not relevant_memories:
+                relevant_memories = "No se encontró información interna relevante."
+
+            # Step 5: LLM Decision Logic
+            logger.info("Step 5: Querying LLM for decision on more search...")
+            decision_llm = get_fast_llm()
+            if not decision_llm:
+                return "Error: El modelo de lenguaje para la decisión no está disponible."
+
+            decision_prompt = f"""
+            Eres un asistente de IA cuya única tarea es decidir si se necesita más información de la web para responder a una consulta original del usuario.
+            Evalúa la siguiente información:
+
+            Consulta Original del Usuario: "{original_query}"
+
+            Resumen Acumulado de la Web:
+            {combined_web_content_accumulated}
+
+            Resumen de la Iteración Actual de la Web:
+            {web_summary}
+
+            Información Relevante de la Base de Conocimiento Personal del Usuario:
+            {relevant_memories if "No se encontró" not in relevant_memories else "No se encontró información interna relevante."}
+
+            Considera si la 'Consulta Original del Usuario' puede ser respondida completamente con el 'Resumen Acumulado de la Web' (que incluye el resumen de la iteración actual) y la 'Información Relevante de la Base de Conocimiento Personal'.
+            Si la información es suficiente, responde con `needs_more_search: false`.
+            Si la información no es suficiente y se necesita una nueva búsqueda, responde con `needs_more_search: true` y una `new_query` refinada basada en lo que falta.
+            Asegúrate de que tu respuesta sea un objeto JSON válido.
+
+            Ejemplo de respuesta si se necesita más búsqueda:
+            ```json
+            {{
+              "needs_more_search": true,
+              "new_query": "consulta refinada para la próxima búsqueda",
+              "reason": "razón por la que se necesita más búsqueda"
+            }}
+            ```
+
+            Ejemplo de respuesta si no se necesita más búsqueda:
+            ```json
+            {{
+              "needs_more_search": false,
+              "reason": "razón por la que no se necesita más búsqueda"
+            }}
+            ```
+
+            Tu respuesta JSON:
+            """
+            decision_response = await decision_llm.ainvoke([HumanMessage(content=decision_prompt)])
+            
+            try:
+                decision = json.loads(decision_response.content)
+                logger.info(f"LLM Decision: {decision}")
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing LLM decision JSON: {e}. Raw response: {decision_response.content}")
+                # Si el LLM no devuelve un JSON válido, asumimos que no se necesita más búsqueda para evitar un bucle infinito.
+                decision = {"needs_more_search": False, "reason": "Error al parsear la respuesta del LLM, asumiendo que no se necesita más búsqueda."}
+
+            # Step 6: Control Flow based on LLM Decision
+            if decision.get('needs_more_search') and iteration_count < max_iterations:
+                query = decision.get('new_query', query) # Actualizar la consulta para la próxima iteración
+                logger.info(f"LLM requests more search. New query for next iteration: {query}")
+                # El bucle continuará automáticamente
+            else:
+                logger.info("LLM indicates no more search needed or max iterations reached. Exiting loop.")
+                break # Salir del bucle
+
+        # --- Fin del Bucle de Decisión ---
+
+        # Step 7: Final Combined Analysis (Ahora usa los acumulados)
+        logger.info("Step 7: Performing final combined analysis...")
         final_analysis_llm = get_fast_llm()
         if not final_analysis_llm:
             return "Error: El modelo de lenguaje para el análisis final no está disponible."
         
         final_prompt = f"""
-        Eres Kognito, un asistente de IA experto en análisis y síntesis. Tu tarea es responder a la consulta original del usuario combinando la información recién investigada de la web con el conocimiento personal relevante del usuario.
+        Eres Kognito, un asistente de IA experto en análisis y síntesis. Tu tarea es responder a la consulta original del usuario combinando la información acumulada de la web con el conocimiento personal relevante del usuario.
 
-        Consulta Original del Usuario: "{query}"
+        Consulta Original del Usuario: "{original_query}"
 
-        --- Resumen Ejecutivo de la Investigación Web ---
-        {web_summary}
-        --- Fin del Resumen Web ---
+        --- Resumen Ejecutivo de la Investigación Web Acumulada ---
+        {combined_web_content_accumulated}
+        --- Fin del Resumen Web Acumulado ---
 
         --- Información Relevante de la Base de Conocimiento Personal del Usuario ---
         {{relevant_memories if "No se encontraron" not in relevant_memories else "No se encontró información interna relevante."}}\\n
@@ -193,7 +264,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         - Si encuentras conexiones, sinergias o contradicciones entre la información web y el conocimiento del usuario, destácalas.
         - Adopta un tono de asistente útil y experto.
         - Formatea tu respuesta de manera clara y legible usando Markdown.\n
-        - **Importante:** Al final de tu respuesta, incluye una sección titulada "**Fuentes** donde listes todas las URLs utilizadas en la investigación web ({', '.join([f'[{url.split("//")[1].split("/")[0]}](<{url}>)' for url in urls_to_scrape[:5]])}). Asegúrate de que cada URL esté en formato de enlace clickable usando Markdown.\n
+        - **Importante:** Al final de tu respuesta, incluye una sección titulada "**Fuentes**" donde listes todas las URLs utilizadas en la investigación web ({', '.join([f'[{url.split("//")[1].split("/")[0]}](<{url}>)' for url in urls_to_scrape_accumulated[:5]]) if urls_to_scrape_accumulated else "No se encontraron fuentes web."}). Asegúrate de que cada URL esté en formato de enlace clickable usando Markdown.\n
         """
         final_response = await final_analysis_llm.ainvoke([HumanMessage(content=final_prompt)])
 

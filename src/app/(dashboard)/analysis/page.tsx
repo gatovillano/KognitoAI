@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AnalysisDetailDialog } from './analysis-detail-dialog';
+import { SemanticAnalysisDialog } from '../rag/semantic-analysis-dialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { 
@@ -67,6 +68,7 @@ const getAnalysisIcon = (type: string) => {
     case 'code':
       return <Code className="h-5 w-5 text-orange-500" />;
     case 'semantic':
+    case 'semantic_summary':
       return <BarChart3 className="h-5 w-5 text-indigo-500" />;
     default:
       return <FileText className="h-5 w-5 text-gray-500" />;
@@ -87,6 +89,8 @@ const getAnalysisTypeLabel = (type: string) => {
       return 'Código';
     case 'semantic':
       return 'Semántico';
+    case 'semantic_summary':
+      return 'Resumen Semántico';
     default:
       return 'Análisis';
   }
@@ -105,6 +109,7 @@ const getAnalysisTypeBadgeColor = (type: string) => {
     case 'code':
       return 'bg-orange-100 text-orange-800 border-orange-200';
     case 'semantic':
+    case 'semantic_summary':
       return 'bg-indigo-100 text-indigo-800 border-indigo-200';
     default:
       return 'bg-gray-100 text-gray-800 border-gray-200';
@@ -118,11 +123,12 @@ export default function AnalysisPage() {
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
+  const [isSemanticDialogOpen, setIsSemanticDialogOpen] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [offset, setOffset] = useState(0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
-  const fetchAnalyses = async (reset = false) => {
+  const fetchAnalyses = useCallback(async (reset = false) => {
     if (reset) {
       setIsLoading(true);
       setOffset(0);
@@ -156,11 +162,11 @@ export default function AnalysisPage() {
       setIsLoading(false);
       setIsLoadingMore(false);
     }
-  };
+  }, [selectedType, searchQuery, offset]);
 
   useEffect(() => {
     fetchAnalyses(true);
-  }, [selectedType, searchQuery]);
+  }, [selectedType, searchQuery, fetchAnalyses]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,7 +175,11 @@ export default function AnalysisPage() {
 
   const handleViewDetails = (analysis: Analysis) => {
     setSelectedAnalysis(analysis);
-    setIsDetailDialogOpen(true);
+    if (analysis.type === 'semantic' || analysis.type === 'semantic_summary') {
+      setIsSemanticDialogOpen(true);
+    } else {
+      setIsDetailDialogOpen(true);
+    }
   };
 
   const handleLoadMore = () => {
@@ -195,7 +205,8 @@ export default function AnalysisPage() {
     { value: 'mindmap', label: 'Mapas Mentales' },
     { value: 'insight', label: 'Insights' },
     { value: 'code', label: 'Código' },
-    { value: 'semantic', label: 'Semántico' }
+    { value: 'semantic', label: 'Semántico' },
+    { value: 'semantic_summary', label: 'Resumen Semántico' }
   ];
 
   if (isLoading) {
@@ -411,6 +422,16 @@ export default function AnalysisPage() {
         isOpen={isDetailDialogOpen}
         onOpenChange={setIsDetailDialogOpen}
       />
+      
+      {/* Diálogo específico para análisis semántico */}
+      {selectedAnalysis && (selectedAnalysis.type === 'semantic' || selectedAnalysis.type === 'semantic_summary') && (
+        <SemanticAnalysisDialog
+          analysis={selectedAnalysis.full_data}
+          isOpen={isSemanticDialogOpen}
+          onOpenChange={setIsSemanticDialogOpen}
+          topic={selectedAnalysis.title}
+        />
+      )}
     </div>
   );
 }

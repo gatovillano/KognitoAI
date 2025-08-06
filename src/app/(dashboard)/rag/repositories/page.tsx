@@ -3,7 +3,7 @@
 'use client';
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -111,7 +111,7 @@ export default function RepositoriesPage() {
 
   // --- Handlers de Análisis ---
 
-  const handleAnalyzeDocument = async (doc: Document) => {
+  const handleAnalyzeDocument = useCallback(async (doc: Document) => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     setDocumentToAnalyze(doc);
     try {
@@ -119,7 +119,7 @@ export default function RepositoriesPage() {
       setDocPollingId(response.data.task_id);
       toast.info(`Análisis para "${doc.file_name}" iniciado.`);
     } catch (error) { toast.error("No se pudo iniciar el análisis del documento."); }
-  };
+  }, [docPollingId, collectionPollingId]);
   
   const handleAnalyzeCollection = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
@@ -177,14 +177,14 @@ export default function RepositoriesPage() {
   };
 
   // --- Handler para Extraer Título de un Documento Individual ---
-  const handleExtractTitleForDocument = async (doc: Document) => {
+  const handleExtractTitleForDocument = useCallback(async (doc: Document) => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     try {
       const response = await apiClient.post('/api/extract-title', { file_name: doc.file_name });
       toast.info(`Extracción de título para "${doc.file_name}" iniciada.`);
       fetchPageData();
     } catch (error) { toast.error(`No se pudo iniciar la extracción de título para "${doc.file_name}".`); }
-  };
+  }, [docPollingId, collectionPollingId, fetchPageData]);
 
   // --- Handler para Actualizar Repositorio ---
   const handleUpdateRepository = (repoName: string, repoUrl: string) => {

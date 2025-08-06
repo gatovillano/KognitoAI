@@ -29,8 +29,8 @@ def setup_llm_detailed_logging(log_level: str = "INFO", log_file: Optional[str] 
     loggers_config = {
         "LLMCallback": logging.INFO,  # Nuestro callback personalizado
         "core.agent": logging.INFO,   # Logs del agente
-        "langchain.agents.agent": logging.DEBUG,  # Cambiado a DEBUG para depuración
-        "langchain_google_genai": logging.DEBUG,  # Cambiado a DEBUG para depuración
+        "langchain.agents.agent": logging.WARNING,  # Cambiado a INFO para reducir verbosidad
+        "langchain_google_genai": logging.WARNING,  # Cambiado a INFO para reducir verbosidad
         "tools.github_repo_tool": logging.DEBUG, # Añadido para ver logs de la herramienta
     }
 

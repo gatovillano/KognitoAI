@@ -70,7 +70,10 @@ class ProactiveKnowledgeLinkerTool(BaseTool):
     )
     args_schema: Type[BaseModel] = ProactiveKnowledgeLinkerInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
-    account_id: str # Se mantiene aquí, ya que es donde se inyecta
+    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="El ID del espacio de trabajo, inyectado automáticamente si está disponible.")
+    telegram_id: Optional[str] = Field(None, description="El ID de Telegram del usuario, inyectado automáticamente si está disponible.")
+    thread_id: Optional[str] = Field(None, description="El ID del hilo de conversación, inyectado automáticamente si está disponible.")
 
     def __init__(self, **kwargs):
         """Inicializa la herramienta con cualquier configuración necesaria."""

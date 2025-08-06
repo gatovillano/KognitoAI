@@ -27,10 +27,6 @@ class VectorDBQueryInput(BaseModel):
         ...,
         description="El texto de la consulta para buscar documentos o fragmentos similares en la base de datos vectorial."
     )
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
     k: int = Field(
         default=5,
         description="El número de resultados similares a devolver. Por defecto es 5."
@@ -42,10 +38,6 @@ class VectorDBQueryInput(BaseModel):
     topic: Optional[str] = Field(
         default=None,
         description="Filtra los resultados por un tema específico dentro de los metadatos del documento (usando operadores JSONB)."
-    )
-    workspace_id: Optional[str] = Field(
-        default=None,
-        description="Filtra los resultados por un ID de workspace específico dentro de los metadatos del documento (usando operadores JSONB)."
     )
 
 class VectorDBQueryTool(BaseTool):
@@ -61,40 +53,43 @@ class VectorDBQueryTool(BaseTool):
     )
     args_schema: Type[BaseModel] = VectorDBQueryInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
+    account_id: str = Field(..., description="El identificador universal (UUID en formato string) de la cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="Filtra los resultados por un ID de workspace específico, inyectado automáticamente.")
+    telegram_id: Optional[str] = Field(None, description="El ID de usuario de Telegram, inyectado automáticamente cuando la herramienta es invocada desde Telegram.")
+    thread_id: Optional[str] = Field(None, description="El ID del hilo de conversación, inyectado automáticamente para mantener el contexto.")
 
-    async def _arun(self, query: str, account_id: str, k: int = 5, collection_name: Optional[str] = None, topic: Optional[str] = None, workspace_id: Optional[str] = None, **kwargs: Any) -> str:
+    async def _arun(self, query: str, k: int = 5, collection_name: Optional[str] = None, topic: Optional[str] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
             query: El texto de la consulta para buscar similitudes.
-            account_id: El ID universal de la cuenta del usuario.
             k: Número de resultados similares a devolver. Por defecto es 5.
             collection_name: Nombre de la colección específica a buscar (opcional).
             topic: Filtro por tema en los metadatos (opcional).
-            workspace_id: Filtro por ID de workspace en los metadatos (opcional).
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
             Un mensaje de texto con los resultados formateados o un mensaje de error.
         """
         logger.info(
-            f"Ejecutando VectorDBQueryTool para la cuenta '{account_id}' con consulta: '{query[:50]}...'"
-            f"{f', topic: {topic}' if topic else ''}{f', workspace_id: {workspace_id}' if workspace_id else ''}"
+            f"Ejecutando VectorDBQueryTool para la cuenta '{self.account_id}' con consulta: '{query[:50]}...'"
+            f"{f', topic: {topic}' if topic else ''}{f', workspace_id: {self.workspace_id}' if self.workspace_id else ''}"
+            f"{f', telegram_id: {self.telegram_id}' if self.telegram_id else ''}{f', thread_id: {self.thread_id}' if self.thread_id else ''}"
         )
         try:
             # Llamar a la función de consulta vectorial
             results = await query_vector_db(
                 query=query,
-                account_id=account_id,
+                account_id=self.account_id,
                 k=k,
                 collection_name=collection_name,
                 topic=topic,
-                workspace_id=workspace_id
+                workspace_id=self.workspace_id
             )
             
             if not results:
-                logger.info(f"No se encontraron resultados para la consulta '{query[:50]}...' en la cuenta '{account_id}'.")
+                logger.info(f"No se encontraron resultados para la consulta '{query[:50]}...' en la cuenta '{self.account_id}'.")
                 return f"No se encontraron resultados similares para tu consulta en la base de datos vectorial."
             
             # Formatear los resultados para el agente
@@ -108,10 +103,10 @@ class VectorDBQueryTool(BaseTool):
                 if metadata:
                     formatted_results.append(f"   Metadatos: {metadata}")
             
-            logger.info(f"Se devolvieron {len(results)} resultados para la consulta en la cuenta '{account_id}'.")
+            logger.info(f"Se devolvieron {len(results)} resultados para la consulta en la cuenta '{self.account_id}'.")
             return "\n".join(formatted_results)
         except Exception as e:
-            logger.error(f"Error en VectorDBQueryTool para la cuenta '{account_id}': {e}", exc_info=True)
+            logger.error(f"Error en VectorDBQueryTool para la cuenta '{self.account_id}': {e}", exc_info=True)
             return f"Ocurrió un error al realizar la búsqueda en la base de datos vectorial: {str(e)}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

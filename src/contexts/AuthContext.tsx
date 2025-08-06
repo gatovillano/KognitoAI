@@ -1,7 +1,7 @@
 // En: src/contexts/AuthContext.tsx
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import apiClient from '@/lib/api';
 
 interface User {
@@ -27,18 +27,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    const initializeAuth = async () => {
-      const storedToken = localStorage.getItem('authToken');
-      if (storedToken) {
-        await login(storedToken);
-      }
-      setIsLoading(false);
-    };
-    initializeAuth();
-  }, []);
+  const logout = useCallback(() => {
+    localStorage.removeItem('authToken');
+    setToken(null);
+    setUser(null);
+    window.location.href = '/login';
+  }, [setToken, setUser]);
 
-  const login = async (newToken: string) => {
+  const login = useCallback(async (newToken: string) => {
     localStorage.setItem('authToken', newToken);
     setToken(newToken);
     try {
@@ -50,15 +46,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error('Failed to fetch user', error);
       logout();
     }
-  };
+  }, [logout, setToken, setUser]);
 
-  const logout = () => {
-    localStorage.removeItem('authToken');
-    setToken(null);
-    setUser(null);
-    // Opcional: Redirigir a la página de login
-    window.location.href = '/login';
-  };
+  useEffect(() => {
+    const initializeAuth = async () => {
+      const storedToken = localStorage.getItem('authToken');
+      if (storedToken) {
+        await login(storedToken);
+      }
+      setIsLoading(false);
+    };
+    initializeAuth();
+  }, [login]);
 
   const value = { user, token, login, logout, isLoading };
 

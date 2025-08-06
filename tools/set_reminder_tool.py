@@ -14,7 +14,7 @@ de cualquier interfaz.
 """
 
 import logging
-from typing import Type, Any
+from typing import Type, Any, Optional
 
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
@@ -55,17 +55,18 @@ class SetReminderTool(BaseTool):
     )
     args_schema: Type[BaseModel] = SetReminderInput
     return_direct: bool = False
-    account_id: str
-    telegram_id: str = Field(..., description="El ID de Telegram del usuario, inyectado automáticamente.")
+    account_id: Optional[str] = Field(None, description="El ID de la cuenta del usuario.")
+    workspace_id: Optional[str] = Field(None, description="El ID del espacio de trabajo actual.")
+    telegram_id: Optional[str] = Field(None, description="El ID de Telegram del usuario.")
+    thread_id: Optional[str] = Field(None, description="El ID del hilo de conversación.")
 
-    async def _arun(self, text: str, natural_language_time: str, **kwargs: Any) -> str:
+    async def _arun(self, text: str, natural_language_time: str) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
             text: El contenido del recordatorio.
             natural_language_time: El texto con la descripción del tiempo.
-            **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
@@ -74,9 +75,11 @@ class SetReminderTool(BaseTool):
         try:
             success, message = await set_simple_reminder(
                 account_id=self.account_id,
-                telegram_id=int(self.telegram_id),
+                telegram_id=int(self.telegram_id) if self.telegram_id else None,
                 text=text,
-                natural_language_time=natural_language_time
+                natural_language_time=natural_language_time,
+                workspace_id=self.workspace_id,
+                thread_id=self.thread_id
             )
             logger.info(f"Herramienta de recordatorio simple completada para la cuenta '{self.account_id}'. Mensaje: {message}")
             return message

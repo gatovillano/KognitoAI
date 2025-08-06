@@ -1,7 +1,7 @@
 # tools/delete_note_tool.py
 
 import logging
-from typing import Type, Any
+from typing import Type, Any, Optional
 
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
@@ -25,6 +25,9 @@ class DeleteNoteTool(BaseTool):
     )
     args_schema: Type[BaseModel] = DeleteNoteInput
     account_id: str
+    workspace_id: Optional[str] = Field(None, description="El ID del espacio de trabajo del usuario.")
+    telegram_id: Optional[str] = Field(None, description="El ID de usuario de Telegram.")
+    thread_id: Optional[str] = Field(None, description="El ID del hilo de conversación de Telegram.")
 
     async def _arun(self, note_id: int, **kwargs: Any) -> str:
         logger.info(f"Ejecutando DeleteNoteTool para cuenta '{self.account_id}' y nota ID '{note_id}'.")

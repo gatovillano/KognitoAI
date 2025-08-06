@@ -1,19 +1,20 @@
 'use client';
-
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation'; // Mantener esta importación
+import Image from 'next/image';
+import { motion } from 'framer-motion';
 import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSearch } from '@/contexts/SearchContext';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { ArrowLeft, FolderKanban, Bot, BrainCircuit, Search } from 'lucide-react';
+import { ArrowLeft, FolderKanban, Bot, BrainCircuit, Search, X, Folder, File as FileIcon } from 'lucide-react';
 import { ChatMessage } from '@/components/ChatMessage';
-import { ChatInputBar } from '@/components/ChatInputBar';
+import ChatInputBar from '@/components/ChatInputBar';
 import { BackgroundTaskIndicator } from '@/components/BackgroundTaskIndicator';
-import { ArtifactPanel } from '@/components/ArtifactPanel';
-import { useArtifactPanel } from '@/contexts/ArtifactPanelContext';
+import { EmptyChat } from '@/components/EmptyChat';
+import { ContextSelectorButton } from '@/components/ContextSelectorButton';
 import { PanelRightOpen, PanelRightClose } from 'lucide-react';
 
 interface ToolStatusMessage {
@@ -31,6 +32,14 @@ interface ChatMessageType {
   created_at: string;
   image_base64?: string;
   document_url?: string;
+  ragContext?: SelectedContextItem[];
+}
+
+interface SelectedContextItem {
+  id: string;
+  type: 'document' | 'collection';
+  name: string;
+  title?: string;
 }
 
 interface Artifact {
@@ -48,6 +57,9 @@ interface ThreadDetails {
 
 interface CommonChatProps {
   threadId: string;
+  workspaceId?: string;
+  initialMessage?: string;
+  initialRagContext?: string;
 }
 
 // Nuevo componente de indicador de carga con animación de escritura
@@ -103,8 +115,9 @@ function LoadingIndicator({
   );
 }
 
-export function CommonChat({ threadId }: CommonChatProps) {
+export function CommonChat({ threadId, workspaceId, initialMessage, initialRagContext }: CommonChatProps) {
   const { user, token } = useAuth();
+  const router = useRouter(); // Usar useRouter directamente
   const [threadDetails, setThreadDetails] = useState<ThreadDetails | null>(null);
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -116,11 +129,14 @@ export function CommonChat({ threadId }: CommonChatProps) {
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [backgroundTasks, setBackgroundTasks] = useState<{ taskId: string; type: string }[]>([]);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isContextSelectorOpen, setIsContextSelectorOpen] = useState(false);
+
+  const [selectedContext, setSelectedContext] = useState<SelectedContextItem[]>([]);
   const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
   const [isAudioPaused, setIsAudioPaused] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-  const { isVisible: isArtifactPanelVisible, toggleVisibility } = useArtifactPanel();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -146,10 +162,24 @@ export function CommonChat({ threadId }: CommonChatProps) {
   }, []);
 
   useEffect(() => {
-    if (!user || !token) return;
+    // Only attempt WebSocket connection if user, token, and threadId are available,
+    // and the component is not in a loading state (meaning initial data fetch is complete).
+    if (!user || !token || !threadId || isLoading) {
+      console.warn('CommonChat: Skipping WebSocket connection. User, token, threadId, or loading state not ready.');
+      return;
+    }
 
-    const wsUrl = `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws') || 'ws://localhost:8889'}/ws?token=${token}`;
-    wsRef.current = new WebSocket(wsUrl);
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8889';
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl = `${apiUrl.replace(/^https?/, wsProtocol)}/ws?token=${token}`;
+    console.log(`CommonChat: Attempting to connect to WebSocket at: ${wsUrl}`);
+    console.log(`CommonChat: API URL used: ${apiUrl}`);
+    console.log(`CommonChat: Current page protocol: ${window.location.protocol}`);
+    console.log(`CommonChat: User ID: ${user.id}, Token: ${token ? 'Available' : 'Unavailable'}`);
+    console.log(`CommonChat: Token value (first 10 chars): ${token ? token.substring(0, 10) : 'N/A'}`); // Log para depuración
+    const wsUrlWithToken = `${apiUrl.replace(/^https?/, wsProtocol)}/ws?token=${token}`;
+    console.log(`CommonChat: Attempting to connect to WebSocket at: ${wsUrlWithToken}`);
+    wsRef.current = new WebSocket(wsUrlWithToken);
 
     wsRef.current.onopen = () => {
       console.log('WebSocket connected');
@@ -179,14 +209,34 @@ export function CommonChat({ threadId }: CommonChatProps) {
       console.log('WebSocket disconnected');
     };
 
-    wsRef.current.onerror = (error) => {
-      console.error('WebSocket error:', error);
+    wsRef.current.onerror = (event) => {
+      console.error(`CommonChat: WebSocket error: Failed to connect to ${wsUrlWithToken}. Please check the server is running and the NEXT_PUBLIC_API_URL environment variable is correct.`, event);
+      console.error('CommonChat: WebSocket error event details:', event); // Log completo del evento de error
     };
 
     return () => {
       wsRef.current?.close();
     };
-  }, [user, threadId]);
+  }, [user, threadId, token]);
+
+  // Función para mantener el scroll al final
+  const scrollToBottom = useCallback((immediate = false) => {
+    if (scrollAreaRef.current) {
+      const scrollElement = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      if (scrollElement) {
+        if (immediate) {
+          // Scroll inmediato sin animación
+          scrollElement.scrollTop = scrollElement.scrollHeight;
+        } else {
+          // Scroll suave
+          scrollElement.scrollTo({
+            top: scrollElement.scrollHeight,
+            behavior: 'smooth',
+          });
+        }
+      }
+    }
+  }, []);
 
   const handleStreamingResponse = useCallback(
     async (requestData: any, userMessage: ChatMessageType, signal?: AbortSignal) => {
@@ -286,7 +336,7 @@ export function CommonChat({ threadId }: CommonChatProps) {
         throw error;
       }
     },
-    [threadId, artifacts]
+    [],
   );
 
   const handleSendMessage = useCallback(
@@ -300,18 +350,40 @@ export function CommonChat({ threadId }: CommonChatProps) {
         setIsResponding(false);
         return;
       }
+
+      // Si no hay threadId, es un nuevo chat. Creamos el hilo y redirigimos.
       if (!threadId) {
-        toast.error('Error: ID del hilo de chat faltante.');
-        setIsResponding(false);
+        setIsResponding(true);
+        try {
+          const response = await apiClient.post('/api/threads', {});
+          const newThread = response.data;
+          if (!newThread || !newThread.id) {
+            throw new Error('No se pudo crear un nuevo hilo de chat.');
+          }
+          
+          let queryString = `initial_message=${encodeURIComponent(messageText)}`;
+          if (selectedContext && selectedContext.length > 0) {
+            queryString += `&rag_context=${encodeURIComponent(JSON.stringify(selectedContext))}`;
+          }
+          // Redirigir a la página del nuevo chat con el mensaje como parámetro
+          router.replace(`/chat/${newThread.id}?${queryString}`);
+
+        } catch (error) {
+          console.error('Error creando nuevo hilo de chat:', error);
+          toast.error('No se pudo iniciar una nueva conversación.');
+          setIsResponding(false);
+        }
         return;
       }
 
-      const userMessage = {
+      // Lógica existente para un chat ya creado
+      const userMessage: ChatMessageType = {
         text: messageText,
         sender: 'user' as const,
         created_at: new Date().toISOString(),
         image_base64: '',
-        document_url: ''
+        document_url: '',
+        ragContext: selectedContext,
       };
       setMessages((prev) => [...prev, userMessage]);
 
@@ -326,6 +398,7 @@ export function CommonChat({ threadId }: CommonChatProps) {
         setNewMessage('');
       }
       setFiles([]);
+      // setSelectedContext([]); // Keep context persistent
       setIsResponding(true);
 
       const currentComprehensiveAnalysisActive = isComprehensiveAnalysisActive;
@@ -372,6 +445,7 @@ export function CommonChat({ threadId }: CommonChatProps) {
           image_base64: imageBase64,
           document_url: documentUrl,
           mode: mode,
+          rag_context: selectedContext.map((item: SelectedContextItem) => ({ type: item.type, id: item.id })),
         }, userMessage, controller.signal);
 
         clearTimeout(timeoutId);
@@ -404,7 +478,10 @@ export function CommonChat({ threadId }: CommonChatProps) {
       isWebSearchActive,
       isComprehensiveAnalysisActive,
       threadId,
-      handleStreamingResponse
+      handleStreamingResponse,
+      selectedContext,
+      router,
+      scrollToBottom
     ]
   );
 
@@ -496,6 +573,14 @@ export function CommonChat({ threadId }: CommonChatProps) {
     }
   }, [handleSendMessage]);
 
+  const handleContextSelect = useCallback((selectedItems: SelectedContextItem[]) => {
+    setSelectedContext(selectedItems);
+  }, []);
+
+  const handleRemoveContextItem = useCallback((id: string, type: 'document' | 'collection') => {
+    setSelectedContext((prev) => prev.filter(item => !(item.id === id && item.type === type)));
+  }, []);
+
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const newFiles = Array.from(e.target.files);
@@ -573,50 +658,62 @@ export function CommonChat({ threadId }: CommonChatProps) {
   }, []);
 
   useEffect(() => {
-    if (threadId && user) {
-      const fetchChatData = async () => {
-        setIsResponding(true);
+    const fetchChatData = async () => {
+      if (threadId && user) {
+        setIsLoading(true);
         try {
+          console.log('CommonChat: Iniciando fetch de datos del chat para threadId:', threadId);
           const [threadRes, messagesRes] = await Promise.all([
-            apiClient.get(`/api/threads/${threadId}`),
-            apiClient.get(`/api/threads/${threadId}/messages`),
+            apiClient.get(`/api/threads/${threadId}`).catch(error => {
+              console.error(`CommonChat: Error fetching thread details for ${threadId}:`, error);
+              throw error; // Re-throw para que el catch externo lo maneje
+            }),
+            apiClient.get(`/api/threads/${threadId}/messages`).catch(error => {
+              console.error(`CommonChat: Error fetching messages for ${threadId}:`, error);
+              throw error; // Re-throw para que el catch externo lo maneje
+            }),
           ]);
+          console.log('CommonChat: threadDetails response:', threadRes.data);
+          console.log('CommonChat: messages response:', messagesRes.data);
           setThreadDetails(threadRes.data);
+          
+          // Solo procesar initial_message y initial_rag_context si el chat es nuevo (no hay mensajes previos)
+          if (messagesRes.data.length === 0 && initialMessage) {
+            let parsedRagContext = [];
+            if (initialRagContext) {
+              try {
+                parsedRagContext = JSON.parse(initialRagContext);
+              } catch (e) {
+                console.error("CommonChat: Error parsing RAG context from URL", e);
+              }
+            }
+            setSelectedContext(parsedRagContext);
+            await handleSendMessage(undefined, initialMessage);
+            
+            // Limpiar los parámetros de la URL para no reenviar el mensaje al recargar
+            // Esto se maneja en page.tsx ahora, no es necesario aquí.
+          }
+          
           setMessages(messagesRes.data);
+
         } catch (error) {
           console.error('Error fetching chat data:', error);
           setMessages([{ text: 'No se pudo cargar esta conversación.', sender: 'ai', created_at: new Date().toISOString() }]);
         } finally {
-          setIsResponding(false);
+          setIsLoading(false);
         }
-      };
-      fetchChatData();
-    }
-  }, [threadId, user]);
+      } else if (user) {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchChatData();
+  }, [threadId, user, initialMessage, initialRagContext]); // Añadir initialMessage y initialRagContext a las dependencias
 
   const { searchTerm } = useSearch();
   const filteredMessages = searchTerm
     ? messages.filter(msg => msg.text.toLowerCase().includes(searchTerm.toLowerCase()))
     : messages;
-
-  // Función para mantener el scroll al final
-  const scrollToBottom = useCallback((immediate = false) => {
-    if (scrollAreaRef.current) {
-      const scrollElement = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
-      if (scrollElement) {
-        if (immediate) {
-          // Scroll inmediato sin animación
-          scrollElement.scrollTop = scrollElement.scrollHeight;
-        } else {
-          // Scroll suave
-          scrollElement.scrollTo({
-            top: scrollElement.scrollHeight,
-            behavior: 'smooth',
-          });
-        }
-      }
-    }
-  }, []);
 
   // Efecto para scroll inicial (cuando se cargan los mensajes por primera vez)
   useEffect(() => {
@@ -687,12 +784,29 @@ export function CommonChat({ threadId }: CommonChatProps) {
     return () => clearInterval(intervalId);
   }, [backgroundTasks]);
 
-  if (!user && !isResponding) {
+  const exampleQuestions = [
+    "¿Cuáles son los top 2025 auriculares con cancelación de ruido?",
+    "¿Cuáles son los aspectos económicos de la actual escasez mundial de huevos?",
+    "¿Cuáles son algunos ETFs con la mayor oportunidad de crecimiento?",
+    "¿Cuáles son buenos zapatos duraderos para correr largas distancias?"
+  ];
+
+  if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center">
         <p>Cargando conversación...</p>
       </div>
     );
+  }
+
+  // Si no hay mensajes, muestra la interfaz de bienvenida.
+  if (messages.length === 0 && !isResponding) {
+      return <EmptyChat 
+          onSendMessage={handleSendMessage} 
+          newMessage={newMessage} 
+          setNewMessage={setNewMessage} 
+          isResponding={isResponding} 
+      />;
   }
 
   return (
@@ -706,14 +820,15 @@ export function CommonChat({ threadId }: CommonChatProps) {
                 
                 return (
                   <div
-                    key={`${msg.created_at}-${messageIndex}`}
+                    key={`msg-${messageIndex}-${msg.created_at || 'temp'}`}
                   >
                     <ChatMessage
                       msg={{
                         text: msg.text,
                         sender: msg.sender,
                         image: msg.image_base64 || '',
-                        document_url: msg.document_url || ''
+                        document_url: msg.document_url || '',
+                        ragContext: msg.ragContext,
                       }}
                       index={messageIndex}
                       handleCopyMessage={handleCopyMessage}
@@ -722,7 +837,18 @@ export function CommonChat({ threadId }: CommonChatProps) {
                       isAudioLoading={isAudioLoading}
                       playingMessageIndex={playingMessageIndex}
                       isAudioPaused={isAudioPaused}
+                      isLastMessage={msg.sender === 'ai' && index === filteredMessages.length - 1 && isResponding}
                     />
+                    {msg.ragContext && msg.ragContext.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {msg.ragContext.map((item: SelectedContextItem) => (
+                          <div key={`${item.type}-${item.id}`} className="flex items-center gap-1 bg-background p-1 px-2 rounded-full text-xs border border-border">
+                            {item.type === 'collection' ? <Folder className="h-3 w-3 text-primary" /> : <FileIcon className="h-3 w-3 text-secondary" />}
+                            <span>{item.name || item.title}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -746,20 +872,35 @@ export function CommonChat({ threadId }: CommonChatProps) {
             </div>
           </div>
         </ScrollArea>
-        <div className="w-full max-w-4xl mx-auto">
+        <div className="w-full max-w-4xl mx-auto px-4 pb-4">
+          <div className="relative">
+            {selectedContext.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2 p-2 bg-muted rounded-md border border-border/50">
+                {selectedContext.map((item: SelectedContextItem) => (
+                  <div key={`${item.type}-${item.id}`} className="flex items-center gap-2 bg-background p-1.5 px-3 rounded-full text-sm">
+                    {item.type === 'collection' ? <Folder className="h-4 w-4 text-primary" /> : <FileIcon className="h-4 w-4 text-secondary" />}
+                    <span>{item.name || item.title}</span>
+                    <button onClick={() => handleRemoveContextItem(item.id, item.type)} className="hover:text-red-500">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <ChatInputBar
                 newMessage={newMessage}
                 isResponding={isResponding}
                 isRecording={isRecording}
+                currentContext={selectedContext}
                 isUploadingFile={isUploadingFile}
-                isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+                isKnowledgeAnalysisActive={selectedContext.length > 0}
                 isWebSearchActive={isWebSearchActive}
                 isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
                 files={files}
                 onMessageChange={setNewMessage}
                 onSendMessage={handleSendMessage}
                 onKeyDown={handleKeyDown}
-                onToggleKnowledgeAnalysis={toggleKnowledgeAnalysis}
+                onToggleKnowledgeAnalysis={() => setIsContextSelectorOpen(!isContextSelectorOpen)} // Abre/cierra el selector de contexto
                 onToggleWebSearch={toggleWebSearch}
                 onToggleComprehensiveAnalysis={toggleComprehensiveAnalysis}
                 onStartRecording={startRecording}
@@ -768,14 +909,18 @@ export function CommonChat({ threadId }: CommonChatProps) {
                 onRemoveFile={handleRemoveFile}
                 onPaste={handlePaste}
                 isFixedPosition={false}
-            />
+                workspaceId={workspaceId} // ¡NUEVO! Pasamos el workspaceId
+            >
+              {/* ContextSelectorButton ya no necesita onContextSelected aquí directamente */}
+              <ContextSelectorButton
+                onContextSelected={handleContextSelect}
+                currentContext={selectedContext}
+                workspaceId={workspaceId}
+              />
+            </ChatInputBar>
+          </div>
         </div>
       </div>
-      {isArtifactPanelVisible && (
-        <div className="w-1/3 h-full hidden lg:block border-l border-border">
-          <ArtifactPanel artifacts={artifacts} onCopyContent={handleCopyArtifactContent} isVisible={isArtifactPanelVisible} onToggleVisibility={toggleVisibility} />
-        </div>
-      )}
     </div>
   );
 }

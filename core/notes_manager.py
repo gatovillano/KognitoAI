@@ -34,7 +34,7 @@ from utils.embeddings import get_embedding_model
 logger = logging.getLogger(__name__)
 
 
-async def add_note(account_id: str, title: Optional[str], content: str, category: Optional[str] = None, team_id: Optional[str] = None) -> Dict[str, Any]:
+async def add_note(account_id: str, title: Optional[str], content: str, category: Optional[str] = None, team_id: Optional[str] = None, workspace_id: Optional[str] = None, telegram_id: Optional[str] = None, thread_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Añade una nueva nota a la base de datos para una cuenta de usuario específica o un equipo. Añade los embedding de la nota
 
@@ -68,8 +68,11 @@ async def add_note(account_id: str, title: Optional[str], content: str, category
             team_id=uuid.UUID(team_id) if team_id else None,
             title=title,
             content=content,
-            category=effective_category, # Usamos el valor efectivo
-            embedding=note_embedding # Guardar el embedding
+            category=effective_category,
+            embedding=note_embedding,
+            workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
+            telegram_id=telegram_id,
+            thread_id=thread_id
         )
         db.add(new_note)
         await db.commit()
@@ -163,7 +166,7 @@ class NotesManager:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def add_note(self, account_id: str, title: Optional[str], content: str, category: Optional[str] = None, team_id: Optional[str] = None) -> Dict[str, Any]:
+    async def add_note(self, account_id: str, title: Optional[str], content: str, category: Optional[str] = None, team_id: Optional[str] = None, workspace_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Añade una nueva nota a la base de datos para una cuenta o equipo.
         """
@@ -184,7 +187,8 @@ class NotesManager:
             title=title,
             content=content,
             category=effective_category,
-            embedding=note_embedding
+            embedding=note_embedding,
+            workspace_id=uuid.UUID(workspace_id) if workspace_id else None
         )
         self.db.add(new_note)
         await self.db.commit()

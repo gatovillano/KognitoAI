@@ -16,10 +16,22 @@ import json # Importar json
 logger = logging.getLogger(__name__)
 
 class CogneeKnowledgeGraphToolInput(BaseModel):
-    """Input para la herramienta de grafo de conocimiento con Cognee, como una cadena JSON."""
-    tool_input_json: str = Field(
+    """Input para la herramienta de grafo de conocimiento con Cognee."""
+    action: Literal["process_documents", "search_graph", "get_insights"] = Field(
         ...,
-        description="La entrada completa de la herramienta como una cadena JSON que contiene 'action', 'documents', 'query' y 'dataset_name'."
+        description="La acción a realizar: 'process_documents', 'search_graph', o 'get_insights'."
+    )
+    documents: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Lista de documentos a procesar. Requerido para 'process_documents'. Cada documento debe tener 'file_name' y opcionalmente 'content'."
+    )
+    query: Optional[str] = Field(
+        None,
+        description="Consulta de búsqueda o tema para insights. Requerido para 'search_graph' y 'get_insights'."
+    )
+    dataset_name: str = Field(
+        "default",
+        description="Nombre del dataset para el procesamiento o la consulta (opcional, por defecto 'default')."
     )
 
 class CogneeKnowledgeGraphTool(BaseTool):
@@ -45,54 +57,42 @@ class CogneeKnowledgeGraphTool(BaseTool):
     _cognee_integration: Optional[CogneeIntegration] = None
     _graph_db: Optional[GraphDB] = None
 
-    def _get_cognee_integration(self) -> CogneeIntegration:
-        """Obtiene o crea la instancia de CogneeIntegration."""
-        if self._cognee_integration is None:
-            logger.info(f"DEBUG Neo4j Config: URI={settings.neo4j_uri}, User={settings.neo4j_user}, Password set={bool(settings.neo4j_password)}")
+    # Constructor para inyectar las dependencias
+    def __init__(self, cognee_integration: Optional[CogneeIntegration] = None, graph_db: Optional[GraphDB] = None, **data: Any):
+        super().__init__(**data)
+        self._cognee_integration = cognee_integration
+        self._graph_db = graph_db
+        if self._cognee_integration is None or self._graph_db is None:
+            logger.warning("⚠️ CogneeIntegration o GraphDB no inyectados en CogneeKnowledgeGraphTool. Inicializando internamente.")
+            # Fallback: inicializar si no se inyectaron
             if not settings.neo4j_uri or not settings.neo4j_user or not settings.neo4j_password:
+                logger.error("❌ Configuración de Neo4j incompleta. No se puede inicializar CogneeKnowledgeGraphTool.")
                 raise ValueError(
-                    "Configuración de Neo4j incompleta. "
-                    "Asegúrate de configurar NEO4J_URI, NEO4J_USER y NEO4J_PASSWORD"
+                    "Configuración de Neo4j incompleta. Asegúrate de configurar NEO4J_URI, NEO4J_USER y NEO4J_PASSWORD"
                 )
-            
-            self._graph_db = GraphDB(
-                settings.neo4j_uri,
-                settings.neo4j_user,
-                settings.neo4j_password
-            )
+            self._graph_db = GraphDB(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
             self._graph_db.connect()
-            
             self._cognee_integration = CogneeIntegration(self._graph_db)
-            logger.info("✅ CogneeIntegration inicializada")
-        
+            logger.info("✅ CogneeIntegration y GraphDB inicializados internamente para CogneeKnowledgeGraphTool.")
+
+    # El método _get_cognee_integration ya no es necesario si las dependencias se inyectan correctamente.
+    # Podríamos mantenerlo para compatibilidad o eliminarlo si estamos seguros de la inyección.
+    # Para este ejercicio, lo dejamos, pero aseguramos que use las instancias existentes.
+    def _get_cognee_integration(self) -> CogneeIntegration: # type: ignore
+        if self._cognee_integration is None:
+            raise ValueError("CogneeIntegration no está inicializada.")
         return self._cognee_integration
     
     async def _arun(
         self,
-        tool_input_json: str, # Nuevo parámetro
-        run_manager: Optional[Any] = None, # Añadido para consistencia con _arun de conceptual_processing
+        action: Literal["process_documents", "search_graph", "get_insights"],
+        documents: Optional[List[Dict[str, Any]]] = None,
+        query: Optional[str] = None,
+        dataset_name: str = "default",
+        run_manager: Optional[Any] = None,
         **kwargs # Para capturar cualquier otro kwarg que pueda venir
     ) -> str:
-        # Parsear la cadena JSON de entrada
-        try:
-            parsed_input = json.loads(tool_input_json)
-        except json.JSONDecodeError:
-            try:
-                # Intentar limpiar y parsear si no es un JSON válido directamente
-                cleaned_json = tool_input_json.replace("'", "\"")
-                parsed_input = json.loads(cleaned_json)
-            except json.JSONDecodeError as e:
-                logger.error(f"❌ Error al parsear tool_input_json: {tool_input_json}. Error: {e}", exc_info=True)
-                return json.dumps({
-                    "error": "Error de formato de entrada",
-                    "status": "error",
-                    "details": "El tool_input no es un JSON válido."
-                })
-        
-        action = parsed_input.get("action")
-        documents = parsed_input.get("documents")
-        query = parsed_input.get("query")
-        dataset_name = parsed_input.get("dataset_name", "default")
+        # La lógica de parseo de tool_input_json se elimina
 
         if not action:
             return json.dumps({
@@ -215,7 +215,7 @@ Puedes usar 'search_graph' para buscar información específica."""
             logger.error(f"❌ Error en CogneeKnowledgeGraphTool: {e}")
             return f"❌ Error al ejecutar la herramienta: {str(e)}"
     
-    def _run(self, tool_input_json: str, **kwargs) -> str:
+    def _run(self, action: Literal["process_documents", "search_graph", "get_insights"], documents: Optional[List[Dict[str, Any]]] = None, query: Optional[str] = None, dataset_name: str = "default", **kwargs) -> str:
         """Ejecuta la herramienta de forma síncrona."""
         return asyncio.run(self._arun(tool_input_json, **kwargs))
     
