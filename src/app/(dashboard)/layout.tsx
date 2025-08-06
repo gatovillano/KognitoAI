@@ -39,6 +39,6 @@ export default function DashboardLayout({
         <AppShell>{children}</AppShell>
       </WorkspaceTitleProvider>
       <Toaster richColors position="top-right" />
-e    </>
+    </>
   );
 }

@@ -461,7 +461,8 @@ async def analyze_entry(entry_to_analyze: Dict[str, Any], knowledge_pool: List[D
 async def run_batch_analysis_job(
     account_id_filter: Optional[str] = None,
     since_timestamp: Optional[datetime.datetime] = None,
-    topic_keywords: Optional[List[str]] = None
+    topic_keywords: Optional[List[str]] = None,
+    thread_id: Optional[str] = None # Nuevo parámetro
 ):
     """
     Función principal para el trabajo de análisis. Acepta filtros para ejecuciones manuales o programadas.
@@ -516,9 +517,22 @@ async def run_batch_analysis_job(
     
     logger.info("--- [ANALYSIS JOB] Trabajo de vinculación de conocimiento completado. ---")
     
-    # Enviar notificación al frontend sobre la finalización del análisis
-    # TODO: Implementar sistema de notificaciones al frontend
-    logger.info("Notificación al frontend sobre finalización del análisis pendiente de implementación.")
+    if thread_id:
+        try:
+            from langchain_community.chat_message_histories import PostgresChatMessageHistory
+            from langchain_core.messages import AIMessage
+            from core.database import settings
+
+            db_sync_url = settings.database_url.replace("+psycopg", "")
+            chat_message_history = PostgresChatMessageHistory(
+                connection_string=db_sync_url,
+                session_id=thread_id,
+                table_name="langchain_chat_history",
+            )
+            await chat_message_history.aadd_message(AIMessage(content="El análisis de conocimiento ha finalizado y los insights han sido generados."))
+            logger.info(f"Mensaje de finalización de análisis enviado al hilo {thread_id}.")
+        except Exception as e:
+            logger.error(f"Error al enviar mensaje de finalización de análisis al hilo {thread_id}: {e}", exc_info=True)
 
 # --- TRIGGER REFACTORIZADO ---
 async def proactive_knowledge_linker_trigger(new_entry: Dict[str, Any]):

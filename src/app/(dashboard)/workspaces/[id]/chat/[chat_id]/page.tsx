@@ -62,7 +62,7 @@ export default function WorkspaceChatPage() {
   return (
     <div className="flex h-screen flex-col">
       <div className="flex-4 overflow-auto" style={{ height: '100vh' }}>
-        <CommonChat threadId={chatId} />
+        <CommonChat threadId={chatId} workspaceId={workspaceId} />
       </div>
     </div>
   );

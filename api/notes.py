@@ -36,6 +36,7 @@ class NoteRequest(BaseModel):
     title: Optional[str] = None
     content: str
     category: Optional[str] = None
+    workspace_id: Optional[str] = None
 
 class NoteUpdateRequest(BaseModel):
     note_id: int
@@ -69,7 +70,8 @@ async def add_note_endpoint(
         account_id=current_account_id,
         title=note.title or "",
         content=note.content,
-        category=note.category or ""
+        category=note.category or "",
+        workspace_id=note.workspace_id
     )
     return new_note
 

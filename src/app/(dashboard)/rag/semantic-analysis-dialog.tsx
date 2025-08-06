@@ -7,9 +7,11 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Expand, HelpCircle, Brain, Network, Lightbulb, Volume2, Loader2, Pause } from 'lucide-react';
+import { Expand, HelpCircle, Brain, Network, Lightbulb, Volume2, Loader2, Pause, Calendar } from 'lucide-react';
 import { QuestionSliderDialog } from '@/components/QuestionSliderDialog';
 import { useTextToSpeech } from '@/hooks/useTextToSpeech';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface SemanticAnalysisProps {
   analysis: any;
@@ -26,6 +28,30 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
   const [isConceptDialogOpen, setIsConceptDialogOpen] = useState(false);
   const { play, stop, isLoading, isPlaying, activeText } = useTextToSpeech();
 
+  // Mueve los hooks que dependen de `analysis` aquí, pero maneja el caso de que `analysis` sea null
+  const semanticData = useMemo(() => {
+    if (!analysis) {
+      return {
+        resumen_semantico: 'No hay resumen disponible',
+        temas_transversales: [],
+        conceptos_centrales: [],
+        brechas_conocimiento: [],
+        patrones_semanticos: {}
+      };
+    }
+    return {
+      resumen_semantico: analysis.resumen_semantico || 'No hay resumen disponible',
+      temas_transversales: analysis.temas_transversales || [],
+      conceptos_centrales: analysis.conceptos_centrales || [],
+      brechas_conocimiento: analysis.brechas_conocimiento || [],
+      patrones_semanticos: analysis.patrones_semanticos || {}
+    };
+  }, [analysis]);
+
+  const textToRead = useMemo(() => {
+    return `Resumen Semántico: ${semanticData.resumen_semantico}`;
+  }, [semanticData]);
+
   if (!analysis) {
     console.log("❌ SemanticAnalysisDialog: No analysis data provided");
     return null;
@@ -33,17 +59,6 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
 
   console.log("🧠 SemanticAnalysisDialog - Analysis object:", analysis);
   console.log("🧠 SemanticAnalysisDialog - Topic:", topic);
-
-  // El análisis semántico tiene una estructura específica
-  const semanticData = {
-    resumen_semantico: analysis.resumen_semantico || 'No hay resumen disponible',
-    temas_transversales: analysis.temas_transversales || [],
-    conceptos_centrales: analysis.conceptos_centrales || [],
-    brechas_conocimiento: analysis.brechas_conocimiento || [],
-    patrones_semanticos: analysis.patrones_semanticos || {}
-  };
-
-
 
   const handleThemeClick = (theme: any) => {
     setSelectedTheme(theme);
@@ -55,10 +70,6 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
     setIsConceptDialogOpen(true);
   };
 
-  const textToRead = useMemo(() => {
-    return `Resumen Semántico: ${semanticData.resumen_semantico}`;
-  }, [semanticData]);
-
   const handlePlayPause = () => play(textToRead);
   const isCurrentlyPlaying = isPlaying && activeText === textToRead;
   const isCurrentlyLoading = isLoading && activeText === textToRead;
@@ -66,11 +77,11 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="max-w-4xl max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl">
           <DialogHeader >
             <DialogTitle className="flex items-center gap-2">
               <Brain className="h-5 w-5" />
-              Resumen Semántico de "{topic}"
+              Resumen Semántico de &quot;{topic}&quot;
             </DialogTitle>
             <DialogDescription>
               Análisis semántico profundo de la colección con agrupación de conceptos y patrones
@@ -118,7 +129,7 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                       {semanticData.temas_transversales.map((tema: any, index: number) => (
                         <Badge
                           key={index}
-                          className="cursor-pointer hover:bg-primary/80 transition-colors"
+                          className="text-xs cursor-pointer bg-purple-800 text-white hover:bg-purple-700 transition-colors"
                           onClick={() => handleThemeClick(tema)}
                         >
                           {typeof tema === 'string' ? tema : tema.tema}
@@ -146,8 +157,8 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                           className="p-4 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors border border-transparent hover:border-muted-foreground/20"
                           onClick={() => handleConceptClick(concepto)}
                         >
-                          <div className="text-sm font-medium">
-                            {concepto}
+                          <div className="text-sm font-medium line-clamp-2">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{concepto}</ReactMarkdown>
                           </div>
                           <div className="text-xs text-muted-foreground mt-1">
                             Haz clic para ver más detalles
@@ -171,33 +182,33 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
                       {semanticData.patrones_semanticos.total_documentos && (
                         <div className="p-3 bg-muted rounded-md">
-                          <div className="text-2xl font-bold text-primary">
+                          <div className="text-2xl font-bold text-purple-600">
                             {semanticData.patrones_semanticos.total_documentos}
                           </div>
-                          <div className="text-xs text-muted-foreground">Documentos</div>
+                          <div className="text-xs text-purple-400">Documentos</div>
                         </div>
                       )}
                       {semanticData.patrones_semanticos.total_chunks_analizados && (
                         <div className="p-3 bg-muted rounded-md">
-                          <div className="text-2xl font-bold text-primary">
+                          <div className="text-2xl font-bold text-purple-600">
                             {semanticData.patrones_semanticos.total_chunks_analizados}
                           </div>
-                          <div className="text-xs text-muted-foreground">Fragmentos</div>
+                          <div className="text-xs text-purple-400">Fragmentos</div>
                         </div>
                       )}
                       {semanticData.patrones_semanticos.temas_identificados && (
                         <div className="p-3 bg-muted rounded-md">
-                          <div className="text-2xl font-bold text-primary">
+                          <div className="text-2xl font-bold text-purple-600">
                             {semanticData.patrones_semanticos.temas_identificados}
                           </div>
-                          <div className="text-xs text-muted-foreground">Temas</div>
+                          <div className="text-xs text-purple-400">Temas</div>
                         </div>
                       )}
                       <div className="p-3 bg-muted rounded-md">
-                        <div className="text-2xl font-bold text-primary">
+                        <div className="text-2xl font-bold text-purple-600">
                           {semanticData.conceptos_centrales.length}
                         </div>
-                        <div className="text-xs text-muted-foreground">Conceptos</div>
+                        <div className="text-xs text-purple-400">Conceptos</div>
                       </div>
                     </div>
                   </CardContent>
@@ -224,10 +235,9 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                   <CardContent>
                     <div className="space-y-3">
                       {semanticData.brechas_conocimiento.slice(0, 3).map((brecha: string, index: number) => (
-                        <div key={index} className="p-4 bg-muted/50 border-l-4 border-muted-foreground/30 rounded-r-lg">
-                          <div className="text-sm text-foreground">
-                            {brecha}
-                          </div>
+                        <div key={index} className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                          <p className="text-xs font-medium text-purple-800 mb-1">Brecha Identificada:</p>
+                          <div className="text-sm text-purple-700"><ReactMarkdown remarkPlugins={[remarkGfm]}>{brecha}</ReactMarkdown></div>
                         </div>
                       ))}
                       {semanticData.brechas_conocimiento.length > 3 && (
@@ -247,6 +257,29 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
               )}
             </div>
           </ScrollArea>
+          {analysis?.analysis_metadata && (
+            <div className="space-y-2 text-xs text-muted-foreground mt-auto pt-3 border-t border-border/50">
+              {analysis.analysis_metadata.tool_used && (
+                <div className="mb-2">
+                  <Badge variant="outline" className="text-xs font-mono bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700">
+                    {analysis.analysis_metadata.tool_used}
+                  </Badge>
+                </div>
+              )}
+              {analysis.analysis_metadata.created_at && (
+                <div className="flex items-center gap-1">
+                  <Calendar className="h-3 w-3" />
+                  <span className="truncate">Creado: {new Date(analysis.analysis_metadata.created_at).toLocaleDateString('es-ES', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}</span>
+                </div>
+              )}
+            </div>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cerrar</Button>
           </DialogFooter>
@@ -274,7 +307,7 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                       {selectedTheme.citas.map((cita: any, i: number) => (
                         <div key={i} className="p-3 bg-muted rounded-md">
                           <div className="font-medium text-sm mb-1">{cita.documento}</div>
-                          <div className="text-sm text-muted-foreground italic">"{cita.cita}"</div>
+                          <div className="text-sm text-muted-foreground italic">&quot;{cita.cita}&quot;</div>
                         </div>
                       ))}
                     </div>
@@ -303,15 +336,15 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                     {selectedConcept.split(':')[0]}
                   </h4>
                   <div className="p-4 bg-muted/50 rounded-lg">
-                    <p className="text-sm leading-relaxed">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {selectedConcept.split(':').slice(1).join(':').trim()}
-                    </p>
+                    </ReactMarkdown>
                   </div>
                 </div>
 
                 <div className="mt-6">
                   <h5 className="font-semibold mb-3 text-sm">Definición y contexto:</h5>
-                  <div className="p-4 bg-blue-50/50 border-l-4 border-blue-200 rounded-r-lg">
+                  <div className="p-4 bg-purple-50/50 border-l-4 border-purple-200 rounded-r-lg">
                     {(() => {
                       // Parsear el concepto en formato "CONCEPTO: DEFINICIÓN"
                       const conceptParts = selectedConcept?.split(':');
@@ -321,15 +354,15 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                         return (
                           <div className="space-y-3">
                             <div>
-                              <h6 className="font-medium text-sm text-blue-800 mb-1">Concepto:</h6>
+                              <h6 className="font-medium text-sm text-purple-800 mb-1">Concepto:</h6>
                               <p className="text-sm font-semibold">{conceptName}</p>
                             </div>
                             <div>
-                              <h6 className="font-medium text-sm text-blue-800 mb-1">Definición:</h6>
-                              <p className="text-sm text-muted-foreground leading-relaxed">{conceptDefinition}</p>
+                              <h6 className="font-medium text-sm text-purple-800 mb-1">Definición:</h6>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{conceptDefinition}</ReactMarkdown>
                             </div>
-                            <div className="mt-4 pt-3 border-t border-blue-200">
-                              <p className="text-xs text-blue-600">
+                            <div className="mt-4 pt-3 border-t border-purple-200">
+                              <p className="text-xs text-purple-600">
                                 💡 Este concepto fue identificado como central en el análisis semántico de la colección.
                                 Para profundizar, puedes realizar una búsqueda dirigida en la colección.
                               </p>
@@ -339,9 +372,9 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                       } else {
                         return (
                           <div className="space-y-3">
-                            <p className="text-sm text-muted-foreground leading-relaxed">{selectedConcept}</p>
-                            <div className="mt-4 pt-3 border-t border-blue-200">
-                              <p className="text-xs text-blue-600">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedConcept}</ReactMarkdown>
+                            <div className="mt-4 pt-3 border-t border-purple-200">
+                              <p className="text-xs text-purple-600">
                                 💡 Este concepto fue identificado como central en el análisis semántico de la colección.
                               </p>
                             </div>

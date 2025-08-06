@@ -35,10 +35,15 @@ interface Workspace {
   name: string;
 }
 
-export default function WorkspaceDashboard() {
+interface PageProps {
+  params: Promise<{ id: string }>;
+}
+
+export default function WorkspaceDashboard({ params }: PageProps) {
   const router = useRouter();
-  const params = useParams();
-  const workspaceId = (params?.id as string) || '';
+  // Type assertion to treat params as a synchronous object
+  const syncParams = params as unknown as { id: string };
+  const { id: workspaceId } = syncParams;
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [chats, setChats] = useState<ChatThread[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -206,7 +211,7 @@ export default function WorkspaceDashboard() {
     // Actualizar la lista de colecciones después de crear una nueva
     const fetchCollections = async () => {
       try {
-        const collectionsResponse = await apiClient.get(`/api/workspaces/${workspaceId}/collections`);
+        const collectionsResponse = await apiClient.get(`/api/collections?workspace_id=${workspaceId}`);
         console.log('Fetched collections after creation:', collectionsResponse.data);
         setCollections(collectionsResponse.data);
       } catch (error) {
@@ -239,32 +244,32 @@ export default function WorkspaceDashboard() {
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
 
   const handleOpenAddExistingCollectionDialog = async () => {
-    setLoadingCollections(true);
-    try {
-      const response = await apiClient.post('/api/list-collections', {});
-      const allCollections = response.data.map((col: any) => ({
-        id: col.topic || col.id || col.title || `collection-${Math.random().toString(36).substr(2, 9)}`,
-        title: col.topic || col.title || 'Sin título',
-        name: col.topic || col.title || 'Sin título',
-        topic: col.topic || col.title || '',
-        workspace_id: col.workspace_id || '',
-        created_at: col.created_at || new Date().toISOString(),
-        description: col.description || (col.document_count > 0 ? `${col.document_count} documentos` : 'Colección vacía'),
-        document_count: col.document_count || 0
-      }));
-      // Filtrar para mostrar solo las colecciones que no están ya en este workspace
-      const filteredCollections = allCollections.filter(
-        (col: Collection) => !collections.some(existingCol => existingCol.id === col.id)
-      );
-      setAvailableCollections(filteredCollections);
-      setCollectionDialogOpen(true);
-    } catch (error) {
-      console.error('Error al cargar las colecciones disponibles:', error);
-      alert('Error al cargar las colecciones disponibles.');
-    } finally {
-      setLoadingCollections(false);
-    }
-  };
+      setLoadingCollections(true);
+      try {
+        const response = await apiClient.get('/api/collections');
+        const allCollections = response.data.map((col: any) => ({
+          id: col.topic || col.id || col.title || `collection-${Math.random().toString(36).substr(2, 9)}`,
+          title: col.topic || col.title || 'Sin título',
+          name: col.topic || col.title || 'Sin título',
+          topic: col.topic || col.title || '',
+          workspace_id: col.workspace_id || '',
+          created_at: col.created_at || new Date().toISOString(),
+          description: col.description || (col.document_count > 0 ? `${col.document_count} documentos` : 'Colección vacía'),
+          document_count: col.document_count || 0
+        }));
+        // Filtrar para mostrar solo las colecciones que no están ya en este workspace
+        const filteredCollections = allCollections.filter(
+          (col: Collection) => !collections.some(existingCol => existingCol.id === col.id)
+        );
+        setAvailableCollections(filteredCollections);
+        setCollectionDialogOpen(true);
+      } catch (error) {
+        console.error('Error al cargar las colecciones disponibles:', error);
+        alert('Error al cargar las colecciones disponibles.');
+      } finally {
+        setLoadingCollections(false);
+      }
+    };
 
   const handleAddExistingCollection = async () => {
     if (selectedCollectionId) {
@@ -523,8 +528,8 @@ const handleDeleteCollection = async (collectionId: string) => {
                       <div className="h-10 w-10 rounded-lg bg-green-500/10 flex items-center justify-center flex-shrink-0">
                         <MessageSquare className="h-5 w-5 text-green-600" />
                       </div>
-                      <div className="min-w-0 flex-1 flex flex-col justify-between h-full">
-                        <div className="font-semibold text-sm leading-relaxed">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm leading-relaxed whitespace-normal break-words line-clamp-3">
                           <InlineMarkdownRenderer content={chat.title} />
                         </div>
                       </div>

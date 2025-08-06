@@ -76,11 +76,12 @@ class MultiQueryRetriever:
         account_id: str,
         original_query: str,
         content_type: Optional[str] = None,
-        topic: Optional[str] = None,
+        topics: Optional[List[str]] = None, # Cambiado a plural
         category: Optional[str] = None,
         workspace_id: Optional[str] = None,
         team_id: Optional[str] = None,
         visibility_teams: Optional[List[str]] = None,
+        document_ids: Optional[List[str]] = None,
         k: int = 5
     ) -> List[Dict]:
         """
@@ -90,7 +91,7 @@ class MultiQueryRetriever:
         
         # 1. Generar consultas alternativas
         queries = await self.generate_alternative_queries(original_query)
-        logger.info(f"📝 Consultas generadas: {queries}")
+        logger.info(f"🧠 [Multi-Query RAG] Consultas generadas para la búsqueda: {queries}")
         
         # 2. Ejecutar búsquedas en paralelo
         search_tasks = []
@@ -99,11 +100,12 @@ class MultiQueryRetriever:
                 account_id=account_id,
                 query=query,
                 content_type=content_type,
-                topic=topic,
+                topics=topics, # Pasar topics (plural)
                 category=category,
                 workspace_id=workspace_id,
                 team_id=team_id,
                 visibility_teams=visibility_teams,
+                document_ids=document_ids,
                 k=k
             )
             search_tasks.append(task)
@@ -125,11 +127,12 @@ class MultiQueryRetriever:
                 account_id=account_id,
                 query=original_query,
                 content_type=content_type,
-                topic=topic,
+                topics=topics, # Pasar topics (plural)
                 category=category,
                 workspace_id=workspace_id,
                 team_id=team_id,
                 visibility_teams=visibility_teams,
+                document_ids=document_ids,
                 k=k
             )
     
@@ -223,11 +226,12 @@ async def multi_query_search(
     account_id: str,
     query: str,
     content_type: Optional[str] = None,
-    topic: Optional[str] = None,
+    topics: Optional[List[str]] = None, # Cambiado a plural
     category: Optional[str] = None,
     workspace_id: Optional[str] = None,
     team_id: Optional[str] = None,
     visibility_teams: Optional[List[str]] = None,
+    document_ids: Optional[List[str]] = None,
     k: int = 5,
     num_queries: int = 3,
     fusion_method: str = "rrf"
@@ -238,13 +242,13 @@ async def multi_query_search(
     retriever = MultiQueryRetriever(num_queries=num_queries, fusion_method=fusion_method)
     return await retriever.search_with_multiple_queries(
         account_id=account_id,
-
         original_query=query,
         content_type=content_type,
-        topic=topic,
+        topics=topics, # Pasar topics (plural)
         category=category,
         workspace_id=workspace_id,
         team_id=team_id,
         visibility_teams=visibility_teams,
+        document_ids=document_ids,
         k=k
     )

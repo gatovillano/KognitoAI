@@ -1,21 +1,50 @@
 # tools/github_repo_tool.py
 import logging
 import os
-from typing import List, Any, Dict, Optional, Union # Importar Union
+from typing import List, Any, Dict, Optional, Union, Type
 import requests
 from bs4 import BeautifulSoup
-import urllib3
 from urllib.parse import urlparse, urljoin
 import json
-import hashlib # Importar hashlib para calcular SHA
+import hashlib
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, ConfigDict
 
 logger = logging.getLogger(__name__)
 
+class GitHubRepoInput(BaseModel):
+    """
+    Define el esquema de entrada para la herramienta de exploración de repositorios de GitHub.
+    Valida que el LLM proporcione todos los argumentos necesarios.
+    """
+    repo_url: str = Field(
+        ...,
+        description="La URL completa del repositorio de GitHub a explorar (por ejemplo, https://github.com/usuario/repositorio)."
+    )
+    action: str = Field(
+        ...,
+        description="La acción a realizar en el repositorio. Las opciones válidas son: 'list_tree' (listar todos los archivos), 'read_file' (leer un archivo específico), 'navigate' (listar contenido de un directorio), 'read_directory' (leer todos los documentos de un directorio), 'read_directory_recursively' (leer todos los documentos de un directorio y sus subdirectorios), 'add_as_knowledge_collection' (añadir como colección de conocimientos), 'update_knowledge_collection' (actualizar colección de conocimientos)."
+    )
+    path: Optional[str] = Field(
+        None,
+        description="La ruta al archivo o directorio dentro del repositorio. Requerido para las acciones 'read_file', 'navigate' y 'read_directory'."
+    )
+    github_token: Optional[str] = Field(
+        None,
+        description="Token de acceso personal de GitHub para acceder a repositorios privados. Opcional, pero puede ser necesario para repositorios privados."
+    )
+    collection_topic: Optional[str] = Field(
+        None,
+        description="Tema de la colección RAG donde se gestionarán los documentos. Opcional. Si no se proporciona, se usará el account_id para el conocimiento general."
+    )
+    vectorize: Optional[bool] = Field(
+        None,
+        description="Indica si los documentos deben ser vectorizados al añadirlos o actualizarlos como colección de conocimientos. Por defecto es False."
+    )
 
 class GitHubRepoTool(BaseTool):
+    args_schema: Type[BaseModel] = GitHubRepoInput
     name: str = "github_repository_explorer"
     description: str = (
         "Este tool permite explorar repositorios de GitHub y gestionarlos como colecciones de conocimientos. Debes proporcionar la URL del repositorio en el parámetro 'repo_url', la acción a realizar (list_tree, read_file, navigate, read_directory, read_directory_recursively, add_as_knowledge_collection, update_knowledge_collection) en el parámetro 'action', y, opcionalmente, la ruta al archivo o directorio en el parámetro 'path', el token de GitHub en el parámetro 'github_token', el ID del workspace en 'workspace_id' y el ID de la cuenta en 'account_id' si es necesario. Asegúrate de proporcionar la URL completa del repositorio y de utilizar los nombres de parámetro y acción correctos."
@@ -29,6 +58,11 @@ class GitHubRepoTool(BaseTool):
         description="La sesión HTTP a utilizar para realizar las solicitudes."
     )
 
+    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="El ID del workspace, inyectado automáticamente.")
+    telegram_id: Optional[str] = Field(None, description="El ID de Telegram del usuario, inyectado automáticamente si está disponible.")
+    thread_id: Optional[str] = Field(None, description="El ID del hilo de conversación, inyectado automáticamente si está disponible.")
+
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
     )
@@ -41,27 +75,18 @@ class GitHubRepoTool(BaseTool):
             self.session.headers.update({'Authorization': f'token {self.github_token}'})
         logger.debug("GitHubRepoTool initialized. Version: 2025-07-24_04:42") # Añadir log de versión
     
-    def _run(self, *args: Any, **kwargs: Any) -> str:
+    def _run(self, tool_input: GitHubRepoInput) -> str:
         """
         Ejecuta la acción especificada en el repositorio de GitHub.
         Esta es la versión síncrona y no debe usar await.
         """
-        tool_input = self._parse_tool_input(*args, **kwargs)
-        if isinstance(tool_input, str): # Si tool_input sigue siendo un string, es un error de formato
-            return f"Error: El tool_input no es un JSON válido o no se pudo parsear: {tool_input}"
-
-        repo_url = tool_input.get("repo_url")
-        action = tool_input.get("action")
-        path = tool_input.get("path")
-        github_token = tool_input.get("github_token")
-        collection_topic = tool_input.get("collection_topic")
-        account_id = tool_input.get("account_id")
-        workspace_id = tool_input.get("workspace_id")
+        repo_url = tool_input.repo_url
+        action = tool_input.action
+        path = tool_input.path
+        github_token = tool_input.github_token
+        collection_topic = tool_input.collection_topic
         
-        logger.debug(f"DEBUG: _run called with repo_url={repo_url}, action={action}") # Nuevo log
-
-        if not repo_url or not action:
-            return "Error: 'repo_url' y 'action' son parámetros requeridos."
+        logger.debug(f"DEBUG: _run called with repo_url={repo_url}, action={action}")
 
         if self.session is None:
             self.session = requests.Session()
@@ -96,24 +121,18 @@ class GitHubRepoTool(BaseTool):
             logger.error(f"Error al ejecutar la acción {action} en el repositorio {repo_url}: {e}", exc_info=True)
             return f"Error al ejecutar la acción: {e}"
     
-    async def _arun(self, *args: Any, **kwargs: Any) -> str:
+    async def _arun(self, tool_input: GitHubRepoInput) -> str:
         """
         Ejecuta la acción especificada en el repositorio de GitHub (asíncrono).
         """
-        tool_input = self._parse_tool_input(*args, **kwargs)
-        if isinstance(tool_input, str): # Si tool_input sigue siendo un string, es un error de formato
-            return f"Error: El tool_input no es un JSON válido o no se pudo parsear: {tool_input}"
-
-        repo_url = tool_input.get("repo_url")
-        action = tool_input.get("action")
-        path = tool_input.get("path")
-        github_token = tool_input.get("github_token")
-        collection_topic = tool_input.get("collection_topic")
-        account_id = tool_input.get("account_id")
-        workspace_id = tool_input.get("workspace_id")
-        vectorize = tool_input.get("vectorize", False) # Default a False si no se proporciona
+        repo_url = tool_input.repo_url
+        action = tool_input.action
+        path = tool_input.path
+        github_token = tool_input.github_token
+        collection_topic = tool_input.collection_topic
+        vectorize = tool_input.vectorize
         
-        logger.debug(f"DEBUG: _arun called with repo_url={repo_url}, action={action}") # Nuevo log
+        logger.debug(f"DEBUG: _arun called with repo_url={repo_url}, action={action}")
 
         if not repo_url or not action:
             return "Error: 'repo_url' y 'action' son parámetros requeridos."
@@ -142,33 +161,15 @@ class GitHubRepoTool(BaseTool):
             elif action == "read_directory_recursively":
                 return self._read_directory_recursively(repo_url, path or "")
             elif action == "add_as_knowledge_collection":
-                return await self._add_as_knowledge_collection(repo_url, collection_topic, account_id, workspace_id, vectorize=vectorize)
+                return await self._add_as_knowledge_collection(repo_url, collection_topic, vectorize=vectorize or False)
             elif action == "update_knowledge_collection":
-                return await self._update_knowledge_collection(repo_url, collection_topic, account_id, workspace_id, vectorize=vectorize)
+                return await self._update_knowledge_collection(repo_url, collection_topic, vectorize=vectorize or False)
             else:
                 return f"Error: Acción no válida. Las acciones válidas son: list_tree, read_file, navigate, read_directory, read_directory_recursively, add_as_knowledge_collection, update_knowledge_collection"
         except Exception as e:
             logger.error(f"Error al ejecutar la acción {action} en el repositorio {repo_url}: {e}", exc_info=True)
             return f"Error al ejecutar la acción: {e}"
     
-    def _parse_tool_input(self, *args: Any, **kwargs: Any) -> Union[str, Dict[str, Any]]:
-        """
-        Intenta parsear el tool_input de varias formas.
-        Prioriza kwargs, luego el primer argumento posicional como JSON.
-        """
-        if kwargs:
-            return kwargs
-        
-        if args and isinstance(args[0], str):
-            try:
-                # Intentar parsear el string como JSON
-                return json.loads(args[0])
-            except json.JSONDecodeError:
-                # Si no es JSON, devolver el string tal cual
-                return args[0]
-        
-        # Si no hay kwargs y args no es un string, o está vacío
-        return ""
 
     def _list_tree(self, repo_url: str) -> str:
         """
@@ -181,7 +182,8 @@ class GitHubRepoTool(BaseTool):
             api_url = self._get_api_url(repo_url)
             repo_info_response = self.session.get(api_url)
             repo_info_response.raise_for_status()
-            default_branch = repo_info_response.json().get("default_branch", "main")
+            repo_info = repo_info_response.json()
+            default_branch = repo_info.get("default_branch", "main")
             
             # Now, get the tree for the default branch
             tree_url = f"{api_url}/git/trees/{default_branch}?recursive=1"
@@ -269,7 +271,8 @@ class GitHubRepoTool(BaseTool):
             api_url = self._get_api_url(repo_url)
             repo_info_response = self.session.get(api_url)
             repo_info_response.raise_for_status()
-            default_branch = repo_info_response.json().get("default_branch", "main")
+            repo_info = repo_info_response.json()
+            default_branch = repo_info.get("default_branch", "main")
             
             tree_url = f"{api_url}/git/trees/{default_branch}?recursive=1"
             response = self.session.get(tree_url)
@@ -292,7 +295,7 @@ class GitHubRepoTool(BaseTool):
             logger.error(f"Error al leer recursivamente el directorio {directory_path} del repositorio {repo_url}: {e}", exc_info=True)
             return f"Error al leer recursivamente el directorio: {e}"
 
-    async def _add_as_knowledge_collection(self, repo_url: str, collection_topic: Optional[str] = None, account_id: Optional[str] = None, workspace_id: Optional[str] = None, vectorize: bool = False) -> str:
+    async def _add_as_knowledge_collection(self, repo_url: str, collection_topic: Optional[str] = None, vectorize: bool = False) -> str:
         """
         Añade un repositorio de GitHub como colección de conocimientos, ya sea en una colección RAG específica o como conocimiento general de una cuenta.
         Controla la vectorización con el parámetro 'vectorize'.
@@ -330,11 +333,11 @@ class GitHubRepoTool(BaseTool):
                 file_count = 0
                 vectorized_count = 0
                 
-                if account_id is None:
+                if self.account_id is None:
                     raise ValueError("Account ID must be provided.")
 
-                logger.info(f"DEBUG: _add_as_knowledge_collection - account_id: {account_id}, collection_topic: {collection_topic}, vectorize: {vectorize}")
-                rag_tool = DocumentRAGTool(account_id=account_id)
+                logger.info(f"DEBUG: _add_as_knowledge_collection - account_id: {self.account_id}, collection_topic: {collection_topic}, vectorize: {vectorize}")
+                rag_tool = DocumentRAGTool(account_id=self.account_id, workspace_id=self.workspace_id, telegram_id=self.telegram_id, thread_id=self.thread_id)
 
                 for item in tree:
                     if item['type'] == 'blob':
@@ -360,8 +363,8 @@ class GitHubRepoTool(BaseTool):
                             file_path=file_path,
                             sha=content_sha,
                             content=clean_content, # Guardar contenido limpio
-                            account_id=account_id,
-                            workspace_id=workspace_id if workspace_id else None,
+                            account_id=self.account_id,
+                            workspace_id=self.workspace_id if self.workspace_id else None,
                             topic=collection_topic,
                             created_at=datetime.now(),
                             updated_at=datetime.now()
@@ -382,7 +385,7 @@ class GitHubRepoTool(BaseTool):
                                     extracted_text=clean_content, # Vectorizar contenido limpio
                                     file_name=file_path,
                                     topic=collection_topic if collection_topic else "repositorio",
-                                    workspace_id=workspace_id,
+                                    workspace_id=self.workspace_id,
                                     metadata=repo_metadata
                                 )
                                 
@@ -400,7 +403,7 @@ class GitHubRepoTool(BaseTool):
                 logger.info(f"DEBUG: Antes del commit en _add_as_knowledge_collection. Archivos a añadir: {file_count}")
                 await db_session.commit()
                 logger.info(f"DEBUG: Después del commit en _add_as_knowledge_collection.")
-                return f"Repositorio {repo_name} añadido con {file_count} archivos. {vectorized_count} archivos vectorizados correctamente para la cuenta {account_id} con tema '{collection_topic if collection_topic else 'repositorio'}'."
+                return f"Repositorio {repo_name} añadido con {file_count} archivos. {vectorized_count} archivos vectorizados correctamente para la cuenta {self.account_id} con tema '{collection_topic if collection_topic else 'repositorio'}'."
             finally:
                 logger.info(f"DEBUG: Cerrando db_session en _add_as_knowledge_collection.")
                 await db_session.close()
@@ -454,13 +457,9 @@ class GitHubRepoTool(BaseTool):
                     return "Error: Account ID must be provided to update repository documents."
 
                 # Instanciar DocumentRAGTool solo si account_id no es None
-                rag_tool = DocumentRAGTool(account_id=account_id)
+                rag_tool = DocumentRAGTool(account_id=account_id, workspace_id=self.workspace_id, telegram_id=self.telegram_id, thread_id=self.thread_id)
 
-                if account_id is None:
-                    return "Error: Account ID must be provided to update repository documents."
-
-                # Instanciar DocumentRAGTool solo si account_id no es None
-                rag_tool = DocumentRAGTool(account_id=account_id)
+                # La segunda instanciación duplicada se elimina, ya que no es necesaria
 
                 # Obtener los documentos de GitHub existentes en la base de datos para este repositorio y cuenta
                 # Para repositorios de documentos, usamos topic=None (sin tema específico)
@@ -492,11 +491,14 @@ class GitHubRepoTool(BaseTool):
                     else:
                         decoded_content = content_base64
 
+                    # Limpiar NUL bytes
+                    clean_content = decoded_content.replace('\x00', '')
+
                     if file_path in existing_db_docs:
                         db_doc = existing_db_docs[file_path]
                         if db_doc.sha != github_sha:
                             # Contenido modificado, actualizar solo el documento
-                            db_doc.content = decoded_content.replace('\x00', '') # Limpiar NUL bytes
+                            db_doc.content = clean_content
                             db_doc.sha = github_sha
                             db_doc.updated_at = datetime.now()
                             updated_files += 1
@@ -507,7 +509,7 @@ class GitHubRepoTool(BaseTool):
                             repo_url=repo_url,
                             file_path=file_path,
                             sha=github_sha,
-                            content=decoded_content.replace('\x00', ''), # Limpiar NUL bytes
+                            content=clean_content, # Limpiar NUL bytes
                             account_id=account_id,
                             workspace_id=workspace_id if workspace_id else None,
                             topic=None,  # Aseguramos que el topic sea None para documentos no vectorizados
@@ -530,7 +532,7 @@ class GitHubRepoTool(BaseTool):
             logger.error(f"Error al actualizar documentos del repositorio {repo_url}: {e}", exc_info=True)
             return f"Error al actualizar documentos del repositorio: {e}"
 
-    async def _update_knowledge_collection(self, repo_url: str, collection_topic: Optional[str] = None, account_id: Optional[str] = None, workspace_id: Optional[str] = None, vectorize: bool = False) -> str:
+    async def _update_knowledge_collection(self, repo_url: str, collection_topic: Optional[str] = None, vectorize: bool = False) -> str:
         """
         Actualiza una colección de conocimientos existente desde un repositorio de GitHub, ya sea en una colección RAG específica o como conocimiento general de una cuenta.
         Controla la re-vectorización con el parámetro 'vectorize'.
@@ -565,11 +567,11 @@ class GitHubRepoTool(BaseTool):
                 deleted_files = 0
                 vectorized_count = 0
                 
-                if account_id is None:
+                if self.account_id is None:
                     return "Error: Debes especificar un ID de cuenta para actualizar la colección de conocimientos."
 
                 # Instanciar DocumentRAGTool para vectorización (después de la verificación de account_id)
-                rag_tool = DocumentRAGTool(account_id=account_id)
+                rag_tool = DocumentRAGTool(account_id=self.account_id, workspace_id=self.workspace_id, telegram_id=self.telegram_id, thread_id=self.thread_id)
                 
                 # Obtener el árbol actual del repositorio de GitHub
                 tree_url = f"{api_url}/git/trees/{default_branch}?recursive=1"
@@ -584,13 +586,13 @@ class GitHubRepoTool(BaseTool):
                 if collection_topic:
                     existing_github_docs_query = select(GitHubDocument).where(
                         GitHubDocument.repo_url == repo_url,
-                        GitHubDocument.account_id == account_id,
+                        GitHubDocument.account_id == self.account_id,
                         GitHubDocument.topic == collection_topic
                     )
                 else:
                     existing_github_docs_query = select(GitHubDocument).where(
                         GitHubDocument.repo_url == repo_url,
-                        GitHubDocument.account_id == account_id,
+                        GitHubDocument.account_id == self.account_id,
                         GitHubDocument.topic == None
                     )
                 result = await db_session.execute(existing_github_docs_query)
@@ -602,7 +604,7 @@ class GitHubRepoTool(BaseTool):
                         # Eliminar embeddings del archivo
                         try:
                             await remove_document_from_rag(
-                                account_id=account_id,
+                                account_id=self.account_id,
                                 file_name=file_path,
                                 topic=collection_topic if collection_topic else "repositorio"
                             )
@@ -642,7 +644,7 @@ class GitHubRepoTool(BaseTool):
                             # Eliminar embeddings antiguos
                             try:
                                 await remove_document_from_rag(
-                                    account_id=account_id,
+                                    account_id=self.account_id,
                                     file_name=file_path,
                                     topic=collection_topic if collection_topic else "repositorio"
                                 )
@@ -663,11 +665,11 @@ class GitHubRepoTool(BaseTool):
                                         extracted_text=decoded_content,
                                         file_name=file_path,
                                         topic=collection_topic if collection_topic else "repositorio",
-                                        workspace_id=workspace_id,
+                                        workspace_id=self.workspace_id,
                                         metadata=repo_metadata
                                     )
                                     
-                                    if "chunks added" in result.context_for_llm: # Acceder a .context_for_llm
+                                    if "chunks added" in result.context_for_llm:
                                         vectorized_count += 1
                                         logger.info(f"✅ Archivo {file_path} re-vectorizado correctamente")
                                 except Exception as vec_error:
@@ -681,8 +683,8 @@ class GitHubRepoTool(BaseTool):
                             file_path=file_path,
                             sha=github_sha,
                             content=decoded_content,
-                            account_id=account_id,
-                            workspace_id=workspace_id if workspace_id else None,
+                            account_id=self.account_id,
+                            workspace_id=self.workspace_id if self.workspace_id else None,
                             topic=collection_topic, # Usamos collection_topic directamente aquí
                             created_at=datetime.now(),
                             updated_at=datetime.now()
@@ -697,7 +699,7 @@ class GitHubRepoTool(BaseTool):
                                     extracted_text=decoded_content,
                                     file_name=file_path,
                                     topic=collection_topic if collection_topic else "repositorio",
-                                    workspace_id=workspace_id,
+                                    workspace_id=self.workspace_id,
                                     metadata=repo_metadata
                                 )
                                 
@@ -730,43 +732,3 @@ class GitHubRepoTool(BaseTool):
             raise ValueError("Invalid GitHub repository URL")
         username, repo_name = path_segments
         return f"https://api.github.com/repos/{username}/{repo_name}"
-
-class GitHubRepoInput(BaseModel):
-    """
-    Define el esquema de entrada para la herramienta de exploración de repositorios de GitHub.
-    Valida que el LLM proporcione todos los argumentos necesarios.
-    """
-    repo_url: str = Field(
-        ...,
-        description="La URL completa del repositorio de GitHub a explorar (por ejemplo, https://github.com/usuario/repositorio)."
-    )
-    action: str = Field(
-        ...,
-        description="La acción a realizar en el repositorio. Las opciones válidas son: 'list_tree' (listar todos los archivos), 'read_file' (leer un archivo específico), 'navigate' (listar contenido de un directorio), 'read_directory' (leer todos los documentos de un directorio), 'read_directory_recursively' (leer todos los documentos de un directorio y sus subdirectorios), 'add_as_knowledge_collection' (añadir como colección de conocimientos), 'update_knowledge_collection' (actualizar colección de conocimientos)."
-    )
-    path: Optional[str] = Field(
-        None,
-        description="La ruta al archivo o directorio dentro del repositorio. Requerido para las acciones 'read_file', 'navigate' y 'read_directory'."
-    )
-    github_token: Optional[str] = Field(
-        None,
-        description="Token de acceso personal de GitHub para acceder a repositorios privados. Opcional, pero puede ser necesario para repositorios privados."
-    )
-    collection_topic: Optional[str] = Field(
-        None,
-        description="Tema de la colección RAG donde se gestionarán los documentos. Opcional. Si no se proporciona, se usará el account_id para el conocimiento general."
-    )
-    account_id: Optional[str] = Field(
-        None,
-        description="ID de la cuenta a la que se asociará la colección de conocimientos general. Requerido si no se proporciona un collection_topic para las acciones 'add_as_knowledge_collection' y 'update_knowledge_collection'."
-    )
-    workspace_id: Optional[str] = Field(
-        None,
-        description="ID del workspace al que se asociará la colección de conocimientos. Opcional. Si se proporciona, el repositorio se asociará a ese workspace específico."
-    )
-    vectorize: Optional[bool] = Field(
-        None,
-        description="Indica si los documentos deben ser vectorizados al añadirlos o actualizarlos como colección de conocimientos. Por defecto es False."
-    )
-
-

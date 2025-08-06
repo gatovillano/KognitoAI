@@ -18,16 +18,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_db() -> AsyncSession:
-    """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+from utils.db_session import DBSession
 
 @router.post("/list-events")  # Cambiado a POST
-async def list_events_endpoint(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def list_events_endpoint(current_account_id: str = Depends(get_current_account_id)):
     """Lista los eventos de la agenda del usuario, incluyendo eventos compartidos con equipos. Protegido por JWT."""
     account_uuid = uuid.UUID(current_account_id)
     
@@ -36,12 +30,13 @@ async def list_events_endpoint(current_account_id: str = Depends(get_current_acc
     logger.info(f"Personal events for account {current_account_id}: {len(personal_events)} events found")
     
     # Obtener equipos del usuario
-    member_teams_result = await db.execute(
-        select(TeamMember).where(TeamMember.account_id == account_uuid)
-    )
-    member_teams = member_teams_result.scalars().all()
-    team_ids = [str(team.team_id) for team in member_teams]
-    logger.info(f"Teams for account {current_account_id} (events): {team_ids}")
+    async with DBSession(SessionLocal) as db:
+        member_teams_result = await db.execute(
+            select(TeamMember).where(TeamMember.account_id == account_uuid)
+        )
+        member_teams = member_teams_result.scalars().all()
+        team_ids = [str(team.team_id) for team in member_teams]
+        logger.info(f"Teams for account {current_account_id} (events): {team_ids})")
     
     # Obtener eventos de equipos
     team_events = []

@@ -50,6 +50,7 @@ class GetAgendaTool(BaseTool):
     args_schema: Type[BaseModel] = GetAgendaInput
     return_direct: bool = False
     account_id: str
+    workspace_id: Optional[str] = None
 
     async def _arun(self, target_day: str, **kwargs: Any) -> str:
         """

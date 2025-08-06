@@ -1,10 +1,8 @@
-// En: src/app/layout.tsx
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/components/ThemeProvider";
-import { ArtifactPanelProvider } from "@/contexts/ArtifactPanelContext";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -20,17 +18,16 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="es" suppressHydrationWarning>
       <body className={inter.className}>
-        {/* --- CAMBIO 3: Envolver todo en el ThemeProvider --- */}
+        <AuthProvider>
           <ThemeProvider
             attribute="class"
             defaultTheme="system"
             enableSystem
             disableTransitionOnChange
           >
-            <ArtifactPanelProvider>
-              <AuthProvider>{children}</AuthProvider>
-            </ArtifactPanelProvider>
+            {children}
           </ThemeProvider>
+        </AuthProvider>
       </body>
     </html>
   );

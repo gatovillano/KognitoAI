@@ -2,7 +2,7 @@
 
 import logging
 import asyncio
-from typing import Type, Any
+from typing import Type, Any, Optional
 from pydantic import BaseModel, Field
 from langchain.tools import BaseTool
 
@@ -23,7 +23,10 @@ class AddNoteTool(BaseTool):
         "Debes proporcionar el contenido y, opcionalmente, un título y una categoría."
     )
     args_schema: Type[BaseModel] = AddNoteInput
-    account_id: str
+    account_id: Optional[str] = Field(None, description="ID de la cuenta a la que pertenece la nota.")
+    workspace_id: Optional[str] = Field(None, description="ID del espacio de trabajo al que pertenece la nota.")
+    telegram_id: Optional[str] = Field(None, description="ID de Telegram del usuario.")
+    thread_id: Optional[str] = Field(None, description="ID del hilo de conversación.")
 
     async def _arun(
         self,
@@ -40,6 +43,7 @@ class AddNoteTool(BaseTool):
                 notes_manager = NotesManager(session)
                 result_dict = await notes_manager.add_note(
                     account_id=self.account_id,
+                    workspace_id=self.workspace_id,
                     content=content,
                     title=title if title else None,
                     category=category if category else None

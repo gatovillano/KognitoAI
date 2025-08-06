@@ -56,3 +56,7 @@ class VectorDBSearchTool(BaseTool):
             return "\n".join(formatted_results)
         except Exception as e:
             return f"Error en la búsqueda vectorial: {str(e)}"
+
+    def _run(self, *args: Any, **kwargs: Any) -> str:
+        """Ejecuta la herramienta de forma síncrona (no recomendada)."""
+        return asyncio.run(self._arun(*args, **kwargs))

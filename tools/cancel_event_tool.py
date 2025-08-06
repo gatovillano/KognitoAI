@@ -14,9 +14,9 @@ ya que el agente deberá solicitar este ID si el usuario no lo proporciona.
 """
 
 import logging
-from typing import Type, Any
+from typing import Type, Any, Optional
 
-from pydantic.v1 import BaseModel, Field
+from pydantic.v1 import BaseModel, Field, PrivateAttr
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de agenda.
@@ -51,7 +51,10 @@ class CancelEventTool(BaseTool):
     )
     args_schema: Type[BaseModel] = CancelEventInput
     return_direct: bool = False
-    account_id: str
+    account_id: str = Field(..., description="ID de la cuenta del usuario.")
+    workspace_id: Optional[str] = Field(None, description="ID del espacio de trabajo del usuario.")
+    telegram_id: Optional[str] = Field(None, description="ID de Telegram del usuario.")
+    thread_id: Optional[str] = Field(None, description="ID del hilo de conversación.")
 
     async def _arun(self, event_id: int, **kwargs: Any) -> str:
         """

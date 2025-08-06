@@ -59,7 +59,7 @@ export default function RagCollectionsPage() {
   const fetchCollections = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await apiClient.post('/api/list-collections');
+      const response = await apiClient.get('/api/list-collections');
       setCollections(response.data);
     } catch (error) {
       toast.error('Error al cargar las colecciones.');
@@ -89,7 +89,7 @@ export default function RagCollectionsPage() {
       setAnalyzingTopic(topic);
       const response = await apiClient.post('/api/start-collection-analysis', { topic });
       setCollectionPollingId(response.data.task_id);
-      toast.info(`Análisis de la colección "${topic}" iniciado.`);
+      toast.info(`Análisis de la colección &quot;${topic}&quot; iniciado.`);
     } catch (error) {
       toast.error("No se pudo iniciar el análisis de la colección.");
       setAnalyzingTopic(null);
@@ -227,6 +227,7 @@ export default function RagCollectionsPage() {
       <motion.div layout className="grid gap-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 px-2">
         <AnimatePresence>
           <StaticCollectionCard
+            key="all-documents-card"
             href="/rag/all"
             icon={Library}
             title="Todos los Documentos"
@@ -234,6 +235,7 @@ export default function RagCollectionsPage() {
             className="bg-muted"
           />
           <StaticCollectionCard
+            key="repositories-card"
             href="/rag/repositories"
             icon={Github}
             title="Repositorios"
@@ -255,6 +257,7 @@ export default function RagCollectionsPage() {
           ))}
           {/* Tarjeta para crear nueva colección */}
           <motion.div
+            key="create-collection-card"
             layout
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -339,7 +342,7 @@ export default function RagCollectionsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta acción es irreversible y eliminará la colección "{deletingTopic}" y todos sus documentos permanentemente.
+              Esta acción es irreversible y eliminará la colección &quot;{deletingTopic}&quot; y todos sus documentos permanentemente.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -46,7 +46,10 @@ class KnowledgeAnalysisTool(BaseTool):
         "Tu trabajo es pasar la petición del usuario en el campo 'query'."
     )
     args_schema: Type[BaseModel] = KnowledgeAnalysisInput
-    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    account_id: Optional[str] = Field(None, description="El ID de cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="El ID del espacio de trabajo actual, inyectado automáticamente.")
+    telegram_id: Optional[str] = Field(None, description="El ID de Telegram del usuario, inyectado automáticamente.")
+    thread_id: Optional[str] = Field(None, description="El ID del hilo de chat actual, inyectado automáticamente.")
     return_direct: bool = False
 
     async def _interpret_request(self, user_query: str) -> Dict[str, Any]:
@@ -133,13 +136,17 @@ class KnowledgeAnalysisTool(BaseTool):
         
         if action == "run_full_analysis":
             start_time = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
-            asyncio.create_task(run_batch_analysis_job(account_id_filter=self.account_id, since_timestamp=start_time))
+            asyncio.create_task(run_batch_analysis_job(account_id_filter=self.account_id, since_timestamp=start_time, thread_id=self.thread_id))
             response_message = "¡Entendido! He iniciado un análisis completo de tu base de conocimiento en segundo plano."
 
         elif action == "analyze_recent_items":
-            days = params.get("days_ago", 1)
+            days = params.get("days_ago")
+            if days is None:
+                days = 7 # Default to 7 days if the LLM returns None
+            else:
+                days = int(days) # Ensure it's an integer if it's not None
             start_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
-            asyncio.create_task(run_batch_analysis_job(account_id_filter=self.account_id, since_timestamp=start_time))
+            asyncio.create_task(run_batch_analysis_job(account_id_filter=self.account_id, since_timestamp=start_time, thread_id=self.thread_id))
             response_message = f"¡Claro! Estoy analizando tus notas de los últimos {days} días en segundo plano."
 
         elif action == "analyze_specific_topic":
@@ -147,7 +154,7 @@ class KnowledgeAnalysisTool(BaseTool):
             if not keywords:
                 return "No pude identificar un tema específico en tu petición."
             start_time = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
-            asyncio.create_task(run_batch_analysis_job(account_id_filter=self.account_id, since_timestamp=start_time, topic_keywords=keywords))
+            asyncio.create_task(run_batch_analysis_job(account_id_filter=self.account_id, since_timestamp=start_time, topic_keywords=keywords, thread_id=self.thread_id))
             response_message = f"¡Perfecto! He comenzado a buscar conexiones sobre '{', '.join(keywords)}' en segundo plano."
         
         return response_message

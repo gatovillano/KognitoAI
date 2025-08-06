@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 
 interface WebSocketMessage {
@@ -24,7 +24,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 5;
 
-  const connect = () => {
+  const connect = useCallback(() => {
     try {
       const token = localStorage.getItem('authToken');
       if (!token) {
@@ -164,16 +164,16 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
 
       wsRef.current.onerror = (error) => {
         console.error('❌ Error en WebSocket:', error);
-        setConnectionError('Error de conexión WebSocket');
+        // setConnectionError('Error de conexión WebSocket'); // Eliminado para evitar bucles de actualización
       };
 
     } catch (error) {
       console.error('❌ Error al crear WebSocket:', error);
       setConnectionError('Error al crear conexión WebSocket');
     }
-  };
+  }, [options]); // Dependencias: options (y las funciones set son estables)
 
-  const disconnect = () => {
+  const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
@@ -186,7 +186,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
     
     setIsConnected(false);
     setConnectionError(null);
-  };
+  }, []); // Sin dependencias
 
   useEffect(() => {
     connect();
@@ -194,7 +194,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
     return () => {
       disconnect();
     };
-  }, []);
+  }, [connect, disconnect]);
 
   return {
     isConnected,

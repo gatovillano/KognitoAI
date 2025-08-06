@@ -49,7 +49,10 @@ class ConversationContextAnalyzerTool(BaseTool):
     )
     args_schema: Type[BaseModel] = ConversationContextAnalyzerInput
     return_direct: bool = False
-    account_id: str
+    account_id: Optional[str] = Field(None, description="ID de la cuenta asociada a la conversación.")
+    workspace_id: Optional[str] = Field(None, description="ID del espacio de trabajo asociado a la conversación.")
+    telegram_id: Optional[str] = Field(None, description="ID del usuario de Telegram, si la conversación proviene de Telegram.")
+    thread_id: Optional[str] = Field(None, description="ID del hilo de conversación específico.")
 
     async def _arun(self, conversation_history: Optional[str] = None, user_query: Optional[str] = None, **kwargs: Any) -> str:
         """
@@ -63,6 +66,10 @@ class ConversationContextAnalyzerTool(BaseTool):
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
+        if self.account_id is None:
+            logger.error("account_id no está definido en ConversationContextAnalyzerTool. No se puede proceder con el análisis.")
+            return "Error: account_id no está definido. No se puede iniciar el análisis de contexto."
+
         logger.info(f"Ejecutando ConversationContextAnalyzerTool para la cuenta '{self.account_id}'.")
         try:
             if user_query:
@@ -78,7 +85,7 @@ class ConversationContextAnalyzerTool(BaseTool):
             logger.error(f"Error en ConversationContextAnalyzerTool para la cuenta '{self.account_id}': {e}", exc_info=True)
             return f"Ocurrió un error inesperado al iniciar el análisis de contexto: {e}"
 
-    async def _analyze_with_query(self, account_id: str, user_query: str) -> str:
+    async def _analyze_with_query(self, account_id: Optional[str], user_query: str) -> str:
         """
         Analiza el contexto basado en una consulta específica del usuario.
         """
@@ -86,20 +93,20 @@ class ConversationContextAnalyzerTool(BaseTool):
         # y realizar un análisis específico. Por ahora, simulamos una respuesta.
         return f"Análisis de contexto basado en la consulta '{user_query}' iniciado. Se generarán insights en segundo plano."
 
-    async def _analyze_conversation_history(self, account_id: str, conversation_history: str) -> str:
+    async def _analyze_conversation_history(self, account_id: Optional[str], conversation_history: str) -> str:
         """
         Analiza un historial de conversación proporcionado.
         """
         try:
             analysis_result = await text_analyzer.analyze_single_text(conversation_history)
             formatted_result = self._format_result(analysis_result)
-            logger.info(f"Análisis de historial de conversación completado para la cuenta '{account_id}'.")
+            logger.info(f"Análisis de historial de conversación completado para la cuenta '{self.account_id}'.")
             return formatted_result
         except Exception as e:
             logger.error(f"Error durante el análisis de historial de conversación: {e}", exc_info=True)
             return f"Ocurrió un error al analizar el historial de conversación: {str(e)}"
 
-    async def _analyze_recent_context(self, account_id: str) -> str:
+    async def _analyze_recent_context(self, account_id: Optional[str]) -> str:
         """
         Analiza las conversaciones y memorias recientes del usuario.
         """

@@ -10,7 +10,7 @@ información sobre resúmenes, temas clave, conceptos centrales y relaciones.
 """
 
 import logging
-from typing import Type, Any, List, Dict
+from typing import Type, Any, List, Dict, Optional
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 from sqlalchemy import select
@@ -27,10 +27,6 @@ class GetAnalysisResultsInput(BaseModel):
     Define el esquema de entrada para la herramienta de recuperación de resultados de análisis.
     Valida que el argumento necesario sea proporcionado por el LLM.
     """
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
     action: str = Field(
         "summary",
         description="La acción a realizar. Puede ser 'summary' para mostrar un resumen de los análisis o 'full_analysis' para mostrar el contenido completo de un análisis específico."
@@ -42,10 +38,6 @@ class GetAnalysisResultsInput(BaseModel):
     document_name: str = Field(
         "",
         description="El nombre del documento para filtrar los resultados de análisis cuando la acción es 'summary'. Si no se proporciona, se devuelven todos los análisis."
-    )
-    analysis_id: str = Field(
-        "",
-        description="El ID del análisis específico para mostrar su contenido completo cuando la acción es 'full_analysis'. Requerido si la acción es 'full_analysis'."
     )
 
 
@@ -62,18 +54,21 @@ class GetAnalysisResultsTool(BaseTool):
     )
     args_schema: Type[BaseModel] = GetAnalysisResultsInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
+    account_id: Optional[str] = Field(None, description="El identificador universal (UUID en formato string) de la cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="El identificador del espacio de trabajo del usuario, inyectado automáticamente.")
+    telegram_id: Optional[str] = Field(None, description="El identificador de Telegram del usuario, inyectado automáticamente si la herramienta es llamada desde Telegram.")
+    thread_id: Optional[str] = Field(None, description="El identificador del hilo de conversación, inyectado automáticamente.")
 
     def __init__(self, **kwargs):
         """Inicializa la herramienta con cualquier configuración necesaria."""
         super().__init__(**kwargs)
         logger.info("Inicializando GetAnalysisResultsTool")
 
-    async def _arun(self, account_id: str, action: str = "summary", limit: int = 5, document_name: str = "", analysis_id: str = "", **kwargs: Any) -> str:
+    async def _arun(self, action: str = "summary", limit: int = 5, document_name: str = "", analysis_id: str = "") -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
-            account_id: El ID universal de la cuenta del usuario.
             action: La acción a realizar, 'summary' para resumen o 'full_analysis' para análisis completo.
             limit: El número máximo de resultados de análisis a recuperar cuando la acción es 'summary' (por defecto 5).
             document_name: El nombre del documento para filtrar los resultados cuando la acción es 'summary' (opcional).
@@ -83,10 +78,10 @@ class GetAnalysisResultsTool(BaseTool):
         Returns:
             Un mensaje de texto con los resultados de análisis formateados o un mensaje indicando que no hay resultados.
         """
-        logger.info(f"Ejecutando GetAnalysisResultsTool para la cuenta '{account_id}' con acción '{action}', límite de {limit} resultados, documento '{document_name}' y análisis ID '{analysis_id}'.")
+        logger.info(f"Ejecutando GetAnalysisResultsTool para la cuenta '{self.account_id}' con acción '{action}', límite de {limit} resultados, documento '{document_name}' y análisis ID '{analysis_id}'.")
         try:
             async with DBSession(SessionLocal) as db:
-                account_uuid = uuid.UUID(account_id)
+                account_uuid = uuid.UUID(self.account_id)
                 if action == "full_analysis":
                     if not analysis_id:
                         return "Error: Debes proporcionar un ID de análisis para la acción 'full_analysis'."
@@ -106,7 +101,7 @@ class GetAnalysisResultsTool(BaseTool):
                 analyses = result.scalars().all()
 
                 if not analyses:
-                    logger.info(f"No se encontraron resultados de análisis para la cuenta '{account_id}' con documento '{document_name}' o análisis ID '{analysis_id}'.")
+                    logger.info(f"No se encontraron resultados de análisis para la cuenta '{self.account_id}' con documento '{document_name}' o análisis ID '{analysis_id}'.")
                     if action == "full_analysis":
                         return f"No se encontró el análisis con ID '{analysis_id}' en tu base de conocimiento."
                     if document_name:
@@ -235,10 +230,10 @@ class GetAnalysisResultsTool(BaseTool):
                     if len(analyses) == limit:
                         response_lines.append(f"\n(Mostrando los {limit} más recientes. Si deseas ver más, puedo buscarlos.)")
 
-                logger.info(f"Recuperados {len(analyses)} resultados de análisis para la cuenta '{account_id}'.")
+                logger.info(f"Recuperados {len(analyses)} resultados de análisis para la cuenta '{self.account_id}'.")
                 return "\n".join(response_lines)
         except Exception as e:
-            logger.error(f"Error en GetAnalysisResultsTool para la cuenta '{account_id}': {e}", exc_info=True)
+            logger.error(f"Error en GetAnalysisResultsTool para la cuenta '{self.account_id}': {e}", exc_info=True)
             return f"Ocurrió un error inesperado al intentar recuperar tus resultados de análisis: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

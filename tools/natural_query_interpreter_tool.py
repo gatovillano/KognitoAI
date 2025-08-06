@@ -147,7 +147,7 @@ Responde SOLO en formato JSON válido:
     ) -> str:
         """Ejecuta la interpretación y búsqueda automática."""
         try:
-            logger.info(f"🔍 Interpretando consulta natural: '{query[:100]}...'")
+            logger.info(f"🔍 Interpretando consulta natural: '{query[:100]}...' ")
             
             # 1. Interpretar la consulta
             interpretation = await self._interpret_query(query, context or "")

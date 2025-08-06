@@ -105,7 +105,7 @@ class DuckDuckGoSearchTool(BaseTool):
             with DDGS() as ddgs:
                 # Realizar búsqueda web
                 search_results = list(ddgs.text(
-                    keywords=query,
+                    query,
                     max_results=10,
                     region='es-es',  # Región en español
                     safesearch='moderate',

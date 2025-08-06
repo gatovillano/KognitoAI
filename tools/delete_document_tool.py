@@ -66,6 +66,9 @@ class DeleteDocumentTool(BaseTool):
     args_schema: Type[BaseModel] = DeleteDocumentInput
     return_direct: bool = False
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="El ID del espacio de trabajo del usuario, inyectado automáticamente.")
+    telegram_id: Optional[str] = Field(None, description="El ID de Telegram del usuario, inyectado automáticamente.")
+    thread_id: Optional[str] = Field(None, description="El ID del hilo de conversación, inyectado automáticamente.")
 
     async def _arun(self, file_name: Optional[str] = None, topic: Optional[str] = None, **kwargs: Any) -> str:
         """

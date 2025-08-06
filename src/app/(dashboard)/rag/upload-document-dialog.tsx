@@ -94,42 +94,30 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
     setIsSubmitting(true);
     
     const topicForUpload = defaultTopic || values.topic || 'General';
-    const fileNames: string[] = []; // Para el feedback al usuario
+    const fileNames: string[] = [];
+    const formData = new FormData();
+
+    formData.append('topic', topicForUpload);
+    if (workspaceId) {
+      formData.append('workspace_id', workspaceId);
+    }
 
     try {
       if (activeTab === 'files' && values.files && values.files.length > 0) {
-        const formData = new FormData();
-        formData.append('topic', topicForUpload);
-        if (workspaceId) {
-          formData.append('workspace_id', workspaceId);
-          console.log("Frontend: workspaceId = " + workspaceId);
-        }
         for (let i = 0; i < values.files.length; i++) {
           formData.append('files', values.files[i]);
           fileNames.push(values.files[i].name);
         }
-
         toast.info('Subiendo documentos...', {
           description: `A la colección: ${topicForUpload}`,
           duration: 0,
           id: 'upload-progress'
         });
 
-        onUploadStart(fileNames, topicForUpload);
-        onOpenChange(false);
-
-        await apiClient.post('/api/upload-document', formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        });
-        toast.success('¡Documentos subidos con éxito!', {
-          id: 'upload-progress'
-        });
-
       } else if (activeTab === 'text' && values.text_content) {
-        const textFileName = `texto-${Date.now()}.md`; // Generar un nombre de archivo para el texto
-        fileNames.push(textFileName);
+        const textFile = new File([values.text_content], `texto-${Date.now()}.md`, { type: 'text/markdown' });
+        formData.append('files', textFile);
+        fileNames.push(textFile.name);
 
         toast.info('Guardando texto como documento...', {
           description: `En la colección: ${topicForUpload}`,
@@ -137,26 +125,28 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
           id: 'upload-progress'
         });
 
-        onUploadStart(fileNames, topicForUpload);
-        onOpenChange(false);
-
-        await apiClient.post('/api/upload-text-document', { // Nueva API para subir texto
-          topic: topicForUpload,
-          file_name: textFileName,
-          content: values.text_content,
-          workspace_id: workspaceId,
-        });
-        toast.success('¡Texto guardado como documento con éxito!', {
-          id: 'upload-progress'
-        });
-
       } else {
         toast.error('Por favor, selecciona al menos un archivo o introduce texto.');
+        setIsSubmitting(false);
         return;
       }
       
+      onUploadStart(fileNames, topicForUpload);
+      onOpenChange(false);
+
+      await apiClient.post('/api/upload-document', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      toast.success('¡Documentos subidos con éxito!', {
+        id: 'upload-progress'
+      });
+      
       onUploadSuccess(fileNames, topicForUpload);
       form.reset();
+
     } catch (error) {
       toast.error('Error al subir/guardar documento', {
         description: 'Por favor, inténtalo de nuevo.',
@@ -233,7 +223,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
                     <FormItem>
                       <FormLabel>Contenido de Texto</FormLabel>
                       <FormControl>
-                        <TiptapEditor content={field.value || ''} onChange={field.onChange} />
+                        <TiptapEditor content={field.value || ''} onChange={field.onChange} containerClassName="max-h-60 overflow-y-auto" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>

@@ -191,7 +191,7 @@ export default function AgendaPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>¿Cancelar este evento?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta acción es irreversible y cancelará el recordatorio para "{deletingEvent?.description}".
+              Esta acción es irreversible y cancelará el recordatorio para &quot;{deletingEvent?.description}&quot;.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

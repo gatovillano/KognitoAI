@@ -21,7 +21,7 @@ El diseño sigue la arquitectura centralizada y agnóstica de la plataforma:
 """
 
 import logging
-from typing import Any, Type
+from typing import Any, Optional, Type
 from io import BytesIO
 
 from pydantic.v1 import BaseModel, Field
@@ -48,15 +48,6 @@ class ImageGenerationInput(BaseModel):
         ...,
         description="Una descripción detallada y clara de la imagen que se desea generar. Debería estar en inglés para obtener los mejores resultados."
     )
-    # Requerimos ambos IDs por las razones explicadas en la documentación del módulo.
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario."
-    )
-    telegram_id: int = Field(
-        ...,
-        description="El ID numérico original de Telegram del usuario, necesario para guardar la imagen en el estado de la sesión (`user_data`)."
-    )
 
 
 class ImageGenerationTool(BaseTool):
@@ -73,24 +64,26 @@ class ImageGenerationTool(BaseTool):
     )
     args_schema: Type[BaseModel] = ImageGenerationInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
+    account_id: Optional[str] = Field(None, description="El identificador universal (UUID en formato string) de la cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="El identificador del espacio de trabajo del usuario, inyectado automáticamente.")
+    telegram_id: Optional[int] = Field(None, description="El ID numérico original de Telegram del usuario, necesario para guardar la imagen en el estado de la sesión (`user_data`), inyectado automáticamente.")
+    thread_id: Optional[str] = Field(None, description="El identificador del hilo de conversación, inyectado automáticamente.")
 
-    async def _arun(self, prompt: str, account_id: str, telegram_id: int, **kwargs: Any) -> str:
+    async def _arun(self, prompt: str, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
             prompt: La descripción para generar la imagen.
-            account_id: El ID universal de la cuenta del usuario.
-            telegram_id: El ID de Telegram para la gestión del estado de sesión.
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
             Un mensaje de texto para el agente, indicando el resultado de la operación.
         """
-        logger.info(f"Ejecutando ImageGenerationTool para la cuenta '{account_id}' con el prompt: '{prompt[:100]}...'")
+        logger.info(f"Ejecutando ImageGenerationTool para la cuenta '{self.account_id}' con el prompt: '{prompt[:100]}...'")
 
         if not prompt or not prompt.strip():
-            logger.warning(f"ImageGenerationTool llamada con un prompt vacío para la cuenta '{account_id}'.")
+            logger.warning(f"ImageGenerationTool llamada con un prompt vacío para la cuenta '{self.account_id}'.")
             return "Necesito una descripción para poder generar una imagen. ¿Qué te gustaría que creara?"
 
         try:
@@ -106,7 +99,7 @@ class ImageGenerationTool(BaseTool):
                 
                 image_data = base64.b64encode(image_result.getvalue()).decode('utf-8')
                 payload = {
-                    "user_id": telegram_id,
+                    "user_id": self.telegram_id,
                     "key": GENERATED_IMAGE_KEY,
                     "data": image_data
                 }
@@ -119,11 +112,11 @@ class ImageGenerationTool(BaseTool):
                             timeout=10
                         )
                         response.raise_for_status()
-                        logger.info(f"✅ Imagen enviada al endpoint de telegram_client para el usuario {telegram_id}.")
+                        logger.info(f"✅ Imagen enviada al endpoint de telegram_client para el usuario {self.telegram_id}.")
                         
                         # Enviar un mensaje de seguimiento al chat de Telegram para activar el envío de la imagen.
                         follow_up_payload = {
-                            "chat_id": telegram_id,
+                            "chat_id": self.telegram_id,
                             "text": "¡Hecho! He generado la imagen y te la enviaré en un momento."
                         }
                         follow_up_response = await client.post(
@@ -132,7 +125,7 @@ class ImageGenerationTool(BaseTool):
                             timeout=5
                         )
                         follow_up_response.raise_for_status()
-                        logger.info(f"✅ Mensaje de seguimiento enviado al chat de Telegram para el usuario {telegram_id}.")
+                        logger.info(f"✅ Mensaje de seguimiento enviado al chat de Telegram para el usuario {self.telegram_id}.")
                         return "¡Hecho! He generado la imagen y te la enviaré en un momento."
                 except Exception as e:
                     logger.error(f"Error al enviar imagen al endpoint de telegram_client: {e}", exc_info=True)
@@ -142,7 +135,7 @@ class ImageGenerationTool(BaseTool):
                     temp_dir = "/app/tmp/generated_images"
                     os.makedirs(temp_dir, exist_ok=True)
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    temp_filename = f"{temp_dir}/imagen_{account_id}_{timestamp}.png"
+                    temp_filename = f"{temp_dir}/imagen_{self.account_id}_{timestamp}.png"
                     with open(temp_filename, "wb") as temp_file:
                         temp_file.write(image_result.getvalue())
                     logger.info(f"✅ Imagen guardada en archivo temporal {temp_filename} debido a error en endpoint.")
@@ -150,11 +143,11 @@ class ImageGenerationTool(BaseTool):
             else:
                 # Si no es BytesIO, es un mensaje de error de la función de generación.
                 error_message = str(image_result)
-                logger.error(f"❌ La generación de imagen falló para la cuenta '{account_id}'. Razón: {error_message}")
+                logger.error(f"❌ La generación de imagen falló para la cuenta '{self.account_id}'. Razón: {error_message}")
                 return f"No pude generar la imagen. El servicio de imágenes devolvió un error: {error_message}"
 
         except Exception as e:
-            logger.error(f"Error en ImageGenerationTool para la cuenta '{account_id}': {e}", exc_info=True)
+            logger.error(f"Error en ImageGenerationTool para la cuenta '{self.account_id}': {e}", exc_info=True)
             return f"Ocurrió un error inesperado al intentar generar la imagen: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

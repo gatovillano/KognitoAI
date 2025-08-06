@@ -32,14 +32,7 @@ class ExtractDocumentTitlesInput(BaseModel):
     Define el esquema de entrada para la herramienta de extracción de títulos de documentos.
     Valida que el argumento necesario sea proporcionado por el LLM.
     """
-    topic: Optional[str] = Field(
-        None,
-        description="El tema o categoría de los documentos a procesar. Si no se proporciona, se procesarán todos los documentos del usuario."
-    )
-    collection_id: Optional[str] = Field(
-        None,
-        description="El ID de la colección de documentos a procesar. Si se proporciona, solo se procesarán los documentos de esta colección."
-    )
+    pass
 
 
 class ExtractDocumentTitlesTool(BaseTool):
@@ -59,24 +52,27 @@ class ExtractDocumentTitlesTool(BaseTool):
     return_direct: bool = False
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
     workspace_id: Optional[str] = Field(None, description="El ID del workspace actual, inyectado automáticamente.")
+    telegram_id: Optional[str] = Field(None, description="El ID de usuario de Telegram del usuario, inyectado automáticamente.")
+    thread_id: Optional[str] = Field(None, description="El ID del hilo de conversación de Telegram, inyectado automáticamente.")
+    topic: Optional[str] = Field(None, description="El tema o categoría de los documentos a procesar, inyectado automáticamente.")
+    collection_id: Optional[str] = Field(None, description="El ID de la colección de documentos a procesar, inyectado automáticamente.")
 
     def _run(self, *args: Any, **kwargs: Any) -> str:
         """Síncrono: Esta herramienta solo soporta ejecución asíncrona."""
         raise NotImplementedError("ExtractDocumentTitlesTool solo soporta ejecución asíncrona. Usa _arun en su lugar.")
 
-    async def _arun(self, topic: Optional[str] = None, file_name: Optional[str] = None, collection_id: Optional[str] = None, **kwargs: Any) -> str:
+    async def _arun(self, **kwargs: Any) -> str:
+        file_name = None # Inicializar file_name aquí
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
-            topic: El tema de los documentos a procesar (opcional).
-            file_name: El nombre del archivo específico a procesar (opcional).
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
-        logger.info(f"Ejecutando ExtractDocumentTitlesTool para la cuenta '{self.account_id}' con tema: '{topic}', archivo: '{file_name}'.")
+        logger.info(f"Ejecutando ExtractDocumentTitlesTool para la cuenta '{self.account_id}' con tema: '{self.topic}', archivo: '{file_name}'.")
         try:
             if not settings.database_url:
                 raise ValueError("Database URL is not configured")
@@ -122,13 +118,13 @@ class ExtractDocumentTitlesTool(BaseTool):
                     except ValueError:
                         logger.warning(f"workspace_id '{self.workspace_id}' no es un UUID válido. Omitiendo filtro.")
 
-                if topic:
+                if self.topic:
                     clauses.append("topic = :tpc") # Usar directamente la columna 'topic'
-                    params["tpc"] = topic
+                    params["tpc"] = self.topic
                 # Eliminar el filtro por collection_id si se usa topic, o si collection_id es None
-                if collection_id: # Este collection_id se refiere a 'user_documents' o 'user_memories'
+                if self.collection_id: # Este collection_id se refiere a 'user_documents' o 'user_memories'
                     clauses.append("collection_id = :col_id")
-                    params["col_id"] = collection_id
+                    params["col_id"] = self.collection_id
 
                 # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
                 select_sql = text("SELECT DISTINCT ON (cmetadata->>'document_id') * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses) + " ORDER BY cmetadata->>'document_id', id")
@@ -199,13 +195,13 @@ class ExtractDocumentTitlesTool(BaseTool):
                             except ValueError:
                                 logger.warning(f"workspace_id '{self.workspace_id}' no es un UUID válido. Omitiendo filtro.")
 
-                        if topic:
+                        if self.topic:
                             first_chunk_query_clauses.append("topic = :tpc")
-                            first_chunk_params["tpc"] = topic
+                            first_chunk_params["tpc"] = self.topic
                         # Solo añadir el filtro collection_id si se proporciona y no se usa topic
-                        elif collection_id: # Este collection_id se refiere a 'user_documents' o 'user_memories'
+                        elif self.collection_id: # Este collection_id se refiere a 'user_documents' o 'user_memories'
                             first_chunk_query_clauses.append("collection_id = :col_id")
-                            first_chunk_params["col_id"] = collection_id
+                            first_chunk_params["col_id"] = self.collection_id
 
                         first_chunk_query = text("SELECT document FROM langchain_pg_embedding WHERE " + " AND ".join(first_chunk_query_clauses) + " ORDER BY (cmetadata->>'chunk_index')::integer ASC LIMIT 3")
                         logger.info(f"Valores para first_chunk_query: {first_chunk_params}")

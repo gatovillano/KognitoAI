@@ -47,7 +47,7 @@ interface MarkdownRendererProps {
   fontSize?: string;
 }
 
-const _MarkdownRenderer = ({ content, fontSize = 'text-base' }: MarkdownRendererProps) => {
+const MarkdownRendererComponent = ({ content, fontSize = 'text-base' }: MarkdownRendererProps) => {
   const [copiedStates, setCopiedStates] = useState<Record<string, boolean>>({});
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -135,7 +135,7 @@ const _MarkdownRenderer = ({ content, fontSize = 'text-base' }: MarkdownRenderer
         }
       );
 
-      return marked.parse(processedContent, { async: false });
+      return marked.parse(processedContent) as string;
     } catch (error) {
       console.error("Error parsing markdown:", error);
       return "<p>Error rendering content.</p>";
@@ -240,4 +240,4 @@ const _MarkdownRenderer = ({ content, fontSize = 'text-base' }: MarkdownRenderer
   );
 };
 
-export const MarkdownRenderer = memo(_MarkdownRenderer);
+export const MarkdownRenderer = memo(MarkdownRendererComponent);

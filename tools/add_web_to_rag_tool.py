@@ -35,11 +35,6 @@ class AddWebToRAGInput(BaseModel):
         description="Tema o categoría bajo la cual guardar el contenido web",
         json_schema_extra={"type": "string"}
     )
-    workspace_id: Optional[str] = Field(
-        None, 
-        description="ID del workspace (opcional)",
-        json_schema_extra={"type": "string"}
-    )
     custom_title: Optional[str] = Field(
         None, 
         description="Título personalizado para el documento (opcional, se usará el de la página si no se especifica)",
@@ -127,18 +122,20 @@ class AddWebToRAGTool(BaseTool):
             raise Exception(f"Error al extraer contenido: {str(e)}")
     
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="ID del workspace, inyectado automáticamente.")
+    telegram_id: Optional[str] = Field(None, description="ID de Telegram del usuario, inyectado automáticamente.")
+    thread_id: Optional[str] = Field(None, description="ID del hilo de conversación, inyectado automáticamente.")
 
     async def _arun(
         self,
         url: str,
         topic: str,
-        workspace_id: Optional[str] = None,
         custom_title: Optional[str] = None,
         **kwargs: Any
     ) -> str:
         """Ejecuta la herramienta de forma asíncrona."""
         
-        logger.info(f"🚀 Iniciando AddWebToRAG para URL: {url}, topic: {topic}, workspace: {workspace_id}")
+        logger.info(f"🚀 Iniciando AddWebToRAG para URL: {url}, topic: {topic}, workspace: {self.workspace_id}")
         
         try:
             if not url.startswith(('http://', 'https://')):
@@ -170,11 +167,11 @@ class AddWebToRAGTool(BaseTool):
                 extracted_text=content,
                 topic=topic,
                 metadata=metadata,
-                workspace_id=workspace_id
+                workspace_id=self.workspace_id,
             )
             
             if chunks_added > 0:
-                workspace_info = f" en el workspace '{workspace_id}'" if workspace_id else ""
+                workspace_info = f" en el workspace '{self.workspace_id}'" if self.workspace_id else ""
                 logger.info(f"✅ Contenido web añadido exitosamente: {chunks_added} chunks")
                 return (
                     f"✅ ¡Contenido web añadido exitosamente!\n\n"
@@ -196,8 +193,6 @@ class AddWebToRAGTool(BaseTool):
         self,
         url: str,
         topic: str,
-        account_id: str,
-        workspace_id: Optional[str] = None,
         custom_title: Optional[str] = None,
         **kwargs: Any
     ) -> str:
@@ -206,8 +201,6 @@ class AddWebToRAGTool(BaseTool):
             result = asyncio.run(self._arun(
                 url=url,
                 topic=topic,
-                account_id=account_id,
-                workspace_id=workspace_id,
                 custom_title=custom_title,
                 **kwargs
             ))

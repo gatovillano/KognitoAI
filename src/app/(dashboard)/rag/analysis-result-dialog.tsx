@@ -145,10 +145,10 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                                             <h4 className="text-sm font-medium text-muted-foreground">Citas relacionadas:</h4>
                                             {topic.quotes.slice(0, 2).map((quote: any, qIndex: number) => (
                                                 <blockquote key={qIndex} className="text-xs italic text-muted-foreground border-l-2 border-primary/20 pl-3 py-1">
-                                                    "{quote.quote || quote}"
+                                                    &quot;{quote.quote || quote}&quot;
                                                     {quote.document_title && (
                                                         <cite className="block text-xs font-medium mt-1">
-                                                            — {quote.document_title}
+                                                            &mdash; {quote.document_title}
                                                         </cite>
                                                     )}
                                                 </blockquote>

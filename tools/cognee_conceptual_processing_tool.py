@@ -137,39 +137,42 @@ class CogneeConceptualProcessingTool(BaseTool):
     """
     args_schema: type[BaseModel] = CogneeConceptualProcessingSchema
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="El ID del espacio de trabajo, inyectado automáticamente si está disponible.")
+    telegram_id: Optional[str] = Field(None, description="El ID de Telegram del usuario, inyectado automáticamente si está disponible.")
+    thread_id: Optional[str] = Field(None, description="El ID del hilo de conversación, inyectado automáticamente si está disponible.")
     cognee_integration: Optional[CogneeIntegration] = None
     graph_db: Optional[GraphDB] = None
 
-    @model_validator(mode='after')
-    def initialize_integration(self) -> 'CogneeConceptualProcessingTool':
-        """
-        Inicializa la integración con Cognee (y Neo4j) después de crear la instancia.
-        Esto asegura que la conexión esté lista antes de usar la herramienta.
-        """
-        try:
-            # Inicializar conexión Neo4j usando settings
-            neo4j_uri = settings.neo4j_uri
-            neo4j_user = settings.neo4j_user
-            neo4j_password = settings.neo4j_password
-
-            if not neo4j_uri or not neo4j_user or not neo4j_password:
-                logger.warning("⚠️ Configuración de Neo4j incompleta para CogneeConceptualProcessingTool. Asegúrate de que NEO4J_URI, NEO4J_USER y NEO4J_PASSWORD estén definidos.")
-                self.cognee_integration = None
-                self.graph_db = None # Asegurarse de que graph_db también sea None
-                return self
-
-            # Crear instancia de GraphDB
-            self.graph_db = GraphDB(neo4j_uri, neo4j_user, neo4j_password)
-            self.graph_db.connect() # Intentar conectar
-
-            # Crear integración con Cognee
-            self.cognee_integration = CogneeIntegration(self.graph_db)
-            logger.info("✅ Integración con Cognee inicializada correctamente para CogneeConceptualProcessingTool")
-        except Exception as e:
-            logger.error(f"❌ Error inicializando la integración con Cognee para la herramienta: {e}", exc_info=True)
-            self.cognee_integration = None
-            self.graph_db = None
-        return self
+    # @model_validator(mode='after')
+    # def initialize_integration(self) -> 'CogneeConceptualProcessingTool':
+    #     """
+    #     Inicializa la integración con Cognee (y Neo4j) después de crear la instancia.
+    #     Esto asegura que la conexión esté lista antes de usar la herramienta.
+    #     """
+    #     try:
+    #         # Inicializar conexión Neo4j usando settings
+    #         neo4j_uri = settings.neo4j_uri
+    #         neo4j_user = settings.neo4j_user
+    #         neo4j_password = settings.neo4j_password
+    #
+    #         if not neo4j_uri or not neo4j_user or not neo4j_password:
+    #             logger.warning("⚠️ Configuración de Neo4j incompleta para CogneeConceptualProcessingTool. Asegúrate de que NEO4J_URI, NEO4J_USER y NEO4J_PASSWORD estén definidos.")
+    #             self.cognee_integration = None
+    #             self.graph_db = None # Asegurarse de que graph_db también sea None
+    #             return self
+    #
+    #         # Crear instancia de GraphDB
+    #         self.graph_db = GraphDB(neo4j_uri, neo4j_user, neo4j_password)
+    #         self.graph_db.connect() # Intentar conectar
+    #
+    #         # Crear integración con Cognee
+    #         self.cognee_integration = CogneeIntegration(self.graph_db)
+    #         logger.info("✅ Integración con Cognee inicializada correctamente para CogneeConceptualProcessingTool")
+    #     except Exception as e:
+    #         logger.error(f"❌ Error inicializando la integración con Cognee para la herramienta: {e}", exc_info=True)
+    #         self.cognee_integration = None
+    #         self.graph_db = None
+    #     return self
 
     async def _prepare_documents(self, account_id: str, document_info_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -324,45 +327,12 @@ class CogneeConceptualProcessingTool(BaseTool):
                 "details": "Error durante la ejecución síncrona del procesamiento conceptual."
             }
 
-    account_id: str
-
-    async def _arun(self, tool_input_json: str, run_manager: Optional[Any] = None, **kwargs) -> Dict[str, Any]:
+    async def _arun(self, documents: Optional[List[Dict[str, Any]]] = None, document_titles: Optional[List[str]] = None, dataset_name: str = "default", run_manager: Optional[Any] = None, **kwargs) -> Dict[str, Any]:
         """
         Versión asíncrona de la ejecución de la herramienta.
         Maneja la obtención del account_id y la preparación de los documentos.
         """
         effective_account_id = self.account_id
-
-        # Parsear la cadena JSON de entrada
-        try:
-            parsed_input = json.loads(tool_input_json)
-        except json.JSONDecodeError:
-            try:
-                # Intentar limpiar y parsear si no es un JSON válido directamente
-                cleaned_json = tool_input_json.replace("'", "\"")
-                parsed_input = json.loads(cleaned_json)
-            except json.JSONDecodeError as e:
-                logger.error(f"❌ Error al parsear tool_input_json: {tool_input_json}. Error: {e}", exc_info=True)
-                return {
-                    "error": "Error de formato de entrada",
-                    "status": "error",
-                    "details": "El tool_input no es un JSON válido."
-                }
-        
-        documents = parsed_input.get("documents")
-        document_titles = parsed_input.get("document_titles")
-        dataset_name = parsed_input.get("dataset_name", "default")
-
-        # --- PATCH: Handle common input error where 'documents' is a stringified dict with 'document_titles' ---
-        if isinstance(documents, str):
-            try:
-                possible_dict = json.loads(documents)
-                # If the stringified dict contains 'document_titles', use it
-                if isinstance(possible_dict, dict) and "document_titles" in possible_dict:
-                    document_titles = possible_dict["document_titles"]
-                    documents = None
-            except Exception:
-                pass
 
         # La lógica para obtener account_id del run_manager ya no es necesaria aquí,
         # ya que se inyecta directamente en la instancia de la herramienta.

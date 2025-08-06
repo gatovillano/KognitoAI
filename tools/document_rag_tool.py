@@ -8,6 +8,7 @@ un tema especificado por el usuario y metadatos opcionales, para dividirlo, incr
 vectorial del usuario. Es útil cuando un usuario sube un documento y desea que se guarde para referencia futura.
 """
 
+import asyncio
 import logging
 import os
 from typing import Any, Dict, List, Optional, Type
@@ -26,15 +27,6 @@ class DocumentRAGInput(BaseModel):
     extracted_text: str = Field(..., description="The complete text content extracted from the document.")
     file_name: str = Field(..., description="The original name of the document file.")
     topic: str = Field(..., description="The topic or category for this document, as specified by the user.")
-
-
-    workspace_id: Optional[str] = Field(
-        description="El ID del workspace (UUID en formato string) para asociar el documento a un workspace específico, si aplica.",
-        json_schema_extra={"type": "string"}
-    )
-    
-    # Use account_id as the universal identifier for the user account
-    account_id: str = Field(..., description="The unique universal identifier (UUID) of the user's account. This MUST be provided by the LLM.")
     metadata: Optional[Dict[str, Any]] = Field(
         None,
         description="Optional metadata for the document, e.g., {'author': 'John Doe', 'title': 'My Document'}"
@@ -55,13 +47,15 @@ class DocumentRAGTool(BaseTool):
     args_schema: type[BaseModel] = DocumentRAGInput
     return_direct: bool = False
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="El ID del workspace (UUID en formato string) para asociar el documento a un workspace específico, inyectado automáticamente.")
+    telegram_id: Optional[str] = Field(None, description="El ID de Telegram del usuario, inyectado automáticamente.")
+    thread_id: Optional[str] = Field(None, description="El ID del hilo de conversación, inyectado automáticamente.")
 
     async def _arun(
             self,
             extracted_text: str,
             file_name: str,
             topic: str,
-            workspace_id: Optional[str] = None,
             metadata: Optional[Dict[str, Any]] = None,
             **kwargs: Any
     ) -> ToolOutputWithSources:
@@ -89,7 +83,7 @@ class DocumentRAGTool(BaseTool):
             file_name=file_name,
             topic=topic,
             account_id=self.account_id,
-            workspace_id=workspace_id,
+            workspace_id=self.workspace_id,
             metadata=metadata_to_pass,
         )
 
@@ -99,3 +93,7 @@ class DocumentRAGTool(BaseTool):
             return ToolOutputWithSources(context_for_llm=message, sources=sources)
         else:
             return ToolOutputWithSources(context_for_llm=f"Error: No se pudo procesar el documento '{file_name}'.", sources=[])
+
+    def _run(self, *args: Any, **kwargs: Any) -> ToolOutputWithSources:
+        """Ejecuta la herramienta de forma síncrona (no recomendada)."""
+        return asyncio.run(self._arun(*args, **kwargs))

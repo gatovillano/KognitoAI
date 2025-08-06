@@ -1,5 +1,7 @@
 /* En: src/app/globals.css */
 
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -125,6 +127,9 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', sans-serif; /* Aplicar la nueva fuente */
+    font-weight: 300; /* Hacer la fuente más fina */
+    line-height: 1.75; /* Aumentar el espaciado entre líneas */
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }

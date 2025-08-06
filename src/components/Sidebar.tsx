@@ -30,11 +30,13 @@ interface ChatThread {
   isPinned?: boolean;
   platform?: string;
   workspace_id?: string | null;
+  created_at: string;
 }
 
 export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [pinnedThreads, setPinnedThreads] = useState<ChatThread[]>([]);
+  const [isToolsCollapsed, setIsToolsCollapsed] = useState(false);
   const [isPinnedCollapsed, setIsPinnedCollapsed] = useState(false);
   const [isRecentCollapsed, setIsRecentCollapsed] = useState(false);
   const { logout, user } = useAuth();
@@ -75,7 +77,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
         try {
           // Se obtienen todos los hilos y se filtran en el cliente para mayor consistencia.
           const response = await apiClient.get<ChatThread[]>('/api/threads');
-          const allThreads = response.data;
+          const allThreads = response.data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
           
           const filteredThreads = activeWorkspaceId
             ? allThreads.filter(thread => thread.workspace_id === activeWorkspaceId)
@@ -119,7 +121,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
       const payload = { workspace_id: activeWorkspaceId };
       const response = await apiClient.post<ChatThread>('/api/threads', payload);
       const newThread = response.data;
-      setThreads((prevThreads) => [newThread, ...prevThreads]);
+      setThreads((prevThreads) => [newThread, ...prevThreads].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
       router.push(`/chat/${newThread.id}`);
       if (onLinkClick) {
         onLinkClick();
@@ -192,11 +194,10 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
             variant={pathname === `/chat/${thread.id}` ? "secondary" : "ghost"}
             className={cn(
               "w-full font-normal items-start text-left transition-all duration-200 hover:bg-muted rounded-xl",
-              isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-8 py-1.5 px-2"
+              isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-auto py-1.5 px-2"
             )}
           >
             <div className="flex items-center">
-              <MessageSquare className={cn("h-3.5 w-3.5 flex-shrink-0", !isCollapsed && "mr-1.5")} />
               {!isCollapsed && thread.platform === 'telegram' && (
                 <div title="Telegram">
                   <Smartphone className="h-2.5 w-2.5 text-blue-500 mr-1 flex-shrink-0" />
@@ -293,53 +294,38 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
   return (
     <div className={cn("flex flex-col h-full", isCollapsed ? "items-center p-2" : "p-6")}>
       {/* Header del sidebar */}
-      <div className={cn("flex items-center w-full pb-6 mb-6 border-b border-border/50", isCollapsed ? "justify-center" : "justify-between")}>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <Image src="/logo-simple.png" alt="Kognito Logo" width={48} height={48} className="rounded-lg" />
-            <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-primary rounded-full border-2 border-background"></div>
-          </div>
-          {!isCollapsed && (
-            <div className="flex flex-col">
-              <span className="font-bold text-xl text-foreground">Kognito</span>
-              <span className="text-sm text-muted-foreground">AI Labs</span>
-            </div>
+      <div className={cn("flex items-center w-full pb-4 mb-2 border-b border-border/50", isCollapsed ? "justify-center" : "justify-start")}>
+        <Button
+          onClick={handleNewChat}
+          variant="default"
+          className={cn(
+            "w-full transition-all duration-200",
+            isCollapsed ? "h-9 w-9 p-0 rounded-xl" : "h-9 px-4 rounded-xl"
           )}
-        </div>
-        {!isCollapsed && (
-          <Button
-            onClick={handleNewChat}
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 hover:bg-primary/10 hover:text-primary rounded-xl transition-all duration-200"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
-        )}
+        >
+          <Plus className={cn("h-4 w-4", !isCollapsed && "mr-2")} />
+          {!isCollapsed && <span className="text-sm font-medium">Nuevo Chat</span>}
+        </Button>
       </div>
 
       {/* Sección de herramientas */}
-      <div className={cn("w-full", isCollapsed && "flex flex-col items-center")}>
+      <div className={cn("w-full mt-2", isCollapsed && "flex flex-col items-center")}>
         {!isCollapsed && (
-          <div className="flex items-center gap-2 mb-4 px-2">
-            <div className="w-1 h-1 rounded-full bg-primary"></div>
-            <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Herramientas</p>
-          </div>
+            <div className="flex items-center justify-between mb-3 px-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Herramientas</p>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="p-0 h-6 w-6 rounded-full hover:bg-muted" 
+                onClick={() => setIsToolsCollapsed(!isToolsCollapsed)}
+              >
+                {isToolsCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              </Button>
+            </div>
         )}
-        <nav className="space-y-1 w-full">
-          <Link href="/chat" passHref onClick={onLinkClick} title="Chat">
-            <Button
-              variant={pathname?.startsWith('/chat') ? 'secondary' : 'ghost'}
-              className={cn(
-                "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
-                isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                pathname?.startsWith('/chat') && "bg-primary/10 text-primary border border-primary/20"
-              )}
-            >
-              <MessageSquare className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Chat</span>}
-            </Button>
-          </Link>
+        {!isToolsCollapsed && (
+        <nav className="space-y-0.5 w-full">
+          
           <Link href="/dashboard" passHref onClick={onLinkClick} title="Escritorio">
             <Button
               variant={pathname?.startsWith('/dashboard') ? 'secondary' : 'ghost'}
@@ -349,8 +335,8 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                 pathname?.startsWith('/dashboard') && "bg-primary/10 text-primary border border-primary/20"
               )}
             >
-              <Bot className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Escritorio</span>}
+              <FolderKanban className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
+              {!isCollapsed && <span className="text-xs font-medium">Escritorio</span>}
             </Button>
           </Link>
           <Link href="/rag" passHref onClick={onLinkClick} title="Gestión de Conocimientos">
@@ -363,7 +349,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <BookMarked className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Conocimientos</span>}
+              {!isCollapsed && <span className="text-xs font-medium">Conocimientos</span>}
             </Button>
           </Link>
           <Link href="/agenda" passHref onClick={onLinkClick} title="Agenda">
@@ -376,7 +362,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <Calendar className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Agenda</span>}
+              {!isCollapsed && <span className="text-xs font-medium">Agenda</span>}
             </Button>
           </Link>
           <Link href="/notes" passHref onClick={onLinkClick} title="Notas">
@@ -389,7 +375,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <Notebook className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Notas</span>}
+              {!isCollapsed && <span className="text-xs font-medium">Notas</span>}
             </Button>
           </Link>
           <Link href="/analysis" passHref onClick={onLinkClick} title="Análisis">
@@ -402,7 +388,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <BarChart3 className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Análisis</span>}
+              {!isCollapsed && <span className="text-xs font-medium">Análisis</span>}
             </Button>
           </Link>
           <Link href="/teams" passHref onClick={onLinkClick} title="Equipos">
@@ -415,7 +401,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <Users className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Equipos</span>}
+              {!isCollapsed && <span className="text-xs font-medium">Equipos</span>}
             </Button>
           </Link>
           <Link href="/workspaces" passHref onClick={onLinkClick} title="Workspaces">
@@ -428,15 +414,19 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <Bot className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-sm font-medium">Workspaces</span>}
+              {!isCollapsed && <span className="text-xs font-medium">Workspaces</span>}
             </Button>
           </Link>
         </nav>
+        )}
+        
+      </div>
+
+      <ScrollArea className="flex-grow w-full">
         {!isCollapsed && (
-          <div className="mt-8 mb-6">
+          <div className="mt-4 mb-6">
             <div className="flex items-center justify-between gap-2 mb-4 px-2">
               <div className="flex items-center gap-2">
-                <div className="w-1 h-1 rounded-full bg-primary"></div>
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Conversaciones</p>
               </div>
               <DropdownMenu>
@@ -453,52 +443,9 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
-            <div className="px-2 space-y-1.5">
-              <input
-                type="text"
-                placeholder="Buscar conversaciones..."
-                value={searchTerm}
-                onChange={handleSearchChange}
-                className="w-full py-1.5 px-3 text-xs rounded-full bg-muted/50 border border-border/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 text-foreground placeholder:text-muted-foreground transition-all duration-200"
-              />
-              <div className="flex gap-0.5">
-                <Button
-                  variant={platformFilter === 'all' ? 'secondary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setPlatformFilter('all')}
-                  className="flex-1 text-xs h-7"
-                >
-                  Todos
-                </Button>
-                <Button
-                  variant={platformFilter === 'web' ? 'secondary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setPlatformFilter('web')}
-                  className="flex-1 text-xs h-7"
-                >
-                  Web
-                </Button>
-                <Button
-                  variant={platformFilter === 'telegram' ? 'secondary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setPlatformFilter('telegram')}
-                  className="flex-1 text-xs h-7 flex items-center gap-0.5"
-                >
-                  <Smartphone className="h-3 w-3" />
-                  Telegram
-                </Button>
-              </div>
-            </div>
+            
           </div>
         )}
-        {isCollapsed && (
-          <Button onClick={handleNewChat} variant="ghost" size="icon" className="mb-2 h-7 w-7 rounded-full hover:bg-muted" title="Nuevo Chat">
-            <Plus className="h-3 w-3" />
-          </Button>
-        )}
-      </div>
-
-      <ScrollArea className="flex-grow w-full">
         <DndProvider backend={HTML5Backend}>
           {!isCollapsed && (
             <div className="flex items-center justify-between mb-3 px-2">
