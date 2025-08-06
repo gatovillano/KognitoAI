@@ -31,12 +31,21 @@ class ProfileUpdateInput(BaseModel):
     Define el esquema de entrada para la herramienta de actualización de perfil.
     Valida que los argumentos necesarios, especialmente el `account_id`, sean proporcionados.
     """
+
     # El cambio más importante: requerimos el identificador universal.
     # Los demás campos son opcionales, permitiendo actualizaciones parciales del perfil.
     nombre: Optional[str] = Field(default=None, description="El nombre del usuario.")
-gustos: Optional[str] = Field(default=None, description="Los gustos o preferencias del usuario.")
-intereses: Optional[str] = Field(default=None, description="Los intereses o hobbies del usuario.")
-otros_datos: Optional[str] = Field(default=None, description="Cualquier otra información relevante sobre el usuario.")
+
+
+gustos: Optional[str] = Field(
+    default=None, description="Los gustos o preferencias del usuario."
+)
+intereses: Optional[str] = Field(
+    default=None, description="Los intereses o hobbies del usuario."
+)
+otros_datos: Optional[str] = Field(
+    default=None, description="Cualquier otra información relevante sobre el usuario."
+)
 
 
 class UpdateProfileTool(BaseTool):
@@ -44,6 +53,7 @@ class UpdateProfileTool(BaseTool):
     Una herramienta de LangChain que se conecta a la función `update_user_profile`
     para guardar o actualizar la información del perfil de un usuario en la base de datos.
     """
+
     name: str = "update_user_profile"
     description: str = (
         "Útil cuando el usuario proporciona información personal sobre sí mismo, como su nombre, gustos, "
@@ -61,7 +71,7 @@ class UpdateProfileTool(BaseTool):
         gustos: Optional[str] = None,
         intereses: Optional[str] = None,
         otros_datos: Optional[str] = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
@@ -81,26 +91,37 @@ class UpdateProfileTool(BaseTool):
         # Construir un diccionario solo con los datos que fueron proporcionados.
         # Esto evita sobreescribir campos existentes con None si no se especifican.
         update_data = {
-            k: v for k, v in {
+            k: v
+            for k, v in {
                 "nombre": nombre,
                 "gustos": gustos,
                 "intereses": intereses,
-                "otros_datos": otros_datos
-            }.items() if v is not None
+                "otros_datos": otros_datos,
+            }.items()
+            if v is not None
         }
 
         if not update_data:
-            logger.warning(f"UpdateProfileTool fue llamada para la cuenta '{self.account_id}' pero no se proporcionaron datos para actualizar.")
-            return "No se proporcionó información específica del perfil para actualizar."
+            logger.warning(
+                f"UpdateProfileTool fue llamada para la cuenta '{self.account_id}' pero no se proporcionaron datos para actualizar."
+            )
+            return (
+                "No se proporcionó información específica del perfil para actualizar."
+            )
 
         try:
             # Llama a la función de lógica de negocio, que ahora debe ser actualizada
             # para aceptar 'account_id' en lugar de 'telegram_id'.
             await update_user_profile(account_id=self.account_id, **update_data)
-            logger.info(f"Perfil actualizado exitosamente para la cuenta '{self.account_id}'.")
+            logger.info(
+                f"Perfil actualizado exitosamente para la cuenta '{self.account_id}'."
+            )
             return "La información de tu perfil ha sido actualizada."
         except Exception as e:
-            logger.error(f"Error en UpdateProfileTool para la cuenta '{self.account_id}': {e}", exc_info=True)
+            logger.error(
+                f"Error en UpdateProfileTool para la cuenta '{self.account_id}': {e}",
+                exc_info=True,
+            )
             return f"Ocurrió un error inesperado al actualizar tu perfil: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

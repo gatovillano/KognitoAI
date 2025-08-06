@@ -38,11 +38,6 @@ class MemoryAddInput(BaseModel):
         ...,
         description="El texto o información específica que debe ser guardado en la memoria a largo plazo."
     )
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
-    # El 'type' ahora es una clasificación general de la memoria.
     type: str = Field(
         "user_memory", # Valor por defecto más específico para memorias del usuario
         description=(
@@ -50,7 +45,6 @@ class MemoryAddInput(BaseModel):
             "'chat_summary' (para resúmenes de conversaciones), 'document_chunk' (para fragmentos de documentos)."
         )
     )
-    # Añadimos 'category' para una clasificación más específica, que irá en los metadatos.
     category: Optional[str] = Field(
         None,
         description=(
@@ -60,11 +54,6 @@ class MemoryAddInput(BaseModel):
             "Ejemplos si 'type' es 'chat_summary': 'resolucion_problema', 'planificacion_proyecto', 'discusion_general'. "
             "Si no es aplicable o no se puede inferir, déjalo como None."
         )
-    )
-    # Añadimos 'workspace_id' para asociar la memoria con un workspace específico.
-    workspace_id: Optional[str] = Field(
-        None,
-        description="El identificador del workspace (UUID en formato string) para asociar la memoria con un workspace específico, si aplica."
     )
 
 
@@ -85,9 +74,12 @@ class MemoryAddTool(BaseTool):
     )
     args_schema: Type[BaseModel] = MemoryAddInput
     return_direct: bool = False
-    account_id: str
+    account_id: str = Field(..., description="El identificador de la cuenta (UUID en formato string) para asociar la memoria, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="El identificador del workspace (UUID en formato string) para asociar la memoria con un workspace específico, inyectado automáticamente.")
+    telegram_id: Optional[str] = Field(None, description="El identificador de Telegram del usuario, inyectado automáticamente si la herramienta se usa en un contexto de Telegram.")
+    thread_id: Optional[str] = Field(None, description="El identificador del hilo de conversación, inyectado automáticamente.")
 
-    async def _arun(self, content: str, type: Optional[str] = "user_memory", category: Optional[str] = None, workspace_id: Optional[str] = None, run_manager: Optional[Any] = None, **kwargs: Any) -> str:
+    async def _arun(self, content: str, type: Optional[str] = "user_memory", category: Optional[str] = None, run_manager: Optional[Any] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -95,7 +87,6 @@ class MemoryAddTool(BaseTool):
             content: El contenido de la memoria a guardar.
             type: El tipo general de memoria a guardar (ej. 'user_memory').
             category: La categoría específica de la memoria (ej. 'interes').
-            workspace_id: El ID del workspace para asociar la memoria (opcional).
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
@@ -109,7 +100,7 @@ class MemoryAddTool(BaseTool):
             return "No se puede guardar contenido vacío en la memoria."
 
         log_content = content[:100] + '...' if len(content) > 100 else content
-        logger.info(f"Ejecutando MemoryAddTool para la cuenta '{self.account_id}' (Tipo: {type}, Categoría: {category}, Workspace: {workspace_id}): '{log_content}'")
+        logger.info(f"Ejecutando MemoryAddTool para la cuenta '{self.account_id}' (Tipo: {type}, Categoría: {category}, Workspace: {self.workspace_id}, Telegram ID: {self.telegram_id}, Thread ID: {self.thread_id}): '{log_content}'")
 
         try:
             final_type = type if type else "user_memory"
@@ -117,7 +108,9 @@ class MemoryAddTool(BaseTool):
                 account_id=self.account_id,
                 content=content,
                 type=final_type,
-                workspace_id=workspace_id,
+                workspace_id=self.workspace_id,
+                telegram_id=self.telegram_id,
+                thread_id=self.thread_id,
                 topic=category if category else "general"
             )
             logger.info(f"Memoria añadida exitosamente para la cuenta '{self.account_id}'.")

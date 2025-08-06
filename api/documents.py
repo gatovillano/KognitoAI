@@ -11,7 +11,7 @@ class DeleteDocumentRequest(BaseModel):
     workspace_id: Optional[str] = None
 
 
-from fastapi import APIRouter, HTTPException, Depends, status, Form, File, UploadFile, Body, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, status, Form, File, UploadFile, Body, BackgroundTasks, Query
 from pydantic import BaseModel
 from sqlalchemy import select, text, update
 import asyncio
@@ -40,42 +40,40 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 async def process_upload_task(task_id: str, account_id: str, file_data_list: List[dict], topic: str, workspace_id: Optional[str] = None):
-    """Función que procesa la subida de documentos en segundo plano."""
+    """
+    Función que procesa la subida de documentos en segundo plano de forma paralela.
+    """
     async with SessionLocal() as db_session:
         try:
             # 1. Marcar la tarea como 'processing'
             stmt_processing = update(UploadTask).where(UploadTask.id == uuid.UUID(task_id)).values(
                 status="processing",
-                progress=0
+                progress=5  # Progreso inicial
             )
             await db_session.execute(stmt_processing)
             await db_session.commit()
-
             logger.info(f"Iniciando procesamiento de subida para tarea {task_id}...")
 
-            processed_files = 0
             total_files = len(file_data_list)
-
-            for i, file_data in enumerate(file_data_list):
+            processed_files_count = 0
+            
+            # Función auxiliar para procesar un solo archivo
+            async def _process_single_file(file_data: dict) -> bool:
                 try:
-                    # Actualizar progreso
-                    progress = int((i / total_files) * 90)  # Hasta 90% durante el procesamiento
-                    stmt_progress = update(UploadTask).where(UploadTask.id == uuid.UUID(task_id)).values(
-                        progress=progress
-                    )
-                    await db_session.execute(stmt_progress)
-                    await db_session.commit()
-
-                    # Procesar el archivo
-                    file_name_str = file_data['filename'] if file_data['filename'] is not None else "unknown_file"
-                    extracted_text, metadata = extract_text_and_metadata_from_document(
+                    file_name_str = file_data.get('filename', "unknown_file")
+                    
+                    # Ejecutar la función sincrónica en un executor para no bloquear el bucle de eventos
+                    loop = asyncio.get_running_loop()
+                    extracted_text, metadata = await loop.run_in_executor(
+                        None,  # Usa el ThreadPoolExecutor por defecto
+                        extract_text_and_metadata_from_document,
                         file_name_str,
                         file_data['content']
                     )
 
                     if not extracted_text:
-                        logger.warning(f"No se pudo extraer texto del archivo '{file_data['filename']}'. Omitiendo.")
-                        continue
+                        logger.warning(f"No se pudo extraer texto del archivo '{file_name_str}'. Omitiendo.")
+                        return False
 
                     await process_document_for_rag(
                         account_id=account_id,
@@ -85,17 +83,35 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
                         metadata={"original_filename": file_name_str},
                         workspace_id=workspace_id
                     )
-                    processed_files += 1
-
+                    return True
                 except Exception as e:
-                    logger.error(f"Error al procesar archivo {file_data['filename']}: {e}", exc_info=True)
+                    logger.error(f"Error al procesar archivo {file_data.get('filename', 'unknown')}: {e}", exc_info=True)
+                    return False
+
+            # Crear y ejecutar tareas en paralelo
+            tasks = [_process_single_file(file_data) for file_data in file_data_list]
+            
+            # Usar asyncio.as_completed para actualizar el progreso a medida que terminan
+            for i, task_future in enumerate(asyncio.as_completed(tasks)):
+                result = await task_future
+                if result:
+                    processed_files_count += 1
+                
+                # Actualizar progreso en la base de datos
+                progress = 5 + int(((i + 1) / total_files) * 90)
+                async with SessionLocal() as progress_session:
+                    stmt_progress = update(UploadTask).where(UploadTask.id == uuid.UUID(task_id)).values(
+                        progress=progress
+                    )
+                    await progress_session.execute(stmt_progress)
+                    await progress_session.commit()
 
             # 2. Marcar la tarea como completada
             result_payload = {
-                "processed_files": processed_files,
+                "processed_files": processed_files_count,
                 "total_files": total_files,
                 "topic": topic,
-                "message": f"{processed_files}/{total_files} archivo(s) procesado(s) y añadido(s) a la colección '{topic}'."
+                "message": f"{processed_files_count}/{total_files} archivo(s) procesado(s) y añadido(s) a la colección '{topic}'."
             }
 
             stmt_completed = update(UploadTask).where(UploadTask.id == uuid.UUID(task_id)).values(
@@ -222,18 +238,18 @@ async def upload_chat_file_endpoint(
         raise HTTPException(status_code=500, detail="No se pudo procesar ninguno de los archivos.")
     return {"message": f"{processed_files}/{len(files)} archivo(s) subido(s) y procesado(s) para el contexto del hilo {thread_id}."}
 
-@router.post("/list-documents")
+@router.get("/list-documents")
 async def list_documents_endpoint(
     current_account_id: str = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db),
-    topic: Optional[str] = Body(None), # Recibe el topic directamente
-    workspace_id: Optional[str] = Body(None)
+    topic: Optional[str] = Query(None), # Recibe el topic directamente
+    workspace_id: Optional[str] = Query(None)
 ):
-    """Lista los documentos subidos por el usuario, incluyendo documentos compartidos con equipos. 
+    """Lista los documentos subidos por el usuario, incluyendo documentos compartidos con equipos.
     Opcionalmente filtra por topic específico. Protegido por JWT."""
     account_id_uuid = uuid.UUID(current_account_id)
     topic_filter = topic # Ahora el topic ya viene directamente
-    logger.info(f"list_documents_endpoint called with account_id={current_account_id}, topic_filter={topic_filter}, workspace_id={workspace_id}")
+    logger.info(f"DEBUG_API: list_documents_endpoint called with account_id={current_account_id}, topic_filter={topic_filter}, workspace_id={workspace_id}")
     
     # Usar list_user_documents para filtrar por workspace_id
     # Si workspace_id es None, list_user_documents listará documentos con workspace_id IS NULL
@@ -245,7 +261,7 @@ async def list_documents_endpoint(
         workspace_id=workspace_id
     )
     
-    logger.info(f"Documents found for account {current_account_id} (topic: {topic_filter}, workspace_id: {workspace_id}): {len(documents)} documents")
+    logger.info(f"DEBUG_API: Documents found for account {current_account_id} (topic: {topic_filter}, workspace_id: {workspace_id}): {len(documents)} documents")
     
     return documents
 
@@ -291,7 +307,6 @@ class UpdateMetadataRequest(BaseModel):
     file_name: str
     new_title: Optional[str] = None
     new_topic: Optional[str] = None
-    workspace_id: Optional[str] = None
 
 @router.post("/update-document-metadata")
 async def update_document_metadata_endpoint(
@@ -306,8 +321,7 @@ async def update_document_metadata_endpoint(
         str(account_id_uuid), 
         request.file_name, 
         request.new_title, 
-        request.new_topic,
-        workspace_id=request.workspace_id
+        request.new_topic
     )
     if not success:
         raise HTTPException(status_code=404, detail="Documento no encontrado o no actualizado.")
@@ -344,6 +358,142 @@ class UpdateCollectionRequest(BaseModel):
     new_description: Optional[str] = None
     workspace_id: Optional[str] = None
     team_id: Optional[str] = None
+
+# --- Modelos Pydantic para Colecciones ---
+class CollectionResponse(BaseModel):
+    id: str
+    name: str
+    document_count: int
+
+class CollectionCreateRequest(BaseModel):
+    topic: str
+    description: Optional[str] = None
+    workspaceId: Optional[str] = None # Añadido para recibir el workspaceId del frontend
+
+class DocumentToCollectionRequest(BaseModel):
+    document_id: str
+
+class DocumentResponse(BaseModel):
+    file_name: str
+    topic: Optional[str] = None
+    title: Optional[str] = None
+    author: Optional[str] = None
+    document_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    team_id: Optional[str] = None
+
+# --- Endpoints para Colecciones ---
+@router.get("/collections/{collection_id}", response_model=CollectionResponse, summary="Obtener detalles de una colección")
+async def get_collection_details(collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
+    logger.info(f"API: get_collection_details - collection_id: {collection_id}, account_id: {current_account_id}, workspace_id: {workspace_id}")
+    
+    decoded_collection_id = unquote(collection_id)
+    logger.info(f"API: get_collection_details - decoded_collection_id: {decoded_collection_id}")
+    
+    collections = await list_user_collections(account_id=current_account_id, workspace_id=workspace_id)
+    logger.info(f"API: get_collection_details - collections found: {len(collections)}")
+    
+    collection = None
+    for c in collections:
+        if c.get('topic') == decoded_collection_id:
+            collection = c
+            break
+            
+    if not collection:
+        logger.warning(f"API: get_collection_details - Colección '{decoded_collection_id}' no encontrada.")
+        logger.warning(f"API: get_collection_details - Colección '{decoded_collection_id}' no encontrada para la cuenta {current_account_id} y workspace {workspace_id}.")
+        raise HTTPException(status_code=404, detail=f"Colección '{decoded_collection_id}' no encontrada.")
+    
+    logger.info(f"API: get_collection_details - Returning collection: {collection}")
+    return CollectionResponse(id=collection['topic'], name=collection['topic'], document_count=collection['document_count'])
+ 
+@router.get("/collections/{collection_id}/documents", response_model=List[DocumentResponse], summary="Listar documentos de una colección")
+async def list_collection_documents(collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
+    logger.info(f"API: list_collection_documents - collection_id: {collection_id}, account_id: {current_account_id}, workspace_id: {workspace_id}")
+    try:
+        decoded_collection_id = unquote(collection_id)
+        logger.info(f"API: list_collection_documents - decoded_collection_id: {decoded_collection_id}")
+ 
+        documents = await list_user_documents(account_id=current_account_id, workspace_id=workspace_id, topic=decoded_collection_id)
+        logger.info(f"API: list_collection_documents - documents found: {len(documents)}")
+        return [DocumentResponse(**doc) for doc in documents]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"API: list_collection_documents - Error al listar documentos de la colección '{decoded_collection_id}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error al listar documentos de la colección.")
+
+@router.get("/collections", response_model=List[CollectionResponse], summary="Listar colecciones del usuario")
+async def list_collections(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
+    logger.info(f"API: list_collections - Listando colecciones para account_id: {current_account_id}, workspace_id recibido: {workspace_id}")
+    collections = await list_user_collections(account_id=current_account_id, workspace_id=workspace_id)
+    logger.info(f"API: list_collections - Collections retrieved from memory_manager: {collections}")
+    return [CollectionResponse(id=c['topic'], name=c['topic'], document_count=c['document_count']) for c in collections]
+ 
+@router.post("/collections", status_code=status.HTTP_201_CREATED, summary="Crear una nueva colección")
+async def create_collection(request: CollectionCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+    logger.info(f"API: create_collection - Petición para crear colección: {request.topic}, description: {request.description}, workspaceId: {request.workspaceId}, account: {current_account_id}")
+    from core.memory_manager import create_empty_collection
+    success = await create_empty_collection(
+        account_id=current_account_id,
+        topic_name=request.topic,
+        description=request.description,
+        workspace_id=request.workspaceId
+    )
+    if not success:
+        logger.error(f"API: create_collection - No se pudo crear la colección o ya existe: {request.topic}")
+        raise HTTPException(status_code=400, detail="No se pudo crear la colección o ya existe.")
+    logger.info(f"API: create_collection - Colección '{request.topic}' creada y asociada al workspace {request.workspaceId if request.workspaceId else 'global'} con éxito.")
+    return {"message": f"Colección '{request.topic}' creada y lista para ser usada en el workspace {request.workspaceId if request.workspaceId else 'global'}."}
+ 
+@router.post("/collections/{collection_id}/associate", status_code=status.HTTP_200_OK, summary="Asociar una colección existente a un workspace")
+async def associate_collection_to_workspace(collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
+    logger.info(f"API: associate_collection_to_workspace - collection_id: {collection_id}, account_id: {current_account_id}, workspace_id: {workspace_id}")
+    from core.memory_manager import update_collection_workspace
+    
+    if not workspace_id:
+        logger.error("API: associate_collection_to_workspace - Se requiere un workspace_id para asociar una colección.")
+        raise HTTPException(status_code=400, detail="Se requiere un workspace_id para asociar una colección.")
+    
+    decoded_collection_id = unquote(collection_id)
+    logger.info(f"API: associate_collection_to_workspace - decoded_collection_id: {decoded_collection_id}")
+    success = await update_collection_workspace(current_account_id, decoded_collection_id, workspace_id)
+    if not success:
+        logger.error(f"API: associate_collection_to_workspace - Colección no encontrada o no se pudo asociar al workspace: {decoded_collection_id}")
+        raise HTTPException(status_code=404, detail="Colección no encontrada o no se pudo asociar al workspace.")
+    
+    logger.info(f"API: associate_collection_to_workspace - Colección '{decoded_collection_id}' asociada al workspace con éxito.")
+    return {"message": f"Colección '{decoded_collection_id}' asociada al workspace con éxito.", "id": decoded_collection_id, "workspace_id": workspace_id}
+ 
+@router.post("/collections/{topic}/documents", status_code=status.HTTP_201_CREATED, summary="Añadir un documento a una colección")
+async def add_document_to_collection(
+    topic: str,
+    file: UploadFile = File(...),
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+    workspace_id: Optional[str] = Query(None)
+):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="El nombre del archivo no puede estar vacío.")
+
+    logger.info(f"API: add_document_to_collection - topic: {topic}, file_name: {file.filename}, account_id: {current_account_id}, workspace_id: {workspace_id}")
+    
+    # Decodificar el topic si viene codificado en la URL
+    decoded_topic = unquote(topic)
+
+    # Leer el contenido del archivo
+    file_content = await file.read()
+    
+    # Llamar a la función de procesamiento de documentos
+    await process_document_for_rag(
+        file_name=file.filename,
+        extracted_text=file_content.decode('utf-8'), # Asumimos UTF-8, ajustar si es necesario
+        account_id=current_account_id,
+        topic=decoded_topic,
+        workspace_id=workspace_id
+    )
+    logger.info(f"Documento '{file.filename}' subido y procesado exitosamente en la colección '{decoded_topic}' para el workspace '{workspace_id}'.")
+    return {"message": f"Documento {file.filename} añadido a la colección '{decoded_topic}'."}
 
 @router.post("/extract-title", summary="Extraer títulos de documentos y actualizar metadatos")
 async def extract_titles_endpoint(request: ExtractTitleRequest, current_account_id: str = Depends(get_current_account_id)):
@@ -437,7 +587,7 @@ async def update_collection_endpoint(
         await db.rollback()
         raise HTTPException(status_code=500, detail="Error al actualizar la colección.")
 
-@router.post("/list-collections", summary="Listar las colecciones de conocimiento")
+@router.get("/list-collections", summary="Listar las colecciones de conocimiento")
 async def list_collections_endpoint(current_account_id: str = Depends(get_current_account_id)):
     """
     Devuelve una lista de todas las colecciones (temas) únicas de un usuario
@@ -677,7 +827,9 @@ async def process_knowledge_graph_endpoint(
                     "dataset_name": f"kognito_{current_account_id}"
                 }
                 result = await tool._arun(
-                    tool_input_json=json.dumps(tool_input)
+                    action=tool_input["action"],
+                    documents=tool_input.get("documents"),
+                    dataset_name=tool_input.get("dataset_name", f"kognito_{current_account_id}")
                 )
                 logger.info(f"Procesamiento de grafo completado para {current_account_id}: {result}")
             except Exception as e:

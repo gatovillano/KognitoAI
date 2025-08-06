@@ -15,6 +15,7 @@ from api.notes import router as notes_router
 from api.agenda import router as agenda_router
 from api.teams import router as teams_router
 from api.knowledge_graph import router as knowledge_graph_router
+from api.search import router as search_router
 from core.config import settings
 from core.database import create_tables
 from core.llm_manager import initialize_llms
@@ -23,7 +24,7 @@ from utils.security import decode_access_token
 from utils.embeddings import initialize_embeddings
 from utils.ascii_logo import print_startup_logo
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 logger.propagate = False # Evitar la duplicación de logs del logger principal
 
@@ -32,7 +33,7 @@ from utils.llm_logging_config import setup_llm_detailed_logging, create_llm_log_
 
 # Configurar logging detallado del LLM
 setup_llm_detailed_logging(
-    log_level="INFO",
+    log_level="DEBUG",
     log_file=create_llm_log_filename()
 )
 
@@ -158,6 +159,7 @@ app.include_router(telegram_router, prefix="", tags=["telegram"])
 app.include_router(logs_router, prefix="/api", tags=["logs"])
 app.include_router(scheduled_tools_router, prefix="/api", tags=["scheduled-tools"])
 app.include_router(knowledge_graph_router, prefix="/api", tags=["knowledge-graph"])
+app.include_router(search_router, prefix="/api", tags=["search"])
 
 if __name__ == "__main__":
     import uvicorn

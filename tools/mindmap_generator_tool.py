@@ -5,7 +5,7 @@ from pydantic import Field
 
 import asyncio
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from langchain_core.tools import Tool
 
@@ -26,7 +26,6 @@ class MindmapGeneratorInput(BaseModel):
     document_content: str = Field(..., description="El contenido del documento a analizar.")
     concept_query: str = Field(default="temas clave", description="La consulta para extraer los conceptos clave (ej. 'temas principales', 'conceptos clave').")
     topic_hint: str = Field(default="", description="Una pista sobre el tema principal del documento.")
-    account_id: str = Field(..., description="El ID de la cuenta del usuario para asociar el mapa mental.") # <--- AÑADIR ESTA LÍNEA
 class MindmapGeneratorTool(BaseTool):
     name: str = Field(default="mindmap_generator", description="Nombre de la herramienta")
     description: str = Field(default="""
@@ -41,13 +40,13 @@ class MindmapGeneratorTool(BaseTool):
         Una cadena Base64 de la imagen PNG generada, o una cadena vacía si hay un error.
     """, description="Descripción de la herramienta")
     args_schema: Type[BaseModel] = MindmapGeneratorInput
-    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
+    account_id: Optional[str] = Field(None, description="ID de la cuenta asociada a esta herramienta, inyectado automáticamente.")
 
-    def __init__(self, account_id: str = "", **kwargs):
+    def __init__(self, account_id: Optional[str] = None, **kwargs):
         super().__init__(**kwargs)
         self.account_id = account_id
 
-    async def _arun(self, document_content: str, account_id: str, concept_query: str = "temas clave", topic_hint: str = "") -> str:
+    async def _arun(self, document_content: str, concept_query: str = "temas clave", topic_hint: str = "") -> str:
         """
         Ejecuta la herramienta de generación de mapas mentales de forma asíncrona.
         """

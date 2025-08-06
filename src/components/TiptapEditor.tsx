@@ -31,7 +31,7 @@ const Toolbar = ({ editor }: { editor: any }) => {
 };
 
 // --- El Editor Principal ---
-export function TiptapEditor({ content, onChange }: { content: string; onChange: (html: string) => void }) {
+export function TiptapEditor({ content, onChange, containerClassName }: { content: string; onChange: (html: string) => void; containerClassName?: string }) {
   const debounceTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
   const editor = useEditor({
@@ -60,7 +60,7 @@ export function TiptapEditor({ content, onChange }: { content: string; onChange:
     content: content,
     editorProps: {
       attributes: {
-        class: 'prose prose-invert dark:prose-invert min-h-[300px] max-w-full rounded-b-md border p-4 focus:outline-none',
+        class: `prose prose-invert dark:prose-invert max-w-full rounded-b-md border p-4 focus:outline-none ${containerClassName || 'min-h-[300px]'}`,
       },
     },
     onUpdate({ editor }) {

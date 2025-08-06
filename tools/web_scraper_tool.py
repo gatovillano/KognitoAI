@@ -60,6 +60,11 @@ class WebScraperTool(BaseTool):
         "Úsala cuando el usuario proporcione una URL y quiera que la analices, resumas o respondas "
         "preguntas sobre su contenido. La entrada DEBE ser una URL válida."
     )
+    # Atributos de contexto estandarizados
+    account_id: Optional[str] = Field(None, description="ID de la cuenta del usuario.")
+    workspace_id: Optional[str] = Field(None, description="ID del espacio de trabajo actual.")
+    telegram_id: Optional[str] = Field(None, description="ID de Telegram del usuario, si aplica.")
+    thread_id: Optional[str] = Field(None, description="ID del hilo de conversación, si aplica.")
     args_schema: Type[BaseModel] = WebScraperInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
 

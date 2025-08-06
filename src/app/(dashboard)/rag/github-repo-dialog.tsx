@@ -41,7 +41,7 @@ export function GitHubRepoDialog({ isOpen, onOpenChange, onSuccess }: GitHubRepo
       const fetchData = async () => {
         try {
           const [collectionsResponse, workspacesResponse] = await Promise.all([
-            apiClient.post("/api/list-collections"),
+            apiClient.get("/api/collections"),
             apiClient.get("/api/workspaces")
           ]);
           setCollections(collectionsResponse.data);
@@ -134,12 +134,12 @@ export function GitHubRepoDialog({ isOpen, onOpenChange, onSuccess }: GitHubRepo
           </div>
           <div>
             <Label htmlFor="workspace-select">Workspace (opcional)</Label>
-            <Select value={selectedWorkspace || ""} onValueChange={setSelectedWorkspace}>
+            <Select value={selectedWorkspace || "personal"} onValueChange={(value) => setSelectedWorkspace(value === "personal" ? null : value)}>
               <SelectTrigger id="workspace-select">
                 <SelectValue placeholder="Seleccionar workspace o dejar en blanco para uso personal" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Personal (sin workspace)</SelectItem>
+                <SelectItem value="personal">Personal (sin workspace)</SelectItem>
                 {workspaces.map((workspace) => (
                   <SelectItem key={workspace.id} value={workspace.id}>
                     {workspace.name}

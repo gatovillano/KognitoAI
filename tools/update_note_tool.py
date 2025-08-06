@@ -1,7 +1,7 @@
 # tools/update_note_tool.py
 
 import logging
-from typing import Type, Optional, Any
+from typing import Type, Optional, Any, Union
 
 from langchain_core.tools import BaseTool
 from pydantic.v1 import BaseModel, Field
@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 
 class UpdateNoteInput(BaseModel):
     note_id: int = Field(..., description="El ID numérico de la nota a modificar.")
-    new_content: Optional[str] = Field(None, description="El nuevo contenido para la nota.")
-    new_title: Optional[str] = Field(None, description="El nuevo título para la nota.")
-    new_category: Optional[str] = Field(None, description="La nueva categoría para la nota.")
+    new_content: Union[str, None] = Field(None, description="El nuevo contenido para la nota.")
+    new_title: Union[str, None] = Field(None, description="El nuevo título para la nota.")
+    new_category: Union[str, None] = Field(None, description="La nueva categoría para la nota.")
 
 class UpdateNoteTool(BaseTool):
     name: str = "update_note_tool"
@@ -55,5 +55,5 @@ class UpdateNoteTool(BaseTool):
             logger.error(f"Error en UpdateNoteTool para cuenta {self.account_id[:8]}: {e}", exc_info=True)
             return f"Ocurrió un error inesperado al actualizar la nota: {e}"
 
-    def _run(self, *args: Any, **kwargs: Any) -> Any:
+    def _run(self, **kwargs: Any) -> Any:
         raise NotImplementedError("La herramienta 'update_note_tool' solo soporta ejecución asíncrona.")

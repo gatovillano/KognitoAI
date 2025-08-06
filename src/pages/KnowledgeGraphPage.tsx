@@ -1,18 +1,26 @@
-// frontend/src/pages/KnowledgeGraphPage.jsx
+'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Box, Button, Typography, Paper } from '@mui/material';
+import { useParams, useRouter } from 'next/navigation';
+import { Box, Typography, Paper } from '@mui/material';
 import { Settings as SettingsIcon } from '@mui/icons-material';
-import KnowledgeGraphViewer from '../components/KnowledgeGraph/KnowledgeGraphViewer';
-import { useKnowledgeGraph } from '../hooks/useKnowledgeGraph';
-import { useWorkspaces } from '../hooks/useWorkspaces';
+import { Button } from '@/components/ui/button';
+import KnowledgeGraphViewer from '@/components/KnowledgeGraph/KnowledgeGraphViewer';
+import { useKnowledgeGraph } from '@/hooks/useKnowledgeGraph';
+import { useWorkspaces } from '@/hooks/useWorkspaces';
+import { type Node } from 'reactflow';
 import './KnowledgeGraphPage.css';
 
+interface CustomNodeData {
+  label: string;
+  type: string;
+}
+
 const KnowledgeGraphPage = () => {
-  const { workspaceId } = useParams();
-  const navigate = useNavigate();
-  const [selectedNode, setSelectedNode] = useState(null);
+  const params = useParams();
+  const workspaceId = params?.id as string;
+  const router = useRouter();
+  const [selectedNode, setSelectedNode] = useState<Node<CustomNodeData> | null>(null);
   const [showProcessingModal, setShowProcessingModal] = useState(false);
 
   // Hooks
@@ -33,7 +41,7 @@ const KnowledgeGraphPage = () => {
   const workspace = workspaces.find(w => w.id === workspaceId) || currentWorkspace;
 
   // Manejar selección de nodo
-  const handleNodeSelect = (node) => {
+  const handleNodeSelect = (node: Node<CustomNodeData>) => {
     setSelectedNode(node);
   };
 
@@ -66,12 +74,12 @@ const KnowledgeGraphPage = () => {
           <h2>Error cargando el grafo</h2>
           <p>{error}</p>
           <div className="error-actions">
-            <button onClick={clearError} className="btn-secondary">
+            <Button onClick={clearError} variant="secondary">
               Reintentar
-            </button>
-            <button onClick={() => navigate('/workspaces')} className="btn-primary">
+            </Button>
+            <Button onClick={() => router.push('/workspaces')}>
               Volver a Workspaces
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -95,9 +103,9 @@ const KnowledgeGraphPage = () => {
               <span className="stat-label">Documentos disponibles</span>
             </div>
           </div>
-          <button onClick={handleProcessGraph} className="btn-primary large">
+          <Button onClick={handleProcessGraph} size="lg">
             🚀 Generar grafo de conocimiento
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -150,12 +158,12 @@ const KnowledgeGraphPage = () => {
       {/* Header */}
       <div className="graph-header">
         <div className="header-left">
-          <button
-            onClick={() => navigate('/workspaces')}
-            className="back-btn"
+          <Button
+            onClick={() => router.push('/workspaces')}
+            variant="outline"
           >
             ← Volver
-          </button>
+          </Button>
           <div className="header-info">
             <h1>Grafo de Conocimiento</h1>
             {workspace && (
@@ -167,21 +175,10 @@ const KnowledgeGraphPage = () => {
         </div>
         <div className="header-right">
           <Button
-            variant="outlined"
-            startIcon={<SettingsIcon />}
-            onClick={() => navigate('/admin/knowledge-graph')}
-            sx={{
-              borderRadius: 2,
-              textTransform: 'none',
-              fontWeight: 500,
-              borderColor: '#1976d2',
-              color: '#1976d2',
-              '&:hover': {
-                backgroundColor: '#1976d2',
-                color: 'white'
-              }
-            }}
+            variant="outline"
+            onClick={() => router.push('/admin/knowledge-graph')}
           >
+            <SettingsIcon className="mr-2 h-4 w-4" />
             Administración
           </Button>
         </div>
@@ -204,21 +201,20 @@ const KnowledgeGraphPage = () => {
             </div>
           )}
           
-          <button 
+          <Button 
             onClick={refreshGraphData} 
-            className="btn-secondary"
+            variant="secondary"
             disabled={isLoading}
           >
             🔄 Actualizar
-          </button>
+          </Button>
           
-          <button 
+          <Button 
             onClick={handleProcessGraph} 
-            className="btn-primary"
             disabled={isLoading}
           >
             ⚡ Reprocesar
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -227,7 +223,7 @@ const KnowledgeGraphPage = () => {
         <KnowledgeGraphViewer
           graphData={graphData}
           onNodeSelect={handleNodeSelect}
-          selectedWorkspace={workspace?.name}
+          selectedWorkspace={workspace?.name || ''}
         />
       </div>
 
@@ -236,12 +232,14 @@ const KnowledgeGraphPage = () => {
         <div className="side-panel">
           <div className="panel-header">
             <h3>🔍 Explorar conexiones</h3>
-            <button 
+            <Button 
               onClick={() => setSelectedNode(null)}
+              variant="destructive"
+              size="icon"
               className="close-panel-btn"
             >
               ✕
-            </button>
+            </Button>
           </div>
           
           <div className="panel-content">
@@ -251,15 +249,15 @@ const KnowledgeGraphPage = () => {
             </div>
             
             <div className="connection-actions">
-              <button className="action-btn">
+              <Button className="action-btn">
                 🔗 Ver conexiones directas
-              </button>
-              <button className="action-btn">
+              </Button>
+              <Button className="action-btn">
                 📄 Documentos relacionados
-              </button>
-              <button className="action-btn">
+              </Button>
+              <Button className="action-btn">
                 🎯 Centrar en esta entidad
-              </button>
+              </Button>
             </div>
           </div>
         </div>

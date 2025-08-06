@@ -38,10 +38,7 @@ class GetDocumentListInput(BaseModel):
     """
     Define el esquema de entrada para la herramienta de listado de documentos.
     """
-    workspace_id: Optional[str] = Field(
-        None,
-        description="El ID del workspace (UUID en formato string) para listar documentos del workspace, si aplica."
-    )
+    pass
 
 
 class GetDocumentListTool(BaseTool):
@@ -53,14 +50,18 @@ class GetDocumentListTool(BaseTool):
     description: str = (
         "Recupera una lista de todos los documentos (junto con sus temas, títulos y autores) "
         "que el usuario ha subido previamente a su base de conocimiento. "
-        "Permite listar documentos generales o documentos específicos de un workspace. " # <-- Descripción actualizada
-        "Úsala cuando el usuario pida explícitamente ver sus documentos guardados."
+        "Permite listar documentos generales, documentos específicos de un workspace, o documentos de una colección (topic) específica. "
+        "Úsala cuando el usuario pida explícitamente ver sus documentos guardados. "
+        "Si el usuario menciona un 'tema', 'colección' o 'categoría', usa el parámetro 'topic'."
     )
     args_schema: Type[BaseModel] = GetDocumentListInput
     return_direct: bool = False
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    telegram_id: Optional[int] = Field(None, description="El ID de Telegram del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="El ID del workspace (UUID en formato string) para listar documentos del workspace, inyectado automáticamente.")
+    topic: Optional[str] = Field(None, description="El nombre del tema o colección para listar documentos específicos de esa colección, inyectado automáticamente.")
 
-    async def _arun(self, account_id: str, telegram_id: Optional[int] = None, workspace_id: Optional[str] = None, **kwargs: Any) -> str: # <-- workspace_id añadido aquí
+    async def _arun(self, **kwargs: Any) -> str:
         """
         Lógica asíncrona para listar documentos del usuario.
 
@@ -68,43 +69,53 @@ class GetDocumentListTool(BaseTool):
             account_id: El ID universal de la cuenta del usuario.
             telegram_id: El ID de Telegram del usuario, si está disponible.
             workspace_id: El ID del workspace para filtrar documentos (opcional).
+            topic: El nombre del tema/colección para filtrar documentos (opcional).
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
             Una cadena de texto formateada con la lista de documentos para el agente.
         """
-        logger.info(f"Ejecutando GetDocumentListTool para la cuenta '{account_id}' con workspace_id: '{workspace_id}'.")
+        logger.info(f"Ejecutando GetDocumentListTool para la cuenta '{self.account_id}' con workspace_id: '{self.workspace_id}', topic: '{self.topic}'.")
         try:
-            # --- MODIFICACIÓN: Pasar workspace_id a list_user_documents ---
-            documents_list = await list_user_documents(account_id=account_id, team_id=None, workspace_id=workspace_id)
-            
-            if telegram_id is not None:
-                user_data = bot_manager.get_user_data(telegram_id)
+            # --- MODIFICACIÓN: Pasar workspace_id Y topic a list_user_documents ---
+            documents_list = await list_user_documents(account_id=self.account_id, team_id=None, workspace_id=self.workspace_id, topic=self.topic)
+
+            if self.telegram_id is not None:
+                user_data = bot_manager.get_user_data(self.telegram_id)
                 user_data[RAW_DOCUMENT_LIST_KEY] = documents_list
                 await bot_manager.flush_persistence()
             
             if not documents_list:
-                logger.info(f"No se encontraron documentos para la cuenta '{account_id}' en el workspace '{workspace_id}'." if workspace_id else f"No se encontraron documentos para la cuenta '{account_id}'.")
-                return "No tienes ningún documento guardado en tu base de conocimiento todavía. ¡Puedes subir uno cuando quieras!" if not workspace_id else f"No se encontraron documentos en el workspace '{workspace_id}'. ¡Puedes subir uno a este workspace!"
-            
+                if self.topic and self.workspace_id:
+                    return f"No se encontraron documentos en la colección '{self.topic}' dentro del workspace '{self.workspace_id}'."
+                elif self.topic:
+                    return f"No se encontraron documentos en la colección '{self.topic}'. ¡Puedes subir uno a esta colección!"
+                elif self.workspace_id:
+                    return f"No se encontraron documentos en el workspace '{self.workspace_id}'. ¡Puedes subir uno a este workspace!"
+                else:
+                    return "No tienes ningún documento guardado en tu base de conocimiento todavía. ¡Puedes subir uno cuando quieras!"
+
             response_message = f"He encontrado {len(documents_list)} documento(s) en tu base de conocimiento"
-            if workspace_id:
-                response_message += f" para el workspace '{workspace_id}'"
+            if self.topic and self.workspace_id:
+                response_message += f" en la colección '{self.topic}' del workspace '{self.workspace_id}'"
+            elif self.topic:
+                response_message += f" en la colección '{self.topic}'"
+            elif self.workspace_id:
+                response_message += f" para el workspace '{self.workspace_id}'"
             response_message += ". Aquí están los primeros:\n\n"
             
             for doc in documents_list[:100]:
                 title = doc.get('title') or 'Sin título'
-                response_message += f"- Archivo: `{doc['file_name']}` (Título: {title})\n"
-            if len(documents_list) > 5:
+                response_message += f"- Archivo: `{doc['file_name']}` (Título: {title}, Colección: {doc.get('topic', 'N/A')})\n"
+            if len(documents_list) > 100: # Cambié a 100 para ser consistente con el slicing
                 response_message += "\n(Y otros más...)"
-            
             logger.info(
-                f"✅ Lista de documentos recuperada exitosamente para la cuenta '{self.account_id}' con workspace_id: '{effective_workspace_id}'."
+                f"✅ Lista de documentos recuperada exitosamente para la cuenta '{self.account_id}' con workspace_id: '{self.workspace_id}', topic: '{self.topic}'."
             )
             return response_message
         except Exception as e:
             logger.error(
-                f"Error en GetDocumentListTool para la cuenta '{self.account_id}' con workspace_id '{effective_workspace_id}': {e}",
+                f"Error en GetDocumentListTool para la cuenta '{self.account_id}' con workspace_id '{self.workspace_id}' y topic '{self.topic}': {e}",
                 exc_info=True,
             )
             return "Ocurrió un error inesperado al intentar listar tus documentos."

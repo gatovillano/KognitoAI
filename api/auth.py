@@ -36,7 +36,7 @@ async def get_db() -> AsyncSession:
         finally:
             await session.close()
 
-api_key_header = APIKeyHeader(name="X-Internal-API-Key", auto_error=False)
+api_key_header = APIKeyHeader(name="X-Internal-API-Key", auto_error=False) # type: ignore
 
 async def get_internal_api_key(
     x_internal_api_key: Optional[str] = Depends(api_key_header)
@@ -153,11 +153,9 @@ def verify_telegram_hash(data: TelegramLoginRequest, bot_token: str) -> bool:
 @router.post("/auth/telegram/callback", response_model=TokenResponse, summary="Callback de Login Social de Telegram")
 async def handle_telegram_login(login_data: TelegramLoginRequest, db: AsyncSession = Depends(get_db)):
     """Maneja el callback de autenticación social de Telegram, crea o vincula la cuenta y devuelve un token."""
+    logger.warning("--- /api/auth/telegram/callback endpoint has been hit! ---")
     if not settings.telegram_bot_token: raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Autenticación de Telegram no configurada.")
 
-    # DEBUG: Log incoming data and calculated hash for troubleshooting
-    import logging
-    logger = logging.getLogger("telegram_auth")
     logger.warning(f"Incoming Telegram login data: {login_data}")
     data_dict = login_data.dict(exclude={'hash'})
     data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data_dict.items()) if v is not None)

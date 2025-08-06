@@ -20,11 +20,6 @@ logger = logging.getLogger(__name__)
 
 class MultiQuerySearchInput(BaseModel):
     """Esquema de entrada para la herramienta de búsqueda multi-consulta."""
-    account_id: str = Field(
-        ...,
-        description="ID de la cuenta del usuario",
-        json_schema_extra={"type": "string"}
-    )
     query: str = Field(
         ...,
         description="Consulta de búsqueda original",
@@ -43,16 +38,6 @@ class MultiQuerySearchInput(BaseModel):
     category: Optional[str] = Field(
         None,
         description="Categoría específica para filtrar resultados",
-        json_schema_extra={"type": "string"}
-    )
-    workspace_id: Optional[str] = Field(
-        None,
-        description="ID del workspace para filtrar resultados",
-        json_schema_extra={"type": "string"}
-    )
-    team_id: Optional[str] = Field(
-        None,
-        description="ID del equipo para filtrar resultados",
         json_schema_extra={"type": "string"}
     )
     k: Optional[int] = Field(
@@ -102,16 +87,18 @@ class MultiQuerySearchTool(BaseTool):
         "\n⚡ OPTIMIZADO: Aprovecha la infraestructura de búsqueda optimizada de Kognito."
     )
     args_schema: Type[BaseModel] = MultiQuerySearchInput
+    account_id: Optional[str] = Field(None, description="ID de la cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="ID del workspace para filtrar resultados, inyectado automáticamente.")
+    team_id: Optional[str] = Field(None, description="ID del equipo para filtrar resultados, inyectado automáticamente.")
+    telegram_id: Optional[str] = Field(None, description="ID del chat de Telegram para filtrar resultados, inyectado automáticamente.")
+    thread_id: Optional[str] = Field(None, description="ID del hilo de conversación para filtrar resultados, inyectado automáticamente.")
 
     async def _arun(
             self,
-            account_id: str,
             query: str,
             content_type: Union[str, None] = None,
             topic: Union[str, None] = None,
             category: Union[str, None] = None,
-            workspace_id: Union[str, None] = None,
-            team_id: Union[str, None] = None,
             k: Union[int, None] = 5,
             num_queries: Union[int, None] = 3,
             fusion_method: Union[str, None] = "rrf",
@@ -124,13 +111,15 @@ class MultiQuerySearchTool(BaseTool):
             # Determinar visibility_teams basado en include_shared
             visibility_teams = None if include_shared else []
             results = await multi_query_search(
-                account_id=account_id,
+                account_id=self.account_id,
                 query=query,
                 content_type=content_type,
                 topic=topic,
                 category=category,
-                workspace_id=workspace_id,
-                team_id=team_id,
+                workspace_id=self.workspace_id,
+                team_id=self.team_id,
+                telegram_id=self.telegram_id,
+                thread_id=self.thread_id,
                 visibility_teams=visibility_teams,
                 k=k or 5,
                 num_queries=num_queries or 3,
@@ -195,13 +184,10 @@ class MultiQuerySearchTool(BaseTool):
 
     def _run(
             self,
-            account_id: str,
             query: str,
             content_type: Union[str, None] = None,
             topic: Union[str, None] = None,
             category: Union[str, None] = None,
-            workspace_id: Union[str, None] = None,
-            team_id: Union[str, None] = None,
             k: Union[int, None] = 5,
             num_queries: Union[int, None] = 3,
             fusion_method: Union[str, None] = "rrf",
@@ -214,13 +200,15 @@ class MultiQuerySearchTool(BaseTool):
             # Determinar visibility_teams basado en include_shared
             visibility_teams = None if include_shared else []
             results = asyncio.run(multi_query_search(
-                account_id=account_id,
+                account_id=self.account_id,
                 query=query,
                 content_type=content_type,
                 topic=topic,
                 category=category,
-                workspace_id=workspace_id,
-                team_id=team_id,
+                workspace_id=self.workspace_id,
+                team_id=self.team_id,
+                telegram_id=self.telegram_id,
+                thread_id=self.thread_id,
                 visibility_teams=visibility_teams,
                 k=k or 5,
                 num_queries=num_queries or 3,

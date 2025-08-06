@@ -35,8 +35,7 @@ class AnalyzeTextForInsightsTool(BaseTool):
     args_schema: Type[BaseModel] = AnalyzeTextInput
     # La respuesta es rica y estructurada, mejor que el agente la procese.
     return_direct: bool = False
-
-    # El __init__ ya no es necesario, BaseTool se encarga.
+    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
 
     async def _arun(self, text: str, **kwargs: Any) -> str:
         """

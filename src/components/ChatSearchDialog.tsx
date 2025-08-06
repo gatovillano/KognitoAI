@@ -1,267 +1,217 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Badge } from '@/components/ui/badge';
-import { Search, Copy, Quote, User, Bot, Calendar } from 'lucide-react';
+import { Search, MessageSquare, Quote, User, Bot, Calendar, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import apiClient from '@/lib/api';
 import { toast } from 'sonner';
+import { InlineMarkdownRenderer } from './InlineMarkdownRenderer';
+
+// Interfaces
+interface ChatThread {
+  id: string;
+  title: string;
+  created_at: string;
+}
 
 interface ChatMessage {
   text: string;
   sender: 'user' | 'ai';
   created_at: string;
-  image_base64?: string;
-  document_url?: string;
+  thread_id: string;
+  thread_title: string;
 }
 
-interface SearchResult {
+interface MessageSearchResult {
   message: ChatMessage;
-  matchedText: string;
   context: string;
-  messageIndex: number;
 }
 
 interface ChatSearchDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  messages: ChatMessage[];
-  onSelectQuote?: (quote: string, context: string) => void;
+  searchTerm: string;
+  setSearchTerm: (term: string) => void;
 }
 
-export function ChatSearchDialog({ 
-  isOpen, 
-  onOpenChange, 
-  messages, 
-  onSelectQuote 
+// Componente para resaltar coincidencias
+const HighlightMatch = ({ text, term }: { text: string; term: string }) => {
+  if (!term) return <>{text}</>;
+  const parts = text.split(new RegExp(`(${term})`, 'gi'));
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === term.toLowerCase() ? (
+          <mark key={i} className="bg-primary/20 text-primary font-medium rounded px-1">
+            {part}
+          </mark>
+        ) : (
+          part
+        )
+      )}
+    </>
+  );
+};
+
+export function ChatSearchDialog({
+  isOpen,
+  onOpenChange,
+  searchTerm,
+  setSearchTerm,
 }: ChatSearchDialogProps) {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const router = useRouter();
+  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [messages, setMessages] = useState<MessageSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
-  // Función para buscar en los mensajes
-  const searchMessages = (term: string) => {
-    if (!term.trim()) {
-      setSearchResults([]);
+  const performSearch = useCallback(async (term: string) => {
+    if (!term.trim() || term.length < 3) {
+      setThreads([]);
+      setMessages([]);
       return;
     }
-
     setIsSearching(true);
-    const results: SearchResult[] = [];
-    const searchLower = term.toLowerCase();
+    try {
+      // Asumimos un nuevo endpoint unificado para la búsqueda
+      const response = await apiClient.get('/api/search/all', {
+        params: { query: term },
+      });
+      setThreads(response.data.threads || []);
+      setMessages(response.data.messages || []);
+    } catch (error) {
+      console.error('Error performing search:', error);
+      toast.error('Error al realizar la búsqueda.');
+      setThreads([]);
+      setMessages([]);
+    } finally {
+      setIsSearching(false);
+    }
+  }, []);
 
-    messages.forEach((message, index) => {
-      const messageText = message.text.toLowerCase();
-      const searchIndex = messageText.indexOf(searchLower);
-      
-      if (searchIndex !== -1) {
-        // Extraer contexto alrededor de la coincidencia
-        const contextStart = Math.max(0, searchIndex - 50);
-        const contextEnd = Math.min(message.text.length, searchIndex + term.length + 50);
-        const context = message.text.substring(contextStart, contextEnd);
-        
-        // Texto coincidente
-        const matchStart = Math.max(0, searchIndex);
-        const matchEnd = Math.min(message.text.length, searchIndex + term.length);
-        const matchedText = message.text.substring(matchStart, matchEnd);
-
-        results.push({
-          message,
-          matchedText,
-          context: contextStart > 0 ? '...' + context : context,
-          messageIndex: index
-        });
-      }
-    });
-
-    setSearchResults(results);
-    setIsSearching(false);
-  };
-
-  // Efecto para buscar cuando cambia el término
   useEffect(() => {
     const debounceTimer = setTimeout(() => {
-      searchMessages(searchTerm);
-    }, 300);
+      if (isOpen) {
+        performSearch(searchTerm);
+      }
+    }, 300); // Debounce para no buscar en cada pulsación
 
     return () => clearTimeout(debounceTimer);
-  }, [searchTerm, messages]);
+  }, [searchTerm, isOpen, performSearch]);
 
-  // Función para copiar cita
-  const handleCopyQuote = (result: SearchResult) => {
-    const quote = `"${result.context.replace(/^\.\.\./, '').replace(/\.\.\.$/, '')}"`;
-    const sender = result.message.sender === 'user' ? 'Usuario' : 'Kognito';
-    const date = new Date(result.message.created_at).toLocaleDateString();
-    const fullQuote = `${quote}\n\n— ${sender}, ${date}`;
-    
-    navigator.clipboard.writeText(fullQuote).then(() => {
-      toast.success('Cita copiada al portapapeles');
-    }).catch(() => {
-      toast.error('Error al copiar la cita');
-    });
-  };
-
-  // Función para seleccionar cita (si se proporciona callback)
-  const handleSelectQuote = (result: SearchResult) => {
-    if (onSelectQuote) {
-      onSelectQuote(result.matchedText, result.context);
-    }
+  const handleThreadClick = (threadId: string) => {
     onOpenChange(false);
+    setSearchTerm('');
+    router.push(`/chat/${threadId}`);
   };
-
-  // Función para resaltar texto coincidente
-  const highlightMatch = (text: string, searchTerm: string) => {
-    if (!searchTerm) return text;
-    
-    const regex = new RegExp(`(${searchTerm})`, 'gi');
-    const parts = text.split(regex);
-    
-    return parts.map((part, index) => 
-      regex.test(part) ? (
-        <mark key={index} className="bg-primary/20 text-primary font-medium rounded px-1">
-          {part}
-        </mark>
-      ) : part
-    );
+  
+  const handleMessageClick = (threadId: string, messageText: string) => {
+    onOpenChange(false);
+    setSearchTerm('');
+    // Navega al chat y pasa el texto del mensaje para resaltarlo (funcionalidad futura)
+    router.push(`/chat/${threadId}?highlight=${encodeURIComponent(messageText)}`);
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
-        <DialogHeader className="pb-4">
-          <DialogTitle className="text-2xl font-bold flex items-center gap-2">
-            <Search className="h-6 w-6 text-primary" />
-            Buscar en el Chat
+      <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0">
+        <DialogHeader className="p-4 border-b">
+          <DialogTitle className="text-xl font-bold flex items-center gap-3">
+            <Search className="h-5 w-5 text-primary" />
+            Búsqueda Avanzada
           </DialogTitle>
+          <div className="relative mt-2">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="text"
+              placeholder="Buscar en todo el historial..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 h-11 text-base"
+              autoFocus
+            />
+          </div>
         </DialogHeader>
 
-        {/* Barra de búsqueda */}
-        <div className="relative mb-6">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            type="text"
-            placeholder="Buscar mensajes, citas o contenido específico..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 h-12 text-base"
-            autoFocus
-          />
-        </div>
-
-        {/* Estadísticas de búsqueda */}
-        {searchTerm && (
-          <div className="flex items-center gap-4 mb-4 text-sm text-muted-foreground">
-            <span>
-              {isSearching ? 'Buscando...' : `${searchResults.length} resultado${searchResults.length !== 1 ? 's' : ''} encontrado${searchResults.length !== 1 ? 's' : ''}`}
-            </span>
-            {searchResults.length > 0 && (
-              <Badge variant="outline" className="text-xs">
-                {searchResults.filter(r => r.message.sender === 'user').length} del usuario, {' '}
-                {searchResults.filter(r => r.message.sender === 'ai').length} de Kognito
-              </Badge>
-            )}
-          </div>
-        )}
-
-        {/* Resultados de búsqueda */}
-        <ScrollArea className="flex-1">
-          <AnimatePresence>
-            {searchResults.length > 0 ? (
-              <div className="space-y-4">
-                {searchResults.map((result, index) => (
-                  <motion.div
-                    key={`${result.messageIndex}-${index}`}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                    transition={{ duration: 0.2, delay: index * 0.05 }}
-                    className="border border-border rounded-lg p-4 hover:bg-muted/50 transition-colors group"
-                  >
-                    <div className="flex items-start gap-3">
-                      {/* Avatar del remitente */}
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                        result.message.sender === 'user' 
-                          ? 'bg-muted text-foreground' 
-                          : 'bg-primary/10 text-primary'
-                      }`}>
-                        {result.message.sender === 'user' ? (
-                          <User className="h-4 w-4" />
-                        ) : (
-                          <Bot className="h-4 w-4" />
-                        )}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 overflow-hidden p-4">
+          {/* Columna Izquierda: Hilos de Chat */}
+          <div className="flex flex-col overflow-hidden md:col-span-1 bg-muted/50 rounded-lg border">
+            <h3 className="text-base font-semibold p-3 border-b bg-background/50">
+              Conversaciones ({threads.length})
+            </h3>
+            <ScrollArea className="flex-1">
+              {isSearching && threads.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Buscando...
+                </div>
+              ) : threads.length > 0 ? (
+                <div className="p-2 space-y-1">
+                  {threads.map(thread => (
+                    <div
+                      key={thread.id}
+                      onClick={() => handleThreadClick(thread.id)}
+                      className="p-2 rounded-md hover:bg-primary/10 cursor-pointer transition-colors"
+                    >
+                      <div className="font-medium text-sm truncate">
+                        <HighlightMatch text={thread.title} term={searchTerm} />
                       </div>
-
-                      {/* Contenido del mensaje */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="font-medium text-sm">
-                            {result.message.sender === 'user' ? 'Usuario' : 'Kognito'}
-                          </span>
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <Calendar className="h-3 w-3" />
-                            {new Date(result.message.created_at).toLocaleDateString('es-ES', {
-                              day: 'numeric',
-                              month: 'short',
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
-                          </div>
-                        </div>
-                        
-                        <p className="text-sm leading-relaxed mb-3">
-                          {highlightMatch(result.context, searchTerm)}
-                        </p>
-
-                        {/* Botones de acción */}
-                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleCopyQuote(result)}
-                            className="h-8 px-3 text-xs"
-                          >
-                            <Copy className="h-3 w-3 mr-1" />
-                            Copiar Cita
-                          </Button>
-                          {onSelectQuote && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleSelectQuote(result)}
-                              className="h-8 px-3 text-xs"
-                            >
-                              <Quote className="h-3 w-3 mr-1" />
-                              Usar Cita
-                            </Button>
-                          )}
-                        </div>
+                      <div className="text-xs text-muted-foreground">
+                        {new Date(thread.created_at).toLocaleDateString()}
                       </div>
                     </div>
-                  </motion.div>
-                ))}
-              </div>
-            ) : searchTerm && !isSearching ? (
-              <div className="text-center py-12">
-                <Search className="h-12 w-12 text-muted-foreground/50 mx-auto mb-4" />
-                <h3 className="text-lg font-medium mb-2">No se encontraron resultados</h3>
-                <p className="text-muted-foreground">
-                  Intenta con otros términos de búsqueda o verifica la ortografía.
-                </p>
-              </div>
-            ) : !searchTerm ? (
-              <div className="text-center py-12">
-                <Quote className="h-12 w-12 text-muted-foreground/50 mx-auto mb-4" />
-                <h3 className="text-lg font-medium mb-2">Buscar en el Chat</h3>
-                <p className="text-muted-foreground">
-                  Escribe algo en el campo de búsqueda para encontrar mensajes, citas o contenido específico.
-                </p>
-              </div>
-            ) : null}
-          </AnimatePresence>
-        </ScrollArea>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-4 text-center text-sm text-muted-foreground">
+                  {searchTerm.length < 3 ? "Escribe al menos 3 caracteres" : "No se encontraron chats."}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+
+          {/* Columna Derecha: Mensajes */}
+          <div className="flex flex-col overflow-hidden md:col-span-2 bg-muted/50 rounded-lg border">
+            <h3 className="text-base font-semibold p-3 border-b bg-background/50">
+              Mensajes ({messages.length})
+            </h3>
+            <ScrollArea className="flex-1">
+              {isSearching && messages.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Buscando...
+                </div>
+              ) : messages.length > 0 ? (
+                <div className="p-2 space-y-2">
+                  {messages.map((result, index) => (
+                    <div
+                      key={`${result.message.thread_id}-${index}`}
+                      onClick={() => handleMessageClick(result.message.thread_id, result.message.text)}
+                      className="border rounded-lg p-3 hover:bg-background transition-colors group cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
+                        {result.message.sender === 'user' ? <User className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
+                        <span className="font-medium">{result.message.sender === 'user' ? 'Tú' : 'KAI'}</span>
+                        <span>en</span>
+                        <span className="font-semibold text-primary truncate">
+                          <HighlightMatch text={result.message.thread_title} term={searchTerm} />
+                        </span>
+                      </div>
+                      <p className="text-sm text-foreground/90">
+                        <HighlightMatch text={result.context} term={searchTerm} />
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-4 text-center text-sm text-muted-foreground">
+                  {searchTerm.length < 3 ? "Escribe para buscar mensajes." : "No se encontraron mensajes."}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

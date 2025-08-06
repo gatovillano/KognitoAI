@@ -10,7 +10,7 @@ información sobre conexiones, sinergias, duplicidades, contradicciones y brecha
 """
 
 import logging
-from typing import Type, Any, List, Dict
+from typing import Type, Any, List, Dict, Optional, Optional
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 from sqlalchemy import select
@@ -30,10 +30,6 @@ class GetProactiveInsightsInput(BaseModel):
     Define el esquema de entrada para la herramienta de recuperación de insights proactivos.
     Valida que el argumento necesario sea proporcionado por el LLM.
     """
-    account_id: str = Field(
-        ...,
-        description="El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM."
-    )
     limit: int = Field(
         5,
         description="El número máximo de insights a recuperar. Por defecto es 5."
@@ -53,28 +49,31 @@ class GetProactiveInsightsTool(BaseTool):
     )
     args_schema: Type[BaseModel] = GetProactiveInsightsInput
     return_direct: bool = False  # El agente debe procesar la respuesta.
+    account_id: Optional[str] = Field(None, description="El identificador universal (UUID en formato string) de la cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="El identificador del espacio de trabajo del usuario, inyectado automáticamente.")
+    telegram_id: Optional[str] = Field(None, description="El identificador de Telegram del usuario, inyectado automáticamente.")
+    thread_id: Optional[str] = Field(None, description="El identificador del hilo de conversación, inyectado automáticamente.")
 
     def __init__(self, **kwargs):
         """Inicializa la herramienta con cualquier configuración necesaria."""
         super().__init__(**kwargs)
         logger.info("Inicializando GetProactiveInsightsTool")
 
-    async def _arun(self, account_id: str, limit: int = 5, **kwargs: Any) -> str:
+    async def _arun(self, limit: int = 5, **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
         Args:
-            account_id: El ID universal de la cuenta del usuario.
             limit: El número máximo de insights a recuperar (por defecto 5).
             **kwargs: Argumentos adicionales (no utilizados).
 
         Returns:
             Un mensaje de texto con los insights proactivos formateados o un mensaje indicando que no hay insights.
         """
-        logger.info(f"Ejecutando GetProactiveInsightsTool para la cuenta '{account_id}' con límite de {limit} insights.")
+        logger.info(f"Ejecutando GetProactiveInsightsTool para la cuenta '{self.account_id}' con límite de {limit} insights.")
         try:
             async with DBSession(SessionLocal) as db:
-                account_uuid = uuid.UUID(account_id)
+                account_uuid = uuid.UUID(self.account_id)
                 stmt = (
                     select(ProactiveInsight)
                     .where(ProactiveInsight.account_id == account_uuid)
@@ -85,7 +84,7 @@ class GetProactiveInsightsTool(BaseTool):
                 insights = result.scalars().all()
 
                 if not insights:
-                    logger.info(f"No se encontraron insights para la cuenta '{account_id}'.")
+                    logger.info(f"No se encontraron insights para la cuenta '{self.account_id}'.")
                     return "No se encontraron insights proactivos en tu base de conocimiento. ¡A medida que añadas más información, generaré conexiones y sugerencias!"
 
                 response_lines = ["Aquí están los insights proactivos más recientes generados a partir de tu información:"]
@@ -106,10 +105,10 @@ class GetProactiveInsightsTool(BaseTool):
                 if len(insights) == limit:
                     response_lines.append(f"\n(Mostrando los {limit} más recientes. Si deseas ver más, puedo buscarlos.)")
 
-                logger.info(f"Recuperados {len(insights)} insights para la cuenta '{account_id}'.")
+                logger.info(f"Recuperados {len(insights)} insights para la cuenta '{self.account_id}'.")
                 return "\n".join(response_lines)
         except Exception as e:
-            logger.error(f"Error en GetProactiveInsightsTool para la cuenta '{account_id}': {e}", exc_info=True)
+            logger.error(f"Error en GetProactiveInsightsTool para la cuenta '{self.account_id}': {e}", exc_info=True)
             return f"Ocurrió un error inesperado al intentar recuperar tus insights proactivos: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

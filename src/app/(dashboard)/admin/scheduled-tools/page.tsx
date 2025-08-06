@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -73,11 +73,7 @@ export default function ScheduledToolsAdminPage() {
   });
   const { toast } = useToast();
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       const [toolsResponse, statusResponse] = await Promise.all([
@@ -96,7 +92,10 @@ export default function ScheduledToolsAdminPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]); // Add dependencies for fetchData here if any
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const handleCreateTool = async () => {
     try {

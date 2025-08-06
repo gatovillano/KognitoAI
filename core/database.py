@@ -375,6 +375,7 @@ class Nota(Base):
     # Refactorizado: Se vincula a account_id
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False)
     team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True, index=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=True, index=True)
     
     title = Column(String, nullable=True)
     content = Column(Text, nullable=False)
@@ -385,6 +386,7 @@ class Nota(Base):
 
     account = relationship("Account", back_populates="notas")
     team = relationship("Team", back_populates="notas")
+    workspace = relationship("Workspace", backref="notas")
 
     def __repr__(self):
         return f"<Nota(id={self.id}, title='{self.title}', account_id={self.account_id})>"
@@ -453,6 +455,7 @@ class ChatThread(Base):
     is_pinned = Column(Boolean, default=False, nullable=False)
     # Usamos JSONB para almacenar una lista flexible de etiquetas.
     tags = Column(JSONB, nullable=True)
+    persistent_rag_context = Column(JSONB, nullable=True, default=[])
 
     account = relationship("Account", back_populates="chat_threads")
     workspace = relationship("Workspace", back_populates="chat_threads")

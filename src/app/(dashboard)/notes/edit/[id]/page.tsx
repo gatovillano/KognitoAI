@@ -1,7 +1,7 @@
 // En: src/app/(dashboard)/notes/edit/[id]/page.tsx
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -34,7 +34,7 @@ export default function EditNotePage() {
   const [teams, setTeams] = useState<any[]>([]);
 
   // Inicializamos el servicio de conversión
-  const turndownService = new TurndownService();
+  const turndownService = useMemo(() => new TurndownService(), []);
 
     useEffect(() => {
     // Si es una nota nueva, el ID será 'new'. Si no, cargamos los datos.

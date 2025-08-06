@@ -127,7 +127,7 @@ async def lifespan(app: FastAPI):
         # Configurar reintentos para errores de red
         async def retry_on_network_error():
             while True:
-                if not ptb_app.updater.is_running():
+                if not ptb_app.updater.running:
                     try:
                         await ptb_app.updater.start_polling(drop_pending_updates=True, error_callback=done_callback)
                         logger.info("✅ Polling reiniciado con éxito.")
@@ -152,7 +152,7 @@ async def lifespan(app: FastAPI):
             await ptb_to_shutdown.stop()
             logger.info("✅ Dispatcher detenido.")
         
-        if ptb_to_shutdown.updater and ptb_to_shutdown.updater.is_running():
+        if ptb_to_shutdown.updater and ptb_to_shutdown.updater.running:
             await ptb_to_shutdown.updater.stop()
             logger.info("✅ Polling detenido.")
             
