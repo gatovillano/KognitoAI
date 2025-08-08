@@ -5,7 +5,7 @@ import { marked } from 'marked';
 import { sentImage } from '@/lib/imageUtils';
 import { toast } from 'sonner';
 import Prism from 'prismjs';
-import '@/styles/code-highlighting.css';
+import 'prismjs/themes/prism-dark.css';
 
 // Importar lenguajes de programación comunes
 import 'prismjs/components/prism-docker';
@@ -41,6 +41,7 @@ import 'prismjs/components/prism-matlab';
 import 'prismjs/components/prism-dart';
 import 'prismjs/components/prism-elixir';
 import 'prismjs/components/prism-haskell';
+import mermaid from 'mermaid'; // Importar mermaid
 
 interface MarkdownRendererProps {
   content: string;
@@ -57,6 +58,10 @@ const MarkdownRendererComponent = ({ content, fontSize = 'text-base' }: Markdown
       // Configure marked with a custom highlighter
       const renderer = new marked.Renderer();
       renderer.code = function({ text, lang }) {
+        if (lang === 'mermaid') {
+          return `<div class="mermaid">${text}</div>`;
+        }
+
         let language = lang ? lang.toLowerCase() : 'markup';
         
         // Mapeo de alias de lenguajes para mayor compatibilidad
@@ -175,7 +180,7 @@ const MarkdownRendererComponent = ({ content, fontSize = 'text-base' }: Markdown
     }
   }, []);
 
-  // Effect to add copy and preview buttons
+  // Effect to add copy and preview buttons and initialize Mermaid
   useEffect(() => {
     const addButtons = () => {
       if (!containerRef.current) return;
@@ -228,10 +233,22 @@ const MarkdownRendererComponent = ({ content, fontSize = 'text-base' }: Markdown
         (block as HTMLElement).style.color = ''; // Remover color fijo para usar el del tema
         block.setAttribute('data-buttons-added', 'true');
       });
+
     };
 
     addButtons();
+    mermaid.init(); // Inicializar Mermaid después de que el DOM se haya actualizado
   }, [htmlContent, copiedStates, handleCopy, handlePreview]);
+
+  // Configurar Mermaid al inicio
+  useEffect(() => {
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark', // Puedes cambiar a 'default', 'forest', 'neutral', etc.
+      flowchart: { curve: 'basis' },
+      securityLevel: 'loose', // Permite más flexibilidad en los diagramas
+    });
+  }, []);
 
   return (
     <div className={`prose prose-sm max-w-none ${fontSize} text-foreground`} style={{ overflowWrap: 'break-word', margin: 0, padding: 0 }} ref={containerRef}>

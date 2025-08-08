@@ -12,7 +12,7 @@ depender de la plataforma desde la que se realiza la consulta.
 """
 
 import logging
-from typing import Type, Any
+from typing import Type, Any, Optional
 
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
@@ -51,6 +51,7 @@ class GetAgendaTool(BaseTool):
     return_direct: bool = False
     account_id: str
     workspace_id: Optional[str] = None
+    telegram_id: Optional[int] = None
 
     async def _arun(self, target_day: str, **kwargs: Any) -> str:
         """

@@ -40,6 +40,7 @@ class MemorySearchOptimizedTool(BaseTool):
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
     workspace_id: Optional[str] = Field(None, description="ID del workspace (NULL = General), inyectado automáticamente.")
     team_id: Optional[str] = Field(None, description="ID del team propietario, inyectado automáticamente.")
+    telegram_id: Optional[int] = Field(None, description="ID de Telegram del usuario, inyectado automáticamente.")
 
     def _run(
         self,

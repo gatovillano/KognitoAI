@@ -25,6 +25,8 @@ class UpdateNoteTool(BaseTool):
     )
     args_schema: Type[BaseModel] = UpdateNoteInput
     account_id: str
+    workspace_id: Optional[str] = Field(None, description="El ID del espacio de trabajo del usuario.")
+    telegram_id: Optional[int] = Field(None, description="El ID de usuario de Telegram.")
 
     async def _arun(
         self,

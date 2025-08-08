@@ -27,6 +27,8 @@ class GetNotesTool(BaseTool):
                       "Permite filtrar las notas por una categoría o buscar por palabras clave.")
     args_schema: Type[BaseModel] = GetNotesInput
     account_id: str
+    workspace_id: Optional[str] = Field(None, description="El ID del espacio de trabajo del usuario.")
+    telegram_id: Optional[int] = Field(None, description="El ID de usuario de Telegram.")
 
     async def _arun(
         self,

@@ -24,13 +24,12 @@ interface ChatMessage {
 
 interface ChatInputBarProps {
   newMessage: string;
-    isResponding: boolean;
+  isResponding: boolean;
   isRecording?: boolean;
   isUploadingFile?: boolean;
   isKnowledgeAnalysisActive: boolean;
   isWebSearchActive: boolean;
   isComprehensiveAnalysisActive: boolean;
-  files: File[];
   messages?: ChatMessage[];
   onMessageChange: (value: string) => void;
   onSendMessage: (e?: React.FormEvent) => void;
@@ -41,9 +40,9 @@ interface ChatInputBarProps {
   onStartRecording?: () => void;
   onStopRecording?: () => void;
   onFileUpload?: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onRemoveFile?: (index: number) => void;
   onPaste?: (e: ClipboardEvent) => void;
   currentContext: SelectedContextItem[];
+  onRemoveContextItem?: (item: SelectedContextItem) => void;
   isFixedPosition?: boolean;
   onOpenSearch?: () => void;
   children?: React.ReactNode;
@@ -59,7 +58,6 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   isKnowledgeAnalysisActive,
   isWebSearchActive,
   isComprehensiveAnalysisActive,
-  files,
   onMessageChange,
   onSendMessage,
   onKeyDown = () => {},
@@ -69,7 +67,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   onStartRecording = () => {},
   onStopRecording = () => {},
   onFileUpload = () => {},
-  onRemoveFile = () => {},
+  onRemoveContextItem = () => {},
   onPaste = () => {},
   currentContext,
   isFixedPosition = true,
@@ -79,8 +77,6 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   inputPlaceholder
 }) => {
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
-
-
 
   useEffect(() => {
     const textArea = textAreaRef.current;
@@ -120,15 +116,15 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
       <form onSubmit={onSendMessage} className="relative w-full max-w-4xl">
         <div className="rounded-3xl bg-card border border-border px-4 py-3 shadow-medium hover:shadow-strong transition-shadow duration-300">
           {/* Archivos adjuntos */}
-          {files.length > 0 && (
+          {currentContext.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2">
-              {files.map((file, index) => (
+              {currentContext.map((item, index) => (
                 <div key={index} className="flex items-center gap-2 bg-muted rounded-full px-3 py-2 text-sm">
                   <Paperclip className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-foreground max-w-32 truncate">{file.name}</span>
+                  <span className="text-foreground max-w-32 truncate">{item.name}</span>
                   <button 
                     type="button" 
-                    onClick={() => onRemoveFile(index)} 
+                    onClick={() => onRemoveContextItem(item)} 
                     className="text-muted-foreground hover:text-destructive transition-colors"
                   >
                     <X className="h-4 w-4" />
@@ -198,7 +194,11 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                 htmlFor="file-upload"
                 className={`cursor-pointer p-2 rounded-full hover:bg-muted transition-colors flex items-center justify-center ${isUploadingFile ? 'opacity-50' : ''}`}
               >
-                <Upload className="h-5 w-5 text-muted-foreground" />
+                {isUploadingFile ? (
+                  <div className="animate-spin rounded-full h-5 w-5 border-2 border-primary border-t-transparent" />
+                ) : (
+                  <Upload className="h-5 w-5 text-muted-foreground" />
+                )}
               </label>
 
               <Button
@@ -213,7 +213,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
               
               <Button
                 type="submit"
-                disabled={isResponding || (!newMessage.trim() && files.length === 0)}
+                disabled={isResponding || (!newMessage.trim() && currentContext.length === 0)}
                 className="group rounded-full overflow-hidden transition-all duration-300 ease-in-out hover:w-auto w-10 h-10 p-0 hover:px-3 flex items-center relative"
               >
                 <div className="absolute inset-0 flex items-center justify-center w-10 h-10 flex-shrink-0">

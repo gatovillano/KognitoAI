@@ -3,7 +3,7 @@ import os
 import io
 from PIL import Image
 from rembg import remove # Se requiere la instalación de 'rembg' y 'Pillow'
-from typing import Type, Any
+from typing import Optional, Type, Any
 
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
@@ -21,6 +21,9 @@ class ImageBackgroundEraserInput(BaseModel):
     )
 
 class ImageBackgroundEraserTool(BaseTool):
+    account_id: Optional[str] = Field(None, description="ID de la cuenta asociada a esta herramienta.")
+    workspace_id: Optional[str] = Field(None, description="ID del espacio de trabajo del usuario, inyectado automáticamente.")
+    telegram_id: Optional[int] = Field(None, description="ID de Telegram del usuario, inyectado automáticamente.")
     name: str = "image_background_eraser"
     description: str = (
         "Útil para eliminar el fondo de una imagen. "

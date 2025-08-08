@@ -7,7 +7,7 @@ import asyncio
 import logging
 from typing import Type, Optional, List, Dict, Any
 from pydantic import BaseModel, Field
-from langchain.tools import BaseTool
+from langchain.tools import BaseTool, Tool
 from langchain_core.callbacks import AsyncCallbackManagerForToolRun
 
 # Importamos las clases necesarias
@@ -48,18 +48,17 @@ class DuckDuckGoSearchTool(BaseTool):
     )
     args_schema: Type[BaseModel] = DuckDuckGoSearchInput
     return_direct: bool = False
-    account_id: str = Field(default="", description="ID de la cuenta asociada a esta herramienta.")
-
-    def __init__(self, account_id: str = "", **kwargs):
-        super().__init__(**kwargs)
-        self.account_id = account_id
+    account_id: str
+    workspace_id: Optional[str] = None
+    telegram_id: Optional[int] = None
+    thread_id: Optional[str] = None
 
     async def _arun(
             self,
             query: str,
             run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
             **kwargs
-    ) -> ToolOutputWithSources:  # Cambiamos el tipo de retorno a ToolOutputWithSources
+    ) -> Dict[str, Any]:
         """Ejecuta la búsqueda en DuckDuckGo de forma asíncrona."""
         logger.info(f"🦆 Realizando búsqueda en DuckDuckGo con la consulta: '{query}'")
         try:
@@ -67,17 +66,18 @@ class DuckDuckGoSearchTool(BaseTool):
             search_results = await self._search_duckduckgo(query)
             if not search_results:
                 logger.warning(f"⚠️ No se encontraron resultados para la consulta: '{query}'")
-                return ToolOutputWithSources(context_for_llm="No se encontraron resultados de búsqueda para la consulta proporcionada.", sources=[])
+                return ToolOutputWithSources(context_for_llm="No se encontraron resultados de búsqueda para la consulta proporcionada.", sources=[]).model_dump()
 
             # Formatear resultados
-            formatted_results, sources = self._format_results(search_results, query)  # Modificamos para obtener las fuentes
+            formatted_results, sources = self._format_results(search_results, query)
             logger.info(f"✅ Resultados de búsqueda DuckDuckGo procesados exitosamente para la consulta: '{query}'")
-            return ToolOutputWithSources(context_for_llm=formatted_results, sources=sources)  # Devolvemos ToolOutputWithSources
+            output = ToolOutputWithSources(context_for_llm=formatted_results, sources=sources)
+            return output.model_dump()
 
         except Exception as e:
             error_msg = f"❌ Error al realizar búsqueda en DuckDuckGo: {str(e)}"
             logger.error(error_msg)
-            return ToolOutputWithSources(context_for_llm=f"Error al realizar la búsqueda: {str(e)}", sources=[])
+            return ToolOutputWithSources(context_for_llm=f"Error al realizar la búsqueda: {str(e)}", sources=[]).model_dump()
 
     async def _search_duckduckgo(self, query: str) -> List[Dict[str, Any]]:
         """
@@ -186,6 +186,6 @@ def create_ddg_search_tool(account_id: str) -> DuckDuckGoSearchTool:
     Args:
         account_id: ID de la cuenta del usuario
     Returns:
-        DuckDuckGoSearchTool: Instancia configurada de la herramienta
+        Tool: Instancia configurada de la herramienta
     """
     return DuckDuckGoSearchTool(account_id=account_id)

@@ -16,7 +16,7 @@ export type Document = {
   workspace_id?: string | null;
   created_at?: string; // Para ordenar
   // Campos para el estado de la subida
-  status?: 'processing' | 'completed' | 'failed' | 'placeholder';
+  status?: 'processing' | 'completed' | 'failed' | 'placeholder' | 'pending'; // Añadido 'pending'
   progress?: number;
   error?: string;
   document_type?: 'placeholder';
@@ -38,22 +38,28 @@ export const getColumns = (
     cell: ({ row }) => {
       const doc = row.original;
 
-      if (doc.status === 'processing') {
-        return (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span className="italic">{doc.title || 'Procesando...'}</span>
-          </div>
-        );
-      }
+      // Unificar la lógica para estados de carga
+      if (doc.document_type === 'placeholder') {
+        const isLoading = doc.status === 'processing' || doc.status === 'pending';
+        const isFailed = doc.status === 'failed';
 
-      if (doc.status === 'failed') {
-        return (
-          <div className="flex items-center gap-2 text-destructive">
-            <XCircle className="h-4 w-4" />
-            <span className="italic" title={doc.error}>Error al procesar</span>
-          </div>
-        );
+        if (isLoading) {
+          return (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="italic">{doc.title || 'Procesando...'}</span>
+            </div>
+          );
+        }
+
+        if (isFailed) {
+          return (
+            <div className="flex items-center gap-2 text-destructive">
+              <XCircle className="h-4 w-4" />
+              <span className="italic" title={doc.error}>Error al procesar</span>
+            </div>
+          );
+        }
       }
 
       return (
@@ -80,7 +86,7 @@ export const getColumns = (
     id: 'actions',
     cell: ({ row }) => {
       const document = row.original;
-      const isProcessing = document.status === 'processing';
+      const isProcessing = document.status === 'processing' || document.status === 'pending';
 
       if (isProcessing) {
         return (

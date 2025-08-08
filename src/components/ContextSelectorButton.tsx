@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { BookMarked, Loader2, ChevronRight, Folder, File as FileIcon } from 'lucide-react';
 import {
@@ -40,13 +40,7 @@ export function ContextSelectorButton({ onContextSelected, currentContext, works
   const [collections, setCollections] = useState<{ topic: string; items: SelectedContextItem[] }[]>([]);
   const [expandedTopics, setExpandedTopics] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
-    if (isOpen && documents.length === 0) {
-      fetchDocuments();
-    }
-  }, [isOpen, documents.length, workspaceId]); // Añadir workspaceId a las dependencias
-
-  const fetchDocuments = async () => {
+  const fetchDocuments = useCallback(async () => {
     setIsLoading(true);
     try {
       const apiParams = workspaceId ? { workspace_id: workspaceId } : {};
@@ -98,7 +92,13 @@ export function ContextSelectorButton({ onContextSelected, currentContext, works
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (isOpen && documents.length === 0) {
+      fetchDocuments();
+    }
+  }, [isOpen, documents.length, workspaceId, fetchDocuments]); // Añadir workspaceId a las dependencias
 
   const toggleTopicExpansion = (topic: string) => {
     setExpandedTopics(prev => ({ ...prev, [topic]: !prev[topic] }));
@@ -216,9 +216,13 @@ export function ContextSelectorButton({ onContextSelected, currentContext, works
                             htmlFor={`${item.type}-${item.id}`}
                             className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex-1 cursor-pointer"
                           >
-                            {item.type === 'document' ? <FileIcon className="inline-block h-4 w-4 mr-2 text-secondary" /> : <Folder className="inline-block h-4 w-4 mr-2 text-primary" />}
-                            <div className="font-medium">{item.name || item.title}</div>
-                            <div className="text-xs text-muted-foreground truncate">{item.type === 'document' ? item.title : 'Colección'}</div>
+                            <div className="flex items-center">
+                              {item.type === 'document' ? <FileIcon className="h-4 w-4 mr-2 text-secondary flex-shrink-0" /> : <Folder className="h-4 w-4 mr-2 text-primary flex-shrink-0" />}
+                              <div className="flex-grow">
+                                <div className="font-medium truncate">{item.name || item.title}</div>
+                                <div className="text-xs text-muted-foreground capitalize">{item.type}</div>
+                              </div>
+                            </div>
                           </label>
                         </div>
                       ))}

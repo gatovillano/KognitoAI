@@ -19,7 +19,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 # Usamos el nombre del servicio Docker y el puerto interno correcto.
 TTS_SERVICE_URL = "http://openai-edge-tts:5050/v1/audio/speech"
 
-from sqlalchemy import update
+from sqlalchemy import update, Integer, cast # Added cast # Added Integer
 
 
 from utils.audio_transcriber import transcribe_audio_file
@@ -115,7 +115,7 @@ async def text_to_speech(request: TextToSpeechRequest):
     # Parámetros para open-edgetts.
     tts_payload = {
         'input': text_to_speak,
-        'voice': request.voice if request.voice else 'es-MX-DaliaNeural',
+        'voice': request.voice if request.voice else 'es-MX-JorgeNeural',
         'model': 'edge-tts',
         'speed': 1.0,
     }
@@ -159,41 +159,90 @@ async def transcribe_audio(file: UploadFile = File(...)):
     return {"transcription": transcription}
 
 @router.post("/chat", response_model=ChatResponse, summary="Procesar Mensaje de Chat")
-async def handle_chat(request: ChatRequest, background_tasks: BackgroundTasks, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)) -> ChatResponse:
+async def handle_chat(
+    background_tasks: BackgroundTasks,
+    thread_id: str = Form(...),
+    account_id: str = Form(...),
+    user_message: str = Form(...),
+    telegram_id: Optional[int] = Form(None),
+    image_base64: Optional[str] = Form(None),
+    document_url: Optional[str] = Form(None),
+    mode: Optional[str] = Form(None),
+    rag_context: Optional[str] = Form(None), # Received as JSON string
+    file: Optional[UploadFile] = File(None), # New parameter for file upload
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+) -> ChatResponse:
     """
     Endpoint principal para procesar mensajes de chat con el agente de IA.
     Requiere autenticación JWT.
     """
+    # Parse rag_context if provided
+    parsed_rag_context = None
+    if rag_context:
+        try:
+            parsed_rag_context = json.loads(rag_context)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid JSON for rag_context: {rag_context}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El formato de rag_context es inválido.")
+
     try:
-        account_id_uuid = uuid.UUID(request.account_id)
+        account_id_uuid = uuid.UUID(account_id)
         if str(account_id_uuid) != current_account_id:  # Validar que el account_id coincida con el del token
-            logger.error(f"El account_id proporcionado ({request.account_id}) no coincide con el token de autenticación ({current_account_id})")
+            logger.error(f"El account_id proporcionado ({account_id}) no coincide con el token de autenticación ({current_account_id})")
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="El account_id proporcionado no coincide con el token de autenticación.")
     except ValueError:
-        logger.error(f"El account_id proporcionado no es un UUID válido: {request.account_id}")
+        logger.error(f"El account_id proporcionado no es un UUID válido: {account_id}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El account_id proporcionado no tiene un formato válido.")
 
-    logger.info(f"Petición de chat recibida de la cuenta: {request.account_id} con modo: {request.mode}")
+    logger.info(f"Petición de chat recibida de la cuenta: {account_id} con modo: {mode}")
     
     # Obtener el workspace_id del ChatThread asociado
     workspace_id = None
     
     # Logs de depuración para verificar thread_id y account_id
-    logger.info(f"DEBUG: Intentando recuperar ChatThread con thread_id: {request.thread_id} y account_id: {current_account_id}")
+    logger.info(f"DEBUG: Intentando recuperar ChatThread con thread_id: {thread_id} y account_id: {current_account_id}")
     
     thread = await db.scalar(select(ChatThread).where(  # type: ignore[arg-type]
-        ChatThread.id == uuid.UUID(request.thread_id),
+        ChatThread.id == uuid.UUID(thread_id),
         ChatThread.account_id == uuid.UUID(current_account_id)
     ))
     if not thread:
-        logger.warning(f"No se encontró el hilo {request.thread_id} para la cuenta {current_account_id}.")
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Hilo de chat con id {request.thread_id} no encontrado.")
+        logger.warning(f"No se encontró el hilo {thread_id} para la cuenta {current_account_id}.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Hilo de chat con id {thread_id} no encontrado.")
 
     if thread.workspace_id:
         workspace_id = str(thread.workspace_id)
-        logger.info(f"Recuperado workspace_id {workspace_id} para el hilo {request.thread_id}.")
+        logger.info(f"Recuperado workspace_id {workspace_id} para el hilo {thread_id}.")
     else:
-        logger.info(f"El hilo {request.thread_id} no tiene un workspace_id asociado (opcional).")
+        logger.info(f"El hilo {thread_id} no tiene un workspace_id asociado (opcional).")
+
+    # --- Manejo de archivos adjuntos ---
+    processed_file_content = None
+    if file:
+        logger.info(f"Archivo recibido: {file.filename}, Content-Type: {file.content_type}")
+        try:
+            # Aquí iría la lógica para procesar el archivo (ej. extraer texto)
+            # Por ahora, solo leeremos el contenido como bytes y lo codificaremos si es necesario
+            # En una implementación real, se usaría una librería para extraer texto de PDFs, DOCX, etc.
+            file_bytes = await file.read()
+            # Ejemplo muy básico: si es texto, leerlo; si no, indicar que es un archivo binario
+            if file.content_type and "text" in file.content_type:
+                processed_file_content = file_bytes.decode('utf-8')
+            elif file.content_type and "pdf" in file.content_type:
+                # Placeholder para procesamiento de PDF
+                processed_file_content = f"Contenido de PDF adjunto (procesamiento pendiente): {file.filename}"
+            else:
+                processed_file_content = f"Archivo adjunto (tipo no procesado para texto): {file.filename}"
+            
+            # Añadir el contenido del archivo al user_message para que el LLM lo vea
+            user_message = f"{user_message}\n\n--- Contenido del archivo adjunto: {file.filename} ---\n{processed_file_content}\n--- Fin del contenido del archivo adjunto ---" 
+            logger.info(f"Contenido del archivo {file.filename} añadido al user_message.")
+
+        except Exception as e:
+            logger.error(f"Error al procesar el archivo {file.filename}: {e}", exc_info=True)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error al procesar el archivo: {e}")
+    # --- Fin manejo de archivos adjuntos ---
 
     # Implementar la lógica principal del agente aquí y devolver la respuesta real
     # La lógica de streaming ahora se maneja dentro de create_and_run_agent_streaming
@@ -205,14 +254,14 @@ async def handle_chat(request: ChatRequest, background_tasks: BackgroundTasks, c
     final_sources = []
 
     async for chunk_str in create_and_run_agent_streaming(
-        account_id=request.account_id,
-        thread_id=request.thread_id,
-        telegram_id=request.telegram_id,
-        user_message=request.user_message,
-        image_base64=request.image_base64,
-        document_url=request.document_url,
-        mode=request.mode,
-        rag_context=request.rag_context,
+        account_id=account_id,
+        thread_id=thread_id,
+        telegram_id=telegram_id,
+        user_message=user_message,
+        image_base64=image_base64,
+        document_url=document_url,
+        mode=mode,
+        rag_context=parsed_rag_context, # Use parsed rag_context
         background_tasks=background_tasks,
         workspace_id=workspace_id
     ):
@@ -234,6 +283,7 @@ async def handle_chat(request: ChatRequest, background_tasks: BackgroundTasks, c
 
     logger.info(f"DEBUG (handle_chat): Retornando ChatResponse con response_text: {final_agent_response[:100]}..., tool_code: {final_tool_code}, sources: {final_sources}")
     return ChatResponse(response_text=final_agent_response, tool_code=final_tool_code, sources=final_sources)
+
 
 async def create_and_run_agent_streaming(
     account_id: str,
@@ -257,10 +307,54 @@ async def create_and_run_agent_streaming(
     from langchain_core.messages import HumanMessage, AIMessage, ToolMessage # Importar ToolMessage
     from langchain_community.chat_message_histories import PostgresChatMessageHistory
     from core.config import settings
+    from core.database import LangchainPgEmbedding # Importar el modelo correcto
+    from sqlalchemy.future import select
+    from sqlalchemy.orm import selectinload
+    # from sqlalchemy import Integer # Importar Integer - MOVED
+
 
     logger.info(f"--- Iniciando agente LangGraph para account_id: {account_id}, thread_id: {thread_id} ---")
 
     try:
+        # --- Preparación del Contexto RAG ---
+        context_text = ""
+        if rag_context:
+            logger.info(f"Enriqueciendo contexto con {len(rag_context)} item(s) de RAG.")
+            document_ids_to_fetch = [item['id'] for item in rag_context if item.get('type') == 'document']
+            
+            if document_ids_to_fetch:
+                async with SessionLocal() as session:
+                    # 1. Obtener todos los chunks para los documentos solicitados
+                    stmt = (
+                        select(LangchainPgEmbedding)
+                        .filter(LangchainPgEmbedding.cmetadata['document_id'].astext.in_(document_ids_to_fetch))
+                        .order_by(cast(LangchainPgEmbedding.cmetadata['chunk_index'].astext, Integer))\
+                    )
+                    result = await session.execute(stmt)
+                    all_chunks = result.scalars().all()
+
+                    # 2. Agrupar chunks por document_id
+                    docs_content = {}
+                    for chunk in all_chunks:
+                        doc_id = chunk.cmetadata.get('document_id')
+                        if doc_id not in docs_content:
+                            docs_content[doc_id] = {
+                                'title': chunk.cmetadata.get('title', chunk.cmetadata.get('file_name')),
+                                'chunks': []
+                            }
+                        docs_content[doc_id]['chunks'].append(chunk.document)
+
+                    # 3. Construir el texto del contexto
+                    for doc_id, data in docs_content.items():
+                        full_content = "".join(data['chunks'])
+                        context_text += f"\n\n--- Contexto del Documento: {data['title']} ---\n"
+                        context_text += f"Contenido: {full_content}\n"
+                        context_text += "--- Fin del Contexto del Documento ---"
+
+        if context_text:
+            user_message = f"Basado en el siguiente contexto, por favor responde la pregunta del usuario.\n{context_text}\n\nPregunta del usuario: {user_message}"
+            logger.info("Mensaje del usuario enriquecido con contexto RAG.")
+
         # --- Preparación Inicial ---
         agent_app = create_langgraph_agent()
         db_sync_url = settings.database_url.replace("+psycopg", "")
@@ -279,6 +373,7 @@ async def create_and_run_agent_streaming(
             "workspace_id": workspace_id,
             "tools": [], # Inicializa la lista de herramientas vacía
         }
+
         config = {"configurable": {"thread_id": thread_id}}
         final_state = None
 
@@ -317,6 +412,30 @@ async def create_and_run_agent_streaming(
 
         # Guardar el historial completo (incluyendo la respuesta final)
         await chat_message_history.aadd_messages([HumanMessage(content=user_message), AIMessage(content=full_response_content)])
+
+        # --- NOMBRAMIENTO AUTOMÁTICO DE HILOS ---
+        if background_tasks:
+            # Obtener el historial actualizado para el conteo
+            updated_history = await chat_message_history.aget_messages()
+            # Filtrar mensajes que no sean de resumen para un conteo preciso
+            real_messages = [m for m in updated_history if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
+            message_count = len(real_messages)
+
+            async with SessionLocal() as db:
+                thread = await db.get(ChatThread, uuid.UUID(thread_id))
+                current_title = thread.title if thread else ""
+
+            # Condición para nombrar/renombrar
+            should_rename = (
+                (current_title == "Nuevo Chat" and message_count >= 3) or
+                (message_count >= 10 and message_count % 10 == 0) # Renombrar cada 10 mensajes después de los 10 iniciales
+            )
+
+            if should_rename:
+                from core.agent import force_update_thread_title
+                logger.info(f"[AUTO-TÍTULO] Hilo {thread_id} cumple condición para nombrar/renombrar con {message_count} mensajes. Título actual: '{current_title}'")
+                background_tasks.add_task(force_update_thread_title, thread_id)
+        # --- FIN NOMBRAMIENTO AUTOMÁTICO ---
         
         # Extraer tool_code de los mensajes del estado final, si existe
         # Asumimos que si hay tool_code, debería estar en el último mensaje de herramienta o en el último mensaje del AI
@@ -433,7 +552,12 @@ async def get_threads(current_account_id: str = Depends(get_current_account_id),
     Endpoint para obtener la lista de todos los hilos de chat del usuario autenticado.
     """
     try:
-        threads = await db.execute(select(ChatThread).where(ChatThread.account_id == uuid.UUID(current_account_id)))
+        # MODIFICADO: Añadido .order_by() para ordenar por fecha de creación descendente
+        threads = await db.execute(
+            select(ChatThread)
+            .where(ChatThread.account_id == uuid.UUID(current_account_id))
+            .order_by(ChatThread.created_at.desc())
+        )
         thread_list = threads.scalars().all()
         return [{"id": str(thread.id), "title": thread.title, "isPinned": thread.is_pinned, "platform": thread.platform, "workspace_id": str(thread.workspace_id) if thread.workspace_id else None} for thread in thread_list]
     except Exception as e:
@@ -466,9 +590,11 @@ async def get_thread_messages(thread_id: str, current_account_id: str = Depends(
     Endpoint para obtener los mensajes de un hilo de chat específico.
     """
     try:
+        logger.info(f"DEBUG: Intentando obtener mensajes para Thread ID: {thread_id}, Account ID: {current_account_id}") # Added logging
         # Verificar que el hilo pertenece al usuario
         thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
         if not thread:
+            logger.warning(f"DEBUG: Hilo {thread_id} no encontrado para Account ID: {current_account_id}") # Added logging
             raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
 
         # Recuperar historial de mensajes de Langchain
@@ -511,30 +637,7 @@ async def get_thread_messages(thread_id: str, current_account_id: str = Depends(
         logger.error(f"Error al obtener mensajes del hilo {thread_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Ocurrió un error al obtener los mensajes del hilo de chat.")
 
-@router.post("/threads", summary="Crear un nuevo hilo de chat")
-async def create_thread(request: dict = {}, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
-    """
-    Endpoint para crear un nuevo hilo de chat para el usuario autenticado.
-    """
-    try:
-        workspace_id = request.get('workspace_id')
-        new_thread = ChatThread(
-            account_id=uuid.UUID(current_account_id),
-            title="Nuevo Chat",
-            platform="web",
-            workspace_id=uuid.UUID(workspace_id) if workspace_id else None
-        )
-        db.add(new_thread)
-        await db.commit()
-        await db.refresh(new_thread)
-        return {"id": str(new_thread.id), "title": new_thread.title, "isPinned": new_thread.is_pinned, "platform": new_thread.platform, "workspace_id": str(new_thread.workspace_id) if new_thread.workspace_id else None}
-    except ValueError:
-        logger.error(f"El workspace_id proporcionado no es un UUID válido: {workspace_id}")
-        raise HTTPException(status_code=400, detail="El workspace_id proporcionado no tiene un formato válido.")
-    except Exception as e:
-        logger.error(f"Error al crear un nuevo hilo para la cuenta {current_account_id}: {e}", exc_info=True)
-        await db.rollback()
-        raise HTTPException(status_code=500, detail="Ocurrió un error al crear un nuevo hilo de chat.")
+
 
 @router.put("/threads/{thread_id}/pin", summary="Fijar o desfijar un hilo de chat")
 async def pin_thread(thread_id: str, request: PinThreadRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):

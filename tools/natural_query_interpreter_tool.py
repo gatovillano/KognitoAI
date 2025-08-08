@@ -64,6 +64,7 @@ class NaturalQueryInterpreterTool(BaseTool):
     )
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
     workspace_id: Optional[str] = Field(None, description="El ID del workspace actual, inyectado automáticamente.")
+    telegram_id: Optional[int] = Field(None, description="El ID de Telegram del usuario, inyectado automáticamente.")
     args_schema: Type[BaseModel] = NaturalQueryInput
     return_direct: bool = False  # Devuelve resultados directamente
 

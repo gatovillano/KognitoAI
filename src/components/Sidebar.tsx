@@ -91,6 +91,46 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
       }
     };
     fetchThreads();
+
+    if (!user?.id) return;
+
+    // --- LÓGICA DE WEBSOCKET PARA ACTUALIZACIONES EN TIEMPO REAL ---
+    if (!user?.id) return; // Evita la conexión si no hay ID de usuario
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/ws';
+    const ws = new WebSocket(`${wsUrl}/${user?.id}`);
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      if (data.type === 'thread_title_updated') {
+        toast.info(`Conversación renombrada: "${data.new_title}"`);
+        const { thread_id, new_title } = data;
+
+        const updateThreadTitle = (thread: ChatThread) => 
+          thread.id === thread_id ? { ...thread, title: new_title } : thread;
+
+        setThreads(prev => prev.map(updateThreadTitle));
+        setPinnedThreads(prev => prev.map(updateThreadTitle));
+      }
+    };
+
+    ws.onopen = () => {
+      console.log('WebSocket conectado para actualizaciones de sidebar.');
+    };
+
+    ws.onerror = (error) => {
+      console.error('Error de WebSocket en sidebar:', JSON.stringify(error, ['message', 'code', 'reason', 'type']));
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket desconectado de sidebar.');
+    };
+
+    // Limpiar la conexión al desmontar el componente
+    return () => {
+      ws.close();
+    };
+    // Añadir user?.id a las dependencias para reconectar si el usuario cambia
   }, [user, activeWorkspaceId]);
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -238,23 +278,13 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                       onClick={async (e) => {
                         e.preventDefault();
                         e.stopPropagation();
+                        toast.info("Generando un nuevo título para la conversación...");
                         try {
-                          const response = await apiClient.post(`/api/threads/${thread.id}/generate-title`);
-                          const newTitle = response.data.title;
-                          if (newTitle) {
-                            const updatedThread = { ...thread, title: newTitle };
-                            if (isPinned) {
-                              setPinnedThreads((prev) =>
-                                prev.map(t => t.id === thread.id ? updatedThread : t)
-                              );
-                            } else {
-                              setThreads((prev) =>
-                                prev.map(t => t.id === thread.id ? updatedThread : t)
-                              );
-                            }
-                          }
+                          // La llamada a la API activará un evento WebSocket que actualizará la UI
+                          await apiClient.post(`/api/threads/${thread.id}/generate-title`);
                         } catch (error) {
                           console.error('Error generating title for thread:', error);
+                          toast.error("No se pudo generar un nuevo título.");
                         }
                       }}
                     >

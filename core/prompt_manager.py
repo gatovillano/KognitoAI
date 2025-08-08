@@ -102,10 +102,13 @@ class PromptManager:
         # 2. Construir el contenido del prompt del sistema
         # 2. Construir el contenido del prompt del sistema
         system_prompt_content = self.base_system_prompt
-        if custom_prompt_from_profile:
-            system_prompt_content += f"\n\n--- Instrucciones Adicionales del Perfil del Usuario ---\n{custom_prompt_from_profile}"
+
+        # Priorizar el prompt del workspace
         if workspace_prompt:
-            system_prompt_content += f"\n\n--- Instrucciones Adicionales del Workspace ---\n{workspace_prompt}"
+            system_prompt_content = workspace_prompt
+        elif custom_prompt_from_profile:
+            system_prompt_content = custom_prompt_from_profile
+        # Si no hay workspace_prompt ni custom_prompt_from_profile, se mantiene el base_system_prompt
 
         # 3. Aplicar overrides de modo
         if mode:
@@ -150,7 +153,7 @@ class PromptManager:
             "<hr>",
             system_prompt_content,
             "<hr>",
-            "<b>RECORDATORIO CRÍTICO DE TONO KAI:</b> ¡Mantén siempre el tono KAI! Sé cercano, empático, extenso, detallado, con formato cristalino y uso de emojis. ¡Es fundamental para cada una de tus respuestas!"
+            
         ]
         return "\n".join(final_prompt_parts)
 

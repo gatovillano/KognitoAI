@@ -4,6 +4,14 @@ Este documento sirve como una bitácora para registrar los errores encontrados d
 
 ---
 
+## 07-08-2025 - `ValueError` en `Tool` por falta de `account_id`
+
+-   **Error**: Se produjo un `ValueError: "Tool" object has no field "account_id"` al intentar instanciar las herramientas `web_search` y `ddg_search_tool`.
+-   **Causa**: Las herramientas `web_search_tool.py` y `ddg_search_tool.py` no estaban estandarizadas como las demás. Les faltaba el campo `account_id` y el `__init__` para recibirlo, lo que provocaba un error de validación en Pydantic al crear la herramienta.
+-   **Solución**: Se modificaron `tools/web_search_tool.py` y `tools/ddg_search_tool.py` para que las clases `WebSearchTool` y `DuckDuckGoSearchTool` incluyeran el campo `account_id` y un método `__init__` que lo aceptara. Además, se actualizaron las funciones `get_web_search_tool` y `create_ddg_search_tool` para que pasaran el `account_id` al crear la instancia de la herramienta, alineándolas con el resto de las herramientas del proyecto.
+
+---
+
 ## 2025-08-03 - Solución de `TypeError` en la Instanciación de Herramientas
 
 -   **Error**: Se produjo un `TypeError: Can't instantiate abstract class ... with abstract method _run` al intentar instanciar `DocumentRAGTool` y `VectorDBSearchTool`.
@@ -116,6 +124,37 @@ Se solucionaron tres errores críticos que afectaban la experiencia del usuario 
 
 ## 04-08-2025 - Errores de Ubicación de Importaciones y Bloques de Código en Componentes React
 
--   **Error**: Se produjeron errores de compilación (`'import', and 'export' cannot be used outside of module code`) en `src/app/(dashboard)/admin/page.tsx` y `src/app/(dashboard)/admin/scheduled-tools/page.tsx`.
+-   **Error**: Se produjeron errores de compilación (`'import', and 'export' cannot be used outside de module code`) en `src/app/(dashboard)/admin/page.tsx` y `src/app/(dashboard)/admin/scheduled-tools/page.tsx`.
 -   **Causa**: Las sentencias `import { useEffect, useCallback } from 'react';` estaban ubicadas incorrectamente dentro del cuerpo de la función del componente, en lugar de al principio del archivo. Además, en ambos archivos, el bloque `try...catch` de las funciones `fetchUsers` y `fetchData` estaba fuera de la definición de `useCallback`, causando errores de sintaxis.
 -   **Solución**: Se movieron las sentencias `import` al inicio de los archivos `src/app/(dashboard)/admin/page.tsx` y `src/app/(dashboard)/admin/scheduled-tools/page.tsx`. Se reubicaron los bloques `try...catch` dentro de las definiciones de `useCallback` para `fetchUsers` y `fetchData` respectivamente, asegurando la correcta estructura del código y la resolución de los errores de compilación.
+---
+
+## 07-08-2025 - `ValueError` en `WebSearchTool` por falta de campos de contexto
+
+-   **Error**: Se produjo un `ValueError: "WebSearchTool" object has no field "thread_id"` al intentar pasar el contexto de la conversación a la herramienta.
+-   **Causa**: La herramienta `WebSearchTool` no estaba estandarizada para aceptar los campos de contexto (`workspace_id`, `telegram_id`, `thread_id`) que el sistema pasa a todas las herramientas, aunque no los necesite para su lógica interna. Esto provocaba un error de validación en Pydantic.
+-   **Solución**: Se modificó la clase `WebSearchTool` en `tools/web_search_tool.py` para que incluya los campos `workspace_id`, `telegram_id` y `thread_id`. También se eliminó el `__init__` personalizado, ya que no era necesario. Esto alinea la herramienta con la estructura estándar del proyecto y evita el error de validación, permitiendo que el sistema le pase el contexto sin problemas.
+
+---
+
+## 07-08-2025 - `ValueError` en `DuckDuckGoSearchTool` por falta de campos de contexto
+
+-   **Error**: Se produjo un `ValueError: "DuckDuckGoSearchTool" object has no field "thread_id"` al intentar pasar el contexto de la conversación a la herramienta.
+-   **Causa**: La herramienta `DuckDuckGoSearchTool` no estaba estandarizada para aceptar los campos de contexto (`workspace_id`, `telegram_id`, `thread_id`) que el sistema pasa a todas las herramientas, aunque no los necesite para su lógica interna. Esto provocaba un error de validación en Pydantic.
+-   **Solución**: Se modificó la clase `DuckDuckGoSearchTool` en `tools/ddg_search_tool.py` para que incluya los campos `workspace_id`, `telegram_id` y `thread_id`. También se eliminó el `__init__` personalizado, ya que no era necesario. Esto alinea la herramienta con la estructura estándar del proyecto y evita el error de validación, permitiendo que el sistema le pase el contexto sin problemas.
+
+---
+
+## 07-08-2025 - `ValidationError` en `WebSearchTool` y `DuckDuckGoSearchTool` por `workspace_id` requerido
+
+-   **Error**: Se produjo un `ValidationError` en `WebSearchTool` y `DuckDuckGoSearchTool` indicando que el campo `workspace_id` era requerido pero no se estaba proporcionando.
+-   **Causa**: Durante la estandarización de las herramientas, el campo `workspace_id` se definió erróneamente como `str` en lugar de `Optional[str] = None`, haciéndolo obligatorio. Esto causaba un error de validación cuando las herramientas se instanciaban solo con el `account_id`.
+-   **Solución**: Se modificaron las clases `WebSearchTool` en `tools/web_search_tool.py` y `DuckDuckGoSearchTool` en `tools/ddg_search_tool.py` para que la definición del campo `workspace_id` sea `Optional[str] = None`. Esto lo convierte en un campo opcional y resuelve el error de validación, permitiendo que las herramientas se creen correctamente con o sin un `workspace_id`.
+
+---
+
+## 07-08-2025 - `TypeError` por objeto no serializable en herramientas de búsqueda
+
+-   **Error**: Se produjo un `TypeError: Object of type ToolOutputWithSources is not JSON serializable` al procesar el resultado de las herramientas `WebSearchTool` y `DuckDuckGoSearchTool`.
+-   **Causa**: Las herramientas devolvían una instancia del objeto `ToolOutputWithSources` de Pydantic. Este objeto no es directamente compatible con la serialización JSON que requiere el sistema para procesar los resultados de las herramientas.
+-   **Solución**: Se modificaron los métodos `_arun` en `tools/web_search_tool.py` y `tools/ddg_search_tool.py`. En lugar de devolver el objeto `ToolOutputWithSources` directamente, ahora se utiliza el método `.model_dump()` de Pydantic para convertir el objeto en un diccionario antes de devolverlo. Los diccionarios son compatibles con la serialización JSON, lo que resuelve el `TypeError` y permite que el sistema procese los resultados correctamente.

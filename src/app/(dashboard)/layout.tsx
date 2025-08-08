@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppShell } from '@/components/AppShell';
@@ -36,7 +36,9 @@ export default function DashboardLayout({
   return (
     <>
       <WorkspaceTitleProvider>
-        <AppShell>{children}</AppShell>
+        <AppShell>
+          {React.isValidElement(children) ? children : null}
+        </AppShell>
       </WorkspaceTitleProvider>
       <Toaster richColors position="top-right" />
     </>

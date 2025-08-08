@@ -2,16 +2,14 @@
 
 import { DocumentCollectionDisplay } from '@/components/DocumentCollectionDisplay';
 import React from 'react';
+import { useParams } from 'next/navigation'; // Importar useParams
 
-interface PageProps {
-  params: { topic: string };
-}
-
-export default function CollectionDetailPage({ params }: PageProps) {
-  const topic = decodeURIComponent(params.topic || '');
+export default function CollectionDetailPage() {
+  const params = useParams();
+  const topic = params ? decodeURIComponent(params.topic as string) : '';
 
   return (
-    <div className="h-full">
+    <div className="h-full overflow-x-hidden">
       <DocumentCollectionDisplay
         topic={topic}
         collectionName={topic}

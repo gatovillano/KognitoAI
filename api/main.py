@@ -106,13 +106,13 @@ async def log_405_errors(request, call_next):
     return response
 
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, token: str):
+@app.websocket("/ws/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: str):
     """Endpoint para manejar conexiones WebSocket."""
-    account_id = decode_access_token(token)
+    account_id = user_id
     if not account_id:
         await websocket.close(code=1008)
-        logger.warning("Intento de conexión WebSocket con token inválido.")
+        logger.warning("Intento de conexión WebSocket sin user_id.")
         return
 
     await connect_websocket(account_id, websocket)

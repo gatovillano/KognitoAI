@@ -54,6 +54,9 @@ class CogneeKnowledgeGraphTool(BaseTool):
     
     args_schema: Type[BaseModel] = CogneeKnowledgeGraphToolInput
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = None
+    telegram_id: Optional[int] = None
+    thread_id: Optional[str] = None
     _cognee_integration: Optional[CogneeIntegration] = None
     _graph_db: Optional[GraphDB] = None
 
@@ -217,7 +220,7 @@ Puedes usar 'search_graph' para buscar información específica."""
     
     def _run(self, action: Literal["process_documents", "search_graph", "get_insights"], documents: Optional[List[Dict[str, Any]]] = None, query: Optional[str] = None, dataset_name: str = "default", **kwargs) -> str:
         """Ejecuta la herramienta de forma síncrona."""
-        return asyncio.run(self._arun(tool_input_json, **kwargs))
+        return asyncio.run(self._arun(action=action, documents=documents, query=query, dataset_name=dataset_name, **kwargs))
     
     def _format_search_results(self, results: List[Any]) -> str:
         """Formatea los resultados de búsqueda."""

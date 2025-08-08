@@ -153,7 +153,7 @@ def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = None, 
                 if token: # Only add github_token if it exists
                     github_kwargs["github_token"] = token
                 if telegram_id is not None: # Pass telegram_id if it's not None
-                    github_kwargs["telegram_id"] = telegram_id
+                    github_kwargs["telegram_id"] = str(telegram_id)
                 if thread_id is not None: # Pass thread_id if it's not None
                     github_kwargs["thread_id"] = thread_id
                 # Assuming workspace_id is also passed to get_all_langchain_tools if needed
@@ -162,12 +162,65 @@ def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = None, 
                 tool_instance = ToolClass(**github_kwargs)
             # Tools requiring account_id and optionally telegram_id and thread_id
             elif hasattr(ToolClass, 'model_fields') and 'account_id' in ToolClass.model_fields:
-                kwargs = {"account_id": account_id}
-                if 'telegram_id' in ToolClass.model_fields: # Check if tool also expects telegram_id
-                    kwargs["telegram_id"] = telegram_id
-                if 'thread_id' in ToolClass.model_fields: # Check if tool also expects thread_id
-                    kwargs["thread_id"] = thread_id
-                tool_instance = ToolClass(**kwargs)
+                tool_kwargs = {}
+
+                if 'account_id' in ToolClass.model_fields:
+                    tool_kwargs['account_id'] = account_id
+
+                if 'telegram_id' in ToolClass.model_fields and telegram_id is not None:
+                    tool_kwargs['telegram_id'] = str(telegram_id)
+
+                # Define a list of tools that should NOT receive thread_id
+                tools_to_exclude_thread_id = [
+                    "MemorySearchOptimizedTool",
+                    "WebSearchTool",
+                    "DuckDuckGoSearchTool",
+                    "UpdateProfileTool",
+                    "InternalKnowledgeSearchTool",
+                    "GetDocumentListTool",
+                    "GetDocumentContentTool",
+                    "GetNotesTool",
+                    "GetAgendaTool",
+                    "CancelEventTool",
+                    "SetReminderTool",
+                    "ScheduleEventTool",
+                    "UpdateNoteTool",
+                    "DeleteNoteTool",
+                    "DeleteDocumentTool",
+                    "ExtractDocumentTitlesTool",
+                    "UpdateDocumentMetadataTool",
+                    "ImageGenerationTool",
+                    "ImageBackgroundEraserTool",
+                    "WebScraperTool",
+                    "AddWebToRAGTool",
+                    "AnalyzeTextForInsightsTool",
+                    "AnalyzeCodeForInsightsTool",
+                    "KnowledgeAnalysisTool",
+                    "ComprehensiveWebAnalysisTool",
+                    "GetAnalysisResultsTool",
+                    "ScopedRagAnalysisTool",
+                    "MultiQuerySearchTool",
+                    "CogneeKnowledgeGraphTool",
+                    "CogneeConceptualProcessingTool",
+                    "ScheduleToolExecutionTool",
+                    "ListScheduledToolsTool",
+                    "VectorDBSearchTool",
+                    "VectorDBQueryTool",
+                    "NaturalQueryInterpreterTool",
+                    "ProactiveKnowledgeLinkerTool",
+                    "GetProactiveInsightsTool",
+                    "MindmapGeneratorTool",
+                    "ConversationHistoryAnalyzerTool",
+                    "ConversationContextAnalyzerTool",
+                    "DocumentRAGTool",
+                ]
+
+                # Add thread_id ONLY if the tool explicitly has the field AND is NOT in the exclusion list
+                if 'thread_id' in ToolClass.model_fields and thread_id is not None and \
+                   ToolClass.__name__ not in tools_to_exclude_thread_id:
+                    tool_kwargs['thread_id'] = thread_id
+
+                tool_instance = ToolClass(**tool_kwargs)
             # General tools that do not require account_id or telegram_id in constructor
             else:
                 tool_instance = ToolClass()
@@ -183,7 +236,7 @@ def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = None, 
     try:
         # Importar la FÁBRICA de la herramienta de búsqueda web
         from tools.ddg_search_tool import create_ddg_search_tool
-        ddg_search_tool_instance = create_ddg_search_tool(account_id=account_id) # ddg_search_tool requiere account_id
+        ddg_search_tool_instance = create_ddg_search_tool(account_id=account_id)
         available_tools.append(ddg_search_tool_instance)
         logger.info(f"  [+] Herramienta de fábrica cargada: {ddg_search_tool_instance.name}")
     except Exception as e:
@@ -192,7 +245,7 @@ def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = None, 
     try:
         # Importar la FÁBRICA de la herramienta de búsqueda web
         from tools.web_search_tool import get_web_search_tool
-        web_search_tool_instance = get_web_search_tool()
+        web_search_tool_instance = get_web_search_tool(account_id=account_id)
         available_tools.append(web_search_tool_instance)
         logger.info(f"  [+] Herramienta de fábrica cargada: {web_search_tool_instance.name}")
     except Exception as e:

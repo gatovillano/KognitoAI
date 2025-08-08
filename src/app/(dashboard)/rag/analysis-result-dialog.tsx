@@ -25,7 +25,12 @@ interface AnalysisResultDialogProps {
 
 export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange }: AnalysisResultDialogProps) {
   const [isQuestionsDialogOpen, setIsQuestionsDialogOpen] = useState(false);
+  const [expandedThemes, setExpandedThemes] = useState<Record<string, boolean>>({});
   const { play, stop, isLoading, isPlaying, activeText } = useTextToSpeech();
+
+  const toggleThemeExpansion = (themeName: string) => {
+    setExpandedThemes(prev => ({ ...prev, [themeName]: !prev[themeName] }));
+  };
 
   if (!analysis) return null;
 
@@ -130,20 +135,22 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                     </div>
                 </div>
                 <div>
-                    <h3 className="font-semibold mb-2">Temas Clave</h3>
-                    <div className="space-y-3">
-                    <h3 className="font-semibold mb-2">Temas Clave Avanzados</h3>
+                    <h3 className="font-semibold mb-2">Temas Clave</h3> {/* Renamed from "Temas Clave Avanzados" */}
                     <div className="flex flex-wrap gap-2">
                         {Array.isArray(mappedAnalysis.temas_clave_avanzados) && mappedAnalysis.temas_clave_avanzados.length > 0 ? (
                             mappedAnalysis.temas_clave_avanzados.map((topic: any, i: number) => (
-                                <div key={i} className="border rounded-lg p-3 bg-muted/30">
-                                    <Badge className="mb-2">
+                                <div key={i} className="flex flex-col items-start"> {/* Removed box styling */}
+                                    <Button
+                                        variant="outline" // Changed to outline for tag-like appearance
+                                        className="mb-2"
+                                        onClick={() => toggleThemeExpansion(topic.name)}
+                                    >
                                         {topic.name || topic.description || 'Tema sin nombre'}
-                                    </Badge>
-                                    {topic.quotes && topic.quotes.length > 0 && (
+                                    </Button>
+                                    {expandedThemes[topic.name] && topic.quotes && topic.quotes.length > 0 && (
                                         <div className="mt-2 space-y-2">
                                             <h4 className="text-sm font-medium text-muted-foreground">Citas relacionadas:</h4>
-                                            {topic.quotes.slice(0, 2).map((quote: any, qIndex: number) => (
+                                            {topic.quotes.map((quote: any, qIndex: number) => ( // Show all quotes when expanded
                                                 <blockquote key={qIndex} className="text-xs italic text-muted-foreground border-l-2 border-primary/20 pl-3 py-1">
                                                     &quot;{quote.quote || quote}&quot;
                                                     {quote.document_title && (
@@ -153,11 +160,6 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                                                     )}
                                                 </blockquote>
                                             ))}
-                                            {topic.quotes.length > 2 && (
-                                                <p className="text-xs text-muted-foreground">
-                                                    +{topic.quotes.length - 2} citas más...
-                                                </p>
-                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -246,7 +248,6 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                     </div>
                 )}
             </div>
-        </div>
         </ScrollArea>
         <div className="flex justify-between mt-4">
           <Button 

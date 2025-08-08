@@ -315,10 +315,7 @@ class CogneeConceptualProcessingTool(BaseTool):
         Ejecuta la herramienta de forma síncrona (utilizando asyncio.run para llamar a _arun).
         """
         try:
-            return asyncio.run(self._arun(
-                tool_input_json=kwargs.get("tool_input_json", json.dumps(kwargs)),
-                **kwargs
-            ))
+            return asyncio.run(self._arun(**kwargs))
         except Exception as e:
             logger.error(f"❌ Error en la ejecución síncrona de CogneeConceptualProcessingTool: {e}", exc_info=True)
             return {
@@ -406,11 +403,29 @@ class CogneeConceptualProcessingTool(BaseTool):
                     "details": "No se pudo reconstruir el contenido de ningún documento válido proporcionado."
                 }
 
-            # Procesar documentos conceptualmente usando la integración de Cognee
-            result = await self._process_documents_conceptually(effective_account_id, prepared_documents, dataset_name)
+            # Procesar documentos uno por uno con una pausa para evitar rate limiting
+            all_results = []
+            total_docs = len(prepared_documents)
+            for i, doc in enumerate(prepared_documents):
+                logger.info(f"Procesando documento {i+1}/{total_docs}: {doc.get('file_name')}")
+                # Enviar el documento individualmente (envuelto en una lista)
+                result = await self._process_documents_conceptually(
+                    effective_account_id, [doc], dataset_name
+                )
+                all_results.append(result)
 
-            # El resultado ya viene parseado (o con error dict) de _process_documents_conceptually
-            return result
+                # Si no es el último documento, esperar para evitar rate limiting
+                if i < total_docs - 1:
+                    logger.info("Esperando 5 segundos antes del siguiente documento...")
+                    await asyncio.sleep(5)
+
+            logger.info("Todos los documentos han sido procesados.")
+            # Devolver una lista con todos los resultados
+            return {
+                "status": "completed",
+                "processed_documents_count": len(all_results),
+                "results": all_results
+            }
 
         except Exception as e:
             logger.error(f"❌ Error general en la ejecución asíncrona de CogneeConceptualProcessingTool: {e}", exc_info=True)

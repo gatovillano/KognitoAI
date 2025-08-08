@@ -35,17 +35,9 @@ class ProfileUpdateInput(BaseModel):
     # El cambio más importante: requerimos el identificador universal.
     # Los demás campos son opcionales, permitiendo actualizaciones parciales del perfil.
     nombre: Optional[str] = Field(default=None, description="El nombre del usuario.")
-
-
-gustos: Optional[str] = Field(
-    default=None, description="Los gustos o preferencias del usuario."
-)
-intereses: Optional[str] = Field(
-    default=None, description="Los intereses o hobbies del usuario."
-)
-otros_datos: Optional[str] = Field(
-    default=None, description="Cualquier otra información relevante sobre el usuario."
-)
+    gustos: Optional[str] = Field(default=None, description="Los gustos o preferencias del usuario.")
+    intereses: Optional[str] = Field(default=None, description="Los intereses o hobbies del usuario.")
+    otros_datos: Optional[str] = Field(default=None, description="Cualquier otra información relevante sobre el usuario.")
 
 
 class UpdateProfileTool(BaseTool):
@@ -64,6 +56,9 @@ class UpdateProfileTool(BaseTool):
     args_schema: Type[BaseModel] = ProfileUpdateInput
     return_direct: bool = False
     account_id: str
+    workspace_id: Optional[str] = Field(None, description="El ID del espacio de trabajo del usuario.")
+    telegram_id: Optional[int] = Field(None, description="El ID de Telegram del usuario.")
+    thread_id: Optional[str] = Field(None, description="ID del hilo de conversación específico.")
 
     async def _arun(
         self,

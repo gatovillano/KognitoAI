@@ -267,6 +267,8 @@ class LangchainPgEmbedding(Base):
     category = Column(String(50), nullable=True) # ⭐ COLUMNA DIRECTA
     team_id = Column(UUID(as_uuid=True), nullable=True, index=True) # ⭐ COLUMNA DIRECTA
     visibility_teams = Column(JSONB, nullable=True) # ⭐ COLUMNA DIRECTA
+    telegram_id = Column(BigInteger, nullable=True, index=True) # ⭐ COLUMNA DIRECTA
+    thread_id = Column(UUID(as_uuid=True), nullable=True, index=True) # ⭐ COLUMNA DIRECTA
 
     # Índices adicionales para las columnas directas
     __table_args__ = (

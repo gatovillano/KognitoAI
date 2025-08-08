@@ -282,7 +282,7 @@ export default function RagCollectionsPage() {
   };
 
   return (
-    <div className="p-8 mx-4">
+    <div className="p-8 mx-4 overflow-x-hidden">
       <div className="flex items-center justify-between mb-12">
         <div>
           <h1 className="text-3xl font-bold flex items-center">

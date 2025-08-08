@@ -342,7 +342,7 @@ export default function RepositoryDetailPage() {
   };
 
   return (
-    <div className="h-full flex flex-col p-6">
+    <div className="h-full flex flex-col p-6 overflow-x-hidden">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div>
           <Link href="/rag/repositories" className="flex items-center text-sm text-muted-foreground hover:text-foreground mb-2">

@@ -75,6 +75,8 @@ class ScheduleToolExecutionTool(BaseTool):
     args_schema: Type[BaseModel] = ScheduleToolExecutionInput
     return_direct: bool = False
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="El ID del espacio de trabajo del usuario, inyectado automáticamente.")
+    telegram_id: Optional[int] = Field(None, description="El ID de Telegram del usuario, inyectado automáticamente.")
 
     async def _arun(
         self,

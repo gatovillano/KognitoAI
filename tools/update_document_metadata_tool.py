@@ -48,11 +48,8 @@ class UpdateDocumentMetadataInput(BaseModel):
         None,
         description="La nueva categoría o tema para el documento. Si se proporciona, reemplazará el tema existente."
     )
-    # --- NUEVO: Parámetro para el ID del workspace ---
-    workspace_id: Optional[str] = Field(
-        None,
-        description="El ID del workspace (UUID en formato string) para actualizar el documento de un workspace específico, si aplica."
-    )
+    workspace_id: Optional[str] = Field(None, description="El ID del espacio de trabajo del usuario, inyectado automáticamente.")
+    telegram_id: Optional[int] = Field(None, description="El ID de Telegram del usuario, inyectado automáticamente.")
 
 
 class UpdateDocumentMetadataTool(BaseTool):
