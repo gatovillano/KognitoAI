@@ -121,7 +121,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
       const response = await apiClient.post('/api/threads', { workspace_id: workspaceId });
       const newThread = response.data;
       setChats((prevChats) => [...prevChats, newThread]);
-      router.push(`/chat/${newThread.id}`);
+      router.push(`/workspaces/${workspaceId}/chat/${newThread.id}`);
     } catch (error) {
       console.error('Error creating new chat:', error);
     }
@@ -673,7 +673,9 @@ const handleDeleteCollection = async (collectionId: string) => {
                   </p>
                   <div className="flex items-center justify-between pt-2 border-t border-border/50">
                     <span className="text-xs text-muted-foreground">
-                      {collection.created_at ? new Date(collection.created_at).toLocaleDateString() : 'Sin fecha'}
+                      {collection.document_count !== undefined
+                        ? `${collection.document_count} documento(s)`
+                        : 'Calculando...'}
                     </span>
                     <div className="flex items-center gap-1">
                       <div className="h-2 w-2 rounded-full bg-blue-500"></div>

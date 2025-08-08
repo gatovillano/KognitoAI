@@ -102,11 +102,11 @@ function LoadingIndicator({
         </div>
       </div>
       <div className="flex-1 bg-muted p-3 rounded-lg max-w-[70%] relative">
-        <p className="text-sm text-muted-foreground flex items-center">
+        <p className="text-base text-muted-foreground flex items-center">
           {text}
-          <span className="inline-block ml-1">.</span>
-          <span className="inline-block">.</span>
-          <span className="inline-block">.</span>
+          <span className="animate-pulse delay-0 inline-block ml-1">.</span>
+          <span className="animate-pulse delay-150 inline-block">.</span>
+          <span className="animate-pulse delay-300 inline-block">.</span>
         </p>
         {/* Cola de la burbuja */}
         <div className="absolute left-[-8px] top-3 h-4 w-4 bg-muted rotate-45 transform origin-bottom-left"></div>
@@ -120,6 +120,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const router = useRouter(); // Usar useRouter directamente
   const [threadDetails, setThreadDetails] = useState<ThreadDetails | null>(null);
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
+  const [files, setFiles] = useState<File[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isResponding, setIsResponding] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -135,7 +136,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [selectedContext, setSelectedContext] = useState<SelectedContextItem[]>([]);
   const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
   const [isAudioPaused, setIsAudioPaused] = useState(false);
-  const [files, setFiles] = useState<File[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -144,10 +144,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [toolName, setToolName] = useState<string | undefined>(undefined);
   const [reactState, setReactState] = useState<string | undefined>(undefined);
   const wsRef = useRef<WebSocket | null>(null);
-
-  const handleRemoveFile = (index: number) => {
-    setFiles((prevFiles) => prevFiles.filter((_, i) => i !== index));
-  };
 
   const handleCopyMessage = useCallback((text: string) => {
     navigator.clipboard
@@ -162,10 +158,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   }, []);
 
   useEffect(() => {
-    // Only attempt WebSocket connection if user, token, and threadId are available,
-    // and the component is not in a loading state (meaning initial data fetch is complete).
-    if (!user || !token || !threadId || isLoading) {
-      console.warn('CommonChat: Skipping WebSocket connection. User, token, threadId, or loading state not ready.');
+    if (!user || !token) {
+      console.warn('CommonChat: User or token not available, skipping WebSocket connection.');
       return;
     }
 
@@ -290,16 +284,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
                 if (data.type === 'chunk') {
                   fullResponse += data.content;
-
-                  // Actualizar mensaje en tiempo real
-                  setMessages((prev) => {
-                    const newMessages = [...prev];
-                    const lastMessage = newMessages[newMessages.length - 1];
-                    if (lastMessage && lastMessage.sender === 'ai') {
-                      lastMessage.text = fullResponse;
-                    }
-                    return newMessages;
-                  });
                 } else if (data.type === 'info') {
                   // Opcional: mostrar información de herramientas
                   console.log('Tool info:', data.content);
@@ -323,6 +307,16 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           }
         }
 
+        // Actualizar el mensaje de IA con la respuesta completa
+        setMessages((prev) => {
+          const newMessages = [...prev];
+          const lastMessage = newMessages[newMessages.length - 1];
+          if (lastMessage && lastMessage.sender === 'ai') {
+            lastMessage.text = fullResponse;
+          }
+          return newMessages;
+        });
+
         // Verificar si hay ID de tarea en la respuesta final
         if (fullResponse && fullResponse.includes("ID de tarea:")) {
           const taskId = fullResponse.split("ID de tarea:")[1].trim().split(".")[0];
@@ -343,7 +337,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     async (e?: React.FormEvent, retryMessage?: string) => {
       if (e) e.preventDefault();
       const messageText = retryMessage || newMessage;
-      if ((!messageText.trim() && files.length === 0) || isResponding) return;
+      if ((!messageText.trim() && selectedContext.length === 0) || isResponding) return;
 
       if (!user || !user.id) {
         toast.error('Error: Usuario no autenticado o ID de usuario faltante.');
@@ -393,11 +387,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       });
 
       const messageToSend = messageText;
-      const filesToSend = [...files];
       if (!retryMessage) {
         setNewMessage('');
       }
-      setFiles([]);
       // setSelectedContext([]); // Keep context persistent
       setIsResponding(true);
 
@@ -406,22 +398,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       try {
         let imageBase64: string | null = null;
         let documentUrl: string | null = null;
-        if (filesToSend.length > 0) {
-          const imageFile = filesToSend.find((file) => file.type.startsWith('image/'));
-          if (imageFile) {
-            imageBase64 = await new Promise((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-              reader.onerror = reject;
-              reader.readAsDataURL(imageFile);
-            });
-            userMessage.image_base64 = `data:image/${imageFile.type.split('/')[1]};base64,${imageBase64}`;
-          } else {
-            const documentFile = filesToSend[0];
-            documentUrl = URL.createObjectURL(documentFile);
-            userMessage.document_url = documentUrl;
-          }
-        }
 
         const mode = isKnowledgeAnalysisActive
           ? 'knowledgeAnalysis'
@@ -577,17 +553,45 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     setSelectedContext(selectedItems);
   }, []);
 
-  const handleRemoveContextItem = useCallback((id: string, type: 'document' | 'collection') => {
-    setSelectedContext((prev) => prev.filter(item => !(item.id === id && item.type === type)));
+  const handleRemoveContextItem = useCallback((itemToRemove: SelectedContextItem) => {
+    setSelectedContext((prev) => prev.filter(item => !(item.id === itemToRemove.id && item.type === itemToRemove.type)));
   }, []);
 
-  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const newFiles = Array.from(e.target.files);
-      setFiles((prevFiles) => [...prevFiles, ...newFiles]);
-      e.target.value = '';
+      e.target.value = ''; // Reset input
+
+      setIsUploadingFile(true);
+      const uploadPromises = newFiles.map(file => {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (workspaceId) {
+          formData.append('workspace_id', workspaceId);
+        }
+
+        return apiClient.post('/api/upload-chat-document', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        });
+      });
+
+      try {
+        const results = await Promise.all(uploadPromises);
+        const newContextItems = results.map(res => res.data);
+        
+        setSelectedContext(prev => [...prev, ...newContextItems]);
+        toast.success(`${newFiles.length} archivo(s) subido(s) y añadido(s) al contexto.`);
+
+      } catch (error) {
+        console.error("Error al subir el archivo de chat:", error);
+        toast.error('Error al subir uno o más archivos. Inténtalo de nuevo.');
+      } finally {
+        setIsUploadingFile(false);
+      }
     }
-  }, []);
+  }, [workspaceId]);
 
   const toggleKnowledgeAnalysis = useCallback(() => {
     setIsKnowledgeAnalysisActive((prev) => !prev);
@@ -694,7 +698,11 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             // Esto se maneja en page.tsx ahora, no es necesario aquí.
           }
           
-          setMessages(messagesRes.data);
+          // Ordenar mensajes por fecha, los más recientes primero
+          const sortedMessages = messagesRes.data.sort((a: ChatMessageType, b: ChatMessageType) => {
+            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+          });
+          setMessages(sortedMessages);
 
         } catch (error) {
           console.error('Error fetching chat data:', error);
@@ -810,10 +818,10 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   }
 
   return (
-    <div className="flex h-full bg-background -m-6">
+    <div className="flex h-full bg-background overflow-x-hidden">
       <div className="flex flex-col h-full w-full">
         <ScrollArea ref={scrollAreaRef} className="flex-1">
-          <div className="p-4 md:p-6 space-y-6 w-full max-w-4xl mx-auto">
+          <div className="p-4 md:p-6 space-y-6 w-full md:max-w-4xl mx-auto">
             <div>
               {filteredMessages.slice(-50).map((msg, index) => {
                 const messageIndex = filteredMessages.length - 50 + index;
@@ -837,7 +845,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                       isAudioLoading={isAudioLoading}
                       playingMessageIndex={playingMessageIndex}
                       isAudioPaused={isAudioPaused}
-                      isLastMessage={msg.sender === 'ai' && index === filteredMessages.length - 1 && isResponding}
                     />
                     {msg.ragContext && msg.ragContext.length > 0 && (
                       <div className="flex flex-wrap gap-2 mt-2">
@@ -872,12 +879,12 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             </div>
           </div>
         </ScrollArea>
-        <div className="w-full max-w-4xl mx-auto px-4 pb-4">
+        <div className="w-full md:max-w-4xl mx-auto px-4 pb-4">
           <div className="relative">
             {selectedContext.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2 p-2 bg-muted rounded-md border border-border/50">
                 {selectedContext.map((item: SelectedContextItem) => (
-                  <div key={`${item.type}-${item.id}`} className="flex items-center gap-2 bg-background p-1.5 px-3 rounded-full text-sm">
+                  <div key={`${item.type}-${item.id}`} className="flex items-center gap-2 bg-background p-1.5 px-3 rounded-full text-xs">
                     {item.type === 'collection' ? <Folder className="h-4 w-4 text-primary" /> : <FileIcon className="h-4 w-4 text-secondary" />}
                     <span>{item.name || item.title}</span>
                     <button onClick={() => handleRemoveContextItem(item.id, item.type)} className="hover:text-red-500">
@@ -896,7 +903,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 isKnowledgeAnalysisActive={selectedContext.length > 0}
                 isWebSearchActive={isWebSearchActive}
                 isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
-                files={files}
                 onMessageChange={setNewMessage}
                 onSendMessage={handleSendMessage}
                 onKeyDown={handleKeyDown}
@@ -906,7 +912,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 onStartRecording={startRecording}
                 onStopRecording={stopRecording}
                 onFileUpload={handleFileUpload}
-                onRemoveFile={handleRemoveFile}
+                onRemoveContextItem={handleRemoveContextItem}
                 onPaste={handlePaste}
                 isFixedPosition={false}
                 workspaceId={workspaceId} // ¡NUEVO! Pasamos el workspaceId

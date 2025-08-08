@@ -132,20 +132,32 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
       }
       
       onUploadStart(fileNames, topicForUpload);
-      onOpenChange(false);
+      onOpenChange(false); // Cierra el diálogo inmediatamente
 
-      await apiClient.post('/api/upload-document', formData, {
+      // La subida ahora ocurre en segundo plano. El componente padre
+      // escuchará los eventos de WebSocket para actualizar el estado.
+      apiClient.post('/api/upload-document', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+      }).then(response => {
+        // El éxito se maneja a través de WebSockets, pero podemos loguear aquí si es necesario
+        console.log('Upload request sent successfully for', fileNames);
+        // Opcional: podrías llamar a onUploadSuccess aquí si necesitas hacer algo
+        // general después de que la petición se complete, pero el estado de los
+        // documentos individuales es manejado por WebSockets.
+        onUploadSuccess(fileNames, topicForUpload);
+      }).catch(error => {
+        // Si la petición inicial falla, mostramos un error genérico.
+        // Los fallos de procesamiento de archivos individuales se manejan por WebSockets.
+        toast.error('Error al iniciar la subida de documentos.', {
+          description: 'Por favor, revisa tu conexión e inténtalo de nuevo.',
+        });
+        console.error(error);
+      }).finally(() => {
+        setIsSubmitting(false);
+        form.reset();
       });
-
-      toast.success('¡Documentos subidos con éxito!', {
-        id: 'upload-progress'
-      });
-      
-      onUploadSuccess(fileNames, topicForUpload);
-      form.reset();
 
     } catch (error) {
       toast.error('Error al subir/guardar documento', {

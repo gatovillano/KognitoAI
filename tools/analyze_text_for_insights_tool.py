@@ -2,7 +2,7 @@
 
 import logging
 import asyncio
-from typing import Any, Type
+from typing import Any, Optional, Type
 
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
@@ -36,6 +36,8 @@ class AnalyzeTextForInsightsTool(BaseTool):
     # La respuesta es rica y estructurada, mejor que el agente la procese.
     return_direct: bool = False
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="El ID del espacio de trabajo del usuario, inyectado automáticamente.")
+    telegram_id: Optional[int] = Field(None, description="El ID de Telegram del usuario, inyectado automáticamente.")
 
     async def _arun(self, text: str, **kwargs: Any) -> str:
         """

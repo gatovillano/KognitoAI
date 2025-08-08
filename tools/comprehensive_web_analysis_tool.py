@@ -7,12 +7,13 @@ from typing import Any, Type, List, Optional, cast
 import re
 
 from langchain_core.tools import Tool
-from core.citation_models import ToolOutputWithSources
+from core.citation_models import ToolOutputWithSources, Source # <-- Añadir Source aquí
 
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.messages import HumanMessage
+from core.prompts import KNOWLEDGE_SHARE_PRROMPT
 from bs4 import BeautifulSoup
 
 # Import functionalities from other tools and modules
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 class ComprehensiveWebAnalysisInput(BaseModel):
     """Input schema for the Comprehensive Web Analysis Tool."""
     query: str = Field(..., description="The user's research query in natural language.")
-    # --- NUEVO: Parámetro para el ID del workspace ---
+    
 class ComprehensiveWebAnalysisTool(BaseTool):
     """
     A comprehensive tool that orchestrates web searching, scraping, and knowledge base analysis
@@ -48,9 +49,9 @@ class ComprehensiveWebAnalysisTool(BaseTool):
     telegram_id: Optional[str] = Field(None, description="El ID del usuario de Telegram, si la solicitud proviene de Telegram.")
     thread_id: Optional[str] = Field(None, description="El ID del hilo de conversación, si aplica.")
 
-    def _extract_urls(self, search_results: str) -> List[str]:
-        """Extracts URLs from the formatted search results string."""
-        urls = re.findall(r"<a href=\'(.*?)\'>", search_results)
+    def _extract_urls(self, search_results: List[Source]) -> List[str]:
+        """Extracts URLs from a list of Source objects."""
+        urls = [source.url for source in search_results if source.url]
         logger.info(f"Extracted {len(urls)} URLs from search results: {urls}")
         return urls
 
@@ -87,7 +88,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
 
             # Step 1: Web Search
             logger.info("Step 1: Performing web search...")
-            web_search_tool_instance = get_web_search_tool()
+            web_search_tool_instance = get_web_search_tool(account_id=effective_account_id)
             if web_search_tool_instance._arun is None:
                 logger.error("Error: web_search_tool_instance._arun is None. This should not happen.")
                 return "Error interno: La herramienta de búsqueda web no está configurada correctamente."
@@ -103,7 +104,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
                 else:
                     break # Si ya hay contenido acumulado, intentar finalizar con lo que se tiene.
 
-            urls_to_scrape = self._extract_urls(search_results_obj.context_for_llm)
+            urls_to_scrape = self._extract_urls(search_results_obj.sources)
             if not urls_to_scrape:
                 logger.warning("No URLs could be extracted from the search results.")
                 soup = BeautifulSoup(search_results_obj.context_for_llm, "html.parser")
@@ -246,27 +247,28 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         if not final_analysis_llm:
             return "Error: El modelo de lenguaje para el análisis final no está disponible."
         
-        final_prompt = f"""
-        Eres Kognito, un asistente de IA experto en análisis y síntesis. Tu tarea es responder a la consulta original del usuario combinando la información acumulada de la web con el conocimiento personal relevante del usuario.
+        # Generar las fuentes en formato Markdown con enlaces, adaptado al nuevo formato del prompt
+        formatted_sources = ""
+        if urls_to_scrape_accumulated:
+            for i, url in enumerate(urls_to_scrape_accumulated):
+                # Para simplificar, usamos el dominio como título y "Desconocido" para autor.
+                # En un caso real, se podría intentar extraer más metadatos de la URL.
+                display_name = url.split("//")[1].split("/")[0] # Usar el dominio como título
+                formatted_sources += (
+                    f"    Fuente {i+1}: [**{display_name}**](<{url}>)\n"
+                    f"        Autor: [Desconocido/No aplicable]\n"
+                    f"        Relevancia: [Esta fuente fue relevante para el análisis general de la consulta original.]\n\n"
+                )
 
-        Consulta Original del Usuario: "{original_query}"
-
-        --- Resumen Ejecutivo de la Investigación Web Acumulada ---
-        {combined_web_content_accumulated}
-        --- Fin del Resumen Web Acumulado ---
-
-        --- Información Relevante de la Base de Conocimiento Personal del Usuario ---
-        {{relevant_memories if "No se encontraron" not in relevant_memories else "No se encontró información interna relevante."}}\\n
-        --- Fin de la Información Interna ---
-
-        Basándote en TODA la información anterior, por favor, elabora una respuesta final y completa para el usuario.
-        - Sintetiza los hallazgos clave.
-        - Si encuentras conexiones, sinergias o contradicciones entre la información web y el conocimiento del usuario, destácalas.
-        - Adopta un tono de asistente útil y experto.
-        - Formatea tu respuesta de manera clara y legible usando Markdown.\n
-        - **Importante:** Al final de tu respuesta, incluye una sección titulada "**Fuentes**" donde listes todas las URLs utilizadas en la investigación web ({', '.join([f'[{url.split("//")[1].split("/")[0]}](<{url}>)' for url in urls_to_scrape_accumulated[:5]]) if urls_to_scrape_accumulated else "No se encontraron fuentes web."}). Asegúrate de que cada URL esté en formato de enlace clickable usando Markdown.\n
-        """
-        final_response = await final_analysis_llm.ainvoke([HumanMessage(content=final_prompt)])
+        # Rellenar la plantilla KNOWLEDGE_SHARE_PRROMPT con la información recopilada
+        final_prompt_content = KNOWLEDGE_SHARE_PRROMPT.replace("{query}", original_query)
+        final_prompt_content = final_prompt_content.replace("{combined_web_content_accumulated}", combined_web_content_accumulated)
+        final_prompt_content = final_prompt_content.replace("{relevant_memories}", relevant_memories if "No se encontró" not in relevant_memories else "No se encontró información interna relevante.")
+        final_prompt_content = final_prompt_content.replace("{formatted_sources}", formatted_sources)
+        
+        # El KNOWLEDGE_SHARE_PRROMPT ya contiene la estructura completa del informe.
+        # No necesitamos envolverlo en otro f-string ni añadir más instrucciones aquí.
+        final_response = await final_analysis_llm.ainvoke([HumanMessage(content=final_prompt_content)])
 
         return final_response.content
 

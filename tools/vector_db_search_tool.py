@@ -18,6 +18,9 @@ class VectorDBSearchTool(BaseTool):
     name: str = "vector_db_search"
     description: str = "Busca información en la base de datos vectorial del usuario"
     args_schema: Type[BaseModel] = VectorDBSearchInput
+    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="ID del workspace (NULL = General), inyectado automáticamente.")
+    telegram_id: Optional[int] = Field(None, description="ID de Telegram del usuario, inyectado automáticamente.")
 
     async def _arun(
         self,

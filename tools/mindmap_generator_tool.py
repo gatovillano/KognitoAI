@@ -41,6 +41,8 @@ class MindmapGeneratorTool(BaseTool):
     """, description="Descripción de la herramienta")
     args_schema: Type[BaseModel] = MindmapGeneratorInput
     account_id: Optional[str] = Field(None, description="ID de la cuenta asociada a esta herramienta, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="ID del espacio de trabajo asociado a esta herramienta, inyectado automáticamente.")
+    telegram_id: Optional[int] = Field(None, description="ID de Telegram del usuario asociado a esta herramienta, inyectado automáticamente.")
 
     def __init__(self, account_id: Optional[str] = None, **kwargs):
         super().__init__(**kwargs)

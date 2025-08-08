@@ -75,7 +75,7 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <LoadingProvider>
       <SearchProvider>
-        <div className="flex h-screen bg-background">
+        <div className="flex h-screen bg-background overflow-x-hidden">
             {/* Sidebar para desktop (visible en md y superior) */}
             <div
               className={`hidden md:block bg-card/80 backdrop-blur-xl transition-all duration-500 ease-in-out ${isSidebarCollapsed ? 'w-16' : 'w-72'} h-full overflow-y-auto shadow-medium border-border/20`}
@@ -129,16 +129,7 @@ export function AppShell({ children }: AppShellProps) {
                       </Button>
                     </>
                   ) : (
-                    <div className="hidden md:flex items-center gap-3">
-                      <div className="relative">
-                        <Image src="/logo-simple.png" alt="Kognito Logo" width={40} height={40} className="rounded-lg" />
-                        <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-primary rounded-full border-2 border-background"></div>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="font-bold text-lg text-foreground">Kognito</span>
-                        <span className="text-xs text-muted-foreground">AI Labs</span>
-                      </div>
-                    </div>
+                    null
                   )}
                 </div>
                 
@@ -151,14 +142,8 @@ export function AppShell({ children }: AppShellProps) {
                   )}
                   <ThemeToggle />
                   {/* New button for right panel */}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={toggleRightPanel}
-                    className="rounded-xl hover:bg-primary/10 hover:text-primary transition-all duration-200"
-                  >
-                    {isRightPanelOpen ? <PanelRightClose className="h-5 w-5" /> : <PanelRightOpen className="h-5 w-5" />}
-                  </Button>
+                  {/* Botón de despliegue del menú de la derecha eliminado */}
+                  <Image src="/logo-simple.png" alt="Kognito Logo" width={40} height={40} className="rounded-lg" />
                 </div>
               </header>
               <main className="flex-1 bg-background overflow-y-auto p-4 md:p-6">

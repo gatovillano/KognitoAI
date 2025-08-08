@@ -7,7 +7,6 @@ import { ChatAvatar } from './ChatAvatar';
 import { Button } from '@/components/ui/button';
 import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
-import TypewriterMarkdown from './TypewriterMarkdown';
 
 interface Artifact {
   id: number;
@@ -32,7 +31,6 @@ interface ChatMessageProps {
   isAudioLoading: boolean;
   playingMessageIndex: number | null;
   isAudioPaused: boolean;
-  isLastMessage: boolean; // Nueva prop
   children?: React.ReactNode; // Añadir la propiedad children
 }
 
@@ -45,7 +43,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
   isAudioLoading,
   playingMessageIndex,
   isAudioPaused,
-  isLastMessage, // Recibir la nueva prop
   children, // Recibir children en las props
 }) => {
   ChatMessage.displayName = 'ChatMessage';
@@ -82,8 +79,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
         >
           <div className="flex items-start gap-3 max-w-[100%] mr-4" style={{ marginRight: '20px' }}>
             <div
-              className="rounded-3xl px-2 py-0 shadow-sm bg-muted/80 backdrop-blur-sm text-foreground border border-border/10 max-w-[calc(100%-4rem)] md:max-w-lg"
-            >
+              className="rounded-3xl rounded-br-none px-4 py-2 shadow-sm bg-muted/80 backdrop-blur-sm text-foreground border border-border/10 max-w-[80%] md:max-w-lg relative">
+              {/* Cola de la burbuja */}
+              
               {isEditing ? (
                 <textarea
                   value={editedText}
@@ -92,15 +90,15 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
                   placeholder="Edita tu mensaje aquí..."
                 />
               ) : (
-                <div className="text-sm break-words font-sans">
-                  <MarkdownRenderer content={msg.text} />
+                <div className="text-base break-words font-sans">
+                  {msg.text}
                 </div>
               )}
 
               {/* Contexto RAG utilizado */}
               {msg.ragContext && msg.ragContext.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-border/20">
-                  <h4 className="text-xs font-semibold text-muted-foreground mb-2">Contexto Utilizado:</h4>
+                  <h4 className="text-base font-semibold text-muted-foreground mb-2">Contexto Utilizado:</h4>
                   <div className="flex flex-wrap gap-2">
                     {msg.ragContext.map(item => (
                       <div key={`${item.type}-${item.id}`} className="flex items-center gap-2 bg-background/50 p-1 px-2 rounded-md text-xs">
@@ -130,7 +128,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
                   </svg>
-                  <span className="text-sm">{msg.document_url.split('/').pop() || 'Documento'}</span>
+                  <span className="text-base">{msg.document_url.split('/').pop() || 'Documento'}</span>
                 </div>
               )}
             </div>
@@ -171,10 +169,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
         </div>
       ) : (
         // Mensaje de la IA
-        <motion.div
-          initial={{ opacity: 0, y: 0 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, ease: "easeOut" }}
+        <div
           className="flex flex-col mb-8"
         >
           <div className="flex items-start gap-3">
@@ -183,10 +178,10 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
                 className="flex items-center gap-2 mb-3"
               >
                 <span className="font-semibold text-foreground">KAI</span>
-                <span className="text-xs text-muted-foreground">Assistant</span>
+                <span className="text-lg text-muted-foreground">Assistant</span>
               </div>
               
-              <div className="py-2 w-full">
+              <div className="w-full">
                 {isEditing ? (
                   <textarea
                     value={editedText}
@@ -195,34 +190,17 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
                     placeholder="Edita tu mensaje aquí..."
                   />
                 ) : (
-                  <div className="text-sm text-foreground break-words font-sans">
-                    {msg.sender === 'ai' ? (
-                      <TypewriterMarkdown content={msg.text} shouldAnimate={isLastMessage} />
-                    ) : (
-                      <MarkdownRenderer content={msg.text} />
-                    )}
+                  <div className="text-base text-foreground break-words font-sans">
+                    <MarkdownRenderer content={msg.text} />
                   </div>
                 )}
-                
-                {/* Archivos adjuntos */}
-                {msg.image && (
-                  <div className="mt-4">
-                    <Image 
-                      src={msg.image} 
-                      alt="Imagen generada" 
-                      className="max-w-full h-auto rounded-2xl cursor-pointer shadow-sm" 
-                      onClick={() => window.open(msg.image, '_blank')}
-                      width={500} // Asumiendo un ancho razonable
-                      height={500} // Asumiendo una altura razonable
-                    />
-                  </div>
-                )}
+               
                 {msg.document_url && (
                   <div className="mt-3 flex items-center gap-2 text-muted-foreground hover:text-foreground cursor-pointer" onClick={() => window.open(msg.document_url, '_blank')}>
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                       <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
                     </svg>
-                    <span className="text-sm">{msg.document_url.split('/').pop() || 'Documento'}</span>
+                    <span className="text-base">{msg.document_url.split('/').pop() || 'Documento'}</span>
                   </div>
                 )}
                 {msg.artifact && (
@@ -231,7 +209,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
                       <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
                       <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
                     </svg>
-                    <span className="text-sm">Ver Artefacto</span>
+                    <span className="text-base">Ver Artefacto</span>
                   </div>
                 )}
               </div>
@@ -283,7 +261,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
               </div>
             </div>
           </div>
-        </motion.div>
+        </div>
       )}
     </motion.div>
   );

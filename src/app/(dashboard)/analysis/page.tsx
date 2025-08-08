@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -124,20 +124,21 @@ export default function AnalysisPage() {
   const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
   const [isSemanticDialogOpen, setIsSemanticDialogOpen] = useState(false);
+  const offsetRef = useRef(0); // Use useRef for offset
   const [hasMore, setHasMore] = useState(false);
-  const [offset, setOffset] = useState(0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   const fetchAnalyses = useCallback(async (reset = false) => {
     if (reset) {
       setIsLoading(true);
-      setOffset(0);
+      offsetRef.current = 0; // Update ref directly
+      setAnalyses([]); // Clear analyses when resetting
     } else {
       setIsLoadingMore(true);
     }
 
     try {
-      const currentOffset = reset ? 0 : offset;
+      const currentOffset = offsetRef.current; // Read from ref
       const response = await apiClient.post('/api/get-all-analysis', {
         limit: 20,
         offset: currentOffset,
@@ -152,17 +153,25 @@ export default function AnalysisPage() {
       } else {
         setAnalyses(prev => [...prev, ...data.analysis]);
       }
-      
-      setHasMore(data.has_more);
-      setOffset(currentOffset + data.analysis.length);
+
+      // Crucial change: If hasMore is true but no new data was received, set hasMore to false
+      if (data.has_more && data.analysis.length === 0) {
+        setHasMore(false);
+      } else {
+        setHasMore(data.has_more);
+      }
+
+      offsetRef.current = currentOffset + data.analysis.length; // Update ref directly
     } catch (error) {
       toast.error('Error al cargar los análisis');
       console.error('Error fetching analyses:', error);
+      // Also set hasMore to false on error to prevent infinite retries if the error is persistent
+      setHasMore(false);
     } finally {
       setIsLoading(false);
       setIsLoadingMore(false);
     }
-  }, [selectedType, searchQuery, offset]);
+  }, [selectedType, searchQuery]); // Removed offset from dependencies
 
   useEffect(() => {
     fetchAnalyses(true);
@@ -232,15 +241,7 @@ export default function AnalysisPage() {
         </p>
       </div>
 
-      {/* Sección de Visualización de Grafos */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Visualización de Grafo de Conocimiento</CardTitle>
-        </CardHeader>
-        <CardContent className="h-[600px] w-full">
-          <GraphVisualization workspaceId="default_workspace" />
-        </CardContent>
-      </Card>
+      
 
       {/* Filtros y búsqueda */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">

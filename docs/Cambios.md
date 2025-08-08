@@ -107,3 +107,117 @@ Descripción general: Se ha incorporado una nueva estructura de respuesta al `KA
 
 - **Punto 1**: Se añadió una sección detallada en el `KAI_SYSTEM_PROMPT` que describe la estructura esperada para informes y análisis, incluyendo introducción empática, estructura lógica, profundidad en la explicación, uso de emojis y formato, y un cierre colaborativo.
 - **Punto 2**: La nueva estructura se insertó en la sección "TONO Y ESTILO DE COMUNICACIÓN" del prompt, justo después de la instrucción de "Extensa y Detallada".
+---
+## 06-08-25 Corrección de Importación de Optional en GetAgendaTool
+Descripción general: Se añadió la importación de `Optional` desde `typing` en `tools/get_agenda_tool.py` para resolver un `NameError` después de añadir `workspace_id: Optional[str] = None` a la clase `GetAgendaTool`.
+
+- **Punto 1**: Se añadió `from typing import Optional` en `tools/get_agenda_tool.py`.
+---
+## 06-08-25 Adición de `telegram_id` como campo opcional en `GetAgendaTool`
+Descripción general: Se añadió `telegram_id: Optional[int] = None` a la clase `GetAgendaTool` en `tools/get_agenda_tool.py` para que la herramienta pueda recibir este parámetro sin generar errores, alineándose con la estandarización de herramientas.
+
+- **Punto 1**: Se añadió `telegram_id: Optional[int] = None` como atributo a la clase `GetAgendaTool` en `tools/get_agenda_tool.py`.
+---
+## 07-08-25 Corrección de TypeError en WebSearchTool
+Descripción general: Se solucionó un TypeError en la herramienta WebSearchTool (tools/web_search_tool.py) que ocurría porque el método _arun devolvía un diccionario (.dict()) en lugar de un objeto ToolOutputWithSources.
+
+- **Punto 1**: Se identificó que la firma de la función _arun esperaba un objeto ToolOutputWithSources como valor de retorno.
+- **Punto 2**: Se observó que la línea de retorno estaba convirtiendo incorrectamente el objeto a un diccionario con .dict().
+- **Punto 3**: Se eliminó la llamada a .dict() en la sentencia return de la función _arun para que devuelva el objeto correcto, solucionando así el error.
+---
+## 07-08-25 Mejoras de UI y Responsividad en Chat y RAG
+Descripción general: Se implementaron varias mejoras en la interfaz de usuario y la responsividad, especialmente para dispositivos móviles, en los componentes de chat y las páginas de RAG.
+
+- **Punto 1**: Se eliminó la "cola" de la burbuja de chat del usuario en `src/components/ChatMessage.tsx` para un diseño más limpio.
+- **Punto 2**: Se hizo que la esquina inferior derecha de la burbuja de chat del usuario fuera recta en `src/components/ChatMessage.tsx` (`rounded-br-none`).
+- **Punto 3**: Se corrigió la visualización de mensajes cortos en la burbuja de chat del usuario en smartphones, ajustando el ancho máximo en `src/components/ChatMessage.tsx` a `max-w-[80%]`.
+- **Punto 4**: Se implementó el ordenamiento de mensajes por fecha (los más recientes primero) en `src/components/CommonChat.tsx`.
+- **Punto 5**: Se eliminó el scroll horizontal en la vista de chat en smartphones, añadiendo `overflow-x-hidden` al contenedor principal en `src/components/CommonChat.tsx`.
+- **Punto 6**: Se eliminó el botón de despliegue del menú de la derecha en `src/components/AppShell.tsx` y se corrigió el error de sintaxis del comentario HTML a JSX.
+- **Punto 7**: Se aplicó la misma responsividad (`overflow-x-hidden`) a toda la página en `src/components/AppShell.tsx` para evitar el scroll horizontal general.
+- **Punto 8**: Se adaptó la responsividad de las páginas de RAG (`src/app/(dashboard)/rag/**/page.tsx`) para evitar el scroll horizontal en smartphones, añadiendo `overflow-x-hidden` a sus contenedores principales.
+---
+## 07-08-25 Correcciones y Mejoras en Herramientas y UI
+Descripción general: Se implementaron varias correcciones y mejoras en las herramientas de análisis web y en la interfaz de usuario, incluyendo la gestión de errores de React y la visualización de logos.
+
+- **Punto 1**: Se corrigió el error en `tools/comprehensive_web_analysis_tool.py` donde la herramienta se saltaba pasos debido a una extracción incorrecta de URLs. Se modificó `_extract_urls` para procesar objetos `Source` directamente.
+- **Punto 2**: Se instruyó al LLM en `tools/comprehensive_web_analysis_tool.py` para que intente citar y referenciar fuentes en formato APA en sus respuestas.
+- **Punto 3**: Se resolvió el `NameError: name 'Source'` en `tools/comprehensive_web_analysis_tool.py` añadiendo la importación de `Source` desde `core/citation_models`.
+- **Punto 4**: Se solucionó el error "Objects are not valid as a React child" en `src/app/(dashboard)/layout.tsx` asegurando que solo se pasen elementos React válidos a `AppShell` mediante `React.isValidElement()`.
+- **Punto 5**: Se corrigió el error de compilación en `src/components/AppShell.tsx` causado por un comentario HTML inválido, reemplazándolo por `null` para que no se renderice nada en esa posición.
+- **Punto 6**: Se modificó `src/components/AppShell.tsx` para eliminar el logo "Kognito AI Labs" y posicionar `public/logo-simple.png` en la esquina superior derecha de la barra superior.
+---
+## 07-08-25 Corrección de Parámetro Innecesario en UpdateProfileTool
+Descripción general: Se solucionó el error `ValueError: "UpdateProfileTool" object has no field "thread_id"` al instanciar `UpdateProfileTool`.
+
+- **Punto 1**: Se añadió `UpdateProfileTool` a la lista de herramientas excluidas de recibir el parámetro `thread_id` en `core/tools.py`.
+---
+## 07-08-25 Integración de KNOWLEDGE_SHARE_PRROMPT en ComprehensiveWebAnalysisTool
+Descripción general: Se modificó la herramienta de análisis web (`ComprehensiveWebAnalysisTool`) para utilizar la plantilla `KNOWLEDGE_SHARE_PRROMPT` definida en `core/prompts.py` al generar el análisis final. Esto asegura que la respuesta del LLM siga un formato detallado y estructurado, incluyendo la referencia a las fuentes.
+
+- **Punto 1**: Se importó `KNOWLEDGE_SHARE_PRROMPT` desde `core/prompts.py` en `tools/comprehensive_web_analysis_tool.py`.
+- **Punto 2**: Se ajustó el `final_prompt` en la función `_arun` para que use `KNOWLEDGE_SHARE_PRROMPT` como plantilla.
+- **Punto 3**: Se implementó el llenado de los marcadores de posición (`query`, `combined_web_content_accumulated`, `relevant_memories`, `formatted_sources`) en la plantilla `KNOWLEDGE_SHARE_PRROMPT`.
+- **Punto 4**: Se mejoró la generación de `formatted_sources` para que se adapte al formato de fuentes de la plantilla.
+---
+## 07-08-25 Mejora del Contexto del Chat con Metadatos de Documentos
+Descripción general: Se ha mejorado la capacidad del chat para utilizar el contexto de los documentos seleccionados. Ahora, el LLM recibe no solo el contenido del documento, sino también sus metadatos, lo que le permite tener conversaciones más ricas y precisas en torno al texto.
+
+- **Punto 1**: Se modificó el backend en `api/chat.py` para que, al recibir un contexto de RAG, busque en la base de datos el contenido y los metadatos de los documentos y colecciones seleccionados.
+- **Punto 2**: Se ha enriquecido el `user_message` que se envía al LLM, anteponiendo un texto con el contexto extraído, incluyendo el contenido y los metadatos de cada documento.
+- **Punto 3**: Se ha realizado un pequeño ajuste en el frontend, en `src/components/ContextSelectorButton.tsx`, para mostrar de forma más clara si un ítem es un "Documento" o una "Colección", mejorando la usabilidad.
+---
+## 07-08-25 Ordenación de Conversaciones por Fecha de Creación
+Descripción general: Se ha corregido el comportamiento de la lista de conversaciones para que se ordene por fecha de creación, mostrando las más recientes primero.
+
+- **Punto 1**: Se ha modificado la consulta a la base de datos en `api/chat.py` en el endpoint que devuelve la lista de hilos (`/threads`).
+- **Punto 2**: Se ha añadido `.order_by(ChatThread.created_at.desc())` a la consulta de SQLAlchemy para asegurar que los resultados se ordenen de forma descendente por fecha de creación.
+---
+## 07-08-25 Nombramiento Automático de Conversaciones con Actualización en Tiempo Real
+Descripción general: Se ha implementado un sistema de nombramiento automático para las conversaciones. Los títulos se generan y actualizan mediante un LLM después de un cierto número de mensajes, y los cambios se reflejan en la interfaz de usuario en tiempo real sin necesidad de recargar la página.
+
+- **Punto 1**: Se ha modificado `api/chat.py` para que, después de cada mensaje, se verifique el número de mensajes en la conversación. Si se alcanzan los 3 o 10 mensajes, se lanza una tarea en segundo plano para generar un nuevo título.
+- **Punto 2**: Se ha mejorado la función `force_update_thread_title` en `core/agent.py` para que, además de actualizar la base de datos, envíe una notificación a través de un WebSocket al frontend.
+- **Punto 3**: Se ha actualizado el componente `src/components/Sidebar.tsx` para que establezca una conexión WebSocket y escuche las notificaciones de `thread_title_updated`. Al recibir una, actualiza el título de la conversación correspondiente en el estado de React, logrando una actualización visual instantánea.
+---
+## 07-08-25 Corrección de Error de Importación en `api/chat.py`
+Descripción general: Se ha solucionado un error crítico de `ImportError` y `NameError` en `api/chat.py` que impedía el correcto funcionamiento del enriquecimiento de contexto del chat. El error se debía a la importación de modelos incorrectos y a una lógica de consulta desactualizada.
+
+- **Punto 1**: Se eliminó la importación incorrecta de `Document` y `Collection` que causaba el `ImportError`.
+- **Punto 2**: Se importó el modelo correcto, `LangchainPgEmbedding`, desde `core/database`.
+- **Punto 3**: Se ha reescrito por completo la lógica de enriquecimiento de contexto para que consulte la tabla `langchain_pg_embedding` utilizando los `document_id` proporcionados. La nueva lógica recupera todos los `chunks` de un documento, los ordena correctamente y reconstruye el contenido completo para inyectarlo en el prompt del LLM.
+---
+## 07-08-25 Corrección de NameError en api/chat.py
+Descripción general: Se solucionó el error `NameError: name 'Integer' is not defined` en `api/chat.py` añadiendo la importación de `Integer` desde `sqlalchemy`.
+
+- **Punto 1**: Se añadió `from sqlalchemy import Integer` en `api/chat.py` para resolver el error de nombre.
+---
+## 07-08-25 Corrección de Parámetro Innecesario en InternalKnowledgeSearchTool
+Descripción general: Se solucionó el error `ValueError: "InternalKnowledgeSearchTool" object has no field "thread_id"` al instanciar `InternalKnowledgeSearchTool`.
+
+- **Punto 1**: Se añadió `InternalKnowledgeSearchTool` a la lista de herramientas excluidas de recibir el parámetro `thread_id` en `core/tools.py`.
+---
+## 07-08-25 Corrección de Parámetro Innecesario en GetDocumentListTool
+Descripción general: Se solucionó el error `ValueError: "GetDocumentListTool" object has no field "thread_id"` al instanciar `GetDocumentListTool`.
+
+- **Punto 1**: Se añadió `GetDocumentListTool` a la lista de herramientas excluidas de recibir el parámetro `thread_id` en `core/tools.py`.
+---
+## 07-08-25 Ajuste de Tamaño de Fuente en Etiquetas de Documentos del Chat
+Descripción general: Se ajustó el tamaño de la fuente de las etiquetas que muestran los documentos en el contexto del chat en `src/components/CommonChat.tsx` para que sean más pequeñas y se integren mejor visualmente.
+
+- **Punto 1**: Se modificó el tamaño de la fuente de las etiquetas de contexto dentro de los mensajes del chat a `text-xs` (extra pequeñas).
+- **Punto 2**: Se modificó el tamaño de la fuente de las etiquetas de contexto en la barra de entrada del chat a `text-xs` (extra pequeñas).
+---
+## 08-08-25 Mejora en la Subida de Documentos con Indicador de Carga Realista
+Descripción general: Se ha mejorado la experiencia de usuario al subir documentos en la sección RAG. Anteriormente, se mostraba una notificación de éxito de forma prematura. Ahora, se ha implementado un sistema de seguimiento en tiempo real que muestra un indicador de carga individual para cada archivo hasta que su procesamiento en el backend finaliza.
+
+- **Punto 1 (Backend - `core/memory_manager.py`):** Se modificó la función `process_document_for_rag` para que envíe notificaciones WebSocket granulares al frontend en tres momentos clave: `document_processing_started`, `document_processing_completed` y `document_processing_failed`.
+- **Punto 2 (Frontend - `src/app/(dashboard)/rag/upload-document-dialog.tsx`):** Se eliminó la notificación `toast` de éxito inmediato y la lógica de `await`. Ahora, el diálogo se cierra al instante y la petición de subida se realiza en segundo plano, delegando la responsabilidad de la retroalimentación visual al componente padre.
+- **Punto 3 (Frontend - `src/components/DocumentCollectionDisplay.tsx`):** Se implementó la lógica para escuchar los nuevos eventos de WebSocket. Al recibir `document_processing_started`, se añade un *placeholder* a la tabla con estado "Procesando". Al recibir `document_processing_completed`, se recarga la lista de documentos para mostrar el archivo final. Si se recibe `document_processing_failed`, se actualiza el *placeholder* para mostrar un estado de error.
+---
+## 08-08-25 Corrección del Botón "Nombrar" en el Menú de Chats
+Descripción general: Se ha corregido el botón "Nombrar" en el menú contextual de cada conversación en la barra lateral (`Sidebar.tsx`), que no funcionaba correctamente. El problema se debía a un conflicto entre la actualización manual del estado en el frontend y el sistema de actualización en tiempo real a través de WebSockets.
+
+- **Punto 1**: Se simplificó la lógica del `onClick` del botón "Nombrar" en `src/components/Sidebar.tsx`.
+- **Punto 2**: Se eliminó el código que intentaba actualizar el estado de React (`setThreads`, `setPinnedThreads`) directamente después de recibir la respuesta de la API.
+- **Punto 3**: Ahora, el botón solo envía la solicitud a la API (`/api/threads/${thread.id}/generate-title`) y muestra una notificación `toast`. La actualización del título en la interfaz de usuario es gestionada exclusivamente por el listener de WebSocket existente, que ya se encarga de las notificaciones `thread_title_updated`, asegurando una única fuente de verdad y un funcionamiento correcto.
