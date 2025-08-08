@@ -4,6 +4,7 @@ import logging
 import uuid
 from typing import List, Optional
 from pydantic import BaseModel # Importar BaseModel
+from urllib.parse import unquote # Importar unquote
 
 class DeleteDocumentRequest(BaseModel):
     file_name: str
@@ -196,47 +197,49 @@ async def upload_document_endpoint(
         "message": f"Subida de {len(files)} archivo(s) iniciada en segundo plano para la colección '{topic}'."
     }
 
-@router.post("/upload-chat-file")
-async def upload_chat_file_endpoint(
+@router.post("/upload-chat-document")
+async def upload_chat_document_endpoint(
     current_account_id: str = Depends(get_current_account_id),
-    files: List[UploadFile] = File(...),
-    thread_id: str = Form(...)
+    file: UploadFile = File(...),
+    workspace_id: Optional[str] = Form(None),
 ):
     """
-    Endpoint para subir archivos al contexto de un hilo de chat específico.
-    Los archivos se procesan para RAG pero se marcan como específicos del chat y no se guardan en colecciones permanentes.
+    Sube un documento para el contexto de un chat, lo procesa para RAG y lo devuelve.
+    No se asigna a una colección (topic) específica, quedando como un documento flotante.
     """
-    account_id_uuid = uuid.UUID(current_account_id)
-    processed_files = 0
-    for file in files:
-        try:
-            content_bytes = await file.read()
-            file_name_str = file.filename if file.filename is not None else "unknown_file"
-            extracted_text, metadata = extract_text_and_metadata_from_document(file_name_str, content_bytes)
-            if not extracted_text:
-                logger.warning(f"No se pudo extraer texto del archivo '{file.filename}'. Omitiendo.")
-                continue
+    try:
+        content_bytes = await file.read()
+        file_name = file.filename or "documento_subido"
 
-            # Añadir metadato para indicar que es un documento de chat y no debe guardarse en colecciones permanentes
-            metadata['chat_context_only'] = True
-            metadata['thread_id'] = thread_id
-            metadata['temporary'] = True  # Marca para indicar que es temporal y solo para el contexto del chat
+        # Extraer texto y metadatos
+        extracted_text, metadata = extract_text_and_metadata_from_document(file_name, content_bytes)
 
-            await process_document_for_rag(
-                account_id=str(account_id_uuid),
-                file_name=file_name_str,
-                extracted_text=extracted_text,
-                topic=f"chat_{thread_id}",
-                metadata=metadata
-            )
-            logger.info(f"Archivo {file.filename} subido y procesado para RAG en el hilo {thread_id} por la cuenta {account_id_uuid}")
-            processed_files += 1
-        except Exception as e:
-            logger.error(f"Fallo al procesar el archivo {file.filename} para el hilo {thread_id} de la cuenta {account_id_uuid}: {e}", exc_info=True)
+        if not extracted_text:
+            raise HTTPException(status_code=400, detail=f"No se pudo extraer texto del archivo '{file_name}'.")
 
-    if processed_files == 0 and files:
-        raise HTTPException(status_code=500, detail="No se pudo procesar ninguno de los archivos.")
-    return {"message": f"{processed_files}/{len(files)} archivo(s) subido(s) y procesado(s) para el contexto del hilo {thread_id}."}
+        # Procesar para RAG sin un topic específico
+        document_id = await process_document_for_rag(
+            account_id=current_account_id,
+            file_name=file_name,
+            extracted_text=extracted_text,
+            topic=None,  # No se asigna a ninguna colección
+            metadata={"original_filename": file_name},
+            workspace_id=workspace_id
+        )
+
+        logger.info(f"Documento '{file_name}' (ID: {document_id}) subido al chat del workspace '{workspace_id}' por la cuenta {current_account_id}.")
+
+        # Devolver la información necesaria para el frontend
+        return {
+            "id": document_id,
+            "type": "document",
+            "name": file_name,
+            "title": file_name,
+        }
+
+    except Exception as e:
+        logger.error(f"Error al subir documento de chat para la cuenta {current_account_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error al procesar el archivo: {str(e)}")
 
 @router.get("/list-documents")
 async def list_documents_endpoint(

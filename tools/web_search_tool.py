@@ -8,7 +8,7 @@ import asyncio
 import logging
 from typing import Type, Optional, List, Dict, Any
 from pydantic import BaseModel, Field
-from langchain.tools import BaseTool
+from langchain.tools import BaseTool, Tool
 from langchain_core.callbacks import AsyncCallbackManagerForToolRun
 
 from core.citation_models import Source, ToolOutputWithSources
@@ -30,6 +30,12 @@ class WebSearchInput(BaseModel):
     )
 
 class WebSearchTool(BaseTool):
+    """Herramienta para realizar búsquedas en la web."""
+    account_id: str
+    workspace_id: Optional[str] = None
+    telegram_id: Optional[int] = None
+    thread_id: Optional[str] = None
+    
     name: str = "web_search"
     description: str = "CUÁNDO USAR: Cuando necesites buscar información en la web pública. Es ideal para responder preguntas sobre eventos actuales, temas de conocimiento general, o cualquier cosa que no se encuentre en la base de conocimiento interna del usuario."
     args_schema: Type[BaseModel] = WebSearchInput
@@ -40,21 +46,22 @@ class WebSearchTool(BaseTool):
             query: str,
             run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
             **kwargs
-    ) -> ToolOutputWithSources:
+    ) -> Dict[str, Any]:
         logger.info(f"🦆 Realizando búsqueda web con la consulta: '{query}'")
         if not DDG_AVAILABLE:
-            return ToolOutputWithSources(context_for_llm="Error: La funcionalidad de búsqueda web no está disponible en el servidor.", sources=[])
+            return ToolOutputWithSources(context_for_llm="Error: La funcionalidad de búsqueda web no está disponible en el servidor.", sources=[]).model_dump()
         try:
             search_results = await self._search_duckduckgo(query)
             if not search_results:
-                return ToolOutputWithSources(context_for_llm="No se encontraron resultados de búsqueda.", sources=[])
+                return ToolOutputWithSources(context_for_llm="No se encontraron resultados de búsqueda.", sources=[]).model_dump()
 
             formatted_results, sources = self._format_results(search_results)
-            return ToolOutputWithSources(context_for_llm=formatted_results, sources=sources)
+            output = ToolOutputWithSources(context_for_llm=formatted_results, sources=sources)
+            return output
 
         except Exception as e:
             logger.error(f"Error al realizar búsqueda web: {str(e)}", exc_info=True)
-            return ToolOutputWithSources(context_for_llm=f"Error al realizar la búsqueda: {str(e)}", sources=[])
+            return ToolOutputWithSources(context_for_llm=f"Error al realizar la búsqueda: {str(e)}", sources=[]).model_dump()
 
     async def _search_duckduckgo(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
         if not DDG_AVAILABLE: return []
@@ -91,6 +98,6 @@ class WebSearchTool(BaseTool):
     def _run(self, query: str, **kwargs) -> str:
         raise NotImplementedError("Esta herramienta solo soporta ejecución asíncrona.")
 
-def get_web_search_tool() -> WebSearchTool:
+def get_web_search_tool(account_id: str) -> WebSearchTool:
     """Función de fábrica para crear una instancia de WebSearchTool."""
-    return WebSearchTool()
+    return WebSearchTool(account_id=account_id)

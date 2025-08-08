@@ -215,8 +215,28 @@ async def force_update_thread_title(thread_id: str):
             response = await llm.ainvoke(prompt)
             new_title = response.content.strip() if hasattr(response, 'content') else str(response).strip()
             logger.info(f"Nuevo título generado para el hilo {thread_id}: '{new_title}'")
+            
+            # Obtener account_id para la notificación ANTES de hacer commit
+            account_id = str(thread.account_id)
+            
             await db.execute(update(ChatThread).where(ChatThread.id == uuid.UUID(thread_id)).values(title=new_title))
             await db.commit()
+
+            # --- NOTIFICACIÓN WEBSOCKET ---
+            try:
+                from core.websocket_manager import send_personal_message
+                await send_personal_message(
+                    account_id,
+                    {
+                        "type": "thread_title_updated",
+                        "thread_id": thread_id,
+                        "new_title": new_title,
+                    }
+                )
+                logger.info(f"📡 Notificación WebSocket enviada para actualización de título del hilo {thread_id}")
+            except Exception as e:
+                logger.warning(f"No se pudo enviar notificación WebSocket para el hilo {thread_id}: {e}")
+            # --- FIN NOTIFICACIÓN ---
         except Exception as e:
             logger.error(f"Error al forzar la actualización del título del hilo {thread_id}: {e}")
 
@@ -390,6 +410,32 @@ async def tool_node(state: AgentState):
             output = await selected_tool.ainvoke(tool_args)
             logger.info(f"Resultado de la herramienta '{tool_name}': {output}")
             
+            # --- INICIO: Lógica de resumen para cognee_conceptual_processing ---
+            if tool_name == "cognee_conceptual_processing":
+                try:
+                    # Intentar parsear la salida como JSON
+                    output_data = json.loads(output)
+                    if output_data.get("status") == "completed":
+                        llm = get_fast_llm()
+                        if llm:
+                            summary_prompt = f"""Eres un asistente de IA. Has procesado unos documentos y has extraído conocimiento. Ahora, resume los resultados de forma amigable para el usuario. No inventes detalles, basa tu resumen estrictamente en los siguientes datos JSON. Explica brevemente qué son las citas conceptuales y los perfiles de ideas si aparecen en los resultados. Sé conciso y claro. Datos a resumir: {json.dumps(output_data, indent=2, ensure_ascii=False)}"""
+                            summary_response = await llm.ainvoke(summary_prompt)
+                            final_output = summary_response.content if hasattr(summary_response, 'content') else str(summary_response)
+                            logger.info(f"Resumen generado para cognee_conceptual_processing: {final_output}")
+                            output = final_output # Reemplazar el JSON con el resumen
+                        else:
+                            logger.warning("No se pudo generar resumen para cognee_conceptual_processing: LLM rápido no disponible.")
+                            # Dejar el output JSON como fallback
+                    else:
+                        # Si el estado no es 'completed', mostrar un mensaje de error amigable
+                        error_message = output_data.get("details", "Ocurrió un error desconocido durante el procesamiento.")
+                        output = f"No pude completar el procesamiento conceptual. Razón: {error_message}"
+
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning("La salida de cognee_conceptual_processing no es un JSON válido, no se puede generar resumen.")
+                    # Dejar el output como está si no es un JSON válido
+            # --- FIN: Lógica de resumen ---
+
             # Asegurarse de que la salida sea un string
             if not isinstance(output, str):
                 output = json.dumps(output, ensure_ascii=False)

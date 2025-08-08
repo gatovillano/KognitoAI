@@ -34,9 +34,21 @@ interface DocumentCollectionDisplayProps {
 export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, backButtonText = "Volver a Colecciones", backButtonHref = "/rag/all" }: DocumentCollectionDisplayProps) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-
-  // Estado para rastrear las tareas de subida en progreso
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
+
+  const handleUploadStart = (fileNames: string[], topic: string) => {
+    const newPlaceholders = fileNames.map(fileName => ({
+      id: `placeholder-${fileName}-${Date.now()}`,
+      file_name: fileName,
+      topic: topic,
+      status: 'pending' as const,
+      title: 'Pendiente de procesamiento...',
+      author: '-',
+      created_at: new Date().toISOString(),
+      document_type: 'placeholder' as const,
+    }));
+    setDocuments(prevDocs => [...newPlaceholders, ...prevDocs]);
+  };
   
   // Estados para diálogos
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -76,8 +88,20 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         apiClient.post('/api/get-saved-analyses', commonParams)
       ]);
       
-      setDocuments(docsRes.data);
-      setSavedAnalyses(analysesRes.data);
+      const serverDocuments = docsRes.data;
+      const savedAnalysesData = analysesRes.data;
+
+      setDocuments(prevDocs => {
+        // Filtramos los placeholders que aún están pendientes o procesando
+        const pendingPlaceholders = prevDocs.filter(
+          p => p.document_type === 'placeholder' && !serverDocuments.some(d => d.file_name === p.file_name)
+        );
+        // Combinamos los documentos del servidor con los placeholders que aún no han terminado
+        return [...pendingPlaceholders, ...serverDocuments];
+      });
+
+      setSavedAnalyses(savedAnalysesData);
+
     } catch (error) {
       toast.error('Error al cargar los datos de la colección.');
       console.error(error);
@@ -102,35 +126,65 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   }, [fetchPageData]);
 
   const onUploadStarted = useCallback((data: { task_id: string; file_names: string[]; topic: string; created_at: string; }) => {
-    // Añadir placeholders a la tabla de documentos
-    const newPlaceholders = data.file_names.map(fileName => ({
-      file_name: fileName,
-      topic: data.topic,
-      status: 'processing' as const,
-      title: 'Procesando...',
-      author: '-',
-      created_at: new Date().toISOString(),
-      document_type: 'placeholder' as const, // Corregido: usar 'as const' para el tipo literal
-      id: `placeholder-${fileName}-${Date.now()}`
-    }));
-    setDocuments(prevDocs => [...newPlaceholders, ...prevDocs]);
-  }, [setDocuments]);
+    setUploadTasks(prev => [...prev, { id: data.task_id, status: 'processing', ...data }]);
+  }, []);
 
   const onUploadProgress = useCallback((data: { task_id: string; progress: number; message: string; }) => {
-    // Este evento parece no tener file_names, así que no podemos actualizar un doc específico.
-    // Podríamos mostrar un progreso general si quisiéramos. Por ahora, lo dejamos.
+    setUploadTasks(prev => prev.map(task => task.id === data.task_id ? { ...task, progress: data.progress } : task));
   }, []);
 
   const onUploadCompleted = useCallback((data: { task_id: string; message: string; }) => {
-    toast.success(data.message || `Archivos procesados exitosamente.`);
+    toast.success(data.message || 'Subida completada.');
+    setUploadTasks(prev => prev.filter(task => task.id !== data.task_id));
     fetchPageData();
   }, [fetchPageData]);
 
   const onUploadFailed = useCallback((data: { task_id: string; error_message: string; }) => {
-    toast.error(data.error_message || 'Falló el procesamiento de un archivo.');
-    // Como no tenemos file_names, recargamos para limpiar placeholders incorrectos.
+    toast.error(data.error_message || 'Falló la subida de archivos.');
+    setUploadTasks(prev => prev.filter(task => task.id !== data.task_id));
+    fetchPageData(); // Recargar para limpiar
+  }, [fetchPageData]);
+
+  const onDocumentProcessingStarted = useCallback((data: { file_name: string; task_id: string; }) => {
+    setDocuments(prevDocs => {
+      const docIndex = prevDocs.findIndex(d => d.file_name === data.file_name && d.document_type === 'placeholder');
+
+      if (docIndex !== -1) {
+        // Si ya existe un placeholder, actualízalo a "Procesando"
+        const newDocs = [...prevDocs];
+        newDocs[docIndex] = { ...prevDocs[docIndex], status: 'processing' as const, title: 'Procesando...' };
+        return newDocs;
+      } else {
+        // Si no existe (por una condición de carrera), créalo ahora
+        const newPlaceholder: Document = {
+          id: `placeholder-${data.file_name}-${Date.now()}`,
+          file_name: data.file_name,
+          topic: topic,
+          status: 'processing' as const,
+          title: 'Procesando...',
+          author: '-',
+          created_at: new Date().toISOString(),
+          document_type: 'placeholder' as const,
+        };
+        return [newPlaceholder, ...prevDocs];
+      }
+    });
+  }, [topic]);
+
+  const onDocumentProcessingCompleted = useCallback((data: { file_name: string; task_id: string; document_id: string; }) => {
+    toast.success(`"${data.file_name}" procesado con éxito.`);
+    // Simplemente recargamos los datos. La nueva lógica en fetchPageData se encargará
+    // de reemplazar el placeholder con el documento real sin afectar a los demás.
     fetchPageData();
   }, [fetchPageData]);
+
+  const onDocumentProcessingFailed = useCallback((data: { file_name: string; task_id: string; error: string; }) => {
+    toast.error(`Error procesando "${data.file_name}"`, { description: data.error });
+    // Actualizamos el placeholder a un estado de error
+    setDocuments(prevDocs => prevDocs.map(doc => 
+      doc.file_name === data.file_name ? { ...doc, status: 'failed', title: 'Error de procesamiento' } : doc
+    ));
+  }, []);
 
   const webSocketOptions = useMemo(() => ({
     onTitleUpdated,
@@ -138,8 +192,21 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     onUploadStarted,
     onUploadProgress,
     onUploadCompleted,
-    onUploadFailed
-  }), [onTitleUpdated, onTitleExtractionCompleted, onUploadStarted, onUploadProgress, onUploadCompleted, onUploadFailed]);
+    onUploadFailed,
+    onDocumentProcessingStarted,
+    onDocumentProcessingCompleted,
+    onDocumentProcessingFailed,
+  }), [
+    onTitleUpdated, 
+    onTitleExtractionCompleted, 
+    onUploadStarted, 
+    onUploadProgress, 
+    onUploadCompleted, 
+    onUploadFailed,
+    onDocumentProcessingStarted,
+    onDocumentProcessingCompleted,
+    onDocumentProcessingFailed,
+  ]);
 
   const { isConnected } = useWebSocket(webSocketOptions);
 
@@ -149,7 +216,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
 
   // --- Handlers de Análisis ---
 
-  const handleAnalyzeDocument = async (doc: Document) => {
+  const handleAnalyzeDocument = useCallback(async (doc: Document) => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     setDocumentToAnalyze(doc);
     try {
@@ -157,7 +224,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
       setDocPollingId(response.data.task_id);
       toast.info(`Análisis para "${doc.file_name}" iniciado.`);
     } catch (error) { toast.error("No se pudo iniciar el análisis del documento."); }
-  };
+  }, [docPollingId, collectionPollingId, workspaceId]);
   
   const handleAnalyzeCollection = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
@@ -225,14 +292,14 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   };
 
   // --- Handler para Extraer Título de un Documento Individual ---
-  const handleExtractTitleForDocument = async (doc: Document) => {
+  const handleExtractTitleForDocument = useCallback(async (doc: Document) => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     try {
       const response = await apiClient.post('/api/extract-title', { file_name: doc.file_name, ...(workspaceId && { workspace_id: workspaceId }) });
       toast.info(`Extracción de título para "${doc.file_name}" iniciada.`);
       fetchPageData();
     } catch (error) { toast.error(`No se pudo iniciar la extracción de título para "${doc.file_name}".`); }
-  };
+  }, [docPollingId, collectionPollingId, workspaceId, fetchPageData]);
 
   // --- Handler para Resumen Semántico de la Colección ---
   const handleSemanticSummary = async () => {
@@ -492,7 +559,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         isOpen={isUploadOpen}
         onOpenChange={setIsUploadOpen}
         onUploadSuccess={() => { /* WebSocket handles updates */ }}
-        onUploadStart={() => { /* WebSocket handles updates */ }}
+        onUploadStart={handleUploadStart} // Conectamos la función para crear placeholders
         defaultTopic={topic}
         workspaceId={workspaceId}
       />

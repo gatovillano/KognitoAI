@@ -23,6 +23,7 @@ import json
 from sqlalchemy import select, text, create_engine, delete, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List, Union, Dict, Any
+from pydantic.fields import FieldInfo # Importar FieldInfo
 import datetime
 # Importación movida dentro de las funciones para evitar circularidad
 
@@ -116,7 +117,10 @@ async def search_vector_db_optimized(
 
         if topics:
             context_filters.append("topic = ANY(:topics)")
-            query_params["topics"] = topics
+            params_topics = []
+            for tpc in topics:
+                params_topics.append(tpc.description if isinstance(tpc, FieldInfo) else tpc)
+            query_params["topics"] = params_topics
             logger.info(f"🏷️ Filtro por topics: {topics}")
         
         if context_filters:
@@ -760,6 +764,25 @@ async def process_document_for_rag(
     CAMBIO: Ahora usa solo langchain_pg_embedding para todos los documentos,
     agregando workspace_id como metadato y columna cuando corresponde.
     """
+    task_id = metadata.get("task_id") if metadata else None
+    try:
+        from core.websocket_manager import send_personal_message
+        if account_id and task_id:
+            await send_personal_message(account_id, {
+                "type": "document_processing_started",
+                "file_name": file_name,
+                "task_id": task_id,
+            })
+    except ImportError:
+        logger.warning("Could not import send_personal_message, WebSocket notifications will be disabled.")
+    except Exception as e:
+        logger.error(f"Error sending WebSocket notification: {e}")
+    """
+    Divide, embebe y almacena el texto de un documento en la DB vectorial.
+    
+    CAMBIO: Ahora usa solo langchain_pg_embedding para todos los documentos,
+    agregando workspace_id como metadato y columna cuando corresponde.
+    """
     if not extracted_text:
         return 0
         
@@ -770,13 +793,16 @@ async def process_document_for_rag(
     extracted_text = cleaned_text
 
     try:
+        logger.info("Intentando obtener el modelo de embeddings...")
         embeddings = get_embedding_model()
         if not embeddings:
             logger.error("Los Embeddings no están inicializados. No se puede procesar el documento.")
             return 0
 
+        logger.info(f"Tamaño del texto extraído para '{file_name}': {len(extracted_text)} caracteres.")
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
         texts = text_splitter.split_text(extracted_text)
+        logger.info(f"Documento '{file_name}' dividido en {len(texts)} chunks.")
         
         # Determinar la colección de LangChain (topic)
         # Si se proporciona workspace_id, la colección será específica de ese workspace.
@@ -846,7 +872,9 @@ async def process_document_for_rag(
             connection=engine,
             use_jsonb=True
         )
+        logger.info(f"Iniciando aadd_documents para {len(lc_documents)} chunks en colección '{langchain_collection_name}'.")
         await vectorstore.aadd_documents(lc_documents)
+        logger.info(f"Finalizado aadd_documents para {len(lc_documents)} chunks en colección '{langchain_collection_name}'.")
 
         # Obtener el UUID de la colección de LangChain recién creada/existente
         async with DBSession(SessionLocal) as db:
@@ -876,6 +904,22 @@ async def process_document_for_rag(
 
         logger.info(f"✅ Procesado y añadido {len(lc_documents)} chunks a la colección '{langchain_collection_name}'.")
         
+        try:
+            from core.websocket_manager import send_personal_message
+            if account_id and task_id:
+                await send_personal_message(account_id, {
+                    "type": "document_processing_completed",
+                    "file_name": file_name,
+                    "task_id": task_id,
+                    "document_id": document_id,
+                    "topic": topic,
+                    "workspace_id": workspace_id,
+                })
+        except ImportError:
+            logger.warning("Could not import send_personal_message, WebSocket notifications will be disabled.")
+        except Exception as e:
+            logger.error(f"Error sending WebSocket notification: {e}")
+
         # Trigger proactivo deshabilitado para documentos (se analizará en un job nocturno)
         if account_id or team_id:
             logger.info("[Memory Manager] Análisis proactivo no programado para documentos. Se analizará en el job nocturno.")
@@ -885,6 +929,19 @@ async def process_document_for_rag(
 
     except Exception as e:
         logger.error(f"❌ Error durante el procesamiento RAG para '{file_name}': {e}", exc_info=True)
+        try:
+            from core.websocket_manager import send_personal_message
+            if account_id and task_id:
+                await send_personal_message(account_id, {
+                    "type": "document_processing_failed",
+                    "file_name": file_name,
+                    "task_id": task_id,
+                    "error": str(e),
+                })
+        except ImportError:
+            logger.warning("Could not import send_personal_message, WebSocket notifications will be disabled.")
+        except Exception as ws_e:
+            logger.error(f"Error sending WebSocket notification on failure: {ws_e}")
         return 0
 
 
@@ -1818,7 +1875,7 @@ async def extract_titles_and_update_metadata(account_id: str, topic: Optional[st
 
             if topic:
                 clauses.append("topic = :topic")
-                params["topic"] = topic
+                params["topic"] = topic.description if isinstance(topic, FieldInfo) else topic
 
             if workspace_id:
                 clauses.append("workspace_id = :workspace_id")

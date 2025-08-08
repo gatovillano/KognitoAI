@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, use } from 'react';
 import { useParams } from 'next/navigation';
 import { toast } from 'sonner';
 
@@ -22,8 +22,7 @@ interface PageProps {
 }
 
 export default function WorkspaceCollectionDetailPage({ params }: PageProps) {
-  const syncParams = params as unknown as { id: string; collectionId: string };
-  const { id: workspaceId, collectionId } = syncParams;
+  const { id: workspaceId, collectionId } = use(params);
   
   const [collectionData, setCollectionData] = useState<Collection | null>(null);
   const [isLoadingCollection, setIsLoadingCollection] = useState(true);

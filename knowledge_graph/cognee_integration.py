@@ -48,6 +48,19 @@ class CogneeIntegration:
             logger.info("✅ CogneeIntegration inicializada con Cognee real")
             # Configurar Cognee con las credenciales del proyecto
             self._configure_cognee()
+            
+            # Asegurarse de que el dataset exista antes de usarlo
+            try:
+                import cognee.modules.data as data
+                # Esta es una llamada síncrona, pero la ejecutamos en el constructor
+                # que es síncrono. Si se mueve a un método asíncrono, usar asyncio.to_thread
+                data.add_dataset("default")
+                logger.info("✅ Dataset 'default' de Cognee asegurado.")
+            except Exception as e:
+                # Es posible que la función falle si el dataset ya existe,
+                # lo cual es un comportamiento esperado y no un error crítico.
+                logger.warning(f"⚠️ No se pudo asegurar el dataset 'default' de Cognee (puede que ya exista): {e}")
+
         else:
             logger.warning("⚠️ CogneeIntegration inicializada en modo fallback (sin Cognee)")
 
