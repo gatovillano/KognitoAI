@@ -44,7 +44,7 @@ Descripción general: Se resolvieron múltiples errores de `NameError` y se esta
 
 - **Punto 1**: Se añadió la importación de `BaseTool` desde `langchain_core.tools` para resolver el `NameError` inicial.
 - **Punto 2**: Se importó `GraphDB` desde `knowledge_graph.graph_database` para corregir el `NameError` relacionado.
-- **Punto 3**: Se importó `settings` desde `core.config` y se reemplazaron las variables de configuración de Neo4j (`NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`) por `settings.neo4j_uri`, `settings.neo4j_user` y `settings.neo4j_password` para asegurar el acceso correcto a la configuración.
+- **Punto 3**: Se importó `settings` desde `core.config` y se reemplazaron las variables de configuración de Neo4j (`NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`) por `settings.neo4j_uri` y `settings.neo4j_user` y `settings.neo4j_password` para asegurar el acceso correcto a la configuración.
 - **Punto 4**: Se importó `LLMManager` desde `core.llm_manager` para resolver el `NameError` correspondiente.
 - **Punto 5**: Se importaron `HybridGraphProcessor` desde `knowledge_graph.hybrid_graph_processor` y `Neo4jAdapter` desde `knowledge_graph.neo4j_adapter` para corregir los errores de `NameError` de estas clases.
 - **Punto 6**: Se corrigió la instanciación de `GithubRepositoryExplorerTool` a `GitHubRepoTool` para que coincidiera con el nombre de la clase importada.
@@ -68,16 +68,16 @@ Descripción general: Se corrigió el problema donde el LLM no invocaba las herr
 
 - **Punto 1**: Se añadió un nuevo nodo `llmToolInvocation` en `core/agent.py` para invocar al LLM con las herramientas vinculadas.
 - **Punto 2**: Se modificó el flujo del grafo en `create_langgraph_agent` para que el nodo `llmToolInvocation` se ejecute después de `getContext` y antes del `routing_node`.
-- **Punto 3**: Se eliminaron las descripciones de las herramientas del prompt del sistema en `core/prompt_manager.py`, ya que el LLM ahora las recibe directamente a través de `bind_tools`.
+- **Punto 3**: Se eliminaron las descripciones de las herramientas del prompt del sistema en `core/prompts.py`, ya que el LLM ahora las recibe directamente a través de `bind_tools`.
 - **Punto 4**: Se actualizó la llamada a `prompt_manager.build_system_prompt` en `core/agent.py` para que ya no pase el argumento `tools`.
-- **Punto 5**: Se actualizó la definición de la función `build_system_prompt` en `core/prompt_manager.py` para eliminar el parámetro `tools`.
-- **Punto 6**: Se corrigió un `SyntaxError` en `core/prompt_manager.py` debido a una cadena de texto de varias líneas sin terminar.
-- **Punto 7**: Se corrigió un `NameError` en `core/prompt_manager.py` eliminando una línea de depuración que intentaba acceder a la variable `tools` después de que se eliminara el parámetro.
+- **Punto 5**: Se actualizó la definición de la función `build_system_prompt` en `core/prompts.py` para eliminar el parámetro `tools`.
+- **Punto 6**: Se corrigió un `SyntaxError` en `core/prompts.py` debido a una cadena de texto de varias líneas sin terminar.
+- **Punto 7**: Se corrigió un `NameError` en `core/prompts.py` eliminando una línea de depuración que intentaba acceder a la variable `tools` después de que se eliminara el parámetro.
 ---
 ## 06-08-25 Corrección de TypeError en PromptManager.build_system_prompt
 Descripción general: Se solucionó un `TypeError` en `PromptManager.build_system_prompt()` causado por el paso de un argumento `tools` inesperado. La corrección consistió en eliminar este argumento de la llamada a la función en `core/agent.py`.
 
-- **Punto 1**: Se identificó que la función `build_system_prompt` en `core/prompt_manager.py` no esperaba el argumento `tools`.
+- **Punto 1**: Se identificó que la función `build_system_prompt` en `core/prompts.py` no esperaba el argumento `tools`.
 - **Punto 2**: Se encontró que la llamada a `prompt_manager.build_system_prompt` en `core/agent.py` estaba pasando el argumento `tools`.
 - **Punto 3**: Se eliminó el argumento `tools` de la llamada a `prompt_manager.build_system_prompt` en `core/agent.py` para resolver el `TypeError`.
 
@@ -189,7 +189,6 @@ Descripción general: Se ha solucionado un error crítico de `ImportError` y `Na
 ---
 ## 07-08-25 Corrección de NameError en api/chat.py
 Descripción general: Se solucionó el error `NameError: name 'Integer' is not defined` en `api/chat.py` añadiendo la importación de `Integer` desde `sqlalchemy`.
-
 - **Punto 1**: Se añadió `from sqlalchemy import Integer` en `api/chat.py` para resolver el error de nombre.
 ---
 ## 07-08-25 Corrección de Parámetro Innecesario en InternalKnowledgeSearchTool
@@ -221,3 +220,42 @@ Descripción general: Se ha corregido el botón "Nombrar" en el menú contextual
 - **Punto 1**: Se simplificó la lógica del `onClick` del botón "Nombrar" en `src/components/Sidebar.tsx`.
 - **Punto 2**: Se eliminó el código que intentaba actualizar el estado de React (`setThreads`, `setPinnedThreads`) directamente después de recibir la respuesta de la API.
 - **Punto 3**: Ahora, el botón solo envía la solicitud a la API (`/api/threads/${thread.id}/generate-title`) y muestra una notificación `toast`. La actualización del título en la interfaz de usuario es gestionada exclusivamente por el listener de WebSocket existente, que ya se encarga de las notificaciones `thread_title_updated`, asegurando una única fuente de verdad y un funcionamiento correcto.
+---
+## 08-08-25 Corrección de `IntegrityError` en `langchain_pg_collection`
+Descripción general: Se solucionó el error `IntegrityError: duplicate key value violates unique constraint "langchain_pg_collection_name_key"` que ocurría al intentar insertar una colección de Langchain con un nombre ya existente, como "Formulación". La causa fue que la lógica no verificaba la existencia de la colección antes de intentar crearla, lo que provocaba una duplicidad.
+
+- **Punto 1**: Se modificó la función `process_document_for_rag` en `core/memory_manager.py` para verificar la existencia de la colección en la tabla `LangchainPgCollection` antes de inicializar `PGVector`.
+- **Punto 2**: Si la colección ya existe, se reutiliza su UUID. Si no existe, se permite que Langchain la cree y luego se obtiene su UUID para asegurar la consistencia.
+- **Punto 3**: Este cambio evita la violación de la restricción de unicidad al asegurar que no se intenten crear colecciones duplicadas en la base de datos.
+
+---
+## 08-08-25 Implementación de Sistema de Citas y RAG Explícito
+
+**Descripción general:** Se ha refactorizado profundamente el sistema de Recuperación Aumentada por Generación (RAG) para soportar un contexto explícito seleccionado por el usuario y se ha implementado un sistema de citas en el frontend para mostrar las fuentes de la información. Esto mejora drásticamente la precisión, eficiencia y transparencia de las respuestas del LLM.
+
+- **Punto 1 (RAG Explícito - Backend):**
+    - Se modificó `core/memory_manager.py` para que la función `get_relevant_memories` acepte filtros explícitos por `document_ids` y `topics`.
+    - Se ajustó la función `search_vector_db_optimized` para que la consulta SQL una los filtros de `document_ids` y `topics` con un operador `OR`, permitiendo búsquedas en contextos mixtos.
+    - Se actualizó `core/agent.py` para que el `AgentState` transporte el `rag_context` y las `sources`. El `call_model_node` ahora procesa este contexto y lo pasa a `get_relevant_memories`.
+    - Se ajustó `api/chat.py` para pasar el `rag_context` de la solicitud del usuario al estado inicial del agente.
+
+- **Punto 2 (Sistema de Citas - Backend):**
+    - Se modificó `get_relevant_memories` para que, en lugar de devolver una cadena de texto, devuelva un objeto `ToolOutputWithSources` que contiene tanto el contexto formateado para el LLM como una lista estructurada de objetos `Source`.
+    - Se importaron los modelos de `core/citation_models.py` en `core/memory_manager.py` para construir las fuentes.
+
+- **Punto 3 (Sistema de Citas - Frontend):**
+    - Se actualizaron los tipos de datos en `src/components/CommonChat.tsx` para que cada mensaje pueda almacenar una lista de `sources`.
+    - Se modificó la lógica de streaming en `CommonChat.tsx` para capturar y almacenar las `sources` que llegan desde el backend.
+    - Se creó un nuevo componente `<Citation />` en `src/components/ChatMessage.tsx` que utiliza un `Popover` para mostrar los detalles de una fuente (título, snippet, relevancia).
+    - Se modificó el `MarkdownRenderer` para que detecte los marcadores de cita (ej. `[1]`) en el texto de la IA y los reemplace dinámicamente por el componente `<Citation />` interactivo.
+
+- **Punto 4 (Correcciones Menores):**
+    - Se solucionaron varios errores de `NameError` y de importación en `ChatMessage.tsx` y `core/agent.py` que surgieron durante la refactorización.
+---
+## 08-08-25 Corrección de TypeError en GitHubRepoTool._arun()
+
+Descripción general: Se solucionó un `TypeError` en la invocación de `GitHubRepoTool._arun()` en `api/github.py`. El error se debía a que el método esperaba un objeto `GitHubRepoInput` como argumento, pero se le estaban pasando los parámetros directamente.
+
+- **Punto 1**: Se identificó que la función `_arun` en `tools/github_repo_tool.py` esperaba un objeto `GitHubRepoInput` como `tool_input`.
+- **Punto 2**: Se encontró que en `api/github.py`, la función `manage_github_collection` estaba llamando a `_arun` con argumentos directos (`repo_url`, `action`, `collection_topic`, `account_id_to_use`, `workspace_id`, `github_token`).
+- **Punto 3**: Se modificó `api/github.py` para construir un objeto `GitHubRepoInput` con los parámetros necesarios y pasarlo como `tool_input` a `github_tool._arun()`.

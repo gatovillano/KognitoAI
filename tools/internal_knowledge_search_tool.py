@@ -94,7 +94,7 @@ Responde SOLO en formato JSON válido.
                 account_id=self.account_id,
                 query=search_terms,
                 content_type=interpretation.get("content_type"),
-                topic=interpretation.get("topic"),
+                topics=[interpretation.get("topic")] if interpretation.get("topic") else None,
                 category=interpretation.get("category"),
                 workspace_id=self.workspace_id,
                 k=k

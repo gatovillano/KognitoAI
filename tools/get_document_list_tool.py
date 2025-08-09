@@ -38,7 +38,7 @@ class GetDocumentListInput(BaseModel):
     """
     Define el esquema de entrada para la herramienta de listado de documentos.
     """
-    pass
+    topic: Optional[str] = Field(None, description="El nombre del tema o colección para listar documentos específicos de esa colección.")
 
 
 class GetDocumentListTool(BaseTool):
@@ -61,7 +61,7 @@ class GetDocumentListTool(BaseTool):
     workspace_id: Optional[str] = Field(None, description="El ID del workspace (UUID en formato string) para listar documentos del workspace, inyectado automáticamente.")
     topic: Optional[str] = Field(None, description="El nombre del tema o colección para listar documentos específicos de esa colección, inyectado automáticamente.")
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _arun(self, topic: Optional[str] = None, **kwargs: Any) -> str:
         """
         Lógica asíncrona para listar documentos del usuario.
 
@@ -78,7 +78,8 @@ class GetDocumentListTool(BaseTool):
         logger.info(f"Ejecutando GetDocumentListTool para la cuenta '{self.account_id}' con workspace_id: '{self.workspace_id}', topic: '{self.topic}'.")
         try:
             # --- MODIFICACIÓN: Pasar workspace_id Y topic a list_user_documents ---
-            documents_list = await list_user_documents(account_id=self.account_id, team_id=None, workspace_id=self.workspace_id, topic=self.topic)
+            logger.info(f"DEBUG: Llamando a list_user_documents con account_id={self.account_id}, workspace_id={self.workspace_id}, topic={topic}")
+            documents_list = await list_user_documents(account_id=self.account_id, team_id=None, workspace_id=self.workspace_id, topic=topic)
 
             if self.telegram_id is not None:
                 user_data = bot_manager.get_user_data(self.telegram_id)

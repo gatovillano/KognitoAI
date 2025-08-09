@@ -79,6 +79,10 @@ class AgentState(TypedDict):
     telegram_id: Optional[int]
     # El ID del workspace para el contexto
     workspace_id: Optional[str]
+    # El contexto RAG explícito seleccionado por el usuario
+    rag_context: Optional[List[Dict[str, Any]]]
+    # Las fuentes recuperadas para la citación
+    sources: Optional[List[Dict[str, Any]]]
 
 # ==============================================================================
 # SECCIÓN 2: MANEJO DE CONTEXTO Y MEMORIA
@@ -298,12 +302,33 @@ async def call_model_node(state: AgentState):
     # 1. Construir el prompt del sistema dinámicamente
     user_message = extract_text_content(state["messages"][-1].content)
     user_profile = await get_user_profile(state['account_id'])
-    relevant_memories = await get_relevant_memories(
+
+    # --- INICIO DE LA NUEVA LÓGICA DE RAG EXPLÍCITO ---
+    rag_context = state.get("rag_context")
+    filter_topics = None
+    filter_document_ids = None
+    sources_for_prompt = []
+
+    if rag_context:
+        logger.info(f"Aplicando RAG explícito con {len(rag_context)} item(s) de contexto.")
+        filter_document_ids = [item['id'] for item in rag_context if item.get('type') == 'document']
+        filter_topics = [item['id'] for item in rag_context if item.get('type') == 'collection']
+    
+    # La llamada a get_relevant_memories ahora devuelve un objeto ToolOutputWithSources
+    rag_results = await get_relevant_memories(
         state['account_id'],
         user_message,
-        k=5,
-        workspace_id=state.get('workspace_id')
+        k=10, # Aumentamos k para tener más contexto
+        workspace_id=state.get('workspace_id'),
+        filter_topics=filter_topics,
+        filter_document_ids=filter_document_ids
     )
+    
+    relevant_memories_text = rag_results.context_for_llm
+    sources_for_prompt = rag_results.sources
+    # Guardamos las fuentes en el estado para que estén disponibles al final
+    state['sources'] = sources_for_prompt
+    # --- FIN DE LA NUEVA LÓGICA ---
     
     from core.prompt_manager import PromptManager
     prompt_manager = PromptManager(settings={"default_system_prompt": settings.default_system_prompt})
@@ -322,7 +347,7 @@ async def call_model_node(state: AgentState):
 
     system_prompt_content = prompt_manager.build_system_prompt(
         user_profile=user_profile,
-        relevant_memories=relevant_memories,
+        relevant_memories=relevant_memories_text,
         summary_string="",
         custom_prompt_from_profile=str(user_profile.system_prompt) if user_profile and user_profile.system_prompt else None,
         workspace_prompt=workspace_prompt,
@@ -401,8 +426,10 @@ async def tool_node(state: AgentState):
         selected_tool.account_id = state['account_id']
         selected_tool.workspace_id = state.get('workspace_id')
         selected_tool.telegram_id = state.get('telegram_id')
-        # Asumiendo que thread_id está en additional_kwargs del último mensaje
-        selected_tool.thread_id = state['messages'][-1].additional_kwargs.get('thread_id') 
+        
+        # Solo asignar thread_id si la herramienta tiene el atributo
+        if hasattr(selected_tool, 'thread_id'):
+            selected_tool.thread_id = state['messages'][-1].additional_kwargs.get('thread_id') 
         # --- FIN INYECCIÓN ---
 
         try:
