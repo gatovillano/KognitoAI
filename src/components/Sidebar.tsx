@@ -119,7 +119,13 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
     };
 
     ws.onerror = (error) => {
-      console.error('Error de WebSocket en sidebar:', JSON.stringify(error, ['message', 'code', 'reason', 'type']));
+      console.error('Error de WebSocket en sidebar:', {
+        type: error.type,
+        message: (error as any).message,
+        code: (error as any).code,
+        errorObject: (error as any).error,
+        event: error
+      });
     };
 
     ws.onclose = () => {

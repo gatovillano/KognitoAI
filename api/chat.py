@@ -27,6 +27,10 @@ from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from core.database import SessionLocal, ChatThread, settings, Workspace
+from core.llm_manager import get_main_llm
+from tools.deep_research_tool import DeepResearchTool
+from tools.add_web_to_rag_tool import AddWebToRAGTool
+from tools.ddg_search_tool import create_ddg_search_tool
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -352,8 +356,9 @@ async def create_and_run_agent_streaming(
                         context_text += "--- Fin del Contexto del Documento ---"
 
         if context_text:
-            user_message = f"Basado en el siguiente contexto, por favor responde la pregunta del usuario.\n{context_text}\n\nPregunta del usuario: {user_message}"
-            logger.info("Mensaje del usuario enriquecido con contexto RAG.")
+            # No modificar user_message aquí, solo usar context_text para el LLM
+            # El contexto se pasará al LLM a través de un prompt específico o como parte de las herramientas
+            logger.info("Contexto RAG preparado para el LLM.")
 
         # --- Preparación Inicial ---
         agent_app = create_langgraph_agent()
@@ -365,13 +370,20 @@ async def create_and_run_agent_streaming(
         )
         history_messages = await chat_message_history.aget_messages()
 
+        # Crear el HumanMessage con el rag_context en additional_kwargs
+        user_message_with_rag_context = HumanMessage(
+            content=user_message,
+            additional_kwargs={'rag_context': rag_context} if rag_context else {}
+        )
+
         # --- Fase 1: Streaming del Proceso con LangGraph ---
         initial_state = {
             "messages": history_messages + [HumanMessage(content=user_message)],
             "account_id": account_id,
-            "telegram_id": telegram_id, # Pasar directamente como int o None
+            "telegram_id": telegram_id,
             "workspace_id": workspace_id,
-            "tools": [], # Inicializa la lista de herramientas vacía
+            "rag_context": rag_context,  # <-- AÑADIDO
+            "sources": [],  # Inicializar lista de fuentes
         }
 
         config = {"configurable": {"thread_id": thread_id}}
@@ -519,19 +531,42 @@ async def handle_chat_stream(
 
     async def generate_stream():
         try:
-            async for chunk in create_and_run_agent_streaming(
-                account_id=request.account_id,
-                thread_id=request.thread_id,
-                telegram_id=request.telegram_id,
-                user_message=request.user_message,
-                image_base64=request.image_base64,
-                document_url=request.document_url,
-                mode=request.mode,
-                rag_context=request.rag_context,
-                background_tasks=background_tasks,
-                workspace_id=workspace_id
-            ):
-                yield chunk
+            if request.mode == "deepResearch":
+                logger.info(f"Iniciando Deep Research para: {request.user_message}")
+                llm_instance = get_main_llm()
+                if not llm_instance:
+                    raise HTTPException(status_code=500, detail="LLM no inicializado para Deep Research.")
+
+                ddg_search_tool_instance = create_ddg_search_tool(account_id=request.account_id)
+                add_web_to_rag_tool_instance = AddWebToRAGTool()
+
+                deep_research_tool = DeepResearchTool(
+                    llm_instance=llm_instance,
+                    ddg_search_tool=ddg_search_tool_instance,
+                    add_web_to_rag_tool=add_web_to_rag_tool_instance
+                )
+
+                research_report = await deep_research_tool._run(request.user_message)
+                
+                yield "data: " + json.dumps({"type": "chunk", "content": "**Informe de Investigación Profunda:**\n\n"}) + "\n\n"
+                for char in research_report:
+                    yield "data: " + json.dumps({"type": "chunk", "content": char}) + "\n\n"
+                yield "data: " + json.dumps({"type": "done", "message": "Investigación profunda completada."}) + "\n\n"
+
+            else:
+                async for chunk in create_and_run_agent_streaming(
+                    account_id=request.account_id,
+                    thread_id=request.thread_id,
+                    telegram_id=request.telegram_id,
+                    user_message=request.user_message,
+                    image_base64=request.image_base64,
+                    document_url=request.document_url,
+                    mode=request.mode,
+                    rag_context=request.rag_context,
+                    background_tasks=background_tasks,
+                    workspace_id=workspace_id
+                ):
+                    yield chunk
         except Exception as e:
             logger.error(f"Error en generate_stream: {e}", exc_info=True)
             yield "data: " + json.dumps({"type": "error", "message": "Error interno del servidor"}) + "\n\n"
@@ -626,6 +661,7 @@ async def get_thread_messages(thread_id: str, current_account_id: str = Depends(
                 "text": content,
                 "sender": sender,
                 "created_at": msg.additional_kwargs.get('timestamp', ''),
+                "ragContext": msg.additional_kwargs.get('rag_context', []) # Extraer rag_context
             })
 
         return formatted_messages

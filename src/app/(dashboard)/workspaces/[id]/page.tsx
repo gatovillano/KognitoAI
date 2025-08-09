@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, use } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -41,9 +41,8 @@ interface PageProps {
 
 export default function WorkspaceDashboard({ params }: PageProps) {
   const router = useRouter();
-  // Type assertion to treat params as a synchronous object
-  const syncParams = params as unknown as { id: string };
-  const { id: workspaceId } = syncParams;
+  const resolvedParams = use(params);
+  const { id: workspaceId } = resolvedParams;
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [chats, setChats] = useState<ChatThread[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);

@@ -160,6 +160,8 @@ app.include_router(logs_router, prefix="/api", tags=["logs"])
 app.include_router(scheduled_tools_router, prefix="/api", tags=["scheduled-tools"])
 app.include_router(knowledge_graph_router, prefix="/api", tags=["knowledge-graph"])
 app.include_router(search_router, prefix="/api", tags=["search"])
+from api.deep_research import router as deep_research_router
+app.include_router(deep_research_router, prefix="/api", tags=["deep-research"])
 
 if __name__ == "__main__":
     import uvicorn

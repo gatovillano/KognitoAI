@@ -75,63 +75,17 @@ class GitHubRepoTool(BaseTool):
             self.session.headers.update({'Authorization': f'token {self.github_token}'})
         logger.debug("GitHubRepoTool initialized. Version: 2025-07-24_04:42") # Añadir log de versión
     
-    def _run(self, tool_input: GitHubRepoInput) -> str:
+    def _run(self, repo_url: str, action: str, path: Optional[str] = None, github_token: Optional[str] = None, collection_topic: Optional[str] = None) -> str:
         """
         Ejecuta la acción especificada en el repositorio de GitHub.
         Esta es la versión síncrona y no debe usar await.
         """
-        repo_url = tool_input.repo_url
-        action = tool_input.action
-        path = tool_input.path
-        github_token = tool_input.github_token
-        collection_topic = tool_input.collection_topic
-        
         logger.debug(f"DEBUG: _run called with repo_url={repo_url}, action={action}")
-
-        if self.session is None:
-            self.session = requests.Session()
-        self.github_token = github_token or self.github_token or os.environ.get("GITHUB_TOKEN")
-        if self.github_token:
-            self.session.headers.update({'Authorization': f'token {self.github_token}'})
-            logger.info("Using github_token to access repo")
-        try:
-            if action == "list_tree":
-                return self._list_tree(repo_url)
-            elif action == "read_file":
-                if not path:
-                    return "Error: Debes especificar la ruta del archivo para leer."
-                return self._read_file(repo_url, path)
-            elif action == "navigate":
-                if not path:
-                    return "Error: Debes especificar la ruta para navegar."
-                return self._navigate(repo_url, path)
-            elif action == "read_directory":
-                if not path:
-                    return "Error: Debes especificar la ruta del directorio para leer los documentos."
-                return self._read_directory(repo_url, path)
-            elif action == "read_directory_recursively":
-                return self._read_directory_recursively(repo_url, path or "")
-            elif action == "add_as_knowledge_collection":
-                return "Error: La acción 'add_as_knowledge_collection' solo puede ser ejecutada de forma asíncrona."
-            elif action == "update_knowledge_collection":
-                return "Error: La acción 'update_knowledge_collection' solo puede ser ejecutada de forma asíncrona."
-            else:
-                return f"Error: Acción no válida. Las acciones válidas son: list_tree, read_file, navigate, read_directory, read_directory_recursively, add_as_knowledge_collection, update_knowledge_collection"
-        except Exception as e:
-            logger.error(f"Error al ejecutar la acción {action} en el repositorio {repo_url}: {e}", exc_info=True)
-            return f"Error al ejecutar la acción: {e}"
     
-    async def _arun(self, tool_input: GitHubRepoInput) -> str:
+    async def _arun(self, repo_url: str, action: str, path: Optional[str] = None, github_token: Optional[str] = None, collection_topic: Optional[str] = None, vectorize: Optional[bool] = False) -> str:
         """
         Ejecuta la acción especificada en el repositorio de GitHub (asíncrono).
         """
-        repo_url = tool_input.repo_url
-        action = tool_input.action
-        path = tool_input.path
-        github_token = tool_input.github_token
-        collection_topic = tool_input.collection_topic
-        vectorize = tool_input.vectorize
-        
         logger.debug(f"DEBUG: _arun called with repo_url={repo_url}, action={action}")
 
         if not repo_url or not action:
