@@ -5,8 +5,18 @@ import { motion } from 'framer-motion'; // Importar motion
 
 import { ChatAvatar } from './ChatAvatar';
 import { Button } from '@/components/ui/button';
-import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
+
+interface Source {
+  id: number;
+  title: string;
+  url: string;
+  snippet: string;
+  type: 'web' | 'document' | 'memory' | 'code' | 'database';
+  metadata?: Record<string, any>;
+}
 
 interface Artifact {
   id: number;
@@ -23,6 +33,7 @@ interface ChatMessageProps {
     document_url?: string;
     artifact?: Artifact;
     ragContext?: any[];
+    sources?: Source[];
   };
   index: number;
   handleCopyMessage: (text: string) => void;
@@ -33,6 +44,29 @@ interface ChatMessageProps {
   isAudioPaused: boolean;
   children?: React.ReactNode; // Añadir la propiedad children
 }
+
+const Citation: React.FC<{ source: Source }> = ({ source }) => {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button className="inline-block align-super text-xs bg-primary/10 text-primary font-bold rounded-full w-4 h-4 mx-0.5 focus:outline-none focus:ring-2 focus:ring-primary/50">
+          {source.id}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-80 text-sm">
+        <div className="font-bold mb-2">{source.title}</div>
+        <p className="text-muted-foreground">
+          {source.snippet}
+        </p>
+        {source.metadata?.similarity_score && (
+          <div className="text-xs text-primary/80 mt-2">
+            Relevancia: {Math.round(source.metadata.similarity_score * 100)}%
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+};
 
 export const ChatMessage: React.FC<ChatMessageProps> = memo(({
   msg,
@@ -95,21 +129,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
                 </div>
               )}
 
-              {/* Contexto RAG utilizado */}
-              {msg.ragContext && msg.ragContext.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-border/20">
-                  <h4 className="text-base font-semibold text-muted-foreground mb-2">Contexto Utilizado:</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {msg.ragContext.map(item => (
-                      <div key={`${item.type}-${item.id}`} className="flex items-center gap-2 bg-background/50 p-1 px-2 rounded-md text-xs">
-                        {item.type === 'collection' ? <Folder className="h-3 w-3 text-primary" /> : <File className="h-3 w-3 text-secondary" />}
-                        <span>{item.name || item.title}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              
               {/* Archivos adjuntos */}
               {msg.image && (
                 <div className="mt-3">
@@ -191,7 +210,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
                   />
                 ) : (
                   <div className="text-base text-foreground break-words font-sans">
-                    <MarkdownRenderer content={msg.text} />
+                    <MarkdownRenderer content={msg.text} sources={msg.sources} />
                   </div>
                 )}
                

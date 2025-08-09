@@ -26,6 +26,15 @@ interface ToolStatusMessage {
   error?: string;
 }
 
+interface Source {
+  id: number;
+  title: string;
+  url: string;
+  snippet: string;
+  type: 'web' | 'document' | 'memory' | 'code' | 'database';
+  metadata?: Record<string, any>;
+}
+
 interface ChatMessageType {
   text: string;
   sender: 'user' | 'ai';
@@ -33,6 +42,7 @@ interface ChatMessageType {
   image_base64?: string;
   document_url?: string;
   ragContext?: SelectedContextItem[];
+  sources?: Source[]; // <-- AÑADIDO
 }
 
 interface SelectedContextItem {
@@ -127,6 +137,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [isKnowledgeAnalysisActive, setIsKnowledgeAnalysisActive] = useState(false);
   const [isWebSearchActive, setIsWebSearchActive] = useState(false);
   const [isComprehensiveAnalysisActive, setIsComprehensiveAnalysisActive] = useState(false);
+  const [isDeepResearchActive, setIsDeepResearchActive] = useState(false); // Nuevo estado para Deep Research
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [backgroundTasks, setBackgroundTasks] = useState<{ taskId: string; type: string }[]>([]);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
@@ -268,6 +279,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         }
 
         let fullResponse = '';
+        let sources: Source[] = [];
         const decoder = new TextDecoder();
 
         while (true) {
@@ -285,17 +297,11 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 if (data.type === 'chunk') {
                   fullResponse += data.content;
                 } else if (data.type === 'info') {
-                  // Opcional: mostrar información de herramientas
                   console.log('Tool info:', data.content);
-                  // These are handled by WebSocket now:
-                  // if (data.content.toolName) {
-                  //   setToolName(data.content.toolName);
-                  // }
-                  // if (data.content.reactState) {
-                  //   setReactState(data.content.reactState);
-                  // }
                 } else if (data.type === 'done') {
-                  // Respuesta completada
+                  if (data.sources) {
+                    sources = data.sources;
+                  }
                   break;
                 } else if (data.type === 'error') {
                   throw new Error(data.message);
@@ -307,12 +313,13 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           }
         }
 
-        // Actualizar el mensaje de IA con la respuesta completa
+        // Actualizar el mensaje de IA con la respuesta completa y las fuentes
         setMessages((prev) => {
           const newMessages = [...prev];
           const lastMessage = newMessages[newMessages.length - 1];
           if (lastMessage && lastMessage.sender === 'ai') {
             lastMessage.text = fullResponse;
+            lastMessage.sources = sources;
           }
           return newMessages;
         });
@@ -405,6 +412,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           ? 'webSearch'
           : isComprehensiveAnalysisActive
           ? 'comprehensiveAnalysis'
+          : isDeepResearchActive // NUEVO: Si el modo Deep Research está activo
+          ? 'deepResearch' // NUEVO: Establecer el modo a 'deepResearch'
           : '';
 
         // Timeouts aumentados para permitir operaciones largas del LLM
@@ -443,6 +452,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         if (currentComprehensiveAnalysisActive) {
           setIsComprehensiveAnalysisActive(false);
         }
+        setIsDeepResearchActive(false); // NUEVO: Desactivar Deep Research después de enviar
       }
     },
     [
@@ -453,6 +463,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       isKnowledgeAnalysisActive,
       isWebSearchActive,
       isComprehensiveAnalysisActive,
+      isDeepResearchActive, // NUEVO: Añadir al array de dependencias
       threadId,
       handleStreamingResponse,
       selectedContext,
@@ -460,6 +471,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       scrollToBottom
     ]
   );
+
 
   const handleRetry = useCallback((text: string) => {
     handleSendMessage(undefined, text);
@@ -609,7 +621,27 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     setIsComprehensiveAnalysisActive((prev) => !prev);
     setIsKnowledgeAnalysisActive(false);
     setIsWebSearchActive(false);
+    setIsDeepResearchActive(false); // Desactivar Deep Research
   }, []);
+
+  const toggleDeepResearch = useCallback(() => {
+    // Toggle the deep research state first
+    setIsDeepResearchActive((prev) => {
+      const newState = !prev;
+      console.log("Deep Research new state:", newState); // DEBUG: Añadido para verificar el estado
+      // If deep research is being activated, deactivate others
+      if (newState) {
+        setIsKnowledgeAnalysisActive(false);
+        setIsWebSearchActive(false);
+        setIsComprehensiveAnalysisActive(false);
+        // Clear message only if it's being activated and there's text
+        if (newMessage.trim()) {
+          setNewMessage('');
+        }
+      }
+      return newState;
+    });
+  }, [newMessage]); // newMessage es la única dependencia que cambia fuera de los setters de estado
 
   const startRecording = useCallback(async () => {
     if (isRecording) return;
@@ -837,6 +869,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                         image: msg.image_base64 || '',
                         document_url: msg.document_url || '',
                         ragContext: msg.ragContext,
+                        sources: msg.sources, // <-- AÑADIDO
                       }}
                       index={messageIndex}
                       handleCopyMessage={handleCopyMessage}
@@ -846,16 +879,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                       playingMessageIndex={playingMessageIndex}
                       isAudioPaused={isAudioPaused}
                     />
-                    {msg.ragContext && msg.ragContext.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {msg.ragContext.map((item: SelectedContextItem) => (
-                          <div key={`${item.type}-${item.id}`} className="flex items-center gap-1 bg-background p-1 px-2 rounded-full text-xs border border-border">
-                            {item.type === 'collection' ? <Folder className="h-3 w-3 text-primary" /> : <FileIcon className="h-3 w-3 text-secondary" />}
-                            <span>{item.name || item.title}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -881,19 +904,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         </ScrollArea>
         <div className="w-full md:max-w-4xl mx-auto px-4 pb-4">
           <div className="relative">
-            {selectedContext.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2 p-2 bg-muted rounded-md border border-border/50">
-                {selectedContext.map((item: SelectedContextItem) => (
-                  <div key={`${item.type}-${item.id}`} className="flex items-center gap-2 bg-background p-1.5 px-3 rounded-full text-xs">
-                    {item.type === 'collection' ? <Folder className="h-4 w-4 text-primary" /> : <FileIcon className="h-4 w-4 text-secondary" />}
-                    <span>{item.name || item.title}</span>
-                    <button onClick={() => handleRemoveContextItem(item.id, item.type)} className="hover:text-red-500">
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
             <ChatInputBar
                 newMessage={newMessage}
                 isResponding={isResponding}
@@ -903,12 +913,14 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 isKnowledgeAnalysisActive={selectedContext.length > 0}
                 isWebSearchActive={isWebSearchActive}
                 isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+                isDeepResearchActive={isDeepResearchActive} // Pasar la nueva prop
                 onMessageChange={setNewMessage}
                 onSendMessage={handleSendMessage}
                 onKeyDown={handleKeyDown}
                 onToggleKnowledgeAnalysis={() => setIsContextSelectorOpen(!isContextSelectorOpen)} // Abre/cierra el selector de contexto
                 onToggleWebSearch={toggleWebSearch}
                 onToggleComprehensiveAnalysis={toggleComprehensiveAnalysis}
+                onToggleDeepResearch={toggleDeepResearch} // Pasar la nueva prop
                 onStartRecording={startRecording}
                 onStopRecording={stopRecording}
                 onFileUpload={handleFileUpload}

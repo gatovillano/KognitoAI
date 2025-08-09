@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, memo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { Send, ArrowUp, Search, BookMarked, BrainCircuit, Upload, Mic, X, Paperclip } from 'lucide-react';
+import { Send, ArrowUp, Search, BookMarked, BrainCircuit, Upload, Mic, X, Paperclip, Lightbulb } from 'lucide-react';
 import { ContextSelectorButton } from '@/components/ContextSelectorButton';
 
 interface SelectedContextItem {
@@ -30,6 +30,7 @@ interface ChatInputBarProps {
   isKnowledgeAnalysisActive: boolean;
   isWebSearchActive: boolean;
   isComprehensiveAnalysisActive: boolean;
+  isDeepResearchActive: boolean; // Nueva prop
   messages?: ChatMessage[];
   onMessageChange: (value: string) => void;
   onSendMessage: (e?: React.FormEvent) => void;
@@ -37,6 +38,7 @@ interface ChatInputBarProps {
   onToggleKnowledgeAnalysis?: () => void;
   onToggleWebSearch?: () => void;
   onToggleComprehensiveAnalysis?: () => void;
+  onToggleDeepResearch?: () => void; // Nueva prop
   onStartRecording?: () => void;
   onStopRecording?: () => void;
   onFileUpload?: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -58,12 +60,14 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   isKnowledgeAnalysisActive,
   isWebSearchActive,
   isComprehensiveAnalysisActive,
+  isDeepResearchActive, // Nueva prop
   onMessageChange,
   onSendMessage,
   onKeyDown = () => {},
   onToggleKnowledgeAnalysis = () => {},
   onToggleWebSearch = () => {},
   onToggleComprehensiveAnalysis = () => {},
+  onToggleDeepResearch = () => {}, // Nueva prop
   onStartRecording = () => {},
   onStopRecording = () => {},
   onFileUpload = () => {},
@@ -117,11 +121,11 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
         <div className="rounded-3xl bg-card border border-border px-4 py-3 shadow-medium hover:shadow-strong transition-shadow duration-300">
           {/* Archivos adjuntos */}
           {currentContext.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-2">
+            <div className="mb-2 flex gap-2 overflow-x-auto pb-2">
               {currentContext.map((item, index) => (
-                <div key={index} className="flex items-center gap-2 bg-muted rounded-full px-3 py-2 text-sm">
+                <div key={index} className="flex-shrink-0 flex items-center gap-2 bg-muted rounded-full px-3 py-1 text-sm">
                   <Paperclip className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-foreground max-w-32 truncate">{item.name}</span>
+                  <span className="text-foreground">{item.name}</span>
                   <button 
                     type="button" 
                     onClick={() => onRemoveContextItem(item)} 
@@ -169,9 +173,20 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                 size="sm"
                 onClick={onToggleComprehensiveAnalysis}
                 className={`rounded-full overflow-hidden transition-all duration-300 ease-in-out hover:w-auto w-8 h-8 p-0 hover:px-3 group flex items-center justify-center ${isComprehensiveAnalysisActive ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}>
-                <BrainCircuit className="h-4 w-4 flex-shrink-0" />
+                <Lightbulb className="h-4 w-4 flex-shrink-0" />
                 <span className="ml-2 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 max-w-0 group-hover:max-w-xs overflow-hidden">
                   Búsqueda Analítica
+                </span>
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={onToggleDeepResearch}
+                className={`rounded-full overflow-hidden transition-all duration-300 ease-in-out hover:w-auto w-8 h-8 p-0 hover:px-3 group flex items-center justify-center ${isDeepResearchActive ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}>
+                <BrainCircuit className="h-4 w-4 flex-shrink-0" />
+                <span className="ml-2 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 max-w-0 group-hover:max-w-xs overflow-hidden">
+                  Investigación Profunda
                 </span>
               </Button>
             </div>
@@ -214,16 +229,16 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
               <Button
                 type="submit"
                 disabled={isResponding || (!newMessage.trim() && currentContext.length === 0)}
-                className="group rounded-full overflow-hidden transition-all duration-300 ease-in-out hover:w-auto w-10 h-10 p-0 hover:px-3 flex items-center relative"
+                className="group rounded-full transition-all duration-300 ease-in-out w-24 h-10 px-3 flex items-center relative justify-center"
               >
-                <div className="absolute inset-0 flex items-center justify-center w-10 h-10 flex-shrink-0">
+                <div className="flex items-center justify-center flex-shrink-0">
                   {isResponding ? (
                     <div className="animate-spin rounded-full h-4 w-4 border-2 border-background border-t-transparent" />
                   ) : (
                     <Send className="h-4 w-4" />
                   )}
                 </div>
-                <span className="absolute left-10 ml-2 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 max-w-0 group-hover:max-w-xs overflow-hidden">
+                <span className="ml-2 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 w-0 group-hover:w-auto overflow-hidden">
                   {isResponding ? 'Enviando...' : 'Enviar'}
                 </span>
               </Button>

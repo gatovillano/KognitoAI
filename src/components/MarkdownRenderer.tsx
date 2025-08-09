@@ -42,19 +42,68 @@ import 'prismjs/components/prism-dart';
 import 'prismjs/components/prism-elixir';
 import 'prismjs/components/prism-haskell';
 import mermaid from 'mermaid'; // Importar mermaid
+import ReactDOMServer from 'react-dom/server';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+
+interface Source {
+  id: number;
+  title: string;
+  url: string;
+  snippet: string;
+  type: 'web' | 'document' | 'memory' | 'code' | 'database';
+  metadata?: Record<string, any>;
+}
 
 interface MarkdownRendererProps {
   content: string;
   fontSize?: string;
+  sources?: Source[];
 }
 
-const MarkdownRendererComponent = ({ content, fontSize = 'text-base' }: MarkdownRendererProps) => {
+const Citation: React.FC<{ source: Source }> = ({ source }) => {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button className="inline-block align-super text-xs bg-primary/10 text-primary font-bold rounded-full w-4 h-4 mx-0.5 focus:outline-none focus:ring-2 focus:ring-primary/50">
+          {source.id}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-80 text-sm">
+        <div className="font-bold mb-2">{source.title}</div>
+        <p className="text-muted-foreground">
+          {source.snippet}
+        </p>
+        {source.metadata?.similarity_score && (
+          <div className="text-xs text-primary/80 mt-2">
+            Relevancia: {Math.round(source.metadata.similarity_score * 100)}%
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+};
+
+const MarkdownRendererComponent = ({ content, fontSize = 'text-base', sources = [] }: MarkdownRendererProps) => {
   const [copiedStates, setCopiedStates] = useState<Record<string, boolean>>({});
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Memoize the HTML content generation
   const htmlContent = useMemo(() => {
     try {
+      let processedContent = content;
+
+      // 1. Reemplazar citas con componentes de React renderizados a string
+      if (sources && sources.length > 0) {
+        processedContent = processedContent.replace(/\[(\d+)\]/g, (match, citationIdStr) => {
+          const citationId = parseInt(citationIdStr, 10);
+          const source = sources.find(s => s.id === citationId);
+          if (source) {
+            return ReactDOMServer.renderToString(<Citation source={source} />);
+          }
+          return match; // Si no se encuentra la fuente, dejar la cita como texto plano
+        });
+      }
+
       // Configure marked with a custom highlighter
       const renderer = new marked.Renderer();
       renderer.code = function({ text, lang }) {
@@ -125,7 +174,7 @@ const MarkdownRendererComponent = ({ content, fontSize = 'text-base' }: Markdown
       });
 
       // Custom processing to handle base64 image strings
-      const processedContent = content.replace(
+      processedContent = processedContent.replace(
         /!\[([^\]]*)\]\((data:image\/[a-zA-Z]+;base64,[^\)]+)\)/g,
         (match, altText, src) => {
           return `![${altText}](${src})`;

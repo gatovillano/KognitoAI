@@ -564,14 +564,15 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
     <AnimatePresence>
       {isOpen && (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-          <DialogContent className="max-w-4xl max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl">
+          <DialogContent className="max-w-4xl max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col">
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
+              className="flex flex-col flex-grow"
             >
-              <DialogHeader>
+              <DialogHeader className="flex-shrink-0">
                 <DialogTitle className="flex items-center gap-3">
                   {getAnalysisIcon(analysis.type)}
                   <span>{analysis.title}</span>
