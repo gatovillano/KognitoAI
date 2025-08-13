@@ -902,7 +902,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             </div>
           </div>
         </ScrollArea>
-        <div className="w-full md:max-w-4xl mx-auto px-4 pb-4">
+        <div className="w-full md:max-w-2xl mx-auto px-4 pb-4">
           <div className="relative">
             <ChatInputBar
                 newMessage={newMessage}

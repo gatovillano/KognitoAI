@@ -98,7 +98,7 @@ Aquí hay algunos ejemplos de código inline: \`const x = 42;\`, \`npm install\`
 `;
 
   return (
-    <div className="container mx-auto p-6 max-w-4xl">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
       <Card>
         <CardHeader>
           <CardTitle className="text-2xl font-bold">

@@ -600,26 +600,30 @@ class GitHubDocument(Base):
 async def create_tables():
     """
     Crea la extensión pgvector y todas las tablas definidas en los modelos
-    si no existen en la base de datos.
+    si no existen en la base de datos. Incluye reintentos para robustez.
     """
-    logger.info("Verificando y creando tablas de la base de datos asincrónicamente...")
-    try:
-        async with engine.begin() as conn:
-            # Asegura que la extensión de pgvector esté habilitada
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            logger.info("Extensión pgvector verificada/creada.")
-            
-            # Crea todas las tablas que heredan de Base
-            await conn.run_sync(Base.metadata.create_all)
-            logger.info("Tablas de la base de datos verificadas/creadas.")
-            
-            # La lógica de añadir columnas personalizadas a langchain_pg_embedding ya no es necesaria aquí,
-            # porque ahora se define como un modelo ORM completo y sus columnas e índices se crean
-            # automáticamente con Base.metadata.create_all.
-            # Se puede eliminar el bloque try-except anterior que manejaba esto.
-    except Exception as e:
-        logger.error(f"❌ ERROR CRÍTICO al crear tablas de la base de datos: {e}", exc_info=True)
-        raise
+    max_retries = 5
+    retry_delay = 5  # segundos
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Verificando y creando tablas (intento {attempt + 1}/{max_retries})...")
+            async with engine.begin() as conn:
+                # Asegura que la extensión de pgvector esté habilitada
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                logger.info("Extensión pgvector verificada/creada.")
+                
+                # Crea todas las tablas que heredan de Base
+                await conn.run_sync(Base.metadata.create_all)
+                logger.info("✅ Tablas de la base de datos verificadas/creadas exitosamente.")
+                return  # Salir de la función si tiene éxito
+        except Exception as e:
+            logger.error(f"❌ Error al crear tablas en el intento {attempt + 1}: {e}")
+            if attempt < max_retries - 1:
+                logger.info(f"Reintentando en {retry_delay} segundos...")
+                await asyncio.sleep(retry_delay)
+            else:
+                logger.error("❌ ERROR CRÍTICO: No se pudieron crear las tablas de la base de datos después de varios reintentos.")
+                raise
 
 async def get_db_session():
     """

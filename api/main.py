@@ -108,13 +108,31 @@ async def log_405_errors(request, call_next):
 
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
-    """Endpoint para manejar conexiones WebSocket."""
-    account_id = user_id
-    if not account_id:
-        await websocket.close(code=1008)
-        logger.warning("Intento de conexión WebSocket sin user_id.")
+    """Endpoint para manejar conexiones WebSocket con autenticación."""
+    token = websocket.query_params.get('token')
+
+    if not token:
+        logger.warning(f"Intento de conexión WebSocket sin token para el usuario {user_id}.")
+        await websocket.close(code=1008, reason="Token no proporcionado")
         return
 
+    try:
+        payload = decode_access_token(token)
+        token_user_id = payload.get("sub")
+        if token_user_id != user_id:
+            logger.warning(f"Conflicto de ID de usuario en WebSocket. Token ID: {token_user_id}, Path ID: {user_id}")
+            await websocket.close(code=1008, reason="Conflicto de ID de usuario")
+            return
+    except HTTPException as e:
+        logger.error(f"Error de autenticación de token en WebSocket para el usuario {user_id}: {e.detail}")
+        await websocket.close(code=1008, reason=f"Token inválido: {e.detail}")
+        return
+    except Exception as e:
+        logger.error(f"Error inesperado al decodificar token en WebSocket para el usuario {user_id}: {e}", exc_info=True)
+        await websocket.close(code=1008, reason="Error de token")
+        return
+
+    account_id = user_id
     await connect_websocket(account_id, websocket)
     try:
         while True:

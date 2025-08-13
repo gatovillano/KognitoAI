@@ -172,9 +172,9 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px]"> {/* Ajustar el ancho del diálogo */}
+      <DialogContent className="max-w-xl w-full p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle>Subir Nuevo Documento</DialogTitle>
+          <DialogTitle className="text-lg sm:text-xl">Subir Nuevo Documento</DialogTitle>
           <DialogDescription>
             {defaultTopic
               ? `Los archivos se añadirán a la colección "${defaultTopic}".`
@@ -235,7 +235,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
                     <FormItem>
                       <FormLabel>Contenido de Texto</FormLabel>
                       <FormControl>
-                        <TiptapEditor content={field.value || ''} onChange={field.onChange} containerClassName="max-h-60 overflow-y-auto" />
+                        <TiptapEditor content={field.value || ''} onChange={field.onChange} containerClassName="max-h-[250px] sm:max-h-60 overflow-y-auto" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -244,8 +244,8 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
               </TabsContent>
             </Tabs>
 
-            <DialogFooter>
-              <Button type="submit" disabled={isSubmitting} className="relative">
+            <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
+              <Button type="submit" disabled={isSubmitting} className="relative w-full sm:w-auto">
                 {isSubmitting ? (
                   <>
                     <span className="absolute left-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
@@ -254,6 +254,9 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
                 ) : (
                   activeTab === 'files' ? 'Subir Documento' : 'Guardar Conocimiento'
                 )}
+              </Button>
+              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting} className="w-full sm:w-auto">
+                Cancelar
               </Button>
             </DialogFooter>
           </form>

@@ -241,7 +241,7 @@ export default function EditNotePage() {
   if (isLoading) return <div>Cargando editor...</div>;
 
   return (
-    <div className="p-6 h-full flex flex-col">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden space-y-6">
       <header className="flex items-center justify-between mb-4">
         <Button variant="ghost" onClick={() => router.push(fromTeam ? `/teams/${fromTeam}/dashboard` : '/notes')}>
           <ArrowLeft className="mr-2 h-4 w-4" /> {fromTeam ? 'Volver a Equipo' : 'Volver a Notas'}

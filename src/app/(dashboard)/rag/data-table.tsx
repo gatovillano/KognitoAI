@@ -42,14 +42,14 @@ export function DataTable<TData, TValue>({
   });
 
   return (
-    <div className="rounded-md border mt-4">
-      <Table>
+    <div className="rounded-md border mt-4 overflow-x-auto">
+      <Table className="min-w-full">
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup: any) => (
             <TableRow key={headerGroup.id}>
               {headerGroup.headers.map((header: any) => {
                 return (
-                  <TableHead key={header.id}>
+                  <TableHead key={header.id} className="whitespace-nowrap">
                     {header.isPlaceholder
                       ? null
                       : (
@@ -85,7 +85,7 @@ export function DataTable<TData, TValue>({
                 data-state={row.getIsSelected() && 'selected'}
               >
                 {row.getVisibleCells().map((cell: any) => (
-                  <TableCell key={cell.id}>
+                  <TableCell key={cell.id} className="whitespace-nowrap">
                     {flexRender(
                       cell.column.columnDef.cell,
                       cell.getContext()
@@ -98,7 +98,7 @@ export function DataTable<TData, TValue>({
             <TableRow>
               <TableCell
                 colSpan={columns.length}
-                className="h-24 text-center"
+                className="h-24 text-center whitespace-normal"
               >
                 No hay documentos en tu base de conocimiento.
               </TableCell>

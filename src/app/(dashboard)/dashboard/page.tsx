@@ -132,7 +132,7 @@ export default function DashboardPage() {
 
   return (
     <>
-      <div className="p-8 mx-4 space-y-8">
+      <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden space-y-8">
         {/* Header moderno */}
         <div className="spacing-component">
           <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">

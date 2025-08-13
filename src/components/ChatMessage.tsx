@@ -113,7 +113,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
         >
           <div className="flex items-start gap-3 max-w-[100%] mr-4" style={{ marginRight: '20px' }}>
             <div
-              className="rounded-3xl rounded-br-none px-4 py-2 shadow-sm bg-muted/80 backdrop-blur-sm text-foreground border border-border/10 max-w-[80%] md:max-w-lg relative">
+              className="rounded-3xl rounded-br-none px-4 py-2 shadow-sm bg-muted/80 backdrop-blur-sm text-foreground border border-border/10 max-w-[80%] md:max-w-lg relative min-w-[100px]">
               {/* Cola de la burbuja */}
               
               {isEditing ? (

@@ -27,8 +27,17 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
   const connect = useCallback(() => {
     try {
       const token = localStorage.getItem('authToken');
-      if (!token) {
-        setConnectionError('No hay token de acceso disponible');
+      const userInfo = localStorage.getItem('userInfo');
+      
+      if (!token || !userInfo) {
+        setConnectionError('No hay token de acceso o información de usuario disponible');
+        return;
+      }
+
+      const { id: userId } = JSON.parse(userInfo);
+
+      if (!userId) {
+        setConnectionError('No se pudo obtener el ID de usuario para la conexión WebSocket');
         return;
       }
 
@@ -37,7 +46,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8889'; // Fallback por si no está definida
       const wsProtocol = apiBaseUrl.startsWith('https') ? 'wss' : 'ws';
       const wsHost = apiBaseUrl.replace(/^https?:\/\//, '');
-      const wsUrl = `${wsProtocol}://${wsHost}/ws?token=${encodeURIComponent(token)}`;
+      const wsUrl = `${wsProtocol}://${wsHost}/ws/${userId}?token=${encodeURIComponent(token)}`;
       
       wsRef.current = new WebSocket(wsUrl);
 
@@ -145,7 +154,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       };
 
       wsRef.current.onclose = (event) => {
-        console.log('🔌 WebSocket desconectado:', event.code, event.reason);
+        console.log(`🔌 WebSocket desconectado. Código: ${event.code}, Razón: "${event.reason}", Limpio: ${event.wasClean}`);
         setIsConnected(false);
         
         // Intentar reconectar si no fue un cierre intencional
@@ -158,13 +167,15 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
             connect();
           }, delay);
         } else if (reconnectAttempts.current >= maxReconnectAttempts) {
-          setConnectionError('No se pudo reconectar al servidor');
+          setConnectionError('No se pudo reconectar al servidor. Se han agotado los intentos.');
+          toast.error("Error de conexión", {
+            description: "No se pudo establecer la conexión con el servidor WebSocket después de varios intentos.",
+          });
         }
       };
 
-      wsRef.current.onerror = (error) => {
-        console.error('❌ Error en WebSocket:', error);
-        // setConnectionError('Error de conexión WebSocket'); // Eliminado para evitar bucles de actualización
+      wsRef.current.onerror = (event) => {
+        console.error('❌ Se ha producido un error en la conexión WebSocket:', event);
       };
 
     } catch (error) {

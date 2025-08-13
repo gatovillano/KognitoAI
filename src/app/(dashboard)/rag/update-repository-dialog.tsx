@@ -113,9 +113,9 @@ export function UpdateRepositoryDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-md w-full p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
             <RefreshCw className="h-5 w-5 text-primary" />
             Actualizar Repositorio
           </DialogTitle>
@@ -199,12 +199,13 @@ export function UpdateRepositoryDialog({
             variant="outline"
             onClick={handleClose}
             disabled={isLoading && !taskId}
+            className="w-full sm:w-auto"
           >
             {taskStatus === 'processing' ? 'Cerrar' : 'Cancelar'}
           </Button>
 
           {!taskId && (
-            <Button onClick={handleUpdate} disabled={isLoading}>
+            <Button onClick={handleUpdate} disabled={isLoading} className="w-full sm:w-auto">
               {isLoading ? (
                 <>
                   <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
@@ -220,14 +221,14 @@ export function UpdateRepositoryDialog({
           )}
 
           {taskStatus === 'completed' && (
-            <Button onClick={() => { onOpenChange(false); resetState(); }}>
+            <Button onClick={() => { onOpenChange(false); resetState(); }} className="w-full sm:w-auto">
               <CheckCircle className="mr-2 h-4 w-4" />
               Cerrar
             </Button>
           )}
 
           {taskStatus === 'failed' && (
-            <Button onClick={handleUpdate} variant="destructive">
+            <Button onClick={handleUpdate} variant="destructive" className="w-full sm:w-auto">
               <RefreshCw className="mr-2 h-4 w-4" />
               Reintentar
             </Button>
