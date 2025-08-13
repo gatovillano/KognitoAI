@@ -17,13 +17,14 @@ from pydantic import BaseModel
 from sqlalchemy import select, text, update
 import asyncio
 
-from core.database import SessionLocal, TeamMember, LangchainPgCollection, UploadTask
+from core.database import SessionLocal, TeamMember, LangchainPgCollection, UploadTask, GitHubDocument, get_db_session
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.document_parser import extract_text_and_metadata_from_document
 from core.memory_manager import process_document_for_rag, list_user_documents, list_user_documents_all_teams, delete_document_chunks, get_full_document_content, update_document_metadata, list_user_collections, extract_titles_and_update_metadata
 from utils.db_session import DBSession
 from tools.add_web_to_rag_tool import AddWebToRAGTool
+from core.websocket_manager import send_personal_message
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -98,7 +99,7 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
                 if result:
                     processed_files_count += 1
                 
-                # Actualizar progreso en la base de datos
+                # Actualizar progreso en la base de datos y notificar por WebSocket
                 progress = 5 + int(((i + 1) / total_files) * 90)
                 async with SessionLocal() as progress_session:
                     stmt_progress = update(UploadTask).where(UploadTask.id == uuid.UUID(task_id)).values(
@@ -107,12 +108,24 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
                     await progress_session.execute(stmt_progress)
                     await progress_session.commit()
 
+                # Notificar al cliente a través de WebSocket
+                await send_personal_message(
+                    account_id,
+                    {
+                        "type": "upload_progress",
+                        "task_id": task_id,
+                        "progress": progress,
+                        "message": f"Procesando archivo {i + 1}/{total_files}..."
+                    }
+                )
+
             # 2. Marcar la tarea como completada
+            result_message = f"{processed_files_count}/{total_files} archivo(s) procesado(s) y añadido(s) a la colección '{topic}'."
             result_payload = {
                 "processed_files": processed_files_count,
                 "total_files": total_files,
                 "topic": topic,
-                "message": f"{processed_files_count}/{total_files} archivo(s) procesado(s) y añadido(s) a la colección '{topic}'."
+                "message": result_message
             }
 
             stmt_completed = update(UploadTask).where(UploadTask.id == uuid.UUID(task_id)).values(
@@ -123,17 +136,38 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
             await db_session.execute(stmt_completed)
             await db_session.commit()
 
+            # Notificar al cliente que la subida se ha completado
+            await send_personal_message(
+                account_id,
+                {
+                    "type": "upload_completed",
+                    "task_id": task_id,
+                    "message": result_message
+                }
+            )
+
             logger.info(f"Tarea de subida {task_id} completada exitosamente.")
 
         except Exception as e:
-            logger.error(f"Error en la tarea de subida {task_id}: {e}", exc_info=True)
+            error_message = str(e)
+            logger.error(f"Error en la tarea de subida {task_id}: {error_message}", exc_info=True)
             # Marcar la tarea como fallida
             stmt_failed = update(UploadTask).where(UploadTask.id == uuid.UUID(task_id)).values(
                 status="failed",
-                error_message=str(e)
+                error_message=error_message
             )
             await db_session.execute(stmt_failed)
             await db_session.commit()
+
+            # Notificar al cliente que la subida ha fallado
+            await send_personal_message(
+                account_id,
+                {
+                    "type": "upload_failed",
+                    "task_id": task_id,
+                    "error_message": error_message
+                }
+            )
 
 @router.post("/upload-document")
 async def upload_document_endpoint(
@@ -191,6 +225,18 @@ async def upload_document_endpoint(
     )
 
     logger.info(f"Backend (process_upload_task): workspace_id = {workspace_id}")
+
+    # Notificar al cliente que la subida ha comenzado
+    await send_personal_message(
+        current_account_id,
+        {
+            "type": "upload_started",
+            "task_id": str(new_task.id),
+            "file_names": file_names,
+            "topic": topic,
+            "created_at": new_task.created_at.isoformat()
+        }
+    )
 
     return {
         "task_id": str(new_task.id),
@@ -336,11 +382,29 @@ class DocumentContentRequest(BaseModel):
 @router.post("/get-document-content", summary="Obtener el contenido de un documento")
 async def get_document_content_endpoint(
     request: DocumentContentRequest,
-    current_account_id: str = Depends(get_current_account_id)
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session) # Añadido db dependency
 ):
     """
     Recupera el contenido textual completo de un documento específico.
     """
+    # 1. Intentar recuperar de GitHubDocument primero
+    try:
+        query = select(GitHubDocument).where(
+            GitHubDocument.account_id == uuid.UUID(current_account_id),
+            GitHubDocument.file_path == request.file_name
+        )
+        result = await db.execute(query)
+        github_doc = result.scalars().first()
+
+        if github_doc:
+            logger.info(f"Contenido de GitHubDocument encontrado para {request.file_name}.")
+            return {"content": github_doc.content}
+    except Exception as e:
+        logger.error(f"Error al buscar en GitHubDocument para {request.file_name}: {e}", exc_info=True)
+        # Continuar buscando en la base de datos vectorial si hay un error aquí
+
+    # 2. Si no es un documento de GitHub o no se encontró, intentar recuperar de la base de datos vectorial
     content = await get_full_document_content(
         account_id=current_account_id,
         file_name=request.file_name
@@ -849,3 +913,39 @@ async def process_knowledge_graph_endpoint(
     except Exception as e:
         logger.error(f"Error al iniciar procesamiento de grafo: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error al iniciar el procesamiento del grafo de conocimiento.")
+
+
+class DeleteFolderRequest(BaseModel):
+    repo_name: str
+    folder_path: str
+    repo_url: str # Añadido para identificar el repositorio de forma única
+    workspace_id: Optional[str] = None
+
+@router.post("/github/delete-folder")
+async def delete_folder_endpoint(
+    request: DeleteFolderRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    logger.info(f"Received delete folder request for repo: '{request.repo_name}', folder: '{request.folder_path}', workspace: '{request.workspace_id}' from account: {current_account_id}")
+
+    account_id_uuid = uuid.UUID(current_account_id)
+    
+    folder_prefix = request.folder_path
+    if folder_prefix and not folder_prefix.endswith('/'):
+        folder_prefix += '/'
+
+    # Importar delete_document_chunks desde core.memory_manager
+    from core.memory_manager import delete_document_chunks
+
+    success = await delete_document_chunks(
+        account_id=str(account_id_uuid),
+        file_name_prefix=folder_prefix, # Usar el nuevo parámetro
+        workspace_id=request.workspace_id,
+        repo_url=request.repo_url # Pasar el repo_url
+    )
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Carpeta no encontrada o ya eliminada.")
+    return {"message": f"La carpeta '{request.folder_path}' y sus contenidos han sido eliminados."}
+

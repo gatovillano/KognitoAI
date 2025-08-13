@@ -69,9 +69,9 @@ export function ShareDocumentDialog({ isOpen, onOpenChange, onShareSuccess, docu
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-md w-full p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle>Compartir Documento</DialogTitle>
+          <DialogTitle className="text-lg sm:text-xl">Compartir Documento</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <p>Seleccione un equipo para compartir el documento: <strong>{document?.file_name}</strong></p>
@@ -96,13 +96,14 @@ export function ShareDocumentDialog({ isOpen, onOpenChange, onShareSuccess, docu
             <p className="text-muted-foreground">No se encontraron equipos para compartir.</p>
           )}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="w-full sm:w-auto">
             Cancelar
           </Button>
           <Button
             onClick={handleShare}
             disabled={!selectedTeam || isSharing || isLoadingTeams}
+            className="w-full sm:w-auto"
           >
             {isSharing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             Compartir

@@ -58,7 +58,7 @@ def get_kognito_logo() -> str:
     ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═══╝╚═╝   ╚═╝    ╚═════╝ 
 {Colors.RESET}
 {Colors.BRIGHT_MAGENTA}{Colors.BOLD}                        ╔═══════════════════════════════════╗
-                        ║           🧠 AI SYSTEM            ║
+                        ║           🧠 AI LABS              ║
                         ╚═══════════════════════════════════╝{Colors.RESET}
 """
     return logo

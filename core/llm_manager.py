@@ -41,7 +41,6 @@ async def initialize_llms():
             google_api_key=settings.google_api_key,
             
         )
-        await main_llm.ainvoke("Test prompt")
         _main_agent_llm_instance = main_llm
         logger.info("✅ Main agent LLM initialized.")
     except Exception as e:
@@ -56,7 +55,6 @@ async def initialize_llms():
             google_api_key=settings.google_api_key,
             
         )
-        await fast_llm.ainvoke("Test prompt")
         _fast_task_llm_instance = fast_llm
         logger.info("✅ Fast task LLM initialized.")
     except Exception as e:

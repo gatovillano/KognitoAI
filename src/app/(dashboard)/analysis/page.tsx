@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { AnalysisDetailDialog } from './analysis-detail-dialog';
 import { SemanticAnalysisDialog } from '../rag/semantic-analysis-dialog';
 import apiClient from '@/lib/api';
@@ -23,7 +24,8 @@ import {
   ChevronDown,
   Calendar,
   Eye,
-  Loader2
+  Loader2,
+  Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -230,15 +232,26 @@ export default function AnalysisPage() {
   }
 
   return (
-    <div className="p-8 mx-4 space-y-8">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden space-y-8">
       {/* Header */}
       <div className="spacing-component">
-        <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
-          Centro de Análisis
-        </h1>
-        <p className="typography-body-large text-muted-foreground max-w-2xl">
-          Explora todos tus análisis de documentos, colecciones, mapas mentales e insights proactivos en un solo lugar.
-        </p>
+        <div className="flex items-center gap-2">
+          <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
+            Centro de Análisis
+          </h1>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
+                  <Info className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Explora todos tus análisis de documentos, colecciones, mapas mentales e insights proactivos en un solo lugar.</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
       </div>
 
       

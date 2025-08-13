@@ -40,9 +40,9 @@ export function PreviewDocumentDialog({ document, isOpen, onOpenChange }: Previe
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl h-[80vh] flex flex-col">
+      <DialogContent className="max-w-4xl w-full h-[90vh] sm:h-[80vh] flex flex-col p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle className="truncate">
+          <DialogTitle className="truncate text-lg sm:text-xl">
             Previsualizando: {document?.title || document?.file_name}
           </DialogTitle>
         </DialogHeader>

@@ -61,7 +61,7 @@ export default function AllInsightsPage() {
 
   return (
     <>
-      <div className="p-6 space-y-6">
+      <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden space-y-6">
         <div>
           <Link href="/dashboard" className="text-sm text-primary hover:underline mb-2 inline-block">
             &larr; Volver al Dashboard

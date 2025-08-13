@@ -9,7 +9,7 @@ export default function CollectionDetailPage() {
   const topic = params ? decodeURIComponent(params.topic as string) : '';
 
   return (
-    <div className="h-full overflow-x-hidden">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden"> {/* Ajustado padding */}
       <DocumentCollectionDisplay
         topic={topic}
         collectionName={topic}

@@ -158,3 +158,18 @@ Se solucionaron tres errores críticos que afectaban la experiencia del usuario 
 -   **Error**: Se produjo un `TypeError: Object of type ToolOutputWithSources is not JSON serializable` al procesar el resultado de las herramientas `WebSearchTool` y `DuckDuckGoSearchTool`.
 -   **Causa**: Las herramientas devolvían una instancia del objeto `ToolOutputWithSources` de Pydantic. Este objeto no es directamente compatible con la serialización JSON que requiere el sistema para procesar los resultados de las herramientas.
 -   **Solución**: Se modificaron los métodos `_arun` en `tools/web_search_tool.py` y `tools/ddg_search_tool.py`. En lugar de devolver el objeto `ToolOutputWithSources` directamente, ahora se utiliza el método `.model_dump()` de Pydantic para convertir el objeto en un diccionario antes de devolverlo. Los diccionarios son compatibles con la serialización JSON, lo que resuelve el `TypeError` y permite que el sistema procese los resultados correctamente.
+
+---
+## 11-08-2025 - `ProgrammingError` por `FieldInfo` en `ExtractDocumentTitlesTool`
+
+-   **Error**: Se produjo un `psycopg.ProgrammingError: cannot adapt type 'FieldInfo' using placeholder '%s'` al ejecutar la herramienta `ExtractDocumentTitlesTool`.
+-   **Causa**: La herramienta estaba intentando pasar objetos `FieldInfo` (metadatos de Pydantic) directamente como parámetros a una consulta SQL, en lugar de los valores de cadena esperados para `topic` y `collection_id`. Esto ocurría porque los atributos de la instancia de la herramienta (`self.topic`, `self.collection_id`) conservaban sus valores `FieldInfo` predeterminados si no se les asignaba explícitamente un valor de cadena.
+-   **Solución**: Se modificó el método `_arun` en `tools/extract_document_titles_tool.py`. Ahora, antes de usar `self.topic` y `self.collection_id` en los parámetros de la consulta SQL, se verifica explícitamente si son instancias de `str`. Si no lo son (es decir, si son objetos `FieldInfo`), se tratan como `None` para la consulta. Además, se ajustó el log inicial para reflejar el valor correcto del tema. Esto asegura que solo valores de cadena o `None` sean pasados a la base de datos, resolviendo el error de adaptación de tipo.
+
+---
+
+## 12-08-2025 - `KeyError: 'content'` al añadir repositorios de GitHub
+
+- **Error**: Se produjo un `KeyError: 'content'` en `tools/github_repo_tool.py` al intentar añadir un repositorio de GitHub que contenía enlaces simbólicos (symlinks).
+- **Causa**: El código intentaba acceder a la clave `'content'` en la respuesta de la API de GitHub para cada archivo. Sin embargo, la respuesta para un enlace simbólico no contiene esta clave, lo que provocaba el error.
+- **Solución**: Se modificó el método `_add_as_knowledge_collection` en `tools/github_repo_tool.py` para comprobar el tipo de archivo antes de procesarlo. Si el tipo es `'symlink'`, el archivo se omite y se registra un mensaje, evitando así el `KeyError`.

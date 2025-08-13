@@ -155,7 +155,7 @@ export default function TeamDashboardPage() {
   };
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center">
           <Button variant="outline" size="icon" className="mr-4" onClick={handleBack}>

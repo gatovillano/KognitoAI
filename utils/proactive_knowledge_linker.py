@@ -26,7 +26,7 @@ from langchain_core.embeddings import Embeddings
 # Modelos para NLP y summarization - cargados de forma singleton
 import spacy
 from keybert import KeyBERT
-from sqlalchemy import select
+
 # Importar el modelo de Google Gemini
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
@@ -310,9 +310,7 @@ async def get_all_knowledge(account_id: str) -> List[Dict[str, Any]]:
             })
 
         # Fetch Vector Memories (including document chunks) from langchain_pg_embedding
-        from sqlalchemy import Table, MetaData
-        from core.memory_manager import PGVECTOR_SYNC_ENGINE, langchain_pg_embedding
-        from core.database import LangchainPgCollection
+        from core.database import LangchainPgCollection, LangchainPgEmbedding
 
         # Obtener los UUIDs de las colecciones relevantes para el usuario
         relevant_collection_uuids = []
@@ -331,9 +329,9 @@ async def get_all_knowledge(account_id: str) -> List[Dict[str, Any]]:
 
         # Usar la nueva estructura optimizada con account_id directo
         memories = []
-        memories_stmt = select(langchain_pg_embedding).where(
-            langchain_pg_embedding.c.account_id == account_id,
-            langchain_pg_embedding.c.content_type == 'user_memories'
+        memories_stmt = select(LangchainPgEmbedding).where(
+            LangchainPgEmbedding.account_id == account_id_uuid,
+            LangchainPgEmbedding.content_type == 'user_memories'
         )
         result = await db.execute(memories_stmt)
         memories = result.mappings().all()

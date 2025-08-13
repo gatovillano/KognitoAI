@@ -55,18 +55,18 @@ export function DeleteConfirmationDialog({ document, isOpen, onOpenChange, onDel
 
   return (
     <AlertDialog open={isOpen} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
+      <AlertDialogContent className="max-w-md w-full p-4 sm:p-6">
         <AlertDialogHeader>
-          <AlertDialogTitle>¿Estás absolutamente seguro?</AlertDialogTitle>
+          <AlertDialogTitle className="text-lg sm:text-xl">¿Estás absolutamente seguro?</AlertDialogTitle>
           <AlertDialogDescription>
             Esta acción es irreversible. Se eliminará permanentemente el documento
             <strong className="mx-1">{document?.file_name}</strong>
             y todos sus datos asociados de la memoria de la IA.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isDeleting}>Cancelar</AlertDialogCancel>
-          <AlertDialogAction onClick={handleDelete} disabled={isDeleting}>
+        <AlertDialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
+          <AlertDialogCancel disabled={isDeleting} className="w-full sm:w-auto">Cancelar</AlertDialogCancel>
+          <AlertDialogAction onClick={handleDelete} disabled={isDeleting} className="w-full sm:w-auto bg-destructive hover:bg-destructive/90">
             {isDeleting ? 'Eliminando...' : 'Sí, eliminar'}
           </AlertDialogAction>
         </AlertDialogFooter>

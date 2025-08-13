@@ -5,7 +5,8 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { ArrowLeft, Loader2, FileText, Folder, Eye, Edit, ScanSearch, Share2, Trash2, History, FolderKanban, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Loader2, FileText, Folder, Eye, Edit, ScanSearch, Share2, Trash2, History, FolderKanban, RefreshCw, MoreHorizontal, ChevronDown } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 
 import apiClient from '@/lib/api';
@@ -56,8 +57,66 @@ export default function RepositoryDetailPage() {
   const [vectorizationResult, setVectorizationResult] = useState<any>(null);
   const [isVectorizationOpen, setIsVectorizationOpen] = useState(false);
 
+  // Componente auxiliar para el menú de acciones del documento
+  const DocumentActionsDropdown = ({ doc }: { doc: Document }) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+          <span className="sr-only">Abrir menú</span>
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => setDocumentToPreview(doc)}>
+          <Eye className="mr-2 h-4 w-4" />
+          <span>Ver</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setDocumentToEdit(doc)}>
+          <Edit className="mr-2 h-4 w-4" />
+          <span>Editar</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleAnalyzeDocument(doc)}>
+          <ScanSearch className="mr-2 h-4 w-4" />
+          <span>Analizar</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => { setDocumentToShare(doc); setIsShareOpen(true); }}>
+          <Share2 className="mr-2 h-4 w-4" />
+          <span>Compartir</span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => setDocumentToDelete(doc)} className="text-red-600">
+          <Trash2 className="mr-2 h-4 w-4" />
+          <span>Eliminar</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   // Estado para el historial de análisis
   const [savedAnalyses, setSavedAnalyses] = useState<any[]>([]);
+
+  const refreshDocuments = () => {
+    fetchData();
+  };
+
+  const handleDeleteFolder = async (folderPath: string) => {
+    try {
+      // Asegurarse de que folderPath no termine con '/' si es la raíz del repo
+      const cleanedFolderPath = folderPath === '/' ? '' : folderPath;
+
+      await apiClient.post('/api/github/delete-folder', {
+        repo_name: repoName,
+        folder_path: cleanedFolderPath,
+        repo_url: repoUrl,
+        // workspace_id: ... si es necesario pasarlo
+      });
+      toast.success(`Carpeta "${folderPath}" eliminada con éxito.`);
+      refreshDocuments(); // Recargar documentos después de eliminar la carpeta
+    } catch (error) {
+      toast.error(`Error al eliminar la carpeta "${folderPath}".`);
+      console.error(error);
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -290,7 +349,7 @@ export default function RepositoryDetailPage() {
                 <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); /* Lógica para compartir carpeta */ toast.info(`Compartiendo carpeta ${node.name}`); }} title="Compartir Carpeta">
                   <Share2 className="h-4 w-4" />
                 </Button>
-                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); /* Lógica para eliminar carpeta */ toast.info(`Eliminando carpeta ${node.name}`); }} title="Eliminar Carpeta">
+                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); handleDeleteFolder(node.path); }} title="Eliminar Carpeta">
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
@@ -314,21 +373,14 @@ export default function RepositoryDetailPage() {
                         <span>{file.file_name.replace(`${repoPart}/${folderPath}`, '').split('/').pop()}</span>
                       </div>
                       <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => setDocumentToPreview(file)} title="Ver">
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setDocumentToEdit(file)} title="Editar">
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => handleAnalyzeDocument(file)} title="Analizar">
-                          <ScanSearch className="h-4 w-4" />
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => { setDocumentToShare(file); setIsShareOpen(true); }} title="Compartir">
-                          <Share2 className="h-4 w-4" />
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setDocumentToDelete(file)} title="Eliminar">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <DocumentActionsDropdown doc={file} />
+                        <DocumentActionsDropdown doc={file} />
+                        <DocumentActionsDropdown doc={file} />
+                        <DocumentActionsDropdown doc={file} />
+                        <DocumentActionsDropdown doc={file} />
+                        <DocumentActionsDropdown doc={file} />
+                        <DocumentActionsDropdown doc={file} />
+                        <DocumentActionsDropdown doc={file} />
                       </div>
                     </li>
                   );
@@ -342,32 +394,44 @@ export default function RepositoryDetailPage() {
   };
 
   return (
-    <div className="h-full flex flex-col p-6 overflow-x-hidden">
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+    <div className="h-full flex flex-col p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 flex-wrap gap-2">
         <div>
-          <Link href="/rag/repositories" className="flex items-center text-sm text-muted-foreground hover:text-foreground mb-2">
-            <ArrowLeft className="h-4 w-4 mr-2" />
+          <Link href="/rag/repositories" className="flex items-center text-sm text-muted-foreground hover:text-foreground mb-1 sm:mb-2">
+            <ArrowLeft className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
             Volver a Repositorios
           </Link>
-          <h1 className="text-3xl font-bold break-all">{repoName}</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold break-all">{repoName}</h1>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" className="border-orange-400 text-orange-400 hover:bg-orange-50" onClick={() => setIsUpdateRepoOpen(true)}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Actualizar Repositorio
-          </Button>
-          <Button variant="outline" className="border-blue-400 text-blue-400 hover:bg-blue-50" disabled={!!docPollingId || !!collectionPollingId} onClick={handleAnalyzeRepository}>
-            {collectionPollingId ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <ScanSearch className="mr-2 h-4 w-4" />
-            )}
-            {collectionPollingId ? 'Analizando...' : 'Analizar Repositorio'}
-          </Button>
-          <Button variant="outline" className="border-green-400 text-green-400 hover:bg-green-50" disabled={!!docPollingId || !!collectionPollingId || !!vectorizationPollingId} onClick={handleVectorizeRepository}>
-            <FileText className="mr-2 h-4 w-4" />
-            Vectorizar Repositorio
-          </Button>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+          {/* MENÚ DE ACCIONES PARA EL REPOSITORIO */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="gap-2" disabled={!!docPollingId || !!collectionPollingId || !!vectorizationPollingId}>
+                <MoreHorizontal className="h-4 w-4" />
+                <span className="hidden sm:inline">Acciones</span>
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={() => setIsUpdateRepoOpen(true)}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                <span>Actualizar Repositorio</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleAnalyzeRepository} disabled={!!docPollingId || !!collectionPollingId}>
+                {collectionPollingId ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <ScanSearch className="mr-2 h-4 w-4" />
+                )}
+                <span>{collectionPollingId ? 'Analizando...' : 'Analizar Repositorio'}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleVectorizeRepository} disabled={!!docPollingId || !!collectionPollingId || !!vectorizationPollingId}>
+                <FileText className="mr-2 h-4 w-4" />
+                <span>Vectorizar Repositorio</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -387,9 +451,9 @@ export default function RepositoryDetailPage() {
             )}
           </div>
 
-          <div className="mt-8 pt-6 border-t">
-            <h2 className="text-2xl font-bold flex items-center gap-2 mb-4">
-              <History className="h-6 w-6" />
+          <div className="mt-6 sm:mt-8 pt-4 sm:pt-6 border-t">
+            <h2 className="text-xl sm:text-2xl font-bold flex items-center gap-2 mb-3 sm:mb-4">
+              <History className="h-5 w-5 sm:h-6 sm:w-6" />
               Historial de Análisis
             </h2>
             {savedAnalyses.length > 0 ? (
@@ -405,7 +469,7 @@ export default function RepositoryDetailPage() {
                         </div>
                       </AccordionTrigger>
                       <AccordionContent>
-                        <Button variant="link" className="p-0 h-auto" onClick={() => {
+                        <Button variant="link" className="p-0 h-auto text-xs sm:text-sm" onClick={() => {
                           if (analysis.file_name.startsWith('Colección:')) {
                             setCollectionAnalysisResult(analysis.result_payload);
                             setIsCollectionAnalysisOpen(true);
@@ -432,7 +496,12 @@ export default function RepositoryDetailPage() {
       {/* Diálogos */}
       <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={() => {}} document={documentToEdit} />
-      <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={() => {}} document={documentToDelete} />
+      <DeleteConfirmationDialog
+        isOpen={!!documentToDelete}
+        onOpenChange={(open) => !open && setDocumentToDelete(null)}
+        onDeleteSuccess={refreshDocuments}
+        document={documentToDelete}
+      />
       <CodeAnalysisResultDialog isOpen={isDocAnalysisOpen} onOpenChange={setIsDocAnalysisOpen} analysis={docAnalysisResult} repoName={repoName} />
       <CodeAnalysisResultDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} repoName={repoName} />
       <AnalysisResultDialog isOpen={isVectorizationOpen} onOpenChange={setIsVectorizationOpen} analysis={vectorizationResult} document={{ file_name: repoName, topic: 'Repositories', title: 'Vectorización de ' + repoName, author: '' }} />

@@ -76,9 +76,9 @@ export function EditCollectionDialog({ isOpen, onOpenChange, onEditSuccess, coll
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-md w-full p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle>Editar Colección</DialogTitle>
+          <DialogTitle className="text-lg sm:text-xl">Editar Colección</DialogTitle>
           <DialogDescription>
             Modifica el nombre y descripción de tu colección de conocimiento.
           </DialogDescription>
@@ -104,11 +104,11 @@ export function EditCollectionDialog({ isOpen, onOpenChange, onEditSuccess, coll
             />
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={handleClose} disabled={isLoading}>
+        <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
+          <Button variant="outline" onClick={handleClose} disabled={isLoading} className="w-full sm:w-auto">
             Cancelar
           </Button>
-          <Button onClick={handleEdit} disabled={isLoading || !topicName.trim()}>
+          <Button onClick={handleEdit} disabled={isLoading || !topicName.trim()} className="w-full sm:w-auto">
             {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             Guardar Cambios
           </Button>

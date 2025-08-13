@@ -1,14 +1,17 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Sparkles, ChevronDown, MoreHorizontal, Network, Brain, ArrowLeft } from 'lucide-react';
+import { Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Sparkles, ChevronDown, MoreHorizontal, Network, Brain, ArrowLeft, Info } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { toast } from 'sonner';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { DocumentCard } from '@/app/(dashboard)/rag/document-card';
 
 import { DataTable } from '@/app/(dashboard)/rag/data-table';
 import { getColumns, type Document } from '@/app/(dashboard)/rag/columns';
@@ -22,6 +25,7 @@ import UploadProgressIndicator, { UploadTask } from '@/components/UploadProgress
 import { CollectionAnalysisDialog } from '@/app/(dashboard)/rag/collection-analysis-dialog';
 import { SemanticAnalysisDialog } from '@/app/(dashboard)/rag/semantic-analysis-dialog';
 import { ShareDocumentDialog } from '@/app/(dashboard)/rag/share-document-dialog';
+import { CustomAnalysisDialog } from '@/app/(dashboard)/rag/custom-analysis-dialog';
 
 interface DocumentCollectionDisplayProps {
   topic: string;
@@ -35,6 +39,8 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
+  const [collectionDescription, setCollectionDescription] = useState<string | null>(null);
+  const isMobile = useMediaQuery('(max-width: 768px)'); // md breakpoint
 
   const handleUploadStart = (fileNames: string[], topic: string) => {
     const newPlaceholders = fileNames.map(fileName => ({
@@ -69,6 +75,9 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   const [isCollectionAnalysisOpen, setIsCollectionAnalysisOpen] = useState(false);
   const [collectionPollingId, setCollectionPollingId] = useState<string | null>(null);
 
+  // Estado para análisis personalizado
+  const [isCustomAnalysisOpen, setIsCustomAnalysisOpen] = useState(false);
+
   // Estados para análisis semántico
   const [semanticAnalysisResult, setSemanticAnalysisResult] = useState<any>(null);
   const [isSemanticAnalysisOpen, setIsSemanticAnalysisOpen] = useState(false);
@@ -83,24 +92,27 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     setIsLoading(true);
     try {
       const commonParams = { topic: topic, ...(workspaceId && { workspace_id: workspaceId }) };
-      const [docsRes, analysesRes] = await Promise.all([
+      const [docsRes, analysesRes, collectionRes] = await Promise.all([
         apiClient.get('/api/list-documents', { params: commonParams }),
-        apiClient.post('/api/get-saved-analyses', commonParams)
+        apiClient.post('/api/get-saved-analyses', commonParams),
+        apiClient.get(`/api/collections/${topic}`, { params: { ...(workspaceId && { workspace_id: workspaceId }) } })
       ]);
       
       const serverDocuments = docsRes.data;
       const savedAnalysesData = analysesRes.data;
+      const collectionData = collectionRes.data;
 
       setDocuments(prevDocs => {
         // Filtramos los placeholders que aún están pendientes o procesando
         const pendingPlaceholders = prevDocs.filter(
-          p => p.document_type === 'placeholder' && !serverDocuments.some(d => d.file_name === p.file_name)
+          p => p.document_type === 'placeholder' && !serverDocuments.some((d: Document) => d.file_name === p.file_name)
         );
         // Combinamos los documentos del servidor con los placeholders que aún no han terminado
         return [...pendingPlaceholders, ...serverDocuments];
       });
 
       setSavedAnalyses(savedAnalysesData);
+      setCollectionDescription(collectionData.description || null);
 
     } catch (error) {
       toast.error('Error al cargar los datos de la colección.');
@@ -111,14 +123,19 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   }, [topic, workspaceId]);
 
   // WebSocket para actualizaciones en tiempo real
-  const onTitleUpdated = useCallback((data: { file_name: string; new_title: string; progress: number; total: number }) => {
+  const onTitleUpdated = (data: { file_name: string; new_title: string; progress: number; total: number }) => {
     setDocuments(prevDocs =>
       prevDocs.map(doc =>
         doc.file_name === data.file_name ? { ...doc, title: data.new_title } : doc
       )
     );
     toast.success(`Título actualizado para: ${data.file_name}`);
-  }, [setDocuments]);
+  };
+
+  const onTitleUpdatedRef = useRef(onTitleUpdated);
+  useEffect(() => {
+    onTitleUpdatedRef.current = onTitleUpdated;
+  });
 
   const onTitleExtractionCompleted = useCallback((data: { updated_count: number; total_processed: number; message: string }) => {
     toast.success(data.message || `Extracción de títulos completada.`);
@@ -187,7 +204,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   }, []);
 
   const webSocketOptions = useMemo(() => ({
-    onTitleUpdated,
+    onTitleUpdated: (data: any) => onTitleUpdatedRef.current(data),
     onTitleExtractionCompleted,
     onUploadStarted,
     onUploadProgress,
@@ -197,9 +214,8 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     onDocumentProcessingCompleted,
     onDocumentProcessingFailed,
   }), [
-    onTitleUpdated, 
-    onTitleExtractionCompleted, 
-    onUploadStarted, 
+    onTitleExtractionCompleted,
+    onUploadStarted,
     onUploadProgress, 
     onUploadCompleted, 
     onUploadFailed,
@@ -287,7 +303,6 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     try {
       const response = await apiClient.post('/api/extract-title', { topic, ...(workspaceId && { workspace_id: workspaceId }) });
       toast.info(`Extracción de títulos para la colección "${collectionName || topic}" iniciada.`);
-      fetchPageData();
     } catch (error) { toast.error("No se pudo iniciar la extracción de títulos."); }
   };
 
@@ -297,9 +312,8 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     try {
       const response = await apiClient.post('/api/extract-title', { file_name: doc.file_name, ...(workspaceId && { workspace_id: workspaceId }) });
       toast.info(`Extracción de título para "${doc.file_name}" iniciada.`);
-      fetchPageData();
     } catch (error) { toast.error(`No se pudo iniciar la extracción de título para "${doc.file_name}".`); }
-  }, [docPollingId, collectionPollingId, workspaceId, fetchPageData]);
+  }, [docPollingId, collectionPollingId, workspaceId]);
 
   // --- Handler para Resumen Semántico de la Colección ---
   const handleSemanticSummary = async () => {
@@ -360,29 +374,39 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
           {backButtonText}
         </Button>
       </div>
-      <div className="flex justify-between items-center mb-6"> {/* Contenedor para el título y los botones */}
-        {collectionName && <h1 className="text-2xl font-bold">{collectionName}</h1>} {/* Título de la colección */}
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-6 gap-4">
+        <div className="flex items-center gap-2"> {/* New div for title and tooltip */}
+          {collectionName && <h1 className="text-2xl font-bold">{collectionName}</h1>}
+          {collectionDescription && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="ml-1 h-6 w-6 text-muted-foreground">
+                    <Info className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  <p>{collectionDescription}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Botón Principal */}
-          <Button onClick={() => setIsUploadOpen(true)} size="lg" className="bg-primary hover:bg-primary/90">
-            <Upload className="mr-2 h-4 w-4" />
-            Subir Documentos
-          </Button>
-
-          {/* Menú de Análisis */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="gap-2" disabled={!!docPollingId || !!collectionPollingId}>
-                {collectionPollingId ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <ScanSearch className="h-4 w-4" />
-                )}
-                <span className="hidden sm:inline">Análisis</span>
+              <Button variant="outline" className="gap-2" disabled={!!docPollingId || !!collectionPollingId || isProcessingKnowledgeGraph}>
+                <MoreHorizontal className="h-4 w-4" />
+                <span className="hidden sm:inline">Acciones</span>
                 <ChevronDown className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={() => setIsUploadOpen(true)}>
+                <Upload className="mr-2 h-4 w-4" />
+                <span>Subir Documentos</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleAnalyzeCollection} disabled={!!docPollingId || !!collectionPollingId}>
                 <ScanSearch className="mr-2 h-4 w-4" />
                 <span>Analizar Colección</span>
@@ -391,30 +415,22 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                 <ScanSearch className="mr-2 h-4 w-4" />
                 <span>Resumen Semántico</span>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setIsDocAnalysisOpen(true)}>
+              <DropdownMenuItem onClick={() => setIsCustomAnalysisOpen(true)} disabled={!!docPollingId || !!collectionPollingId}>
                 <Sparkles className="mr-2 h-4 w-4" />
                 <span>Análisis Personalizado</span>
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
+              
               <DropdownMenuItem onClick={handleExtractTitles} disabled={!!docPollingId || !!collectionPollingId}>
                 <Text className="mr-2 h-4 w-4" />
                 <span>Extraer Títulos</span>
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleProcessKnowledgeGraph} disabled={isProcessingKnowledgeGraph}>
+                <Network className="mr-2 h-4 w-4" />
+                <span>Crear Grafo</span>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-
-          {/* Botón de Grafos de Conocimiento */}
-          <Button
-            onClick={handleProcessKnowledgeGraph}
-            variant="outline"
-            disabled={isProcessingKnowledgeGraph}
-            className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50"
-          >
-            <Network className="h-4 w-4" />
-            <span className="hidden sm:inline">
-              {isProcessingKnowledgeGraph ? "Procesando..." : "Crear Grafo"}
-            </span>
-          </Button>
         </div>
       </div>
       
@@ -429,16 +445,37 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         <div className="fixed bottom-6 right-6 z-50 w-80"><UploadProgressIndicator tasks={uploadTasks} /></div>
       )}
 
-      <Card className="flex-grow"> {/* Eliminado mb-6 de aquí */}
-        <CardHeader>
-          <CardTitle>Documentos en la Colección</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-auto">
-            <DataTable columns={columns} data={documents} />
-          </div>
-        </CardContent>
-      </Card>
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Documentos en la Colección</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isMobile ? (
+              <div className="grid grid-cols-1 gap-4">
+                {documents.map((document) => (
+                  <DocumentCard
+                    key={document.id}
+                    document={document}
+                    onPreview={(doc) => setDocumentToPreview(doc)}
+                    onEdit={(doc) => setDocumentToEdit(doc)}
+                    onDelete={(doc) => setDocumentToDelete(doc)}
+                    onAnalyze={handleAnalyzeDocument}
+                    onShare={(doc) => {
+                      setDocumentToShare(doc);
+                      setIsShareOpen(true);
+                    }}
+                    onExtractTitle={handleExtractTitleForDocument}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <DataTable columns={columns} data={documents} />
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
       <Card>
         <CardHeader>
@@ -449,7 +486,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         </CardHeader>
         <CardContent>
           {savedAnalyses.length > 0 ? (
-            <div className="w-full max-h-[300px] overflow-y-auto">
+            <div className="w-full overflow-y-auto">
               <Accordion type="single" collapsible className="w-full">
                 {savedAnalyses.map((analysis: any) => (
                   <AccordionItem value={`item-${analysis.id}`} key={analysis.id}>
@@ -467,9 +504,8 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                         {analysis.file_name.startsWith('Colección:') && analysis.result_payload?.collection_summary && (
                           <div className="p-3 bg-muted rounded-lg">
                             <h4 className="font-medium text-sm mb-2">Resumen de la Colección:</h4>
-                            <p className="text-sm text-muted-foreground overflow-hidden" style={{
+                            <p className="text-sm text-muted-foreground" style={{
                               display: '-webkit-box',
-                              WebkitLineClamp: 3,
                               WebkitBoxOrient: 'vertical'
                             }}>
                               {analysis.result_payload.collection_summary}
@@ -480,9 +516,8 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                         {analysis.file_name.startsWith('Resumen Semántico:') && analysis.result_payload?.resumen_semantico && (
                           <div className="p-3 bg-muted rounded-lg">
                             <h4 className="font-medium text-sm mb-2">Resumen Semántico:</h4>
-                            <p className="text-sm text-muted-foreground overflow-hidden" style={{
+                            <p className="text-sm text-muted-foreground" style={{
                               display: '-webkit-box',
-                              WebkitLineClamp: 3,
                               WebkitBoxOrient: 'vertical'
                             }}>
                               {analysis.result_payload.resumen_semantico}
@@ -493,9 +528,8 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                         {analysis.file_name.startsWith('Análisis Personalizado:') && analysis.result_payload?.analysis_result && (
                           <div className="p-3 bg-muted rounded-lg">
                             <h4 className="font-medium text-sm mb-2">Resultado del Análisis:</h4>
-                            <p className="text-sm text-muted-foreground overflow-hidden" style={{
+                            <p className="text-sm text-muted-foreground" style={{
                               display: '-webkit-box',
-                              WebkitLineClamp: 3,
                               WebkitBoxOrient: 'vertical'
                             }}>
                               {typeof analysis.result_payload.analysis_result === 'string'
@@ -511,9 +545,8 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                          analysis.result_payload?.resumen_ejecutivo && (
                           <div className="p-3 bg-muted rounded-lg">
                             <h4 className="font-medium text-sm mb-2">Resumen Ejecutivo:</h4>
-                            <p className="text-sm text-muted-foreground overflow-hidden" style={{
+                            <p className="text-sm text-muted-foreground" style={{
                               display: '-webkit-box',
-                              WebkitLineClamp: 3,
                               WebkitBoxOrient: 'vertical'
                             }}>
                               {analysis.result_payload.resumen_ejecutivo}
@@ -553,6 +586,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
           )}
         </CardContent>
       </Card>
+      </div>
 
       {/* Diálogos */}
       <UploadDocumentDialog
@@ -570,6 +604,15 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
       <CollectionAnalysisDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} topic={topic} />
       <SemanticAnalysisDialog isOpen={isSemanticAnalysisOpen} onOpenChange={setIsSemanticAnalysisOpen} analysis={semanticAnalysisResult} topic={topic} />
       <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={fetchPageData} document={documentToShare} />
+      <CustomAnalysisDialog
+        isOpen={isCustomAnalysisOpen}
+        onOpenChange={setIsCustomAnalysisOpen}
+        topic={topic}
+        onAnalysisStart={(taskId) => {
+          setCollectionPollingId(taskId); // Usar el mismo polling para análisis de colección
+          toast.info("Análisis personalizado iniciado. Esperando resultados...");
+        }}
+      />
     </>
   );
 }

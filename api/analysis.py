@@ -742,58 +742,22 @@ async def run_semantic_summary_analysis(task_id: str, account_id: str, topic: st
             logger.info(f"📚 Analizando {len(documents)} documentos en la colección '{topic}'")
 
             # Obtener contenido de los documentos para análisis semántico
-            from core.memory_manager import search_vector_db_optimized
-            all_chunks = []
-            for doc in documents:
-                chunks = await search_vector_db_optimized(
-                    account_id=account_id,
-                    query=doc['file_name'],
-                    content_type="user_documents",
-                    topic=topic,
-                    workspace_id=workspace_id,
-                    k=50  # Obtener más chunks por documento
-                )
-                all_chunks.extend(chunks)
-
-            if not all_chunks:
-                raise ValueError(f"No se encontró contenido para analizar en la colección '{topic}'")
-
-            # Preparar contenido para análisis semántico manteniendo la información de documentos originales
-            from utils.advanced_text_analyzer import AdvancedTextAnalyzer
-            analyzer = AdvancedTextAnalyzer()
-
-            # Agrupar chunks por documento para mantener la procedencia
-            documents_content = {}
-            for chunk in all_chunks[:100]:  # Limitar para evitar tokens excesivos
-                file_name = chunk.get('metadata', {}).get('file_name', 'Documento desconocido')
-                if file_name not in documents_content:
-                    documents_content[file_name] = []
-                documents_content[file_name].append(chunk.get('content', ''))
-
-            # Preparar documentos en el formato esperado por analyze_collection
-            documents_for_analysis = []
-            for file_name, content_chunks in documents_content.items():
-                # Filtrar contenido que parece ser bibliografía o metadatos
-                filtered_chunks = []
-                for chunk in content_chunks:
-                    # Filtrar chunks que parecen ser bibliografía, URLs, o metadatos
-                    if not (
-                        chunk.lower().startswith(('http', 'www', 'doi:', 'isbn:', 'referencias:', 'bibliografía:')) or
-                        len(chunk.split()) < 10 or  # Chunks muy cortos
-                        chunk.count('http') > 2 or  # Chunks con muchas URLs
-                        chunk.count('@') > 2  # Chunks con muchos emails/citas académicas
-                    ):
-                        filtered_chunks.append(chunk)
-
-                if filtered_chunks:  # Solo incluir documentos con contenido sustantivo
-                    combined_content = "\n\n".join(filtered_chunks[:10])  # Máximo 10 chunks por documento
-                    documents_for_analysis.append({
-                        "title": file_name,
-                        "content": combined_content
+            all_docs_content = []
+            for doc_meta in documents:
+                content = await get_full_document_content(account_id, doc_meta['file_name'])
+                if content:
+                    all_docs_content.append({
+                        "title": doc_meta.get('title', doc_meta['file_name']),
+                        "content": content
                     })
 
-            if not documents_for_analysis:
-                raise ValueError(f"No se encontró contenido sustantivo para analizar en la colección '{topic}'")
+            if not all_docs_content:
+                raise ValueError(f"No se encontró contenido para analizar en la colección '{topic}'")
+
+            # Realizar análisis semántico de la colección
+            from utils.advanced_text_analyzer import AdvancedTextAnalyzer
+            analyzer = AdvancedTextAnalyzer()
+            semantic_analysis = await analyzer.analyze_collection(all_docs_content)
 
             # Realizar análisis semántico de la colección
             semantic_analysis = await analyzer.analyze_collection(documents_for_analysis)

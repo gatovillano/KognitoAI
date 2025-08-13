@@ -6,13 +6,15 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { PlusCircle, Clock, Trash2, Users, Calendar as CalendarIcon } from 'lucide-react';
+import { PlusCircle, Clock, Trash2, Users, Calendar as CalendarIcon, MoreHorizontal, Info } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { EventDialog } from './event-dialog';
 import { Calendar } from '@/components/ui/calendar';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { EventDetailsDialog } from './EventDetailsDialog';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 export interface AgendaEvent {
   id: number;
@@ -90,27 +92,47 @@ export default function AgendaPage() {
   });
 
   return (
-    <>
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
       <div className="p-6 h-full flex flex-col">
         <div className="flex items-center justify-between mb-6 shrink-0">
           <div>
             <h1 className="text-3xl font-bold flex items-center">
                 <CalendarIcon className="mr-2 h-8 w-8 text-primary" />
                 Agenda
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground">
+                        <Info className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Tus próximos eventos y recordatorios.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
             </h1>
-            <p className="text-muted-foreground">Tus próximos eventos y recordatorios.</p>
           </div>
           <div className="flex gap-2">
-            <Button onClick={() => setIsEventDialogOpen(true)}>
-              <PlusCircle className="mr-2 h-4 w-4" />
-              Agendar Evento
-            </Button>
-            <Button variant={isWeekView ? "default" : "outline"} onClick={() => setIsWeekView(true)}>
-              Vista Semanal
-            </Button>
-            <Button variant={!isWeekView ? "default" : "outline"} onClick={() => setIsWeekView(false)}>
-              Vista Diaria
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 px-2 md:px-4">
+                  <span className="hidden md:inline">Acciones</span> <MoreHorizontal className="md:ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[160px]">
+                <DropdownMenuItem onClick={() => setIsEventDialogOpen(true)}>
+                  <PlusCircle className="mr-2 h-4 w-4" /> Agendar Evento
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setIsWeekView(true)} className={isWeekView ? "font-bold" : ""}>
+                  Vista Semanal
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setIsWeekView(false)} className={!isWeekView ? "font-bold" : ""}>
+                  Vista Diaria
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
         
@@ -200,6 +222,6 @@ export default function AgendaPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </>
+    </div>
   );
 }

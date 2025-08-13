@@ -299,6 +299,12 @@ class GitHubRepoTool(BaseTool):
                         content_response = self.session.get(f"{api_url}/contents/{file_path}")
                         content_response.raise_for_status()
                         content_data = content_response.json()
+
+                        # Omitir enlaces simbólicos ya que no tienen contenido directo
+                        if content_data.get('type') == 'symlink':
+                            logger.info(f"⏩ Omitiendo enlace simbólico: {file_path}")
+                            continue
+
                         content_base64 = content_data["content"]
                         encoding = content_data["encoding"]
                         

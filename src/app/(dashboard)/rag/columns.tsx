@@ -63,7 +63,7 @@ export const getColumns = (
       }
 
       return (
-        <div className="font-medium flex items-center">
+        <div className="font-medium">
           {doc.title || <span className="text-muted-foreground italic">Sin título</span>}
           {doc.team_shared && (
             <span className="ml-2 text-blue-500" title="Compartido con equipo">👥</span>
@@ -74,12 +74,14 @@ export const getColumns = (
   },
   {
     accessorKey: 'file_name',
-    header: 'Nombre del Archivo',
+    header: () => <div className="hidden sm:table-cell">Nombre del Archivo</div>,
+    cell: ({ row }) => <div className="hidden sm:table-cell">{row.original.file_name}</div>,
     enableSorting: true,
   },
   {
     accessorKey: 'topic',
-    header: 'Base de Conocimiento',
+    header: () => <div className="hidden md:table-cell">Base de Conocimiento</div>,
+    cell: ({ row }) => <div className="hidden md:table-cell">{row.original.topic}</div>,
     enableSorting: true,
   },
   {

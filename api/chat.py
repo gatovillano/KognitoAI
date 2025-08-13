@@ -538,7 +538,7 @@ async def handle_chat_stream(
                     raise HTTPException(status_code=500, detail="LLM no inicializado para Deep Research.")
 
                 ddg_search_tool_instance = create_ddg_search_tool(account_id=request.account_id)
-                add_web_to_rag_tool_instance = AddWebToRAGTool()
+                add_web_to_rag_tool_instance = AddWebToRAGTool(account_id=request.account_id)
 
                 deep_research_tool = DeepResearchTool(
                     llm_instance=llm_instance,

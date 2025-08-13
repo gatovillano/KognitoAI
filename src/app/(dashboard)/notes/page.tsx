@@ -6,11 +6,13 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, Notebook, Users, Edit, Trash2 } from 'lucide-react';
+import { Plus, Notebook, Users, Edit, Trash2, MoreHorizontal, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { NoteDialog } from './note-dialog';
 import { ViewNoteDialog } from './view-note-dialog';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 
@@ -175,7 +177,7 @@ export default function NotesPage() {
     return (
       <div ref={drop as any} className="p-4 rounded-lg" style={{ backgroundColor: isOver ? 'rgba(147, 112, 219, 0.1)' : 'transparent' }}>
         <h2 className="text-xl font-semibold mb-4 px-2">{category}</h2>
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
           {children}
         </div>
       </div>
@@ -241,23 +243,44 @@ export default function NotesPage() {
 
   return (
     <DndProvider backend={HTML5Backend}>
-      <div className="pt-8">
+      <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold flex items-center">
               <Notebook className="mr-3 h-8 w-8 text-primary" />
               Mis Notas
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground">
+                      <Info className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Captura y organiza tus ideas, pensamientos y recordatorios.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </h1>
-            <p className="text-muted-foreground mt-2">Captura y organiza tus ideas, pensamientos y recordatorios.</p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant={categoryView ? "secondary" : "outline"} onClick={() => setCategoryView(!categoryView)}>
-              {categoryView ? "Vista General" : "Vista por Categoría"}
-            </Button>
-            <Button size="lg" onClick={() => { setEditingNote(null); setIsNoteDialogOpen(true); }} className="bg-primary hover:bg-primary/90">
-              <Plus className="mr-2 h-5 w-5" />
-              Nueva Nota
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 px-2 md:px-4">
+                  <span className="hidden md:inline">Acciones</span> <MoreHorizontal className="md:ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[180px]">
+                <DropdownMenuItem onClick={() => { setEditingNote(null); setIsNoteDialogOpen(true); }}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Nueva Nota
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setCategoryView(!categoryView)}>
+                  {categoryView ? "Vista General" : "Vista por Categoría"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 

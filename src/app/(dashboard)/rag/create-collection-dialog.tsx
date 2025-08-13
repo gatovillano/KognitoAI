@@ -70,9 +70,9 @@ export function CreateCollectionDialog({ isOpen, onOpenChange, onCreateSuccess }
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-md w-full p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle>Crear Nueva Colección</DialogTitle>
+          <DialogTitle className="text-lg sm:text-xl">Crear Nueva Colección</DialogTitle>
           <DialogDescription>
             Dale un nombre a tu nueva base de conocimiento. Podrás añadir documentos después.
           </DialogDescription>
@@ -99,9 +99,9 @@ export function CreateCollectionDialog({ isOpen, onOpenChange, onCreateSuccess }
           </div>
           <div className="space-y-2">
             <Label htmlFor="team-select">Compartir con Equipo</Label>
-            <select 
+            <select
               id="team-select"
-              className="w-full border rounded-md p-2"
+              className="w-full border rounded-md p-2 text-sm"
               value={teamId}
               onChange={(e) => setTeamId(e.target.value)}
               disabled={loadingTeams}
@@ -115,9 +115,12 @@ export function CreateCollectionDialog({ isOpen, onOpenChange, onCreateSuccess }
             </select>
           </div>
         </div>
-        <DialogFooter>
-          <Button onClick={handleCreate} disabled={isLoading}>
+        <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
+          <Button onClick={handleCreate} disabled={isLoading} className="w-full sm:w-auto">
             {isLoading ? 'Creando...' : 'Crear'}
+          </Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="w-full sm:w-auto">
+            Cancelar
           </Button>
         </DialogFooter>
       </DialogContent>

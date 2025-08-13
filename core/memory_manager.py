@@ -41,7 +41,8 @@ from core.database import (
     Account,
     engine,
     LangchainPgCollection,
-    UserDocumentTopic
+    UserDocumentTopic,
+    GitHubDocument # <--- NUEVA IMPORTACIÓN
 )
 from utils.db_session import DBSession
 from utils.embeddings import get_embedding_model
@@ -1013,21 +1014,24 @@ async def remove_document_from_rag(
 async def delete_document_chunks(
     account_id: str,
     file_name: Optional[str] = None,
+    file_name_prefix: Optional[str] = None, # Nuevo parámetro
     topic: Optional[str] = None,
     team_id: Optional[str] = None,
-    workspace_id: Optional[str] = None
+    workspace_id: Optional[str] = None,
+    repo_url: Optional[str] = None # Nuevo parámetro para filtrar por repo
 ) -> int:
     """
     Elimina los chunks de documentos usando las columnas optimizadas (sin JOINs).
 
     OPTIMIZADO: Usa filtros directos en langchain_pg_embedding sin necesidad de JOINs.
     """
-    if not file_name and not topic:
-        logger.warning("Se llamó a delete_document_chunks sin file_name ni topic.")
+    if not file_name and not topic and not file_name_prefix: # Actualizado para incluir file_name_prefix
+        logger.warning("Se llamó a delete_document_chunks sin file_name, topic ni file_name_prefix.")
         return 0
 
     logger.info(f"🗑️ Eliminando chunks optimizado para account_id: {account_id}")
     logger.info(f"📄 File name: {file_name}")
+    logger.info(f"📁 File name prefix: {file_name_prefix}") # Log del nuevo parámetro
     logger.info(f"🏷️ Topic: {topic}")
     logger.info(f"👥 Team ID: {team_id}")
     logger.info(f"🏢 Workspace ID: {workspace_id}")
@@ -1044,6 +1048,9 @@ async def delete_document_chunks(
             if file_name:
                 clauses.append("cmetadata->>'file_name' = :fname")
                 params["fname"] = file_name
+            elif file_name_prefix: # Nueva lógica para el prefijo
+                clauses.append("cmetadata->>'file_name' LIKE :fname_prefix")
+                params["fname_prefix"] = f"{file_name_prefix}%"
 
             if topic:
                 clauses.append("topic = :topic")
@@ -1066,8 +1073,33 @@ async def delete_document_chunks(
             deleted_count = result.rowcount or 0
             await db.commit()
 
+            # --- NUEVA LÓGICA: Eliminar de GitHubDocument ---
+            github_delete_clauses = [
+                GitHubDocument.account_id == uuid.UUID(account_id)
+            ]
+            if repo_url: # Filtrar por repo_url si se proporciona
+                github_delete_clauses.append(GitHubDocument.repo_url == repo_url)
+
+            if file_name:
+                github_delete_clauses.append(GitHubDocument.file_path == file_name)
+            elif file_name_prefix:
+                github_delete_clauses.append(GitHubDocument.file_path.like(f"{file_name_prefix}%"))
+            
+            # Si se proporciona workspace_id, también filtrar por él
+            if workspace_id:
+                github_delete_clauses.append(GitHubDocument.workspace_id == uuid.UUID(workspace_id))
+
+            github_delete_stmt = delete(GitHubDocument).where(*github_delete_clauses)
+            
+            logger.info(f"🔧 Query SQL para GitHubDocument: {github_delete_stmt}")
+            github_result = await db.execute(github_delete_stmt)
+            github_deleted_count = github_result.rowcount or 0
+            await db.commit()
+            logger.info(f"🗑️ Total borrados {github_deleted_count} registros de GitHubDocument.")
+            # --- FIN NUEVA LÓGICA ---
+
             logger.info(f"🗑️ Total borrados {deleted_count} chunks usando consulta optimizada.")
-            return deleted_count
+            return github_deleted_count if github_deleted_count > 0 else deleted_count
 
     except Exception as e:
         logger.error(f"❌ Error eliminando chunks optimizado: {e}", exc_info=True)

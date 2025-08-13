@@ -77,7 +77,7 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-4xl max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl">
+        <DialogContent className="max-w-full sm:max-w-4xl max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl">
           <DialogHeader >
             <DialogTitle className="flex items-center gap-2">
               <Brain className="h-5 w-5" />
@@ -87,7 +87,7 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
               Análisis semántico profundo de la colección con agrupación de conceptos y patrones
             </DialogDescription>
           </DialogHeader>
-          <ScrollArea className="max-h-[70vh] pr-4">
+          <ScrollArea className="h-[75vh] sm:h-[70vh] pr-4">
             <div className="space-y-6">
               {/* Resumen Semántico Principal */}
               <Card>
@@ -179,7 +179,7 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 text-center">
                       {semanticData.patrones_semanticos.total_documentos && (
                         <div className="p-3 bg-muted rounded-md">
                           <div className="text-2xl font-bold text-purple-600">
@@ -280,17 +280,17 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
               )}
             </div>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => onOpenChange(false)}>Cerrar</Button>
+          <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => onOpenChange(false)} className="w-full sm:w-auto">Cerrar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Diálogo secundario para mostrar detalles del tema transversal */}
       <Dialog open={isThemeDialogOpen} onOpenChange={setIsThemeDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-lg w-full max-h-[90vh] p-4 sm:p-6">
           <DialogHeader>
-            <DialogTitle>Detalles del Tema Transversal</DialogTitle>
+            <DialogTitle className="text-lg sm:text-xl">Detalles del Tema Transversal</DialogTitle>
           </DialogHeader>
           {selectedTheme && (
             <ScrollArea className="max-h-[60vh] pr-4">
@@ -324,9 +324,9 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
 
       {/* Diálogo para mostrar detalles del concepto */}
       <Dialog open={isConceptDialogOpen} onOpenChange={setIsConceptDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-lg w-full max-h-[90vh] p-4 sm:p-6">
           <DialogHeader>
-            <DialogTitle>Detalles del Concepto</DialogTitle>
+            <DialogTitle className="text-lg sm:text-xl">Detalles del Concepto</DialogTitle>
           </DialogHeader>
           {selectedConcept && (
             <ScrollArea className="max-h-[60vh] pr-4">

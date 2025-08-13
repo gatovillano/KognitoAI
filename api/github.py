@@ -22,6 +22,7 @@ class GitHubCollectionRequest(BaseModel):
     workspace_id: Optional[str] = None  # Para asociar el repositorio a un workspace específico
     account_id: Optional[str] = None # Se obtendría del usuario autenticado si no se proporciona
     github_token: Optional[str] = None
+    vectorize: Optional[bool] = True
 
 @router.post("/collections")
 async def manage_github_collection(
@@ -35,7 +36,7 @@ async def manage_github_collection(
     # Si se usa autenticación, se podría obtener el account_id del usuario actual
     account_id_to_use = request.account_id if request.account_id else account_id
 
-    github_tool = GitHubRepoTool()
+    github_tool = GitHubRepoTool(account_id=account_id_to_use)
     
     # Pasar la sesión de la base de datos a la herramienta si es necesario,
     # aunque la herramienta ya crea su propia SessionLocal.
@@ -52,14 +53,13 @@ async def manage_github_collection(
     logger.info(f"Gestionando colección de GitHub para account_id: {account_id_to_use}, repo_url: {request.repo_url}, action: {request.action}")
     
     try:
-        tool_input = GitHubRepoTool.args_schema(
+        result = await github_tool._arun(
             repo_url=request.repo_url,
             action=request.action,
             collection_topic=request.collection_topic,
             github_token=request.github_token,
-            # account_id, workspace_id, telegram_id, thread_id se inyectan automáticamente en la herramienta
+            vectorize=request.vectorize
         )
-        result = await github_tool._arun(tool_input)
         logger.info(f"Resultado de la operación: {result}")
         
         # La vectorización ya se maneja dentro de github_tool._arun(), no necesitamos duplicarla aquí
@@ -252,15 +252,11 @@ async def update_repository_task(task_id: str, account_id: str, repo_url: str, c
             logger.info(f"Iniciando actualización de repositorio para tarea {task_id}...")
 
             # Usar el GitHubRepoTool para actualizar el repositorio
-            github_tool = GitHubRepoTool()
-            # Crear un objeto GitHubRepoInput para pasar a la herramienta
-            tool_input = GitHubRepoTool.args_schema(
+            github_tool = GitHubRepoTool(account_id=account_id)
+            result = await github_tool._update_repository_documents(
                 repo_url=repo_url,
-                action="update_knowledge_collection",  # La acción que se está realizando
-                collection_topic=collection_topic,
-                # account_id, workspace_id, telegram_id, thread_id se inyectan automáticamente en la herramienta
+                account_id=account_id
             )
-            result = await github_tool._update_knowledge_collection(tool_input)
 
             # Marcar la tarea como completada con el resultado
             stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
