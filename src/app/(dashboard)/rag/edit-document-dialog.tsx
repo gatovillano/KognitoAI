@@ -67,9 +67,9 @@ export function EditDocumentDialog({ document, isOpen, onOpenChange, onUpdateSuc
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-md w-full p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle>Editar Metadatos</DialogTitle>
+          <DialogTitle className="text-lg sm:text-xl">Editar Metadatos</DialogTitle>
           <DialogDescription className="truncate">
             Archivo: {document?.file_name}
           </DialogDescription>
@@ -102,9 +102,12 @@ export function EditDocumentDialog({ document, isOpen, onOpenChange, onUpdateSuc
                 </FormItem>
               )}
             />
-            <DialogFooter>
-              <Button type="submit" disabled={isSubmitting}>
+            <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
+              <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto">
                 {isSubmitting ? 'Guardando...' : 'Guardar Cambios'}
+              </Button>
+              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting} className="w-full sm:w-auto">
+                Cancelar
               </Button>
             </DialogFooter>
           </form>

@@ -76,6 +76,7 @@ export function GitHubRepoDialog({ isOpen, onOpenChange, onSuccess }: GitHubRepo
         github_token: githubToken,
         collection_topic: collectionTopic || "repositorio",
         workspace_id: selectedWorkspace,
+        vectorize: false,
       });
       toast({
         title: "Éxito",
@@ -96,9 +97,9 @@ export function GitHubRepoDialog({ isOpen, onOpenChange, onSuccess }: GitHubRepo
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-md w-full p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle>Gestionar Repositorio de GitHub</DialogTitle>
+          <DialogTitle className="text-lg sm:text-xl">Gestionar Repositorio de GitHub</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-4">
           <div>
@@ -135,7 +136,7 @@ export function GitHubRepoDialog({ isOpen, onOpenChange, onSuccess }: GitHubRepo
           <div>
             <Label htmlFor="workspace-select">Workspace (opcional)</Label>
             <Select value={selectedWorkspace || "personal"} onValueChange={(value) => setSelectedWorkspace(value === "personal" ? null : value)}>
-              <SelectTrigger id="workspace-select">
+              <SelectTrigger id="workspace-select" className="w-full">
                 <SelectValue placeholder="Seleccionar workspace o dejar en blanco para uso personal" />
               </SelectTrigger>
               <SelectContent>
@@ -152,10 +153,11 @@ export function GitHubRepoDialog({ isOpen, onOpenChange, onSuccess }: GitHubRepo
             </p>
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
           <Button
             onClick={() => handleManageCollection("add_as_knowledge_collection")}
             disabled={isLoading}
+            className="w-full sm:w-auto"
           >
             {isLoading ? "Añadiendo..." : "Añadir"}
           </Button>
@@ -163,6 +165,7 @@ export function GitHubRepoDialog({ isOpen, onOpenChange, onSuccess }: GitHubRepo
             onClick={() => handleManageCollection("update_knowledge_collection")}
             disabled={isLoading}
             variant="outline"
+            className="w-full sm:w-auto"
           >
             {isLoading ? "Actualizando..." : "Actualizar"}
           </Button>

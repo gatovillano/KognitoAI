@@ -156,7 +156,7 @@ export default function TeamDetailPage() {
   }
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center">
           <Users className="mr-2 h-6 w-6 text-blue-500" />

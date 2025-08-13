@@ -4,9 +4,10 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Plus, Bot } from 'lucide-react';
+import { Plus, Bot, Info } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { WorkspaceDialog } from './workspace-dialog';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface Workspace {
   id: string;
@@ -54,14 +55,25 @@ export default function WorkspacesPage() {
   };
 
   return (
-    <div>
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold flex items-center">
             <Bot className="mr-3 h-8 w-8 text-primary" />
             Workspaces
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground">
+                    <Info className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  <p>Organiza y gestiona tus espacios de trabajo especializados. Crea un espacio con un asistente con sus propias indicaciones de sistema. Dentro podrás gestionar colecciones de conocimiento a las que tendrá acceso tu asistente de forma aislada del resto del contexto personal.</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </h1>
-          <p className="text-muted-foreground mt-2">Organiza y gestiona tus espacios de trabajo especializados. Crea un espacio con un asistente con sus propias indicaciones de sistema. Dentro podrás gestionar colecciones de conocimiento a las que tendrá acceso tu asistente de forma aislada del resto del contexto personal.</p>
         </div>
         <Button size="lg" onClick={() => {
           setSelectedWorkspace(null);

@@ -46,8 +46,7 @@ async def initialize_embeddings():
         )
         if _embedding_model is None:
             raise ValueError("No se pudo crear la instancia de OllamaEmbeddings.")
-        # Prueba de inicialización síncrona para verificar que el modelo carga.
-        _embedding_model.embed_query("hola mundo de prueba")
+        # La prueba de inicialización síncrona se ha eliminado para acelerar el arranque.
         return _embedding_model
 
     try:

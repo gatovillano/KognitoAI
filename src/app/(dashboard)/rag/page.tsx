@@ -10,6 +10,8 @@ import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2, Upload, CheckCircle, XCircle, Clock, Network, ChevronDown, Settings } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Info } from 'lucide-react';
 
 import { UploadDocumentDialog } from './upload-document-dialog';
 import { CreateCollectionDialog } from './create-collection-dialog';
@@ -80,6 +82,7 @@ export default function RagCollectionsPage() {
   };
 
   const handleAnalyzeCollection = async (topic: string) => {
+    console.log(`Attempting to analyze collection: ${topic}`); // Added for debugging
     if (collectionPollingId) {
       toast.info("Ya hay un análisis en progreso. Por favor, espera.");
       return;
@@ -141,6 +144,9 @@ export default function RagCollectionsPage() {
     try {
       await apiClient.post('/api/delete-collection', { topic: deletingTopic });
       toast.success(`Colección "${deletingTopic}" eliminada.`, { id: toastId });
+      // Actualización optimista: eliminar la colección del estado inmediatamente
+      setCollections(prevCollections => prevCollections.filter(col => col.topic !== deletingTopic));
+      // Luego, recargar para asegurar la consistencia (opcional, pero buena práctica)
       fetchCollections();
     } catch (error) {
       toast.error(`Error al eliminar la colección "${deletingTopic}".`, { id: toastId });
@@ -282,44 +288,55 @@ export default function RagCollectionsPage() {
   };
 
   return (
-    <div className="p-8 mx-4 overflow-x-hidden">
-      <div className="flex items-center justify-between mb-12">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 sm:mb-12 gap-4">
         <div>
-          <h1 className="text-3xl font-bold flex items-center">
-            <BookMarked className="mr-3 h-8 w-8 text-primary" />
+          <h1 className="text-2xl sm:text-3xl font-bold flex items-center">
+            <BookMarked className="mr-2 sm:mr-3 h-6 w-6 sm:h-8 sm:w-8 text-primary" />
             Colecciones de Conocimientos
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="ml-1 sm:ml-2 h-5 w-5 sm:h-6 sm:w-6 text-muted-foreground">
+                    <Info className="h-3 w-3 sm:h-4 sm:w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs text-center">
+                  <p>Organiza tus documentos en colecciones temáticas de conocimientos. En cada colección encontrarás herramientas de análisis tanto de cada documento como de todos los textos contenidos. También puedes extraer los tìtulos, y eliminar documentos. Todo desde el menú de Acciones.</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </h1>
-          <p className="text-muted-foreground mt-2">Organiza tus documentos en bases de conocimiento.</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
           {/* Menú de Acciones Avanzadas */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="gap-2">
-                <Settings className="h-4 w-4" />
-                <span className="hidden sm:inline">Acciones</span>
-                <ChevronDown className="h-4 w-4" />
+              <Button variant="outline" className="gap-1 sm:gap-2 w-full sm:w-auto">
+                <Settings className="h-3 w-3 sm:h-4 sm:w-4" />
+                <span className="text-xs sm:text-sm">Acciones</span>
+                <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuContent align="end" className="w-48 sm:w-56">
               <DropdownMenuItem onClick={() => setIsGitHubRepoOpen(true)}>
-                <Github className="mr-2 h-4 w-4" />
-                <span>Añadir Repositorio</span>
+                <Github className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                <span className="text-xs sm:text-sm">Añadir Repositorio</span>
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => handleProcessKnowledgeGraph()}
                 disabled={isProcessingKnowledgeGraph}
               >
-                <Network className="mr-2 h-4 w-4" />
-                <span>{isProcessingKnowledgeGraph ? "Procesando Grafos..." : "Crear Grafos de Conocimiento"}</span>
+                <Network className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                <span className="text-xs sm:text-sm">{isProcessingKnowledgeGraph ? "Procesando Grafos..." : "Crear Grafos de Conocimiento"}</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
           {/* Botón Principal */}
-          <Button size="lg" onClick={() => setIsUploadOpen(true)} className="bg-primary hover:bg-primary/90 gap-2">
-            <Plus className="h-5 w-5" />
-            <span>Subir Documento</span>
+          <Button size="sm" className="bg-primary hover:bg-primary/90 gap-1 sm:gap-2 w-full sm:w-auto" onClick={() => setIsUploadOpen(true)}>
+            <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
+            <span className="text-xs sm:text-sm">Subir Documento</span>
           </Button>
         </div>
       </div>

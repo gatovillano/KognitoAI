@@ -3,12 +3,13 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Plus, Users } from "lucide-react";
+import { Plus, Users, Info } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MoreVertical } from "lucide-react";
 import { TeamDialog } from "./team-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import apiClient from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
@@ -229,14 +230,25 @@ export default function TeamsPage() {
   // Removed reference to getColumns as it's no longer used with card layout
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
       <div className="flex items-center justify-between mb-8">
         <div>
-            <h1 className="text-3xl font-bold mb-2 flex items-center">
+            <h1 className="text-3xl font-bold flex items-center">
                 <Users className="mr-2 h-8 w-8 text-primary" />
                 Equipos
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground">
+                        <Info className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Gestiona tus equipos y colaboradores.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
             </h1>
-            <p className="text-muted-foreground">Gestiona tus equipos y colaboradores.</p>
         </div>
         <Button onClick={() => setOpen(true)} className="mt-4">
           <Plus className="mr-2 h-4 w-4" />

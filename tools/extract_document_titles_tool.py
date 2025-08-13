@@ -11,6 +11,7 @@ import uuid
 from typing import Type, Optional, Any
 
 from pydantic.v1 import BaseModel, Field
+from pydantic.v1.fields import FieldInfo
 from langchain_core.tools import BaseTool
 
 # Importa las dependencias necesarias para interactuar con la base de datos y el LLM.
@@ -72,7 +73,30 @@ class ExtractDocumentTitlesTool(BaseTool):
         Returns:
             Un mensaje de texto indicando el resultado de la operación.
         """
-        logger.info(f"Ejecutando ExtractDocumentTitlesTool para la cuenta '{self.account_id}' con tema: '{self.topic}', archivo: '{file_name}'.")
+        # Extraer topic y collection_id de kwargs o usar los atributos de la instancia.
+        # Si son objetos FieldInfo (inyectados automáticamente), obtener su descripción.
+        current_topic_val = kwargs.get("topic", self.topic)
+        if isinstance(current_topic_val, FieldInfo):
+            current_topic = current_topic_val.description if current_topic_val.description else None
+        elif isinstance(current_topic_val, str):
+            current_topic = current_topic_val
+        else:
+            current_topic = None
+        
+        current_collection_id_val = kwargs.get("collection_id", self.collection_id)
+        if isinstance(current_collection_id_val, FieldInfo):
+            current_collection_id = None # Si es FieldInfo, el valor no es un UUID válido.
+        elif isinstance(current_collection_id_val, str):
+            try:
+                # Intentar convertir a UUID para validar
+                uuid.UUID(current_collection_id_val)
+                current_collection_id = current_collection_id_val
+            except ValueError:
+                current_collection_id = None # No es un UUID válido
+        else:
+            current_collection_id = None
+
+        logger.info(f"Ejecutando ExtractDocumentTitlesTool para la cuenta '{self.account_id}' con tema: '{current_topic}', archivo: '{file_name}'.")
         try:
             if not settings.database_url:
                 raise ValueError("Database URL is not configured")
@@ -118,13 +142,13 @@ class ExtractDocumentTitlesTool(BaseTool):
                     except ValueError:
                         logger.warning(f"workspace_id '{self.workspace_id}' no es un UUID válido. Omitiendo filtro.")
 
-                if self.topic:
+                if current_topic:
                     clauses.append("topic = :tpc") # Usar directamente la columna 'topic'
-                    params["tpc"] = self.topic
+                    params["tpc"] = current_topic
                 # Eliminar el filtro por collection_id si se usa topic, o si collection_id es None
-                if self.collection_id: # Este collection_id se refiere a 'user_documents' o 'user_memories'
+                if current_collection_id: # Este collection_id se refiere a 'user_documents' o 'user_memories'
                     clauses.append("collection_id = :col_id")
-                    params["col_id"] = self.collection_id
+                    params["col_id"] = current_collection_id
 
                 # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
                 select_sql = text("SELECT DISTINCT ON (cmetadata->>'document_id') * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses) + " ORDER BY cmetadata->>'document_id', id")
@@ -195,13 +219,13 @@ class ExtractDocumentTitlesTool(BaseTool):
                             except ValueError:
                                 logger.warning(f"workspace_id '{self.workspace_id}' no es un UUID válido. Omitiendo filtro.")
 
-                        if self.topic:
+                        if current_topic:
                             first_chunk_query_clauses.append("topic = :tpc")
-                            first_chunk_params["tpc"] = self.topic
+                            first_chunk_params["tpc"] = current_topic
                         # Solo añadir el filtro collection_id si se proporciona y no se usa topic
-                        elif self.collection_id: # Este collection_id se refiere a 'user_documents' o 'user_memories'
+                        elif current_collection_id: # Este collection_id se refiere a 'user_documents' o 'user_memories'
                             first_chunk_query_clauses.append("collection_id = :col_id")
-                            first_chunk_params["col_id"] = self.collection_id
+                            first_chunk_params["col_id"] = current_collection_id
 
                         first_chunk_query = text("SELECT document FROM langchain_pg_embedding WHERE " + " AND ".join(first_chunk_query_clauses) + " ORDER BY (cmetadata->>'chunk_index')::integer ASC LIMIT 3")
                         logger.info(f"Valores para first_chunk_query: {first_chunk_params}")
@@ -220,7 +244,9 @@ class ExtractDocumentTitlesTool(BaseTool):
                                 f"\n\nFragmento:\n{content}"
                             )
                             try:
+                                logger.info(f"Enviando prompt al LLM para extracción de título:\n---\n{prompt}\n---")
                                 response = await llm.ainvoke(prompt)
+                                logger.info(f"Respuesta recibida del LLM: {response}")
                                 # Extraer el contenido de texto del objeto AIMessage
                                 potential_title = response.content if hasattr(response, 'content') else str(response)
                                 potential_title = potential_title.strip()

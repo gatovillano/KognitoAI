@@ -1,19 +1,18 @@
 // En: src/app/(dashboard)/rag/analysis-result-dialog.tsx
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
-import { Expand, HelpCircle, Volume2, Loader2, Pause } from 'lucide-react';
+import { Expand, HelpCircle } from 'lucide-react';
 import { QuestionSliderDialog } from '@/components/QuestionSliderDialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { useTextToSpeech } from '@/hooks/useTextToSpeech';
 import { type Document } from './columns'; // Importamos el tipo
 
 interface AnalysisResultDialogProps {
@@ -25,12 +24,9 @@ interface AnalysisResultDialogProps {
 
 export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange }: AnalysisResultDialogProps) {
   const [isQuestionsDialogOpen, setIsQuestionsDialogOpen] = useState(false);
-  const [expandedThemes, setExpandedThemes] = useState<Record<string, boolean>>({});
-  const { play, stop, isLoading, isPlaying, activeText } = useTextToSpeech();
+  const [selectedThemeForDialog, setSelectedThemeForDialog] = useState<any>(null);
+  const [isThemeQuotesDialogOpen, setIsThemeQuotesDialogOpen] = useState(false);
 
-  const toggleThemeExpansion = (themeName: string) => {
-    setExpandedThemes(prev => ({ ...prev, [themeName]: !prev[themeName] }));
-  };
 
   if (!analysis) return null;
 
@@ -69,10 +65,15 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
     });
   };
 
+  const handleThemeClick = (theme: any) => {
+    setSelectedThemeForDialog(theme);
+    setIsThemeQuotesDialogOpen(true);
+  };
+
   // Map backend field names to frontend expected field names
   const mappedAnalysis = {
     resumen_ejecutivo: analysis.executive_summary || analysis.resumen_ejecutivo || 'No summary available',
-    temas_clave_avanzados: ensureArray(analysis.key_themes || analysis.temas_clave_avanzados || analysis.code_structure),
+    temas_clave_avanzados: extractThemes(analysis.key_themes || analysis.temas_clave_avanzados || analysis.code_structure),
     conceptos_centrales: ensureArray(analysis.central_concepts || analysis.conceptos_centrales || analysis.design_patterns),
     relaciones_conceptos: ensureArray(analysis.concept_relationships || analysis.relaciones_conceptos || analysis.dependencies),
     preguntas_para_explorar: ensureArray(analysis.knowledge_gaps || analysis.preguntas_para_explorar || analysis.potential_issues),
@@ -81,87 +82,44 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
     reflexiones_finales: ensureArray(analysis.final_reflections || analysis.reflexiones_finales)
   };
 
-  const handlePlayPause = (text: string) => {
-    play(text);
-  };
-
-  const isSummaryPlaying = isPlaying && activeText === mappedAnalysis.resumen_ejecutivo;
-  const isGeneralAnalysisPlaying = isPlaying && activeText === mappedAnalysis.analisis_general;
-  const isSummaryLoading = isLoading && activeText === mappedAnalysis.resumen_ejecutivo;
-  const isGeneralAnalysisLoading = isLoading && activeText === mappedAnalysis.analisis_general;
-
   return (
     <>
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-4xl w-full max-h-[90vh]">
         <DialogHeader>
           <DialogTitle>Resultados del Análisis</DialogTitle>
           <DialogDescription className="truncate">
             Para el documento: {document?.file_name || 'Nombre no disponible'}
           </DialogDescription>
         </DialogHeader>
-        <ScrollArea className="max-h-[60vh] pr-4">
-            <div className="space-y-6">
-                <div>
-                    <div className="flex justify-between items-center mb-2">
-                      <h3 className="font-semibold">Resumen Ejecutivo por IA</h3>
-                      <Button variant="ghost" size="icon" onClick={() => handlePlayPause(mappedAnalysis.resumen_ejecutivo)} disabled={isLoading && !isSummaryLoading}>
-                        {isSummaryLoading ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : isSummaryPlaying ? (
-                          <Pause className="h-4 w-4" />
-                        ) : (
-                          <Volume2 className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
+        <ScrollArea className="max-h-[70vh] sm:max-h-[60vh] pr-4">
+          <div className="space-y-6">
+              <div>
+                  <h3 className="font-semibold mb-2">Resumen Ejecutivo por IA</h3>
                     <p className="text-sm text-muted-foreground p-3 bg-muted rounded-md whitespace-pre-wrap">{mappedAnalysis.resumen_ejecutivo}</p>
                 </div>
                 <div>
-                    <div className="flex justify-between items-center mb-2">
-                      <h3 className="font-semibold">Análisis General</h3>
-                      <Button variant="ghost" size="icon" onClick={() => handlePlayPause(mappedAnalysis.analisis_general)} disabled={isLoading && !isGeneralAnalysisLoading}>
-                        {isGeneralAnalysisLoading ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : isGeneralAnalysisPlaying ? (
-                          <Pause className="h-4 w-4" />
-                        ) : (
-                          <Volume2 className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
+                    <h3 className="font-semibold mb-2">Análisis General</h3>
                     <div className="text-sm text-muted-foreground p-3 bg-muted border-l-4 border-blue-200 rounded-md">
                         <InlineMarkdownRenderer content={mappedAnalysis.analisis_general} />
                     </div>
                 </div>
                 <div>
-                    <h3 className="font-semibold mb-2">Temas Clave</h3> {/* Renamed from "Temas Clave Avanzados" */}
-                    <div className="flex flex-wrap gap-2">
+                    <h3 className="font-semibold mb-2">Temas Clave</h3>
+                    <div className="space-y-3">
+                    <div className="flex flex-wrap gap-x-1">
                         {Array.isArray(mappedAnalysis.temas_clave_avanzados) && mappedAnalysis.temas_clave_avanzados.length > 0 ? (
                             mappedAnalysis.temas_clave_avanzados.map((topic: any, i: number) => (
-                                <div key={i} className="flex flex-col items-start"> {/* Removed box styling */}
-                                    <Button
-                                        variant="outline" // Changed to outline for tag-like appearance
-                                        className="mb-2"
-                                        onClick={() => toggleThemeExpansion(topic.name)}
-                                    >
-                                        {topic.name || topic.description || 'Tema sin nombre'}
-                                    </Button>
-                                    {expandedThemes[topic.name] && topic.quotes && topic.quotes.length > 0 && (
-                                        <div className="mt-2 space-y-2">
-                                            <h4 className="text-sm font-medium text-muted-foreground">Citas relacionadas:</h4>
-                                            {topic.quotes.map((quote: any, qIndex: number) => ( // Show all quotes when expanded
-                                                <blockquote key={qIndex} className="text-xs italic text-muted-foreground border-l-2 border-primary/20 pl-3 py-1">
-                                                    &quot;{quote.quote || quote}&quot;
-                                                    {quote.document_title && (
-                                                        <cite className="block text-xs font-medium mt-1">
-                                                            &mdash; {quote.document_title}
-                                                        </cite>
-                                                    )}
-                                                </blockquote>
-                                            ))}
-                                        </div>
-                                    )}
+                                <div
+                                    className="hover:bg-muted/50 cursor-pointer transition-colors rounded-md"
+                                    onClick={() => handleThemeClick(topic)}
+                                >
+                                    <div className="font-medium mb-1">
+                                        <Badge className="!bg-blue-100 !text-blue-950 !border !border-blue-950">
+                                            {topic.name || topic.description || 'Tema sin nombre'}
+                                        </Badge>
+                                    </div>
+                                    
                                 </div>
                             ))
                         ) : (
@@ -173,7 +131,11 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                     <h3 className="font-semibold mb-2">Conceptos Centrales</h3>
                     <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
                         {Array.isArray(mappedAnalysis.conceptos_centrales) && mappedAnalysis.conceptos_centrales.length > 0 ? (
-                            mappedAnalysis.conceptos_centrales.map((concept: string, i: number) => <li key={i}>{concept}</li>)
+                            mappedAnalysis.conceptos_centrales.map((concept: string, i: number) => (
+                                <li key={i}>
+                                    <InlineMarkdownRenderer content={concept} />
+                                </li>
+                            ))
                         ) : (
                             <li className="text-sm text-muted-foreground">No hay conceptos centrales disponibles.</li>
                         )}
@@ -197,7 +159,7 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                     <h3 className="font-semibold mb-4">Problemas Potenciales o Preguntas para Explorar</h3>
                     {Array.isArray(mappedAnalysis.preguntas_para_explorar) && mappedAnalysis.preguntas_para_explorar.length > 0 ? (
                       <Card
-                        className="cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-300 border-2 hover:border-primary/20 group"
+                        className="cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-300 border border-gray-800 group"
                         onClick={() => setIsQuestionsDialogOpen(true)}
                       >
                         <CardContent className="p-4">
@@ -248,8 +210,9 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                     </div>
                 )}
             </div>
+        </div>
         </ScrollArea>
-        <div className="flex justify-between mt-4">
+        <div className="flex flex-col sm:flex-row justify-between mt-4 gap-2"> {/* Añadido flex-col y sm:flex-row, gap-2 */}
           <Button 
             variant="destructive" 
             onClick={async () => {
@@ -272,6 +235,35 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
             Cerrar
           </Button>
         </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Diálogo secundario para mostrar citas relacionadas con el tema */}
+    <Dialog open={isThemeQuotesDialogOpen} onOpenChange={setIsThemeQuotesDialogOpen}>
+      <DialogContent className="max-w-xl w-full max-h-[90vh]">
+        <DialogHeader>
+          <DialogTitle>Detalles del Tema</DialogTitle>
+        </DialogHeader>
+        {selectedThemeForDialog && (
+          <div className="space-y-4">
+            <p className="text-base font-semibold">{selectedThemeForDialog.name || selectedThemeForDialog.description || 'Tema sin nombre'}</p>
+            {selectedThemeForDialog.quotes && selectedThemeForDialog.quotes.length > 0 && (
+              <div>
+                <h4 className="font-semibold">Citas Relacionadas:</h4>
+                <ul className="list-disc list-inside text-sm text-muted-foreground space-y-2">
+                  {selectedThemeForDialog.quotes.map((quote: any, i: number) => (
+                    <li key={i}>
+                      <strong>{quote.document_title || 'Documento desconocido'}</strong>: {quote.quote || quote}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setIsThemeQuotesDialogOpen(false)}>Cerrar</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
 

@@ -55,9 +55,9 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[90vh]">
+      <DialogContent className="max-w-5xl w-full max-h-[95vh] sm:max-h-[90vh] p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
             <Code className="h-5 w-5" />
             Análisis de Código - {repoName || 'Repositorio'}
           </DialogTitle>
@@ -70,7 +70,7 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
         </DialogHeader>
         
         <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
             <TabsTrigger value="overview">Resumen</TabsTrigger>
             <TabsTrigger value="structure">Estructura</TabsTrigger>
             <TabsTrigger value="patterns">Patrones</TabsTrigger>
@@ -79,7 +79,7 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
             <TabsTrigger value="recommendations">Recomendaciones</TabsTrigger>
           </TabsList>
           
-          <ScrollArea className="h-[60vh] mt-4">
+          <ScrollArea className="h-[70vh] sm:h-[60vh] mt-4">
             <TabsContent value="overview" className="space-y-4">
               <Card>
                 <CardHeader>
@@ -175,7 +175,7 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
                   {dependencies.length > 0 ? (
                     <div className="grid gap-3">
                       {dependencies.map((item, i) => (
-                        <div key={i} className="flex items-start gap-3 p-3 border rounded-lg">
+                        <div key={i} className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3 p-3 border rounded-lg"> {/* Añadido flex-col y sm:flex-row, gap-2 */}
                           <Badge variant="secondary">{item.library}</Badge>
                           <p className="text-sm text-muted-foreground flex-1">{item.description}</p>
                         </div>
@@ -254,7 +254,7 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
           </ScrollArea>
         </Tabs>
 
-        <div className="flex justify-between mt-4">
+        <div className="flex flex-col sm:flex-row justify-between mt-4 gap-2"> {/* Añadido flex-col y sm:flex-row, gap-2 */}
           <Button 
             variant="destructive" 
             onClick={async () => {
