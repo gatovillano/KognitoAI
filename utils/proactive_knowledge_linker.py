@@ -20,6 +20,7 @@ from scipy.spatial.distance import cosine
 # Importaciones de la base de datos y la configuración
 from core.database import ProactiveInsight, SessionLocal, Nota, Account
 from utils.db_session import DBSession
+from sqlalchemy import select
 
 from langchain_core.embeddings import Embeddings
 

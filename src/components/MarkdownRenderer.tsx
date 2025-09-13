@@ -83,7 +83,7 @@ const Citation: React.FC<{ source: Source }> = ({ source }) => {
   );
 };
 
-const MarkdownRendererComponent = ({ content, fontSize = 'text-base', sources = [] }: MarkdownRendererProps) => {
+const MarkdownRendererComponent = ({ content, fontSize, sources = [] }: MarkdownRendererProps) => {
   const [copiedStates, setCopiedStates] = useState<Record<string, boolean>>({});
   const containerRef = useRef<HTMLDivElement>(null);
 

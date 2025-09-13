@@ -51,6 +51,7 @@ export const CollectionDisplay = ({
   isAnalyzing = false,
   isProcessingKnowledgeGraph = false,
   className,
+  onLinkProfile,
 }: CollectionDisplayProps) => {
   const router = useRouter();
 

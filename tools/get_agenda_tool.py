@@ -18,7 +18,7 @@ from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de agenda.
-from core.agenda_manager import get_agenda_for_day
+from core.agenda_manager import get_agenda_for_period
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -29,9 +29,13 @@ class GetAgendaInput(BaseModel):
     Define el esquema de entrada para la herramienta de consulta de agenda.
     Valida que todos los argumentos necesarios sean proporcionados por el LLM.
     """
-    target_day: str = Field(
+    target_date: str = Field(
         ...,
-        description="El día para el cual se consulta la agenda. Puede ser 'hoy', 'mañana', o una fecha específica como '15 de junio' o 'próximo jueves'."
+        description="La fecha o período para el cual se consulta la agenda. Puede ser 'hoy', 'mañana', '15 de junio', 'esta semana', 'próximo mes', etc."
+    )
+    period_type: Optional[str] = Field(
+        "day",
+        description="El tipo de período a consultar: 'day', 'week', o 'month'. Por defecto es 'day' si no se especifica."
     )
     # Cambiamos telegram_id por account_id para que sea universal.
 
@@ -44,8 +48,8 @@ class GetAgendaTool(BaseTool):
     name: str = "get_agenda_tool"
     description: str = (
         "Útil para cuando un usuario pregunta qué tiene programado en su agenda. "
-        "Responde a preguntas como '¿Qué tengo para hoy?', '¿Cómo está mi agenda mañana?', "
-        "o '¿Tengo algo para el 25 de diciembre?'."
+        "Responde a preguntas como '¿Qué tengo para hoy?', '¿Cómo está mi agenda esta semana?', "
+        "'¿Tengo algo para el próximo mes?', o '¿Tengo algo para el 25 de diciembre?'."
     )
     args_schema: Type[BaseModel] = GetAgendaInput
     return_direct: bool = False
@@ -53,7 +57,7 @@ class GetAgendaTool(BaseTool):
     workspace_id: Optional[str] = None
     telegram_id: Optional[int] = None
 
-    async def _arun(self, target_day: str, **kwargs: Any) -> str:
+    async def _arun(self, target_date: str, period_type: str = "day", **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 
@@ -64,9 +68,9 @@ class GetAgendaTool(BaseTool):
         Returns:
             Una cadena de texto con la lista de eventos o un mensaje indicando que no hay eventos.
         """
-        logger.info(f"Ejecutando GetAgendaTool para la cuenta '{self.account_id}' en el día: '{target_day}'.")
+        logger.info(f"Ejecutando GetAgendaTool para la cuenta '{self.account_id}' para el período '{period_type}' en la fecha: '{target_date}'.")
         try:
-            agenda_string = await get_agenda_for_day(account_id=self.account_id, target_day=target_day)
+            agenda_string = await get_agenda_for_period(account_id=self.account_id, period_type=period_type, target_date=target_date, workspace_id=self.workspace_id)
             logger.info(f"Herramienta de consulta de agenda completada para la cuenta '{self.account_id}'.")
             return agenda_string
         except Exception as e:

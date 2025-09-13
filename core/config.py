@@ -38,14 +38,11 @@ class Config:
 
         # --- Configuración de Modelos de Lenguaje (Priorizando Google) ---
         # El LLM principal para el agente (texto y razonamiento).
+        self.llm_provider: str = os.getenv("LLM_PROVIDER", "google")
         self.openai_compatible_api_url: Optional[str] = os.getenv("OPENAI_COMPATIBLE_API_URL")
+        self.openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
         self.google_main_model_name: str = os.getenv("GOOGLE_MAIN_MODEL_NAME", "gemini-2.0-flash")
 
-        if self.openai_compatible_api_url:
-            self.main_model_name: str = self.openai_compatible_api_url  # Usa el endpoint compatible con OpenAI
-        else:
-            self.main_model_name: str = self.google_main_model_name  # Usa el modelo de Google por defecto
-        
         # El LLM para tareas rápidas y económicas como la sumarización.
         self.google_summary_model_name: str = os.getenv("GOOGLE_SUMMARY_MODEL_NAME", "gemini-2.5-flash")
         
@@ -54,6 +51,9 @@ class Config:
         
         # ¡NUEVO! El modelo de Vertex AI para la generación de embeddings.
         self.google_embedding_model_name: str = os.getenv("GOOGLE_EMBEDDING_MODEL_NAME", "text-embedding-004")
+
+        # ¡NUEVO! El modelo de OpenAI a utilizar.
+        self.openai_model_name: str = os.getenv("OPENAI_MODEL_NAME", "gpt-4o")
         
 
         # Temperatura para la generación de texto del LLM principal.
@@ -61,6 +61,7 @@ class Config:
         self.llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", 0.7))
         self.ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text") # Modelo de embedding de Ollama
         self.ollama_api_url: str = os.getenv("OLLAMA_API_URL", "http://196.168.100.106:11434") # URL interna del servicio Ollama
+        self.llm_request_timeout: int = int(os.getenv("LLM_REQUEST_TIMEOUT", 120)) # Nuevo: Tiempo de espera para las solicitudes al LLM en segundos
 
 
         # --- Configuración de Telegram ---
@@ -87,9 +88,13 @@ class Config:
         
         # Clave para la herramienta de búsqueda web.
         self.brave_search_api_key: Optional[str] = os.getenv("BRAVE_SEARCH_API_KEY")
+        # ¡NUEVA LÍNEA! Clave para la herramienta de búsqueda Tavily.
+        self.tavily_api_key: Optional[str] = os.getenv("TAVILY_API_KEY")
+        # ¡NUEVA LÍNEA! Token de GitHub para importar repositorios privados.
+        self.github_token: Optional[str] = os.getenv("GITHUB_TOKEN")
 
         # ¡NUEVA LÍNEA! La URL de nuestro servidor API para que los clientes sepan a dónde llamar.
-        self.api_server_url: str = os.getenv("API_SERVER_URL", "http://core:8080")
+        self.api_server_url: str = os.getenv("API_SERVER_URL", "https://apibase.gatoslibres.art")
         # ¡NUEVA LÍNEA! Un secreto para proteger los endpoints de administración.
         self.admin_secret: str = os.getenv("ADMIN_SECRET", "default-admin-secret")
 
@@ -111,6 +116,30 @@ class Config:
         self.chunk_size: int = int(os.getenv("CHUNK_SIZE", 1000))
         self.chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", 200))
         self.internal_api_key_for_bot: str = os.getenv("INTERNAL_API_KEY_FOR_BOT", "super-secret-internal-key")
+        self.global_collection_name: str = os.getenv("GLOBAL_COLLECTION_NAME", "global_knowledge_base") # Nueva variable
+
+        # RAG General
+        self.embedding_model_name: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-ada-002") # O "ollama/nomic-embed-text"
+        self.embedding_chunk_size: int = int(os.getenv("EMBEDDING_CHUNK_SIZE", 1000))
+        self.embedding_chunk_overlap: int = int(os.getenv("EMBEDDING_CHUNK_OVERLAP", 200))
+
+        # Reranking
+        self.reranker_model_name: str = os.getenv("RERANKER_MODEL_NAME", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+        self.reranker_top_n: int = int(os.getenv("RERANKER_TOP_N", 5)) # Cuántos documentos rerankear
+
+        # Búsqueda Híbrida
+        self.hybrid_search_bm25_weight: float = float(os.getenv("HYBRID_SEARCH_BM25_WEIGHT", 0.5))
+
+        # Loaders de Documentos Avanzados (APIs externas)
+        self.datalab_marker_api_url: Optional[str] = os.getenv("DATALAB_MARKER_API_URL")
+        self.datalab_marker_api_key: Optional[str] = os.getenv("DATALAB_MARKER_API_KEY")
+        self.mistral_ocr_api_url: Optional[str] = os.getenv("MISTRAL_OCR_API_URL")
+        self.mistral_ocr_api_key: Optional[str] = os.getenv("MISTRAL_OCR_API_KEY")
+
+        # Búsqueda Web Avanzada
+        self.tavily_api_key: Optional[str] = os.getenv("TAVILY_API_KEY")
+        self.tavily_search_engine_type: str = os.getenv("TAVILY_SEARCH_ENGINE_TYPE", "tavily")
+        self.playwright_service_url: Optional[str] = os.getenv("PLAYWRIGHT_SERVICE_URL") # URL de un servicio Playwright remoto
 
         # --- Configuración de Umbrales para proactive_knowledge_linker_tool ---
         self.DUPLICITY_SIMILARITY_THRESHOLD: float = float(os.getenv("DUPLICITY_SIMILARITY_THRESHOLD", 0.90)) # Umbral para duplicidad (alta similitud)
@@ -229,7 +258,9 @@ class Config:
 
         # Opcionales, pero importantes para funcionalidades específicas.
         if not self.brave_search_api_key:
-            logger.warning("⚠️ ADVERTENCIA: BRAVE_SEARCH_API_KEY no está definido. La búsqueda web no funcionará.")
+            logger.warning("⚠️ ADVERTENCIA: BRAVE_SEARCH_API_KEY no está definido. La búsqueda web (Brave) no funcionará.")
+        if not self.tavily_api_key:
+            logger.warning("⚠️ ADVERTENCIA: TAVILY_API_KEY no está definido. La búsqueda web (Tavily) no funcionará.")
         if not self.webapp_url:
             logger.warning("⚠️ ADVERTENCIA: TELEGRAM_WEBAPP_URL no está definido. El panel de control no será accesible.")
         if not self.admin_telegram_ids:

@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { DocumentCard } from '@/app/(dashboard)/rag/document-card';
+import { useAuth } from '@/contexts/AuthContext'; // Importar useAuth
 
 import { DataTable } from '@/app/(dashboard)/rag/data-table';
 import { getColumns, type Document } from '@/app/(dashboard)/rag/columns';
@@ -36,11 +37,18 @@ interface DocumentCollectionDisplayProps {
 }
 
 export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, backButtonText = "Volver a Colecciones", backButtonHref = "/rag/all" }: DocumentCollectionDisplayProps) {
+  const { user } = useAuth(); // Obtener el usuario del contexto de autenticación
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
   const [collectionDescription, setCollectionDescription] = useState<string | null>(null);
   const isMobile = useMediaQuery('(max-width: 768px)'); // md breakpoint
+
+  useEffect(() => {
+    if (user?.id) {
+      console.log("DocumentCollectionDisplay: Account ID para WebSocket:", user.id);
+    }
+  }, [user?.id]);
 
   const handleUploadStart = (fileNames: string[], topic: string) => {
     const newPlaceholders = fileNames.map(fileName => ({

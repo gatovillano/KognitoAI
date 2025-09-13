@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import apiClient from '@/lib/api';
+import { AgendaEvent } from './page';
 
 // Schema actualizado para campos específicos
 const formSchema = z.object({
@@ -19,67 +20,111 @@ const formSchema = z.object({
   date: z.string().min(1, "Debes seleccionar una fecha."),
   time: z.string().min(1, "Debes especificar una hora."),
   team_id: z.string().optional(), // Optional field for sharing with a team
+  workspace_id: z.string().optional(), // New field for workspace
 });
 
 interface EventDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onSaveSuccess: (event: any) => void;
+  workspaceId?: string;
+  event?: AgendaEvent | null;
 }
 
-export function EventDialog({ isOpen, onOpenChange, onSaveSuccess }: EventDialogProps) {
+export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, event }: EventDialogProps) {
   const [teams, setTeams] = useState<any[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(false);
+  const [workspaces, setWorkspaces] = useState<any[]>([]);
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
-    defaultValues: { description: '' },
+    defaultValues: {
+      description: '',
+      date: '',
+      time: '',
+      team_id: '',
+      workspace_id: '',
+    },
   });
 
   useEffect(() => {
-    const fetchTeams = async () => {
+    const fetchTeamsAndWorkspaces = async () => {
       setLoadingTeams(true);
+      setLoadingWorkspaces(true);
       try {
-        const response = await apiClient.get('/api/teams');
-        setTeams(response.data);
+        const [teamsRes, workspacesRes] = await Promise.all([
+          apiClient.get('/api/teams'),
+          apiClient.get('/api/workspaces'),
+        ]);
+        setTeams(teamsRes.data);
+        setWorkspaces(workspacesRes.data);
       } catch (error) {
-        console.error("Error fetching teams:", error);
-        toast.error('Error al cargar los equipos.');
+        console.error("Error fetching teams or workspaces:", error);
+        toast.error('Error al cargar datos necesarios.');
       } finally {
         setLoadingTeams(false);
+        setLoadingWorkspaces(false);
       }
     };
-    if (isOpen) {
-      fetchTeams();
-    }
-  }, [isOpen]);
 
-async function onSubmit(values: z.infer<typeof formSchema>) {
-    // --- CAMBIO CLAVE: Combinamos fecha y hora en un formato estándar ---
-    // En lugar de "2025-06-27 a las 10:00", ahora será "2025-06-27 10:00"
+    if (isOpen) {
+      fetchTeamsAndWorkspaces();
+      if (event) {
+        const eventDateTime = new Date(event.event_datetime_utc);
+        form.reset({
+          description: event.description,
+          date: eventDateTime.toISOString().split('T')[0],
+          time: eventDateTime.toTimeString().split(' ')[0].substring(0, 5),
+          team_id: event.team_id?.toString() || '',
+          workspace_id: event?.workspace_id?.toString() || workspaceId || '', // Asegurarse de que event no sea null
+        });
+      } else {
+        form.reset({
+          description: '',
+          date: '',
+          time: '',
+          team_id: '',
+          workspace_id: workspaceId || '',
+        });
+      }
+    }
+  }, [isOpen, event, form, workspaceId]);
+
+  async function onSubmit(values: z.infer<typeof formSchema>) {
     const standardDateTime = `${values.date} ${values.time}`;
-    
-    const toastId = toast.loading('Agendando evento...');
+    const toastId = toast.loading(event ? 'Actualizando evento...' : 'Agendando evento...');
+
     try {
-      const response = await apiClient.post('/api/add-event', {
-        description: values.description,
-        event_datetime: standardDateTime,
-        team_id: values.team_id ? parseInt(values.team_id) : null, // Send team ID if selected
-      });
-      toast.success('¡Evento agendado!', { id: toastId });
+      let response;
+      if (event) {
+        response = await apiClient.put(`/api/agenda/events/${event.id}`, {
+          description: values.description,
+          event_datetime: standardDateTime,
+          team_id: values.team_id ? parseInt(values.team_id) : null,
+          workspace_id: values.workspace_id || null,
+        });
+      } else {
+        response = await apiClient.post('/api/add-event', {
+          description: values.description,
+          event_datetime: standardDateTime,
+          team_id: values.team_id ? parseInt(values.team_id) : null,
+          workspace_id: values.workspace_id || null,
+        });
+      }
+      toast.success(event ? '¡Evento actualizado!' : '¡Evento agendado!', { id: toastId });
       onSaveSuccess(response.data);
       onOpenChange(false);
-      form.reset();
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Error al agendar el evento.', { id: toastId });
+      toast.error(error.response?.data?.detail || (event ? 'Error al actualizar el evento.' : 'Error al agendar el evento.'), { id: toastId });
     }
-}
+  }
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Agendar Nuevo Evento</DialogTitle>
+          <DialogTitle>{event ? 'Editar Evento' : 'Agendar Nuevo Evento'}</DialogTitle>
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -100,8 +145,7 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
                 <FormControl>
                   <select 
                     className="w-full border rounded-md p-2"
-                    onChange={field.onChange} 
-                    value={field.value || ''}
+                    {...field}
                     disabled={loadingTeams}
                   >
                     <option value="">{loadingTeams ? "Cargando equipos..." : "Seleccionar equipo (opcional)"}</option>
@@ -115,9 +159,29 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
                 <FormMessage />
               </FormItem>
             )} />
+            <FormField control={form.control} name="workspace_id" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Asociar a Workspace</FormLabel>
+                <FormControl>
+                  <select
+                    className="w-full border rounded-md p-2"
+                    {...field}
+                    disabled={loadingWorkspaces}
+                  >
+                    <option value="">{loadingWorkspaces ? "Cargando workspaces..." : "Seleccionar workspace (opcional)"}</option>
+                    {workspaces.map(ws => (
+                      <option key={ws.id} value={ws.id.toString()}>
+                        {ws.name}
+                      </option>
+                    ))}
+                  </select>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
             <DialogFooter>
               <Button type="submit" disabled={form.formState.isSubmitting}>
-                {form.formState.isSubmitting ? 'Agendando...' : 'Agendar'}
+                {form.formState.isSubmitting ? (event ? 'Guardando...' : 'Agendando...') : (event ? 'Guardar Cambios' : 'Agendar')}
               </Button>
             </DialogFooter>
           </form>

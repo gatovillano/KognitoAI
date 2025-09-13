@@ -11,9 +11,50 @@ interface EmptyChatProps {
   newMessage: string;
   setNewMessage: (value: string) => void;
   isResponding: boolean;
+  isRecording: boolean;
+  isProcessingAudio: boolean;
+  isUploadingFile: boolean;
+  isKnowledgeAnalysisActive: boolean;
+  isWebSearchActive: boolean;
+  isComprehensiveAnalysisActive: boolean;
+  isDeepResearchActive: boolean;
+  onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  onToggleKnowledgeAnalysis: () => void;
+  onToggleWebSearch: () => void;
+  onToggleComprehensiveAnalysis: () => void;
+  onToggleDeepResearch: () => void;
+  onStartRecording: () => void;
+  onStopRecording: () => void;
+  onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onRemoveContextItem: (item: any) => void;
+  onPaste: (e: ClipboardEvent) => void;
+  workspaceId?: string;
 }
 
-export function EmptyChat({ onSendMessage, newMessage, setNewMessage, isResponding }: EmptyChatProps) {
+export function EmptyChat({
+  onSendMessage,
+  newMessage,
+  setNewMessage,
+  isResponding,
+  isRecording,
+  isProcessingAudio,
+  isUploadingFile,
+  isKnowledgeAnalysisActive,
+  isWebSearchActive,
+  isComprehensiveAnalysisActive,
+  isDeepResearchActive,
+  onKeyDown,
+  onToggleKnowledgeAnalysis,
+  onToggleWebSearch,
+  onToggleComprehensiveAnalysis,
+  onToggleDeepResearch,
+  onStartRecording,
+  onStopRecording,
+  onFileUpload,
+  onRemoveContextItem,
+  onPaste,
+  workspaceId,
+}: EmptyChatProps) {
   const [selectedContext, setSelectedContext] = useState<any[]>([]); // Estado para el contexto seleccionado
 
   const handleContextSelected = (context: any[]) => {
@@ -63,20 +104,33 @@ export function EmptyChat({ onSendMessage, newMessage, setNewMessage, isRespondi
         <p className="text-lg text-muted-foreground mb-8">¿En que puedo colaborar hoy?</p>
       </motion.div>
 
-      <div className="w-full max-w-2xl px-4">
+      <div className="w-full max-w-4xl px-4">
         <ChatInputBar
           newMessage={newMessage}
           onMessageChange={setNewMessage}
           onSendMessage={onSendMessage}
           isResponding={isResponding}
           inputPlaceholder="¿En que puedo colaborar hoy?"
-          isKnowledgeAnalysisActive={false}
-          isWebSearchActive={false}
-          isComprehensiveAnalysisActive={false}
-          files={[]}
-          onFileUpload={() => {}}
-          onRemoveFile={() => {}}
-          currentContext={selectedContext} // Pasar el contexto seleccionado
+          isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+          isWebSearchActive={isWebSearchActive}
+          isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+          isDeepResearchActive={isDeepResearchActive}
+          isRecording={isRecording}
+          isProcessingAudio={isProcessingAudio}
+          isUploadingFile={isUploadingFile}
+          onKeyDown={onKeyDown}
+          onToggleKnowledgeAnalysis={onToggleKnowledgeAnalysis}
+          onToggleWebSearch={onToggleWebSearch}
+          onToggleComprehensiveAnalysis={onToggleComprehensiveAnalysis}
+          onToggleDeepResearch={onToggleDeepResearch}
+          onStartRecording={onStartRecording}
+          onStopRecording={onStopRecording}
+          onFileUpload={onFileUpload}
+          onRemoveContextItem={onRemoveContextItem}
+          onPaste={onPaste}
+          currentContext={selectedContext}
+          isFixedPosition={false}
+          workspaceId={workspaceId}
         >
           <ContextSelectorButton
             onContextSelected={handleContextSelected}

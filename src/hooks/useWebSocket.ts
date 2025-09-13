@@ -14,9 +14,19 @@ interface UseWebSocketOptions {
   onUploadProgress?: (data: { task_id: string; progress: number; message: string; }) => void;
   onUploadCompleted?: (data: { task_id: string; message: string; }) => void;
   onUploadFailed?: (data: { task_id: string; error_message: string; }) => void;
+  onLlmChunk?: (data: { chunk: string; thread_id: string; task_id: string; }) => void;
+  onLlmStart?: (data: { thread_id: string; task_id: string; message: string; }) => void;
+  onLlmEnd?: (data: { thread_id: string; task_id: string; message: string; tool_code?: string; sources?: any[]; }) => void;
+  onLlmError?: (data: { thread_id: string; task_id: string; message: string; }) => void;
+  onLlmStatus?: (data: { thread_id: string; task_id: string; message: string; }) => void; // Added
+  onToolStatusUpdate?: (data: { thread_id: string; tool_name: string; status: 'start' | 'end' | 'error'; timestamp: string; message?: string; result?: string; error?: string; sources?: any[]; }) => void;
+  onThreadTitleUpdated?: (data: { thread_id: string; new_title: string; }) => void; // Added
+  onToolCode?: (data: { thread_id: string; task_id: string; tool_code: string; }) => void;
+  userId?: string; // <--- AÑADIR ESTA PROP
 }
 
 export const useWebSocket = (options: UseWebSocketOptions = {}) => {
+  const { userId } = options; // <--- OBTENER EL USER ID DE LAS OPCIONES
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -25,33 +35,43 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
   const maxReconnectAttempts = 5;
 
   const connect = useCallback(() => {
+    console.log('WS: Intentando conectar...'); // Nuevo log
     try {
       const token = localStorage.getItem('authToken');
-      const userInfo = localStorage.getItem('userInfo');
+      // const userInfo = localStorage.getItem('userInfo'); // Ya no es necesario aquí si userId viene de props
       
-      if (!token || !userInfo) {
-        setConnectionError('No hay token de acceso o información de usuario disponible');
+      if (!token || !userId) { // <--- USAR userId DE LAS PROPS
+        console.error('WS: No hay token de acceso o ID de usuario disponible. No se puede conectar.'); // Nuevo log
+        setConnectionError('No hay token de acceso o ID de usuario disponible');
         return;
       }
 
-      const { id: userId } = JSON.parse(userInfo);
+      // const { id: userId } = JSON.parse(userInfo); // Ya no es necesario
 
-      if (!userId) {
-        setConnectionError('No se pudo obtener el ID de usuario para la conexión WebSocket');
-        return;
+      const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || window.location.origin;
+      console.log(`WS: apiBaseUrl (antes de parsear): ${apiBaseUrl}`); // Nuevo log para depuración
+      let wsProtocol = 'ws';
+      let wsHost = '';
+
+      try {
+        const url = new URL(apiBaseUrl);
+        wsProtocol = url.protocol === 'https:' ? 'wss' : 'ws';
+        wsHost = url.host;
+      } catch (e) {
+        console.error("WS: Error parsing API_BASE_URL, falling back to window.location.origin", e); // Nuevo log
+        wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        wsHost = window.location.host;
       }
+      
+      
 
-      // Usar NEXT_PUBLIC_API_URL para la conexión WebSocket
-      // Reemplazar http/https por ws/wss
-      const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8889'; // Fallback por si no está definida
-      const wsProtocol = apiBaseUrl.startsWith('https') ? 'wss' : 'ws';
-      const wsHost = apiBaseUrl.replace(/^https?:\/\//, '');
       const wsUrl = `${wsProtocol}://${wsHost}/ws/${userId}?token=${encodeURIComponent(token)}`;
+      console.log(`WS: Intentando conectar a: ${wsUrl}`); // Log detallado de la URL
       
       wsRef.current = new WebSocket(wsUrl);
 
       wsRef.current.onopen = () => {
-        console.log('🔌 WebSocket conectado');
+        console.log('WS: 🔌 WebSocket conectado exitosamente.'); // Log más claro
         setIsConnected(true);
         setConnectionError(null);
         reconnectAttempts.current = 0;
@@ -60,7 +80,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       wsRef.current.onmessage = (event) => {
         try {
           const message: WebSocketMessage = JSON.parse(event.data);
-          console.log('📨 Mensaje WebSocket recibido:', message);
+          console.log('WS: 📨 Mensaje WebSocket recibido:', message);
 
           switch (message.type) {
             case 'title_updated':
@@ -72,7 +92,6 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
                   total: message.total
                 });
               }
-              // Mostrar toast con el título actualizado
               toast.success(`📄 Título actualizado: ${message.file_name}`, {
                 description: `Nuevo título: "${message.new_title}"`
               });
@@ -121,8 +140,6 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
                   message: message.message
                 });
               }
-              // Opcional: mostrar progreso si es relevante
-              // toast.info(`Progreso de subida para ${message.task_id}: ${message.progress}%`);
               break;
 
             case 'upload_completed':
@@ -145,46 +162,91 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
               toast.error(`❌ Subida fallida: ${message.error_message}`);
               break;
 
+            case 'llm_chunk':
+                if (options.onLlmChunk) {
+                    options.onLlmChunk(message as any);
+                }
+                break;
+            case 'llm_start':
+                if (options.onLlmStart) {
+                    options.onLlmStart(message as any);
+                }
+                break;
+            case 'llm_end':
+                if (options.onLlmEnd) {
+                    options.onLlmEnd(message as any);
+                }
+                break;
+            case 'llm_error':
+                if (options.onLlmError) {
+                    options.onLlmError(message as any);
+                }
+                toast.error(`Error del LLM: ${message.message}`);
+                break;
+            case 'llm_status':
+                if (options.onLlmStatus) {
+                    options.onLlmStatus(message as any);
+                }
+                break;
+            case 'tool_status':
+                if (options.onToolStatusUpdate) {
+                    options.onToolStatusUpdate(message as any);
+                }
+                break;
+            case 'thread_title_updated':
+                if (options.onThreadTitleUpdated) {
+                    options.onThreadTitleUpdated(message as any);
+                }
+                break;
+            case 'tool_code': // Added case for tool_code
+                if (options.onToolCode) {
+                    options.onToolCode(message as any);
+                }
+                break;
+
             default:
-              console.log('📨 Mensaje WebSocket no manejado:', message);
+              console.log('WS: 📨 Mensaje WebSocket no manejado:', message);
           }
         } catch (error) {
-          console.error('❌ Error al procesar mensaje WebSocket:', error);
+          console.error('WS: ❌ Error al procesar mensaje WebSocket:', error);
         }
       };
 
       wsRef.current.onclose = (event) => {
-        console.log(`🔌 WebSocket desconectado. Código: ${event.code}, Razón: "${event.reason}", Limpio: ${event.wasClean}`);
+        console.log(`WS: 🔌 WebSocket desconectado. Código: ${event.code}, Razón: "${event.reason}", Limpio: ${event.wasClean}.`);
         setIsConnected(false);
         
-        // Intentar reconectar si no fue un cierre intencional
         if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
-          console.log(`🔄 Reintentando conexión en ${delay}ms (intento ${reconnectAttempts.current + 1}/${maxReconnectAttempts})`);
+          console.log(`WS: 🔄 Reintentando conexión en ${delay}ms (intento ${reconnectAttempts.current + 1}/${maxReconnectAttempts}).`);
           
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectAttempts.current++;
             connect();
           }, delay);
         } else if (reconnectAttempts.current >= maxReconnectAttempts) {
-          setConnectionError('No se pudo reconectar al servidor. Se han agotado los intentos.');
+          const errorMessage = 'No se pudo reconectar al servidor después de varios intentos. Verifica la conexión y la configuración del servidor.';
+          console.error(`WS: ${errorMessage}`);
+          setConnectionError(errorMessage);
           toast.error("Error de conexión", {
-            description: "No se pudo establecer la conexión con el servidor WebSocket después de varios intentos.",
+            description: errorMessage,
           });
         }
       };
 
       wsRef.current.onerror = (event) => {
-        console.error('❌ Se ha producido un error en la conexión WebSocket:', event);
+        console.error('WS: ❌ Se ha producido un error en la conexión WebSocket.', event);
+        setConnectionError('Error en la conexión WebSocket. Revisa la consola para más detalles.');
       };
 
     } catch (error) {
-      console.error('❌ Error al crear WebSocket:', error);
+      console.error('WS: ❌ Error al crear WebSocket:', error);
       setConnectionError('Error al crear conexión WebSocket');
     }
-  }, [options]); // Dependencias: options (y las funciones set son estables)
+  }, [options, userId]); // <--- AÑADIR userId A LAS DEPENDENCIAS DE useCallback
 
   const disconnect = useCallback(() => {
+    console.log('WS: Desconectando WebSocket...'); // Nuevo log
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
@@ -197,15 +259,21 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
     
     setIsConnected(false);
     setConnectionError(null);
-  }, []); // Sin dependencias
+  }, []);
 
   useEffect(() => {
-    connect();
+    console.log('WS: useEffect: Montando useWebSocket hook.');
+    if (userId) {
+      connect();
+    } else {
+      console.log("WS: No userId available yet, skipping WebSocket connection attempt.");
+    }
 
     return () => {
+      console.log('WS: useEffect: Desmontando useWebSocket hook. Limpiando...');
       disconnect();
     };
-  }, [connect, disconnect]);
+  }, [userId, connect, disconnect]);
 
   return {
     isConnected,

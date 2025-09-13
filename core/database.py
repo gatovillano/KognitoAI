@@ -29,9 +29,9 @@ import logging
 import asyncio
 import uuid
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, List
 import pytz
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID, ARRAY, TSVECTOR
 
 # --- Importaciones de SQLAlchemy ---
 from sqlalchemy import (
@@ -106,6 +106,9 @@ class Account(Base):
     # Cada cuenta tiene un único perfil.
     profile = relationship("Perfil", uselist=False, back_populates="account", cascade="all, delete-orphan")
     
+    # Relación con perfiles de contacto
+    contact_profiles = relationship("ContactProfile", back_populates="account", cascade="all, delete-orphan")
+    
     # Relaciones uno a muchos con los datos del usuario.
     workspaces = relationship("Workspace", back_populates="account", cascade="all, delete-orphan")
     # ELIMINADO: La tabla 'Memory' se eliminará, por lo que esta relación ya no es necesaria.
@@ -126,6 +129,7 @@ class Account(Base):
     analysis_tasks = relationship("AnalysisTask", back_populates="account", cascade="all, delete-orphan")
     mindmap_tasks = relationship("MindmapTask", back_populates="account", cascade="all, delete-orphan")
     upload_tasks = relationship("UploadTask", back_populates="account", cascade="all, delete-orphan")
+    tasks = relationship("Task", back_populates="account", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Account(id={self.id}, name='{self.name}')>"
@@ -177,6 +181,7 @@ class Team(Base):
     proactive_insights = relationship("ProactiveInsight", back_populates="team", cascade="all, delete-orphan")
     # AÑADIDO: Relación con la nueva tabla de temas/colecciones de documentos definidos por el equipo
     user_document_topics = relationship("UserDocumentTopic", back_populates="team", cascade="all, delete-orphan")
+    tasks = relationship("Task", back_populates="team", cascade="all, delete-orphan")
 
 
     def __repr__(self):
@@ -215,6 +220,7 @@ class Workspace(Base):
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     system_prompt = Column(Text, nullable=True, comment="Prompt de sistema específico para este espacio de trabajo.")
+    color = Column(String(7), nullable=True, default="#007bff", comment="Color asociado al workspace (ej. #RRGGBB).") # NEW COLUMN
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 
     # Relaciones
@@ -224,6 +230,8 @@ class Workspace(Base):
     # collection_associations = relationship("WorkspaceCollectionAssociation", back_populates="workspace", cascade="all, delete-orphan")
     # AÑADIDO: Relación con la nueva tabla de temas/colecciones de documentos definidos para este workspace
     user_document_topics = relationship("UserDocumentTopic", back_populates="workspace", cascade="all, delete-orphan")
+    tasks = relationship("Task", back_populates="workspace", cascade="all, delete-orphan")
+    agenda_events = relationship("AgendaEvent", back_populates="workspace", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Workspace(id={self.id}, name='{self.name}')>"
@@ -269,6 +277,7 @@ class LangchainPgEmbedding(Base):
     visibility_teams = Column(JSONB, nullable=True) # ⭐ COLUMNA DIRECTA
     telegram_id = Column(BigInteger, nullable=True, index=True) # ⭐ COLUMNA DIRECTA
     thread_id = Column(UUID(as_uuid=True), nullable=True, index=True) # ⭐ COLUMNA DIRECTA
+    text_search_vector = Column(TSVECTOR, nullable=True) # ⭐ COLUMNA DIRECTA para FTS
 
     # Índices adicionales para las columnas directas
     __table_args__ = (
@@ -322,6 +331,12 @@ class UserDocumentTopic(Base):
     workspace = relationship("Workspace", back_populates="user_document_topics")
     team = relationship("Team", back_populates="user_document_topics") # Si se añade team_id
 
+    contact_profiles = relationship(
+        "ContactProfile",
+        secondary="user_document_topic_contact_profiles_association",
+        back_populates="user_document_topics"
+    )
+
     # Restricciones para asegurar que un usuario/workspace/equipo no tenga dos colecciones con el mismo nombre
     __table_args__ = (
         Index('ix_account_workspace_topic', 'account_id', 'workspace_id', 'name', unique=True, postgresql_where=text("workspace_id IS NOT NULL")),
@@ -370,6 +385,56 @@ class Perfil(Base):
     account = relationship("Account", back_populates="profile")
 
 
+class ContactProfile(Base):
+    """
+    Representa un perfil de contacto, vinculado a una cuenta de usuario.
+    """
+    __tablename__ = "contact_profiles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    
+    name = Column(String(255), nullable=True, comment="Nombre del contacto.")
+    email = Column(String(255), nullable=True, comment="Email del contacto.")
+    phone = Column(String(255), nullable=True, comment="Número de teléfono del contacto.")
+    tags = Column(ARRAY(String), nullable=True, comment="Etiquetas asociadas al contacto.")
+    category = Column(String(255), nullable=True, comment="Categoría del contacto.")
+    custom_fields = Column(JSONB, nullable=True, comment="Campos personalizados para el contacto.")
+    
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+    # Relación con Account
+    account = relationship("Account", back_populates="contact_profiles")
+
+    notas = relationship(
+        "Nota",
+        secondary="note_contact_profiles_association",
+        back_populates="contact_profiles"
+    )
+
+    user_document_topics = relationship(
+        "UserDocumentTopic",
+        secondary="user_document_topic_contact_profiles_association",
+        back_populates="contact_profiles"
+    )
+
+    agenda_events = relationship(
+        "AgendaEvent",
+        secondary="agenda_event_contact_profiles_association",
+        back_populates="contact_profiles"
+    )
+
+    tasks = relationship(
+        "Task",
+        secondary="task_contact_profiles_association",
+        back_populates="contact_profiles"
+    )
+
+    def __repr__(self):
+        return f"<ContactProfile(id={self.id}, name='{self.name}', account_id={self.account_id})>"
+
+
 class Nota(Base):
     """Almacena las notas de un usuario o equipo."""
     __tablename__ = "notas"
@@ -386,6 +451,12 @@ class Nota(Base):
     updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
     embedding = Column(Vector(384), nullable=True)
 
+    contact_profiles = relationship(
+        "ContactProfile",
+        secondary="note_contact_profiles_association",
+        back_populates="notas"
+    )
+
     account = relationship("Account", back_populates="notas")
     team = relationship("Team", back_populates="notas")
     workspace = relationship("Workspace", backref="notas")
@@ -401,6 +472,7 @@ class AgendaEvent(Base):
     id = Column(Integer, primary_key=True)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
     team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True, index=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=True, index=True)
     description = Column(String, nullable=False)
     event_datetime_utc = Column(DateTime(timezone=True), nullable=False)
     
@@ -409,24 +481,66 @@ class AgendaEvent(Base):
     
     job_name = Column(String, nullable=True, unique=True) # Para poder cancelar los jobs de Telegram
 
+    contact_profiles = relationship(
+        "ContactProfile",
+        secondary="agenda_event_contact_profiles_association",
+        back_populates="agenda_events"
+    )
+
     account = relationship("Account", back_populates="agenda_events")
     team = relationship("Team", back_populates="agenda_events")
+    workspace = relationship("Workspace", back_populates="agenda_events")
 
     def to_dict(self, timezone_str: str | None = "UTC") -> Dict[str, Any]:
         """Convierte el objeto a un diccionario para su uso en APIs."""
         user_tz = pytz.timezone(timezone_str) if timezone_str else pytz.utc
         local_datetime = self.event_datetime_utc.astimezone(user_tz)
         
+        workspace_name = None
+        workspace_color = None
+        if self.workspace: # Check if workspace relationship is loaded
+            workspace_name = self.workspace.name
+            workspace_color = self.workspace.color
+
         return {
             "id": self.id,
             "account_id": str(self.account_id),
             "team_id": str(self.team_id) if self.team_id else None, # type: ignore
+            "workspace_id": str(self.workspace_id) if self.workspace_id else None,
+            "workspace_name": workspace_name, # NEW
+            "workspace_color": workspace_color, # NEW
             "description": self.description,
             "event_datetime_utc": self.event_datetime_utc.isoformat(),
             "event_datetime_local": local_datetime.isoformat(),
             "user_timezone": str(user_tz),
             "is_active": self.is_active
         }
+
+
+class NoteContactProfileAssociation(Base):
+    """
+    Tabla de asociación para la relación muchos a muchos entre Nota y ContactProfile.
+    """
+    __tablename__ = "note_contact_profiles_association"
+
+    note_id = Column(Integer, ForeignKey("notas.id"), primary_key=True, nullable=False)
+    contact_profile_id = Column(UUID(as_uuid=True), ForeignKey("contact_profiles.id"), primary_key=True, nullable=False)
+
+    def __repr__(self):
+        return f"<NoteContactProfileAssociation(note_id={self.note_id}, contact_profile_id={self.contact_profile_id})>"
+
+
+class AgendaEventContactProfileAssociation(Base):
+    """
+    Tabla de asociación para la relación muchos a muchos entre AgendaEvent y ContactProfile.
+    """
+    __tablename__ = "agenda_event_contact_profiles_association"
+
+    agenda_event_id = Column(Integer, ForeignKey("agenda_events.id"), primary_key=True, nullable=False)
+    contact_profile_id = Column(UUID(as_uuid=True), ForeignKey("contact_profiles.id"), primary_key=True, nullable=False)
+
+    def __repr__(self):
+        return f"<AgendaEventContactProfileAssociation(agenda_event_id={self.agenda_event_id}, contact_profile_id={self.contact_profile_id})>"
 
 
 class Recordatorio(Base):
@@ -557,6 +671,66 @@ class UploadTask(Base):
 
     # Relación con Account
     account = relationship("Account", back_populates="upload_tasks")
+
+
+class UserDocumentTopicContactProfileAssociation(Base):
+    """
+    Tabla de asociación para la relación muchos a muchos entre UserDocumentTopic y ContactProfile.
+    """
+    __tablename__ = "user_document_topic_contact_profiles_association"
+
+    user_document_topic_id = Column(UUID(as_uuid=True), ForeignKey("user_document_topics.id"), primary_key=True, nullable=False)
+    contact_profile_id = Column(UUID(as_uuid=True), ForeignKey("contact_profiles.id"), primary_key=True, nullable=False)
+
+    def __repr__(self):
+        return f"<UserDocumentTopicContactProfileAssociation(user_document_topic_id={self.user_document_topic_id}, contact_profile_id={self.contact_profile_id})>"
+
+
+class TaskContactProfileAssociation(Base):
+    """
+    Tabla de asociación para la relación muchos a muchos entre Task y ContactProfile.
+    """
+    __tablename__ = "task_contact_profiles_association"
+
+    task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id"), primary_key=True, nullable=False)
+    contact_profile_id = Column(UUID(as_uuid=True), ForeignKey("contact_profiles.id"), primary_key=True, nullable=False)
+
+    def __repr__(self):
+        return f"<TaskContactProfileAssociation(task_id={self.task_id}, contact_profile_id={self.contact_profile_id})>"
+
+
+class Task(Base):
+    """
+    Representa una tarea en el sistema, que puede estar asociada a una cuenta,
+    un espacio de trabajo o un equipo.
+    """
+    __tablename__ = "tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), index=True, nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), index=True, nullable=True)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), index=True, nullable=True)
+    
+    description = Column(Text, nullable=False)
+    is_completed = Column(Boolean, default=False, nullable=False)
+    due_date = Column(DateTime(timezone=True), nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+    # Relaciones
+    account = relationship("Account", back_populates="tasks")
+    workspace = relationship("Workspace", back_populates="tasks")
+    team = relationship("Team", back_populates="tasks")
+
+    contact_profiles = relationship(
+        "ContactProfile",
+        secondary="task_contact_profiles_association",
+        back_populates="tasks"
+    )
+
+    def __repr__(self):
+        return f"<Task(id={self.id}, description='{self.description[:50]}...', is_completed={self.is_completed})>"
 
 
 class GitHubDocument(Base):

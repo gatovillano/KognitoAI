@@ -118,6 +118,42 @@ async def list_all_users(
         ))
     return users_data
 
+@router.get("/users", response_model=List[UserProfileResponse], summary="Listar todos los usuarios (público)")
+async def list_all_users_public(db: AsyncSession = Depends(get_db)):
+    """
+    Lista todos los usuarios registrados en el sistema.
+    """
+    logger.info("Listando todos los usuarios para acceso público.")
+    stmt = select(Account).order_by(Account.created_at.desc())
+    result = await db.execute(stmt)
+    accounts = result.scalars().all()
+    
+    users_data = []
+    for account in accounts:
+        telegram_identity = await db.execute(
+            select(PlatformIdentity).where(
+                PlatformIdentity.account_id == account.id,
+                PlatformIdentity.platform == 'telegram'
+            )
+        )
+        telegram_id = None
+        identity_obj = telegram_identity.scalars().first()
+        if identity_obj is not None and getattr(identity_obj, 'platform_user_id', None):
+            try:
+                telegram_id = int(getattr(identity_obj, 'platform_user_id', ''))
+            except ValueError:
+                pass  # No es un ID numérico válido
+
+        users_data.append(UserProfileResponse(
+            id=str(account.id),
+            name=account.name,  # type: ignore
+            email=account.email,  # type: ignore
+            username=account.username,  # type: ignore
+            telegram_id=telegram_id,
+            is_admin=bool(account.is_admin)  # type: ignore
+        ))
+    return users_data
+
 class DeleteUsersRequest(BaseModel):
     """Define la estructura de datos para eliminar usuarios."""
     account_ids: List[str]  # Lista de UUIDs de cuentas a eliminar

@@ -3,14 +3,17 @@
 import logging
 import uuid
 from typing import List, Optional
-from pydantic import BaseModel # Importar BaseModel
+from pydantic import BaseModel, Field
 from urllib.parse import unquote # Importar unquote
+import uuid
+
+class ProfileLinkRequest(BaseModel):
+    profile_id: uuid.UUID
 
 class DeleteDocumentRequest(BaseModel):
     file_name: str
     topic: Optional[str] = None
     workspace_id: Optional[str] = None
-
 
 from fastapi import APIRouter, HTTPException, Depends, status, Form, File, UploadFile, Body, BackgroundTasks, Query
 from pydantic import BaseModel
@@ -21,7 +24,7 @@ from core.database import SessionLocal, TeamMember, LangchainPgCollection, Uploa
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.document_parser import extract_text_and_metadata_from_document
-from core.memory_manager import process_document_for_rag, list_user_documents, list_user_documents_all_teams, delete_document_chunks, get_full_document_content, update_document_metadata, list_user_collections, extract_titles_and_update_metadata
+from core.memory_manager import process_document_for_rag, list_user_documents, list_user_documents_all_teams, delete_document_chunks, get_full_document_content, update_document_metadata, list_user_collections, extract_titles_and_update_metadata, link_profile_to_collection, unlink_profile_from_collection, get_user_document_topic_by_name
 from utils.db_session import DBSession
 from tools.add_web_to_rag_tool import AddWebToRAGTool
 from core.websocket_manager import send_personal_message
@@ -169,7 +172,55 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
                 }
             )
 
-@router.post("/upload-document")
+
+
+@router.post("/collections/{topic}/link-profile", summary="Vincular perfil a una colección")
+async def link_profile_to_collection_endpoint(
+    topic: str,
+    profile_link_request: ProfileLinkRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    workspace_id: Optional[str] = Query(None),
+    team_id: Optional[str] = Query(None)
+):
+    """
+    Vincula un perfil de contacto a una colección de documentos.
+    """
+    decoded_topic = unquote(topic)
+    success = await link_profile_to_collection(
+        account_id=current_account_id,
+        topic_name=decoded_topic,
+        profile_id=profile_link_request.profile_id,
+        workspace_id=workspace_id,
+        team_id=team_id
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Colección o perfil no encontrado, o no autorizado.")
+    return {"message": f"Perfil {profile_link_request.profile_id} vinculado a la colección {decoded_topic} correctamente."}
+
+@router.post("/collections/{topic}/unlink-profile", summary="Desvincular perfil de una colección")
+async def unlink_profile_from_collection_endpoint(
+    topic: str,
+    profile_link_request: ProfileLinkRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    workspace_id: Optional[str] = Query(None),
+    team_id: Optional[str] = Query(None)
+):
+    """
+    Desvincula un perfil de contacto de una colección de documentos.
+    """
+    decoded_topic = unquote(topic)
+    success = await unlink_profile_from_collection(
+        account_id=current_account_id,
+        topic_name=decoded_topic,
+        profile_id=profile_link_request.profile_id,
+        workspace_id=workspace_id,
+        team_id=team_id
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Vínculo no encontrado, o colección/perfil no autorizado.")
+    return {"message": f"Perfil {profile_link_request.profile_id} desvinculado de la colección {decoded_topic} correctamente."}
+
+
 async def upload_document_endpoint(
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
@@ -450,30 +501,27 @@ class DocumentResponse(BaseModel):
     team_id: Optional[str] = None
 
 # --- Endpoints para Colecciones ---
-@router.get("/collections/{collection_id}", response_model=CollectionResponse, summary="Obtener detalles de una colección")
-async def get_collection_details(collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
-    logger.info(f"API: get_collection_details - collection_id: {collection_id}, account_id: {current_account_id}, workspace_id: {workspace_id}")
-    
-    decoded_collection_id = unquote(collection_id)
-    logger.info(f"API: get_collection_details - decoded_collection_id: {decoded_collection_id}")
-    
-    collections = await list_user_collections(account_id=current_account_id, workspace_id=workspace_id)
-    logger.info(f"API: get_collection_details - collections found: {len(collections)}")
-    
-    collection = None
-    for c in collections:
-        if c.get('topic') == decoded_collection_id:
-            collection = c
-            break
-            
-    if not collection:
-        logger.warning(f"API: get_collection_details - Colección '{decoded_collection_id}' no encontrada.")
-        logger.warning(f"API: get_collection_details - Colección '{decoded_collection_id}' no encontrada para la cuenta {current_account_id} y workspace {workspace_id}.")
-        raise HTTPException(status_code=404, detail=f"Colección '{decoded_collection_id}' no encontrada.")
-    
-    logger.info(f"API: get_collection_details - Returning collection: {collection}")
-    return CollectionResponse(id=collection['topic'], name=collection['topic'], document_count=collection['document_count'])
- 
+@router.get("/collections/{topic}/details", summary="Obtener detalles de una colección por nombre")
+async def get_collection_details_by_name(
+    topic: str,
+    current_account_id: str = Depends(get_current_account_id),
+    workspace_id: Optional[str] = Query(None),
+    team_id: Optional[str] = Query(None)
+):
+    """
+    Obtiene los detalles de una colección específica por su nombre, incluyendo los perfiles de contacto vinculados.
+    """
+    decoded_topic = unquote(topic)
+    collection_details = await get_user_document_topic_by_name(
+        account_id=current_account_id,
+        topic_name=decoded_topic,
+        workspace_id=workspace_id,
+        team_id=team_id
+    )
+    if not collection_details:
+        raise HTTPException(status_code=404, detail=f"Colección '{decoded_topic}' no encontrada o no autorizada.")
+    return collection_details
+
 @router.get("/collections/{collection_id}/documents", response_model=List[DocumentResponse], summary="Listar documentos de una colección")
 async def list_collection_documents(collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
     logger.info(f"API: list_collection_documents - collection_id: {collection_id}, account_id: {current_account_id}, workspace_id: {workspace_id}")
@@ -561,6 +609,52 @@ async def add_document_to_collection(
     )
     logger.info(f"Documento '{file.filename}' subido y procesado exitosamente en la colección '{decoded_topic}' para el workspace '{workspace_id}'.")
     return {"message": f"Documento {file.filename} añadido a la colección '{decoded_topic}'."}
+
+@router.post("/collections/{topic}/link-profile", summary="Vincular perfil a una colección")
+async def link_profile_to_collection_endpoint(
+    topic: str,
+    profile_link_request: ProfileLinkRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    workspace_id: Optional[str] = Query(None),
+    team_id: Optional[str] = Query(None)
+):
+    """
+    Vincula un perfil de contacto a una colección de documentos.
+    """
+    decoded_topic = unquote(topic)
+    success = await link_profile_to_collection(
+        account_id=current_account_id,
+        topic_name=decoded_topic,
+        profile_id=profile_link_request.profile_id,
+        workspace_id=workspace_id,
+        team_id=team_id
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Colección o perfil no encontrado, o no autorizado.")
+    return {"message": f"Perfil {profile_link_request.profile_id} vinculado a la colección {decoded_topic} correctamente."}
+
+@router.post("/collections/{topic}/unlink-profile", summary="Desvincular perfil de una colección")
+async def unlink_profile_from_collection_endpoint(
+    topic: str,
+    profile_link_request: ProfileLinkRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    workspace_id: Optional[str] = Query(None),
+    team_id: Optional[str] = Query(None)
+):
+    """
+    Desvincula un perfil de contacto de una colección de documentos.
+    """
+    decoded_topic = unquote(topic)
+    success = await unlink_profile_from_collection(
+        account_id=current_account_id,
+        topic_name=decoded_topic,
+        profile_id=profile_link_request.profile_id,
+        workspace_id=workspace_id,
+        team_id=team_id
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Vínculo no encontrado, o colección/perfil no autorizado.")
+    return {"message": f"Perfil {profile_link_request.profile_id} desvinculado de la colección {decoded_topic} correctamente."}
 
 @router.post("/extract-title", summary="Extraer títulos de documentos y actualizar metadatos")
 async def extract_titles_endpoint(request: ExtractTitleRequest, current_account_id: str = Depends(get_current_account_id)):

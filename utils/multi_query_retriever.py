@@ -10,7 +10,7 @@ import asyncio
 from typing import List, Dict, Optional, Set
 from langchain_core.messages import HumanMessage
 from core.llm_manager import get_fast_llm
-from core.memory_manager import search_vector_db_optimized
+from core.memory_manager import get_relevant_memories
 
 logger = logging.getLogger(__name__)
 
@@ -96,22 +96,26 @@ class MultiQueryRetriever:
         # 2. Ejecutar búsquedas en paralelo
         search_tasks = []
         for query in queries:
-            task = search_vector_db_optimized(
+            task = get_relevant_memories(
                 account_id=account_id,
                 query=query,
-                content_type=content_type,
-                topics=topics, # Pasar topics (plural)
-                category=category,
+                filter_topics=topics,
                 workspace_id=workspace_id,
                 team_id=team_id,
                 visibility_teams=visibility_teams,
-                document_ids=document_ids,
-                k=k
+                filter_document_ids=document_ids,
+                k=k,
+                hybrid_search=True,
+                reranking=True
             )
             search_tasks.append(task)
         
         try:
-            all_results = await asyncio.gather(*search_tasks)
+            all_tool_outputs = await asyncio.gather(*search_tasks)
+            all_results = []
+            for output in all_tool_outputs:
+                all_results.append([{"document": s.snippet, "cmetadata": s.metadata} for s in output.sources])
+            
             logger.info(f"✅ Completadas {len(all_results)} búsquedas")
             
             # 3. Fusionar resultados
@@ -123,18 +127,19 @@ class MultiQueryRetriever:
         except Exception as e:
             logger.error(f"❌ Error en búsquedas múltiples: {e}")
             # Fallback a búsqueda simple
-            return await search_vector_db_optimized(
+            fallback_output = await get_relevant_memories(
                 account_id=account_id,
                 query=original_query,
-                content_type=content_type,
-                topics=topics, # Pasar topics (plural)
-                category=category,
+                filter_topics=topics,
                 workspace_id=workspace_id,
                 team_id=team_id,
                 visibility_teams=visibility_teams,
-                document_ids=document_ids,
-                k=k
+                filter_document_ids=document_ids,
+                k=k,
+                hybrid_search=True,
+                reranking=True
             )
+            return [{"document": s.snippet, "cmetadata": s.metadata} for s in fallback_output.sources]
     
     def _reciprocal_rank_fusion(self, all_results: List[List[Dict]], k: int) -> List[Dict]:
         """
