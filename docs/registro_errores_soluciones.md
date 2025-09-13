@@ -4,6 +4,44 @@ Este documento sirve como una bitácora para registrar los errores encontrados d
 
 ---
 
+## 12-09-2025 - `ValueError` por tipo de dato incorrecto en `Reranker`
+
+-   **Error**: Se produjo un `ValueError: text input must be of type 'str' (single example), 'list[str]' (batch or single pretokenized example) or 'list[list[str]]' (batch of pretokenized examples)` en `core/memory_manager.py` al llamar a la función `reranker.rerank`.
+-   **Causa**: La función `rerank` en `core/reranker.py` esperaba recibir una lista de cadenas de texto (`list[str]`). Sin embargo, desde `core/memory_manager.py`, se le estaba pasando una lista de objetos `Document` de LangChain, lo que causaba un error de tipo en el tokenizador de Hugging Face.
+-   **Solución**: Se implementó una solución en dos partes para corregir el flujo de datos y mantener la coherencia:
+    1.  **En `core/reranker.py`**: Se modificó la función `rerank` para que acepte una lista de objetos `Document`. La función ahora extrae el atributo `page_content` de cada documento para pasarlo al tokenizador. Después de calcular las puntuaciones, las añade a los metadatos de cada objeto `Document` original bajo la clave `rerank_score` y devuelve la lista de documentos reordenada.
+    2.  **En `core/memory_manager.py`**: Se actualizó la función `get_relevant_memories`. Al construir las fuentes para la citación, ahora busca la clave `rerank_score` (en lugar de la antigua `similarity_score`) en los metadatos del documento para reflejar la puntuación obtenida en el proceso de reordenamiento.
+
+---
+
+## 11-09-2025 - `NameError` y `ValidationError` en `core/memory_manager.py`
+
+-   **Error**: Se produjeron dos errores en `core/memory_manager.py`:
+    1.  `NameError: name 'similarity_threshold' is not defined` en la función `get_relevant_memories`.
+    2.  `ValidationError: 1 validation error for ToolOutputWithSources` al instanciar `ToolOutputWithSources` en un bloque `except`.
+-   **Causa**-
+    1.  La variable `similarity_threshold` se utilizaba en la instanciación de `KognitoPGVectorRetriever` sin haber sido definida como parámetro en la función `get_relevant_memories`.
+    2.  El modelo `ToolOutputWithSources` requiere el campo `context_for_llm`, pero en el bloque `except` se estaba intentando instanciar con un campo `content` que no existe en el modelo.
+-   **Solución**:
+    1.  Se añadió el parámetro `similarity_threshold: float = 0.7` a la firma de la función `get_relevant_memories` y se utilizó en la instanciación del `KognitoPGVectorRetriever`.
+    2.  Se corrigió la instanciación de `ToolOutputWithSources` en el bloque `except` para que utilice el campo `context_for_llm` en lugar de `content`.
+
+---
+
+## 11-09-2025 - `ImportError` por refactorización de `memory_manager`
+
+-   **Error**: Se produjeron múltiples errores `ImportError: cannot import name 'search_vector_db_optimized' from 'core.memory_manager'` en varias herramientas (`internal_knowledge_search_tool`, `memory_search_optimized_tool`, `natural_query_interpreter_tool`, `vector_db_search_tool`) y en `api/analysis.py`.
+-   **Causa**: La función `search_vector_db_optimized` y otras funciones relacionadas fueron eliminadas de `core/memory_manager.py` y reemplazadas por una función más potente y moderna llamada `get_relevant_memories`. Las herramientas que dependían de las funciones antiguas no habían sido actualizadas.
+-   **Solución**: Se refactorizaron todas las herramientas y utilidades (`utils/vector_db_query.py`) que usaban las funciones obsoletas para que utilizaran la nueva función `get_relevant_memories`. Esto implicó:
+    1.  Actualizar las sentencias `import` en los archivos de las herramientas.
+    2.  Adaptar las llamadas a la nueva firma de la función `get_relevant_memories`.
+    3.  Ajustar el procesamiento de los resultados para manejar el objeto `ToolOutputWithSources` que devuelve la nueva función.
+    4.  Se unificaron las herramientas `MemorySearchOptimizedTool`, `VectorDBQueryTool` y `VectorDBSearchTool` en una sola herramienta llamada `KnowledgeSearchTool` para eliminar redundancia.
+    5.  Se actualizó `core/tools.py` para importar y usar la nueva herramienta unificada.
+    6.  Se eliminó la importación innecesaria en `api/analysis.py`.
+
+---
+
 ## 07-08-2025 - `ValueError` en `Tool` por falta de `account_id`
 
 -   **Error**: Se produjo un `ValueError: "Tool" object has no field "account_id"` al intentar instanciar las herramientas `web_search` y `ddg_search_tool`.
@@ -57,7 +95,7 @@ Se solucionaron tres errores críticos que afectaban la experiencia del usuario 
 
 ---
 
-## 03-08-2025 - Error de Tipo en `KnowledgeAnalysisTool` por `NoneType` en `timedelta`
+## 03-08-2025 - `TypeError` en `KnowledgeAnalysisTool` por `NoneType` en `timedelta`
 
 -   **Error**: Se produjo un `TypeError: unsupported type for timedelta days component: NoneType` en `tools/knowledge_analysis_tool.py` al intentar calcular una fecha.
 -   **Causa**: El LLM, al interpretar la solicitud del usuario para un análisis de documentos recientes, no especificó un número de días, lo que resultó en que el parámetro `days_ago` se estableciera como `None`. La función `datetime.timedelta` no puede operar con un valor `None` para su componente `days`.
@@ -117,7 +155,8 @@ Se solucionaron tres errores críticos que afectaban la experiencia del usuario 
 
 ## 04-08-25 - Corrección de `TypeError` en `search_vector_db_optimized`
 
--   **Error**: Se produjo un `TypeError: search_vector_db_optimized() got an unexpected keyword argument 'topic'`.-   **Causa**: La función `search_vector_db_optimized` esperaba un argumento `topics` (en plural y como lista), pero se le estaba pasando `topic` (en singular) en las llamadas desde `search_memories`, `search_documents` y `search_vector_db`.
+-   **Error**: Se produjo un `TypeError: search_vector_db_optimized() got an unexpected keyword argument 'topic'`.
+-   **Causa**: La función `search_vector_db_optimized` esperaba un argumento `topics` (en plural y como lista), pero se le estaba pasando `topic` (en singular) en las llamadas desde `search_memories`, `search_documents` y `search_vector_db`.
 -   **Solución**: Se modificaron las llamadas a `search_vector_db_optimized` en `core/memory_manager.py` para pasar el argumento `topic` como `topics=[topic] if topic else None`, asegurando que la firma de la función se respete correctamente.
 
 ---
@@ -173,3 +212,25 @@ Se solucionaron tres errores críticos que afectaban la experiencia del usuario 
 - **Error**: Se produjo un `KeyError: 'content'` en `tools/github_repo_tool.py` al intentar añadir un repositorio de GitHub que contenía enlaces simbólicos (symlinks).
 - **Causa**: El código intentaba acceder a la clave `'content'` en la respuesta de la API de GitHub para cada archivo. Sin embargo, la respuesta para un enlace simbólico no contiene esta clave, lo que provocaba el error.
 - **Solución**: Se modificó el método `_add_as_knowledge_collection` en `tools/github_repo_tool.py` para comprobar el tipo de archivo antes de procesarlo. Si el tipo es `'symlink'`, el archivo se omite y se registra un mensaje, evitando así el `KeyError`.
+
+---
+
+## 11-09-2025 - `UndefinedColumn` en `task_contact_profiles_association`
+
+-   **Error**: Se produjo un `(psycopg.errors.UndefinedColumn) column task_contact_profiles_association_1.contact_profile_id does not exist` al intentar acceder a la tabla `task_contact_profiles_association`.
+-   **Causa**: La columna `contact_profile_id` no existía en la tabla `task_contact_profiles_association` en la base de datos, a pesar de haber sido definida en el modelo de SQLAlchemy. Esto ocurre cuando los cambios en el esquema de la base de datos no se aplican correctamente (por ejemplo, falta una migración).
+-   **Solución**: Se añadió manualmente la columna `contact_profile_id` a la tabla `task_contact_profiles_association` en la base de datos PostgreSQL mediante la siguiente sentencia SQL:
+    ```sql
+    ALTER TABLE task_contact_profiles_association
+    ADD COLUMN contact_profile_id UUID NOT NULL;
+    ```
+    Esta acción asegura que el esquema de la base de datos coincida con la definición del modelo de SQLAlchemy, resolviendo el error de columna indefinida.
+
+---
+## 10-09-2025 - `AttributeError: 'str' object has no attribute 'get'` en `WebSearchTool`
+
+-   **Error**: Se produjo un `AttributeError: 'str' object has no attribute 'get'` en `tools/web_search_tool.py` al procesar los resultados de una búsqueda.
+-   **Causa**: La herramienta `BraveSearch` de LangChain, después de una actualización reciente, devuelve los resultados de la búsqueda como una cadena de texto en formato JSON en lugar de una lista de diccionarios de Python. El código intentaba iterar directamente sobre esta cadena, tratando cada carácter como un resultado individual y provocando el error al intentar acceder a sus "atributos".
+-   **Solución**: Se modificó el método `_arun` en `tools/web_search_tool.py`. Ahora, la cadena JSON devuelta por `BraveSearch` se decodifica explícitamente en un objeto Python (una lista de diccionarios) usando `json.loads()`. Esto asegura que el método `_format_results` reciba los datos en el formato esperado, resolviendo el `AttributeError`. Se añadió también un manejo de errores para el caso de que la respuesta no sea un JSON válido.
+
+---

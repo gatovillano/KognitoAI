@@ -18,7 +18,6 @@ export default function TeamsPage() {
   const [open, setOpen] = useState(false);
   const [teams, setTeams] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [memberCounts, setMemberCounts] = useState<{ [key: string]: number }>({});
   const [shareDocumentsOpen, setShareDocumentsOpen] = useState(false);
   const [shareEventsOpen, setShareEventsOpen] = useState(false);
   const [shareNotesOpen, setShareNotesOpen] = useState(false);
@@ -37,21 +36,7 @@ export default function TeamsPage() {
     const fetchTeams = async () => {
       try {
         const response = await apiClient.get('/api/teams');
-        const teamsData = response.data;
-        setTeams(teamsData);
-        
-        // Fetch member count for each team
-        const counts: { [key: string]: number } = {};
-        for (const team of teamsData) {
-          try {
-            const membersResponse = await apiClient.get(`/api/teams/${team.id}/members`);
-            counts[team.id] = membersResponse.data.length;
-          } catch (error) {
-            console.error(`Error fetching members for team ${team.id}:`, error);
-            counts[team.id] = 0;
-          }
-        }
-        setMemberCounts(counts);
+        setTeams(response.data);
       } catch (error) {
         console.error("Error fetching teams:", error);
       } finally {
@@ -133,18 +118,9 @@ export default function TeamsPage() {
   const { toast } = useToast();
 
   const handleTeamCreated = async (newTeam: any) => {
-    setTeams([...teams, newTeam]); // Update local state immediately
     try {
       const response = await apiClient.get('/api/teams');
-      // Preserve the members_count from newTeam if it exists
-      const updatedTeams = response.data.map((team: any) => 
-        team.id === newTeam.id ? { ...team, members_count: newTeam.members_count } : team
-      );
-      // If the new team isn't in the response, add it
-      if (!response.data.some((team: any) => team.id === newTeam.id)) {
-        updatedTeams.push(newTeam);
-      }
-      setTeams(updatedTeams);
+      setTeams(response.data);
       toast({
         title: "Éxito",
         description: "Equipo creado correctamente.",
@@ -161,14 +137,9 @@ export default function TeamsPage() {
   };
 
   const handleTeamUpdated = async (updatedTeam: any) => {
-    setTeams(teams.map(t => t.id === updatedTeam.id ? updatedTeam : t)); // Update local state immediately
     try {
       const response = await apiClient.get('/api/teams');
-      // Preserve the members_count from updatedTeam if it exists
-      const updatedTeams = response.data.map((team: any) => 
-        team.id === updatedTeam.id ? { ...team, members_count: updatedTeam.members_count } : team
-      );
-      setTeams(updatedTeams);
+      setTeams(response.data);
       toast({
         title: "Éxito",
         description: "Equipo actualizado correctamente.",
@@ -302,7 +273,7 @@ export default function TeamsPage() {
                 </DropdownMenu>
               </CardHeader>
                 <CardContent className="p-4 pt-2">
-                  <p className="text-sm text-muted-foreground">{memberCounts[team.id] || 0} miembro(s)</p>
+                  <p className="text-sm text-muted-foreground">{team.members_count || 0} miembro(s)</p>
                 </CardContent>
             </Card>
           ))}

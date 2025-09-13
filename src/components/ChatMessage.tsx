@@ -34,6 +34,8 @@ interface ChatMessageProps {
     artifact?: Artifact;
     ragContext?: any[];
     sources?: Source[];
+    chunks?: string[]; // Añadir esta línea
+    tool_code?: string;
   };
   index: number;
   handleCopyMessage: (text: string) => void;
@@ -113,7 +115,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
         >
           <div className="flex items-start gap-3 max-w-[100%] mr-4" style={{ marginRight: '20px' }}>
             <div
-              className="rounded-3xl rounded-br-none px-4 py-2 shadow-sm bg-muted/80 backdrop-blur-sm text-foreground border border-border/10 max-w-[80%] md:max-w-lg relative min-w-[100px]">
+              className="rounded-3xl rounded-br-none px-4 py-2 shadow-sm bg-muted/80 backdrop-blur-sm text-foreground border border-border/10 relative min-w-[100px]">
               {/* Cola de la burbuja */}
               
               {isEditing ? (
@@ -201,6 +203,13 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
               </div>
               
               <div className="w-full">
+                {msg.tool_code && (
+                  <div className="bg-blue-900/20 p-3 rounded-lg text-sm text-blue-200 font-mono mb-4">
+                    <p className="font-bold mb-1">⚙️ Herramienta utilizada:</p>
+                    <pre className="whitespace-pre-wrap break-all">{JSON.stringify(JSON.parse(msg.tool_code), null, 2)}</pre>
+                  </div>
+                )}
+
                 {isEditing ? (
                   <textarea
                     value={editedText}
@@ -209,8 +218,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
                     placeholder="Edita tu mensaje aquí..."
                   />
                 ) : (
-                  <div className="text-base text-foreground break-words font-sans">
-                    <MarkdownRenderer content={msg.text} sources={msg.sources} />
+                  <div className="text-foreground break-words font-sans text-xl p-4">
+                    <MarkdownRenderer content={msg.text} fontSize="text-xl" />
                   </div>
                 )}
                
@@ -246,7 +255,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
                   disabled={isAudioLoading && playingMessageIndex === index}
                 >
                   {isAudioLoading && playingMessageIndex === index ? (
-                    <Loader2 className="h-3 w-3" />
+                    <Loader2 className="h-3 w-3 animate-spin" />
                   ) : playingMessageIndex === index ? (
                     isAudioPaused ? (
                       <Play className="h-3 w-3" />

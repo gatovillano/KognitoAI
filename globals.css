@@ -3,3 +3,31 @@
 body {
   font-weight: 700;
 }
+
+/* Estilos para Tiptap TaskList */
+.ProseMirror ul[data-type="taskList"] {
+  list-style: none;
+  padding: 0;
+}
+
+.ProseMirror ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start; /* Alinea el checkbox y el texto al inicio */
+  gap: 0.5rem; /* Espacio entre el checkbox y el texto */
+}
+
+.ProseMirror ul[data-type="taskList"] li > label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"] {
+  margin-top: 0.25rem; /* Ajuste fino para alinear el checkbox */
+  flex-shrink: 0; /* Evita que el checkbox se encoja */
+}
+
+.ProseMirror ul[data-type="taskList"] li > div {
+  flex-grow: 1; /* Permite que el contenido del texto ocupe el espacio restante */
+}

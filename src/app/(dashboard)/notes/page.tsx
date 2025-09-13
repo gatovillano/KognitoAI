@@ -6,15 +6,17 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, Notebook, Users, Edit, Trash2, MoreHorizontal, Info } from 'lucide-react';
+import { Plus, Notebook, Users, Edit, Trash2, MoreHorizontal, Info, Lightbulb, FileText, Link } from 'lucide-react'; // Añadido Link
 import { motion, AnimatePresence } from 'framer-motion';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { NoteDialog } from './note-dialog';
 import { ViewNoteDialog } from './view-note-dialog';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { DndProvider, useDrag, useDrop } from 'react-dnd';
-import { HTML5Backend } from 'react-dnd-html5-backend';
+// import { DndProvider, useDrag, useDrop } from 'react-dnd'; // Comentado
+// import { HTML5Backend } from 'react-dnd-html5-backend'; // Comentado
+import { ManageLinkedProfilesDialog } from './ManageLinkedProfilesDialog'; // Nueva importación
+import { ContactProfile } from '../profiles/page'; // Nueva importación
 
 export interface Note {
   id: number;
@@ -23,6 +25,10 @@ export interface Note {
   category: string;
   created_at: string;
   team_shared?: boolean | string;
+  team_id?: string;
+  workspace_id?: string;
+  workspace_name?: string; // NEW
+  workspace_color?: string; // NEW
 }
 
 export default function NotesPage() {
@@ -34,6 +40,8 @@ export default function NotesPage() {
   const [isNoteDialogOpen, setIsNoteDialogOpen] = useState(false);
   const [viewingNote, setViewingNote] = useState<Note | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isLinkProfileDialogOpen, setIsLinkProfileDialogOpen] = useState(false); // Nuevo estado
+  const [linkingNote, setLinkingNote] = useState<Note | null>(null); // Nuevo estado
 
   const fetchNotes = async () => {
     setIsLoading(true);
@@ -53,6 +61,63 @@ export default function NotesPage() {
 
   const handleSaveSuccess = () => {
     fetchNotes();
+  };
+
+  const handleAnalyzeAllNotes = async () => {
+    if (notes.length === 0) {
+      toast.info("No hay notas para analizar.");
+      return;
+    }
+
+    const toastId = toast.loading("Iniciando análisis de todas las notas...");
+    try {
+      const notesForAnalysis = notes.map(note => ({
+        id: note.id,
+        title: note.title || "Nota sin título",
+        content: note.content
+      }));
+
+      const response = await apiClient.post('/api/start-notes-collection-analysis', { notes: notesForAnalysis });
+      toast.success(`Análisis de notas iniciado. ID de tarea: ${response.data.task_id}`, { id: toastId });
+    } catch (error) {
+      toast.error("Error al iniciar el análisis de notas.", { id: toastId });
+      console.error("Error al iniciar el análisis de notas:", error);
+    }
+  };
+
+  const handleAnalyzeSingleNote = async (note: Note) => {
+    const toastId = toast.loading("Iniciando análisis de la nota...");
+    try {
+      const response = await apiClient.post('/api/start-single-note-analysis', {
+        title: note.title || "Nota sin título",
+        content: note.content,
+        note_id: note.id
+      });
+      toast.success(`Análisis de nota iniciado. ID de tarea: ${response.data.task_id}`, { id: toastId });
+    } catch (error) {
+      toast.error("Error al iniciar el análisis de la nota.", { id: toastId });
+      console.error("Error al iniciar el análisis de la nota:", error);
+    }
+  };
+
+  const handleLinkProfile = (note: Note) => { // Nueva función
+    setLinkingNote(note);
+    setIsLinkProfileDialogOpen(true);
+  };
+
+  const handleSummarizeSingleNote = async (note: Note) => {
+    const toastId = toast.loading("Iniciando resumen de la nota...");
+    try {
+      const response = await apiClient.post('/api/start-single-note-summary', {
+        title: note.title || "Nota sin título",
+        content: note.content,
+        note_id: note.id
+      });
+      toast.success(`Resumen de nota iniciado. ID de tarea: ${response.data.task_id}`, { id: toastId });
+    } catch (error) {
+      toast.error("Error al iniciar el resumen de la nota.", { id: toastId });
+      console.error("Error al iniciar el resumen de la nota:", error);
+    }
   };
 
   const handleDeleteConfirm = async () => {
@@ -83,14 +148,14 @@ export default function NotesPage() {
     }
   };
 
-  const NoteCard = ({ note }: { note: Note }) => {
-    const [{ isDragging }, drag] = useDrag({
-      type: 'NOTE',
-      item: { id: note.id, category: note.category },
-      collect: monitor => ({
-        isDragging: !!monitor.isDragging(),
-      }),
-    });
+  const NoteCard = ({ note, onAnalyzeNote, onSummarizeNote, onLinkProfile }: { note: Note, onAnalyzeNote: (note: Note) => void, onSummarizeNote: (note: Note) => void, onLinkProfile: (note: Note) => void }) => {
+    // const [{ isDragging }, drag] = useDrag({ // Comentado
+    //   type: 'NOTE',
+    //   item: { id: note.id, category: note.category },
+    //   collect: monitor => ({
+    //     isDragging: !!monitor.isDragging(),
+    //   }),
+    // });
 
     return (
       <motion.div
@@ -99,12 +164,12 @@ export default function NotesPage() {
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.8 }}
         transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        ref={drag as any}
+        // ref={drag as any} // Comentado
         className="h-full"
       >
         <Card
           className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full min-h-[200px]"
-          style={{ opacity: isDragging ? 0.5 : 1 }}
+          // style={{ opacity: isDragging ? 0.5 : 1 }} // Comentado
           onClick={() => {
             setViewingNote(note);
             setIsViewDialogOpen(true);
@@ -118,26 +183,58 @@ export default function NotesPage() {
                 </div>
                 <span className="font-semibold text-lg">{note.title || 'Nota sin título'}</span>
               </div>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 w-8 p-0 hover:bg-muted"
-                  onClick={(e) => { e.stopPropagation(); setEditingNote(note); setIsNoteDialogOpen(true); }}
-                  title="Editar nota"
-                >
-                  <Edit className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 w-8 p-0 hover:bg-destructive hover:text-destructive-foreground"
-                  onClick={(e) => { e.stopPropagation(); setDeletingNote(note); }}
-                  title="Eliminar nota"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-[180px]">
+                  <DropdownMenuItem onClick={(e) => {
+                    e.stopPropagation();
+                    setEditingNote(note);
+                    setIsNoteDialogOpen(true);
+                  }}>
+                    <Edit className="mr-2 h-4 w-4" />
+                    Editar nota
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={(e) => {
+                    e.stopPropagation();
+                    setDeletingNote(note);
+                  }}>
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Eliminar nota
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={(e) => {
+                    e.stopPropagation();
+                    onAnalyzeNote(note);
+                  }}>
+                    <Lightbulb className="mr-2 h-4 w-4" />
+                    Analizar Nota
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={(e) => {
+                    e.stopPropagation();
+                    onSummarizeNote(note);
+                  }}>
+                    <FileText className="mr-2 h-4 w-4" />
+                    Resumen Semántico
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator /> {/* Separador para el nuevo botón */}
+                  <DropdownMenuItem onClick={(e) => {
+                    e.stopPropagation();
+                    onLinkProfile(note);
+                  }}> {/* Nuevo botón */}
+                    <Link className="mr-2 h-4 w-4" />
+                    Vincular a Perfil
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0 flex-grow">
@@ -150,8 +247,19 @@ export default function NotesPage() {
             </div>
           </CardContent>
           <CardFooter className="flex justify-between items-center text-xs text-muted-foreground pt-3 mt-auto border-t border-border/50">
-            <span>{note.category}</span>
-            <div className="flex items-center gap-2">
+            <span className="truncate pr-2">{note.category}</span>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {note.workspace_name && (
+                <span
+                  className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border"
+                  style={{
+                    color: note.workspace_color || '#888888',
+                    borderColor: note.workspace_color || '#888888'
+                  }}
+                >
+                  {note.workspace_name}
+                </span>
+              )}
               {note.team_shared && <span title="Compartido con equipo"><Users className="h-4 w-4" /></span>}
               <span>{new Date(note.created_at).toLocaleDateString()}</span>
             </div>
@@ -162,20 +270,20 @@ export default function NotesPage() {
   };
 
   const CategoryDropZone = ({ category, children }: { category: string; children: React.ReactNode }) => {
-    const [{ isOver }, drop] = useDrop({
-      accept: 'NOTE',
-      drop: (item: { id: number; category: string }) => {
-        if (item.category !== category) {
-          updateNoteCategory(item.id, category);
-        }
-      },
-      collect: monitor => ({
-        isOver: !!monitor.isOver(),
-      }),
-    });
+    // const [{ isOver }, drop] = useDrop({ // Comentado
+    //   accept: 'NOTE',
+    //   drop: (item: { id: number; category: string }) => {
+    //     if (item.category !== category) {
+    //       updateNoteCategory(item.id, category);
+    //     }
+    //   },
+    //   collect: monitor => ({
+    //     isOver: !!monitor.isOver(),
+    //   }),
+    // });
 
     return (
-      <div ref={drop as any} className="p-4 rounded-lg" style={{ backgroundColor: isOver ? 'rgba(147, 112, 219, 0.1)' : 'transparent' }}>
+      <div /* ref={drop as any} */ className="p-4 rounded-lg" /* style={{ backgroundColor: isOver ? 'rgba(147, 112, 219, 0.1)' : 'transparent' }} */> {/* Comentado */}
         <h2 className="text-xl font-semibold mb-4 px-2">{category}</h2>
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
           {children}
@@ -221,7 +329,7 @@ export default function NotesPage() {
             {Object.entries(groupedNotes).map(([category, categoryNotes]) => (
               <CategoryDropZone key={category} category={category}>
                 {categoryNotes.map((note) => (
-                  <NoteCard key={note.id} note={note} />
+                  <NoteCard key={note.id} note={note} onAnalyzeNote={handleAnalyzeSingleNote} onSummarizeNote={handleSummarizeSingleNote} onLinkProfile={handleLinkProfile} />
                 ))}
               </CategoryDropZone>
             ))}
@@ -234,7 +342,7 @@ export default function NotesPage() {
       <motion.div layout className="grid gap-6 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-3">
         <AnimatePresence>
           {notes.map((note) => (
-            <NoteCard key={note.id} note={note} />
+            <NoteCard key={note.id} note={note} onAnalyzeNote={handleAnalyzeSingleNote} onSummarizeNote={handleSummarizeSingleNote} onLinkProfile={handleLinkProfile} />
           ))}
         </AnimatePresence>
       </motion.div>
@@ -242,8 +350,7 @@ export default function NotesPage() {
   };
 
   return (
-    <DndProvider backend={HTML5Backend}>
-      <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold flex items-center">
@@ -279,6 +386,20 @@ export default function NotesPage() {
                 <DropdownMenuItem onClick={() => setCategoryView(!categoryView)}>
                   {categoryView ? "Vista General" : "Vista por Categoría"}
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleAnalyzeAllNotes}>
+                  <Lightbulb className="mr-2 h-4 w-4" />
+                  Analizar Notas
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => toast.info("Funcionalidad 'Resumen Semántico' en desarrollo.")}>
+                  <FileText className="mr-2 h-4 w-4" />
+                  Resumen Semántico
+                </DropdownMenuItem>
+                {/* <DropdownMenuSeparator /> // No es necesario si no hay más elementos */}
+                {/* <DropdownMenuItem onClick={() => handleLinkProfile(null as any)}> // Este botón no va aquí, va en la tarjeta */}
+                {/*   <Link className="mr-2 h-4 w-4" /> */}
+                {/*   Vincular Nota a Perfil */}
+                {/* </DropdownMenuItem> */}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -297,7 +418,17 @@ export default function NotesPage() {
           isOpen={isViewDialogOpen}
           onOpenChange={setIsViewDialogOpen}
           note={viewingNote}
+          onNoteUpdated={fetchNotes}
         />
+
+        {linkingNote && ( // Renderizado condicional del diálogo de vinculación
+          <ManageLinkedProfilesDialog
+            isOpen={isLinkProfileDialogOpen}
+            onOpenChange={setIsLinkProfileDialogOpen}
+            note={linkingNote} // Pasar la nota directamente
+            onLinkedProfilesUpdated={fetchNotes} // Para refrescar las notas si es necesario
+          />
+        )}
 
         <AlertDialog open={!!deletingNote} onOpenChange={(open) => !open && setDeletingNote(null)}>
           <AlertDialogContent>
@@ -314,6 +445,5 @@ export default function NotesPage() {
           </AlertDialogContent>
         </AlertDialog>
       </div>
-    </DndProvider>
   );
 }

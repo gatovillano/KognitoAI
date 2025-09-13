@@ -17,7 +17,7 @@ from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 
-from core.memory_manager import search_vector_db_optimized
+from core.memory_manager import get_relevant_memories
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +148,7 @@ Responde SOLO en formato JSON válido:
     ) -> str:
         """Ejecuta la interpretación y búsqueda automática."""
         try:
-            logger.info(f"🔍 Interpretando consulta natural: '{query[:100]}...' ")
+            logger.info(f"🔍 Interpretando consulta natural: '{query[:100]}' ... ")
             
             # 1. Interpretar la consulta
             interpretation = await self._interpret_query(query, context or "")
@@ -166,38 +166,34 @@ Responde SOLO en formato JSON válido:
             logger.info(f"🧠 Confianza: {confidence:.2f} - Razonamiento: {reasoning}")
             
             # 3. Ejecutar búsqueda optimizada
-            results = await search_vector_db_optimized(
+            results = await get_relevant_memories(
                 account_id=self.account_id,
                 query=search_terms,
                 content_type=content_type,
-                topic=topic,
+                filter_topics=[topic] if topic else None,
                 category=category,
                 workspace_id=self.workspace_id,
                 k=k
             )
             
             # 4. Formatear resultados
-            if not results:
+            if not results or not results.sources:
                 return f"❌ No encontré información relevante para: '{query}'\n\n🔍 Parámetros de búsqueda utilizados:\n- Términos: {search_terms}\n- Tipo: {content_type or 'todos'}\n- Tema: {topic or 'cualquiera'}\n- Categoría: {category or 'cualquiera'}"
             
             # Formatear resultados encontrados
             formatted_results = []
-            for i, result in enumerate(results[:k], 1):
-                # Manejar tanto el formato nuevo (content/metadata) como el antiguo (document/cmetadata)
-                metadata = result.get('metadata', result.get('cmetadata', {}))
-                content = result.get('content', result.get('document', ''))
-                score = result.get('similarity_score', 0)
-
-                result_type = metadata.get('type', 'unknown')
-                source = metadata.get('file_name', metadata.get('source', 'memoria'))
+            for i, source in enumerate(results.sources, 1):
+                score = source.metadata.get('similarity_score', 0)
+                result_type = source.metadata.get('type', 'unknown')
+                source_name = source.title or source.file_path or "memoria"
 
                 formatted_results.append(
                     f"📄 **Resultado {i}** (relevancia: {1-score:.2f})\n"
-                    f"**Fuente:** {source} | **Tipo:** {result_type}\n"
-                    f"**Contenido:** {content[:5000]}{'...' if len(content) > 200 else ''}\n"
+                    f"**Fuente:** {source_name} | **Tipo:** {result_type}\n"
+                    f"**Contenido:** {source.snippet[:5000]}{'...' if len(source.snippet) > 200 else ''}\n"
                 )
             
-            response = f"✅ **Encontré {len(results)} resultados para:** '{query}'\n\n"
+            response = f"✅ **Encontré {len(results.sources)} resultados para:** '{query}'\n\n"
             response += f"🎯 **Interpretación automática:**\n"
             response += f"- Términos de búsqueda: {search_terms}\n"
             response += f"- Tipo de contenido: {content_type or 'todos'}\n"

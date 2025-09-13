@@ -70,7 +70,7 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
               <BarChart3 className="h-5 w-5" />
-              Análisis Completo de la Colección "{topic}"
+              Análisis Completo de la Colección &quot;{topic}&quot;
             </DialogTitle>
             <DialogDescription>
               Análisis profundo e interactivo de la colección con temas transversales, conexiones y brechas de conocimiento

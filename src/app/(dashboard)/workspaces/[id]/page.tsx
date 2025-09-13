@@ -7,10 +7,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { ArrowLeft, Bot, Plus, MessageSquare, BookMarked, MoreVertical, Sparkles } from 'lucide-react';
+import { ArrowLeft, Bot, Plus, MessageSquare, BookMarked, MoreVertical, Sparkles, Calendar, Notebook, ListTodo } from 'lucide-react';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import apiClient from '@/lib/api';
 import { CreateWorkspaceCollectionDialog } from './CreateWorkspaceCollectionDialog';
+import { AgendaEvent, TaskResponse } from '../../agenda/page'; // Import types from agenda page
+import { Note } from '../../notes/page'; // Import type from notes page
+import { EventDialog } from '../../agenda/event-dialog'; // Import EventDialog
+import { TaskDialog } from '../../agenda/task-dialog'; // Import TaskDialog
+import { NoteDialog } from '../../notes/note-dialog'; // Import NoteDialog
+import { ViewNoteDialog } from '../../notes/view-note-dialog'; // Import ViewNoteDialog
 
 interface ChatThread {
   id: string;
@@ -47,6 +53,9 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const [chats, setChats] = useState<ChatThread[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [chatMessages, setChatMessages] = useState<{ [key: string]: any[] }>({});
+  const [agendaEvents, setAgendaEvents] = useState<AgendaEvent[]>([]); // New state for agenda events
+  const [tasks, setTasks] = useState<TaskResponse[]>([]); // New state for tasks
+  const [notes, setNotes] = useState<Note[]>([]); // New state for notes
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
@@ -62,39 +71,60 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
   const [availableWorkspaces, setAvailableWorkspaces] = useState<Workspace[]>([]);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
+  const [isEventDialogOpen, setIsEventDialogOpen] = useState(false); // New state for EventDialog
+  const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false); // New state for TaskDialog
+  const [isNoteDialogOpen, setIsNoteDialogOpen] = useState(false); // New state for NoteDialog
+  const [selectedNote, setSelectedNote] = useState<Note | null>(null); // New state for selected note
+  const [isViewNoteDialogOpen, setIsViewNoteDialogOpen] = useState(false); // New state for ViewNoteDialog
+  const [selectedNoteCategory, setSelectedNoteCategory] = useState<string>('Todas'); // New state for note category filter
+
+  const fetchWorkspaceData = async () => {
+    try {
+      // Obtener información del workspace
+      const workspaceResponse = await apiClient.get(`/api/workspaces/${workspaceId}`);
+      setWorkspace(workspaceResponse.data);
+
+      // Obtener chats asociados con el workspace
+      const chatsResponse = await apiClient.get(`/api/threads?workspace_id=${workspaceId}`);
+      const chatsData = chatsResponse.data.filter((chat: ChatThread) => chat.workspace_id === workspaceId);
+      setChats(chatsData);
+
+      // Obtener mensajes de los chats
+      const messagesPromises = chatsData.map((chat: ChatThread) =>
+        apiClient.get(`/api/threads/${chat.id}/messages`).then(res => ({ id: chat.id, messages: res.data }))
+      );
+      const messagesResults = await Promise.all(messagesPromises);
+      const messagesMap = messagesResults.reduce((acc, { id, messages }) => {
+        acc[id] = messages;
+        return acc;
+      }, {});
+      setChatMessages(messagesMap);
+
+      // Obtener colecciones asociadas con el workspace
+      const collectionsResponse = await apiClient.get(`/api/collections?workspace_id=${workspaceId}`);
+      setCollections(collectionsResponse.data);
+
+      // Fetch Agenda Events for this workspace
+      const eventsResponse = await apiClient.post('/api/list-events', { workspace_id: workspaceId });
+      setAgendaEvents(eventsResponse.data.filter((event: AgendaEvent) => event.workspace_id === workspaceId));
+
+      // Fetch Tasks for this workspace
+      const tasksResponse = await apiClient.get('/api/tasks', { params: { workspace_id: workspaceId } }); // Assuming API supports workspace_id param
+      setTasks(tasksResponse.data.filter((task: TaskResponse) => task.workspace_id === workspaceId));
+
+      // Fetch Notes for this workspace
+      const notesResponse = await apiClient.post('/api/list-notes', { workspace_id: workspaceId });
+      console.log("Notes response data:", notesResponse.data); // Add this line
+      setNotes(notesResponse.data);
+
+    } catch (error) {
+      console.error('Error fetching workspace data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchWorkspaceData = async () => {
-      try {
-        // Obtener información del workspace
-        const workspaceResponse = await apiClient.get(`/api/workspaces/${workspaceId}`);
-        setWorkspace(workspaceResponse.data);
-
-        // Obtener chats asociados con el workspace
-        const chatsResponse = await apiClient.get(`/api/threads?workspace_id=${workspaceId}`);
-        const chatsData = chatsResponse.data.filter((chat: ChatThread) => chat.workspace_id === workspaceId);
-        setChats(chatsData);
-
-        // Obtener mensajes de los chats
-        const messagesPromises = chatsData.map((chat: ChatThread) =>
-          apiClient.get(`/api/threads/${chat.id}/messages`).then(res => ({ id: chat.id, messages: res.data }))
-        );
-        const messagesResults = await Promise.all(messagesPromises);
-        const messagesMap = messagesResults.reduce((acc, { id, messages }) => {
-          acc[id] = messages;
-          return acc;
-        }, {});
-        setChatMessages(messagesMap);
-
-        // Obtener colecciones asociadas con el workspace
-        const collectionsResponse = await apiClient.get(`/api/collections?workspace_id=${workspaceId}`);
-        setCollections(collectionsResponse.data);
-      } catch (error) {
-        console.error('Error fetching workspace data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchWorkspaceData();
   }, [workspaceId]);
 
@@ -114,6 +144,24 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const filteredCollections = searchTerm
     ? collections.filter(col => (col.title || col.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
     : collections;
+
+  const filteredAgendaEvents = searchTerm
+    ? agendaEvents.filter(event => event.description.toLowerCase().includes(searchTerm.toLowerCase()))
+    : agendaEvents;
+
+  const filteredTasks = searchTerm
+    ? tasks.filter(task => task.description.toLowerCase().includes(searchTerm.toLowerCase()))
+    : tasks;
+
+  const filteredNotes = searchTerm
+    ? notes.filter(note => (note.title || '').toLowerCase().includes(searchTerm.toLowerCase()) || note.content.toLowerCase().includes(searchTerm.toLowerCase()))
+    : notes;
+
+  const uniqueNoteCategories = ['Todas', ...Array.from(new Set(notes.map(note => note.category)))];
+
+  const filteredNotesByCategory = selectedNoteCategory === 'Todas'
+    ? filteredNotes
+    : filteredNotes.filter(note => note.category === selectedNoteCategory);
 
   const handleNewChat = async () => {
     try {
@@ -444,8 +492,34 @@ const handleDeleteCollection = async (collectionId: string) => {
     );
   }
 
+  const handleEventSaveSuccess = (newEvent: AgendaEvent) => {
+    setAgendaEvents(prev => [...prev, newEvent].sort((a,b) => new Date(a.event_datetime_utc).getTime() - new Date(b.event_datetime_utc).getTime()));
+  };
+
+  const handleTaskSaveSuccess = (newTask: TaskResponse) => {
+    setTasks(prev => {
+      const existingIndex = prev.findIndex(t => t.id === newTask.id);
+      if (existingIndex > -1) {
+        const updatedTasks = [...prev];
+        updatedTasks[existingIndex] = newTask;
+        return updatedTasks;
+      } else {
+        return [...prev, newTask];
+      }
+    });
+  };
+
+  const handleNoteSaveSuccess = (newNote: Note) => {
+    setNotes(prev => [...prev, newNote].sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+  };
+
+  const handleNoteClick = (note: Note) => {
+    setSelectedNote(note);
+    setIsViewNoteDialogOpen(true);
+  };
+
   return (
-    <div>
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-3">
           <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -691,6 +765,178 @@ const handleDeleteCollection = async (collectionId: string) => {
         </p>
       </div>
 
+      {/* Agenda Section (NEW) */}
+      <div className="mb-12">
+        <div className="mb-6">
+          <div>
+            <h2 className="text-2xl font-semibold flex items-center">
+              <Calendar className="mr-3 h-6 w-6 text-primary" />
+              Agenda del Workspace
+            </h2>
+            <p className="text-muted-foreground mt-1">Eventos y tareas programadas para este espacio</p>
+          </div>
+        </div>
+        {filteredAgendaEvents.length === 0 && filteredTasks.length === 0 ? (
+          <div className="text-center py-16 border-2 border-dashed border-border rounded-xl">
+            <Calendar className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
+            <h3 className="text-xl font-semibold mb-2">
+              {searchTerm ? 'No hay eventos ni tareas que coincidan' : 'No hay eventos ni tareas aún'}
+            </h3>
+            <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+              Programa eventos y tareas específicas para este workspace.
+            </p>
+            {/* Add buttons to create new event/task if needed */}
+          </div>
+        ) : (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {/* Display Agenda Events */}
+            {filteredAgendaEvents.map((event) => (
+              <Card key={event.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="h-10 w-10 rounded-lg bg-purple-500/10 flex items-center justify-center flex-shrink-0">
+                        <Calendar className="h-5 w-5 text-purple-600" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm line-clamp-2">
+                          {event.description}
+                        </div>
+                      </div>
+                    </div>
+                    {/* Add dropdown for actions if needed */}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(event.event_datetime_local).toLocaleDateString()} {new Date(event.event_datetime_local).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    {/* Add status/team info if needed */}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+            {/* Display Tasks */}
+            {filteredTasks.map((task) => (
+              <Card key={task.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="h-10 w-10 rounded-lg bg-orange-500/10 flex items-center justify-center flex-shrink-0">
+                        <ListTodo className="h-5 w-5 text-orange-600" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm line-clamp-2">
+                          {task.description}
+                        </div>
+                      </div>
+                    </div>
+                    {/* Add dropdown for actions if needed */}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                    <span className="text-xs text-muted-foreground">
+                      {task.due_date ? new Date(task.due_date).toLocaleDateString() : 'Sin fecha límite'}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <div className={`h-2 w-2 rounded-full ${task.is_completed ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                      <span className="text-xs text-muted-foreground">{task.is_completed ? 'Completada' : 'Pendiente'}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Notes Section (NEW) */}
+      <div className="mb-12">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-2xl font-semibold flex items-center">
+              <Notebook className="mr-3 h-6 w-6 text-primary" />
+              Notas del Workspace
+            </h2>
+            <p className="text-muted-foreground mt-1">Notas y apuntes específicos de este espacio</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline">
+                  Categoría: {selectedNoteCategory}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {uniqueNoteCategories.map(category => (
+                  <DropdownMenuItem key={category} onClick={() => setSelectedNoteCategory(category)}>
+                    {category}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button variant="outline" onClick={() => setIsNoteDialogOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Nueva Nota
+            </Button>
+          </div>
+        </div>
+        {filteredNotes.length === 0 ? (
+          <div className="text-center py-16 border-2 border-dashed border-border rounded-xl">
+            <Notebook className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
+            <h3 className="text-xl font-semibold mb-2">
+              {searchTerm ? 'No hay notas que coincidan' : 'No hay notas aún'}
+            </h3>
+            <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+              Crea notas para organizar tus ideas y conocimientos en este workspace.
+            </p>
+            {!searchTerm && (
+              <Button onClick={() => setIsNoteDialogOpen(true)} size="lg">
+                <Plus className="mr-2 h-5 w-5" />
+                Crear primera Nota
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {filteredNotesByCategory.map((note) => (
+              <Card key={note.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleNoteClick(note)}>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="h-10 w-10 rounded-lg bg-yellow-500/10 flex items-center justify-center flex-shrink-0">
+                        <Notebook className="h-5 w-5 text-yellow-600" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm line-clamp-2">
+                          {note.title || 'Nota sin título'}
+                        </div>
+                      </div>
+                    </div>
+                    {/* Add dropdown for actions if needed */}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
+                    {note.content}
+                  </p>
+                  <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                    <span className="text-xs text-muted-foreground">
+                      {note.category}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(note.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
       <CreateWorkspaceCollectionDialog 
         isOpen={createCollectionDialogOpen} 
         onOpenChange={setCreateCollectionDialogOpen} 
@@ -827,6 +1073,33 @@ const handleDeleteCollection = async (collectionId: string) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Dialogs for new items */}
+      <EventDialog
+        isOpen={isEventDialogOpen}
+        onOpenChange={setIsEventDialogOpen}
+        onSaveSuccess={handleEventSaveSuccess}
+        workspaceId={workspaceId}
+      />
+      <TaskDialog
+        isOpen={isTaskDialogOpen}
+        onOpenChange={setIsTaskDialogOpen}
+        onSaveSuccess={handleTaskSaveSuccess}
+        workspaceId={workspaceId}
+      />
+      <NoteDialog
+        isOpen={isNoteDialogOpen}
+        onOpenChange={setIsNoteDialogOpen}
+        onSaveSuccess={handleNoteSaveSuccess}
+        workspaceId={workspaceId}
+      />
+
+      <ViewNoteDialog
+        note={selectedNote}
+        isOpen={isViewNoteDialogOpen}
+        onOpenChange={setIsViewNoteDialogOpen}
+        onNoteUpdated={fetchWorkspaceData} // Llamar a fetchWorkspaceData para recargar las notas
+      />
     </div>
   );
 }

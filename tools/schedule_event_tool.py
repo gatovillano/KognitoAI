@@ -52,7 +52,8 @@ class ScheduleEventTool(BaseTool):
             success, message, new_event = await schedule_event(
                 account_id=self.account_id,
                 description=description,
-                natural_language_datetime=natural_language_datetime
+                natural_language_datetime=natural_language_datetime,
+                workspace_id=self.workspace_id
             )
 
             if success and new_event:

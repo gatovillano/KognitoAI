@@ -1,0 +1,455 @@
+# Memoria de Sesión del LLM
+
+## Resumen del Proyecto Kognito AI System:
+
+Kognito AI System es un "exocerebro digital" personalizable y colaborativo que integra IA avanzada, grafos de conocimiento (Cognee + Neo4j), gestión de memoria vectorial (PGVector) y una interfaz multi-plataforma (Telegram Bot, Web App, Next.js Dashboard).
+
+**Características Principales:**
+- **Sistema de Conocimiento Híbrido:** Grafos de conocimiento con Neo4j y búsqueda vectorial con PGVector para una búsqueda inteligente y visualización interactiva.
+- **IA Avanzada:** Agente de IA conversacional (KAI) con más de 30 herramientas.
+- **Gestión de Conocimiento:** Documentos, notas colaborativas, insights proactivos y migración automática.
+- **Productividad:** Gestión de agenda, entrada multimodal y colaboración en equipo.
+- **Interfaces:** Bot de Telegram, Panel Web, Frontend Web (Next.js) y Neo4j Browser.
+
+**Arquitectura:**
+Sistema de microservicios con Backend (FastAPI), Frontend Web (Next.js), Telegram Client, Telegram Panel, Bases de Datos (PostgreSQL + PGVector, Neo4j) y módulos para Grafos de Conocimiento.
+
+**Stack Tecnológico:**
+Python 3.11, FastAPI, LangChain, LangGraph, Google Generative AI, Cognee, Neo4j, Next.js 14, React, TypeScript, Docker, Docker Compose, Nginx.
+
+**Configuración:**
+Requiere Docker, Docker Compose, 8GB RAM y Google API Key. Se configura mediante variables de entorno en un archivo `.env` y se inicia con `docker-compose up -d`.
+## Resumen de `core/llm_manager.py`:
+
+Este módulo es el **corazón de la interacción con los Modelos de Lenguaje Grandes (LLMs)** en Kognito AI. Se encarga de la inicialización, gestión y uso de diferentes LLMs, priorizando Google Generative AI.
+
+**Funcionalidades Clave:**
+-   **`RateLimitedChatModel`**: Un wrapper para `BaseChatModel` que introduce un retraso configurable antes de cada llamada a un LLM para evitar exceder los límites de tasa de las APIs.
+-   **Inicialización de LLMs (`initialize_llms`)**:
+    -   Configura dos instancias globales de LLM: `_main_agent_llm_instance` (para el agente principal, usando `google_main_model_name`) y `_fast_task_llm_instance` (para tareas rápidas, usando `google_summary_model_name`).
+    -   Utiliza `ChatGoogleGenerativeAI` y `ChatOpenAI` (aunque la inicialización actual se enfoca en Google).
+    -   Aplica el `RateLimitedChatModel` a ambos LLMs.
+    -   Maneja errores y fallbacks si un LLM no puede inicializarse.
+-   **`get_main_llm()` y `get_fast_llm()`**: Funciones para obtener las instancias de LLM inicializadas.
+-   **`get_enhanced_llm_response()`**: La función principal para obtener respuestas del LLM, que puede enriquecerse con contexto del grafo de conocimiento.
+    -   Llama a `_get_enhanced_context` para obtener contexto del grafo si `use_knowledge_graph` es `True`.
+    -   Construye un prompt enriquecido con este contexto (`_build_enriched_prompt`).
+    -   Invoca al LLM principal (`llm.ainvoke(enriched_prompt)`).
+    -   Guarda la interacción enriquecida (`_save_enhanced_interaction`).
+-   **`_get_enhanced_context()`**: Integra el `EnhancedMemoryManager` y `GraphDB` para obtener contexto del grafo de conocimiento, requiriendo las credenciales de Neo4j.
+-   **`_build_enriched_prompt()`**: Construye el prompt final para el LLM, incorporando entidades, relaciones, insights y caminos de razonamiento del grafo de conocimiento.
+-   **`_save_enhanced_interaction()`**: Placeholder para guardar las interacciones enriquecidas.
+-   **`_get_traditional_response()`**: Función de fallback para obtener una respuesta del LLM sin contexto enriquecido en caso de error.
+
+**Conexión con `config.py`**: Este módulo utiliza intensivamente las `settings` definidas en `core.config` para obtener los nombres de los modelos, API keys, temperaturas y timeouts.
+
+**Importancia**: Este archivo es crucial porque define cómo Kognito AI interactúa con los modelos de IA, cómo gestiona las limitaciones de tasa, y cómo integra el conocimiento del grafo para generar respuestas más ricas y contextualizadas.
+## Resumen de `core/agent.py`:
+
+Este módulo es el **núcleo de la inteligencia de Kognito AI**. Se encarga de orquestar la interacción entre el modelo de lenguaje (LLM), las herramientas disponibles y la memoria del usuario para generar respuestas coherentes y útiles. Su arquitectura se basa en el framework **LangGraph**, lo que permite un flujo de ejecución modular y robusto.
+
+**Arquitectura Clave y Componentes:**
+1.  **Manejo Manual de Memoria**: A diferencia de las clases de memoria de LangChain, Kognito AI utiliza un ciclo explícito (cargar historial, procesar, guardar historial) para un control más preciso y robusto en un entorno de API.
+2.  **Prompt Dinámico Centralizado**: Construye un `SystemMessage` único al inicio de cada ejecución. Este prompt integra:
+    *   El perfil del usuario (`get_user_profile`).
+    *   Memorias relevantes recuperadas (`get_relevant_memories`).
+    *   El prompt de personalidad del asistente (desde `core.prompt_manager`).
+    *   Instrucciones sobre el uso de `account_id` y las herramientas.
+    *   Prompts específicos del `workspace` si están configurados.
+3.  **Inyección Explícita de IDs**: `account_id` y `telegram_id` se pasan al `AgentExecutor` a través del parámetro `config` de LangChain para que las herramientas tengan acceso a la información de la sesión.
+4.  **Inicialización de LLMs**: Depende de `core.llm_manager` para cargar las instancias de los modelos de lenguaje al inicio del servidor.
+5.  **`AgentState` (LangGraph)**: Define la estructura de datos que fluye a través del grafo del agente. Incluye:
+    *   `messages`: Historial de la conversación.
+    *   `account_id`, `telegram_id`, `workspace_id`: Identificadores de contexto.
+    *   `rag_context`: Contexto RAG explícito seleccionado por el usuario.
+    *   `sources`: Fuentes recuperadas para la citación.
+6.  **Nodos del Grafo (LangGraph)**:
+    *   **`call_model_node`**: El nodo principal donde el LLM es invocado.
+        *   Construye el prompt del sistema dinámicamente con perfil de usuario, memorias relevantes (obtenidas de `get_relevant_memories`, incluyendo fuentes para citación) y prompts de workspace.
+        *   Prepara el LLM principal (`get_main_llm`) y le vincula las herramientas disponibles (`get_all_langchain_tools`).
+        *   Invoca la cadena del LLM en modo streaming y envía fragmentos de la respuesta al frontend a través de WebSockets (`send_personal_message`), lo que mejora la experiencia de usuario.
+        *   Almacena las fuentes recuperadas en el estado para su uso posterior.
+    *   **`generate_response_node`**: Un nodo final que pasa el estado para que la aplicación frontend lo reciba, actuando como un punto de salida.
+7.  **Manejo de Contexto y Memoria Adicional**:
+    *   **`summarize_history_in_background`**: Resume mensajes en segundo plano usando un LLM rápido (`get_fast_llm`) y guarda este resumen en la memoria vectorial (`add_memory_to_vector_db`) sin borrar el historial completo, manteniendo el contexto para el LLM y el historial para el frontend.
+    *   **`update_thread_title_if_needed`, `force_update_thread_title`, `force_update_all_thread_titles`**: Funciones para generar y actualizar dinámicamente los títulos de los hilos de chat, mejorando la organización de las conversaciones. Incluyen notificaciones WebSocket para el frontend.
+    *   **`create_thread_for_account`**: Crea nuevos hilos de chat en la base de datos.
+
+**Conexiones con otros módulos**:
+*   `core.tools`: Para obtener las herramientas que el agente puede usar.
+*   `core.memory_manager`: Para obtener perfiles de usuario y memorias relevantes.
+*   `core.llm_manager`: Para obtener las instancias de los LLMs.
+*   `core.prompt_manager`: Para construir el prompt del sistema.
+*   `core.database`: Para interactuar con la base de datos (hilos de chat, cuentas, workspaces).
+*   `core.websocket_manager`: Para enviar mensajes en tiempo real al frontend.
+
+**Importancia**: `core/agent.py` es fundamental porque integra todos los componentes clave del sistema (LLMs, memoria, herramientas, perfiles de usuario, contextos de workspace) en un flujo de trabajo cohesivo y reactivo, permitiendo a Kognito AI funcionar como un asistente inteligente y contextualizado.
+
+--- Resumen de Conversación GOOGLE (2025-08-27 16:51:43) ---
+Aquí tienes un resumen conciso y coherente de la conversación:
+
+La conversación se centra en el **Kognito AI System**, un "exocerebro digital" personalizable y colaborativo. Este sistema integra IA avanzada, grafos de conocimiento (Cognee + Neo4j), gestión de memoria vectorial (PGVector) y múltiples interfaces (Telegram Bot, Web App, Next.js Dashboard). Sus características principales incluyen un sistema de conocimiento híbrido, un agente de IA conversacional (KAI) con más de 30 herramientas, gestión de conocimiento avanzada y funcionalidades de productividad. La arquitectura se basa en microservicios con un stack tecnológico que incluye Python 3.11, FastAPI, LangChain, LangGraph, Google Generative AI, Docker, entre otros.
+
+Se han detallado dos módulos clave del sistema:
+
+*   **`core/llm_manager.py`**: Este módulo es fundamental para la interacción con los Modelos de Lenguaje Grandes (LLMs). Se encarga de la inicialización y gestión de diferentes LLMs (priorizando Google Generative AI), aplicando un `RateLimitedChatModel` para evitar exceder los límites de tasa. También gestiona la obtención de respuestas enriquecidas con contexto del grafo de conocimiento y maneja fallbacks.
+*   **`core/agent.py`**: Constituye el núcleo de la inteligencia de Kognito AI, orquestando la interacción entre el LLM, las herramientas y la memoria del usuario mediante el framework LangGraph. Este módulo construye prompts dinámicos con perfiles de usuario y memorias relevantes, inyecta IDs de contexto (`account_id`, `telegram_id`) en el `AgentExecutor`, y utiliza nodos del grafo para invocar al LLM, enviar respuestas en streaming vía WebSockets y generar resúmenes del historial en segundo plano, además de actualizar dinámicamente los títulos de los hilos de chat.
+
+El estado actual de la conversación es que el usuario ha solicitado **leer recursivamente el directorio `core` y generar un documento explicativo** basado en su contenido.
+
+---
+Resumen de Conversación (Actualización):
+El asistente ha intentado leer recursivamente el directorio `core` para generar un documento explicativo. Se ha detectado que la información inicial estaba incompleta, y el usuario ha solicitado que se continúe la exploración para obtener todos los archivos. El asistente ha reconocido el problema y ha propuesto una estrategia para obtener la información completa.
+---
+
+
+--- Resumen de Conversación GOOGLE (2025-08-27 16:53:03) ---
+¡Entendido! Mis disculpas por la omisión. Procederé a realizar una lectura recursiva del directorio `core` una vez más para asegurarme de capturar todos los archivos y sus contenidos. Luego, generaré el documento explicativo completo con el resumen de cada uno.
+
+Gracias por tu paciencia y por señalar la información faltante.
+
+
+
+--- Resumen de Conversación GOOGLE (2025-08-27 16:59:58) ---
+Aquí tienes un resumen actualizado y conciso de la conversación, incluyendo la información más reciente de los archivos del directorio `core`:
+
+La conversación gira en torno al **Kognito AI System**, un "exocerebro digital" personalizable y colaborativo. Este sistema integra IA avanzada, grafos de conocimiento (Cognee + Neo4j), gestión de memoria vectorial (PGVector) y múltiples interfaces (Telegram Bot, Web App, Next.js Dashboard). Sus características principales incluyen un sistema de conocimiento híbrido, un agente de IA conversacional (KAI) con más de 30 herramientas, gestión de conocimiento avanzada y funcionalidades de productividad. La arquitectura se basa en microservicios con un stack tecnológico que incluye Python 3.11, FastAPI, LangChain, LangGraph, Google Generative AI, Docker, entre otros.
+
+Se han detallado varios módulos clave del sistema:
+
+*   **`core/llm_manager.py`**: Este módulo es fundamental para la interacción con los Modelos de Lenguaje Grandes (LLMs). Se encarga de la inicialización y gestión de diferentes LLMs (priorizando Google Generative AI), aplicando un `RateLimitedChatModel` para evitar exceder los límites de tasa. También gestiona la obtención de respuestas enriquecidas con contexto del grafo de conocimiento y maneja fallbacks.
+*   **`core/agent.py`**: Constituye el núcleo de la inteligencia de Kognito AI, orquestando la interacción entre el LLM, las herramientas y la memoria del usuario mediante el framework LangGraph. Este módulo construye prompts dinámicos con perfiles de usuario y memorias relevantes, inyecta IDs de contexto (`account_id`, `telegram_id`) en el `AgentExecutor`, y utiliza nodos del grafo para invocar al LLM, enviar respuestas en streaming vía WebSockets y generar resúmenes del historial en segundo plano, además de actualizar dinámicamente los títulos de los hilos de chat.
+*   **`core/prompt_manager.py`**: Este módulo centraliza la gestión de prompts para el agente de IA. La clase `PromptManager` carga, gestiona y formatea prompts, incluyendo los de sumarización, títulos de hilos y prompts enriquecidos con contexto del grafo de conocimiento. Su método `build_system_prompt` construye dinámicamente el prompt del sistema, integrando perfiles de usuario, memorias relevantes (RAG), resúmenes, prompts personalizados/de workspace, instrucciones de herramientas y overrides de modo.
+*   **`core/notes_manager.py`**: Encapsula la lógica de negocio para la gestión de notas en la base de datos. La clase `NotesManager` proporciona operaciones CRUD (Crear, Leer, Actualizar, Eliminar) sobre las notas, incluyendo la generación de embeddings para el contenido, la recuperación de notas personales y compartidas por equipos, y el formateo de las respuestas para el usuario.
+*   **`core/tool_base_classes.py`**: Define las clases base para las herramientas y sus salidas, con un enfoque en la gestión de fuentes de información. Incluye un `Enum` `SourceType` para categorizar las fuentes (web, documento, memoria, código, etc.), un modelo `Source` para representar una fuente individual con su ID, título, URL, snippet y metadatos, y el modelo `ToolOutputWithSources` para encapsular el contenido principal para el LLM junto con una lista de fuentes.
+
+El estado actual de la conversación es que el usuario ha solicitado **leer recursivamente el directorio `core` y generar un documento explicativo** basado en su contenido. El asistente ha realizado esta lectura y ahora dispone de información detallada sobre `prompt_manager.py`, `notes_manager.py` y `tool_base_classes.py`, además de los módulos previamente resumidos. El siguiente paso es generar el documento explicativo completo basándose en todo el contenido recopilado.
+
+--- Resumen de Conversación GOOGLE (2025-08-27 17:28:20) ---
+Aquí tienes un resumen actualizado y conciso de la conversación, incluyendo la información más reciente sobre los archivos del directorio `core`:
+
+La conversación se centra en el **Kognito AI System**, un "exocerebro digital" personalizable y colaborativo. Este sistema integra IA avanzada, grafos de conocimiento (Cognee + Neo4j), gestión de memoria vectorial (PGVector) y múltiples interfaces (Telegram Bot, Web App, Next.js Dashboard). Sus características principales incluyen un sistema de conocimiento híbrido, un agente de IA conversacional (KAI) con más de 30 herramientas, gestión de conocimiento avanzada y funcionalidades de productividad. La arquitectura se basa en microservicios con un stack tecnológico que incluye Python 3.11, FastAPI, LangChain, LangGraph, Google Generative AI, Docker, entre otros.
+
+Se han detallado varios módulos clave del sistema:
+
+*   **`core/llm_manager.py`**: Es el corazón de la interacción con los Modelos de Lenguaje Grandes (LLMs). Se encarga de la inicialización, gestión y uso de diferentes LLMs (priorizando Google Generative AI), aplicando un `RateLimitedChatModel` para evitar exceder los límites de tasa. También gestiona la obtención de respuestas enriquecidas con contexto del grafo de conocimiento y maneja fallbacks.
+*   **`core/agent.py`**: Constituye el núcleo de la inteligencia de Kognito AI, orquestando la interacción entre el LLM, las herramientas y la memoria del usuario mediante el framework LangGraph. Construye prompts dinámicos con perfiles de usuario y memorias relevantes, inyecta IDs de contexto en el `AgentExecutor`, y utiliza nodos del grafo para invocar al LLM, enviar respuestas en streaming vía WebSockets y generar resúmenes del historial en segundo plano, además de actualizar dinámicamente los títulos de los hilos de chat.
+*   **`core/prompt_manager.py`**: Centraliza la gestión de prompts para el agente de IA. La clase `PromptManager` carga, gestiona y formatea prompts (sumarización, títulos de hilos, enriquecidos con grafo), y su método `build_system_prompt` construye dinámicamente el prompt del sistema integrando perfiles de usuario, memorias relevantes (RAG), resúmenes, prompts personalizados/de workspace, instrucciones de herramientas y overrides de modo.
+*   **`core/notes_manager.py`**: Encapsula la lógica de negocio para la gestión de notas en la base de datos. La clase `NotesManager` proporciona operaciones CRUD, incluyendo la generación de embeddings, la recuperación de notas personales y compartidas por equipos, y el formateo de las respuestas para el usuario.
+*   **`core/tool_base_classes.py`**: Define las clases base para las herramientas y sus salidas, con un enfoque en la gestión de fuentes de información. Incluye un `Enum` `SourceType` para categorizar las fuentes, un modelo `Source` para representar una fuente individual, y el modelo `ToolOutputWithSources` para encapsular el contenido principal para el LLM junto con una lista de fuentes.
+*   **`core/config.py`**: Es el módulo de configuración central, que define y valida todas las configuraciones necesarias para la aplicación. Carga variables de entorno desde un archivo `.env`, configurando modelos de IA (Google Generative AI, OpenAI, Ollama), parámetros de LLM (temperatura, timeout), credenciales de Telegram, API Keys de servicios externos (Google, Brave Search, Tavily, GitHub), configuraciones de base de datos (PostgreSQL, Neo4j, Cognee), parámetros de RAG (chunking, embedding, reranking, búsqueda híbrida), loaders de documentos avanzados y umbrales para la vinculación proactiva de conocimiento. También define el prompt de sistema por defecto y realiza validaciones críticas.
+*   **`core/dependencies.py`**: Proporciona dependencias centralizadas para FastAPI, específicamente la función asíncrona `get_db_session` que entrega una sesión de base de datos (`AsyncSession`) con manejo automático de transacciones (commit/rollback) utilizando el patrón `DBSession` para garantizar consistencia y reutilización en los endpoints de la API.
+
+El estado actual de la conversación es que el usuario ha solicitado **leer recursivamente el directorio `core` y generar un documento explicativo** basado en su contenido. El asistente ha realizado esta lectura de varios archivos y ahora dispone de información detallada sobre `prompt_manager.py`, `notes_manager.py`, `tool_base_classes.py`, `config.py` y `dependencies.py`, además de los módulos previamente resumidos. El siguiente paso es continuar la lectura de los archivos restantes en el directorio `core` para luego generar el documento explicativo completo.
+
+--- Resumen de Conversación GOOGLE (2025-08-27 17:31:28) ---
+Aquí tienes un resumen actualizado y conciso de la conversación, incluyendo la información más reciente sobre los archivos del directorio `core`:
+
+La conversación se centra en el **Kognito AI System**, un "exocerebro digital" personalizable y colaborativo. Este sistema integra IA avanzada, grafos de conocimiento (Cognee + Neo4j), gestión de memoria vectorial (PGVector) y múltiples interfaces (Telegram Bot, Web App, Next.js Dashboard). Sus características principales incluyen un sistema de conocimiento híbrido, un agente de IA conversacional (KAI) con más de 30 herramientas, gestión de conocimiento avanzada y funcionalidades de productividad. La arquitectura se basa en microservicios con un stack tecnológico que incluye Python 3.11, FastAPI, LangChain, LangGraph, Google Generative AI, Docker, entre otros.
+
+Se han detallado varios módulos clave del sistema:
+
+*   **`core/llm_manager.py`**: Es el corazón de la interacción con los Modelos de Lenguaje Grandes (LLMs). Se encarga de la inicialización, gestión y uso de diferentes LLMs (priorizando Google Generative AI), aplicando un `RateLimitedChatModel` para evitar exceder los límites de tasa. También gestiona la obtención de respuestas enriquecidas con contexto del grafo de conocimiento y maneja fallbacks.
+*   **`core/agent.py`**: Constituye el núcleo de la inteligencia de Kognito AI, orquestando la interacción entre el LLM, las herramientas y la memoria del usuario mediante el framework LangGraph. Construye prompts dinámicos con perfiles de usuario y memorias relevantes, inyecta IDs de contexto en el `AgentExecutor`, y utiliza nodos del grafo para invocar al LLM, enviar respuestas en streaming vía WebSockets y generar resúmenes del historial en segundo plano, además de actualizar dinámicamente los títulos de los hilos de chat.
+*   **`core/prompt_manager.py`**: Centraliza la gestión de prompts para el agente de IA. La clase `PromptManager` carga, gestiona y formatea prompts (sumarización, títulos de hilos, enriquecidos con grafo), y su método `build_system_prompt` construye dinámicamente el prompt del sistema integrando perfiles de usuario, memorias relevantes (RAG), resúmenes, prompts personalizados/de workspace, instrucciones de herramientas y overrides de modo.
+*   **`core/notes_manager.py`**: Encapsula la lógica de negocio para la gestión de notas en la base de datos. La clase `NotesManager` proporciona operaciones CRUD, incluyendo la generación de embeddings, la recuperación de notas personales y compartidas por equipos, y el formateo de las respuestas para el usuario.
+*   **`core/tool_base_classes.py`**: Define las clases base para las herramientas y sus salidas, con un enfoque en la gestión de fuentes de información. Incluye un `Enum` `SourceType` para categorizar las fuentes, un modelo `Source` para representar una fuente individual, y el modelo `ToolOutputWithSources` para encapsular el contenido principal para el LLM junto con una lista de fuentes.
+*   **`core/config.py`**: Es el módulo de configuración central, que define y valida todas las configuraciones necesarias para la aplicación. Carga variables de entorno desde un archivo `.env`, configurando modelos de IA (Google Generative AI, OpenAI, Ollama), parámetros de LLM (temperatura, timeout), credenciales de Telegram, API Keys de servicios externos (Google, Brave Search, Tavily, GitHub), configuraciones de base de datos (PostgreSQL, Neo4j, Cognee), parámetros de RAG (chunking, embedding, reranking, búsqueda híbrida), loaders de documentos avanzados y umbrales para la vinculación proactiva de conocimiento. También define el prompt de sistema por defecto y realiza validaciones críticas.
+*   **`core/dependencies.py`**: Proporciona dependencias centralizadas para FastAPI, específicamente la función asíncrona `get_db_session` que entrega una sesión de base de datos (`AsyncSession`) con manejo automático de transacciones (commit/rollback) utilizando el patrón `DBSession` para garantizar consistencia y reutilización en los endpoints de la API.
+*   **`core/reranker.py`**: Implementa la clase `Reranker` como un singleton para mejorar la relevancia de los resultados de búsqueda. Utiliza el modelo `cross-encoder/ms-marco-MiniLM-L-6-v2` para re-rankear documentos basándose en una consulta, asignando puntuaciones de relevancia.
+*   **`core/prompts.py`**: Centraliza todos los prompts del sistema, plantillas y textos estáticos utilizados por el agente de IA (KAI). Incluye el `KAI_SYSTEM_PROMPT` con instrucciones clave de operación, el `SUMMARIZATION_PROMPT`, el `THREAD_TITLE_PROMPT` (con una lista de emojis), el `ENRICHED_PROMPT_TEMPLATE` para el grafo de conocimiento, el `SUMMARY_CONTEXT_PROMPT`, y el `KNOWLEDGE_SHARE_PRROMPT`, una plantilla detallada en Markdown para informes extensos con secciones específicas para resumen ejecutivo, análisis profundo, ejemplos, marcos regulatorios, rol de organizaciones, barreras/facilitadores, recomendaciones de política, preguntas de reflexión, conexiones con la base de conocimiento del usuario y una sección crítica para citar fuentes.
+
+Además, se ha identificado el directorio `core/retrieval_components/`, que contiene un subdirectorio `retrievers/`, indicando una organización modular para los componentes de recuperación de información.
+
+El estado actual de la conversación es que el usuario ha solicitado **leer recursivamente el directorio `core` y generar un documento explicativo** basado en su contenido. El asistente ha realizado esta lectura de varios archivos y ahora dispone de información detallada sobre `reranker.py`, `prompts.py` y la estructura de `retrieval_components/`, además de los módulos previamente resumidos. El siguiente paso es continuar la lectura de los archivos restantes en el directorio `core` para luego generar el documento explicativo completo.
+
+--- Resumen de Conversación GOOGLE (2025-08-27 17:32:22) ---
+Aquí tienes un resumen actualizado y conciso de la conversación, incluyendo la información más reciente sobre los archivos del directorio `core`:
+
+La conversación se centra en el **Kognito AI System**, un "exocerebro digital" personalizable y colaborativo. Este sistema integra IA avanzada, grafos de conocimiento (Cognee + Neo4j), gestión de memoria vectorial (PGVector) y múltiples interfaces (Telegram Bot, Web App, Next.js Dashboard). Sus características principales incluyen un sistema de conocimiento híbrido, un agente de IA conversacional (KAI) con más de 30 herramientas, gestión de conocimiento avanzada y funcionalidades de productividad. La arquitectura se basa en microservicios con un stack tecnológico que incluye Python 3.11, FastAPI, LangChain, LangGraph, Google Generative AI, Docker, entre otros.
+
+Se han detallado varios módulos clave del sistema:
+
+*   **`core/llm_manager.py`**: Es el corazón de la interacción con los Modelos de Lenguaje Grandes (LLMs). Se encarga de la inicialización, gestión y uso de diferentes LLMs (priorizando Google Generative AI), aplicando un `RateLimitedChatModel` para evitar exceder los límites de tasa. También gestiona la obtención de respuestas enriquecidas con contexto del grafo de conocimiento y maneja fallbacks.
+*   **`core/agent.py`**: Constituye el núcleo de la inteligencia de Kognito AI, orquestando la interacción entre el LLM, las herramientas y la memoria del usuario mediante el framework LangGraph. Construye prompts dinámicos con perfiles de usuario y memorias relevantes, inyecta IDs de contexto en el `AgentExecutor`, y utiliza nodos del grafo para invocar al LLM, enviar respuestas en streaming vía WebSockets y generar resúmenes del historial en segundo plano, además de actualizar dinámicamente los títulos de los hilos de chat.
+*   **`core/prompt_manager.py`**: Centraliza la gestión de prompts para el agente de IA. La clase `PromptManager` carga, gestiona y formatea prompts (sumarización, títulos de hilos, enriquecidos con grafo), y su método `build_system_prompt` construye dinámicamente el prompt del sistema integrando perfiles de usuario, memorias relevantes (RAG), resúmenes, prompts personalizados/de workspace, instrucciones de herramientas y overrides de modo.
+*   **`core/notes_manager.py`**: Encapsula la lógica de negocio para la gestión de notas en la base de datos. La clase `NotesManager` proporciona operaciones CRUD, incluyendo la generación de embeddings, la recuperación de notas personales y compartidas por equipos, y el formateo de las respuestas para el usuario.
+*   **`core/tool_base_classes.py`**: Define las clases base para las herramientas y sus salidas, con un enfoque en la gestión de fuentes de información. Incluye un `Enum` `SourceType` para categorizar las fuentes, un modelo `Source` para representar una fuente individual, y el modelo `ToolOutputWithSources` para encapsular el contenido principal para el LLM junto con una lista de fuentes.
+*   **`core/config.py`**: Es el módulo de configuración central, que define y valida todas las configuraciones necesarias para la aplicación. Carga variables de entorno desde un archivo `.env`, configurando modelos de IA (Google Generative AI, OpenAI, Ollama), parámetros de LLM (temperatura, timeout), credenciales de Telegram, API Keys de servicios externos (Google, Brave Search, Tavily, GitHub), configuraciones de base de datos (PostgreSQL, Neo4j, Cognee), parámetros de RAG (chunking, embedding, reranking, búsqueda híbrida), loaders de documentos avanzados y umbrales para la vinculación proactiva de conocimiento. También define el prompt de sistema por defecto y realiza validaciones críticas.
+*   **`core/dependencies.py`**: Proporciona dependencias centralizadas para FastAPI, específicamente la función asíncrona `get_db_session` que entrega una sesión de base de datos (`AsyncSession`) con manejo automático de transacciones (commit/rollback) utilizando el patrón `DBSession` para garantizar consistencia y reutilización en los endpoints de la API.
+*   **`core/reranker.py`**: Implementa la clase `Reranker` como un singleton para mejorar la relevancia de los resultados de búsqueda. Utiliza el modelo `cross-encoder/ms-marco-MiniLM-L-6-v2` para re-rankear documentos basándose en una consulta, asignando puntuaciones de relevancia.
+*   **`core/prompts.py`**: Centraliza todos los prompts del sistema, plantillas y textos estáticos utilizados por el agente de IA (KAI). Incluye el `KAI_SYSTEM_PROMPT` con instrucciones clave de operación, el `SUMMARIZATION_PROMPT`, el `THREAD_TITLE_PROMPT` (con una lista de emojis), el `ENRICHED_PROMPT_TEMPLATE` para el grafo de conocimiento, el `SUMMARY_CONTEXT_PROMPT`, y el `KNOWLEDGE_SHARE_PRROMPT`, una plantilla detallada en Markdown para informes extensos con secciones específicas para resumen ejecutivo, análisis profundo, ejemplos, marcos regulatorios, rol de organizaciones, barreras/facilitadores, recomendaciones de política, preguntas de reflexión, conexiones con la base de conocimiento del usuario y una sección crítica para citar fuentes.
+*   **`core/websocket_manager.py`**: Gestiona las conexiones WebSocket activas para la comunicación en tiempo real con los usuarios. Almacena las conexiones en un diccionario (`active_connections`) y proporciona funciones para `connect_websocket`, `disconnect_websocket` y `send_personal_message`, permitiendo el envío de mensajes JSON a cuentas específicas. Se señala la necesidad de un sistema Pub/Sub como Redis para entornos de producción con múltiples instancias de la API.
+
+Además, se ha identificado el directorio `core/retrieval_components/`, que contiene un subdirectorio `retrievers/`, el cual se ha verificado que está vacío.
+
+El estado actual de la conversación es que el usuario ha solicitado **leer recursivamente el directorio `core` y generar un documento explicativo** basado en su contenido. El asistente ha continuado la lectura de los archivos, incluyendo `websocket_manager.py`, y ahora dispone de información detallada sobre estos módulos. El siguiente paso es continuar la lectura de los archivos restantes en el directorio `core` para luego generar el documento explicativo completo.
+
+--- Resumen de Conversación GOOGLE (2025-08-27 17:33:01) ---
+Aquí tienes un resumen actualizado y conciso de la conversación, incluyendo la información más reciente sobre los archivos del directorio `core`:
+
+La conversación se centra en el **Kognito AI System**, un "exocerebro digital" personalizable y colaborativo. Este sistema integra IA avanzada, grafos de conocimiento (Cognee + Neo4j), gestión de memoria vectorial (PGVector) y múltiples interfaces (Telegram Bot, Web App, Next.js Dashboard). Sus características principales incluyen un sistema de conocimiento híbrido, un agente de IA conversacional (KAI) con más de 30 herramientas, gestión de conocimiento avanzada y funcionalidades de productividad. La arquitectura se basa en microservicios con un stack tecnológico que incluye Python 3.11, FastAPI, LangChain, LangGraph, Google Generative AI, Docker, entre otros.
+
+Se han detallado varios módulos clave del sistema:
+
+*   **`core/llm_manager.py`**: Es el corazón de la interacción con los Modelos de Lenguaje Grandes (LLMs). Se encarga de la inicialización, gestión y uso de diferentes LLMs (priorizando Google Generative AI), aplicando un `RateLimitedChatModel` para evitar exceder los límites de tasa. También gestiona la obtención de respuestas enriquecidas con contexto del grafo de conocimiento y maneja fallbacks.
+*   **`core/agent.py`**: Constituye el núcleo de la inteligencia de Kognito AI, orquestando la interacción entre el LLM, las herramientas y la memoria del usuario mediante el framework LangGraph. Construye prompts dinámicos con perfiles de usuario y memorias relevantes, inyecta IDs de contexto en el `AgentExecutor`, y utiliza nodos del grafo para invocar al LLM, enviar respuestas en streaming vía WebSockets y generar resúmenes del historial en segundo plano, además de actualizar dinámicamente los títulos de los hilos de chat.
+*   **`core/prompt_manager.py`**: Centraliza la gestión de prompts para el agente de IA. La clase `PromptManager` carga, gestiona y formatea prompts (sumarización, títulos de hilos, enriquecidos con grafo), y su método `build_system_prompt` construye dinámicamente el prompt del sistema integrando perfiles de usuario, memorias relevantes (RAG), resúmenes, prompts personalizados/de workspace, instrucciones de herramientas y overrides de modo.
+*   **`core/notes_manager.py`**: Encapsula la lógica de negocio para la gestión de notas en la base de datos. La clase `NotesManager` proporciona operaciones CRUD, incluyendo la generación de embeddings, la recuperación de notas personales y compartidas por equipos, y el formateo de las respuestas para el usuario.
+*   **`core/tool_base_classes.py`**: Define las clases base para las herramientas y sus salidas, con un enfoque en la gestión de fuentes de información. Incluye un `Enum` `SourceType` para categorizar las fuentes, un modelo `Source` para representar una fuente individual, y el modelo `ToolOutputWithSources` para encapsular el contenido principal para el LLM junto con una lista de fuentes.
+*   **`core/config.py`**: Es el módulo de configuración central, que define y valida todas las configuraciones necesarias para la aplicación. Carga variables de entorno desde un archivo `.env`, configurando modelos de IA (Google Generative AI, OpenAI, Ollama), parámetros de LLM (temperatura, timeout), credenciales de Telegram, API Keys de servicios externos (Google, Brave Search, Tavily, GitHub), configuraciones de base de datos (PostgreSQL, Neo4j, Cognee), parámetros de RAG (chunking, embedding, reranking, búsqueda híbrida), loaders de documentos avanzados y umbrales para la vinculación proactiva de conocimiento. También define el prompt de sistema por defecto y realiza validaciones críticas.
+*   **`core/dependencies.py`**: Proporciona dependencias centralizadas para FastAPI, específicamente la función asíncrona `get_db_session` que entrega una sesión de base de datos (`AsyncSession`) con manejo automático de transacciones (commit/rollback) utilizando el patrón `DBSession` para garantizar consistencia y reutilización en los endpoints de la API.
+*   **`core/reranker.py`**: Implementa la clase `Reranker` como un singleton para mejorar la relevancia de los resultados de búsqueda. Utiliza el modelo `cross-encoder/ms-marco-MiniLM-L-6-v2` para re-rankear documentos basándose en una consulta, asignando puntuaciones de relevancia.
+*   **`core/prompts.py`**: Centraliza todos los prompts del sistema, plantillas y textos estáticos utilizados por el agente de IA (KAI). Incluye el `KAI_SYSTEM_PROMPT` con instrucciones clave de operación, el `SUMMARIZATION_PROMPT`, el `THREAD_TITLE_PROMPT` (con una lista de emojis), el `ENRICHED_PROMPT_TEMPLATE` para el grafo de conocimiento, el `SUMMARY_CONTEXT_PROMPT`, y el `KNOWLEDGE_SHARE_PRROMPT`, una plantilla detallada en Markdown para informes extensos con secciones específicas para resumen ejecutivo, análisis profundo, ejemplos, marcos regulatorios, rol de organizaciones, barreras/facilitadores, recomendaciones de política, preguntas de reflexión, conexiones con la base de conocimiento del usuario y una sección crítica para citar fuentes.
+*   **`core/websocket_manager.py`**: Gestiona las conexiones WebSocket activas para la comunicación en tiempo real con los usuarios. Almacena las conexiones en un diccionario (`active_connections`) y proporciona funciones para `connect_websocket`, `disconnect_websocket` y `send_personal_message`, permitiendo el envío de mensajes JSON a cuentas específicas. Se señala la necesidad de un sistema Pub/Sub como Redis para entornos de producción con múltiples instancias de la API.
+*   **`core/citation_models.py`**: Define los modelos de datos para el sistema de citas y fuentes, similar a OpenWebUI. Incluye `SourceType` (web, documento, memoria, etc.), `Source` para representar una fuente individual con ID, título, URL y fragmento, `ToolOutputWithSources` para encapsular el contexto del LLM y las fuentes, y `CitationResponse` para la respuesta final del agente. También proporciona funciones helper para crear fuentes y un `CITATION_SYSTEM_PROMPT` con reglas estrictas para el formato de citas.
+*   **`core/reminders_manager.py`**: Gestiona la lógica de negocio para recordatorios simples y relativos en el tiempo (ej. "en 20 minutos"). A diferencia del `agenda_manager`, estos no son eventos formales. Utiliza el `account_id` para persistencia en la base de datos y el `telegram_id` para programar y enviar notificaciones a través de la `JobQueue` de Telegram. Incluye funciones para establecer y reprogramar recordatorios.
+*   **`core/agenda_manager.py`**: Encapsula la lógica de negocio para la gestión de eventos de agenda (CRUD). Es un módulo "puro" que no tiene conocimiento de plataformas específicas como Telegram, delegando la programación de notificaciones a la capa del cliente. Permite programar, consultar (por día) y cancelar eventos, y recuperar eventos futuros como diccionarios para interfaces web.
+*   **`core/memory_manager_old.py`**: Es responsable de la memoria a largo plazo y el perfil del usuario. Gestiona perfiles estructurados y memoria vectorial (RAG) utilizando PGVector para fragmentos de texto no estructurado. Implementa una búsqueda vectorial optimizada con filtros por tipos de contenido, topics, categorías, workspaces y equipos, y un `MemoryContext` para el aislamiento automático de la memoria. También maneja la adición de memoria a la base de datos vectorial y la actualización de columnas optimizadas.
+
+Además, se ha identificado el directorio `core/retrieval_components/`, que contiene un subdirectorio `retrievers/`, el cual se ha verificado que está vacío.
+
+El estado actual de la conversación es que el usuario ha solicitado **leer recursivamente el directorio `core` y generar un documento explicativo** basado en su contenido. El asistente ha continuado la lectura de los archivos, incluyendo `citation_models.py`, `reminders_manager.py`, `agenda_manager.py` y `memory_manager_old.py`, y ahora dispone de información detallada sobre estos módulos. El siguiente paso es continuar la lectura de los archivos restantes en el directorio `core` para luego generar el documento explicativo completo.
+
+--- Resumen de Conversación GOOGLE (2025-08-27 17:33:37) ---
+Aquí tienes un resumen actualizado y conciso de la conversación, incluyendo la información más reciente sobre los archivos del directorio `core`:
+
+La conversación se centra en el **Kognito AI System**, un "exocerebro digital" personalizable y colaborativo. Este sistema integra IA avanzada, grafos de conocimiento (Cognee + Neo4j), gestión de memoria vectorial (PGVector) y múltiples interfaces (Telegram Bot, Web App, Next.js Dashboard). Sus características principales incluyen un sistema de conocimiento híbrido, un agente de IA conversacional (KAI) con más de 30 herramientas, gestión de conocimiento avanzada y funcionalidades de productividad. La arquitectura se basa en microservicios con un stack tecnológico que incluye Python 3.11, FastAPI, LangChain, LangGraph, Google Generative AI, Docker, entre otros.
+
+Se han detallado varios módulos clave del sistema:
+
+*   **`core/llm_manager.py`**: Es el corazón de la interacción con los Modelos de Lenguaje Grandes (LLMs). Se encarga de la inicialización, gestión y uso de diferentes LLMs (priorizando Google Generative AI), aplicando un `RateLimitedChatModel` para evitar exceder los límites de tasa. También gestiona la obtención de respuestas enriquecidas con contexto del grafo de conocimiento y maneja fallbacks.
+*   **`core/agent.py`**: Constituye el núcleo de la inteligencia de Kognito AI, orquestando la interacción entre el LLM, las herramientas y la memoria del usuario mediante el framework LangGraph. Construye prompts dinámicos con perfiles de usuario y memorias relevantes, inyecta IDs de contexto en el `AgentExecutor`, y utiliza nodos del grafo para invocar al LLM, enviar respuestas en streaming vía WebSockets y generar resúmenes del historial en segundo plano, además de actualizar dinámicamente los títulos de los hilos de chat.
+*   **`core/prompt_manager.py`**: Centraliza la gestión de prompts para el agente de IA. La clase `PromptManager` carga, gestiona y formatea prompts (sumarización, títulos de hilos, enriquecidos con grafo), y su método `build_system_prompt` construye dinámicamente el prompt del sistema integrando perfiles de usuario, memorias relevantes (RAG), resúmenes, prompts personalizados/de workspace, instrucciones de herramientas y overrides de modo.
+*   **`core/notes_manager.py`**: Encapsula la lógica de negocio para la gestión de notas en la base de datos. La clase `NotesManager` proporciona operaciones CRUD, incluyendo la generación de embeddings, la recuperación de notas personales y compartidas por equipos, y el formateo de las respuestas para el usuario.
+*   **`core/tool_base_classes.py`**: Define las clases base para las herramientas y sus salidas, con un enfoque en la gestión de fuentes de información. Incluye un `Enum` `SourceType` para categorizar las fuentes, un modelo `Source` para representar una fuente individual, y el modelo `ToolOutputWithSources` para encapsular el contenido principal para el LLM junto con una lista de fuentes.
+*   **`core/config.py`**: Es el módulo de configuración central, que define y valida todas las configuraciones necesarias para la aplicación. Carga variables de entorno desde un archivo `.env`, configurando modelos de IA (Google Generative AI, OpenAI, Ollama), parámetros de LLM (temperatura, timeout), credenciales de Telegram, API Keys de servicios externos (Google, Brave Search, Tavily, GitHub), configuraciones de base de datos (PostgreSQL, Neo4j, Cognee), parámetros de RAG (chunking, embedding, reranking, búsqueda híbrida), loaders de documentos avanzados y umbrales para la vinculación proactiva de conocimiento. También define el prompt de sistema por defecto y realiza validaciones críticas.
+*   **`core/dependencies.py`**: Proporciona dependencias centralizadas para FastAPI, específicamente la función asíncrona `get_db_session` que entrega una sesión de base de datos (`AsyncSession`) con manejo automático de transacciones (commit/rollback) utilizando el patrón `DBSession` para garantizar consistencia y reutilización en los endpoints de la API.
+*   **`core/reranker.py`**: Implementa la clase `Reranker` como un singleton para mejorar la relevancia de los resultados de búsqueda. Utiliza el modelo `cross-encoder/ms-marco-MiniLM-L-6-v2` para re-rankear documentos basándose en una consulta, asignando puntuaciones de relevancia.
+*   **`core/prompts.py`**: Centraliza todos los prompts del sistema, plantillas y textos estáticos utilizados por el agente de IA (KAI). Incluye el `KAI_SYSTEM_PROMPT` con instrucciones clave de operación, el `SUMMARIZATION_PROMPT`, el `THREAD_TITLE_PROMPT` (con una lista de emojis), el `ENRICHED_PROMPT_TEMPLATE` para el grafo de conocimiento, el `SUMMARY_CONTEXT_PROMPT`, y el `KNOWLEDGE_SHARE_PRROMPT`, una plantilla detallada en Markdown para informes extensos con secciones específicas para resumen ejecutivo, análisis profundo, ejemplos, marcos regulatorios, rol de organizaciones, barreras/facilitadores, recomendaciones de política, preguntas de reflexión, conexiones con la base de conocimiento del usuario y una sección crítica para citar fuentes.
+*   **`core/websocket_manager.py`**: Gestiona las conexiones WebSocket activas para la comunicación en tiempo real con los usuarios. Almacena las conexiones en un diccionario (`active_connections`) y proporciona funciones para `connect_websocket`, `disconnect_websocket` y `send_personal_message`, permitiendo el envío de mensajes JSON a cuentas específicas. Se señala la necesidad de un sistema Pub/Sub como Redis para entornos de producción con múltiples instancias de la API.
+*   **`core/citation_models.py`**: Define los modelos de datos para el sistema de citas y fuentes, similar a OpenWebUI. Incluye `SourceType` (web, documento, memoria, etc.), `Source` para representar una fuente individual con ID, título, URL y fragmento, `ToolOutputWithSources` para encapsular el contexto del LLM y las fuentes, y `CitationResponse` para la respuesta final del agente. También proporciona funciones helper para crear fuentes y un `CITATION_SYSTEM_PROMPT` con reglas estrictas para el formato de citas.
+*   **`core/reminders_manager.py`**: Gestiona la lógica de negocio para recordatorios simples y relativos en el tiempo (ej. "en 20 minutos"). A diferencia del `agenda_manager`, estos no son eventos formales. Utiliza el `account_id` para persistencia en la base de datos y el `telegram_id` para programar y enviar notificaciones a través de la `JobQueue` de Telegram. Incluye funciones para establecer y reprogramar recordatorios.
+*   **`core/agenda_manager.py`**: Encapsula la lógica de negocio para la gestión de eventos de agenda (CRUD). Es un módulo "puro" que no tiene conocimiento de plataformas específicas como Telegram, delegando la programación de notificaciones a la capa del cliente. Permite programar, consultar (por día) y cancelar eventos, y recuperar eventos futuros como diccionarios para interfaces web.
+*   **`core/memory_manager_old.py`**: Es responsable de la memoria a largo plazo y el perfil del usuario. Gestiona perfiles estructurados y memoria vectorial (RAG) utilizando PGVector para fragmentos de texto no estructurado. Implementa una búsqueda vectorial optimizada con filtros por tipos de contenido, topics, categorías, workspaces y equipos, y un `MemoryContext` para el aislamiento automático de la memoria. También maneja la adición de memoria a la base de datos vectorial y la actualización de columnas optimizadas.
+*   **`core/smart_knowledge_retriever.py`**: Es el cerebro de la recuperación de información. Contiene `QueryInterpreter` para determinar la estrategia de búsqueda (memoria optimizada, multi-consulta, conocimiento interno, base de datos vectorial) y `SmartKnowledgeRetriever` que orquesta la ejecución de estas estrategias basándose en la consulta del usuario, utilizando funciones de búsqueda unificada RAG.
+*   **`core/models.py`**: Define los modelos de datos esenciales para la recuperación de conocimiento, incluyendo `KnowledgeRetrievalResult` para representar un resultado individual de búsqueda (con contenido, fuente, puntuación de relevancia y metadatos) y `KnowledgeRetrievalOutput` para encapsular el estado, mensaje y una lista de resultados de una operación de recuperación de conocimiento.
+
+Además, se ha identificado el directorio `core/retrieval_components/`, que contiene un subdirectorio `retrievers/`, el cual se ha verificado que está vacío.
+
+El estado actual de la conversación es que el usuario ha solicitado **leer recursivamente el directorio `core` y generar un documento explicativo** basado en su contenido. El asistente ha continuado la lectura de los archivos, incluyendo `smart_knowledge_retriever.py` y `models.py`, y ahora dispone de información detallada sobre estos módulos. El siguiente paso es continuar la lectura de los archivos restantes en el directorio `core` para luego generar el documento explicativo completo.
+
+--- Resumen de Conversación GOOGLE (2025-08-27 18:34:34) ---
+
+
+--- Resumen de Conversación GOOGLE (2025-08-27 18:37:00) ---
+La conversación comenzó con la creación de la carpeta `docs/estructura` para organizar informes. Se generó un informe detallado del directorio `core` y se guardó en `docs/estructura/informe_core.md`, incluyendo explicaciones exhaustivas de sus módulos, propósito, funcionalidades clave e interconexiones dentro del Kognito AI System. Actualmente, el usuario ha solicitado un informe similar y detallado para el directorio `utils`. Se ha recuperado el contenido recursivo del directorio `utils` como paso previo a la generación de dicho informe.
+
+--- Resumen de Conversación GOOGLE (2025-08-27 19:45:05) ---
+La conversación inició con una presentación detallada de KogniTerm, un asistente de IA experto en terminal, explicando sus capacidades para ejecutar tareas directamente, el uso de herramientas como `execute_command`, `python_interpreter`, `list_tree`, `brave_search`, `web_fetch`, y su sistema de gestión de memoria para mantener el contexto.
+
+Posteriormente, la conversación se centró en la tarea de generar un informe detallado para el directorio `utils`, similar a uno previamente creado para `core`, con el objetivo de guardarlo en `docs/estructura`. El usuario confirmó que el archivo ya había sido creado.
+
+Como respuesta, KogniTerm proporcionó el contenido completo del informe generado, que se guardó en `docs/estructura/informe_utils.md`. Este informe detalla exhaustivamente la función y los módulos clave (`vector_db_query.py`, `document_parser.py`, `helpers.py`, `proactive_knowledge_linker.py`) dentro del directorio `utils`.
+
+Finalmente, KogniTerm confirmó que el informe había sido generado y guardado exitosamente. El usuario ha solicitado que se le muestre el contenido del archivo nuevamente.
+
+--- Resumen de Conversación GOOGLE (2025-08-27 19:46:50) ---
+
+
+--- Resumen de Conversación GOOGLE (2025-08-27 19:47:46) ---
+Aquí tienes un resumen actualizado y más completo del directorio `utils` del Kognito AI System, incluyendo la información de los archivos que faltaban en el resumen inicial:
+
+## Documento Explicativo Detallado del Directorio `utils` del Kognito AI System
+
+El directorio `utils` en el Kognito AI System es una colección de **módulos de utilidad y funciones de ayuda** que soportan las operaciones centrales del sistema sin estar directamente acoplados a la lógica de negocio principal. Estos módulos proporcionan funcionalidades genéricas y reutilizables, desde la interacción con bases de datos vectoriales y el parseo de documentos hasta la transformación de texto, el análisis proactivo de conocimiento, la gestión de sesiones de base de datos, la generación de mapas mentales, la transcripción de audio, el análisis de código, la gestión de embeddings, la paginación, el análisis de documentos y colecciones, el envío de imágenes, la configuración de logging de LLM, la programación de herramientas, la seguridad, la generación y procesamiento de imágenes, y la recuperación multi-consulta, asegurando la eficiencia, la modularidad y la robustez del sistema.
+
+A continuación, se detalla exhaustivamente cada uno de los módulos principales dentro de este directorio:
+
+### 1. `utils/vector_db_query.py`
+Este módulo es una utilidad fundamental para la **interacción con la base de datos vectorial**, permitiendo realizar consultas basadas en la similitud semántica de embeddings. Es un componente clave para la funcionalidad de Recuperación Aumentada por Generación (RAG) del Kognito AI System. Su función clave `query_vector_db(...)` busca documentos similares a una consulta dada, utilizando embeddings y filtros de metadatos (como `collection_name`, `topic`, `workspace_id`), y devuelve los resultados formateados con su contenido, metadatos y puntuación de similitud. Incluye robusto manejo de errores y logging.
+
+### 2. `utils/document_parser.py`
+Este módulo es una utilidad dedicada al **parseo y extracción de texto plano y metadatos básicos de diversos tipos de documentos** (PDF, DOCX, TXT, MD). La función `extract_text_and_metadata_from_document(file_name, file_bytes)` detecta el tipo de archivo y utiliza librerías específicas (fitz para PDF, python-docx para DOCX) para extraer el texto y metadatos básicos, siendo crucial para la ingesta de información no estructurada.
+
+### 3. `utils/helpers.py`
+Este módulo es una "caja de herramientas" de **funciones de ayuda generales y reutilizables**, principalmente para la manipulación y formateo de texto. La función `markdown_to_telegram_html(text)` convierte un subconjunto de Markdown a HTML compatible con Telegram, utilizando expresiones regulares para el formateo de negritas, cursivas, código en línea y bloques de código. También incluye una función `sanitize_html` comentada, indicando posibles futuras expansiones.
+
+### 4. `utils/proactive_knowledge_linker.py`
+Este módulo es el corazón de la **vinculación y análisis proactivo de conocimiento** en Kognito AI. Realiza análisis semánticos profundos sobre el conocimiento del usuario para generar insights proactivos, identificar conexiones y detectar redundancias. Carga y gestiona instancias *singleton* de modelos NLP (spaCy para NER, KeyBERT para extracción de palabras clave) y modelos de Embeddings y LLMs rápidos (Gemini). Incluye funciones para encontrar ítems similares (`find_top_k_similar_items`), generar embeddings (`get_text_embedding`), calcular similitud coseno (`cosine_similarity`), extraer entidades (`extract_entities`), y analizar relaciones con LLMs (`analyze_relationship_with_llm`). También interpreta peticiones de usuario para análisis (`interpret_user_request_for_analysis`) y programa análisis de forma proactiva.
+
+### 5. `utils/knowledge_base_manager.py`
+Actúa como una **capa de servicio centralizada para operaciones CRUD en la base de conocimiento**. Gestiona documentos de colecciones (topics) y el almacenamiento textual de repositorios de GitHub. Orquesta la vectorización (embedding) de documentos. Incluye funciones para `import_repository_from_github` (sincroniza archivos de GitHub, gestiona adiciones, actualizaciones y eliminaciones), `add_github_file_to_db`, `list_github_repositories`, `list_repository_files`, `delete_repository_from_db`, `vectorize_repository`, `add_document_to_collection`, `list_collections`, `list_documents_in_collection`, `delete_collection`, y `list_all_github_files`.
+
+### 6. `utils/db_session.py`
+Proporciona un **gestor de contexto asíncrono (`DBSession`) para manejar las sesiones de SQLAlchemy**. Simplifica el manejo de sesiones de base de datos en aplicaciones asíncronas, asegurando la adquisición, el `commit` (en éxito), el `rollback` (en error) y el cierre de la sesión, garantizando la consistencia y evitando fugas de recursos.
+
+### 7. `utils/generate_mind_map.py`
+Este módulo es responsable de la **generación de mapas mentales**. Incluye la función `generate_visual_mindmap` que crea un mapa mental visual utilizando Graphviz y lo devuelve como una imagen Base64. También contiene la función `generate_mermaid_mindmap` que utiliza un LLM para crear mapas mentales en sintaxis MermaidJS a partir del contenido de un documento, extrayendo conceptos clave.
+
+### 8. `utils/audio_transcriber.py`
+Este módulo se encarga de la **transcripción de audio**. La función clave `transcribe_audio_file(audio_file)` utiliza el modelo Faster Whisper (cargado como singleton) para convertir archivos de audio binarios en texto, detectando el idioma y manejando posibles errores durante el proceso.
+
+### 9. `utils/advanced_code_analyzer.py`
+Proporciona una funcionalidad para el **análisis avanzado de fragmentos de código o repositorios**. La función `analyze_code_content(code_content)` utiliza un LLM rápido para generar un informe estructurado en formato JSON, que incluye un resumen ejecutivo, estructura del código, patrones de diseño, dependencias, problemas potenciales y recomendaciones específicas para el código proporcionado.
+
+### 10. `utils/embeddings.py`
+Este módulo gestiona la **inicialización y provisión de la instancia global del modelo de embeddings**. La función `initialize_embeddings()` carga el modelo de embeddings desde Ollama (siguiendo un patrón Singleton) de forma asíncrona, utilizando la configuración de la aplicación. `get_embedding_model()` permite acceder a esta instancia.
+
+### 11. `utils/paginator.py`
+Este módulo es una utilidad para la **paginación de texto largo en mensajes de Telegram**. La clase `Paginator` divide textos extensos en "páginas" manejables, mantiene el estado de la página actual y genera el texto de la página con encabezado, pie de página y botones de navegación (`InlineKeyboardMarkup`), facilitando la visualización interactiva de contenido largo.
+
+### 12. `utils/document_analysis.py`
+Se centra en la **extracción de conceptos clave o información específica de documentos utilizando un LLM**. La función `extract_concepts_from_document` divide documentos grandes en fragmentos con solapamiento, procesa cada fragmento con un LLM para extraer conceptos y luego sintetiza los conceptos extraídos para eliminar duplicados y organizar la información de forma coherente.
+
+### 13. `utils/analysis_on_topic.py`
+Permite realizar un **análisis profundo sobre un tema específico en la base de conocimientos del usuario**. La función `deep_analysis_on_topic` inicia una tarea de análisis en segundo plano, la cual recupera documentos relevantes, los procesa con un LLM (ajustando la profundidad del análisis) y luego actualiza el estado de la tarea en la base de datos y envía una notificación al usuario con los resultados.
+
+### 14. `utils/send_image.py`
+Proporciona una función para **enviar imágenes codificadas en base64 al frontend como una respuesta de streaming**. La función `send_base64_image` decodifica la cadena base64 (manejando prefijos de URI de datos) y la devuelve como un `StreamingResponse` de FastAPI, con manejo de errores para datos de imagen inválidos.
+
+### 15. `utils/llm_logging_config.py`
+Este módulo configura el **logging detallado específico para las comunicaciones del LLM**. Establece loggers especializados (`LLMCallback`, `core.agent`, `langchain.agents.agent`, `langchain_google_genai`, `tools.github_repo_tool`) con niveles de logging controlados y la opción de guardar logs en un archivo. También incluye funciones para `create_llm_log_filename`, `enable_verbose_langchain_logging` (para debugging profundo de LangChain) y `disable_noisy_loggers` (para silenciar logs irrelevantes).
+
+### 16. `utils/tool_scheduler.py`
+Implementa un **sistema de programación de herramientas automáticas**. La clase `ToolScheduler` permite programar funciones (`tool_function`) para ejecutarse diariamente (`schedule_daily_tool`), semanalmente (`schedule_weekly_tool`) o en intervalos de horas (`schedule_interval_tool`), utilizando el JobQueue de Telegram. Gestiona la cancelación y listado de trabajos programados. Incluye funciones de conveniencia como `schedule_daily_analysis` y `schedule_daily_insights`.
+
+### 17. `utils/collection_analysis.py`
+Similar a `document_analysis.py`, este módulo se enfoca en el **análisis de colecciones de documentos**. Utiliza un LLM para `extract_concepts_from_document` y luego `analyze_document_collection` para sintetizar los conceptos extraídos de múltiples documentos en un análisis cohesivo, proporcionando una lista consolidada de conceptos y un resumen narrativo de la colección.
+
+### 18. `utils/security.py`
+(El contenido de este archivo no fue proporcionado en los outputs, por lo que su función específica no puede ser detallada, pero por su nombre, es probable que contenga utilidades relacionadas con la seguridad, como hashing, encriptación, validación de tokens, etc.).
+
+### 19. `utils/image_generation.py`
+(El contenido de este archivo no fue proporcionado en los outputs, por lo que su función específica no puede ser detallada, pero por su nombre, es probable que contenga utilidades para la generación de imágenes, posiblemente interactuando con modelos de IA generativa).
+
+### 20. `utils/multi_query_retriever.py`
+(El contenido de este archivo no fue proporcionado en los outputs, por lo que su función específica no puede ser detallada, pero por su nombre, es probable que implemente estrategias avanzadas de recuperación de información que involucran la generación de múltiples consultas para una misma intención de búsqueda, mejorando la robustez de los sistemas RAG).
+
+### 21. `utils/__init__.py`
+Este archivo es un **marcador de paquete Python**, indicando que el directorio `utils` debe ser tratado como un paquete que contiene submódulos.
+
+### 22. `utils/advanced_text_analyzer.py`
+(El contenido de este archivo no fue proporcionado en los outputs, por lo que su función específica no puede ser detallada, pero por su nombre, es probable que proporcione capacidades de análisis de texto más allá de la simple extracción de conceptos, como análisis de sentimientos, resumen avanzado, detección de temas complejos, etc.).
+
+### 23. `utils/scheduled_tools_manager.py`
+(El contenido de este archivo no fue proporcionado en los outputs, por lo que su función específica no puede ser detallada, pero por su nombre, es probable que sea un gestor de las herramientas programadas, posiblemente interactuando con `tool_scheduler.py` para añadir, modificar o eliminar tareas programadas de forma más centralizada o con lógica adicional).
+
+### 24. `utils/image_processing.py`
+(El contenido de este archivo no fue proporcionado en los outputs, por lo que su función específica no puede ser detallada, pero por su nombre, es probable que contenga utilidades para el procesamiento de imágenes, como redimensionamiento, recorte, aplicación de filtros, extracción de características, etc.).
+
+### 25. `utils/scoped_rag_analysis.py`
+(El contenido de este archivo no fue proporcionado en los outputs, por lo que su función específica no puede ser detallada, pero por su nombre, es probable que implemente análisis RAG (Retrieval Augmented Generation) con un alcance o contexto específico, permitiendo un análisis más enfocado y relevante dentro de un subconjunto de la base de conocimiento).
+
+### 26. `utils/advanced_search_utility.py`
+(El contenido de este archivo no fue proporcionado en los outputs, por lo que su función específica no puede ser detallada, pero por su nombre, es probable que proporcione funcionalidades de búsqueda avanzadas, posiblemente combinando la búsqueda vectorial con otras técnicas de búsqueda o filtrado para obtener resultados más precisos y contextuales).
+
+### 27. `utils/ascii_logo.py`
+(El contenido de este archivo no fue proporcionado en los outputs, pero por su nombre, es probable que contenga el código o los datos para generar un logo en formato ASCII, utilizado comúnmente en la consola para la identidad visual de la aplicación).
+
+---
+
+**Conclusión:**
+
+El directorio `utils` es una parte vital del Kognito AI System, ya que centraliza una amplia gama de funcionalidades de soporte. Su diseño modular permite que los componentes principales del sistema se mantengan enfocados en la lógica de negocio, delegando tareas genéricas pero esenciales a estos módulos de utilidad. Esto contribuye a la robustez, escalabilidad y mantenibilidad general del sistema. La presencia de módulos para el análisis proactivo de conocimiento, la gestión de la base de conocimiento, el análisis de código y documentos, y la integración con modelos de lenguaje y embeddings, destaca la sofisticación y las capacidades avanzadas de Kognito AI.
+
+He leído todos los archivos `.py` del directorio `utils` (excluyendo el directorio `__pycache__`) que se listaron y he incorporado la información en este resumen. Si necesitas más detalles sobre algún módulo en particular o sobre los archivos cuyo contenido no pude obtener, házmelo saber.
+
+--- Resumen de Conversación GOOGLE (2025-08-27 19:50:58) ---
+Aquí tienes un resumen actualizado y más completo del directorio `utils` del Kognito AI System, incorporando la información de los archivos que faltaban en el resumen inicial:
+
+## Documento Explicativo Detallado del Directorio `utils` del Kognito AI System
+
+El directorio `utils` en el Kognito AI System es una colección de **módulos de utilidad y funciones de ayuda** que soportan las operaciones centrales del sistema sin estar directamente acoplados a la lógica de negocio principal. Estos módulos proporcionan funcionalidades genéricas y reutilizables, desde la interacción con bases de datos vectoriales y el parseo de documentos hasta la transformación de texto, el análisis proactivo de conocimiento, la gestión de sesiones de base de datos, la generación de mapas mentales, la transcripción de audio, el análisis de código, la gestión de embeddings, la paginación, el análisis de documentos y colecciones, el envío de imágenes, la configuración de logging de LLM, la programación de herramientas, la seguridad, la generación y procesamiento de imágenes, la recuperación multi-consulta, el análisis RAG focalizado y las utilidades de búsqueda avanzada, asegurando la eficiencia, la modularidad y la robustez del sistema.
+
+A continuación, se detalla exhaustivamente cada uno de los módulos principales dentro de este directorio:
+
+### 1. `utils/vector_db_query.py`
+Este módulo es una utilidad fundamental para la **interacción con la base de datos vectorial**, permitiendo realizar consultas basadas en la similitud semántica de embeddings. Es un componente clave para la funcionalidad de Recuperación Aumentada por Generación (RAG) del Kognito AI System. Su función clave `query_vector_db(...)` busca documentos similares a una consulta dada, utilizando embeddings y filtros de metadatos (como `collection_name`, `topic`, `workspace_id`), y devuelve los resultados formateados con su contenido, metadatos y puntuación de similitud. Incluye robusto manejo de errores y logging.
+
+### 2. `utils/document_parser.py`
+Este módulo es una utilidad dedicada al **parseo y extracción de texto plano y metadatos básicos de diversos tipos de documentos** (PDF, DOCX, TXT, MD). La función `extract_text_and_metadata_from_document(file_name, file_bytes)` detecta el tipo de archivo y utiliza librerías específicas (fitz para PDF, python-docx para DOCX) para extraer el texto y metadatos básicos, siendo crucial para la ingesta de información no estructurada.
+
+### 3. `utils/helpers.py`
+Este módulo es una "caja de herramientas" de **funciones de ayuda generales y reutilizables**, principalmente para la manipulación y formateo de texto. La función `markdown_to_telegram_html(text)` convierte un subconjunto de Markdown a HTML compatible con Telegram, utilizando expresiones regulares para el formateo de negritas, cursivas, código en línea y bloques de código. También incluye una función `sanitize_html` comentada, indicando posibles futuras expansiones.
+
+### 4. `utils/proactive_knowledge_linker.py`
+Este módulo es el corazón de la **vinculación y análisis proactivo de conocimiento** en Kognito AI. Realiza análisis semánticos profundos sobre el conocimiento del usuario para generar insights proactivos, identificar conexiones y detectar redundancias. Carga y gestiona instancias *singleton* de modelos NLP (spaCy para NER, KeyBERT para extracción de palabras clave) y modelos de Embeddings y LLMs rápidos (Gemini). Incluye funciones para encontrar ítems similares (`find_top_k_similar_items`), generar embeddings (`get_text_embedding`), calcular similitud coseno (`cosine_similarity`), extraer entidades (`extract_entities`), y analizar relaciones con LLMs (`analyze_relationship_with_llm`). También interpreta peticiones de usuario para análisis (`interpret_user_request_for_analysis`) y programa análisis de forma proactiva.
+
+### 5. `utils/knowledge_base_manager.py`
+Actúa como una **capa de servicio centralizada para operaciones CRUD en la base de conocimiento**. Gestiona documentos de colecciones (topics) y el almacenamiento textual de repositorios de GitHub. Orquesta la vectorización (embedding) de documentos. Incluye funciones para `import_repository_from_github` (sincroniza archivos de GitHub, gestiona adiciones, actualizaciones y eliminaciones), `add_github_file_to_db`, `list_github_repositories`, `list_repository_files`, `delete_repository_from_db`, `vectorize_repository`, `add_document_to_collection`, `list_collections`, `list_documents_in_collection`, `delete_collection`, y `list_all_github_files`.
+
+### 6. `utils/db_session.py`
+Proporciona un **gestor de contexto asíncrono (`DBSession`) para manejar las sesiones de SQLAlchemy**. Simplifica el manejo de sesiones de base de datos en aplicaciones asíncronas, asegurando la adquisición, el `commit` (en éxito), el `rollback` (en error) y el cierre de la sesión, garantizando la consistencia y evitando fugas de recursos.
+
+### 7. `utils/generate_mind_map.py`
+Este módulo es responsable de la **generación de mapas mentales**. Incluye la función `generate_visual_mindmap` que crea un mapa mental visual utilizando Graphviz y lo devuelve como una imagen Base64. También contiene la función `generate_mermaid_mindmap` que utiliza un LLM para crear mapas mentales en sintaxis MermaidJS a partir del contenido de un documento, extrayendo conceptos clave.
+
+### 8. `utils/audio_transcriber.py`
+Este módulo se encarga de la **transcripción de audio**. La función clave `transcribe_audio_file(audio_file)` utiliza el modelo Faster Whisper (cargado como singleton) para convertir archivos de audio binarios en texto, detectando el idioma y manejando posibles errores durante el proceso.
+
+### 9. `utils/advanced_code_analyzer.py`
+Proporciona una funcionalidad para el **análisis avanzado de fragmentos de código o repositorios**. La función `analyze_code_content(code_content)` utiliza un LLM rápido para generar un informe estructurado en formato JSON, que incluye un resumen ejecutivo, estructura del código, patrones de diseño, dependencias, problemas potenciales y recomendaciones específicas para el código proporcionado.
+
+### 10. `utils/embeddings.py`
+Este módulo gestiona la **inicialización y provisión de la instancia global del modelo de embeddings**. La función `initialize_embeddings()` carga el modelo de embeddings desde Ollama (siguiendo un patrón Singleton) de forma asíncrona, utilizando la configuración de la aplicación. `get_embedding_model()` permite acceder a esta instancia.
+
+### 11. `utils/paginator.py`
+Este módulo es una utilidad para la **paginación de texto largo en mensajes de Telegram**. La clase `Paginator` divide textos extensos en "páginas" manejables, mantiene el estado de la página actual y genera el texto de la página con encabezado, pie de página y botones de navegación (`InlineKeyboardMarkup`), facilitando la visualización interactiva de contenido largo.
+
+### 12. `utils/document_analysis.py`
+Se centra en la **extracción de conceptos clave o información específica de documentos utilizando un LLM**. La función `extract_concepts_from_document` divide documentos grandes en fragmentos con solapamiento, procesa cada fragmento con un LLM para extraer conceptos y luego sintetiza los conceptos extraídos para eliminar duplicados y organizar la información de forma coherente.
+
+### 13. `utils/analysis_on_topic.py`
+Permite realizar un **análisis profundo sobre un tema específico en la base de conocimientos del usuario**. La función `deep_analysis_on_topic` inicia una tarea de análisis en segundo plano, la cual recupera documentos relevantes, los procesa con un LLM (ajustando la profundidad del análisis) y luego actualiza el estado de la tarea en la base de datos y envía una notificación al usuario con los resultados.
+
+### 14. `utils/send_image.py`
+Proporciona una función para **enviar imágenes codificadas en base64 al frontend como una respuesta de streaming**. La función `send_base64_image` decodifica la cadena base64 (manejando prefijos de URI de datos) y la devuelve como un `StreamingResponse` de FastAPI, con manejo de errores para datos de imagen inválidos.
+
+### 15. `utils/llm_logging_config.py`
+Este módulo configura el **logging detallado específico para las comunicaciones del LLM**. Establece loggers especializados (`LLMCallback`, `core.agent`, `langchain.agents.agent`, `langchain_google_genai`, `tools.github_repo_tool`) con niveles de logging controlados y la opción de guardar logs en un archivo. También incluye funciones para `create_llm_log_filename`, `enable_verbose_langchain_logging` (para debugging profundo de LangChain) y `disable_noisy_loggers` (para silenciar logs irrelevantes).
+
+### 16. `utils/tool_scheduler.py`
+Implementa un **sistema de programación de herramientas automáticas**. La clase `ToolScheduler` permite programar funciones (`tool_function`) para ejecutarse diariamente (`schedule_daily_tool`), semanalmente (`schedule_weekly_tool`) o en intervalos de horas (`schedule_interval_tool`), utilizando el JobQueue de Telegram. Gestiona la cancelación y listado de trabajos programados. Incluye funciones de conveniencia como `schedule_daily_analysis` y `schedule_daily_insights`.
+
+### 17. `utils/collection_analysis.py`
+Similar a `document_analysis.py`, este módulo se enfoca en el **análisis de colecciones de documentos**. Utiliza un LLM para `extract_concepts_from_document` y luego `analyze_document_collection` para sintetizar los conceptos extraídos de múltiples documentos en un análisis cohesivo, proporcionando una lista consolidada de conceptos y un resumen narrativo de la colección.
+
+### 18. `utils/security.py`
+Este módulo proporciona **utilidades de seguridad para la autenticación**. Incluye funciones para hashear y verificar contraseñas de forma segura (`pwd_context` con `bcrypt`), crear y decodificar tokens de acceso JWT (`create_access_token`, `decode_access_token`), y dependencias de FastAPI (`OAuth2PasswordBearer`, `get_current_account_id`, `get_current_user`) para proteger endpoints y obtener información del usuario autenticado desde la base de datos.
+
+### 19. `utils/image_generation.py`
+Este módulo se encarga de la **generación de imágenes utilizando Google Vertex AI (modelo Imagen)**. Proporciona una función asíncrona (`generar_imagen_vertex_ai_binario`) que se autentica con Google Cloud (ADC), construye peticiones a la API de Vertex AI, detecta la relación de aspecto de la imagen a partir del prompt y devuelve la imagen generada en formato binario (`BytesIO`).
+
+### 20. `utils/multi_query_retriever.py`
+Este módulo implementa el **MultiQueryRetriever para mejorar la recuperación de información**. Genera múltiples consultas reformuladas a partir de una consulta original utilizando un LLM, ejecuta búsquedas paralelas en la base de datos vectorial con estas consultas, y luego fusiona los resultados utilizando métodos como Reciprocal Rank Fusion (RRF) o una fusión simple para obtener resultados más completos y relevantes.
+
+### 21. `utils/__init__.py`
+Este archivo es un **marcador de paquete Python**, indicando que el directorio `utils` debe ser tratado como un paquete que contiene submódulos, facilitando su importación.
+
+### 22. `utils/advanced_text_analyzer.py`
+Este módulo ofrece **capacidades de análisis de texto avanzadas y estructuradas** utilizando modelos de lenguaje. Define modelos Pydantic (`SingleTextAnalysis`, `CollectionAnalysis`) para garantizar un formato de salida consistente. Incluye métodos para `analyze_single_text` (proporcionando resumen ejecutivo, análisis general extenso, temas clave con citas, conceptos centrales, disciplina, tono del autor, brechas de conocimiento, reflexiones finales, sentimiento y entidades nombradas) y `analyze_collection` (sintetizando información de múltiples documentos, identificando temas transversales, conceptos centrales, relaciones, conexiones, brechas emergentes, insights y notas metodológicas).
+
+### 23. `utils/scheduled_tools_manager.py`
+Este módulo es el **gestor centralizado de herramientas programadas**. Se encarga de inicializar todas las herramientas que deben ejecutarse automáticamente al arrancar el sistema, programando análisis diarios globales, insights específicos por cuenta y tareas de mantenimiento (como limpieza semanal). También permite añadir o eliminar herramientas programadas para cuentas individuales y obtener el estado de las tareas programadas.
+
+### 24. `utils/image_processing.py`
+Este módulo contiene **utilidades para el procesamiento de imágenes**. Específicamente, la función `process_image_with_background_eraser` recibe un archivo de imagen, lo guarda temporalmente, utiliza una herramienta externa (`ImageBackgroundEraserTool`) para eliminar el fondo de la imagen, y devuelve la ruta del archivo resultante, manejando la creación y limpieza de archivos temporales.
+
+### 25. `utils/scoped_rag_analysis.py`
+Este módulo implementa el **análisis RAG (Retrieval Augmented Generation) focalizado y profundo**. Permite realizar un análisis contextualizado sobre la base de conocimiento de un usuario (notas y documentos), utilizando búsquedas optimizadas para recuperar información relevante. El contexto recuperado se pasa a un LLM para generar una respuesta estructurada según un objetivo de análisis específico, incluyendo un método de fallback tradicional si la búsqueda optimizada falla.
+
+### 26. `utils/advanced_search_utility.py`
+Este módulo proporciona **funcionalidades de búsqueda RAG unificadas y avanzadas**. Centraliza la lógica para realizar diferentes tipos de búsquedas, incluyendo "multi_query" (utilizando `multi_query_retriever`), "semantic" y "optimized" (utilizando `vector_db_query`), y `execute_internal_knowledge_search` para buscar en diversas colecciones internas de conocimiento. Convierte los resultados a un formato `KnowledgeRetrievalResult` estándar.
+
+### 27. `utils/ascii_logo.py`
+Este módulo contiene el código y los datos para generar y mostrar un **logo ASCII art de Kognito AI con colores** para la consola al inicio del sistema. Incluye funciones para obtener el logo principal, información del sistema híbrido (Qdrant, Cognee, Ollama, pgvector, Neo4j), y mensajes de inicio con la versión, así como opciones para logos simples y mini.
+
+---
+
+**Conclusión:**
+
+El directorio `utils` es una parte vital del Kognito AI System, ya que centraliza una amplia gama de funcionalidades de soporte. Su diseño modular permite que los componentes principales del sistema se mantengan enfocados en la lógica de negocio, delegando tareas genéricas pero esenciales a estos módulos de utilidad. Esto contribuye a la robustez, escalabilidad y mantenibilidad general del sistema. La presencia de módulos para el análisis proactivo de conocimiento, la gestión de la base de conocimiento, el análisis de código y documentos, la generación y procesamiento de imágenes, la seguridad, la programación de tareas y la integración con modelos de lenguaje y embeddings, destaca la sofisticación y las capacidades avanzadas de Kognito AI.
+
+--- Resumen de Conversación GOOGLE (2025-08-27 19:57:48) ---
+La conversación se centró en la creación y actualización de un documento explicativo detallado para el directorio `utils` del Kognito AI System. Se generó un documento exhaustivo que describe 27 módulos de utilidad y funciones de ayuda dentro de `utils`, cubriendo áreas como la interacción con bases de datos vectoriales, parseo de documentos, análisis proactivo de conocimiento, gestión de sesiones, generación de mapas mentales, transcripción de audio, análisis de código y texto, gestión de embeddings, paginación, análisis de colecciones, envío y procesamiento de imágenes, configuración de logging de LLM, programación de herramientas, seguridad, recuperación multi-consulta, análisis RAG focalizado y utilidades de búsqueda avanzada, así como la presentación del logo ASCII. El usuario solicitó guardar esta versión del documento, lo cual se realizó exitosamente en `docs/estructura/informe_utils.md`.

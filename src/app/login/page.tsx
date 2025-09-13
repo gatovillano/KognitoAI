@@ -26,7 +26,7 @@ const TelegramLoginWidget = ({ onLogin, isProcessing }: { onLogin: (token: strin
         onLogin(response.data.access_token);
       } catch (err: any) {
         console.error('Error en autenticación de Telegram:', err);
-        setError(err.response?.data?.detail || 'Error en la autenticación de Telegram');
+        setError(err.response?.data?.detail || err.message || 'Error en la autenticación de Telegram');
       }
     };
 
@@ -87,18 +87,23 @@ const TelegramLoginWidget = ({ onLogin, isProcessing }: { onLogin: (token: strin
 };
 
 // --- Sub-componente para el formulario de Email/Password ---
-const EmailLoginForm = ({ onLogin, isSubmitting, setParentError }: { onLogin: (token: string) => void; isSubmitting: boolean; setParentError: (error: string) => void }) => {
+const EmailLoginForm = ({ onLogin, setParentError }: { onLogin: (token: string) => void; setParentError: (error: string) => void }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false); // Manejar el estado de envío internamente
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSubmitting(true); // Iniciar el envío
+    setParentError(''); // Limpiar errores previos
     try {
       const response = await apiClient.post('/api/auth/login', { email, password });
       onLogin(response.data.access_token);
-    } catch (err) {
-      setParentError('Email o contraseña incorrectos.');
+    } catch (err: any) {
+      setParentError(err.response?.data?.detail || 'Email o contraseña incorrectos.');
       console.error(err);
+    } finally {
+      setIsSubmitting(false); // Finalizar el envío, independientemente del resultado
     }
   };
   
@@ -133,8 +138,15 @@ export default function LoginPage() {
   const handleSuccessfulLogin = async (token: string) => {
     setIsProcessing(true);
     setGlobalError('');
-    await login(token);
-    router.push('/chat');
+    try {
+      await login(token);
+      router.push('/chat');
+    } catch (err: any) {
+      setGlobalError(err.message || 'Error al iniciar sesión.');
+      console.error('Error en handleSuccessfulLogin:', err);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -158,7 +170,7 @@ export default function LoginPage() {
                   <span className="bg-card px-4 py-1 text-muted-foreground rounded-full">O con Email</span>
                 </div>
               </div>
-              <EmailLoginForm onLogin={handleSuccessfulLogin} isSubmitting={isProcessing} setParentError={setGlobalError} />
+              <EmailLoginForm onLogin={handleSuccessfulLogin} setParentError={setGlobalError} />
               <div className="text-center text-sm text-muted-foreground">
                 ¿No tienes una cuenta?{' '}
                 <a href="/register" className="text-primary hover:text-primary/80 font-medium transition-colors">

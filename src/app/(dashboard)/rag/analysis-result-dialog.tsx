@@ -111,6 +111,7 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                         {Array.isArray(mappedAnalysis.temas_clave_avanzados) && mappedAnalysis.temas_clave_avanzados.length > 0 ? (
                             mappedAnalysis.temas_clave_avanzados.map((topic: any, i: number) => (
                                 <div
+                                    key={i}
                                     className="hover:bg-muted/50 cursor-pointer transition-colors rounded-md"
                                     onClick={() => handleThemeClick(topic)}
                                 >

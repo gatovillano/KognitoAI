@@ -9,15 +9,14 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Plus, MessageSquare, BookMarked, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical, FolderKanban, Settings, BarChart3, Smartphone } from 'lucide-react';
+import { Plus, MessageSquare, BookMarked, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical, FolderKanban, Settings, BarChart3, Smartphone, User } from 'lucide-react';
 import Image from 'next/image';
 import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { InlineMarkdownRenderer } from './InlineMarkdownRenderer';
 import { toast } from 'sonner';
-import { DndProvider, useDrag, useDrop } from 'react-dnd';
-import { HTML5Backend } from 'react-dnd-html5-backend';
+import { useDrag, useDrop } from 'react-dnd';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -234,7 +233,8 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
             variant={pathname === `/chat/${thread.id}` ? "secondary" : "ghost"}
             className={cn(
               "w-full font-normal items-start text-left transition-all duration-200 hover:bg-muted rounded-xl",
-              isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-auto py-1.5 px-2"
+              isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-auto py-1.5 px-2",
+              pathname === `/chat/${thread.id}` && "bg-primary/10 text-primary border border-primary/20"
             )}
           >
             <div className="flex items-center">
@@ -408,6 +408,19 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               {!isCollapsed && <span className="text-xs font-medium">Notas</span>}
             </Button>
           </Link>
+          <Link href="/profiles" passHref onClick={onLinkClick} title="Perfiles">
+            <Button
+              variant={pathname?.startsWith('/profiles') ? 'secondary' : 'ghost'}
+              className={cn(
+                "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
+                pathname?.startsWith('/profiles') && "bg-primary/10 text-primary border border-primary/20"
+              )}
+            >
+              <User className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
+              {!isCollapsed && <span className="text-xs font-medium">Perfiles</span>}
+            </Button>
+          </Link>
           <Link href="/analysis" passHref onClick={onLinkClick} title="Análisis">
             <Button
               variant={pathname?.startsWith('/analysis') ? 'secondary' : 'ghost'}
@@ -476,8 +489,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
             
           </div>
         )}
-        <DndProvider backend={HTML5Backend}>
-          {!isCollapsed && (
+        {!isCollapsed && (
             <div className="flex items-center justify-between mb-3 px-2">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Fijados</p>
               <Button 
@@ -529,7 +541,6 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               </div>
             </DropArea>
           )}
-        </DndProvider>
       </ScrollArea>
 
       {/* Usuario */}

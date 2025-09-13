@@ -4,11 +4,12 @@
 
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Bar, BarChart, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { InsightDetailDialog } from '@/components/InsightDetailDialog';
-import { HelpCircle, Bot, Library, FileText, FolderKanban, Search, BrainCircuit } from 'lucide-react';
+import { HelpCircle, Bot, Library, FileText, FolderKanban, Search, BrainCircuit, Sparkles, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import { QuestionSlider } from '@/components/QuestionSlider';
@@ -21,7 +22,7 @@ const CustomYAxisTick = (props: any) => {
   const { x, y, payload } = props;
   return (
     <g transform={`translate(${x},${y})`}>
-      <foreignObject x={-200} y={-12} width={195} height={24}>
+      <foreignObject x={-200} y={-32} width={195} height={64}>
         <div
           style={{
             width: '100%',
@@ -64,20 +65,35 @@ interface Insight {
   synthetic_name?: string; // Nuevo campo para el nombre sintético
 }
 
+interface Conversation {
+  id: string;
+  title: string;
+  isPinned: boolean;
+  platform: string;
+  workspace_id: string | null;
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [viewingInsight, setViewingInsight] = useState<Insight | null>(null);
   const [analysisData, setAnalysisData] = useState<AnalysisData[]>([]);
   const [isWelcomeDialogOpen, setIsWelcomeDialogOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(e.target.value);
+  };
 
   useEffect(() => {
     const fetchInsights = async () => {
       setIsLoading(true);
       try {
-        const [insightsResponse, analysesResponse] = await Promise.all([
+        const [insightsResponse, analysesResponse, conversationsResponse] = await Promise.all([
           apiClient.post('/api/dashboard-insights', { all: false }),
-          apiClient.post('/api/get-saved-analyses', { all: true })
+          apiClient.post('/api/get-saved-analyses', { all: true }),
+          apiClient.get('/api/threads') // Nueva llamada para obtener conversaciones
         ]);
 
         // Transform insights data to ensure related_items is always an array
@@ -91,6 +107,7 @@ export default function DashboardPage() {
 
         setData(transformedData);
         setAnalysisData(analysesResponse.data);
+        setConversations(conversationsResponse.data); // Guardar las conversaciones
 
         const hasVisited = localStorage.getItem('hasVisitedDashboard');
         if (!hasVisited) {
@@ -122,7 +139,7 @@ export default function DashboardPage() {
 
   if (isLoading) { return <div className="p-6 text-center">Cargando dashboard...</div>; }
 
-  if (!data || (data.key_topics.length === 0 && data.proactive_insights.length === 0)) {
+  if (!data || (data.key_topics.length === 0 && data.proactive_insights.length === 0 && conversations.length === 0)) {
     return (
       <div className="p-6 text-center">
         <p className="text-muted-foreground">No hay datos disponibles en este momento.</p>
@@ -132,32 +149,51 @@ export default function DashboardPage() {
 
   return (
     <>
-      <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden space-y-8">
+      <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
         {/* Header moderno */}
-        <div className="spacing-component">
-          <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
-            Dashboard de Insights
-          </h1>
-          <p className="typography-body-large text-muted-foreground max-w-2xl">
-            Kognito está encontrando patrones y conexiones en tu conocimiento de forma inteligente.
-          </p>
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
+              <Bot className="h-6 w-6 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold">Dashboard de Insights</h1>
+              <p className="text-muted-foreground">Kognito está encontrando patrones y conexiones en tu conocimiento de forma inteligente.</p>
+            </div>
+          </div>
+          <Link href="/dashboard" className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Volver al Dashboard
+          </Link>
         </div>
 
-        <div className="grid gap-8 lg:grid-cols-2 px-2">
-          {/* Gráfico de Temas Principales */}
-          <Card className="modern-card border-0 shadow-medium hover:shadow-strong transition-all duration-300">
-            <CardHeader className="pb-4">
-              <CardTitle className="text-2xl font-bold flex items-center gap-3 mb-3">
-                <div className="w-3 h-3 rounded-full bg-primary"></div>
+        <div className="mb-8">
+          <div className="relative">
+            <svg className="absolute left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <Input
+              type="text"
+              placeholder="Buscar en el dashboard..."
+              value={searchTerm}
+              onChange={handleSearchChange}
+              className="pl-12 h-12 rounded-full bg-card border-0 shadow-sm focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+        </div>
+
+        {/* Gráfico de Temas Principales - Ahora ocupa el ancho completo */}
+        <div className="mb-8 px-2">
+          <div className="mb-6">
+            <div>
+              <h2 className="text-2xl font-semibold flex items-center">
+                <Library className="mr-3 h-6 w-6 text-primary" />
                 Temas Principales
-              </CardTitle>
-              <CardDescription className="space-y-2">
-                <span className="text-base">Tópicos más frecuentes en tu base de conocimiento.</span>
-                <div className="text-xs text-muted-foreground bg-primary/10 px-3 py-1.5 rounded-full inline-block border border-primary/20">
-                  ✨ Agrupados por similitud semántica
-                </div>
-              </CardDescription>
-            </CardHeader>
+              </h2>
+              <p className="text-muted-foreground mt-1">Tópicos más frecuentes en tu base de conocimiento.</p>
+            </div>
+          </div>
+          <Card className="modern-card border-0 shadow-medium hover:shadow-strong transition-all duration-300 h-full">
             <CardContent className="pt-6">
               <div className="flex justify-end mb-6 space-x-2">
                 <button
@@ -231,8 +267,10 @@ export default function DashboardPage() {
               </ResponsiveContainer>
             </CardContent>
           </Card>
+        </div>
 
-          {/* Carrusel de Ayuda */}
+        {/* El grid existente ahora contendrá la tarjeta de Ayuda y Capacidades y el nuevo panel de Conversaciones */}
+        <div className="grid gap-8 lg:grid-cols-2 px-2">
           <Card className="modern-card border-0 shadow-medium hover:shadow-strong transition-all duration-300 h-full">
             <CardHeader className="pb-4">
               <CardTitle className="text-2xl font-bold flex items-center gap-3 mb-2">
@@ -246,12 +284,53 @@ export default function DashboardPage() {
               <DashboardHelpCarousel />
             </CardContent>
           </Card>
+
+          {/* Nuevo Panel de Últimas Conversaciones */}
+          <Card className="modern-card border-0 shadow-medium hover:shadow-strong transition-all duration-300 h-full">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-2xl font-bold flex items-center gap-3 mb-2">
+                <div className="w-3 h-3 rounded-full bg-primary"></div>
+                <Bot className="h-6 w-6 text-primary" />
+                Últimas Conversaciones
+              </CardTitle>
+              <CardDescription className="text-lg">Tus interacciones más recientes con Kognito.</CardDescription>
+            </CardHeader>
+            <CardContent className="pt-0">
+              {conversations.length > 0 ? (
+                <div className="space-y-4">
+                  {conversations.slice(0, 5).map(conv => (
+                    <Link href={`/chat/${conv.id}`} key={conv.id} className="block p-3 rounded-lg bg-muted/40 hover:bg-muted/60 transition-colors duration-200">
+                      <p className="font-medium text-foreground line-clamp-1">{conv.title || 'Conversación sin título'}</p>
+                      <p className="text-sm text-muted-foreground">ID: {conv.id.substring(0, 8)}...</p>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-center text-muted-foreground py-4">No hay conversaciones recientes.</p>
+              )}
+              {conversations.length > 5 && (
+                <div className="flex justify-end mt-4">
+                  <Link href="/chat" className="typography-body-small font-medium text-primary hover:text-primary/80 transition-colors">
+                    Ver todas
+                  </Link>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         {/* Galería de Tarjetas de Insights */}
         <div className="spacing-section mt-16">
-          <div className="flex justify-between items-center spacing-component mb-10">
-            <h2 className="text-4xl font-bold tracking-tight">Descubrimientos Proactivos</h2>
+          <div className="mb-6">
+            <div>
+              <h2 className="text-2xl font-semibold flex items-center">
+                <Sparkles className="mr-3 h-6 w-6 text-primary" />
+                Descubrimientos Proactivos
+              </h2>
+              <p className="text-muted-foreground mt-1">Insights generados automáticamente por Kognito.</p>
+            </div>
+          </div>
+          <div className="flex justify-end items-center spacing-component mb-10">
             <Link href="/dashboard/insights" className="typography-body-small font-medium text-primary hover:text-primary/80 transition-colors">
               Ver todo
             </Link>
@@ -305,9 +384,15 @@ export default function DashboardPage() {
 
         {/* Nueva Sección para Preguntas de Análisis */}
         <div className="spacing-section mt-16">
-          <h2 className="text-4xl font-bold tracking-tight mb-10 bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
-            Preguntas de Análisis
-          </h2>
+          <div className="mb-6">
+            <div>
+              <h2 className="text-2xl font-semibold flex items-center">
+                <Search className="mr-3 h-6 w-6 text-primary" />
+                Preguntas de Análisis
+              </h2>
+              <p className="text-muted-foreground mt-1">Preguntas generadas a partir de tus datos para explorar.</p>
+            </div>
+          </div>
           <div className="grid gap-6 md:grid-cols-2 px-2">
             <QuestionSlider
               title="Brechas de Conocimiento"
