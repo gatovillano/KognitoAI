@@ -230,7 +230,7 @@ export default function RagCollectionsPage() {
     }
 
     return (
-      <motion.div layout className="grid gap-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 px-2">
+      <motion.div layout className="grid gap-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 px-2">
         <AnimatePresence>
           <StaticCollectionCard
             key="all-documents-card"
@@ -382,6 +382,21 @@ export default function RagCollectionsPage() {
         onShareSuccess={handleShareSuccess}
         collection={selectedCollection}
       />
+
+      {linkingCollection && (
+        <ManageLinkedObjectsDialog
+          isOpen={isLinkProfileDialogOpen}
+          onOpenChange={setIsLinkProfileDialogOpen}
+          profile={{
+            id: String(linkingCollection.topic),
+            name: linkingCollection.topic,
+            email: null, phone: null, tags: null, category: null, custom_fields: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }}
+          onLinkedObjectsUpdated={fetchCollections}
+        />
+      )}
     </div>
   );
 }

@@ -223,7 +223,21 @@ class ComprehensiveWebAnalysisTool(BaseTool):
             decision_response = await decision_llm.ainvoke([HumanMessage(content=decision_prompt)])
             
             try:
-                decision = json.loads(decision_response.content)
+                # Buscar el inicio del JSON (primer '{' o '[') y limpiar el contenido desde ahí.
+                json_start_index = -1
+                for char_index, char in enumerate(decision_response.content):
+                    if char == '{' or char == '[':
+                        json_start_index = char_index
+                        break
+
+                if json_start_index != -1:
+                    cleaned_content = decision_response.content[json_start_index:].strip()
+                else:
+                    # Si no se encuentra un inicio de JSON, intentar con la limpieza original o dejarlo como está si no hay nada.
+                    cleaned_content = re.sub(r'^.*?\|\s*', '', decision_response.content, flags=re.MULTILINE).strip()
+                    logger.warning(f"No JSON start char found, falling back to regex cleaning. Raw content: {decision_response.content}")
+
+                decision = json.loads(cleaned_content)
                 logger.info(f"LLM Decision: {decision}")
             except json.JSONDecodeError as e:
                 logger.error(f"Error parsing LLM decision JSON: {e}. Raw response: {decision_response.content}")
@@ -260,15 +274,30 @@ class ComprehensiveWebAnalysisTool(BaseTool):
                     f"        Relevancia: [Esta fuente fue relevante para el análisis general de la consulta original.]\n\n"
                 )
 
-        # Rellenar la plantilla KNOWLEDGE_SHARE_PRROMPT con la información recopilada
-        final_prompt_content = KNOWLEDGE_SHARE_PRROMPT.replace("{query}", original_query)
-        final_prompt_content = final_prompt_content.replace("{combined_web_content_accumulated}", combined_web_content_accumulated)
-        final_prompt_content = final_prompt_content.replace("{relevant_memories}", relevant_memories if "No se encontró" not in relevant_memories else "No se encontró información interna relevante.")
-        final_prompt_content = final_prompt_content.replace("{formatted_sources}", formatted_sources)
-        
-        # El KNOWLEDGE_SHARE_PRROMPT ya contiene la estructura completa del informe.
-        # No necesitamos envolverlo en otro f-string ni añadir más instrucciones aquí.
-        final_response = await final_analysis_llm.ainvoke([HumanMessage(content=final_prompt_content)])
+        # Construir el prompt final para el análisis completo
+        final_prompt = f"""
+        Eres KAI, tu asistente de inteligencia aumentada. Tu tarea es generar un informe detallado y exhaustivo basado en la siguiente información recopilada.
+        DEBES seguir la estructura y los principios del KNOWLEDGE_SHARE_PROMPT que se te proporcionó.
+        Asegúrate de integrar toda la información relevante de forma coherente y detallada en cada sección del informe.
+
+        --- Consulta Original del Usuario ---
+        {original_query}
+
+        --- Contenido Web Acumulado ---
+        {combined_web_content_accumulated}
+
+        --- Información Relevante de la Base de Conocimiento Personal del Usuario ---
+        {relevant_memories if "No se encontró" not in relevant_memories else "No se encontró información interna relevante."}
+
+        --- Fuentes Analizadas ---
+        {formatted_sources if formatted_sources else "No se pudieron extraer fuentes específicas."}
+
+        --- Estructura del Informe (KNOWLEDGE_SHARE_PRROMPT) ---
+        {KNOWLEDGE_SHARE_PRROMPT}
+
+        Por favor, genera el informe detallado ahora, rellenando la estructura con la información anterior:
+        """
+        final_response = await final_analysis_llm.ainvoke([HumanMessage(content=final_prompt)])
 
         return final_response.content
 

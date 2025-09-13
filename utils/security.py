@@ -58,20 +58,16 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     encoded_jwt = jwt.encode(to_encode, settings.jwt_secret_key, algorithm="HS256")
     return encoded_jwt
 
-def decode_access_token(token: str) -> Optional[str]:
+def decode_access_token(token: str) -> Optional[dict]:
     """
-    Decodifica un token JWT y devuelve el 'subject' (account_id).
+    Decodifica un token JWT y devuelve el payload.
     
     Returns:
-        El account_id (str) si el token es válido, o None si ha expirado o es inválido.
+        El payload (dict) si el token es válido, o None si ha expirado o es inválido.
     """
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=["HS256"])
-        # 'sub' (subject) es el estándar para el ID del usuario en JWT.
-        account_id: str = payload.get("sub")
-        if account_id is None:
-            return None
-        return account_id
+        return payload
     except jwt.ExpiredSignatureError:
         logger.warning("Intento de uso de un token JWT expirado.")
         return None
@@ -94,8 +90,12 @@ async def get_current_account_id(token: str = Depends(oauth2_scheme)) -> str:
         headers={"WWW-Authenticate": "Bearer"},
     )
     
-    account_id = decode_access_token(token)
+    payload = decode_access_token(token)
     
+    if payload is None:
+        raise credentials_exception
+
+    account_id: str = payload.get("sub")
     if account_id is None:
         raise credentials_exception
         

@@ -7,7 +7,7 @@ from typing import List, Optional, AsyncGenerator
 
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
-from sqlalchemy import select, update, text
+from sqlalchemy import select, update, text, func
 
 from core.database import SessionLocal, Account, Team, TeamMember, Nota, AgendaEvent
 from utils.security import get_current_account_id
@@ -31,10 +31,12 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 class TeamCreateRequest(BaseModel):
     """Define la estructura de datos para crear un nuevo equipo."""
     name: str
+    members: Optional[List[str]] = None
 
 class TeamUpdateRequest(BaseModel):
     """Define la estructura de datos para actualizar un equipo existente."""
     name: Optional[str] = None
+    members: Optional[List[str]] = None
 
 class TeamShareRequest(BaseModel):
     """Define la estructura de datos para compartir recursos con un equipo."""
@@ -51,6 +53,7 @@ class TeamResponse(BaseModel):
     id: str
     name: str
     created_at: datetime
+    members_count: int = 0  # Añadir el campo para el conteo de miembros
 
 @router.get("/teams", response_model=List[TeamResponse], summary="Listar equipos del usuario")
 async def list_teams(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
@@ -75,11 +78,19 @@ async def list_teams(current_account_id: str = Depends(get_current_account_id), 
     teams = list({team.id: team for team in all_teams}.values())  # Remove duplicates by id
     # Ordenar por fecha de creación descendente
     teams.sort(key=lambda x: getattr(x, 'created_at'), reverse=True)
-    return [TeamResponse(
-        id=str(getattr(team, 'id')),
-        name=str(getattr(team, 'name')),
-        created_at=getattr(team, 'created_at')
-    ) for team in teams]
+
+    response_teams = []
+    for team in teams:
+        # Contar miembros del equipo
+        members_count_result = await db.execute(select(func.count(TeamMember.account_id)).where(TeamMember.team_id == team.id))
+        members_count = members_count_result.scalar_one()
+        response_teams.append(TeamResponse(
+            id=str(getattr(team, 'id')),
+            name=str(getattr(team, 'name')),
+            created_at=getattr(team, 'created_at'),
+            members_count=members_count
+        ))
+    return response_teams
 
 @router.get("/teams/{team_id}", response_model=TeamResponse, summary="Obtener detalles de un equipo")
 async def get_team(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
@@ -92,10 +103,16 @@ async def get_team(team_id: str, current_account_id: str = Depends(get_current_a
     team = await db.scalar(select(Team).where(Team.id == team_uuid, Team.admin_id == account_uuid))
     if not team:
         raise HTTPException(status_code=404, detail="Equipo no encontrado o no pertenece al usuario.")
+    
+    # Contar miembros del equipo
+    members_count_result = await db.execute(select(func.count(TeamMember.account_id)).where(TeamMember.team_id == team.id))
+    members_count = members_count_result.scalar_one()
+
     return TeamResponse(
         id=str(getattr(team, 'id')),
         name=str(getattr(team, 'name')),
-        created_at=getattr(team, 'created_at')
+        created_at=getattr(team, 'created_at'),
+        members_count=members_count
     )
 
 @router.post("/teams", response_model=TeamResponse, status_code=status.HTTP_201_CREATED, summary="Crear un nuevo equipo")
@@ -113,7 +130,8 @@ async def create_team(team: TeamCreateRequest, current_account_id: str = Depends
     return TeamResponse(
         id=str(getattr(new_team, 'id')),
         name=str(getattr(new_team, 'name')),
-        created_at=getattr(new_team, 'created_at')
+        created_at=getattr(new_team, 'created_at'),
+        members_count=0 # Al crear un equipo, inicialmente no tiene miembros
     )
 
 @router.put("/teams/{team_id}", response_model=TeamResponse, summary="Actualizar un equipo existente")
@@ -131,10 +149,16 @@ async def update_team(team_id: str, team_update: TeamUpdateRequest, current_acco
         setattr(team, 'name', team_update.name)
     await db.commit()
     await db.refresh(team)
+
+    # Contar miembros del equipo después de la actualización
+    members_count_result = await db.execute(select(func.count(TeamMember.account_id)).where(TeamMember.team_id == team.id))
+    members_count = members_count_result.scalar_one()
+
     return TeamResponse(
         id=str(getattr(team, 'id')),
         name=str(getattr(team, 'name')),
-        created_at=getattr(team, 'created_at')
+        created_at=getattr(team, 'created_at'),
+        members_count=members_count
     )
 
 @router.post("/teams/{team_id}/share/documents", summary="Compartir documentos con un equipo")
@@ -169,7 +193,8 @@ async def share_documents_with_team(team_id: str, share_request: TeamShareReques
                   AND content_type = 'user_documents'
                   AND cmetadata->>'file_name' = :file_name
                   AND cmetadata->>'type' = 'document_chunk'
-            """)
+            """
+            )
 
             check_result = await db_session.execute(check_sql, {
                 "account_id": current_account_id,
@@ -189,7 +214,8 @@ async def share_documents_with_team(team_id: str, share_request: TeamShareReques
                   AND content_type = 'user_documents'
                   AND cmetadata->>'file_name' = :file_name
                   AND cmetadata->>'type' = 'document_chunk'
-            """)
+            """
+            )
 
             result = await db_session.execute(update_sql, {
                 "team_id": str(team_uuid),
@@ -301,7 +327,8 @@ async def share_collection_with_team(team_id: str, share_request: TeamShareColle
             WHERE account_id = :account_id
             AND topic = :collection_topic
             AND cmetadata->>'type' = 'document_chunk'
-        """)
+        """
+        )
 
         result = await db.execute(update_query, {
             "team_id": str(team_uuid),
@@ -438,7 +465,8 @@ async def list_team_documents(team_id: str, current_account_id: str = Depends(ge
           AND cmetadata->>'type' = 'document_chunk'
           AND team_id = :team_id
         ORDER BY cmetadata->>'file_name', id
-    """)
+    """
+    )
 
     documents_result = await db.execute(document_list_query, {
         "account_id": current_account_id,
@@ -504,7 +532,8 @@ async def list_team_collections(team_id: str, current_account_id: str = Depends(
           AND topic IS NOT NULL
         GROUP BY topic
         ORDER BY topic
-    """)
+    """
+    )
 
     collections_result = await db.execute(collections_query, {"team_id": str(team_uuid)})
     shared_collections = [dict(row) for row in collections_result.mappings()]
@@ -560,9 +589,11 @@ async def list_team_shared_items(team_id: str, current_account_id: str = Depends
                account_id AS account_id
         FROM langchain_pg_embedding
         WHERE team_id = :team_id
+          AND content_type = 'user_documents'
           AND cmetadata->>'type' = 'document_chunk'
         ORDER BY cmetadata->>'document_id', id
-    """)
+    """
+    )
 
     documents_result = await db.execute(document_list_query, {"team_id": str(team_uuid)})
     shared_documents = [dict(row) for row in documents_result.mappings()]

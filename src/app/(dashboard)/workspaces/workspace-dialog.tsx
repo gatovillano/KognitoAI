@@ -12,18 +12,20 @@ interface WorkspaceDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
-  workspace: { id: string; name: string; system_prompt: string | null } | null;
+  workspace: { id: string; name: string; system_prompt: string | null; color: string | null } | null; // NEW: color
 }
 
 export function WorkspaceDialog({ isOpen, onClose, onSuccess, workspace }: WorkspaceDialogProps) {
   const [name, setName] = useState(workspace?.name || '');
   const [systemPrompt, setSystemPrompt] = useState(workspace?.system_prompt || '');
+  const [color, setColor] = useState(workspace?.color || '#007bff'); // NEW: color state
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setName(workspace?.name || '');
       setSystemPrompt(workspace?.system_prompt || '');
+      setColor(workspace?.color || '#007bff'); // NEW: initialize color
     }
   }, [workspace, isOpen]);
 
@@ -33,9 +35,9 @@ export function WorkspaceDialog({ isOpen, onClose, onSuccess, workspace }: Works
 
     try {
       if (workspace) {
-        await apiClient.put(`/api/workspaces/${workspace.id}`, { name, system_prompt: systemPrompt || null });
+        await apiClient.put(`/api/workspaces/${workspace.id}`, { name, system_prompt: systemPrompt || null, color }); // NEW: include color
       } else {
-        const response = await apiClient.post('/api/workspaces', { name, system_prompt: systemPrompt || null });
+        const response = await apiClient.post('/api/workspaces', { name, system_prompt: systemPrompt || null, color }); // NEW: include color
         console.log('Workspace creation API response:', response.data);
       }
       onSuccess();
@@ -68,6 +70,11 @@ export function WorkspaceDialog({ isOpen, onClose, onSuccess, workspace }: Works
               placeholder="Escribe un prompt de sistema personalizado para este workspace..."
               rows={5}
             />
+          </div>
+          {/* NEW: Color Picker */}
+          <div>
+            <Label htmlFor="color">Color del Workspace</Label>
+            <Input type="color" id="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-10 w-full" />
           </div>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>

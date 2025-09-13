@@ -1,6 +1,7 @@
 # api/main.py
 
 import logging
+import asyncio # Added
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -109,6 +110,7 @@ async def log_405_errors(request, call_next):
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
     """Endpoint para manejar conexiones WebSocket con autenticación."""
+    logger.info(f"INTENTO DE CONEXIÓN WEBSOCKET para user_id: {user_id}") # Nuevo log
     token = websocket.query_params.get('token')
 
     if not token:
@@ -162,20 +164,24 @@ app.include_router(documents_router, prefix="/api", tags=["documents"])
 app.include_router(notes_router, prefix="/api", tags=["notes"])
 app.include_router(agenda_router, prefix="/api", tags=["agenda"])
 from api.workspaces import router as workspaces_router
+from api.contact_profiles import router as contact_profiles_router
 
 app.include_router(teams_router, prefix="/api", tags=["teams"])
 app.include_router(workspaces_router, prefix="/api", tags=["workspaces"])
+app.include_router(contact_profiles_router, prefix="/api", tags=["contact-profiles"])
 from api.analysis import router as analysis_router
 app.include_router(analysis_router, prefix="/api", tags=["analysis"])
 from api.github import router as github_router
 from api.telegram import router as telegram_router
 from api.logs import router as logs_router
 from api.scheduled_tools import router as scheduled_tools_router
+from api.tasks import router as tasks_router # Importar el router de tasks
 
 app.include_router(github_router, prefix="/api/github", tags=["github"])
 app.include_router(telegram_router, prefix="", tags=["telegram"])
 app.include_router(logs_router, prefix="/api", tags=["logs"])
 app.include_router(scheduled_tools_router, prefix="/api", tags=["scheduled-tools"])
+app.include_router(tasks_router, prefix="/api", tags=["tasks"]) # Incluir el router de tasks
 app.include_router(knowledge_graph_router, prefix="/api", tags=["knowledge-graph"])
 app.include_router(search_router, prefix="/api", tags=["search"])
 from api.deep_research import router as deep_research_router

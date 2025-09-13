@@ -64,7 +64,7 @@ from tools.image_generation_tool import ImageGenerationTool
 from tools.internal_knowledge_search_tool import InternalKnowledgeSearchTool
 from tools.knowledge_analysis_tool import KnowledgeAnalysisTool
 from tools.memory_add_tool import MemoryAddTool
-from tools.memory_search_optimized_tool import MemorySearchOptimizedTool
+from tools.knowledge_search_tool import KnowledgeSearchTool
 from tools.mindmap_generator_tool import MindmapGeneratorTool
 from tools.multi_query_search_tool import MultiQuerySearchTool
 from tools.natural_query_interpreter_tool import NaturalQueryInterpreterTool
@@ -75,10 +75,11 @@ from tools.set_reminder_tool import SetReminderTool
 from tools.update_document_metadata_tool import UpdateDocumentMetadataTool
 from tools.update_note_tool import UpdateNoteTool
 from tools.update_user_profile import UpdateProfileTool
-from tools.vector_db_query_tool import VectorDBQueryTool
-from tools.vector_db_search_tool import VectorDBSearchTool
+
+
 from tools.web_scraper_tool import WebScraperTool
 from tools.schedule_tool_execution import ScheduleToolExecutionTool, ListScheduledToolsTool
+from tools.search_notes_tool import SearchNotesTool
 
 # List of all tool classes to instantiate directly.
 tool_classes_to_instantiate = [
@@ -108,19 +109,19 @@ tool_classes_to_instantiate = [
     InternalKnowledgeSearchTool,
     KnowledgeAnalysisTool,
     MemoryAddTool,
-    MemorySearchOptimizedTool,
+    KnowledgeSearchTool,
     MindmapGeneratorTool,
     MultiQuerySearchTool,
     NaturalQueryInterpreterTool,
     ProactiveKnowledgeLinkerTool,
     ScheduleEventTool,
     ScopedRagAnalysisTool,
+    SearchNotesTool,
     SetReminderTool,
     UpdateDocumentMetadataTool,
     UpdateNoteTool,
     UpdateProfileTool,
-    VectorDBQueryTool,
-    VectorDBSearchTool,
+    
     WebScraperTool,
     ScheduleToolExecutionTool,
     ListScheduledToolsTool,
@@ -172,7 +173,7 @@ def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = None, 
 
                 # Define a list of tools that should NOT receive thread_id
                 tools_to_exclude_thread_id = [
-                    "MemorySearchOptimizedTool",
+                    "KnowledgeSearchTool",
                     "WebSearchTool",
                     "DuckDuckGoSearchTool",
                     "UpdateProfileTool",
@@ -204,8 +205,7 @@ def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = None, 
                     "CogneeConceptualProcessingTool",
                     "ScheduleToolExecutionTool",
                     "ListScheduledToolsTool",
-                    "VectorDBSearchTool",
-                    "VectorDBQueryTool",
+                    
                     "NaturalQueryInterpreterTool",
                     "ProactiveKnowledgeLinkerTool",
                     "GetProactiveInsightsTool",
@@ -254,7 +254,7 @@ def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = None, 
     # --- Resumen Final de Herramientas Cargadas ---
     logger.info("--- 🧰 Caja de Herramientas Ensamblada ---")
     for tool in available_tools:
-        logger.info(f"  ✅ {tool.name}: {tool.description}")
+        logger.info(f"  ✅ {tool.name}")
     logger.info(f"  Total de herramientas operativas: {len(available_tools)}")
     logger.info("-------------------------------------------")
 

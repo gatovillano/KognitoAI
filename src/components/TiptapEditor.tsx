@@ -60,7 +60,7 @@ export function TiptapEditor({ content, onChange, containerClassName }: { conten
     content: content,
     editorProps: {
       attributes: {
-        class: `prose prose-invert dark:prose-invert max-w-full rounded-b-md border p-4 focus:outline-none ${containerClassName || 'min-h-[300px]'}`,
+        class: `prose dark:prose-invert max-w-full rounded-b-md border p-4 focus:outline-none ${containerClassName || 'min-h-[300px]'}`,
       },
     },
     onUpdate({ editor }) {

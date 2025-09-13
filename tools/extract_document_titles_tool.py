@@ -63,16 +63,15 @@ class ExtractDocumentTitlesTool(BaseTool):
         raise NotImplementedError("ExtractDocumentTitlesTool solo soporta ejecución asíncrona. Usa _arun en su lugar.")
 
     async def _arun(self, **kwargs: Any) -> str:
-        file_name = None # Inicializar file_name aquí
-        """
-        Ejecuta la lógica de la herramienta de forma asíncrona.
+        # Extraer file_name de kwargs al inicio
+        file_name_from_kwargs = kwargs.get("file_name")
+        if isinstance(file_name_from_kwargs, FieldInfo):
+            file_name = file_name_from_kwargs.description if file_name_from_kwargs.description else None
+        elif isinstance(file_name_from_kwargs, str):
+            file_name = file_name_from_kwargs
+        else:
+            file_name = None
 
-        Args:
-            **kwargs: Argumentos adicionales (no utilizados).
-
-        Returns:
-            Un mensaje de texto indicando el resultado de la operación.
-        """
         # Extraer topic y collection_id de kwargs o usar los atributos de la instancia.
         # Si son objetos FieldInfo (inyectados automáticamente), obtener su descripción.
         current_topic_val = kwargs.get("topic", self.topic)
@@ -149,6 +148,11 @@ class ExtractDocumentTitlesTool(BaseTool):
                 if current_collection_id: # Este collection_id se refiere a 'user_documents' o 'user_memories'
                     clauses.append("collection_id = :col_id")
                     params["col_id"] = current_collection_id
+                
+                # AÑADIR ESTA LÓGICA PARA FILTRAR POR file_name
+                if file_name:
+                    clauses.append("cmetadata->>'file_name' = :file_name")
+                    params["file_name"] = file_name
 
                 # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
                 select_sql = text("SELECT DISTINCT ON (cmetadata->>'document_id') * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses) + " ORDER BY cmetadata->>'document_id', id")

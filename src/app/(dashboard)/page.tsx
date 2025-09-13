@@ -89,8 +89,15 @@ export default function ChatLandingPage() {
     setIsResponding(true);
     try {
       // Envía un cuerpo JSON vacío explícitamente
-      const response = await apiClient.post('/api/threads', {}); 
-      const newThread = response.data;
+      let newThread;
+      if (chatInput.trim()) { // Solo crea un hilo si hay un mensaje
+        const response = await apiClient.post('/api/threads', {}); 
+        newThread = response.data;
+      } else {
+        // Si no hay mensaje, no se crea un hilo y se sale de la función
+        setIsResponding(false);
+        return;
+      }
       // Send the first message to the new thread
       const mode = isKnowledgeAnalysisActive
         ? 'knowledgeAnalysis'
@@ -167,7 +174,7 @@ export default function ChatLandingPage() {
     if (!e.target.files || e.target.files.length === 0 || isUploadingFile) return;
     setIsUploadingFile(true);
     try {
-      const response = await apiClient.post('/api/threads');
+      const response = await apiClient.post('/api/threads'); // Crea el hilo solo si hay archivos
       const newThread = response.data;
       const formData = new FormData();
       formData.append('thread_id', newThread.id);
@@ -223,7 +230,7 @@ export default function ChatLandingPage() {
         {/* Input Principal */}
         <form onSubmit={handleChatSubmit} className="w-full max-w-4xl">
           <div className="relative">
-            <div className="rounded-3xl bg-card border border-border p-6 shadow-sm">
+            <div className="rounded-3xl bg-card border border-border px-4 py-3 shadow-medium">
               <Textarea
                 ref={textAreaRef}
                 value={chatInput}
@@ -237,7 +244,7 @@ export default function ChatLandingPage() {
               />
               
               {/* Barra de acciones */}
-              <div className="flex items-center justify-between mt-4 pt-4 border-t border-border/50">
+              <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50">
                 {/* Botones de modo */}
                 <div className="flex items-center gap-2">
                   <Button

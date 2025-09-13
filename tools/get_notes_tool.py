@@ -44,11 +44,19 @@ class GetNotesTool(BaseTool):
         try:
             async with SessionLocal() as session:
                 notes_manager = NotesManager(session)
-                notes = await notes_manager.list_all_notes(
-                    account_id=self.account_id,
-                    search_query=search_query,
-                    category=category
-                )
+                if self.workspace_id:
+                    notes = await notes_manager.get_notes_as_dicts(
+                        account_id=self.account_id,
+                        workspace_id=self.workspace_id,
+                        search_query=search_query,
+                        category=category
+                    )
+                else:
+                    notes = await notes_manager.list_all_notes(
+                        account_id=self.account_id,
+                        search_query=search_query,
+                        category=category
+                    )
 
             if not notes:
                 return "No tienes ninguna nota guardada o ninguna coincide con tu búsqueda."

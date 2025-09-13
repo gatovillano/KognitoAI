@@ -100,7 +100,7 @@ export default function WorkspacesPage() {
           </Button>
         </div>
       ) : (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {workspaces.map((workspace) => (
             <Card key={workspace.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleCardClick(workspace.id)}>
               <CardHeader className="pb-3">

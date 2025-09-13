@@ -53,6 +53,7 @@ from core.database import SessionLocal, Account, ChatThread, Workspace
 from utils.db_session import DBSession
 #from utils.helpers import sanitize_html
 from core.config import settings
+from core.citation_models import ToolOutputWithSources
 from core.llm_manager import get_main_llm, get_fast_llm
 from core.prompts import SUMMARIZATION_PROMPT, THREAD_TITLE_PROMPT
 # --- Claves para estado temporal ---
@@ -375,6 +376,21 @@ async def call_model_node(state: AgentState):
     # 4. Invocar la cadena y añadir la respuesta al estado
     response = await chain.ainvoke({"messages": state["messages"]})
     
+    # Adjuntar fuentes y tool_calls a la respuesta del LLM si existen
+    if isinstance(response, AIMessage):
+        if state.get("sources"):
+            response.additional_kwargs["sources"] = state["sources"]
+        
+        if response.tool_calls:
+            tool_code_data = [
+                {
+                    "name": tc.get("name"),
+                    "arguments": tc.get("args"),
+                }
+                for tc in response.tool_calls
+            ]
+            response.additional_kwargs["tool_code"] = json.dumps(tool_code_data)
+            
     return {"messages": state["messages"] + [response]}
 
 async def generate_response_node(state: AgentState):
@@ -388,6 +404,7 @@ async def generate_response_node(state: AgentState):
 async def tool_node(state: AgentState):
     """
     Ejecuta las herramientas llamadas por el agente y añade los resultados al estado.
+    MODIFICADO: Ahora también extrae y propaga las 'sources' de las herramientas.
     """
     logger.info("--- (Grafo) Nodo: Llamar Herramienta ---")
     if not isinstance(state["messages"][-1], AIMessage):
@@ -406,6 +423,12 @@ async def tool_node(state: AgentState):
     tool_map = {tool.name: tool for tool in tools}
 
     tool_messages = []
+    # Cargar las fuentes existentes del estado para poder añadir nuevas
+    current_sources = state.get("sources") or []
+    # Usar un set para evitar duplicados basados en la URL
+    existing_urls = {s['url'] for s in current_sources if 'url' in s and s['url']}
+
+
     for tool_call in tool_calls:
         tool_name = tool_call.get("name")
         tool_args = tool_call.get("args")
@@ -421,13 +444,10 @@ async def tool_node(state: AgentState):
         selected_tool = tool_map[tool_name]
         
         # --- INYECCIÓN DE ATRIBUTOS DE CONTEXTO ---
-        # Asegurarse de que los IDs de contexto se pasen como atributos de la instancia de la herramienta
-        # Esto es crucial para la estandarización que ya tienes definida.
         selected_tool.account_id = state['account_id']
         selected_tool.workspace_id = state.get('workspace_id')
         selected_tool.telegram_id = state.get('telegram_id')
         
-        # Solo asignar thread_id si la herramienta tiene el atributo
         if hasattr(selected_tool, 'thread_id'):
             selected_tool.thread_id = state['messages'][-1].additional_kwargs.get('thread_id') 
         # --- FIN INYECCIÓN ---
@@ -440,35 +460,40 @@ async def tool_node(state: AgentState):
             # --- INICIO: Lógica de resumen para cognee_conceptual_processing ---
             if tool_name == "cognee_conceptual_processing":
                 try:
-                    # Intentar parsear la salida como JSON
                     output_data = json.loads(output)
                     if output_data.get("status") == "completed":
                         llm = get_fast_llm()
                         if llm:
                             summary_prompt = f"""Eres un asistente de IA. Has procesado unos documentos y has extraído conocimiento. Ahora, resume los resultados de forma amigable para el usuario. No inventes detalles, basa tu resumen estrictamente en los siguientes datos JSON. Explica brevemente qué son las citas conceptuales y los perfiles de ideas si aparecen en los resultados. Sé conciso y claro. Datos a resumir: {json.dumps(output_data, indent=2, ensure_ascii=False)}"""
                             summary_response = await llm.ainvoke(summary_prompt)
-                            final_output = summary_response.content if hasattr(summary_response, 'content') else str(summary_response)
-                            logger.info(f"Resumen generado para cognee_conceptual_processing: {final_output}")
-                            output = final_output # Reemplazar el JSON con el resumen
+                            output = summary_response.content if hasattr(summary_response, 'content') else str(summary_response)
+                            logger.info(f"Resumen generado para cognee_conceptual_processing: {output}")
                         else:
                             logger.warning("No se pudo generar resumen para cognee_conceptual_processing: LLM rápido no disponible.")
-                            # Dejar el output JSON como fallback
                     else:
-                        # Si el estado no es 'completed', mostrar un mensaje de error amigable
                         error_message = output_data.get("details", "Ocurrió un error desconocido durante el procesamiento.")
                         output = f"No pude completar el procesamiento conceptual. Razón: {error_message}"
-
                 except (json.JSONDecodeError, TypeError):
                     logger.warning("La salida de cognee_conceptual_processing no es un JSON válido, no se puede generar resumen.")
-                    # Dejar el output como está si no es un JSON válido
             # --- FIN: Lógica de resumen ---
 
-            # Asegurarse de que la salida sea un string
-            if not isinstance(output, str):
-                output = json.dumps(output, ensure_ascii=False)
+            # --- INICIO: Procesamiento de salida de herramienta y extracción de fuentes ---
+            tool_content_for_llm = ""
+            if isinstance(output, ToolOutputWithSources):
+                tool_content_for_llm = output.context_for_llm
+                if output.sources:
+                    for source in output.sources:
+                        if source.url not in existing_urls:
+                            current_sources.append(source.dict())
+                            existing_urls.add(source.url)
+            elif not isinstance(output, str):
+                tool_content_for_llm = json.dumps(output, ensure_ascii=False)
+            else:
+                tool_content_for_llm = output
+            # --- FIN: Procesamiento de salida ---
 
             tool_messages.append(ToolMessage(
-                content=output,
+                content=tool_content_for_llm,
                 tool_call_id=tool_call.get("id")
             ))
         except Exception as e:
@@ -478,7 +503,8 @@ async def tool_node(state: AgentState):
                 tool_call_id=tool_call.get("id")
             ))
             
-    return {"messages": state["messages"] + tool_messages}
+    # Devolver los mensajes de la herramienta Y las fuentes actualizadas al estado del grafo
+    return {"messages": state["messages"] + tool_messages, "sources": current_sources}
 
 # --- 2. Enrutador ---
 

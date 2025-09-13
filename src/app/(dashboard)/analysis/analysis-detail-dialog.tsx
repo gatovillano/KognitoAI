@@ -565,12 +565,8 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
       {isOpen && (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
           <DialogContent className="max-w-4xl max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-              className="flex flex-col flex-grow"
+            <div
+              className="flex flex-col flex-grow overflow-hidden"
             >
               <DialogHeader className="flex-shrink-0">
                 <DialogTitle className="flex items-center gap-3">
@@ -604,16 +600,16 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
                 </DialogDescription>
               </DialogHeader>
 
-              <ScrollArea className="max-h-[60vh] pr-4">
+              <ScrollArea className="flex-1 min-h-0 pr-4">
                 {renderTypeSpecificContent()}
               </ScrollArea>
 
-              <div className="flex justify-end mt-6">
+              <div className="flex flex-shrink-0 justify-end mt-6">
                 <Button variant="outline" onClick={() => onOpenChange(false)}>
                   Cerrar
                 </Button>
               </div>
-            </motion.div>
+            </div>
           </DialogContent>
         </Dialog>
       )}

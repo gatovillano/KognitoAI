@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, memo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { Send, ArrowUp, X, Paperclip } from 'lucide-react';
+import { Send, ArrowUp, X, Paperclip, Upload, Loader2, Mic } from 'lucide-react';
 import { ContextSelectorButton } from '@/components/ContextSelectorButton';
 import { MoreActionsMenu } from './MoreActionsMenu';
 
@@ -27,14 +27,16 @@ interface ChatInputBarProps {
   newMessage: string;
   isResponding: boolean;
   isRecording?: boolean;
+  isProcessingAudio?: boolean;
   isUploadingFile?: boolean;
   isKnowledgeAnalysisActive: boolean;
   isWebSearchActive: boolean;
   isComprehensiveAnalysisActive: boolean;
   isDeepResearchActive: boolean; // Nueva prop
+  selectedToolName?: string; // Nueva prop para forzar la ejecución de una herramienta
   messages?: ChatMessage[];
   onMessageChange: (value: string) => void;
-  onSendMessage: (e?: React.FormEvent) => void;
+  onSendMessage: (e?: React.FormEvent, message?: string) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onToggleKnowledgeAnalysis?: () => void;
   onToggleWebSearch?: () => void;
@@ -56,12 +58,14 @@ interface ChatInputBarProps {
 const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   newMessage,
   isResponding,
-  isRecording,
-  isUploadingFile,
+  isRecording = false,
+  isProcessingAudio = false,
+  isUploadingFile = false,
   isKnowledgeAnalysisActive,
   isWebSearchActive,
   isComprehensiveAnalysisActive,
   isDeepResearchActive, // Nueva prop
+  selectedToolName, // Nueva prop
   onMessageChange,
   onSendMessage,
   onKeyDown = () => {},
@@ -83,13 +87,32 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
 }) => {
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    let messageText = newMessage;
+
+    // Si se ha seleccionado una herramienta, añadir el prefijo al mensaje
+    if (selectedToolName) {
+      messageText = `[USE_TOOL:${selectedToolName}] ${newMessage}`;
+    }
+
+    if (currentContext.length > 0) {
+      const contextNames = currentContext.map(item => item.name).join(', ');
+      // Si ya se añadió un prefijo de herramienta, el contexto se añade después
+      messageText = `${messageText.trim()}. Considerando el siguiente contexto: ${contextNames}. Mi pregunta es: ${newMessage}`;
+    }
+
+    onSendMessage(e, messageText);
+    onMessageChange('');
+  };
+
   useEffect(() => {
     const textArea = textAreaRef.current;
     if (textArea) {
       const adjustHeight = () => {
         textArea.style.height = 'auto';
         const newHeight = textArea.scrollHeight;
-        const maxHeight = 100; // Altura máxima en píxeles
+        const maxHeight = 60; // Altura máxima en píxeles
         if (newHeight > maxHeight) {
           textArea.style.height = `${maxHeight}px`;
           textArea.style.overflowY = 'auto';
@@ -115,10 +138,16 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     };
   }, [onPaste]);
 
+  useEffect(() => {
+    if (isProcessingAudio) {
+      toast.info("Iniciando transcripción...");
+    }
+  }, [isProcessingAudio]);
+
   return (
     <div className={isFixedPosition ? "fixed bottom-0 w-full md:w-[calc(100%-320px)] right-0 p-4 md:p-6 bg-background z-30" : "relative w-full"}>
       <div className="flex justify-center w-full">
-      <form onSubmit={onSendMessage} className="relative w-full max-w-2xl">
+      <form onSubmit={handleSubmit} className="relative w-full">
         <div className="rounded-3xl bg-card border border-border px-4 py-3 shadow-medium hover:shadow-strong transition-shadow duration-300">
           {/* Archivos adjuntos */}
           {currentContext.length > 0 && (
@@ -174,19 +203,56 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
 
             {/* Botones de acción */}
             <div className="flex items-center gap-3">
+              {/* Botón de Subir Documentos */}
+              <input
+                id="file-upload-chat-bar"
+                type="file"
+                multiple
+                accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.gif"
+                className="hidden"
+                onChange={(e) => {
+                  onFileUpload(e);
+                  e.target.value = '';
+                }}
+                disabled={isUploadingFile}
+              />
+              <label htmlFor="file-upload-chat-bar" className="flex items-center justify-center h-9 w-9 rounded-full text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer">
+                {isUploadingFile ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <Upload className="h-5 w-5" />
+                )}
+              </label>
+
+              {/* Botón de Grabación de Audio */}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={`rounded-full ${isRecording && !isProcessingAudio ? 'text-red-500 animate-pulse' : 'text-muted-foreground'} hover:bg-accent hover:text-accent-foreground`}
+                onClick={isRecording ? onStopRecording : onStartRecording}
+                disabled={isUploadingFile || isResponding || isProcessingAudio}
+              >
+                {isProcessingAudio ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-red-500" />
+                ) : isRecording ? (
+                  <Mic className="h-5 w-5 text-red-500" />
+                ) : (
+                  <Mic className="h-5 w-5" />
+                )}
+              </Button>
+
               <Button
                 type="submit"
+                size="icon"
                 disabled={isResponding || (!newMessage.trim() && currentContext.length === 0)}
-                className="group rounded-full transition-all duration-300 ease-in-out px-3 flex items-center relative justify-center"
+                className="rounded-full"
               >
                 {isResponding ? (
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-background border-t-transparent flex-shrink-0" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Send className="h-4 w-4 flex-shrink-0" />
+                  <ArrowUp className="h-4 w-4" />
                 )}
-                <span className="ml-2 whitespace-nowrap opacity-0 md:group-hover:opacity-100 transition-opacity duration-300 w-0 md:group-hover:w-auto overflow-hidden">
-                  {isResponding ? 'Enviando...' : 'Enviar'}
-                </span>
               </Button>
             </div>
           </div>

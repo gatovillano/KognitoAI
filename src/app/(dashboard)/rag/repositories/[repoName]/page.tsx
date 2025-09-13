@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -95,6 +95,43 @@ export default function RepositoryDetailPage() {
   // Estado para el historial de análisis
   const [savedAnalyses, setSavedAnalyses] = useState<any[]>([]);
 
+  const fetchData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [docsRes, analysesRes] = await Promise.all([
+        apiClient.post('/api/github/list-github-documents', {}),
+        apiClient.post('/api/get-repo-analyses', { repo_name: repoName })
+      ]);
+      // Filtrar documentos por repo_url que termine con el repoName
+      const filteredDocs = docsRes.data.filter((doc: GitHubDocument) => doc.repo_url && doc.repo_url.endsWith(`/${repoName}`));
+
+      // Obtener la URL del repositorio del primer documento
+      if (filteredDocs.length > 0 && filteredDocs[0].repo_url) {
+        setRepoUrl(filteredDocs[0].repo_url);
+      }
+      // Usar los análisis directamente del endpoint específico para el repositorio
+      const repoAnalyses = analysesRes.data
+        .map((analysis: any) => {
+          let fileName = 'Análisis sin título';
+          if (analysis.result_payload && typeof analysis.result_payload === 'object') {
+            fileName = analysis.result_payload.file_name || analysis.result_payload.title || fileName;
+          }
+          return {
+            ...analysis,
+            file_name: fileName
+          };
+        });
+      console.log('Total de análisis cargados desde la API para este repositorio:', repoAnalyses.length);
+      toast.info(`Análisis cargados desde API para ${repoName}: ${repoAnalyses.length}`);
+      setDocuments(filteredDocs);
+      setSavedAnalyses(repoAnalyses);
+    } catch (error) {
+      toast.error('Error al cargar los datos del repositorio');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [repoName]);
+
   const refreshDocuments = () => {
     fetchData();
   };
@@ -119,45 +156,8 @@ export default function RepositoryDetailPage() {
   };
 
   useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true);
-      try {
-        const [docsRes, analysesRes] = await Promise.all([
-          apiClient.post('/api/github/list-github-documents', {}),
-          apiClient.post('/api/get-repo-analyses', { repo_name: repoName })
-        ]);
-        // Filtrar documentos por repo_url que termine con el repoName
-        const filteredDocs = docsRes.data.filter((doc: GitHubDocument) => doc.repo_url && doc.repo_url.endsWith(`/${repoName}`));
-
-        // Obtener la URL del repositorio del primer documento
-        if (filteredDocs.length > 0 && filteredDocs[0].repo_url) {
-          setRepoUrl(filteredDocs[0].repo_url);
-        }
-        // Usar los análisis directamente del endpoint específico para el repositorio
-        const repoAnalyses = analysesRes.data
-          .map((analysis: any) => {
-            let fileName = 'Análisis sin título';
-            if (analysis.result_payload && typeof analysis.result_payload === 'object') {
-              fileName = analysis.result_payload.file_name || analysis.result_payload.title || fileName;
-            }
-            return {
-              ...analysis,
-              file_name: fileName
-            };
-          });
-        console.log('Total de análisis cargados desde la API para este repositorio:', repoAnalyses.length);
-        toast.info(`Análisis cargados desde API para ${repoName}: ${repoAnalyses.length}`);
-        setDocuments(filteredDocs);
-        setSavedAnalyses(repoAnalyses);
-      } catch (error) {
-        toast.error('Error al cargar los datos del repositorio');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     fetchData();
-  }, [repoName]);
+  }, [fetchData]);
 
   const handleAnalyzeDocument = async (doc: Document) => {
     if (docPollingId) { toast.info('Ya hay un análisis en progreso'); return; }

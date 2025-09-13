@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 
-from core.memory_manager import search_vector_db_optimized
+from core.memory_manager import get_relevant_memories
 
 logger = logging.getLogger(__name__)
 
@@ -90,27 +90,25 @@ Responde SOLO en formato JSON válido.
             search_terms = interpretation.get("search_terms", query)
             k = interpretation.get("k", 15)
             
-            results = await search_vector_db_optimized(
+            results = await get_relevant_memories(
                 account_id=self.account_id,
                 query=search_terms,
                 content_type=interpretation.get("content_type"),
-                topics=[interpretation.get("topic")] if interpretation.get("topic") else None,
+                filter_topics=[interpretation.get("topic")] if interpretation.get("topic") else None,
                 category=interpretation.get("category"),
                 workspace_id=self.workspace_id,
                 k=k
             )
             
-            if not results:
+            if not results or not results.sources:
                 return f"No se encontró información relevante para: '{query}'."
 
             formatted_results = []
-            for i, result in enumerate(results, 1):
-                metadata = result.get('metadata', result.get('cmetadata', {}))
-                content = result.get('content', result.get('document', ''))
-                source = metadata.get('file_name', metadata.get('source', 'memoria'))
-                formatted_results.append(f"- Fuente: {source}\n  Contenido: {content[:500]}...")
+            for source in results.sources:
+                source_name = source.title or source.file_path or "memoria"
+                formatted_results.append(f"- Fuente: {source_name}\n  Contenido: {source.snippet[:500]}...")
             
-            return f"Se encontraron {len(results)} resultados en tu base de conocimiento:\n\n" + "\n".join(formatted_results)
+            return f"Se encontraron {len(results.sources)} resultados en tu base de conocimiento:\n\n" + "\n".join(formatted_results)
             
         except Exception as e:
             logger.error(f"Error en InternalKnowledgeSearchTool: {e}", exc_info=True)

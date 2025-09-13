@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation'; // Mantener esta importación
 import Image from 'next/image';
 import { motion } from 'framer-motion';
@@ -16,14 +16,18 @@ import { BackgroundTaskIndicator } from '@/components/BackgroundTaskIndicator';
 import { EmptyChat } from '@/components/EmptyChat';
 import { ContextSelectorButton } from '@/components/ContextSelectorButton';
 import { PanelRightOpen, PanelRightClose } from 'lucide-react';
+import { useWebSocket } from '@/hooks/useWebSocket';
 
 interface ToolStatusMessage {
-  type: 'tool_status';
   thread_id: string;
   tool_name: string;
   status: 'start' | 'end' | 'error';
   timestamp: string;
   error?: string;
+  task_id?: string;
+  message?: string;
+  result?: string;
+  sources?: Source[];
 }
 
 interface Source {
@@ -42,7 +46,9 @@ interface ChatMessageType {
   image_base64?: string;
   document_url?: string;
   ragContext?: SelectedContextItem[];
-  sources?: Source[]; // <-- AÑADIDO
+  sources?: Source[];
+  chunks?: string[]; // Nueva propiedad para los chunks del LLM
+  tool_code?: string; // Nueva propiedad para el código de la herramienta
 }
 
 interface SelectedContextItem {
@@ -133,6 +139,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [files, setFiles] = useState<File[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isResponding, setIsResponding] = useState(false);
+  const [isThinking, setIsThinking] = useState(false); // Añadida declaración
   const [isRecording, setIsRecording] = useState(false);
   const [isKnowledgeAnalysisActive, setIsKnowledgeAnalysisActive] = useState(false);
   const [isWebSearchActive, setIsWebSearchActive] = useState(false);
@@ -141,6 +148,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [backgroundTasks, setBackgroundTasks] = useState<{ taskId: string; type: string }[]>([]);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
+  const [isProcessingAudio, setIsProcessingAudio] = useState(false); // Nuevo estado para el procesamiento de audio
   const [isLoading, setIsLoading] = useState(true);
   const [isContextSelectorOpen, setIsContextSelectorOpen] = useState(false);
 
@@ -155,6 +163,19 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [toolName, setToolName] = useState<string | undefined>(undefined);
   const [reactState, setReactState] = useState<string | undefined>(undefined);
   const wsRef = useRef<WebSocket | null>(null);
+  const aiMessageIndexRef = useRef<number | null>(null); // Definición de aiMessageIndexRef
+
+  const scrollToBottom = useCallback((smooth: boolean) => {
+    if (scrollAreaRef.current) {
+      const scrollElement = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      if (scrollElement) {
+        scrollElement.scrollTo({
+          top: scrollElement.scrollHeight,
+          behavior: smooth ? 'smooth' : 'auto',
+        });
+      }
+    }
+  }, []);
 
   const handleCopyMessage = useCallback((text: string) => {
     navigator.clipboard
@@ -168,181 +189,183 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       });
   }, []);
 
-  useEffect(() => {
-    if (!user || !token) {
-      console.warn('CommonChat: User or token not available, skipping WebSocket connection.');
-      return;
-    }
-
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8889';
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const wsUrl = `${apiUrl.replace(/^https?/, wsProtocol)}/ws?token=${token}`;
-    console.log(`CommonChat: Attempting to connect to WebSocket at: ${wsUrl}`);
-    console.log(`CommonChat: API URL used: ${apiUrl}`);
-    console.log(`CommonChat: Current page protocol: ${window.location.protocol}`);
-    console.log(`CommonChat: User ID: ${user.id}, Token: ${token ? 'Available' : 'Unavailable'}`);
-    console.log(`CommonChat: Token value (first 10 chars): ${token ? token.substring(0, 10) : 'N/A'}`); // Log para depuración
-    const wsUrlWithToken = `${apiUrl.replace(/^https?/, wsProtocol)}/ws?token=${token}`;
-    console.log(`CommonChat: Attempting to connect to WebSocket at: ${wsUrlWithToken}`);
-    wsRef.current = new WebSocket(wsUrlWithToken);
-
-    wsRef.current.onopen = () => {
-      console.log('WebSocket connected');
-    };
-
-    wsRef.current.onmessage = (event) => {
-      try {
-        const message: ToolStatusMessage = JSON.parse(event.data);
-        if (message.type === 'tool_status' && message.thread_id === threadId) {
-          if (message.status === 'start') {
-            setToolName(message.tool_name);
-            setReactState('ejecutando');
-          } else if (message.status === 'end' || message.status === 'error') {
-            setToolName(undefined);
-            setReactState(undefined);
-            if (message.status === 'error') {
-              toast.error(`Error en herramienta ${message.tool_name}: ${message.error}`);
-            }
-          }
-        }
-      } catch (e) {
-        console.error('Error parsing WebSocket message:', e);
+  const handleLlmChunk = useCallback((data: { chunk: string; thread_id: string; task_id: string; }) => {
+    if (data.thread_id === threadId) {
+      setIsThinking(false);
+      // If a tool status is being displayed, we need to clear it
+      // and ensure we start a new message bubble.
+      if (toolName) {
+        setToolName(undefined);
+        setReactState(undefined);
+        aiMessageIndexRef.current = null;
       }
-    };
 
-    wsRef.current.onclose = () => {
-      console.log('WebSocket disconnected');
-    };
+      setMessages((prev) => {
+        const newMessages = [...prev];
 
-    wsRef.current.onerror = (event) => {
-      console.error(`CommonChat: WebSocket error: Failed to connect to ${wsUrlWithToken}. Please check the server is running and the NEXT_PUBLIC_API_URL environment variable is correct.`, event);
-      console.error('CommonChat: WebSocket error event details:', event); // Log completo del evento de error
-    };
+        let currentMessageIndex = aiMessageIndexRef.current;
 
-    return () => {
-      wsRef.current?.close();
-    };
-  }, [user, threadId, token]);
-
-  // Función para mantener el scroll al final
-  const scrollToBottom = useCallback((immediate = false) => {
-    if (scrollAreaRef.current) {
-      const scrollElement = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
-      if (scrollElement) {
-        if (immediate) {
-          // Scroll inmediato sin animación
-          scrollElement.scrollTop = scrollElement.scrollHeight;
-        } else {
-          // Scroll suave
-          scrollElement.scrollTo({
-            top: scrollElement.scrollHeight,
-            behavior: 'smooth',
+        if (currentMessageIndex === null || newMessages[currentMessageIndex]?.sender !== 'ai') {
+          newMessages.push({
+            text: data.chunk, // Initialize text with the first chunk
+            tool_code: undefined, // Ensure tool_code is reset for new message,
+            sender: 'ai' as const,
+            created_at: new Date().toISOString(),
+            sources: [],
+            chunks: [data.chunk], // Inicializar chunks con el primer chunk
           });
+          aiMessageIndexRef.current = newMessages.length - 1; // Update ref to current message index
+        } else if (aiMessageIndexRef.current !== null) {
+          const updatedChunks = [...(newMessages[aiMessageIndexRef.current].chunks || []), data.chunk];
+          const aiMessageToUpdate = {
+            ...newMessages[aiMessageIndexRef.current],
+            chunks: updatedChunks, // Añadir al array de chunks
+            text: updatedChunks.join(''), // Actualizar el texto con todos los chunks
+          };
+          newMessages[aiMessageIndexRef.current] = aiMessageToUpdate;
         }
+        return newMessages;
+      });
+      
+      requestAnimationFrame(() => {
+        scrollToBottom(true);
+      });
+    }
+  }, [threadId, scrollToBottom, toolName, setToolName, setReactState]);
+
+  const handleLlmStart = useCallback((data: { thread_id: string; task_id: string; }) => {
+    console.log("CommonChat: handleLlmStart recibido. Data:", data); // Nuevo log
+    if (data.thread_id === threadId) {
+      setIsResponding(true);
+      aiMessageIndexRef.current = null; // Resetear el índice al inicio de una nueva respuesta del LLM
+    }
+  }, [threadId]);
+
+  const handleLlmEnd = useCallback((data: { thread_id: string; task_id: string; }) => {
+    console.log("CommonChat: handleLlmEnd recibido. Data:", data); // Nuevo log
+    if (data.thread_id === threadId) {
+      setIsResponding(false);
+      setIsThinking(false);
+      // Consolidar los chunks en el texto final del mensaje de la IA
+      setMessages((prev) => {
+        const newMessages = [...prev];
+        if (aiMessageIndexRef.current !== null && newMessages[aiMessageIndexRef.current]?.sender === 'ai') {
+          const aiMessageToUpdate = {
+            ...newMessages[aiMessageIndexRef.current],
+            text: (newMessages[aiMessageIndexRef.current].chunks || []).join(''), // Unir todos los chunks para el texto final
+            chunks: undefined, // Remove chunks after consolidation,
+          };
+          newMessages[aiMessageIndexRef.current] = aiMessageToUpdate;
+        }
+        return newMessages;
+      });
+      aiMessageIndexRef.current = null; // Resetear el índice al finalizar la respuesta del LLM
+    }
+  }, [threadId]);
+
+  const handleToolStatusUpdate = useCallback((message: ToolStatusMessage) => {
+    if (message.thread_id === threadId) {
+      if (message.status === 'start') {
+        setToolName(message.tool_name);
+        setReactState('ejecutando');
+        if (message.task_id) { // Asegura que task_id no es undefined
+          setBackgroundTasks((prev) => {
+            if (!prev.some(task => task.taskId === message.task_id)) {
+              return [...prev, { taskId: message.task_id as string, type: message.tool_name }];
+            }
+            return prev;
+          });
+        toast.info(`Iniciando ${message.tool_name}...`, {
+          description: message.message || "La tarea ha comenzado en segundo plano.",
+          duration: 3000, // Show for 3 seconds
+        });
+        }
+      } else if (message.status === 'end' || message.status === 'error') {
+        setToolName(undefined);
+        setReactState(undefined);
+        if (message.task_id) { // Asegura que task_id no es undefined
+          setBackgroundTasks((prev) => prev.filter((t) => t.taskId !== (message.task_id as string)));
+        }
+
+        let completionMessage: ChatMessageType;
+        if (message.status === 'end') {
+          completionMessage = {
+            text: message.result || "La tarea en segundo plano ha finalizado.",
+            sender: 'ai',
+            created_at: new Date().toISOString(),
+            sources: message.sources || [],
+          };
+          toast.success(`Herramienta ${message.tool_name} completada.`);
+        } else { // status === 'error'
+          completionMessage = {
+            text: `Error en herramienta ${message.tool_name}: ${message.error || "Error desconocido."}`,
+            sender: 'ai',
+            created_at: new Date().toISOString(),
+          };
+          toast.error(`Error en herramienta ${message.tool_name}: ${message.error}`);
+        }
+        setMessages((prev) => [...prev, completionMessage]);
+
+        
       }
     }
+  }, [threadId, setMessages, setBackgroundTasks, setReactState, setToolName]);
+
+  const handleToolCode = useCallback((data: { thread_id: string; task_id: string; tool_code: string; }) => {
+    console.log("CommonChat: handleToolCode recibido. Data:", data); // Nuevo log
+    if (data.thread_id === threadId) {
+      setMessages((prev) => {
+        const newMessages = [...prev];
+        if (aiMessageIndexRef.current !== null && newMessages[aiMessageIndexRef.current]?.sender === 'ai') {
+          const aiMessageToUpdate = {
+            ...newMessages[aiMessageIndexRef.current],
+            tool_code: data.tool_code, // Añadir el tool_code al mensaje de IA existente
+          };
+          newMessages[aiMessageIndexRef.current] = aiMessageToUpdate;
+        }
+        return newMessages;
+      });
+    }
+  }, [threadId]);
+
+  const webSocketOptions = useMemo(() => ({
+    onToolStatusUpdate: handleToolStatusUpdate,
+    onLlmChunk: handleLlmChunk,
+    onLlmStart: handleLlmStart,
+    onLlmEnd: handleLlmEnd,
+    onToolCode: handleToolCode,
+    userId: user?.id,
+  }), [handleToolStatusUpdate, handleLlmChunk, handleLlmStart, handleLlmEnd, handleToolCode, user?.id]);
+
+  useWebSocket(webSocketOptions);
+
+  const toggleContextSelector = useCallback(() => {
+    setIsContextSelectorOpen((prev) => !prev);
   }, []);
-
-  const handleStreamingResponse = useCallback(
-    async (requestData: any, userMessage: ChatMessageType, signal?: AbortSignal) => {
-      // Crear mensaje AI inicial vacío
-      const initialAiMessage = {
-        text: '',
-        sender: 'ai' as const,
-        created_at: new Date().toISOString(),
-        image_base64: '',
-        document_url: ''
-      };
-      
-      setMessages((prev) => [...prev, initialAiMessage]);
-
-      try {
-        // Usar streaming real con la URL base correcta
-        const baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8889';
-        const response = await fetch(`${baseURL}/api/chat/stream`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-          },
-          body: JSON.stringify(requestData),
-          signal: signal
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) {
-          throw new Error('No reader available');
-        }
-
-        let fullResponse = '';
-        let sources: Source[] = [];
-        const decoder = new TextDecoder();
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-
-                if (data.type === 'chunk') {
-                  fullResponse += data.content;
-                } else if (data.type === 'info') {
-                  console.log('Tool info:', data.content);
-                } else if (data.type === 'done') {
-                  if (data.sources) {
-                    sources = data.sources;
-                  }
-                  break;
-                } else if (data.type === 'error') {
-                  throw new Error(data.message);
-                }
-              } catch (parseError) {
-                console.warn('Error parsing streaming data:', parseError);
-              }
-            }
-          }
-        }
-
-        // Actualizar el mensaje de IA con la respuesta completa y las fuentes
-        setMessages((prev) => {
-          const newMessages = [...prev];
-          const lastMessage = newMessages[newMessages.length - 1];
-          if (lastMessage && lastMessage.sender === 'ai') {
-            lastMessage.text = fullResponse;
-            lastMessage.sources = sources;
-          }
-          return newMessages;
-        });
-
-        // Verificar si hay ID de tarea en la respuesta final
-        if (fullResponse && fullResponse.includes("ID de tarea:")) {
-          const taskId = fullResponse.split("ID de tarea:")[1].trim().split(".")[0];
-          setBackgroundTasks((prev) => [...prev, { taskId, type: 'mindmap' }]);
-        }
-
-        // Historial se actualiza automáticamente vía estado
-
-      } catch (error: any) {
-        console.error('Error en la solicitud de chat:', error);
-        throw error;
-      }
-    },
-    [],
-  );
 
   const handleSendMessage = useCallback(
     async (e?: React.FormEvent, retryMessage?: string) => {
+      let imageBase64: string | null = null;
+      let documentUrl: string | null = null;
       if (e) e.preventDefault();
+      // Procesar imágenes pegadas
+      if (files.length > 0) {
+        const imageFile = files.find(file => file.type.startsWith('image/'));
+        if (imageFile) {
+          const reader = new FileReader();
+          reader.readAsDataURL(imageFile);
+          await new Promise<void>((resolve) => {
+            reader.onloadend = () => {
+              if (typeof reader.result === 'string') {
+                imageBase64 = `data:${imageFile.type};base64,${reader.result.split(',')[1]}`; // Incluir el prefijo y el tipo MIME real
+              }
+              resolve();
+            };
+          });
+          // Limpiar los archivos después de procesarlos para este mensaje
+          setFiles([]);
+        }
+      }
       const messageText = retryMessage || newMessage;
       if ((!messageText.trim() && selectedContext.length === 0) || isResponding) return;
 
@@ -403,8 +426,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       const currentComprehensiveAnalysisActive = isComprehensiveAnalysisActive;
 
       try {
-        let imageBase64: string | null = null;
-        let documentUrl: string | null = null;
 
         const mode = isKnowledgeAnalysisActive
           ? 'knowledgeAnalysis'
@@ -416,43 +437,56 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           ? 'deepResearch' // NUEVO: Establecer el modo a 'deepResearch'
           : '';
 
-        // Timeouts aumentados para permitir operaciones largas del LLM
-        // Análisis comprehensivo: 15 minutos, análisis normal: 10 minutos
-        const timeout = isComprehensiveAnalysisActive ? 900000 : 600000;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        const formData = new FormData();
+        formData.append('thread_id', threadId);
+        formData.append('account_id', user.id);
+        formData.append('user_message', messageToSend);
+        // Procesar imágenes pegadas
+        if (files.length > 0) {
+          const imageFile = files.find(file => file.type.startsWith('image/'));
+          if (imageFile) {
+            const reader = new FileReader();
+            reader.readAsDataURL(imageFile);
+            await new Promise<void>((resolve) => {
+              reader.onloadend = () => {
+                if (typeof reader.result === 'string') {
+                  imageBase64 = `data:${imageFile.type};base64,${reader.result.split(',')[1]}`; // Incluir el prefijo y el tipo MIME real
+                }
+                resolve();
+              };
+            });
+            // Limpiar los archivos después de procesarlos para este mensaje
+            setFiles([]);
+          }
+        }
+        if (imageBase64) formData.append('image_base64', imageBase64);
+        if (documentUrl) formData.append('document_url', documentUrl);
+        if (mode) formData.append('mode', mode);
+        if (selectedContext.length > 0) {
+          formData.append('rag_context', JSON.stringify(selectedContext.map((item: SelectedContextItem) => ({ type: item.type, id: item.id }))));
+        }
 
-        // Usar streaming para respuestas más rápidas
-        await handleStreamingResponse({
-          thread_id: threadId,
-          account_id: user.id,
-          user_message: messageToSend,
-          image_base64: imageBase64,
-          document_url: documentUrl,
-          mode: mode,
-          rag_context: selectedContext.map((item: SelectedContextItem) => ({ type: item.type, id: item.id })),
-        }, userMessage, controller.signal);
+        // Enviar el mensaje al backend. La respuesta del LLM se manejará por WebSocket.
+        await apiClient.post('/api/chat', formData);
 
-        clearTimeout(timeoutId);
       } catch (error: any) {
         console.error('Error sending message:', error);
         let errorText = 'Lo siento, ocurrió un error al procesar tu mensaje.';
-        if (error && error.name === 'AbortError') {
-          const timeoutMinutes = isComprehensiveAnalysisActive ? 15 : 10;
-          errorText = `La solicitud ha tardado más de ${timeoutMinutes} minutos en completarse. Esto puede ocurrir con operaciones muy complejas como el análisis de repositorios grandes. Por favor, intenta de nuevo o reduce el alcance de la consulta.`;
-        }
         const errorMessage = {
           text: errorText,
           sender: 'ai' as const,
           created_at: new Date().toISOString()
         };
         setMessages((prev) => [...prev, errorMessage]);
+        setIsResponding(false); // Asegurarse de que el estado de respuesta se desactive en caso de error
       } finally {
-        setIsResponding(false);
+        // Los estados de isResponding, isComprehensiveAnalysisActive, isDeepResearchActive
+        // se manejan en handleLlmStart y handleLlmEnd, o en caso de error en el catch.
+        // Aquí solo nos aseguramos de resetear el modo de análisis si estaba activo.
         if (currentComprehensiveAnalysisActive) {
           setIsComprehensiveAnalysisActive(false);
         }
-        setIsDeepResearchActive(false); // NUEVO: Desactivar Deep Research después de enviar
+        setIsDeepResearchActive(false); // Desactivar Deep Research después de enviar
       }
     },
     [
@@ -465,7 +499,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       isComprehensiveAnalysisActive,
       isDeepResearchActive, // NUEVO: Añadir al array de dependencias
       threadId,
-      handleStreamingResponse,
       selectedContext,
       router,
       scrollToBottom
@@ -675,6 +708,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           toast.error('Error al transcribir el audio. Inténtalo de nuevo.');
         } finally {
           setIsRecording(false);
+          setIsProcessingAudio(false); // Detener el spinner de carga
           stream.getTracks().forEach((track) => track.stop());
         }
       };
@@ -845,7 +879,25 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           onSendMessage={handleSendMessage} 
           newMessage={newMessage} 
           setNewMessage={setNewMessage} 
-          isResponding={isResponding} 
+          isResponding={isResponding}
+          isRecording={isRecording}
+          isProcessingAudio={isProcessingAudio}
+          isUploadingFile={isUploadingFile}
+          isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+          isWebSearchActive={isWebSearchActive}
+          isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+          isDeepResearchActive={isDeepResearchActive}
+          onKeyDown={handleKeyDown}
+          onToggleKnowledgeAnalysis={toggleKnowledgeAnalysis}
+          onToggleWebSearch={toggleWebSearch}
+          onToggleComprehensiveAnalysis={toggleComprehensiveAnalysis}
+          onToggleDeepResearch={toggleDeepResearch}
+          onStartRecording={startRecording}
+          onStopRecording={stopRecording}
+          onFileUpload={handleFileUpload}
+          onRemoveContextItem={handleRemoveContextItem}
+          onPaste={handlePaste}
+          workspaceId={workspaceId}
       />;
   }
 
@@ -869,7 +921,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                         image: msg.image_base64 || '',
                         document_url: msg.document_url || '',
                         ragContext: msg.ragContext,
-                        sources: msg.sources, // <-- AÑADIDO
+                        sources: msg.sources,
+                        chunks: msg.chunks,
+                        tool_code: msg.tool_code,
                       }}
                       index={messageIndex}
                       handleCopyMessage={handleCopyMessage}
@@ -882,7 +936,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                   </div>
                 );
               })}
-              {isResponding && (
+              {isThinking && (
                 <div>
                   <LoadingIndicator
                     isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
@@ -902,12 +956,13 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             </div>
           </div>
         </ScrollArea>
-        <div className="w-full md:max-w-2xl mx-auto px-4 pb-4">
+        <div className="w-full md:max-w-4xl mx-auto px-4 pb-4">
           <div className="relative">
             <ChatInputBar
                 newMessage={newMessage}
                 isResponding={isResponding}
                 isRecording={isRecording}
+                isProcessingAudio={isProcessingAudio} // Añadir esta línea
                 currentContext={selectedContext}
                 isUploadingFile={isUploadingFile}
                 isKnowledgeAnalysisActive={selectedContext.length > 0}

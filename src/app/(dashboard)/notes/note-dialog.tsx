@@ -38,6 +38,7 @@ const formSchema = z.object({
   category: z.string().min(2, "La categoría es muy corta.").optional(),
   content: z.string().min(1, "El contenido no puede estar vacío."),
   team_id: z.string().optional(), // Optional field for sharing with a team
+  workspace_id: z.string().optional(), // New field
 });
 
 interface NoteDialogProps {
@@ -45,12 +46,15 @@ interface NoteDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onSaveSuccess: (note: Note | any) => void; // Acepta la nota actualizada o la nueva
+  workspaceId?: string; // New prop
 }
 
-export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess }: NoteDialogProps) {
+export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspaceId }: NoteDialogProps) {
   const router = useRouter();
   const [teams, setTeams] = useState<any[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(false);
+  const [workspaces, setWorkspaces] = useState<any[]>([]);
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -74,16 +78,37 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess }: NoteDi
     }
   }, [isOpen]);
 
+  useEffect(() => { // NUEVO useEffect para workspaces
+    const fetchWorkspaces = async () => {
+      setLoadingWorkspaces(true);
+      try {
+        const response = await apiClient.get('/api/workspaces'); // Asumo este endpoint
+        setWorkspaces(response.data);
+      } catch (error) {
+        console.error("Error fetching workspaces:", error);
+        toast.error('Error al cargar los workspaces.');
+      } finally {
+        setLoadingWorkspaces(false);
+      }
+    };
+    if (isOpen) {
+      fetchWorkspaces();
+    }
+  }, [isOpen]);
+
   const isEditing = !!note;
 
   // Este useEffect se encarga de rellenar el formulario con los datos de la nota
   // cuando el diálogo se abre para editar, o de limpiarlo si es para crear.
   useEffect(() => {
     if (isOpen) {
+      console.log("NoteDialog: isOpen is true, note prop:", note); // DEBUG
       form.reset({
         title: note?.title || '',
         category: note?.category || 'General',
         content: note?.content || '',
+        team_id: note?.team_id?.toString() || '', // Ensure team_id is reset
+        workspace_id: note?.workspace_id || '', // Ensure workspace_id is reset
       });
     }
   }, [isOpen, note, form]);
@@ -93,7 +118,7 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess }: NoteDi
 
     try {
       const endpoint = isEditing ? '/api/update-note' : '/api/add-note';
-      const payload = isEditing ? { note_id: note.id, ...values } : values;
+      const payload = isEditing ? { note_id: note.id, ...values } : { ...values, workspace_id: workspaceId }; // Pass workspaceId for new notes
       // team_id is included in the payload as per schema
 
       const response = await apiClient.post(endpoint, payload);
@@ -122,7 +147,7 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess }: NoteDi
       // Aseguramos que team_shared se actualice basado en si hay un team_id seleccionado.
       const updatedNote = isEditing 
         ? { ...note, ...values, team_shared: !!values.team_id } 
-        : { ...response.data, team_shared: !!values.team_id };
+        : { ...response.data, team_shared: !!values.team_id, workspace_id: workspaceId }; // Ensure workspace_id is included in updatedNote
       onSaveSuccess(updatedNote);
       onOpenChange(false);
     } catch (error) {
@@ -158,6 +183,27 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess }: NoteDi
                 <FormItem><FormLabel>Categoría</FormLabel><FormControl><Input placeholder="Ej: Trabajo, Personal" {...field} value={field.value || ''} /></FormControl><FormMessage /></FormItem>
                 )} />
             </div>
+            <FormField control={form.control} name="workspace_id" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Workspace</FormLabel>
+                <FormControl>
+                  <select 
+                    className="w-full border rounded-md p-2"
+                    onChange={field.onChange} 
+                    value={field.value || ''}
+                    disabled={loadingWorkspaces}
+                  >
+                    <option value="">{loadingWorkspaces ? "Cargando workspaces..." : "Ninguno"}</option>
+                    {workspaces.map(workspace => (
+                      <option key={workspace.id} value={workspace.id}>
+                        {workspace.name}
+                      </option>
+                    ))}
+                  </select>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
             <FormField control={form.control} name="content" render={({ field }) => (
               <FormItem><FormLabel>Contenido (soporta Markdown)</FormLabel><FormControl><Textarea placeholder="Escribe tu nota aquí..." className="min-h-[200px] resize-y" {...field} /></FormControl><FormMessage /></FormItem>
             )} />

@@ -69,7 +69,7 @@ class CancelEventTool(BaseTool):
         """
         logger.info(f"Ejecutando CancelEventTool para la cuenta '{self.account_id}' y el evento ID '{event_id}'.")
         try:
-            success, message = await cancel_event(account_id=self.account_id, event_id=event_id)
+            success, message = await cancel_event(account_id=self.account_id, event_id=event_id, workspace_id=self.workspace_id)
             logger.info(f"Herramienta de cancelación de evento completada para la cuenta '{self.account_id}'. Mensaje: {message}")
             return message
         except Exception as e:

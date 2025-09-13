@@ -28,24 +28,31 @@ class Reranker:
             self._model = None
             self._tokenizer = None
 
-    async def rerank(self, query: str, documents: list[str]) -> list[tuple[str, float]]:
+    async def rerank(self, query: str, documents: list) -> list:
         if not self._model or not self._tokenizer:
             logger.warning("Modelo de reranking no cargado. Saltando reranking.")
-            return [(doc, 0.0) for doc in documents] # Devolver documentos sin rerankear
+            return documents
 
         if not documents:
             return []
 
-        features = self._tokenizer([query] * len(documents), documents, padding=True, truncation=True, return_tensors='pt')
+        document_contents = [doc.page_content for doc in documents]
+        features = self._tokenizer([query] * len(document_contents), document_contents, padding=True, truncation=True, return_tensors='pt')
 
         with torch.no_grad():
             scores = self._model(**features).logits.squeeze().tolist()
 
         if not isinstance(scores, list):
-            scores = [scores] # Asegurar que scores sea una lista si solo hay un documento
+            scores = [scores]
 
-        reranked_documents = sorted(zip(documents, scores), key=lambda x: x[1], reverse=True)
-        logger.info(f"Documentos rerankeados. Top 3 scores: {[round(s, 4) for _, s in reranked_documents[:3]]}")
+        for doc, score in zip(documents, scores):
+            doc.metadata['rerank_score'] = score
+
+        reranked_documents = sorted(documents, key=lambda x: x.metadata['rerank_score'], reverse=True)
+        
+        top_scores = [doc.metadata['rerank_score'] for doc in reranked_documents[:3]]
+        logger.info(f"Documentos rerankeados. Top 3 scores: {[round(s, 4) for s in top_scores]}")
+        
         return reranked_documents
 
 # Instanciar el reranker como un singleton

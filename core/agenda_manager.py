@@ -1,19 +1,5 @@
 # core/agenda_manager.py
 
-"""
-Gestor de Lógica de Negocio para la Agenda (Versión Pura).
-
-Este módulo encapsula toda la lógica para interactuar con la tabla `agenda_events`
-en la base de datos. Se encarga de crear, consultar y eliminar eventos.
-
-En esta arquitectura final y desacoplada, este módulo es "puro": no tiene
-conocimiento de ninguna plataforma de interfaz como Telegram. Su única
-responsabilidad es la lógica de negocio y la persistencia de datos.
-
-La programación de notificaciones (que es específica de la plataforma) se
-delega a la capa del cliente (ej. `telegram_client`).
-"""
-
 import logging
 import uuid
 from datetime import datetime
@@ -22,16 +8,17 @@ import dateparser
 from typing import Tuple, List, Dict, Any, Optional
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 # Importaciones del proyecto
-from core.database import SessionLocal, Account, AgendaEvent
+from core.database import SessionLocal, Account, AgendaEvent, ContactProfile
 from utils.db_session import DBSession
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
 
 
-async def schedule_event(account_id: str, description: str, natural_language_datetime: str, team_id: Optional[str] = None) -> Tuple[bool, str, AgendaEvent | None]:
+async def schedule_event(account_id: str, description: str, natural_language_datetime: str, team_id: Optional[str] = None, workspace_id: Optional[str] = None) -> Tuple[bool, str, AgendaEvent | None]:
     """
     Crea un nuevo evento y lo guarda en la base de datos para un usuario o equipo.
 
@@ -44,6 +31,7 @@ async def schedule_event(account_id: str, description: str, natural_language_dat
         description: La descripción del evento.
         natural_language_datetime: La descripción en lenguaje natural del tiempo.
         team_id: El ID del equipo (UUID en formato string) al que se asocia el evento, si aplica.
+        workspace_id: El ID del workspace (UUID en formato string) al que se asocia el evento, si aplica.
 
     Returns:
         Una tupla (bool, str, AgendaEvent | None) indicando éxito, un mensaje
@@ -80,6 +68,7 @@ async def schedule_event(account_id: str, description: str, natural_language_dat
             new_event = AgendaEvent(
                 account_id=account_id,
                 team_id=uuid.UUID(team_id) if team_id else None,
+                workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
                 description=description,
                 event_datetime_utc=event_datetime_utc,
                 is_active=True
@@ -101,15 +90,106 @@ async def schedule_event(account_id: str, description: str, natural_language_dat
             await db.rollback()
             return False, "Ocurrió un error inesperado al guardar tu evento.", None
 
-async def get_agenda_for_day(account_id: str, target_day: str, team_id: Optional[str] = None) -> str:
+from datetime import datetime, timedelta
+import pytz
+import dateparser
+from typing import Tuple, List, Dict, Any, Optional
+
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+
+# Importaciones del proyecto
+from core.database import SessionLocal, Account, AgendaEvent, ContactProfile
+from utils.db_session import DBSession
+
+# Configuración del logger para este módulo.
+logger = logging.getLogger(__name__)
+
+
+async def schedule_event(account_id: str, description: str, natural_language_datetime: str, team_id: Optional[str] = None, workspace_id: Optional[str] = None) -> Tuple[bool, str, AgendaEvent | None]:
     """
-    Obtiene los eventos de un usuario o equipo para un día específico y los formatea como texto.
+    Crea un nuevo evento y lo guarda en la base de datos para un usuario o equipo.
+
+    Esta versión pura NO interactúa con la JobQueue. Solo se encarga de la
+    lógica de la base de datos y devuelve el objeto del evento creado para que
+    el llamador (el handler) decida cómo programar la notificación.
+
+    Args:
+        account_id: El ID universal de la cuenta del usuario.
+        description: La descripción del evento.
+        natural_language_datetime: La descripción en lenguaje natural del tiempo.
+        team_id: El ID del equipo (UUID en formato string) al que se asocia el evento, si aplica.
+        workspace_id: El ID del workspace (UUID en formato string) al que se asocia el evento, si aplica.
+
+    Returns:
+        Una tupla (bool, str, AgendaEvent | None) indicando éxito, un mensaje
+        para el usuario, y el objeto del evento creado.
+    """
+    async with DBSession(SessionLocal) as db:
+        try:
+            account = await db.get(Account, account_id)
+            if not account or not account.timezone:
+                return False, "No pude programar el evento porque no conozco tu zona horaria. Por favor, configúrala primero.", None
+
+            user_tz_str = account.timezone
+            user_tz = pytz.timezone(user_tz_str)
+            
+            # ¡CORREGIDO! Usamos un diccionario date_settings pasado como settings=... y ignoramos el error de tipo
+            date_settings = {
+                'TO_TIMEZONE': 'UTC', 
+                'RETURN_AS_TIMEZONE_AWARE': True, 
+                'RELATIVE_BASE': datetime.now(user_tz)
+            }
+            event_datetime_utc = dateparser.parse(
+                natural_language_datetime, 
+                settings=date_settings  # type: ignore
+            )
+
+            if not event_datetime_utc:
+                logger.warning(f"Dateparser no pudo entender '{natural_language_datetime}'.")
+                return False, f"No pude entender el tiempo '{natural_language_datetime}'. Intenta con 'mañana a las 3pm', 'en 2 horas', etc.", None
+
+            now_utc = datetime.now(pytz.utc)
+            if event_datetime_utc < now_utc:
+                return False, "No puedo programar eventos en el pasado. Por favor, elige una fecha y hora futura.", None
+
+            new_event = AgendaEvent(
+                account_id=account_id,
+                team_id=uuid.UUID(team_id) if team_id else None,
+                workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
+                description=description,
+                event_datetime_utc=event_datetime_utc,
+                is_active=True
+            )
+            db.add(new_event)
+            await db.commit()
+            await db.refresh(new_event)
+            
+            display_time = event_datetime_utc.astimezone(user_tz)
+            display_time_str = display_time.strftime('%H:%M del %d-%m-%Y')
+            
+            message = f"¡Evento guardado! Te recordaré sobre '{description}' el {display_time_str} ({user_tz_str})."
+            logger.info(f"Evento {new_event.id} creado para la cuenta {account_id}.")
+            
+            return True, message, new_event
+
+        except Exception as e:
+            logger.error(f"Error al guardar evento para la cuenta '{account_id}': {e}", exc_info=True)
+            await db.rollback()
+            return False, "Ocurrió un error inesperado al guardar tu evento.", None
+
+async def get_agenda_for_period(account_id: str, period_type: str, target_date: str, team_id: Optional[str] = None, workspace_id: Optional[str] = None) -> str:
+    """
+    Obtiene los eventos de un usuario o equipo para un período específico (día, semana, mes)
+    y los formatea como texto.
     Esta función está diseñada para ser llamada por el agente de IA.
 
     Args:
         account_id: El ID universal de la cuenta del usuario.
-        target_day: Una cadena en lenguaje natural que representa el día a consultar.
+        period_type: El tipo de período a consultar ('day', 'week', 'month').
+        target_date: Una cadena en lenguaje natural que representa la fecha o período a consultar.
         team_id: El ID del equipo (UUID en formato string) para filtrar eventos del equipo, si aplica.
+        workspace_id: El ID del workspace (UUID en formato string) para filtrar eventos del workspace, si aplica.
 
     Returns:
         Una cadena de texto formateada con la lista de eventos.
@@ -123,46 +203,75 @@ async def get_agenda_for_day(account_id: str, target_day: str, team_id: Optional
         now_in_user_tz = datetime.now(user_tz)
         
         # Usamos 'PREFER_DATES_FROM': 'future' para que 'hoy a las 10pm' no se interprete como en el pasado si ya son las 11pm.
-        target_date_obj = dateparser.parse(target_day, settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': now_in_user_tz})
+        parsed_date_obj = dateparser.parse(target_date, settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': now_in_user_tz})
         
-        if not target_date_obj:
-            return f"No entendí la fecha '{target_day}'. Por favor, intenta de nuevo."
+        if not parsed_date_obj:
+            return f"No entendí la fecha o período '{target_date}'. Por favor, intenta de nuevo."
 
-        start_of_day = user_tz.localize(datetime(target_date_obj.year, target_date_obj.month, target_date_obj.day, 0, 0, 0))
-        end_of_day = user_tz.localize(datetime(target_date_obj.year, target_date_obj.month, target_date_obj.day, 23, 59, 59))
+        start_period_utc = None
+        end_period_utc = None
+        period_description = ""
 
-        start_of_day_utc = start_of_day.astimezone(pytz.utc)
-        end_of_day_utc = end_of_day.astimezone(pytz.utc)
+        if period_type == "day":
+            start_period = user_tz.localize(datetime(parsed_date_obj.year, parsed_date_obj.month, parsed_date_obj.day, 0, 0, 0))
+            end_period = user_tz.localize(datetime(parsed_date_obj.year, parsed_date_obj.month, parsed_date_obj.day, 23, 59, 59))
+            period_description = f"el {parsed_date_obj.strftime('%d de %B de %Y')}"
+        elif period_type == "week":
+            # Calcular el inicio de la semana (lunes)
+            start_of_week = parsed_date_obj - timedelta(days=parsed_date_obj.weekday())
+            start_period = user_tz.localize(datetime(start_of_week.year, start_of_week.month, start_of_week.day, 0, 0, 0))
+            end_period = start_period + timedelta(days=6, hours=23, minutes=59, seconds=59)
+            period_description = f"la semana del {start_of_week.strftime('%d de %B de %Y')}"
+        elif period_type == "month":
+            start_period = user_tz.localize(datetime(parsed_date_obj.year, parsed_date_obj.month, 1, 0, 0, 0))
+            # Calcular el último día del mes
+            next_month = parsed_date_obj.replace(day=28) + timedelta(days=4)  # Esto asegura que estamos en el próximo mes
+            end_period = user_tz.localize(datetime(next_month.year, next_month.month, 1, 0, 0, 0)) - timedelta(seconds=1)
+            period_description = f"el mes de {parsed_date_obj.strftime('%B de %Y')}"
+        else:
+            return "Tipo de período no válido. Por favor, usa 'day', 'week' o 'month'."
+
+        start_period_utc = start_period.astimezone(pytz.utc)
+        end_period_utc = end_period.astimezone(pytz.utc)
 
         stmt = (
             select(AgendaEvent)
             .where(
                 AgendaEvent.account_id == account_id,
                 AgendaEvent.is_active == True,
-                AgendaEvent.event_datetime_utc >= start_of_day_utc,
-                AgendaEvent.event_datetime_utc <= end_of_day_utc
+                AgendaEvent.event_datetime_utc >= start_period_utc,
+                AgendaEvent.event_datetime_utc <= end_period_utc
             )
         )
-        if team_id:
+        if workspace_id:
+            stmt = stmt.where(AgendaEvent.workspace_id == uuid.UUID(workspace_id))
+        elif team_id:
             stmt = stmt.where(AgendaEvent.team_id == uuid.UUID(team_id))
         else:
-            stmt = stmt.where(AgendaEvent.team_id.is_(None))
+            stmt = stmt.where(AgendaEvent.team_id.is_(None), AgendaEvent.workspace_id.is_(None))
         stmt = stmt.order_by(AgendaEvent.event_datetime_utc)
         result = await db.execute(stmt)
         events = result.scalars().all()
 
         if not events:
-            return f"No tienes eventos programados para el {target_date_obj.strftime('%d de %B de %Y')}."
+            return f"No tienes eventos programados para {period_description}."
 
-        event_list = [f"Tu agenda para el {target_date_obj.strftime('%d de %B de %Y')}:"]
+        event_list = [f"Tu agenda para {period_description}:"]
         for event in events:
             local_time = event.event_datetime_utc.astimezone(user_tz)
-            event_list.append(f"- ID {event.id}: {event.description} a las {local_time.strftime('%H:%M')}")
+            event_list.append(f"- ID {event.id}: {event.description} a las {local_time.strftime('%H:%M del %d-%m-%Y')}")
         
         return "\n".join(event_list)
 
+async def get_agenda_for_day(account_id: str, target_day: str, team_id: Optional[str] = None, workspace_id: Optional[str] = None) -> str:
+    """
+    Función de compatibilidad para mantener la API existente.
+    Delega la llamada a get_agenda_for_period con period_type='day'.
+    """
+    return await get_agenda_for_period(account_id, "day", target_day, team_id, workspace_id)
 
-async def get_events_as_dicts(account_id: str, team_id: Optional[str] = None) -> List[Dict[str, Any]]:
+
+async def get_events_as_dicts(account_id: str, team_id: Optional[str] = None, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Recupera todos los eventos futuros de un usuario o equipo y los devuelve como una lista de diccionarios.
     Esta función está diseñada para ser utilizada por endpoints de API que sirven a interfaces web.
@@ -175,24 +284,42 @@ async def get_events_as_dicts(account_id: str, team_id: Optional[str] = None) ->
         now_utc = datetime.now(pytz.utc)
         stmt = (
             select(AgendaEvent)
+            .options(selectinload(AgendaEvent.contact_profiles), selectinload(AgendaEvent.workspace)) # NEW: Load workspace
             .where(
                 AgendaEvent.account_id == account_id,
                 AgendaEvent.event_datetime_utc > now_utc,
                 AgendaEvent.is_active == True
             )
         )
-        if team_id:
+        if workspace_id:
+            stmt = stmt.where(AgendaEvent.workspace_id == uuid.UUID(workspace_id))
+        elif team_id:
             stmt = stmt.where(AgendaEvent.team_id == uuid.UUID(team_id))
         else:
-            stmt = stmt.where(AgendaEvent.team_id.is_(None))
+            stmt = stmt.where(AgendaEvent.team_id.is_(None), AgendaEvent.workspace_id.is_(None))
         stmt = stmt.order_by(AgendaEvent.event_datetime_utc)
         result = await db.execute(stmt)
         events = result.scalars().all()
+        
         # Usa el método to_dict que definimos en el modelo AgendaEvent
-        return [event.to_dict(account.timezone) for event in events]
+        # Modificamos para incluir los perfiles vinculados
+        event_dicts = []
+        for event in events:
+            event_dict = event.to_dict(account.timezone)
+            linked_profiles_data = []
+            for cp in event.contact_profiles:
+                linked_profiles_data.append({
+                    "id": str(cp.id),
+                    "name": cp.name,
+                    "email": cp.email,
+                    "phone": cp.phone,
+                })
+            event_dict["linked_profiles"] = linked_profiles_data
+            event_dicts.append(event_dict)
+        return event_dicts
 
 
-async def cancel_event(account_id: str, event_id: int, team_id: Optional[str] = None) -> Tuple[bool, str]:
+async def cancel_event(account_id: str, event_id: int, team_id: Optional[str] = None, workspace_id: Optional[str] = None) -> Tuple[bool, str]:
     """
     Cancela un evento marcándolo como inactivo en la base de datos.
     NO se encarga de cancelar el job en la JobQueue, eso debe hacerlo el llamador.
@@ -201,16 +328,19 @@ async def cancel_event(account_id: str, event_id: int, team_id: Optional[str] = 
         account_id: El ID universal de la cuenta del usuario.
         event_id: El ID del evento a cancelar.
         team_id: El ID del equipo (UUID en formato string) para verificar la pertenencia, si aplica.
+        workspace_id: El ID del workspace (UUID en formato string) para verificar la pertenencia, si aplica.
 
     Returns:
         Una tupla (bool, str) indicando éxito y un mensaje para el usuario.
     """
     async with DBSession(SessionLocal) as db:
         stmt = select(AgendaEvent).where(AgendaEvent.id == event_id, AgendaEvent.account_id == account_id)
-        if team_id:
+        if workspace_id:
+            stmt = stmt.where(AgendaEvent.workspace_id == uuid.UUID(workspace_id))
+        elif team_id:
             stmt = stmt.where(AgendaEvent.team_id == uuid.UUID(team_id))
         else:
-            stmt = stmt.where(AgendaEvent.team_id.is_(None))
+            stmt = stmt.where(AgendaEvent.team_id.is_(None), AgendaEvent.workspace_id.is_(None))
         result = await db.execute(stmt)
         event_to_cancel = result.scalars().first()
 
@@ -225,3 +355,94 @@ async def cancel_event(account_id: str, event_id: int, team_id: Optional[str] = 
         
         logger.info(f"Evento {event_id} cancelado en la base de datos para la cuenta {account_id}.")
         return True, f"El evento '{event_to_cancel.description}' ha sido cancelado."
+
+async def link_profile_to_event(account_id: str, event_id: int, profile_id: str) -> bool:
+    """
+    Vincula un perfil a un evento existente.
+    """
+    logger.info(f"Intentando vincular perfil {profile_id} al evento {event_id} para la cuenta {account_id}")
+    async with DBSession(SessionLocal) as db:
+        # Verificar que el evento existe y pertenece al usuario
+        event_stmt = select(AgendaEvent).options(selectinload(AgendaEvent.contact_profiles)).where(AgendaEvent.id == event_id, AgendaEvent.account_id == account_id)
+        event = (await db.execute(event_stmt)).scalars().first()
+        if not event:
+            logger.warning(f"Evento {event_id} no encontrado o no pertenece a la cuenta {account_id}.")
+            return False
+
+        # Verificar que el perfil existe y pertenece al usuario
+        profile_stmt = select(ContactProfile).where(ContactProfile.id == uuid.UUID(profile_id), ContactProfile.account_id == uuid.UUID(account_id))
+        profile = (await db.execute(profile_stmt)).scalars().first()
+        if not profile:
+            logger.warning(f"Perfil {profile_id} no encontrado o no pertenece a la cuenta {account_id}.")
+            return False
+
+        # Verificar si el vínculo ya existe
+        if profile in event.contact_profiles:
+            logger.info(f"El vínculo entre el evento {event_id} y el perfil {profile_id} ya existe.")
+            return True # Ya está vinculado, consideramos éxito
+
+        # Crear el nuevo vínculo
+        event.contact_profiles.append(profile)
+        await db.commit()
+        await db.refresh(event)
+        logger.info(f"Perfil {profile_id} vinculado exitosamente al evento {event_id}.")
+        return True
+
+async def unlink_profile_from_event(account_id: str, event_id: int, profile_id: str) -> bool:
+    """
+    Desvincula un perfil de un evento existente.
+    """
+    logger.info(f"Intentando desvincular perfil {profile_id} del evento {event_id} para la cuenta {account_id}")
+    async with DBSession(SessionLocal) as db:
+        # Verificar que el evento existe y pertenece al usuario
+        event_stmt = select(AgendaEvent).options(selectinload(AgendaEvent.contact_profiles)).where(AgendaEvent.id == event_id, AgendaEvent.account_id == account_id)
+        event = (await db.execute(event_stmt)).scalars().first()
+        if not event:
+            logger.warning(f"Evento {event_id} no encontrado o no pertenece a la cuenta {account_id}.")
+            return False
+
+        # Eliminar el vínculo
+        profile_to_remove_stmt = select(ContactProfile).where(ContactProfile.id == uuid.UUID(profile_id), ContactProfile.account_id == uuid.UUID(account_id))
+        profile_to_remove = (await db.execute(profile_to_remove_stmt)).scalars().first()
+
+        if profile_to_remove and profile_to_remove in event.contact_profiles:
+            event.contact_profiles.remove(profile_to_remove)
+            await db.commit()
+            logger.info(f"Perfil {profile_id} desvinculado exitosamente del evento {event_id}.")
+            return True
+        else:
+            logger.warning(f"El vínculo entre el evento {event_id} y el perfil {profile_id} no fue encontrado para desvincular o el perfil no existe/no pertenece al usuario.")
+            return False
+
+async def get_event_by_id(account_id: str, event_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Recupera un evento específico por su ID, incluyendo perfiles vinculados.
+    """
+    logger.info(f"Consultando evento {event_id} para la cuenta {account_id}.")
+    async with DBSession(SessionLocal) as db:
+        stmt = select(AgendaEvent).options(selectinload(AgendaEvent.contact_profiles)).where(
+            AgendaEvent.id == event_id,
+            AgendaEvent.account_id == uuid.UUID(account_id)
+        )
+        result = await db.execute(stmt)
+        event = result.scalars().first()
+
+        if not event:
+            logger.warning(f"Evento {event_id} no encontrado o no pertenece a la cuenta {account_id}.")
+            return None
+        
+        # Usar el método to_dict del modelo AgendaEvent para obtener la representación base
+        event_dict = event.to_dict(account.timezone)
+
+        # Añadir los perfiles vinculados
+        linked_profiles_data = []
+        for cp in event.contact_profiles:
+            linked_profiles_data.append({
+                "id": str(cp.id),
+                "name": cp.name,
+                "email": cp.email,
+                "phone": cp.phone,
+            })
+        event_dict["linked_profiles"] = linked_profiles_data
+        
+        return event_dict

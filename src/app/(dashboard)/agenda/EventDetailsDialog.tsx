@@ -17,6 +17,7 @@ const formSchema = z.object({
   date: z.string().min(1, "Debes seleccionar una fecha."),
   time: z.string().min(1, "Debes especificar una hora."),
   team_id: z.string().optional(),
+  workspace_id: z.string().optional(),
 });
 
 interface EventDetailsDialogProps {
@@ -29,6 +30,8 @@ interface EventDetailsDialogProps {
 export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event }: EventDetailsDialogProps) {
   const [teams, setTeams] = useState<any[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(false);
+  const [workspaces, setWorkspaces] = useState<any[]>([]);
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -53,8 +56,23 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
         setLoadingTeams(false);
       }
     };
+
+    const fetchWorkspaces = async () => {
+      setLoadingWorkspaces(true);
+      try {
+        const response = await apiClient.get('/api/workspaces');
+        setWorkspaces(response.data);
+      } catch (error) {
+        console.error("Error fetching workspaces:", error);
+        toast.error('Error al cargar los workspaces.');
+      } finally {
+        setLoadingWorkspaces(false);
+      }
+    };
+
     if (isOpen) {
       fetchTeams();
+      fetchWorkspaces();
     }
   }, [isOpen]);
 
@@ -65,6 +83,7 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
         date: event.event_datetime_local ? new Date(event.event_datetime_local).toISOString().split('T')[0] : '',
         time: event.event_datetime_local ? new Date(event.event_datetime_local).toISOString().split('T')[1].substring(0, 5) : '',
         team_id: event.team_id?.toString() || '',
+        workspace_id: event.workspace_id?.toString() || '',
       });
     }
   }, [event, form]);
@@ -77,6 +96,7 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
         description: values.description,
         event_datetime: standardDateTime,
         team_id: values.team_id ? parseInt(values.team_id) : null,
+        workspace_id: values.workspace_id || null,
       });
       toast.success('¡Evento actualizado!', { id: toastId });
       onSaveSuccess(response.data);
@@ -119,6 +139,27 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
                     {teams.map(team => (
                       <option key={team.id} value={team.id.toString()}>
                         {team.name}
+                      </option>
+                    ))}
+                  </select>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="workspace_id" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Asociar a Workspace</FormLabel>
+                <FormControl>
+                  <select
+                    className="w-full border rounded-md p-2"
+                    onChange={field.onChange}
+                    value={field.value || ''}
+                    disabled={loadingWorkspaces}
+                  >
+                    <option value="">{loadingWorkspaces ? "Cargando workspaces..." : "Seleccionar workspace (opcional)"}</option>
+                    {workspaces.map(ws => (
+                      <option key={ws.id} value={ws.id.toString()}>
+                        {ws.name}
                       </option>
                     ))}
                   </select>

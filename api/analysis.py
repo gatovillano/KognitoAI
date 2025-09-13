@@ -1,7 +1,7 @@
 import logging
 from langchain.schema.messages import HumanMessage
 import uuid
-from typing import List, Optional, cast
+from typing import List, Optional, cast, Dict
 from datetime import datetime
 
 from core.llm_manager import get_fast_llm
@@ -20,7 +20,7 @@ from sklearn.cluster import KMeans
 import numpy as np
 from collections import Counter
 from utils.embeddings import get_embedding_model
-from core.memory_manager import create_memory_context, search_vector_db_optimized
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -279,6 +279,92 @@ async def get_dashboard_insights(
         ]
         # Ya no devolvemos 'top_entities' ni 'exploration_questions' para este diseño
     }
+
+class NoteForAnalysis(BaseModel):
+    id: int
+    title: Optional[str] = None
+    content: str
+
+class AnalyzeNotesRequest(BaseModel):
+    notes: List[NoteForAnalysis]
+    workspace_id: Optional[str] = None
+
+async def run_notes_collection_analysis_and_save(task_id: str, account_id: str, notes_data: List[Dict[str, str]], workspace_id: Optional[str]):
+    """
+    Obtiene el contenido de las notas, las analiza y guarda el resultado.
+    """
+    async with SessionLocal() as db_session: # type: ignore
+        try:
+            # Marcar la tarea como 'processing'
+            await db_session.execute(update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing"))
+            await db_session.commit()
+            
+            logger.info(f"Iniciando análisis de colección de notas para tarea {task_id}")
+
+            documents_for_analysis = []
+            for note in notes_data:
+                documents_for_analysis.append({
+                    "title": note.get("title", "Nota sin título"),
+                    "content": note["content"]
+                })
+
+            if not documents_for_analysis:
+                raise ValueError("No se encontraron notas con contenido para analizar.")
+
+            # Realizar el análisis de la colección de notas
+            analysis_result = await text_analyzer.analyze_collection(documents_for_analysis)
+            logger.info(f"Notes collection analysis result generated: {analysis_result.model_dump()}")
+
+            # Guardar el resultado y marcar como 'completed'
+            result_payload = analysis_result.model_dump()
+
+            # Agregar metadata de herramienta utilizada
+            result_payload["tool_used"] = "advanced_text_analyzer.py"
+            result_payload["analysis_metadata"] = {
+                "tool_used": "advanced_text_analyzer.py",
+                "analysis_type": "notes_collection",
+                "notes_count": len(documents_for_analysis),
+                "workspace_id": workspace_id,
+                "created_at": datetime.now().isoformat()
+            }
+
+            stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="completed", result_payload=result_payload)
+            await db_session.execute(stmt_completed)
+            await db_session.commit()
+            logger.info(f"Análisis de colección de notas para tarea {task_id} completado.")
+
+        except Exception as e:
+            logger.error(f"Fallo en tarea de análisis de colección de notas {task_id}: {e}", exc_info=True)
+            stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="failed", error_message=str(e))
+            await db_session.execute(stmt_failed)
+            await db_session.commit()
+
+@router.post("/start-notes-collection-analysis", status_code=202)
+async def start_notes_collection_analysis_endpoint(
+    req: AnalyzeNotesRequest,
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Inicia un análisis de una colección de notas y devuelve un ID de tarea."""
+    new_task = AnalysisTask(
+        account_id=uuid.UUID(current_account_id),
+        file_name="Colección de Notas",
+        status="pending",
+        analysis_type="notes_collection"  # NUEVO: Tipo específico para colección de notas
+    )
+    db.add(new_task)
+    await db.commit()
+    await db.refresh(new_task)
+    
+    # Convertir la lista de objetos NoteForAnalysis a una lista de diccionarios para pasar a la tarea de fondo
+    notes_data_dicts = [note.model_dump() for note in req.notes]
+
+    background_tasks.add_task(run_notes_collection_analysis_and_save, str(new_task.id), current_account_id, notes_data_dicts, req.workspace_id)
+    
+    return {"task_id": str(new_task.id)}
 
 class AnalyzeDocumentRequest(BaseModel):
     file_name: str
@@ -759,9 +845,6 @@ async def run_semantic_summary_analysis(task_id: str, account_id: str, topic: st
             analyzer = AdvancedTextAnalyzer()
             semantic_analysis = await analyzer.analyze_collection(all_docs_content)
 
-            # Realizar análisis semántico de la colección
-            semantic_analysis = await analyzer.analyze_collection(documents_for_analysis)
-
             # Crear resultado estructurado
             result_payload = {
                 "resumen_semantico": semantic_analysis.collection_summary,
@@ -776,7 +859,7 @@ async def run_semantic_summary_analysis(task_id: str, account_id: str, topic: st
                 "brechas_conocimiento": semantic_analysis.emergent_knowledge_gaps,
                 "patrones_semanticos": {
                     "total_documentos": len(documents),
-                    "total_chunks_analizados": len(all_chunks),
+                    "total_chunks_analizados": len(all_docs_content), # Corregido: usar len(all_docs_content)
                     "temas_identificados": len(semantic_analysis.cross_cutting_themes)
                 },
                 "tool_used": "semantic_summary_analysis",
@@ -786,7 +869,7 @@ async def run_semantic_summary_analysis(task_id: str, account_id: str, topic: st
                     "collection_name": topic,
                     "workspace_id": workspace_id,
                     "documents_count": len(documents),
-                    "chunks_analyzed": len(all_chunks),
+                    "chunks_analyzed": len(all_docs_content), # Corregido: usar len(all_docs_content)
                     "created_at": datetime.now().isoformat()
                 }
             }
@@ -809,6 +892,142 @@ async def run_semantic_summary_analysis(task_id: str, account_id: str, topic: st
             )
             await db_session.execute(stmt_failed)
             await db_session.commit()
+
+class AnalyzeSingleNoteRequest(BaseModel):
+    title: Optional[str] = None
+    content: str
+    note_id: Optional[int] = None
+
+async def run_single_note_analysis_and_save(task_id: str, account_id: str, note_title: str, note_content: str, note_id: Optional[int]):
+    """
+    Analiza una sola nota y guarda el resultado.
+    """
+    async with SessionLocal() as db_session: # type: ignore
+        try:
+            # Marcar la tarea como 'processing'
+            await db_session.execute(update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing"))
+            await db_session.commit()
+            
+            logger.info(f"Iniciando análisis de nota individual para tarea {task_id} (Nota: {note_title})")
+
+            # Realizar el análisis de la nota
+            analysis_result = await text_analyzer.analyze_single_text(note_content, document_title=note_title)
+            logger.info(f"Single note analysis result generated: {analysis_result.model_dump()}")
+
+            # Guardar el resultado y marcar como 'completed'
+            result_payload = analysis_result.model_dump()
+
+            # Agregar metadata de herramienta utilizada
+            result_payload["tool_used"] = "advanced_text_analyzer.py"
+            result_payload["analysis_metadata"] = {
+                "tool_used": "advanced_text_analyzer.py",
+                "analysis_type": "single_note",
+                "note_id": note_id,
+                "created_at": datetime.now().isoformat()
+            }
+
+            stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="completed", result_payload=result_payload)
+            await db_session.execute(stmt_completed)
+            await db_session.commit()
+            logger.info(f"Análisis de nota individual para tarea {task_id} completado.")
+
+        except Exception as e:
+            logger.error(f"Fallo en tarea de análisis de nota individual {task_id}: {e}", exc_info=True)
+            stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="failed", error_message=str(e))
+            await db_session.execute(stmt_failed)
+            await db_session.commit()
+
+@router.post("/start-single-note-analysis", status_code=202)
+async def start_single_note_analysis_endpoint(
+    req: AnalyzeSingleNoteRequest,
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Inicia un análisis de una sola nota y devuelve un ID de tarea."""
+    new_task = AnalysisTask(
+        account_id=uuid.UUID(current_account_id),
+        file_name=req.title or f"Nota {req.note_id or 'sin título'}",
+        status="pending",
+        analysis_type="single_note"  # NUEVO: Tipo específico para análisis de nota individual
+    )
+    db.add(new_task)
+    await db.commit()
+    await db.refresh(new_task)
+    
+    background_tasks.add_task(run_single_note_analysis_and_save, str(new_task.id), current_account_id, req.title or "Nota sin título", req.content, req.note_id)
+    
+    return {"task_id": str(new_task.id)}
+
+class SummarizeSingleNoteRequest(BaseModel):
+    title: Optional[str] = None
+    content: str
+    note_id: Optional[int] = None
+
+async def run_single_note_summary_and_save(task_id: str, account_id: str, note_title: str, note_content: str, note_id: Optional[int]):
+    """
+    Genera un resumen ejecutivo de una sola nota y guarda el resultado.
+    """
+    async with SessionLocal() as db_session: # type: ignore
+        try:
+            # Marcar la tarea como 'processing'
+            await db_session.execute(update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing"))
+            await db_session.commit()
+            
+            logger.info(f"Iniciando resumen de nota individual para tarea {task_id} (Nota: {note_title})")
+
+            # Realizar el análisis de la nota para obtener el resumen ejecutivo
+            analysis_result = await text_analyzer.analyze_single_text(note_content, document_title=note_title)
+            executive_summary = analysis_result.executive_summary
+
+            # Guardar el resultado y marcar como 'completed'
+            result_payload = {
+                "executive_summary": executive_summary,
+                "tool_used": "advanced_text_analyzer.py",
+                "analysis_metadata": {
+                    "tool_used": "advanced_text_analyzer.py",
+                    "analysis_type": "single_note_summary",
+                    "note_id": note_id,
+                    "created_at": datetime.now().isoformat()
+                }
+            }
+
+            stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="completed", result_payload=result_payload)
+            await db_session.execute(stmt_completed)
+            await db_session.commit()
+            logger.info(f"Resumen de nota individual para tarea {task_id} completado.")
+
+        except Exception as e:
+            logger.error(f"Fallo en tarea de resumen de nota individual {task_id}: {e}", exc_info=True)
+            stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="failed", error_message=str(e))
+            await db_session.execute(stmt_failed)
+            await db_session.commit()
+
+@router.post("/start-single-note-summary", status_code=202)
+async def start_single_note_summary_endpoint(
+    req: SummarizeSingleNoteRequest,
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Inicia la generación de un resumen ejecutivo de una sola nota y devuelve un ID de tarea."""
+    new_task = AnalysisTask(
+        account_id=uuid.UUID(current_account_id),
+        file_name=f"Resumen de Nota: {req.title or 'sin título'}",
+        status="pending",
+        analysis_type="single_note_summary"  # NUEVO: Tipo específico para resumen de nota individual
+    )
+    db.add(new_task)
+    await db.commit()
+    await db.refresh(new_task)
+    
+    background_tasks.add_task(run_single_note_summary_and_save, str(new_task.id), current_account_id, req.title or "Nota sin título", req.content, req.note_id)
+    
+    return {"task_id": str(new_task.id)}
 
 class AnalyzeCodeRequest(BaseModel):
     repo_name: str

@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useEffect } from 'react';
+import { DndProvider } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppShell } from '@/components/AppShell';
@@ -35,11 +37,13 @@ export default function DashboardLayout({
 
   return (
     <>
-      <WorkspaceTitleProvider>
-        <AppShell>
-          {React.isValidElement(children) ? children : null}
-        </AppShell>
-      </WorkspaceTitleProvider>
+      <DndProvider backend={HTML5Backend}>
+        <WorkspaceTitleProvider>
+          <AppShell>
+            {React.isValidElement(children) ? children : null}
+          </AppShell>
+        </WorkspaceTitleProvider>
+      </DndProvider>
       <Toaster richColors position="top-right" />
     </>
   );
