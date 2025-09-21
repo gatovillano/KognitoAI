@@ -4,7 +4,7 @@ import logging
 from typing import Any, Optional, List, Dict
 import uuid
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -56,33 +56,41 @@ class NotesManager:
             "team_id": str(new_note.team_id) if new_note.team_id else None,
         }
 
-    async def get_notes_as_dicts(self, account_id: str, search_query: Optional[str] = None, team_id: Optional[str] = None, workspace_id: Optional[str] = None, category: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def get_notes_as_dicts(self, account_id: str, search_query: Optional[str] = None, team_id: Optional[str] = None, workspace_id: Optional[str] = None, category: Optional[str] = None, skip: int = 0, limit: int = 10) -> tuple[int, List[Dict[str, Any]]]:
         """
-        Recupera notas como una lista de diccionarios, incluyendo perfiles vinculados.
+        Recupera notas como una lista de diccionarios, incluyendo perfiles vinculados, con paginación.
+        Devuelve una tupla (total_notas, lista_de_notas_paginadas).
         """
-        logger.info(f"get_notes_as_dicts called for account_id: {account_id}, workspace_id: {workspace_id}, team_id: {team_id}") # New log
-        stmt = select(Nota).options(selectinload(Nota.contact_profiles), selectinload(Nota.workspace)).where(Nota.account_id == uuid.UUID(account_id))
+        logger.info(f"get_notes_as_dicts called for account_id: {account_id}, workspace_id: {workspace_id}, team_id: {team_id}, skip: {skip}, limit: {limit}")
+        
+        base_stmt = select(Nota).where(Nota.account_id == uuid.UUID(account_id))
+        
         if team_id:
-            stmt = stmt.where(Nota.team_id == uuid.UUID(team_id))
+            base_stmt = base_stmt.where(Nota.team_id == uuid.UUID(team_id))
         elif workspace_id:
-            stmt = stmt.where(Nota.workspace_id == uuid.UUID(workspace_id))
-        else: # Por defecto, solo notas personales si no se especifica equipo o workspace
-            stmt = stmt.where(Nota.team_id.is_(None)).where(Nota.workspace_id.is_(None))
+            base_stmt = base_stmt.where(Nota.workspace_id == uuid.UUID(workspace_id))
+        # Si no se especifica team_id ni workspace_id, se obtienen todas las notas del account_id
             
         if search_query:
-            stmt = stmt.where(Nota.title.ilike(f"%{search_query}%") | Nota.content.ilike(f"%{search_query}%"))
+            base_stmt = base_stmt.where(Nota.title.ilike(f"%{search_query}%") | Nota.content.ilike(f"%{search_query}%"))
 
         if category:
-            stmt = stmt.where(Nota.category.ilike(f"%{category}%"))
+            base_stmt = base_stmt.where(Nota.category.ilike(f"%{category}%"))
         
-        stmt = stmt.order_by(Nota.created_at.desc())
-        
-        logger.info(f"SQL statement for notes: {stmt}") # New log
-        result = await self.db.execute(stmt)
-        notes = result.scalars().all()
-        logger.info(f"Found {len(notes)} notes for account {account_id} with specified filters.") # New log
+        # Contar el total de notas sin paginación
+        total_stmt = select(func.count()).select_from(base_stmt.subquery())
+        total_result = await self.db.execute(total_stmt)
+        total_notes = total_result.scalar_one()
 
-        return [
+        # Obtener notas paginadas
+        paginated_stmt = base_stmt.options(selectinload(Nota.contact_profiles), selectinload(Nota.workspace)).order_by(Nota.created_at.desc()).offset(skip).limit(limit)
+        
+        logger.info(f"SQL statement for paginated notes: {paginated_stmt}")
+        result = await self.db.execute(paginated_stmt)
+        notes = result.scalars().all()
+        logger.info(f"Found {len(notes)} paginated notes for account {account_id} with specified filters.")
+
+        formatted_notes = [
             {
                 "id": note.id, "title": note.title, "content": note.content,
                 "category": note.category, "created_at": note.created_at.isoformat(),
@@ -92,7 +100,7 @@ class NotesManager:
                 "workspace_name": note.workspace.name if note.workspace else None,
                 "workspace_color": note.workspace.color if note.workspace else None,
                 "team_shared": bool(note.team_id),
-                "contact_profiles": [{
+                "linked_profiles": [{
                     "id": str(cp.id),
                     "account_id": str(cp.account_id),
                     "name": cp.name,
@@ -103,44 +111,23 @@ class NotesManager:
                 } for cp in note.contact_profiles]
             } for note in notes
         ]
+        return total_notes, formatted_notes
 
-    async def list_all_notes(self, account_id: str, search_query: Optional[str] = None, category: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def list_all_notes(self, account_id: str, search_query: Optional[str] = None, category: Optional[str] = None, skip: int = 0, limit: int = 10) -> tuple[int, List[Dict[str, Any]]]:
         """
-        Devuelve todas las notas de un usuario, incluyendo personales, de workspaces y compartidas por equipos.
+        Devuelve todas las notas de un usuario, incluyendo personales, de workspaces y compartidas por equipos, con paginación.
         """
-        account_uuid = uuid.UUID(account_id)
-        logger.info(f"Listando todas las notas para la cuenta {account_id}")
-
-        # 1. Obtener notas personales
-        personal_notes = await self.get_notes_as_dicts(account_id=account_id, search_query=search_query, category=category)
+        logger.info(f"Listando todas las notas para la cuenta {account_id}, skip: {skip}, limit: {limit}")
         
-        # 2. Obtener equipos del usuario
-        member_teams_result = await self.db.execute(
-            select(TeamMember).where(TeamMember.account_id == account_uuid)
+        # Ahora get_notes_as_dicts puede manejar la lógica de obtener todas las notas si no se especifica team_id o workspace_id
+        total, notes = await self.get_notes_as_dicts(
+            account_id=account_id,
+            search_query=search_query,
+            category=category,
+            skip=skip,
+            limit=limit
         )
-        team_ids = [str(team.team_id) for team in member_teams_result.scalars().all()]
-        
-        # 3. Obtener notas de cada equipo
-        team_notes = []
-        for team_id in team_ids:
-            notes_for_team = await self.get_notes_as_dicts(account_id=account_id, search_query=search_query, team_id=team_id, category=category)
-            team_notes.extend(notes_for_team)
-
-        # 4. Obtener workspaces del usuario
-        workspaces_result = await self.db.execute(
-            select(Workspace).where(Workspace.account_id == account_uuid)
-        )
-        workspace_ids = [str(ws.id) for ws in workspaces_result.scalars().all()]
-
-        # 5. Obtener notas de cada workspace
-        workspace_notes = []
-        for workspace_id in workspace_ids:
-            notes_for_workspace = await self.get_notes_as_dicts(account_id=account_id, search_query=search_query, workspace_id=workspace_id, category=category)
-            workspace_notes.extend(notes_for_workspace)
-            
-        # 6. Combinar y eliminar duplicados
-        combined_notes = {note['id']: note for note in personal_notes + team_notes + workspace_notes}
-        return list(combined_notes.values())
+        return total, notes
 
     async def update_note(self, account_id: str, note_id: int, new_title: Optional[str] = None, new_content: Optional[str] = None, new_category: Optional[str] = None) -> bool:
         """

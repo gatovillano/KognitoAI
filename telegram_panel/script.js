@@ -1,6 +1,7 @@
 // webapp/script.js - Versión FINAL Completa con Gestor de Notas
 
 document.addEventListener('DOMContentLoaded', function () {
+    console.log("Script iniciado");
     // --- 1. INICIALIZACIÓN Y VERIFICACIÓN ---
     if (!window.Telegram || !window.Telegram.WebApp) {
         console.error("SDK de Telegram no encontrado.");
@@ -8,6 +9,7 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
     }
     const tg = window.Telegram.WebApp;
+    console.log("SDK de Telegram cargado:", tg);
 
     // --- 2. REFERENCIAS A ELEMENTOS ---
     const elements = {
@@ -56,6 +58,7 @@ document.addEventListener('DOMContentLoaded', function () {
         noteContentInput: document.getElementById('note-content-input'),
         noteCategoryInput: document.getElementById('note-category-input'),
     };
+    console.log("Elementos referenciados:", elements);
 
     let initialPrompt = '';
 
@@ -80,8 +83,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (viewId === 'agenda-screen') loadEvents();
         if (viewId === 'notes-screen') loadNotes();
     }
-    
+    console.log("Adjuntando eventListeners a iconButtons");
     elements.iconButtons.forEach(button => button.addEventListener('click', () => showView(button.dataset.targetView)));
+    console.log("Adjuntando eventListeners a backButtons");
     elements.backButtons.forEach(button => button.addEventListener('click', () => showView('home-screen')));
 
     // --- 5. LÓGICA DEL BOTÓN PRINCIPAL DE TELEGRAM ---

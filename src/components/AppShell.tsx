@@ -146,7 +146,7 @@ export function AppShell({ children }: AppShellProps) {
                   <Image src="/logo-simple.png" alt="Kognito Logo" width={40} height={40} className="rounded-lg" />
                 </div>
               </header>
-              <main className="flex-1 bg-background overflow-y-auto p-4 md:p-6">
+              <main className="flex-1 bg-background p-4 md:p-6 overflow-y-auto pb-24">
                 {children}
               </main>
             </div>

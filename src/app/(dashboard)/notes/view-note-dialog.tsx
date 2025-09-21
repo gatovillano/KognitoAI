@@ -5,14 +5,21 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button'; // Importar Button
-import { Volume2, Pencil, Lightbulb, FileText, MoreHorizontal } from 'lucide-react'; // Importar el icono de volumen y el de lápiz
+import { Volume2, Pencil, Lightbulb, FileText, MoreHorizontal, Link } from 'lucide-react'; // Importar el icono de volumen, el de lápiz y el de enlace
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'; // Reutilizamos nuestro potente renderizador
-import { useState } from 'react'; // Importar useState
+import { useState, useEffect } from 'react'; // Importar useState y useEffect
 import apiClient from '@/lib/api'; // Importar apiClient
 import { NoteDialog } from './note-dialog'; // Importar NoteDialog para la edición
 import type { Note } from './page'; // Importamos el tipo de dato 'Note' desde la página principal
+import { DialogFooter } from '@/components/ui/dialog'; // Importar DialogFooter
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; // Importar Select components
+
+interface ContactProfile {
+  id: string;
+  name: string;
+}
 
 interface ViewNoteDialogProps {
   note: Note | null; // La nota a mostrar. Si es null, el diálogo no se muestra o está vacío.
@@ -24,6 +31,35 @@ interface ViewNoteDialogProps {
 export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: ViewNoteDialogProps) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isNoteEditDialogOpen, setIsNoteEditDialogOpen] = useState(false); // Estado para el diálogo de edición
+  const [isLinkProfileDialogOpen, setIsLinkProfileDialogOpen] = useState(false); // Estado para el diálogo de vincular perfil
+  const [contactProfiles, setContactProfiles] = useState<ContactProfile[]>([]); // Estado para almacenar los perfiles de contacto
+  const [loadingContactProfiles, setLoadingContactProfiles] = useState(false);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null); // Estado para el perfil seleccionado
+
+  useEffect(() => {
+    const fetchContactProfiles = async () => {
+      setLoadingContactProfiles(true);
+      try {
+        const response = await apiClient.get('/api/contact-profiles');
+        // Asumimos que la API devuelve un array de perfiles directamente
+        if (Array.isArray(response.data)) {
+          setContactProfiles(response.data);
+        } else {
+          console.error("API /api/contact-profiles did not return an array:", response.data);
+          setContactProfiles([]);
+        }
+      } catch (error) {
+        console.error("Error fetching contact profiles:", error);
+        toast.error('Error al cargar los perfiles de contacto.');
+      } finally {
+        setLoadingContactProfiles(false);
+      }
+    };
+
+    if (isLinkProfileDialogOpen) {
+      fetchContactProfiles();
+    }
+  }, [isLinkProfileDialogOpen]);
 
   const handleSummarizeSingleNoteFromDialog = async () => {
     if (!note) return;
@@ -87,6 +123,28 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
     }
   };
 
+  const handleLinkToProfile = () => {
+    setIsLinkProfileDialogOpen(true); // Abrir el diálogo de selección de perfil
+  };
+
+  const handleConfirmLinkToProfile = async () => {
+    if (!note || !selectedProfileId) return;
+
+    const toastId = toast.loading("Vinculando nota a perfil...");
+    try {
+      await apiClient.post(`/api/contact-profiles/${selectedProfileId}/link-note`, {
+        note_id: note.id,
+      });
+      toast.success("Nota vinculada exitosamente al perfil.", { id: toastId });
+      setIsLinkProfileDialogOpen(false); // Cerrar el diálogo
+      setSelectedProfileId(null); // Resetear la selección
+      onNoteUpdated(); // Opcional: para refrescar la UI si es necesario
+    } catch (error) {
+      toast.error("Error al vincular la nota a perfil.", { id: toastId });
+      console.error("Error al vincular la nota a perfil:", error);
+    }
+  };
+
   // Si no hay nota para mostrar, no renderizamos nada para evitar errores.
   if (!note) {
     return null;
@@ -119,6 +177,10 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
                     <FileText className="mr-2 h-4 w-4" />
                     Resumen Semántico
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleLinkToProfile}>
+                    <Link className="mr-2 h-4 w-4" />
+                    Vincular a Perfil
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleTextToSpeech} disabled={isSpeaking}>
                     <Volume2 className={isSpeaking ? "mr-2 h-4 w-4 animate-pulse text-primary" : "mr-2 h-4 w-4"} />
@@ -137,7 +199,7 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
         
         {/* Usamos ScrollArea para que el contenido de la nota sea navegable si es muy largo */}
         <ScrollArea className="max-h-[65vh] mt-4 pr-6">
-          <div className="py-4">
+          <div className="py-4 text-xl">
             {/* Aquí está la magia: usamos el MarkdownRenderer que ya creamos */}
             <MarkdownRenderer content={note.content} />
           </div>
@@ -156,6 +218,40 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
           workspaceId={note.workspace_id} // Asegurarse de pasar el workspace_id
         />
       )}
+
+      {/* Diálogo para vincular a perfil */}
+      <Dialog open={isLinkProfileDialogOpen} onOpenChange={setIsLinkProfileDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Vincular Nota a Perfil</DialogTitle>
+            <DialogDescription>
+              Selecciona un perfil de contacto para vincular esta nota.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Select onValueChange={setSelectedProfileId} value={selectedProfileId || ""} disabled={loadingContactProfiles}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder={loadingContactProfiles ? "Cargando perfiles..." : "Selecciona un perfil"} />
+              </SelectTrigger>
+              <SelectContent>
+                {contactProfiles.length === 0 && !loadingContactProfiles ? (
+                  <SelectItem value="" disabled>No hay perfiles disponibles</SelectItem>
+                ) : (
+                  contactProfiles.map((profile) => (
+                    <SelectItem key={profile.id} value={profile.id}>
+                      {profile.name}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsLinkProfileDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleConfirmLinkToProfile} disabled={!selectedProfileId}>Vincular</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

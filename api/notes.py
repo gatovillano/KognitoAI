@@ -3,9 +3,12 @@
 import logging
 from typing import List, Optional
 import uuid
+from datetime import datetime # Importar datetime
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from sqlalchemy import select, desc
+from sqlalchemy.orm import selectinload # Import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import SessionLocal
@@ -34,6 +37,20 @@ def get_notes_manager(db: AsyncSession = Depends(get_db)) -> NotesManager:
 class ListNotesRequest(BaseModel):
     search_term: Optional[str] = None
     workspace_id: Optional[str] = None
+    skip: int = 0
+    limit: int = 10
+
+class NoteResponse(BaseModel):
+    id: int
+    title: Optional[str] # Modificado para ser opcional
+    content: str
+    category: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    workspace_id: Optional[str]
+    workspace_name: Optional[str] # Added
+    workspace_color: Optional[str] # Added
+    linked_profiles: List[ContactProfileResponse] = []
 
 class NoteRequest(BaseModel):
     title: Optional[str] = None
@@ -50,6 +67,10 @@ class NoteUpdateRequest(BaseModel):
 class NoteDeleteRequest(BaseModel):
     note_id: int
 
+class PaginatedNotesResponse(BaseModel):
+    total: int
+    notes: List[NoteResponse]
+
 # Se mantiene ProfileLinkRequest por si se usa en otros endpoints o en el futuro.
 # Si no se usa en ningún otro lugar, se podría eliminar.
 class ProfileLinkRequest(BaseModel):
@@ -57,7 +78,7 @@ class ProfileLinkRequest(BaseModel):
 
 # --- Endpoints de la API ---
 
-@router.get("/notes/{note_id}", summary="Obtener una nota por ID")
+@router.get("/notes/{note_id}", response_model=NoteResponse, summary="Obtener una nota por ID")
 async def get_note_by_id_endpoint(
     note_id: int,
     current_account_id: str = Depends(get_current_account_id),
@@ -69,7 +90,7 @@ async def get_note_by_id_endpoint(
     note = await notes_manager.get_note_by_id(current_account_id, note_id)
     if not note:
         raise HTTPException(status_code=404, detail="Nota no encontrada o no autorizada.")
-    return note
+    return NoteResponse(**note)
 
 @router.get("/notes/{note_id}/linked-profiles", response_model=List[ContactProfileResponse], summary="Obtener perfiles vinculados a una nota")
 async def get_linked_profiles_for_note_endpoint(
@@ -86,23 +107,26 @@ async def get_linked_profiles_for_note_endpoint(
     
     return note["linked_profiles"]
 
-@router.post("/list-notes")
+@router.post("/list-notes", response_model=PaginatedNotesResponse, summary="Listar notas del usuario con paginación")
 async def list_notes_endpoint(
     request: ListNotesRequest,
     current_account_id: str = Depends(get_current_account_id),
     notes_manager: NotesManager = Depends(get_notes_manager)
 ):
-    """Devuelve todas las notas de un usuario, incluyendo personales y de equipos, o filtradas por workspace."""
+    """
+    Devuelve todas las notas de un usuario, incluyendo personales y de equipos, o filtradas por workspace, con paginación.
+    """
     if request.workspace_id:
-        notes = await notes_manager.get_notes_as_dicts(current_account_id, request.search_term, workspace_id=request.workspace_id)
+        total, notes = await notes_manager.get_notes_as_dicts(current_account_id, request.search_term, workspace_id=request.workspace_id, skip=request.skip, limit=request.limit)
     else:
-        notes = await notes_manager.list_all_notes(current_account_id, request.search_term)
-    return notes
+        total, notes = await notes_manager.list_all_notes(current_account_id, request.search_term, skip=request.skip, limit=request.limit)
+    
+    return PaginatedNotesResponse(total=total, notes=[NoteResponse(**note) for note in notes])
 
-@router.post("/notes/{note_id}/link-profile/{profile_id}", summary="Vincular perfil a una nota") # CAMBIO EN LA RUTA
+@router.post("/notes/{note_id}/link-profile", summary="Vincular perfil a una nota") # CAMBIO EN LA RUTA
 async def link_profile_to_note_endpoint(
     note_id: int,
-    profile_id: uuid.UUID, # CAMBIO: Ahora profile_id es un path parameter
+    profile_link_request: ProfileLinkRequest, # CAMBIO: Ahora profile_id es un path parameter
     current_account_id: str = Depends(get_current_account_id),
     notes_manager: NotesManager = Depends(get_notes_manager)
 ):
@@ -112,11 +136,11 @@ async def link_profile_to_note_endpoint(
     success = await notes_manager.link_profile_to_note(
         account_id=current_account_id,
         note_id=note_id,
-        profile_id=profile_id # CAMBIO: Se pasa directamente el profile_id
+        profile_id=profile_link_request.profile_id # CAMBIO: Se pasa directamente el profile_id
     )
     if not success:
         raise HTTPException(status_code=404, detail="Nota o perfil no encontrado, o no autorizado.")
-    return {"message": f"Perfil {profile_id} vinculado a la nota {note_id} correctamente."}
+    return {"message": f"Perfil {profile_link_request.profile_id} vinculado a la nota {note_id} correctamente."}
 
 @router.post("/notes/{note_id}/unlink-profile", summary="Desvincular perfil de una nota")
 async def unlink_profile_from_note_endpoint(

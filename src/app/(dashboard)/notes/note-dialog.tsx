@@ -83,7 +83,15 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
       setLoadingWorkspaces(true);
       try {
         const response = await apiClient.get('/api/workspaces'); // Asumo este endpoint
-        setWorkspaces(response.data);
+        // Asegurarse de que response.data sea un array antes de asignarlo
+        if (Array.isArray(response.data)) {
+          setWorkspaces(response.data);
+        } else if (response.data && Array.isArray(response.data.workspaces)) { // Si la API devuelve un objeto con una propiedad 'workspaces'
+          setWorkspaces(response.data.workspaces);
+        } else {
+          console.warn("API /api/workspaces did not return an array or an object with a 'workspaces' array:", response.data);
+          setWorkspaces([]); // Asegurarse de que siempre sea un array
+        }
       } catch (error) {
         console.error("Error fetching workspaces:", error);
         toast.error('Error al cargar los workspaces.');

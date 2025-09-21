@@ -75,6 +75,7 @@ from tools.set_reminder_tool import SetReminderTool
 from tools.update_document_metadata_tool import UpdateDocumentMetadataTool
 from tools.update_note_tool import UpdateNoteTool
 from tools.update_user_profile import UpdateProfileTool
+from tools.contact_profile_tool import ContactProfileTool
 
 
 from tools.web_scraper_tool import WebScraperTool
@@ -121,10 +122,10 @@ tool_classes_to_instantiate = [
     UpdateDocumentMetadataTool,
     UpdateNoteTool,
     UpdateProfileTool,
-    
     WebScraperTool,
     ScheduleToolExecutionTool,
     ListScheduledToolsTool,
+    ContactProfileTool, # ¡NUEVA HERRAMIENTA!
 ]
 
 def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = None, thread_id: Optional[str] = None) -> List[Tool]:
@@ -213,6 +214,7 @@ def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = None, 
                     "ConversationHistoryAnalyzerTool",
                     "ConversationContextAnalyzerTool",
                     "DocumentRAGTool",
+                    "ContactProfileTool", # NUEVA HERRAMIENTA
                 ]
 
                 # Add thread_id ONLY if the tool explicitly has the field AND is NOT in the exclusion list

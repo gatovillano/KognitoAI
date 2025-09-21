@@ -157,31 +157,38 @@ export default function LoginPage() {
             <Image src="/logo-completo-dark2.png" alt="Kognito AI Labs" width={320} height={110} className="mx-auto" />
           </CardHeader>
           <CardContent className="px-8 pb-8">
-          {globalError && <p className="text-sm text-destructive text-center mb-4">{globalError}</p>}
-
-          {view.type === 'login' && (
-            <div className="space-y-4">
-              {/* Botón de Telegram Widget */}
-              <TelegramLoginWidget onLogin={handleSuccessfulLogin} isProcessing={isProcessing} />
-
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-muted/30" /></div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-card px-4 py-1 text-muted-foreground rounded-full">O con Email</span>
-                </div>
+            {isProcessing ? (
+              <div className="flex flex-col items-center justify-center space-y-2 py-12">
+                <p className="text-lg font-medium text-primary animate-pulse">Ingresando...</p>
+                <p className="text-sm text-muted-foreground">Por favor, espera un momento.</p>
               </div>
-              <EmailLoginForm onLogin={handleSuccessfulLogin} setParentError={setGlobalError} />
-              <div className="text-center text-sm text-muted-foreground">
-                ¿No tienes una cuenta?{' '}
-                <a href="/register" className="text-primary hover:text-primary/80 font-medium transition-colors">
-                  Regístrate
-                </a>
-              </div>
-            </div>
-          )}
+            ) : (
+              <>
+                {globalError && <p className="text-sm text-destructive text-center mb-4">{globalError}</p>}
 
+                {view.type === 'login' && (
+                  <div className="space-y-4">
+                    {/* Botón de Telegram Widget */}
+                    <TelegramLoginWidget onLogin={handleSuccessfulLogin} isProcessing={isProcessing} />
 
-        </CardContent>
+                    <div className="relative">
+                      <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-muted/30" /></div>
+                      <div className="relative flex justify-center text-xs uppercase">
+                        <span className="bg-card px-4 py-1 text-muted-foreground rounded-full">O con Email</span>
+                      </div>
+                    </div>
+                    <EmailLoginForm onLogin={handleSuccessfulLogin} setParentError={setGlobalError} />
+                    <div className="text-center text-sm text-muted-foreground">
+                      ¿No tienes una cuenta?{' '}
+                      <a href="/register" className="text-primary hover:text-primary/80 font-medium transition-colors">
+                        Regístrate
+                      </a>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
         </Card>
       </div>
     </main>

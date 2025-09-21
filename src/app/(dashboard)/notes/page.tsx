@@ -13,8 +13,7 @@ import { NoteDialog } from './note-dialog';
 import { ViewNoteDialog } from './view-note-dialog';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-// import { DndProvider, useDrag, useDrop } from 'react-dnd'; // Comentado
-// import { HTML5Backend } from 'react-dnd-html5-backend'; // Comentado
+import { useDrag, useDrop } from 'react-dnd';
 import { ManageLinkedProfilesDialog } from './ManageLinkedProfilesDialog'; // Nueva importación
 import { ContactProfile } from '../profiles/page'; // Nueva importación
 
@@ -40,27 +39,72 @@ export default function NotesPage() {
   const [isNoteDialogOpen, setIsNoteDialogOpen] = useState(false);
   const [viewingNote, setViewingNote] = useState<Note | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  const [isLinkProfileDialogOpen, setIsLinkProfileDialogOpen] = useState(false); // Nuevo estado
-  const [linkingNote, setLinkingNote] = useState<Note | null>(null); // Nuevo estado
+  const [isLinkProfileDialogOpen, setIsLinkProfileDialogOpen] = useState(false);
+  const [linkingNote, setLinkingNote] = useState<Note | null>(null);
 
-  const fetchNotes = async () => {
-    setIsLoading(true);
+  // Estados para paginación
+  const [skip, setSkip] = useState(0);
+  const [limit, setLimit] = useState(20); // Mostrar 20 notas inicialmente
+  const [hasMore, setHasMore] = useState(true);
+  const [isFetchingMore, setIsFetchingMore] = useState(false); // Para evitar cargas múltiples
+
+  const fetchNotes = async (newSkip: number, newLimit: number, append: boolean = false) => {
+    if (!append) {
+      setIsLoading(true);
+    } else {
+      setIsFetchingMore(true);
+    }
     try {
-      const response = await apiClient.post('/api/list-notes', {});
-      setNotes(response.data.sort((a: Note, b: Note) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+      const response = await apiClient.post('/api/list-notes', { skip: newSkip, limit: newLimit });
+      console.log("API Response Data:", response.data);
+      const fetchedNotes = response.data.notes.sort((a: Note, b: Note) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      if (append) {
+        setNotes(prevNotes => [...prevNotes, ...fetchedNotes]);
+      } else {
+        setNotes(fetchedNotes);
+      }
+      setHasMore(fetchedNotes.length === newLimit);
+      setSkip(newSkip + fetchedNotes.length); // Actualizar skip para la próxima carga
     } catch (error) {
       toast.error('Error al cargar las notas.');
     } finally {
       setIsLoading(false);
+      setIsFetchingMore(false);
     }
   };
 
   useEffect(() => {
-    fetchNotes();
-  }, []);
+    fetchNotes(0, limit); // Carga inicial
+  }, [limit]);
+
+  const handleLoadMore = () => {
+    if (hasMore && !isFetchingMore) {
+      fetchNotes(skip, limit, true);
+    }
+  };
 
   const handleSaveSuccess = () => {
-    fetchNotes();
+    // Recargar todas las notas desde el principio después de guardar
+    setSkip(0);
+    setHasMore(true);
+    fetchNotes(0, limit);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deletingNote) return;
+    const toastId = toast.loading(`Eliminando nota...`);
+    try {
+      await apiClient.post('/api/delete-note', { note_id: deletingNote.id });
+      toast.success('Nota eliminada', { id: toastId });
+      setDeletingNote(null);
+      // Recargar todas las notas desde el principio después de eliminar
+      setSkip(0);
+      setHasMore(true);
+      fetchNotes(0, limit);
+    } catch (error) {
+      toast.error('Error al eliminar la nota', { id: toastId });
+    }
   };
 
   const handleAnalyzeAllNotes = async () => {
@@ -120,18 +164,7 @@ export default function NotesPage() {
     }
   };
 
-  const handleDeleteConfirm = async () => {
-    if (!deletingNote) return;
-    const toastId = toast.loading(`Eliminando nota...`);
-    try {
-      await apiClient.post('/api/delete-note', { note_id: deletingNote.id });
-      toast.success('Nota eliminada', { id: toastId });
-      setDeletingNote(null);
-      fetchNotes();
-    } catch (error) {
-      toast.error('Error al eliminar la nota', { id: toastId });
-    }
-  };
+  
 
   const updateNoteCategory = async (noteId: number, newCategory: string) => {
     try {
@@ -149,27 +182,27 @@ export default function NotesPage() {
   };
 
   const NoteCard = ({ note, onAnalyzeNote, onSummarizeNote, onLinkProfile }: { note: Note, onAnalyzeNote: (note: Note) => void, onSummarizeNote: (note: Note) => void, onLinkProfile: (note: Note) => void }) => {
-    // const [{ isDragging }, drag] = useDrag({ // Comentado
-    //   type: 'NOTE',
-    //   item: { id: note.id, category: note.category },
-    //   collect: monitor => ({
-    //     isDragging: !!monitor.isDragging(),
-    //   }),
-    // });
+    const [{ isDragging }, drag] = useDrag({
+      type: 'NOTE',
+      item: { id: note.id, category: note.category },
+      collect: monitor => ({
+        isDragging: !!monitor.isDragging(),
+      }),
+    });
 
     return (
       <motion.div
+        ref={drag as any}
         layout
         initial={{ opacity: 0, scale: 0.8 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.8 }}
         transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        // ref={drag as any} // Comentado
         className="h-full"
+        style={{ opacity: isDragging ? 0.5 : 1 }}
       >
         <Card
           className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full min-h-[200px]"
-          // style={{ opacity: isDragging ? 0.5 : 1 }} // Comentado
           onClick={() => {
             setViewingNote(note);
             setIsViewDialogOpen(true);
@@ -250,15 +283,20 @@ export default function NotesPage() {
             <span className="truncate pr-2">{note.category}</span>
             <div className="flex items-center gap-2 flex-shrink-0">
               {note.workspace_name && (
-                <span
-                  className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border"
+                <div
+                  className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full"
                   style={{
-                    color: note.workspace_color || '#888888',
-                    borderColor: note.workspace_color || '#888888'
+                      backgroundColor: note.workspace_color ? `${note.workspace_color}20` : '#f3f4f6', // bg-gray-100
                   }}
                 >
-                  {note.workspace_name}
-                </span>
+                  <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: note.workspace_color || '#888888' }}
+                  ></span>
+                  <span style={{ color: note.workspace_color || '#374151' }}>
+                      {note.workspace_name}
+                  </span>
+                </div>
               )}
               {note.team_shared && <span title="Compartido con equipo"><Users className="h-4 w-4" /></span>}
               <span>{new Date(note.created_at).toLocaleDateString()}</span>
@@ -270,20 +308,20 @@ export default function NotesPage() {
   };
 
   const CategoryDropZone = ({ category, children }: { category: string; children: React.ReactNode }) => {
-    // const [{ isOver }, drop] = useDrop({ // Comentado
-    //   accept: 'NOTE',
-    //   drop: (item: { id: number; category: string }) => {
-    //     if (item.category !== category) {
-    //       updateNoteCategory(item.id, category);
-    //     }
-    //   },
-    //   collect: monitor => ({
-    //     isOver: !!monitor.isOver(),
-    //   }),
-    // });
+    const [{ isOver }, drop] = useDrop({
+      accept: 'NOTE',
+      drop: (item: { id: number; category: string }) => {
+        if (item.category !== category) {
+          updateNoteCategory(item.id, category);
+        }
+      },
+      collect: monitor => ({
+        isOver: !!monitor.isOver(),
+      }),
+    });
 
     return (
-      <div /* ref={drop as any} */ className="p-4 rounded-lg" /* style={{ backgroundColor: isOver ? 'rgba(147, 112, 219, 0.1)' : 'transparent' }} */> {/* Comentado */}
+      <div ref={drop as any} className="p-4 rounded-lg" style={{ backgroundColor: isOver ? 'rgba(147, 112, 219, 0.1)' : 'transparent' }}>
         <h2 className="text-xl font-semibold mb-4 px-2">{category}</h2>
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
           {children}
@@ -293,7 +331,8 @@ export default function NotesPage() {
   };
 
   const renderNotes = () => {
-    if (isLoading) {
+    console.log("RenderNotes - notes.length:", notes.length, "isLoading:", isLoading); // Log para depuración
+    if (isLoading && notes.length === 0) { // Solo mostrar "Cargando notas..." si es la carga inicial y no hay notas
       return <p className="text-center py-10">Cargando notas...</p>;
     }
 
@@ -407,6 +446,14 @@ export default function NotesPage() {
 
         {renderNotes()}
 
+        {hasMore && (
+          <div className="flex justify-center mt-8">
+            <Button onClick={handleLoadMore} disabled={isFetchingMore}>
+              {isFetchingMore ? "Cargando más..." : "Ver más"}
+            </Button>
+          </div>
+        )}
+
         <NoteDialog
           isOpen={isNoteDialogOpen}
           onOpenChange={setIsNoteDialogOpen}
@@ -418,15 +465,16 @@ export default function NotesPage() {
           isOpen={isViewDialogOpen}
           onOpenChange={setIsViewDialogOpen}
           note={viewingNote}
-          onNoteUpdated={fetchNotes}
+          onNoteUpdated={() => fetchNotes(0, limit, false)}
         />
 
         {linkingNote && ( // Renderizado condicional del diálogo de vinculación
           <ManageLinkedProfilesDialog
             isOpen={isLinkProfileDialogOpen}
             onOpenChange={setIsLinkProfileDialogOpen}
-            note={linkingNote} // Pasar la nota directamente
-            onLinkedProfilesUpdated={fetchNotes} // Para refrescar las notas si es necesario
+            item={{ id: String(linkingNote.id), name: linkingNote.title || undefined }} // Convertir id a string y pasar title como name
+            itemType="note" // Especificar el tipo de item
+            onLinkedProfilesUpdated={() => fetchNotes(0, limit, false)} // Para refrescar las notas si es necesario
           />
         )}
 
