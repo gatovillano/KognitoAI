@@ -43,6 +43,7 @@ services:
       - "${API_PORT:-8889}:8000" # API accesible en localhost:8889
     volumes:
       - .:/app
+      - "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums:/app/media"
       - ./credentials/gen-lang-client-0283065579-d517663d377f.json:/app/credentials/gen-lang-client-0283065579-d517663d377f.json:ro
     env_file:
       - ./.env

@@ -179,16 +179,20 @@ class TasksManager:
         Vincula un perfil a una tarea existente.
         """
         logger.info(f"Intentando vincular perfil {profile_id} a la tarea {task_id} para la cuenta {account_id}")
-        
-        # Verificar que la tarea existe y pertenece al usuario
-        task_stmt = select(Task).options(selectinload(Task.contact_profiles)).where(Task.id == uuid.UUID(task_id), Task.account_id == uuid.UUID(account_id))
+        account_uuid = uuid.UUID(account_id)
+        task_uuid = uuid.UUID(task_id)
+        if isinstance(profile_id, uuid.UUID):
+            profile_uuid = profile_id
+        else:
+            profile_uuid = uuid.UUID(profile_id)
+        task_stmt = select(Task).options(selectinload(Task.contact_profiles)).where(Task.id == task_uuid, Task.account_id == account_uuid)
         task = (await self.db_session.execute(task_stmt)).scalars().first()
         if not task:
             logger.warning(f"Tarea {task_id} no encontrada o no pertenece a la cuenta {account_id}.")
             return False
 
         # Verificar que el perfil existe y pertenece al usuario
-        profile_stmt = select(ContactProfile).where(ContactProfile.id == uuid.UUID(profile_id), ContactProfile.account_id == uuid.UUID(account_id))
+        profile_stmt = select(ContactProfile).where(ContactProfile.id == profile_uuid, ContactProfile.account_id == account_uuid)
         profile = (await self.db_session.execute(profile_stmt)).scalars().first()
         if not profile:
             logger.warning(f"Perfil {profile_id} no encontrado o no pertenece a la cuenta {account_id}.")
@@ -211,16 +215,17 @@ class TasksManager:
         Desvincula un perfil de una tarea existente.
         """
         logger.info(f"Intentando desvincular perfil {profile_id} de la tarea {task_id} para la cuenta {account_id}")
+        account_uuid = uuid.UUID(account_id)
 
         # Verificar que la tarea existe y pertenece al usuario
-        task_stmt = select(Task).options(selectinload(Task.contact_profiles)).where(Task.id == uuid.UUID(task_id), Task.account_id == uuid.UUID(account_id))
+        task_stmt = select(Task).options(selectinload(Task.contact_profiles)).where(Task.id == uuid.UUID(task_id), Task.account_id == account_uuid)
         task = (await self.db_session.execute(task_stmt)).scalars().first()
         if not task:
             logger.warning(f"Tarea {task_id} no encontrada o no pertenece a la cuenta {account_id}.")
             return False
 
         # Eliminar el vínculo
-        profile_to_remove_stmt = select(ContactProfile).where(ContactProfile.id == uuid.UUID(profile_id), ContactProfile.account_id == uuid.UUID(account_id))
+        profile_to_remove_stmt = select(ContactProfile).where(ContactProfile.id == uuid.UUID(profile_id), ContactProfile.account_id == account_uuid)
         profile_to_remove = (await self.db_session.execute(profile_to_remove_stmt)).scalars().first()
 
         if profile_to_remove and profile_to_remove in task.contact_profiles:

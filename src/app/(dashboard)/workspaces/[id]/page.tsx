@@ -17,6 +17,7 @@ import { EventDialog } from '../../agenda/event-dialog'; // Import EventDialog
 import { TaskDialog } from '../../agenda/task-dialog'; // Import TaskDialog
 import { NoteDialog } from '../../notes/note-dialog'; // Import NoteDialog
 import { ViewNoteDialog } from '../../notes/view-note-dialog'; // Import ViewNoteDialog
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 
 interface ChatThread {
   id: string;
@@ -51,8 +52,9 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const { id: workspaceId } = resolvedParams;
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [chats, setChats] = useState<ChatThread[]>([]);
+  const [hasMoreChats, setHasMoreChats] = useState(true);
+  const [isFetchingMoreChats, setIsFetchingMoreChats] = useState(false);
   const [collections, setCollections] = useState<Collection[]>([]);
-  const [chatMessages, setChatMessages] = useState<{ [key: string]: any[] }>({});
   const [agendaEvents, setAgendaEvents] = useState<AgendaEvent[]>([]); // New state for agenda events
   const [tasks, setTasks] = useState<TaskResponse[]>([]); // New state for tasks
   const [notes, setNotes] = useState<Note[]>([]); // New state for notes
@@ -78,67 +80,68 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const [isViewNoteDialogOpen, setIsViewNoteDialogOpen] = useState(false); // New state for ViewNoteDialog
   const [selectedNoteCategory, setSelectedNoteCategory] = useState<string>('Todas'); // New state for note category filter
 
-  const fetchWorkspaceData = async () => {
+  const fetchInitialData = async () => {
+    setLoading(true);
     try {
-      // Obtener información del workspace
-      const workspaceResponse = await apiClient.get(`/api/workspaces/${workspaceId}`);
-      setWorkspace(workspaceResponse.data);
+      // Fetch workspace info, collections, events, tasks, and notes in parallel
+      const [wsResponse, collectionsResponse, eventsResponse, tasksResponse, notesResponse] = await Promise.all([
+        apiClient.get(`/api/workspaces/${workspaceId}`),
+        apiClient.get(`/api/collections?workspace_id=${workspaceId}`),
+        apiClient.post('/api/list-events', { workspace_id: workspaceId }),
+        apiClient.get('/api/tasks', { params: { workspace_id: workspaceId } }),
+        apiClient.post('/api/list-notes', { workspace_id: workspaceId })
+      ]);
 
-      // Obtener chats asociados con el workspace
-      const chatsResponse = await apiClient.get(`/api/threads?workspace_id=${workspaceId}`);
-      const chatsData = chatsResponse.data.filter((chat: ChatThread) => chat.workspace_id === workspaceId);
-      setChats(chatsData);
-
-      // Obtener mensajes de los chats
-      const messagesPromises = chatsData.map((chat: ChatThread) =>
-        apiClient.get(`/api/threads/${chat.id}/messages`).then(res => ({ id: chat.id, messages: res.data }))
-      );
-      const messagesResults = await Promise.all(messagesPromises);
-      const messagesMap = messagesResults.reduce((acc, { id, messages }) => {
-        acc[id] = messages;
-        return acc;
-      }, {});
-      setChatMessages(messagesMap);
-
-      // Obtener colecciones asociadas con el workspace
-      const collectionsResponse = await apiClient.get(`/api/collections?workspace_id=${workspaceId}`);
+      setWorkspace(wsResponse.data);
       setCollections(collectionsResponse.data);
-
-      // Fetch Agenda Events for this workspace
-      const eventsResponse = await apiClient.post('/api/list-events', { workspace_id: workspaceId });
       setAgendaEvents(eventsResponse.data.filter((event: AgendaEvent) => event.workspace_id === workspaceId));
-
-      // Fetch Tasks for this workspace
-      const tasksResponse = await apiClient.get('/api/tasks', { params: { workspace_id: workspaceId } }); // Assuming API supports workspace_id param
       setTasks(tasksResponse.data.filter((task: TaskResponse) => task.workspace_id === workspaceId));
+      setNotes(notesResponse.data.notes);
 
-      // Fetch Notes for this workspace
-      const notesResponse = await apiClient.post('/api/list-notes', { workspace_id: workspaceId });
-      console.log("Notes response data:", notesResponse.data); // Add this line
-      setNotes(notesResponse.data);
+      // Fetch the first page of chats separately
+      await fetchChats(0, true);
 
     } catch (error) {
-      console.error('Error fetching workspace data:', error);
+      console.error('Error fetching initial workspace data:', error);
     } finally {
       setLoading(false);
     }
   };
 
+  const fetchChats = async (skip: number, initialLoad = false) => {
+    if (!initialLoad) {
+      setIsFetchingMoreChats(true);
+    }
+    try {
+      const response = await apiClient.get(`/api/threads?workspace_id=${workspaceId}&skip=${skip}&limit=7`);
+      const newChats = response.data.threads;
+      setChats(prevChats => initialLoad ? newChats : [...prevChats, ...newChats]);
+      setHasMoreChats(newChats.length === 7);
+    } catch (error) {
+      console.error('Error fetching chats:', error);
+    } finally {
+      if (!initialLoad) {
+        setIsFetchingMoreChats(false);
+      }
+    }
+  };
+
   useEffect(() => {
-    fetchWorkspaceData();
-  }, [workspaceId]);
+    fetchInitialData();
+  }, [workspaceId, fetchInitialData]);
+
+  const handleLoadMoreChats = () => {
+    if (hasMoreChats && !isFetchingMoreChats) {
+      fetchChats(chats.length);
+    }
+  };
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(e.target.value);
   };
 
   const filteredChats = searchTerm 
-    ? chats.filter(chat => {
-        const titleMatch = chat.title.toLowerCase().includes(searchTerm.toLowerCase());
-        const messages = chatMessages[chat.id] || [];
-        const contentMatch = messages.some(msg => msg.text.toLowerCase().includes(searchTerm.toLowerCase()));
-        return titleMatch || contentMatch;
-      })
+    ? chats.filter(chat => chat.title.toLowerCase().includes(searchTerm.toLowerCase()))
     : chats;
 
   const filteredCollections = searchTerm
@@ -466,14 +469,7 @@ const handleDeleteCollection = async (collectionId: string) => {
 };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Cargando datos del workspace...</p>
-        </div>
-      </div>
-    );
+    return <LoadingSpinner />;
   }
 
   if (!workspace) {
@@ -593,7 +589,7 @@ const handleDeleteCollection = async (collectionId: string) => {
               <h3 className="font-semibold text-lg mb-1">Nuevo Chat</h3>
               <p className="text-sm text-muted-foreground">Iniciar nueva conversación</p>
             </Card>
-            {filteredChats.map((chat) => (
+            {[...filteredChats].reverse().map((chat) => (
               <Card key={chat.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 min-h-[180px] flex flex-col" onClick={() => handleChatClick(chat.id)}>
                 <CardHeader className="pb-3 flex-1">
                   <CardTitle className="flex items-start justify-between gap-3 h-full">
@@ -647,6 +643,13 @@ const handleDeleteCollection = async (collectionId: string) => {
                 </CardContent>
               </Card>
             ))}
+          </div>
+        )}
+        {hasMoreChats && !searchTerm && (
+          <div className="flex justify-center mt-6">
+            <Button onClick={handleLoadMoreChats} disabled={isFetchingMoreChats}>
+              {isFetchingMoreChats ? "Cargando..." : "Cargar más chats"}
+            </Button>
           </div>
         )}
       </div>
@@ -1092,13 +1095,14 @@ const handleDeleteCollection = async (collectionId: string) => {
         onOpenChange={setIsNoteDialogOpen}
         onSaveSuccess={handleNoteSaveSuccess}
         workspaceId={workspaceId}
+        note={null}
       />
 
       <ViewNoteDialog
         note={selectedNote}
         isOpen={isViewNoteDialogOpen}
         onOpenChange={setIsViewNoteDialogOpen}
-        onNoteUpdated={fetchWorkspaceData} // Llamar a fetchWorkspaceData para recargar las notas
+        onNoteUpdated={fetchInitialData} // Llamar a fetchInitialData para recargar los datos
       />
     </div>
   );

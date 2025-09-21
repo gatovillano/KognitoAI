@@ -6,18 +6,19 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { PlusCircle, Clock, Trash2, Users, Calendar as CalendarIcon, MoreHorizontal, Info, CheckCircle2 } from 'lucide-react'; // Añadido CheckCircle2
+import { PlusCircle, Clock, Trash2, Users, MoreHorizontal, Info, CheckCircle2, Link as LinkIcon, CalendarIcon } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { EventDialog } from './event-dialog';
 import { Calendar } from '@/components/ui/calendar';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { format } from 'date-fns';
+import { format, startOfWeek, endOfWeek } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { EventDetailsDialog } from './EventDetailsDialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { TaskDialog } from './task-dialog'; // Importar TaskDialog
 import { Checkbox } from '@/components/ui/checkbox'; // Importar Checkbox para las tareas
 import { WeeklyScheduleView } from './WeeklyScheduleView'; // Importar WeeklyScheduleView
+import { MonthlyScheduleView } from './MonthlyScheduleView'; // Importar MonthlyScheduleView
 
 export interface AgendaEvent {
   id: number;
@@ -29,6 +30,7 @@ export interface AgendaEvent {
   workspace_id?: string;
   workspace_name?: string;
   workspace_color?: string;
+  linked_profiles?: any[]; // Add linked_profiles to AgendaEvent interface
 }
 
 // Nuevo tipo para las tareas
@@ -42,6 +44,7 @@ export interface TaskResponse {
   account_id: string;
   workspace_id?: string;
   team_id?: string;
+  linked_profiles?: any[]; // Add linked_profiles to TaskResponse interface
 }
 
 export default function AgendaPage() {
@@ -49,7 +52,7 @@ export default function AgendaPage() {
   const [allTasks, setAllTasks] = useState<TaskResponse[]>([]); // Nuevo estado para todas las tareas
   const [isLoading, setIsLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
-  const [isWeekView, setIsWeekView] = useState(false);
+  const [viewType, setViewType] = useState<'day' | 'week' | 'month'>('day'); // Nuevo estado para el tipo de vista
   
   const [isEventDialogOpen, setIsEventDialogOpen] = useState(false);
   const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false); // Nuevo estado para el diálogo de tareas
@@ -63,7 +66,7 @@ export default function AgendaPage() {
     setIsLoading(true);
     try {
       const [eventsResponse, tasksResponse] = await Promise.all([
-        apiClient.post('/api/list-events'),
+        apiClient.post('/api/list-events', { include_past: true }),
         apiClient.get('/api/tasks') // Nuevo endpoint para listar tareas
       ]);
       setAllEvents(eventsResponse.data);
@@ -143,52 +146,59 @@ export default function AgendaPage() {
     }
   };
 
+  // Filtrado de eventos y tareas para la vista diaria
   const eventsForSelectedPeriod = allEvents.filter(event => {
     if (!selectedDate) return false;
     const eventDate = new Date(event.event_datetime_local);
-    // DEBUG: Log de fechas para depuración
-    console.log(`Event: ${event.description}, Event Date: ${event.event_datetime_local} (${eventDate}), Selected Date: ${selectedDate}`);
-
-    if (isWeekView) {
-      const startOfWeek = new Date(selectedDate);
-      startOfWeek.setDate(selectedDate.getDate() - selectedDate.getDay());
-      startOfWeek.setHours(0, 0, 0, 0);
+    
+    if (viewType === 'month') {
+      return eventDate.getMonth() === selectedDate.getMonth() && eventDate.getFullYear() === selectedDate.getFullYear();
+    } else if (viewType === 'week') {
+      const startOfWeekDate = startOfWeek(selectedDate, { weekStartsOn: 1 }); // Lunes como inicio de semana
+      const endOfWeekDate = endOfWeek(selectedDate, { weekStartsOn: 1 });
       
-      const endOfWeek = new Date(startOfWeek);
-      endOfWeek.setDate(startOfWeek.getDate() + 6);
-      endOfWeek.setHours(23, 59, 59, 999);
-      
-      return eventDate >= startOfWeek && eventDate <= endOfWeek;
-    } else {
+      return eventDate >= startOfWeekDate && eventDate <= endOfWeekDate;
+    } else { // 'day' view
       return (
         eventDate.getDate() === selectedDate.getDate() &&
         eventDate.getMonth() === selectedDate.getMonth() &&
         eventDate.getFullYear() === selectedDate.getFullYear()
       );
     }
-  }).sort((a, b) => new Date(a.event_datetime_local).getTime() - new Date(b.event_datetime_local).getTime()); // Ordenar eventos
+  }).sort((a, b) => new Date(a.event_datetime_local).getTime() - new Date(b.event_datetime_local).getTime());
 
   const tasksForSelectedPeriod = allTasks.filter(task => {
-    if (!selectedDate || !task.due_date) return false;
+    // If task has no due_date, always include it in the current period view
+    if (!task.due_date) return true; // <--- Changed this line
+
+    if (!selectedDate) return false; // Still need a selectedDate for dated tasks
+
     const taskDueDate = new Date(task.due_date);
-    if (isWeekView) {
-      const startOfWeek = new Date(selectedDate);
-      startOfWeek.setDate(selectedDate.getDate() - selectedDate.getDay());
-      startOfWeek.setHours(0, 0, 0, 0);
-      
-      const endOfWeek = new Date(startOfWeek);
-      endOfWeek.setDate(startOfWeek.getDate() + 6);
-      endOfWeek.setHours(23, 59, 59, 999);
-      
-      return taskDueDate >= startOfWeek && taskDueDate <= endOfWeek;
-    } else {
+
+    if (viewType === 'month') {
+      return taskDueDate.getMonth() === selectedDate.getMonth() && taskDueDate.getFullYear() === selectedDate.getFullYear();
+    } else if (viewType === 'week') {
+      const startOfWeekDate = startOfWeek(selectedDate, { weekStartsOn: 1 }); // Lunes como inicio de semana
+      const endOfWeekDate = endOfWeek(selectedDate, { weekStartsOn: 1 });
+
+      return taskDueDate >= startOfWeekDate && taskDueDate <= endOfWeekDate;
+    } else { // 'day' view
       return (
         taskDueDate.getDate() === selectedDate.getDate() &&
         taskDueDate.getMonth() === selectedDate.getMonth() &&
         taskDueDate.getFullYear() === selectedDate.getFullYear()
       );
     }
-  }).sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime()); // Ordenar tareas
+  }).sort((a, b) => {
+    // Sort: undated tasks first, then by due_date
+    if (!a.due_date && !b.due_date) return 0;
+    if (!a.due_date) return -1; // a comes before b
+    if (!b.due_date) return 1;  // b comes before a
+
+    return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+  });
+
+  const periodText = viewType === 'week' ? "esta semana" : viewType === 'month' ? "este mes" : "este día";
 
   return (
     <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
@@ -227,11 +237,14 @@ export default function AgendaPage() {
                   <CheckCircle2 className="mr-2 h-4 w-4" /> Añadir Tarea
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setIsWeekView(true)} className={isWeekView ? "font-bold" : ""}>
+                <DropdownMenuItem onClick={() => setViewType('week')} className={viewType === 'week' ? "font-bold" : ""}>
                   Vista Semanal
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setIsWeekView(false)} className={!isWeekView ? "font-bold" : ""}>
+                <DropdownMenuItem onClick={() => setViewType('day')} className={viewType === 'day' ? "font-bold" : ""}>
                   Vista Diaria
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setViewType('month')} className={viewType === 'month' ? "font-bold" : ""}>
+                  Vista Mensual
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -239,8 +252,8 @@ export default function AgendaPage() {
         </div>
         
         {/* ---- ESTRUCTURA DE LAYOUT CORREGIDA ---- */}
-        <div className={`flex-grow grid gap-6 min-h-0 ${isWeekView ? 'md:grid-cols-1' : 'md:grid-cols-3'}`}>
-          <div className={`${isWeekView ? 'hidden' : 'md:col-span-1'} flex justify-center md:justify-start`}>
+        <div className={`flex-grow grid gap-6 min-h-0 ${viewType === 'week' || viewType === 'month' ? 'md:grid-cols-1' : 'md:grid-cols-3'}`}>
+          <div className={`${viewType === 'week' || viewType === 'month' ? 'hidden' : 'md:col-span-1'} flex justify-center md:justify-start`}>
               <Calendar
                   mode="single"
                   selected={selectedDate}
@@ -253,8 +266,8 @@ export default function AgendaPage() {
               />
           </div>
 
-          <div className={`${isWeekView ? 'md:col-span-1' : 'md:col-span-2'} flex flex-col min-h-0`}>
-              {isWeekView ? (
+          <div className={`${viewType === 'week' || viewType === 'month' ? 'md:col-span-1' : 'md:col-span-2'} flex flex-col min-h-0`}>
+              {viewType === 'week' ? (
                 <WeeklyScheduleView
                   currentDate={selectedDate || new Date()}
                   events={allEvents}
@@ -264,6 +277,16 @@ export default function AgendaPage() {
                   onDeleteEvent={(event) => setDeletingEvent(event)}
                   onEditTask={(task) => { setSelectedTask(task); setIsTaskDialogOpen(true); }}
                   onDeleteTask={(task) => setDeletingTask(task)}
+                  onToggleTaskCompleted={handleToggleTaskCompleted}
+                />
+              ) : viewType === 'month' ? (
+                <MonthlyScheduleView
+                  currentDate={selectedDate || new Date()}
+                  events={allEvents}
+                  tasks={allTasks}
+                  onDateChange={setSelectedDate}
+                  onEditEvent={(event) => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}
+                  onEditTask={(task) => { setSelectedTask(task); setIsTaskDialogOpen(true); }}
                   onToggleTaskCompleted={handleToggleTaskCompleted}
                 />
               ) : (
@@ -303,6 +326,23 @@ export default function AgendaPage() {
                                       <Button variant="ghost" size="icon" onClick={() => setDeletingTask(task)}>
                                         <Trash2 className="h-4 w-4 text-destructive" />
                                       </Button>
+                                      {task.linked_profiles && task.linked_profiles.length > 0 && (
+                                        <TooltipProvider>
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <Button variant="ghost" size="icon" className="text-primary">
+                                                <LinkIcon className="h-4 w-4" />
+                                              </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                              <p>Vinculado a: {task.linked_profiles.map(p => p.name).join(', ')}</p>
+                                            </TooltipContent>
+                                          </Tooltip>
+                                        </TooltipProvider>
+                                      )}
+                                      <Button variant="ghost" size="icon" onClick={() => { setSelectedTask(task); setIsTaskDialogOpen(true); }}>
+                                        <LinkIcon className="h-4 w-4" />
+                                      </Button>
                                     </div>
                                   </div>
                                 ))}
@@ -325,12 +365,19 @@ export default function AgendaPage() {
                                             )}
                                         </p>
                                         {event.workspace_name && (
-                                            <div className="flex items-center gap-2 mt-2 text-xs">
+                                            <div 
+                                                className="inline-flex items-center gap-1.5 mt-2 text-xs font-medium px-2 py-0.5 rounded-full"
+                                                style={{
+                                                    backgroundColor: event.workspace_color ? `${event.workspace_color}20` : '#f3f4f6', // bg-gray-100
+                                                }}
+                                            >
                                                 <span
-                                                    className="h-2.5 w-2.5 rounded-full"
+                                                    className="h-2 w-2 rounded-full"
                                                     style={{ backgroundColor: event.workspace_color || '#888888' }}
                                                 ></span>
-                                                <span className="font-medium text-muted-foreground">{event.workspace_name}</span>
+                                                <span style={{ color: event.workspace_color || '#374151' }}>
+                                                    {event.workspace_name}
+                                                </span>
                                             </div>
                                         )}
                                         <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
@@ -339,6 +386,23 @@ export default function AgendaPage() {
                                         </div>
                                     </div>
                                     <div onClick={(e) => e.stopPropagation()}>
+                                        {event.linked_profiles && event.linked_profiles.length > 0 && (
+                                            <TooltipProvider>
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <Button variant="ghost" size="icon" className="text-primary">
+                                                            <LinkIcon className="h-4 w-4" />
+                                                        </Button>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent>
+                                                        <p>Vinculado a: {event.linked_profiles.map(p => p.name).join(', ')}</p>
+                                                    </TooltipContent>
+                                                </Tooltip>
+                                            </TooltipProvider>
+                                        )}
+                                        <Button variant="ghost" size="icon" onClick={() => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}>
+                                            <LinkIcon className="h-4 w-4" />
+                                        </Button>
                                         <Button variant="ghost" size="icon" onClick={() => setDeletingEvent(event)}>
                                             <Trash2 className="h-4 w-4 text-destructive" />
                                         </Button>
@@ -349,7 +413,7 @@ export default function AgendaPage() {
                             )}
 
                             {tasksForSelectedPeriod.length === 0 && eventsForSelectedPeriod.length === 0 && (
-                                <p className="text-center text-muted-foreground pt-10">No tienes eventos ni tareas para {isWeekView ? "esta semana" : "este día"}.</p>
+                                <p className="text-center text-muted-foreground pt-10">No tienes eventos ni tareas para {periodText}.</p>
                             )}
                         </div>
                     )}

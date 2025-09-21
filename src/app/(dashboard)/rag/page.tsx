@@ -383,7 +383,7 @@ export default function RagCollectionsPage() {
         collection={selectedCollection}
       />
 
-      {linkingCollection && (
+      {/* {linkingCollection && (
         <ManageLinkedObjectsDialog
           isOpen={isLinkProfileDialogOpen}
           onOpenChange={setIsLinkProfileDialogOpen}
@@ -396,7 +396,7 @@ export default function RagCollectionsPage() {
           }}
           onLinkedObjectsUpdated={fetchCollections}
         />
-      )}
+      )} */}
     </div>
   );
 }

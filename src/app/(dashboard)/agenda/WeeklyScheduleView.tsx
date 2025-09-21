@@ -104,7 +104,13 @@ export function WeeklyScheduleView({
               ))}
 
               {/* Tareas del día */}
-              {filterItemsByDay(tasks, day).map(task => (
+              {tasks.filter(task => {
+                  // If task has no due_date, always include it for this day
+                  if (!task.due_date) return true; // <--- CHANGE HERE
+
+                  const taskDueDate = new Date(task.due_date);
+                  return taskDueDate.toDateString() === day.toDateString();
+                }).map(task => (
                 <div
                   key={task.id}
                   className={`p-2 rounded-md text-sm ${(task as TaskResponse).is_completed ? 'bg-green-100 text-green-800 line-through' : 'bg-yellow-100 text-yellow-800'} cursor-pointer hover:opacity-80`}

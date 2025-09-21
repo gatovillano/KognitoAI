@@ -34,6 +34,7 @@ interface CollectionDisplayProps {
   isAnalyzing?: boolean;
   isProcessingKnowledgeGraph?: boolean;
   className?: string; // Para estilos adicionales
+  onLinkProfile?: (collection: Collection) => void;
 }
 
 export const CollectionDisplay = ({

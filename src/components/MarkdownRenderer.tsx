@@ -43,7 +43,9 @@ import 'prismjs/components/prism-elixir';
 import 'prismjs/components/prism-haskell';
 import mermaid from 'mermaid'; // Importar mermaid
 import ReactDOMServer from 'react-dom/server';
+import { createRoot } from 'react-dom/client';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import MermaidViewer from '@/components/MermaidViewer'; // Importar el nuevo componente
 
 interface Source {
   id: number;
@@ -108,7 +110,7 @@ const MarkdownRendererComponent = ({ content, fontSize, sources = [] }: Markdown
       const renderer = new marked.Renderer();
       renderer.code = function({ text, lang }) {
         if (lang === 'mermaid') {
-          return `<div class="mermaid">${text}</div>`;
+          return `<div class="mermaid-code-block" data-mermaid-code="${encodeURIComponent(text)}"></div>`;
         }
 
         let language = lang ? lang.toLowerCase() : 'markup';
@@ -194,7 +196,7 @@ const MarkdownRendererComponent = ({ content, fontSize, sources = [] }: Markdown
       console.error("Error parsing markdown:", error);
       return "<p>Error rendering content.</p>";
     }
-  }, [content]);
+  }, [content, sources]);
 
   // Handle copy functionality using useCallback
   const handleCopy = useCallback((text: string, index: string) => {
@@ -286,7 +288,43 @@ const MarkdownRendererComponent = ({ content, fontSize, sources = [] }: Markdown
     };
 
     addButtons();
-    mermaid.init(); // Inicializar Mermaid después de que el DOM se haya actualizado
+    // mermaid.init(); // Ya no es necesario aquí, se inicializa en MermaidViewer
+
+    // Hydrate MermaidViewer components
+    const mermaidCodeBlocks = containerRef.current?.querySelectorAll('.mermaid-code-block');
+    mermaidCodeBlocks?.forEach(async (block) => {
+      const encodedMermaidCode = block.getAttribute('data-mermaid-code');
+      if (encodedMermaidCode) {
+        const mermaidCode = decodeURIComponent(encodedMermaidCode);
+
+        // Renderizar el diagrama Mermaid estáticamente para la vista previa
+        let staticMermaidSvg = '';
+        try {
+          const renderId = `mermaid-static-${Math.random().toString(36).substr(2, 9)}`;
+          const { svg } = await mermaid.render(renderId, mermaidCode);
+          staticMermaidSvg = svg;
+        } catch (e) {
+          console.error('Error rendering static mermaid diagram:', e);
+          staticMermaidSvg = '<p>Error al renderizar el diagrama.</p>';
+        }
+
+        // Crear un contenedor temporal para el trigger
+        const triggerContainer = document.createElement('div');
+        block.parentNode?.insertBefore(triggerContainer, block);
+        block.remove(); // Eliminar el div original
+
+        const root = createRoot(triggerContainer);
+        root.render(
+          <MermaidViewer mermaidCode={mermaidCode} trigger={
+            <div
+              className="mermaid-diagram-trigger cursor-pointer p-4 border rounded-lg bg-muted hover:bg-muted/50 transition-colors"
+              dangerouslySetInnerHTML={{ __html: staticMermaidSvg }}
+              title="Haz clic para ver el diagrama interactivo"
+            />
+          } />
+        );
+      }
+    });
   }, [htmlContent, copiedStates, handleCopy, handlePreview]);
 
   // Configurar Mermaid al inicio
@@ -300,7 +338,7 @@ const MarkdownRendererComponent = ({ content, fontSize, sources = [] }: Markdown
   }, []);
 
   return (
-    <div className={`prose prose-sm max-w-none ${fontSize} text-foreground`} style={{ overflowWrap: 'break-word', margin: 0, padding: 0 }} ref={containerRef}>
+    <div className={`prose max-w-none ${fontSize} text-foreground`} style={{ overflowWrap: 'break-word', margin: 0, padding: 0 }} ref={containerRef}>
       <div dangerouslySetInnerHTML={{ __html: htmlContent }} style={{ overflowWrap: 'break-word', margin: 0, padding: 0 }} />
     </div>
   );

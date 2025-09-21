@@ -55,7 +55,7 @@ export default function EditNotePage() {
           // Filtramos por ID y tipo 'note' para notas compartidas
           const note = fromTeam 
             ? response.data.find((n: { id: number, type: string }) => n.id === parseInt(noteId) && n.type === 'note')
-            : response.data.find((n: { id: number }) => n.id === parseInt(noteId));
+            : response.data.notes.find((n: { id: number }) => n.id === parseInt(noteId));
           console.log("Nota encontrada:", note);
           if (note) {
             setTitle(note.title || '');
@@ -262,7 +262,7 @@ export default function EditNotePage() {
         <Input placeholder="Categoría" value={category} onChange={(e) => setCategory(e.target.value)} className="w-fit border-none focus-visible:ring-0 shadow-none p-0 text-sm text-muted-foreground" />
       </div>
       <div className="flex-grow mt-4">
-        <TiptapEditor content={content} onChange={setContent} />
+        <TiptapEditor content={content} onChange={setContent} fromTeam={fromTeam ?? undefined} />
       </div>
       <AlertDialog open={isShareDialogOpen} onOpenChange={(open) => !open && setIsShareDialogOpen(false)}>
         <AlertDialogContent>

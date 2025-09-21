@@ -5,50 +5,37 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { ContactProfile } from '../profiles/page'; // Importar la interfaz ContactProfile
-import { Note } from './page'; // Importar la interfaz Note
-
-interface ManageLinkedProfilesDialogProps {
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
-  note: Note | null;
-  onLinkedProfilesUpdated: () => void; // Callback para refrescar las notas o perfiles si es necesario
-}
+// import { Note } from './page'; // No longer needed directly
 
 interface LinkedProfileDisplay extends ContactProfile {
   linked: boolean;
 }
 
-export function ManageLinkedProfilesDialog({ isOpen, onOpenChange, note, onLinkedProfilesUpdated }: ManageLinkedProfilesDialogProps) {
+interface ManageLinkedProfilesDialogProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  item: { id: string; name?: string; title?: string; } | null; // Generic item
+  itemType: 'note' | 'album'; // New prop to specify item type
+  onLinkedProfilesUpdated: () => void; // Callback para refrescar las notas o perfiles si es necesario
+}
+
+export function ManageLinkedProfilesDialog({ isOpen, onOpenChange, item, itemType, onLinkedProfilesUpdated }: ManageLinkedProfilesDialogProps) {
   const [availableProfiles, setAvailableProfiles] = useState<LinkedProfileDisplay[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  useEffect(() => {
-    if (isOpen && note?.id) {
-      fetchAvailableProfiles();
-    } else if (!isOpen) {
-      // Limpiar estados al cerrar el diálogo
-      setAvailableProfiles([]);
-      setSearchTerm('');
-    }
-  }, [isOpen, note?.id]);
-
-  const fetchAvailableProfiles = async () => {
+  const fetchAvailableProfiles = useCallback(async () => {
     setIsLoading(true);
     try {
-      // Obtener todos los perfiles
       const allProfilesResponse = await apiClient.get('/api/contact-profiles');
       const allProfiles: ContactProfile[] = allProfilesResponse.data;
 
-      // Obtener los perfiles ya vinculados a esta nota
-      // Asumo que hay un endpoint para esto, por ejemplo: /api/notes/{note_id}/linked-profiles
-      // Si no existe, se necesitará crear en el backend.
-      const linkedProfilesResponse = await apiClient.get(`/api/notes/${note?.id}/linked-profiles`);
-      const linkedProfilesIds: number[] = linkedProfilesResponse.data.map((p: any) => p.id);
+      const linkedProfilesResponse = await apiClient.get(`/api/${itemType === 'album' ? 'galleries/albums' : `${itemType}s`}/${item?.id}/linked-profiles`);
+      const linkedProfilesIds: string[] = linkedProfilesResponse.data.map((p: any) => p.id.toString());
 
       const profilesWithLinkStatus: LinkedProfileDisplay[] = allProfiles.map(profile => ({
         ...profile,
@@ -62,25 +49,33 @@ export function ManageLinkedProfilesDialog({ isOpen, onOpenChange, note, onLinke
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [item?.id, itemType]);
+
+  useEffect(() => {
+    if (isOpen && item?.id) {
+      fetchAvailableProfiles();
+    } else if (!isOpen) {
+      setAvailableProfiles([]);
+      setSearchTerm('');
+    }
+  }, [isOpen, item?.id, fetchAvailableProfiles]);
 
   const handleToggleLink = async (profileToToggle: LinkedProfileDisplay) => {
-    if (!note?.id) return;
+    if (!item?.id) return;
 
     const endpoint = profileToToggle.linked
-      ? `/api/notes/${note.id}/unlink-profile/${profileToToggle.id}`
-      : `/api/notes/${note.id}/link-profile/${profileToToggle.id}`;
+      ? `/api/${itemType === 'album' ? 'galleries/albums' : `${itemType}s`}/${item.id}/unlink-profile/${profileToToggle.id}`
+      : `/api/${itemType === 'album' ? 'galleries/albums' : `${itemType}s`}/${item.id}/link-profile/${profileToToggle.id}`;
 
     try {
       await apiClient.post(endpoint);
       toast.success(`${profileToToggle.name} ${profileToToggle.linked ? 'desvinculado' : 'vinculado'} correctamente.`);
-      // Actualizar el estado local para reflejar el cambio inmediatamente
       setAvailableProfiles(prevProfiles =>
         prevProfiles.map(p =>
           p.id === profileToToggle.id ? { ...p, linked: !p.linked } : p
         )
       );
-      onLinkedProfilesUpdated(); // Notificar al componente padre para refrescar si es necesario
+      onLinkedProfilesUpdated();
     } catch (error) {
       toast.error(`Error al ${profileToToggle.linked ? 'desvincular' : 'vincular'} ${profileToToggle.name}.`);
       console.error(`Error toggling link for profile ${profileToToggle.id}:`, error);
@@ -89,7 +84,7 @@ export function ManageLinkedProfilesDialog({ isOpen, onOpenChange, note, onLinke
 
   const filterProfiles = (profiles: LinkedProfileDisplay[]) => {
     return profiles.filter(profile =>
-      profile.name.toLowerCase().includes(searchTerm.toLowerCase())
+      (profile.name || '').toLowerCase().includes(searchTerm.toLowerCase())
     );
   };
 
@@ -118,15 +113,17 @@ export function ManageLinkedProfilesDialog({ isOpen, onOpenChange, note, onLinke
     </ScrollArea>
   );
 
-  if (!note) return null;
+  if (!item) return null;
+
+  const itemDisplayName = item.name || item.title || 'elemento sin nombre';
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Vincular Perfiles a Nota: {note.title || 'Nota sin título'}</DialogTitle>
+          <DialogTitle>Vincular Perfiles a {itemType === 'note' ? 'Nota' : 'Álbum'}: {itemDisplayName}</DialogTitle>
           <DialogDescription>
-            Selecciona los perfiles que deseas vincular o desvincular de esta nota.
+            Selecciona los perfiles que deseas vincular o desvincular de este {itemType === 'note' ? 'nota' : 'álbum'}.
           </DialogDescription>
         </DialogHeader>
 

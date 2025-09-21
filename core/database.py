@@ -36,12 +36,16 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID, ARRAY, TSVECTOR
 # --- Importaciones de SQLAlchemy ---
 from sqlalchemy import (
     Column, String, DateTime, Text, ForeignKey, BigInteger, Integer, Boolean,
-    UniqueConstraint, select, text, Float, Index
+    UniqueConstraint, select, text, Float, Index, Table
 )
 from sqlalchemy.orm import sessionmaker, relationship, selectinload
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+try:
+    from sqlalchemy.inspect import inspect
+except ImportError:
+    from sqlalchemy.inspection import inspect # Para compatibilidad con versiones anteriores
 
 # --- Importaciones de pgvector y del proyecto ---
 from pgvector.sqlalchemy import Vector
@@ -431,6 +435,8 @@ class ContactProfile(Base):
         back_populates="contact_profiles"
     )
 
+    albums = relationship("Album", secondary="contact_profile_album_association", back_populates="contact_profiles")
+
     def __repr__(self):
         return f"<ContactProfile(id={self.id}, name='{self.name}', account_id={self.account_id})>"
 
@@ -465,6 +471,59 @@ class Nota(Base):
         return f"<Nota(id={self.id}, title='{self.title}', account_id={self.account_id})>"
 
 
+# --- Modelos para Galerías y Fotos ---
+
+class Album(Base):
+    __tablename__ = 'albums'
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    account_id = Column(UUID(as_uuid=True), ForeignKey('accounts.id'), nullable=False)
+    cover_photo_id = Column(UUID(as_uuid=True), ForeignKey('photos.id', use_alter=True, name='fk_album_cover_photo'), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    owner = relationship("Account")
+    cover_photo = relationship("Photo", foreign_keys=[cover_photo_id], post_update=True)
+    photos = relationship("Photo",
+                          back_populates="album",
+                          cascade="all, delete-orphan",
+                          foreign_keys="[Photo.album_id]")
+    contact_profiles = relationship("ContactProfile", secondary="contact_profile_album_association", back_populates="albums")
+
+
+class Photo(Base):
+    __tablename__ = 'photos'
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    album_id = Column(UUID(as_uuid=True), ForeignKey('albums.id'), nullable=False)
+    file_path = Column(String, nullable=False)
+    thumbnail_path = Column(String, nullable=True) # NEW COLUMN
+    is_favorite = Column(Boolean, default=False)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+
+    album = relationship("Album", back_populates="photos", foreign_keys=[album_id])
+
+
+# --- Model for Shared Album Links ---
+class SharedAlbumLink(Base):
+    __tablename__ = 'shared_album_links'
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    album_id = Column(UUID(as_uuid=True), ForeignKey('albums.id'), nullable=False)
+    token = Column(String, unique=True, nullable=False, index=True)
+    password_hash = Column(String, nullable=True)
+    expiry_date = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    album = relationship("Album")
+
+
+contact_profile_album_association = Table('contact_profile_album_association', Base.metadata,
+    Column('contact_profile_id', UUID(as_uuid=True), ForeignKey('contact_profiles.id'), primary_key=True),
+    Column('album_id', UUID(as_uuid=True), ForeignKey('albums.id'), primary_key=True)
+)
+
+
 class AgendaEvent(Base):
     """Modelo para los eventos de la agenda del usuario o equipo."""
     __tablename__ = "agenda_events"
@@ -494,11 +553,11 @@ class AgendaEvent(Base):
     def to_dict(self, timezone_str: str | None = "UTC") -> Dict[str, Any]:
         """Convierte el objeto a un diccionario para su uso en APIs."""
         user_tz = pytz.timezone(timezone_str) if timezone_str else pytz.utc
-        local_datetime = self.event_datetime_utc.astimezone(user_tz)
+        local_datetime = self.event_datetime_utc.astimezone(user_tz);
         
         workspace_name = None
         workspace_color = None
-        if self.workspace: # Check if workspace relationship is loaded
+        if self.workspace: # workspace relationship is now always loaded
             workspace_name = self.workspace.name
             workspace_color = self.workspace.color
 
@@ -701,6 +760,7 @@ class TaskContactProfileAssociation(Base):
 
 class Task(Base):
     """
+
     Representa una tarea en el sistema, que puede estar asociada a una cuenta,
     un espacio de trabajo o un equipo.
     """

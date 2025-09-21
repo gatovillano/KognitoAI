@@ -74,8 +74,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+
+from api.galleries import router as galleries_router, MEDIA_ROOT, THUMBNAIL_ROOT
+
 # Montar la carpeta 'telegram_panel' para servir archivos estáticos
 app.mount("/telegram_panel", StaticFiles(directory="telegram_panel"), name="telegram_panel")
+app.mount("/media", StaticFiles(directory=MEDIA_ROOT), name="media")
+app.mount("/thumbnails", StaticFiles(directory=THUMBNAIL_ROOT), name="thumbnails")
 
 
 @app.on_event("startup")
@@ -177,6 +183,8 @@ from api.logs import router as logs_router
 from api.scheduled_tools import router as scheduled_tools_router
 from api.tasks import router as tasks_router # Importar el router de tasks
 
+from api.galleries import router as galleries_router, MEDIA_ROOT
+
 app.include_router(github_router, prefix="/api/github", tags=["github"])
 app.include_router(telegram_router, prefix="", tags=["telegram"])
 app.include_router(logs_router, prefix="/api", tags=["logs"])
@@ -186,6 +194,11 @@ app.include_router(knowledge_graph_router, prefix="/api", tags=["knowledge-graph
 app.include_router(search_router, prefix="/api", tags=["search"])
 from api.deep_research import router as deep_research_router
 app.include_router(deep_research_router, prefix="/api", tags=["deep-research"])
+app.include_router(galleries_router, prefix="/api/galleries", tags=["galleries"])
+
+@app.get("/test-connection")
+async def test_connection():
+    return {"message": "Connection successful!"}
 
 if __name__ == "__main__":
     import uvicorn

@@ -401,44 +401,71 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
         headers = {"Authorization": f"Bearer {jwt_token}"}
         
         full_response_content = ""
+        buffer = b"" # Initialize a buffer to accumulate bytes
         async with httpx.AsyncClient(timeout=None) as client: # Timeout ilimitado para streaming
             async with client.stream("POST", chat_api_url, json=api_payload, headers=headers) as response:
                 response.raise_for_status()
                 async for chunk_bytes in response.aiter_bytes():
-                    chunk_str = chunk_bytes.decode("utf-8")
-                    # Los chunks pueden venir con 'data: ' al principio y '}\n\n' al final
-                    if chunk_str.startswith("data: "):
-                        chunk_str = chunk_str[len("data: "):].strip()
-                    if chunk_str.endswith("}\n\n"):
-                        chunk_str = chunk_str[:-len("\n\n")]
-                    
-                    try:
-                        chunk_data = json.loads(chunk_str)
-                        if chunk_data.get("type") == "chunk":
-                            content = chunk_data.get("content", "")
-                            full_response_content += content
-                            # Puedes enviar chunks parciales a Telegram si quieres un efecto de "typing"
-                            # Por ahora, acumulamos y enviamos al final.
-                            # await handle_chat_response(update, context, content) # Si quieres streaming en Telegram
-                        elif chunk_data.get("type") == "done":
-                            # El mensaje "Respuesta completada" viene aquí. No lo enviamos al usuario.
-                            # Solo usamos esto como señal de finalización.
-                            logger.info("Stream de respuesta completado por el agente.")
-                            break # Salir del bucle de streaming
-                        elif chunk_data.get("type") == "error":
-                            error_message = chunk_data.get("message", "Error desconocido en el stream.")
-                            logger.error(f"Error en el stream del agente: {error_message}")
-                            await update.message.reply_text(f"Hubo un error en la respuesta del agente: {error_message}")
+                    buffer += chunk_bytes
+                    # Process buffer line by line
+                    while b"\n" in buffer:
+                        line, buffer = buffer.split(b"\n", 1)
+                        chunk_str = line.decode("utf-8").strip() # Decode and strip whitespace
+
+                        if not chunk_str: # Skip empty lines
+                            continue
+
+                        # Remove 'data: ' prefix if present (for SSE compatibility)
+                        if chunk_str.startswith("data: "):
+                            chunk_str = chunk_str[len("data: "):].strip()
+
+                        try:
+                            chunk_data = json.loads(chunk_str)
+                            if chunk_data.get("type") == "llm_chunk": # Changed from "chunk" to "llm_chunk"
+                                content = chunk_data.get("chunk", "") # Changed from "content" to "chunk"
+                                full_response_content += content
+                                # You can send partial chunks to Telegram here if you want a "typing" effect
+                                # For now, accumulate and send at the end.
+                                # await handle_chat_response(update, context, content) # If you want streaming in Telegram
+                            elif chunk_data.get("type") == "llm_end": # Changed from "done" to "llm_end"
+                                logger.info("Stream de respuesta completado por el agente.")
+                                break # Exit the streaming loop
+                            elif chunk_data.get("type") == "llm_error": # Changed from "error" to "llm_error"
+                                error_message = chunk_data.get("message", "Error desconocido en el stream.")
+                                logger.error(f"Error en el stream del agente: {error_message}")
+                                await update.message.reply_text(f"Hubo un error en la respuesta del agente: {error_message}")
+                                return None
+                        except json.JSONDecodeError as de:
+                            logger.warning(f"Error decodificando chunk JSON: {de}. Chunk: {chunk_str}")
+                            # This can occur if chunks are not well-formed or fragments are received.
+                            # We can accumulate and retry parsing if necessary.
+                            continue
+                        except Exception as e:
+                            logger.error(f"Error inesperado procesando chunk de stream: {e}", exc_info=True)
+                            await update.message.reply_text("Ocurrió un error inesperado al procesar la respuesta.")
                             return None
-                    except json.JSONDecodeError as de:
-                        logger.warning(f"Error decodificando chunk JSON: {de}. Chunk: {chunk_str}")
-                        # Esto puede ocurrir si los chunks no están bien formados o se reciben fragmentos.
-                        # Podemos acumular y reintentar parsear si es necesario.
-                        continue
-                    except Exception as e:
-                        logger.error(f"Error inesperado procesando chunk de stream: {e}", exc_info=True)
-                        await update.message.reply_text("Ocurrió un error inesperado al procesar la respuesta.")
-                        return None
+                # After the loop, if there's any remaining data in the buffer, try to process it
+                if buffer:
+                    chunk_str = buffer.decode("utf-8").strip()
+                    if chunk_str:
+                        try:
+                            chunk_data = json.loads(chunk_str)
+                            if chunk_data.get("type") == "llm_chunk":
+                                content = chunk_data.get("chunk", "")
+                                full_response_content += content
+                            elif chunk_data.get("type") == "llm_end":
+                                logger.info("Stream de respuesta completado por el agente.")
+                            elif chunk_data.get("type") == "llm_error":
+                                error_message = chunk_data.get("message", "Error desconocido en el stream.")
+                                logger.error(f"Error en el stream del agente: {error_message}")
+                                await update.message.reply_text(f"Hubo un error en la respuesta del agente: {error_message}")
+                                return None
+                        except json.JSONDecodeError as de:
+                            logger.warning(f"Error decodificando chunk JSON (final del stream): {de}. Chunk: {chunk_str}")
+                        except Exception as e:
+                            logger.error(f"Error inesperado procesando chunk final de stream: {e}", exc_info=True)
+                            await update.message.reply_text("Ocurrió un error inesperado al procesar la respuesta final.")
+                            return None
         
         # 5. Pasar la respuesta acumulada a la función que la envía al usuario.
         # Ya no necesitamos esperar 2 segundos aquí, ya que el stream ya terminó.

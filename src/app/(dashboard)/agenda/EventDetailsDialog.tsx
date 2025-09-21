@@ -11,6 +11,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import apiClient from '@/lib/api';
+import { ProfileSelectorDialog } from '@/components/dialogs/ProfileSelectorDialog';
+import { Tag } from '@/components/ui/tag'; // Assuming a Tag component for displaying linked profiles
 
 const formSchema = z.object({
   description: z.string().min(3, "La descripción es muy corta."),
@@ -32,13 +34,15 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
   const [loadingTeams, setLoadingTeams] = useState(false);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
+  const [isProfileSelectorOpen, setIsProfileSelectorOpen] = useState(false);
+  const [linkedProfiles, setLinkedProfiles] = useState<any[]>([]); // State to store linked profiles
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       description: event?.description || '',
-      date: event?.event_datetime_local ? new Date(event.event_datetime_local).toISOString().split('T')[0] : '',
-      time: event?.event_datetime_local ? new Date(event.event_datetime_local).toISOString().split('T')[1].substring(0, 5) : '',
+      date: event?.event_datetime_local ? event.event_datetime_local.split('T')[0] : '',
+      time: event?.event_datetime_local ? event.event_datetime_local.split('T')[1].substring(0, 5) : '',
       team_id: event?.team_id?.toString() || '',
     },
   });
@@ -61,27 +65,46 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
       setLoadingWorkspaces(true);
       try {
         const response = await apiClient.get('/api/workspaces');
-        setWorkspaces(response.data);
+        if (Array.isArray(response.data)) {
+          setWorkspaces(response.data);
+        } else {
+          console.warn("/api/workspaces did not return an array:", response.data);
+          setWorkspaces([]);
+        }
       } catch (error) {
         console.error("Error fetching workspaces:", error);
         toast.error('Error al cargar los workspaces.');
+        setWorkspaces([]);
       } finally {
         setLoadingWorkspaces(false);
+      }
+    };
+
+    const fetchLinkedProfiles = async () => {
+      if (event?.id) {
+        try {
+          const response = await apiClient.get(`/api/agenda/events/${event.id}/linked-profiles`);
+          setLinkedProfiles(response.data);
+        } catch (error) {
+          console.error("Error fetching linked profiles:", error);
+          toast.error("Error al cargar perfiles vinculados.");
+        }
       }
     };
 
     if (isOpen) {
       fetchTeams();
       fetchWorkspaces();
+      fetchLinkedProfiles();
     }
-  }, [isOpen]);
+  }, [isOpen, event?.id]);
 
   useEffect(() => {
     if (event) {
       form.reset({
         description: event.description || '',
-        date: event.event_datetime_local ? new Date(event.event_datetime_local).toISOString().split('T')[0] : '',
-        time: event.event_datetime_local ? new Date(event.event_datetime_local).toISOString().split('T')[1].substring(0, 5) : '',
+        date: event.event_datetime_local ? new Date(event.event_datetime_local).toLocaleDateString('en-CA') : '',
+        time: event.event_datetime_local ? new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false }) : '',
         team_id: event.team_id?.toString() || '',
         workspace_id: event.workspace_id?.toString() || '',
       });
@@ -89,12 +112,13 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
   }, [event, form]);
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    const standardDateTime = `${values.date} ${values.time}`;
+    const localDateTime = new Date(`${values.date}T${values.time}:00`); // Crear un objeto Date con la hora local
+    const eventDateTimeUTC = localDateTime.toISOString(); // Convertir a ISO 8601 (UTC)
     const toastId = toast.loading('Actualizando evento...');
     try {
-      const response = await apiClient.put(`/api/events/${event.id}`, {
+      const response = await apiClient.put(`/api/agenda/events/${event.id}`, {
         description: values.description,
-        event_datetime: standardDateTime,
+        event_datetime: eventDateTimeUTC, // Enviar la hora en formato ISO 8601 (UTC)
         team_id: values.team_id ? parseInt(values.team_id) : null,
         workspace_id: values.workspace_id || null,
       });
@@ -105,6 +129,37 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
       toast.error(error.response?.data?.detail || 'Error al actualizar el evento.', { id: toastId });
     }
   }
+
+  // Function to handle linking a profile
+  const handleLinkProfile = async (selectedProfiles: any[]) => {
+    if (!event?.id || selectedProfiles.length === 0) return;
+
+    const profileToLink = selectedProfiles[0]; // Assuming single selection for now
+    try {
+      await apiClient.post(`/api/agenda/events/${event.id}/link-profile`, { profile_id: profileToLink.id });
+      toast.success(`Perfil ${profileToLink.name} vinculado correctamente.`);
+      setLinkedProfiles(prev => [...prev, profileToLink]); // Add to linked profiles state
+      onSaveSuccess(event); // Trigger a refresh in parent if needed
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || `Error al vincular el perfil ${profileToLink.name}.`);
+      console.error("Error linking profile:", error);
+    }
+  };
+
+  // Function to handle unlinking a profile
+  const handleUnlinkProfile = async (profileId: string) => {
+    if (!event?.id) return;
+
+    try {
+      await apiClient.post(`/api/agenda/events/${event.id}/unlink-profile`, { profile_id: profileId });
+      toast.success(`Perfil desvinculado correctamente.`);
+      setLinkedProfiles(prev => prev.filter(p => p.id !== profileId)); // Remove from linked profiles state
+      onSaveSuccess(event); // Trigger a refresh in parent if needed
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || `Error al desvincular el perfil.`);
+      console.error("Error unlinking profile:", error);
+    }
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -167,6 +222,37 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
                 <FormMessage />
               </FormItem>
             )} />
+            {/* New section for Linked Profiles */}
+            <div className="space-y-2">
+              <FormLabel>Perfiles Vinculados</FormLabel>
+              <div className="flex flex-wrap gap-2 p-2 border rounded-md min-h-[40px]">
+                {linkedProfiles.length === 0 ? (
+                  <span className="text-sm text-muted-foreground">Ningún perfil vinculado.</span>
+                ) : (
+                  linkedProfiles.map(profile => (
+                    <Tag key={profile.id} variant="outline" className="flex items-center gap-1">
+                      {profile.name}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-auto p-1"
+                        onClick={() => handleUnlinkProfile(profile.id)}
+                      >
+                        x
+                      </Button>
+                    </Tag>
+                  ))
+                )}
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsProfileSelectorOpen(true)}
+                className="w-full"
+              >
+                Vincular Perfil
+              </Button>
+            </div>
             <DialogFooter>
               <Button type="submit" disabled={form.formState.isSubmitting}>
                 {form.formState.isSubmitting ? 'Actualizando...' : 'Actualizar'}
@@ -175,6 +261,15 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
           </form>
         </Form>
       </DialogContent>
+
+      {/* Profile Selector Dialog */}
+      <ProfileSelectorDialog
+        isOpen={isProfileSelectorOpen}
+        onOpenChange={setIsProfileSelectorOpen}
+        onSelectProfiles={handleLinkProfile}
+        multiselect={false} // Events link to single profile at a time
+        preSelectedProfileIds={linkedProfiles.map(p => p.id)}
+      />
     </Dialog>
   );
 }

@@ -1,13 +1,14 @@
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List, Optional
 import uuid
 from pydantic import BaseModel, Field
-from datetime import datetime # Importar datetime
+from datetime import datetime
 
-from core.database import get_db_session, ContactProfile, Account, Nota, AgendaEvent, Task, UserDocumentTopic
+from sqlalchemy import func
+
+from core.database import get_db_session, ContactProfile, Account, Nota, AgendaEvent, Task, UserDocumentTopic, Album, Photo
 from api.auth import get_current_account_id
 from sqlalchemy.orm import selectinload
 
@@ -31,90 +32,188 @@ class ContactProfileBase(BaseModel):
 class ContactProfileResponse(ContactProfileBase):
     id: uuid.UUID
     account_id: uuid.UUID
-    created_at: datetime # Cambiado a datetime
-    updated_at: datetime # Cambiado a datetime
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
 
-# Pydantic models para los objetos vinculados (simplificados para este endpoint)
+# Pydantic models for linked objects
 class LinkedNoteResponse(BaseModel):
     id: int
     title: Optional[str] = None
     content: str
     created_at: datetime
-
-    class Config:
-        from_attributes = True
+    class Config: from_attributes = True
 
 class LinkedAgendaEventResponse(BaseModel):
     id: int
     description: str
     event_datetime_utc: datetime
-
-    class Config:
-        from_attributes = True
+    event_datetime_local: Optional[datetime] = None
+    class Config: from_attributes = True
 
 class LinkedTaskResponse(BaseModel):
     id: uuid.UUID
     description: str
     is_completed: bool
     due_date: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
+    class Config: from_attributes = True
 
 class LinkedUserDocumentTopicResponse(BaseModel):
     id: uuid.UUID
     name: str
     description: Optional[str] = None
+    class Config: from_attributes = True
 
+# Redefined PhotoResponse to avoid circular imports, keeping it minimal for this context.
+class PhotoResponseForContactProfile(BaseModel):
+    id: uuid.UUID
+    file_path: str
+    thumbnail_path: Optional[str] = None
     class Config:
         from_attributes = True
+
+class LinkedAlbumResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    description: Optional[str] = None
+    cover_photo_id: Optional[uuid.UUID] = None
+    created_at: datetime
+    total_photos: int
+    cover_photo: Optional[PhotoResponseForContactProfile] = None
+    class Config: from_attributes = True
+
 
 class LinkedObjectsResponse(BaseModel):
     notes: List[LinkedNoteResponse]
     agenda_events: List[LinkedAgendaEventResponse]
     tasks: List[LinkedTaskResponse]
     user_document_topics: List[LinkedUserDocumentTopicResponse]
+    albums: List[LinkedAlbumResponse]
+
+class LinkNoteToProfileRequest(BaseModel):
+    note_id: int
+
+class LinkAlbumToProfileRequest(BaseModel):
+    album_id: uuid.UUID
+
+@router.post("/contact-profiles/{profile_id}/link-note")
+async def link_note_to_profile(
+    profile_id: uuid.UUID,
+    request: LinkNoteToProfileRequest,
+    current_account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Vincula una nota existente a un perfil de contacto.
+    """
+    profile_stmt = select(ContactProfile).where(
+        ContactProfile.id == profile_id,
+        ContactProfile.account_id == current_account.id
+    ).options(selectinload(ContactProfile.notas))
+    profile_result = await db.execute(profile_stmt)
+    profile = profile_result.scalars().first()
+
+    if not profile:
+        raise HTTPException(status_code=404, detail="Perfil de contacto no encontrado o no autorizado.")
+
+    note = await db.get(Nota, request.note_id)
+    if not note or note.account_id != current_account.id:
+        raise HTTPException(status_code=404, detail="Nota no encontrada o no autorizada.")
+
+    if note in profile.notas:
+        return {"message": "La nota ya está vinculada a este perfil."}
+
+    profile.notas.append(note)
+    await db.commit()
+    return {"message": "Nota vinculada exitosamente al perfil."}
+
+@router.post("/contact-profiles/{profile_id}/link-album", summary="Vincular un álbum a un perfil")
+async def link_album_to_profile(
+    profile_id: uuid.UUID,
+    request: LinkAlbumToProfileRequest,
+    current_account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Vincula un álbum de fotos existente a un perfil de contacto.
+    """
+    profile_stmt = select(ContactProfile).where(
+        ContactProfile.id == profile_id,
+        ContactProfile.account_id == current_account.id
+    ).options(selectinload(ContactProfile.albums))
+    profile_result = await db.execute(profile_stmt)
+    profile = profile_result.scalars().first()
+
+    if not profile:
+        raise HTTPException(status_code=404, detail="Perfil de contacto no encontrado o no autorizado.")
+
+    album = await db.get(Album, request.album_id)
+    if not album or album.account_id != current_account.id:
+        raise HTTPException(status_code=404, detail="Álbum no encontrado o no autorizado.")
+
+    if album in profile.albums:
+        return {"message": "El álbum ya está vinculado a este perfil."}
+
+    profile.albums.append(album)
+    await db.commit()
+    return {"message": "Álbum vinculado exitosamente al perfil."}
+
+@router.post("/contact-profiles/{profile_id}/unlink-album", summary="Desvincular un álbum de un perfil")
+async def unlink_album_from_profile(
+    profile_id: uuid.UUID,
+    request: LinkAlbumToProfileRequest,
+    current_account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Desvincula un álbum de fotos de un perfil de contacto.
+    """
+    profile_stmt = select(ContactProfile).where(
+        ContactProfile.id == profile_id,
+        ContactProfile.account_id == current_account.id
+    ).options(selectinload(ContactProfile.albums))
+    profile_result = await db.execute(profile_stmt)
+    profile = profile_result.scalars().first()
+
+    if not profile:
+        raise HTTPException(status_code=404, detail="Perfil de contacto no encontrado o no autorizado.")
+
+    album = await db.get(Album, request.album_id)
+    if not album or album.account_id != current_account.id:
+        raise HTTPException(status_code=404, detail="Álbum no encontrado o no autorizado.")
+
+    if album not in profile.albums:
+        return {"message": "El álbum no está vinculado a este perfil."}
+
+    profile.albums.remove(album)
+    await db.commit()
+    return {"message": "Álbum desvinculado exitosamente del perfil."}
 
 @router.get("/contact-profiles", response_model=List[ContactProfileResponse])
 async def get_all_contact_profiles(
     current_account: Account = Depends(get_current_account),
     db: AsyncSession = Depends(get_db_session)
 ):
-    """
-    Lista todos los perfiles de contacto asociados a la cuenta del usuario actual.
-    """
-    try:
-        result = await db.execute(
-            select(ContactProfile)
-            .where(ContactProfile.account_id == current_account.id)
-            .order_by(ContactProfile.created_at.desc())
-        )
-        contact_profiles = result.scalars().all()
-        return contact_profiles
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al listar perfiles de contacto: {e}")
+    result = await db.execute(
+        select(ContactProfile)
+        .where(ContactProfile.account_id == current_account.id)
+        .order_by(ContactProfile.created_at.desc())
+    )
+    return result.scalars().all()
 
 @router.post("/list-contact-profiles", response_model=List[ContactProfileResponse])
 async def list_contact_profiles(
     current_account: Account = Depends(get_current_account),
     db: AsyncSession = Depends(get_db_session)
 ):
-    """
-    Lista todos los perfiles de contacto asociados a la cuenta del usuario actual.
-    """
-    try:
-        result = await db.execute(
-            select(ContactProfile)
-            .where(ContactProfile.account_id == current_account.id)
-            .order_by(ContactProfile.created_at.desc())
-        )
-        contact_profiles = result.scalars().all()
-        return contact_profiles
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al listar perfiles de contacto: {e}")
+    result = await db.execute(
+        select(ContactProfile)
+        .where(ContactProfile.account_id == current_account.id)
+        .order_by(ContactProfile.created_at.desc())
+    )
+    return result.scalars().all()
 
 @router.get("/contact-profiles/{profile_id}", response_model=ContactProfileResponse)
 async def get_contact_profile(
@@ -122,9 +221,6 @@ async def get_contact_profile(
     current_account: Account = Depends(get_current_account),
     db: AsyncSession = Depends(get_db_session)
 ):
-    """
-    Obtiene los detalles de un perfil de contacto específico.
-    """
     profile = await db.get(ContactProfile, profile_id)
     if not profile or profile.account_id != current_account.id:
         raise HTTPException(status_code=404, detail="Perfil de contacto no encontrado o no autorizado.")
@@ -137,28 +233,60 @@ async def get_linked_objects(
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Obtiene todas las notas, eventos, tareas y colecciones de documentos vinculadas a un perfil de contacto.
+    Obtiene todos los objetos vinculados a un perfil de contacto.
     """
-    profile = await db.execute(
+    profile_stmt = (
         select(ContactProfile)
         .options(
             selectinload(ContactProfile.notas),
             selectinload(ContactProfile.agenda_events),
             selectinload(ContactProfile.tasks),
-            selectinload(ContactProfile.user_document_topics)
+            selectinload(ContactProfile.user_document_topics),
+            selectinload(ContactProfile.albums)
         )
         .where(ContactProfile.id == profile_id, ContactProfile.account_id == current_account.id)
     )
-    profile = profile.scalars().first()
+    profile_result = await db.execute(profile_stmt)
+    profile = profile_result.scalars().first()
 
     if not profile:
         raise HTTPException(status_code=404, detail="Perfil de contacto no encontrado o no autorizado.")
+
+    # Enhance albums with total_photos and cover_photo
+    enhanced_albums = []
+    if profile.albums:
+        for album in profile.albums:
+            # Get total photo count for the album
+            total_photos_stmt = select(func.count(Photo.id)).where(Photo.album_id == album.id)
+            total_photos_result = await db.execute(total_photos_stmt)
+            total_photos = total_photos_result.scalar_one()
+
+            # Get the cover photo object if it exists
+            cover_photo_obj = None
+            if album.cover_photo_id:
+                cover_photo_result = await db.execute(select(Photo).where(Photo.id == album.cover_photo_id))
+                photo = cover_photo_result.scalars().first()
+                if photo:
+                    cover_photo_obj = PhotoResponseForContactProfile.model_validate(photo)
+
+            enhanced_albums.append(
+                LinkedAlbumResponse(
+                    id=album.id,
+                    name=album.name,
+                    description=album.description,
+                    cover_photo_id=album.cover_photo_id,
+                    created_at=album.created_at,
+                    total_photos=total_photos,
+                    cover_photo=cover_photo_obj
+                )
+            )
 
     return LinkedObjectsResponse(
         notes=profile.notas,
         agenda_events=profile.agenda_events,
         tasks=profile.tasks,
-        user_document_topics=profile.user_document_topics
+        user_document_topics=profile.user_document_topics,
+        albums=enhanced_albums
     )
 
 @router.post("/create-contact-profile", response_model=ContactProfileResponse)
@@ -167,26 +295,11 @@ async def create_contact_profile(
     current_account: Account = Depends(get_current_account),
     db: AsyncSession = Depends(get_db_session)
 ):
-    """
-    Crea un nuevo perfil de contacto para la cuenta del usuario actual.
-    """
-    try:
-        print(f"DEBUG: Datos recibidos para crear perfil: {profile_data.model_dump_json()}")
-        new_profile = ContactProfile(
-            account_id=current_account.id,
-            name=profile_data.name,
-            email=profile_data.email,
-            phone=profile_data.phone,
-            tags=profile_data.tags, # Añadir tags
-            category=profile_data.category, # Añadir category
-            custom_fields=profile_data.custom_fields
-        )
-        db.add(new_profile)
-        await db.commit()
-        await db.refresh(new_profile)
-        return new_profile
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al crear perfil de contacto: {e}")
+    new_profile = ContactProfile(**profile_data.model_dump(), account_id=current_account.id)
+    db.add(new_profile)
+    await db.commit()
+    await db.refresh(new_profile)
+    return new_profile
 
 @router.post("/update-contact-profile/{profile_id}", response_model=ContactProfileResponse)
 async def update_contact_profile(
@@ -195,62 +308,28 @@ async def update_contact_profile(
     current_account: Account = Depends(get_current_account),
     db: AsyncSession = Depends(get_db_session)
 ):
-    """
-    Actualiza un perfil de contacto existente para la cuenta del usuario actual.
-    """
-    print("DEBUG: Función update_contact_profile invocada.") # <-- NUEVO PRINT
-    try:
-        profile = await db.get(ContactProfile, profile_id)
+    profile = await db.get(ContactProfile, profile_id)
+    if not profile or profile.account_id != current_account.id:
+        raise HTTPException(status_code=404, detail="Perfil de contacto no encontrado o no autorizado.")
 
-        if not profile or profile.account_id != current_account.id:
-            raise HTTPException(status_code=404, detail="Perfil de contacto no encontrado o no autorizado.")
-
-        print(f"DEBUG: profile_data recibida: {profile_data.model_dump_json()}")
-        print(f"DEBUG: profile_data para actualizar (exclude_unset): {profile_data.model_dump(exclude_unset=True)}")
-
-        # Actualizar campos individualmente para depuración
-        if profile_data.name is not None: profile.name = profile_data.name
-        if profile_data.email is not None: profile.email = profile_data.email
-        if profile_data.phone is not None: profile.phone = profile_data.phone
-        if profile_data.tags is not None: profile.tags = profile_data.tags
-        if profile_data.category is not None: profile.category = profile_data.category
-        if profile_data.custom_fields is not None: profile.custom_fields = profile_data.custom_fields
-
-        # for field, value in profile_data.model_dump(exclude_unset=True).items():
-        #     print(f"DEBUG: Intentando actualizar campo '{field}' con valor '{value}' (tipo: {type(value)})")
-        #     setattr(profile, field, value)
-        
-        await db.commit()
-        await db.refresh(profile)
-        return profile
-    except HTTPException as http_exc:
-        print(f"ERROR: HTTPException capturada: {http_exc.detail}") # Loguear el detalle de HTTPException
-        raise http_exc
-    except Exception as e:
-        print(f"ERROR: Excepción inesperada al actualizar perfil: {e}")
-        import traceback
-        traceback.print_exc() # Esto imprimirá el stack trace completo
-        raise HTTPException(status_code=500, detail=f"Error interno del servidor al actualizar perfil: {e}")
+    update_data = profile_data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(profile, key, value)
+    
+    await db.commit()
+    await db.refresh(profile)
+    return profile
 
 @router.post("/delete-contact-profile")
 async def delete_contact_profile(
-    profile_id: uuid.UUID,
+    profile_id: uuid.UUID = Body(..., embed=True),
     current_account: Account = Depends(get_current_account),
     db: AsyncSession = Depends(get_db_session)
 ):
-    """
-    Elimina un perfil de contacto existente para la cuenta del usuario actual.
-    """
-    try:
-        profile = await db.get(ContactProfile, profile_id)
+    profile = await db.get(ContactProfile, profile_id)
+    if not profile or profile.account_id != current_account.id:
+        raise HTTPException(status_code=404, detail="Perfil de contacto no encontrado o no autorizado.")
 
-        if not profile or profile.account_id != current_account.id:
-            raise HTTPException(status_code=404, detail="Perfil de contacto no encontrado o no autorizado.")
-
-        await db.delete(profile)
-        await db.commit()
-        return {"message": "Perfil de contacto eliminado exitosamente."}
-    except HTTPException as http_exc:
-        raise http_exc
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al eliminar perfil de contacto: {e}")
+    await db.delete(profile)
+    await db.commit()
+    return {"message": "Perfil de contacto eliminado exitosamente."}

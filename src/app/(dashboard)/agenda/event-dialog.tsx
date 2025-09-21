@@ -58,7 +58,7 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
           apiClient.get('/api/workspaces'),
         ]);
         setTeams(teamsRes.data);
-        setWorkspaces(workspacesRes.data);
+        setWorkspaces(workspacesRes.data.workspaces);
       } catch (error) {
         console.error("Error fetching teams or workspaces:", error);
         toast.error('Error al cargar datos necesarios.');
@@ -74,10 +74,10 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
         const eventDateTime = new Date(event.event_datetime_utc);
         form.reset({
           description: event.description,
-          date: eventDateTime.toISOString().split('T')[0],
-          time: eventDateTime.toTimeString().split(' ')[0].substring(0, 5),
-          team_id: event.team_id?.toString() || '',
-          workspace_id: event?.workspace_id?.toString() || workspaceId || '', // Asegurarse de que event no sea null
+          date: eventDateTime.toLocaleDateString('en-CA'), // 'en-CA' para formato YYYY-MM-DD
+          time: eventDateTime.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          team_id: (typeof event.team_shared === 'string' ? event.team_shared : '') || '',
+          workspace_id: event?.workspace_id?.toString() || workspaceId || '',
         });
       } else {
         form.reset({
@@ -92,22 +92,27 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
   }, [isOpen, event, form, workspaceId]);
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    const standardDateTime = `${values.date} ${values.time}`;
     const toastId = toast.loading(event ? 'Actualizando evento...' : 'Agendando evento...');
 
     try {
       let response;
       if (event) {
+        const localDateTime = new Date(`${values.date}T${values.time}:00`); // Crear un objeto Date con la hora local
+        const eventDateTimeUTC = localDateTime.toISOString(); // Convertir a ISO 8601 (UTC)
+
         response = await apiClient.put(`/api/agenda/events/${event.id}`, {
           description: values.description,
-          event_datetime: standardDateTime,
+          event_datetime: eventDateTimeUTC, // Enviar la hora en formato ISO 8601 (UTC)
           team_id: values.team_id ? parseInt(values.team_id) : null,
           workspace_id: values.workspace_id || null,
         });
       } else {
+        const localDateTime = new Date(`${values.date}T${values.time}:00`); // Crear un objeto Date con la hora local
+        const eventDateTimeUTC = localDateTime.toISOString(); // Convertir a ISO 8601 (UTC)
+
         response = await apiClient.post('/api/add-event', {
           description: values.description,
-          event_datetime: standardDateTime,
+          event_datetime: eventDateTimeUTC, // Enviar la hora en formato ISO 8601 (UTC)
           team_id: values.team_id ? parseInt(values.team_id) : null,
           workspace_id: values.workspace_id || null,
         });

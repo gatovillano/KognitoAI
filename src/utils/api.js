@@ -2,7 +2,7 @@
  * Utilidades para realizar peticiones a la API
  */
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://apibase.gatoslibres.art';
 
 /**
  * Realiza una petición HTTP a la API

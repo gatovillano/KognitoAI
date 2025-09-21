@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { ContactProfile } from './page'; // Importar la interfaz ContactProfile
@@ -21,8 +21,17 @@ interface ManageLinkedObjectsDialogProps {
 interface LinkedObjectDisplay {
   id: string | number;
   title: string;
-  type: 'note' | 'event' | 'task' | 'collection';
+  type: 'note' | 'event' | 'task' | 'collection' | 'album'; // Added 'album'
   linked: boolean;
+}
+
+// Define LinkedAlbumResponse interface (mirroring backend Pydantic model)
+interface LinkedAlbumResponse {
+  id: string;
+  name: string;
+  description: string | null;
+  cover_photo_id: string | null;
+  created_at: string;
 }
 
 export function ManageLinkedObjectsDialog({ isOpen, onOpenChange, profile, onLinkedObjectsUpdated }: ManageLinkedObjectsDialogProps) {
@@ -31,23 +40,11 @@ export function ManageLinkedObjectsDialog({ isOpen, onOpenChange, profile, onLin
   const [availableEvents, setAvailableEvents] = useState<LinkedObjectDisplay[]>([]);
   const [availableTasks, setAvailableTasks] = useState<LinkedObjectDisplay[]>([]);
   const [availableCollections, setAvailableCollections] = useState<LinkedObjectDisplay[]>([]);
+  const [availableAlbums, setAvailableAlbums] = useState<LinkedObjectDisplay[]>([]); // New state for albums
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  useEffect(() => {
-    if (isOpen && profile?.id) {
-      fetchAvailableObjects();
-    } else if (!isOpen) {
-      // Limpiar estados al cerrar el diálogo
-      setAvailableNotes([]);
-      setAvailableEvents([]);
-      setAvailableTasks([]);
-      setAvailableCollections([]);
-      setSearchTerm('');
-    }
-  }, [isOpen, profile?.id]);
-
-  const fetchAvailableObjects = async () => {
+  const fetchAvailableObjects = useCallback(async () => {
     setIsLoading(true);
     try {
       // Fetch linked objects first to mark them as linked
@@ -56,7 +53,7 @@ export function ManageLinkedObjectsDialog({ isOpen, onOpenChange, profile, onLin
 
       // Fetch all notes
       const notesResponse = await apiClient.post('/api/list-notes', { search_term: '' });
-      const allNotes: LinkedObjectDisplay[] = notesResponse.data.map((note: any) => ({
+      const allNotes: LinkedObjectDisplay[] = notesResponse.data.notes.map((note: any) => ({
         id: note.id,
         title: note.title || note.content.substring(0, 50) + '...',
         type: 'note',
@@ -94,33 +91,59 @@ export function ManageLinkedObjectsDialog({ isOpen, onOpenChange, profile, onLin
       }));
       setAvailableCollections(allCollections);
 
+      // Fetch all albums (NEW)
+      const albumsResponse = await apiClient.get<LinkedAlbumResponse[]>(`${process.env.NEXT_PUBLIC_API_URL}/api/galleries/albums`);
+      const allAlbums: LinkedObjectDisplay[] = albumsResponse.data.map((album: LinkedAlbumResponse) => ({
+        id: album.id,
+        title: album.name,
+        type: 'album',
+        linked: linkedData.albums.some((linkedAlbum: LinkedAlbumResponse) => linkedAlbum.id === album.id),
+      }));
+      setAvailableAlbums(allAlbums);
+
     } catch (error) {
       toast.error('Error al cargar objetos disponibles.');
       console.error('Error fetching available objects:', error);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (isOpen && profile?.id) {
+      fetchAvailableObjects();
+    } else if (!isOpen) {
+      // Limpiar estados al cerrar el diálogo
+      setAvailableNotes([]);
+      setAvailableEvents([]);
+      setAvailableTasks([]);
+      setAvailableCollections([]);
+      setAvailableAlbums([]);
+      setSearchTerm('');
+    }
+  }, [isOpen, profile?.id, fetchAvailableObjects]);
 
   const handleToggleLink = async (item: LinkedObjectDisplay) => {
     if (!profile?.id) return;
 
     const endpointMap = {
-      note: { link: '/api/notes/{id}/link-profile', unlink: '/api/notes/{id}/unlink-profile' },
-      event: { link: '/api/agenda/events/{id}/link-profile', unlink: '/api/agenda/events/{id}/unlink-profile' },
-      task: { link: '/api/tasks/{id}/link-profile', unlink: '/api/tasks/{id}/unlink-profile' },
-      collection: { link: '/api/collections/{id}/link-profile', unlink: '/api/collections/{id}/unlink-profile' },
+      note: { link: '/api/contact-profiles/{profile_id}/link-note', unlink: '/api/notes/{id}/unlink-profile' }, // Note: unlink for notes is not yet implemented in backend
+      event: { link: '/api/agenda/events/{id}/link-profile', unlink: '/api/agenda/events/{id}/unlink-profile' }, // Note: unlink for events is not yet implemented in backend
+      task: { link: '/api/tasks/{id}/link-profile', unlink: '/api/tasks/{id}/unlink-profile' }, // Note: unlink for tasks is not yet implemented in backend
+      collection: { link: '/api/collections/{id}/link-profile', unlink: '/api/collections/{id}/unlink-profile' }, // Note: unlink for collections is not yet implemented in backend
+      album: { link: '/api/contact-profiles/{profile_id}/link-album', unlink: '/api/contact-profiles/{profile_id}/unlink-album' }, // NEW for albums
     };
 
     const currentEndpoint = endpointMap[item.type];
     const url = item.linked
-      ? currentEndpoint.unlink.replace('{id}', String(item.id))
-      : currentEndpoint.link.replace('{id}', String(item.id));
+      ? currentEndpoint.unlink.replace('{profile_id}', profile.id).replace('{id}', String(item.id))
+      : currentEndpoint.link.replace('{profile_id}', profile.id).replace('{id}', String(item.id));
+
+    const payload = item.type === 'album' ? { album_id: item.id } : { note_id: item.id, event_id: item.id, task_id: item.id, collection_id: item.id }; // Adjust payload based on type
 
     try {
-      await apiClient.post(url, { profile_id: profile.id });
+      await apiClient.post(url, payload);
       toast.success(`${item.title} ${item.linked ? 'desvinculado' : 'vinculado'} correctamente.`);
-      // Refrescar la lista de objetos disponibles y los objetos vinculados en el ViewProfileDialog
       fetchAvailableObjects();
       onLinkedObjectsUpdated();
     } catch (error) {
@@ -168,7 +191,7 @@ export function ManageLinkedObjectsDialog({ isOpen, onOpenChange, profile, onLin
         <DialogHeader>
           <DialogTitle>Gestionar Vinculaciones para {profile.name || 'Perfil sin nombre'}</DialogTitle>
           <DialogDescription>
-            Vincula o desvincula notas, eventos, tareas y colecciones a este perfil.
+            Vincula o desvincula notas, eventos, tareas, colecciones y álbumes a este perfil.
           </DialogDescription>
         </DialogHeader>
 
@@ -181,16 +204,18 @@ export function ManageLinkedObjectsDialog({ isOpen, onOpenChange, profile, onLin
           />
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5"> {/* Updated grid-cols-5 */}
               <TabsTrigger value="notes">Notas</TabsTrigger>
               <TabsTrigger value="events">Eventos</TabsTrigger>
               <TabsTrigger value="tasks">Tareas</TabsTrigger>
               <TabsTrigger value="collections">Colecciones</TabsTrigger>
+              <TabsTrigger value="albums">Álbumes</TabsTrigger> {/* New tab */}
             </TabsList>
             <TabsContent value="notes">{renderItemList(availableNotes)}</TabsContent>
             <TabsContent value="events">{renderItemList(availableEvents)}</TabsContent>
             <TabsContent value="tasks">{renderItemList(availableTasks)}</TabsContent>
             <TabsContent value="collections">{renderItemList(availableCollections)}</TabsContent>
+            <TabsContent value="albums">{renderItemList(availableAlbums)}</TabsContent> {/* New content */}
           </Tabs>
         </div>
 
