@@ -36,10 +36,12 @@ export default function ChatPage() {
   }, [searchParams, router, threadId]);
 
   return (
-    <CommonChat
-      threadId={threadId}
-      initialMessage={initialMessage || undefined}
-      initialRagContext={initialRagContext || undefined}
-    />
+    <div className="flex flex-col h-full overflow-hidden">
+      <CommonChat
+        threadId={threadId}
+        initialMessage={initialMessage || undefined}
+        initialRagContext={initialRagContext || undefined}
+      />
+    </div>
   );
 }

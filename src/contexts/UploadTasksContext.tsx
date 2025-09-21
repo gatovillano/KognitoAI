@@ -1,0 +1,1 @@
+// This file is deprecated. The logic has been moved to DashboardLayout.tsx using the useWebSocket hook.

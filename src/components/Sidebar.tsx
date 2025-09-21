@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Plus, MessageSquare, BookMarked, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical, FolderKanban, Settings, BarChart3, Smartphone, User } from 'lucide-react';
+import { Plus, MessageSquare, BookMarked, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical, FolderKanban, Settings, BarChart3, Smartphone, User, Image as ImageIcon } from 'lucide-react';
 import Image from 'next/image';
 import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -74,16 +74,19 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
     const fetchThreads = async () => {
       if (user) {
         try {
-          // Se obtienen todos los hilos y se filtran en el cliente para mayor consistencia.
-          const response = await apiClient.get<ChatThread[]>('/api/threads');
-          const allThreads = response.data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          // Se obtienen los hilos y se filtran en el cliente. Se pide un límite alto para simular la carga de "todos".
+          let apiUrl = '/api/threads?limit=100';
+          if (activeWorkspaceId) {
+            apiUrl += `&workspace_id=${activeWorkspaceId}`;
+          } else {
+            apiUrl += `&workspace_id=none`; // Request threads with no workspace_id
+          }
+          const response = await apiClient.get(apiUrl);
+          const allThreads = response.data.threads.sort((a: ChatThread, b: ChatThread) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
           
-          const filteredThreads = activeWorkspaceId
-            ? allThreads.filter(thread => thread.workspace_id === activeWorkspaceId)
-            : allThreads.filter(thread => !thread.workspace_id);
-            
-          setThreads(filteredThreads.filter(thread => !thread.isPinned));
-          setPinnedThreads(filteredThreads.filter(thread => thread.isPinned));
+          // No need for client-side filtering by workspace_id anymore, as the API handles it
+          setThreads(allThreads.filter((thread: ChatThread) => !thread.isPinned));
+          setPinnedThreads(allThreads.filter((thread: ChatThread) => thread.isPinned));
         } catch (error) {
           console.error('Error fetching threads:', error);
         }
@@ -330,7 +333,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           variant="default"
           className={cn(
             "w-full transition-all duration-200",
-            isCollapsed ? "h-9 w-9 p-0 rounded-xl" : "h-9 px-4 rounded-xl"
+            isCollapsed ? "h-9 w-9 p-0 rounded-full" : "h-9 px-4 rounded-full"
           )}
         >
           <Plus className={cn("h-4 w-4", !isCollapsed && "mr-2")} />
@@ -419,6 +422,19 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
             >
               <User className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
               {!isCollapsed && <span className="text-xs font-medium">Perfiles</span>}
+            </Button>
+          </Link>
+          <Link href="/galleries" passHref onClick={onLinkClick} title="Álbumes">
+            <Button
+              variant={pathname?.startsWith('/galleries') ? 'secondary' : 'ghost'}
+              className={cn(
+                "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
+                pathname?.startsWith('/galleries') && "bg-primary/10 text-primary border border-primary/20"
+              )}
+            >
+              <ImageIcon className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
+              {!isCollapsed && <span className="text-xs font-medium">Galerías</span>}
             </Button>
           </Link>
           <Link href="/analysis" passHref onClick={onLinkClick} title="Análisis">

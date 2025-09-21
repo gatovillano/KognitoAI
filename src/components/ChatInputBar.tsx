@@ -64,15 +64,15 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   isKnowledgeAnalysisActive,
   isWebSearchActive,
   isComprehensiveAnalysisActive,
-  isDeepResearchActive, // Nueva prop
-  selectedToolName, // Nueva prop
+  isDeepResearchActive,
+  selectedToolName,
   onMessageChange,
   onSendMessage,
   onKeyDown = () => {},
   onToggleKnowledgeAnalysis = () => {},
   onToggleWebSearch = () => {},
   onToggleComprehensiveAnalysis = () => {},
-  onToggleDeepResearch = () => {}, // Nueva prop
+  onToggleDeepResearch = () => {},
   onStartRecording = () => {},
   onStopRecording = () => {},
   onFileUpload = () => {},
@@ -87,24 +87,35 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
 }) => {
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    onMessageChange(e.target.value);
+  }, [onMessageChange]);
+
+  const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     let messageText = newMessage;
 
-    // Si se ha seleccionado una herramienta, añadir el prefijo al mensaje
     if (selectedToolName) {
       messageText = `[USE_TOOL:${selectedToolName}] ${newMessage}`;
     }
 
     if (currentContext.length > 0) {
       const contextNames = currentContext.map(item => item.name).join(', ');
-      // Si ya se añadió un prefijo de herramienta, el contexto se añade después
       messageText = `${messageText.trim()}. Considerando el siguiente contexto: ${contextNames}. Mi pregunta es: ${newMessage}`;
     }
 
     onSendMessage(e, messageText);
     onMessageChange('');
-  };
+  }, [newMessage, selectedToolName, currentContext, onSendMessage, onMessageChange]);
+
+  const handleRemoveContextItem = useCallback((item: SelectedContextItem) => {
+    onRemoveContextItem(item);
+  }, [onRemoveContextItem]);
+
+  const handleFileUploadChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    onFileUpload(e);
+    e.target.value = '';
+  }, [onFileUpload]);
 
   useEffect(() => {
     const textArea = textAreaRef.current;
@@ -112,7 +123,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
       const adjustHeight = () => {
         textArea.style.height = 'auto';
         const newHeight = textArea.scrollHeight;
-        const maxHeight = 60; // Altura máxima en píxeles
+        const maxHeight = 60;
         if (newHeight > maxHeight) {
           textArea.style.height = `${maxHeight}px`;
           textArea.style.overflowY = 'auto';
@@ -147,120 +158,96 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   return (
     <div className={isFixedPosition ? "fixed bottom-0 w-full md:w-[calc(100%-320px)] right-0 p-4 md:p-6 bg-background z-30" : "relative w-full"}>
       <div className="flex justify-center w-full">
-      <form onSubmit={handleSubmit} className="relative w-full">
-        <div className="rounded-3xl bg-card border border-border px-4 py-3 shadow-medium hover:shadow-strong transition-shadow duration-300">
-          {/* Archivos adjuntos */}
-          {currentContext.length > 0 && (
-            <div className="mb-2 flex gap-2 overflow-x-auto pb-2">
-              {currentContext.map((item, index) => (
-                <div key={index} className="flex-shrink-0 flex items-center gap-2 bg-muted rounded-full px-3 py-1 text-sm">
-                  <Paperclip className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-foreground">{item.name}</span>
-                  <button 
-                    type="button" 
-                    onClick={() => onRemoveContextItem(item)} 
-                    className="text-muted-foreground hover:text-destructive transition-colors"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+        <form onSubmit={handleSubmit} className="relative w-full">
 
-          {/* Input de texto */}
-          <Textarea
-            ref={textAreaRef}
-            value={newMessage}
-            onKeyDown={onKeyDown}
-            placeholder={inputPlaceholder || (currentContext.length > 0 ? "Escribe tu mensaje..." : "Escribe tu mensaje o selecciona contexto...")}
-            autoComplete="on"
-            disabled={isResponding}
-            className="w-full resize-none bg-transparent border-0 focus:ring-0 p-0 text-lg placeholder:text-muted-foreground/70"
-            rows={1}
-            onChange={(e) => onMessageChange(e.target.value)}
-          />
-          
-          {/* Barra de acciones */}
-          <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50">
-            {/* Botones de modo */}
-            <div className="flex items-center gap-2">
-              {children}
-              <MoreActionsMenu
-                isWebSearchActive={isWebSearchActive}
-                isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
-                isDeepResearchActive={isDeepResearchActive}
-                isRecording={isRecording}
-                isUploadingFile={isUploadingFile}
-                onToggleWebSearch={onToggleWebSearch}
-                onToggleComprehensiveAnalysis={onToggleComprehensiveAnalysis}
-                onToggleDeepResearch={onToggleDeepResearch}
-                onFileUpload={onFileUpload}
-                onStartRecording={onStartRecording}
-                onStopRecording={onStopRecording}
-              />
-            </div>
-
-            {/* Botones de acción */}
-            <div className="flex items-center gap-3">
-              {/* Botón de Subir Documentos */}
-              <input
-                id="file-upload-chat-bar"
-                type="file"
-                multiple
-                accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.gif"
-                className="hidden"
-                onChange={(e) => {
-                  onFileUpload(e);
-                  e.target.value = '';
-                }}
-                disabled={isUploadingFile}
-              />
-              <label htmlFor="file-upload-chat-bar" className="flex items-center justify-center h-9 w-9 rounded-full text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer">
-                {isUploadingFile ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <Upload className="h-5 w-5" />
-                )}
-              </label>
-
-              {/* Botón de Grabación de Audio */}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`rounded-full ${isRecording && !isProcessingAudio ? 'text-red-500 animate-pulse' : 'text-muted-foreground'} hover:bg-accent hover:text-accent-foreground`}
-                onClick={isRecording ? onStopRecording : onStartRecording}
-                disabled={isUploadingFile || isResponding || isProcessingAudio}
-              >
-                {isProcessingAudio ? (
-                  <Loader2 className="h-5 w-5 animate-spin text-red-500" />
-                ) : isRecording ? (
-                  <Mic className="h-5 w-5 text-red-500" />
-                ) : (
-                  <Mic className="h-5 w-5" />
-                )}
-              </Button>
-
-              <Button
-                type="submit"
-                size="icon"
-                disabled={isResponding || (!newMessage.trim() && currentContext.length === 0)}
-                className="rounded-full"
-              >
-                {isResponding ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <ArrowUp className="h-4 w-4" />
-                )}
-              </Button>
+          <div className="rounded-lg bg-card border border-border px-4 py-2 shadow-medium hover:shadow-strong transition-shadow duration-300">
+            {currentContext.length > 0 && (
+              <div className="mb-2 flex gap-2 overflow-x-auto pb-2">
+                {currentContext.map((item, index) => (
+                  <div key={index} className="flex-shrink-0 flex items-center gap-2 bg-muted rounded-full px-3 py-1 text-sm">
+                    <Paperclip className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-foreground">{item.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveContextItem(item)}
+                      className="text-muted-foreground hover:text-destructive transition-colors"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <Textarea
+              ref={textAreaRef}
+              value={newMessage}
+              onKeyDown={onKeyDown}
+              placeholder={inputPlaceholder || (currentContext.length > 0 ? "Escribe tu mensaje..." : "Escribe tu mensaje o selecciona contexto...")}
+              autoComplete="on"
+              disabled={isResponding}
+              className="w-full resize-none bg-transparent border-0 focus:ring-0 p-0 text-lg placeholder:text-muted-foreground/70"
+              rows={1}
+              onChange={handleMessageChange}
+            />
+            <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50">
+              <div className="flex items-center gap-2">
+                {children}
+                <MoreActionsMenu
+                  isWebSearchActive={isWebSearchActive}
+                  isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+                  isDeepResearchActive={isDeepResearchActive}
+                  isRecording={isRecording}
+                  isUploadingFile={isUploadingFile}
+                  onToggleWebSearch={onToggleWebSearch}
+                  onToggleComprehensiveAnalysis={onToggleComprehensiveAnalysis}
+                  onToggleDeepResearch={onToggleDeepResearch}
+                  onFileUpload={onFileUpload}
+                  onStartRecording={onStartRecording}
+                  onStopRecording={onStopRecording}
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  id="file-upload-chat-bar"
+                  type="file"
+                  multiple
+                  accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.gif"
+                  className="hidden"
+                  onChange={handleFileUploadChange}
+                  disabled={isUploadingFile}
+                />
+                <label htmlFor="file-upload-chat-bar" className="flex items-center justify-center h-9 w-9 rounded-full text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer">
+                  {isUploadingFile ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}
+                </label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className={`rounded-full ${isRecording && !isProcessingAudio ? 'text-red-500 animate-pulse' : 'text-muted-foreground'} hover:bg-accent hover:text-accent-foreground`}
+                  onClick={isRecording ? onStopRecording : onStartRecording}
+                  disabled={isUploadingFile || isResponding || isProcessingAudio}
+                >
+                  {isProcessingAudio ? <Loader2 className="h-5 w-5 animate-spin" /> : isRecording ? <Mic className="h-5 w-5 text-red-500" /> : <Mic className="h-5 w-5" />}
+                </Button>
+                <Button
+                  type="submit"
+                  size="icon"
+                  disabled={isResponding || (!newMessage.trim() && currentContext.length === 0)}
+                  className="rounded-full"
+                >
+                  {isResponding ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      </form>
+
+        </form>
       </div>
     </div>
   );
 };
 
 export default memo(ChatInputBarComponent);
+
+
+

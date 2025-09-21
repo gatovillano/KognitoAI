@@ -8,7 +8,7 @@ import TaskItem from '@tiptap/extension-task-item';
 import Mention from '@tiptap/extension-mention';
 import { Bold, Italic, Strikethrough, Code, Heading1, Heading2, List, ListOrdered, Quote, CheckSquare } from 'lucide-react';
 import { Button } from './ui/button';
-import { mentionSuggestion } from './mention-suggestion';
+import { createMentionSuggestion } from './mention-suggestion';
 
 // --- La Barra de Herramientas ---
 const Toolbar = ({ editor }: { editor: any }) => {
@@ -30,8 +30,15 @@ const Toolbar = ({ editor }: { editor: any }) => {
   );
 };
 
+interface TiptapEditorProps {
+  content: string;
+  onChange: (html: string) => void;
+  fromTeam?: string; // Cambiado a string | undefined
+  containerClassName?: string; // Nueva propiedad
+}
+
 // --- El Editor Principal ---
-export function TiptapEditor({ content, onChange, containerClassName }: { content: string; onChange: (html: string) => void; containerClassName?: string }) {
+export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName }: TiptapEditorProps) => {
   const debounceTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
   const editor = useEditor({
@@ -54,13 +61,13 @@ export function TiptapEditor({ content, onChange, containerClassName }: { conten
             `@${node.attrs.label ?? node.attrs.id}`,
           ]
         },
-        suggestion: mentionSuggestion,
+        suggestion: createMentionSuggestion(fromTeam),
       }),
     ],
     content: content,
     editorProps: {
       attributes: {
-        class: `prose dark:prose-invert max-w-full rounded-b-md border p-4 focus:outline-none ${containerClassName || 'min-h-[300px]'}`,
+        class: `prose dark:prose-invert max-w-full rounded-b-md border p-4 focus:outline-none min-h-[300px]`,
       },
     },
     onUpdate({ editor }) {
@@ -80,7 +87,7 @@ export function TiptapEditor({ content, onChange, containerClassName }: { conten
   });
 
   return (
-    <div>
+    <div className={containerClassName}> {/* Aplicar containerClassName aquí */}
       <Toolbar editor={editor} />
       <EditorContent editor={editor} />
     </div>

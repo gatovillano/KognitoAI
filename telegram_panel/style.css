@@ -14,7 +14,9 @@ body {
     background-color: var(--tg-theme-bg-color);
     color: var(--tg-theme-text-color);
     margin: 0;
-    padding: 20px;
+    padding: 16px; /* Reducir padding general */
+    line-height: 1.5; /* Mejorar legibilidad */
+    font-size: 15px; /* Ajustar tamaño base de fuente */
 }
 .view { display: none; }
 .view.active { display: block; animation: fadeIn 0.3s; }
@@ -22,10 +24,26 @@ body {
 
 #home-screen h1 { font-size: 24px; font-weight: 700; text-align: center; margin-bottom: 30px; }
 .icon-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-.icon-button { background-color: var(--tg-theme-secondary-bg-color); border-radius: 18px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; cursor: pointer; user-select: none; }
-.icon-button:active { transform: scale(0.95); transition: transform 0.1s; }
-.icon-bubble { font-size: 32px; }
-.icon-label { font-size: 14px; font-weight: 500; text-align: center; }
+.icon-button {
+    background-color: var(--tg-theme-secondary-bg-color);
+    border-radius: 16px; /* Ligeramente más suave */
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px; /* Reducir el espacio entre icono y label */
+    cursor: pointer;
+    user-select: none;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05); /* Sombra sutil */
+    transition: transform 0.1s, box-shadow 0.2s;
+}
+.icon-button:active {
+    transform: scale(0.97); /* Menos agresivo */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Sombra al presionar */
+}
+.icon-bubble { font-size: 36px; /* Iconos un poco más grandes */ }
+.icon-label { font-size: 13px; font-weight: 500; text-align: center; color: var(--tg-theme-text-color); }
 
 .view-header { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
 .back-button { font-size: 28px; background: none; border: none; color: var(--tg-theme-hint-color); cursor: pointer; padding: 0; }

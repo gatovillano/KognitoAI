@@ -167,6 +167,26 @@ async def get_task(
         logger.error(f"Error al obtener tarea {task_id} para account {current_account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al obtener la tarea.")
 
+    return task
+
+@router.get("/tasks/{task_id}/linked-profiles", summary="Obtener perfiles vinculados a una tarea")
+async def get_linked_profiles_to_task_endpoint(
+    task_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    tasks_manager: TasksManager = Depends(get_tasks_manager)
+):
+    """
+    Obtiene la lista de perfiles de contacto vinculados a una tarea específica.
+    """
+    task = await tasks_manager.get_task_by_id(current_account_id, task_id) # Use manager to get task
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada o no autorizada.")
+    
+    # The task object returned by get_task_by_id is already a dict,
+    # and it should contain 'linked_profiles' if loaded with selectinload.
+    # So, we just need to return that part.
+    return task.get("linked_profiles", [])
+
 @router.put("/tasks/{task_id}", response_model=TaskResponse, summary="Actualizar una tarea existente")
 async def update_task(
     task_id: str,
@@ -175,7 +195,7 @@ async def update_task(
     tasks_manager: TasksManager = Depends(get_tasks_manager)
 ):
     """
-    Actualiza una tarea existente del usuario autenticado.
+    Actualiza una tarea existente para el usuario autenticado.
     """
     try:
         updated_task = await tasks_manager.update_task(

@@ -78,6 +78,11 @@ class PromptManager:
         Construye el prompt del sistema dinámicamente, integrando todos los
         componentes de contexto.
         """
+        # Escape relevant_memories to prevent unescaped curly braces from causing KeyError
+        # This ensures that any curly braces within the content are treated as literal characters
+        # and not as placeholders for string formatting.
+        escaped_relevant_memories = relevant_memories.replace('{', '{{').replace('}', '}}')
+
         # 1. Construir contexto del usuario
         profile_info = []
         if user_profile:
@@ -95,7 +100,7 @@ class PromptManager:
         if relevant_memories and "No se encontraron memorias relevantes" not in relevant_memories:
             user_context_parts.append("\n--- Memorias y Documentos Relevantes (Base de Conocimiento) ---")
             user_context_parts.append("**Instrucción de Contexto RAG:** Has recibido 'Memorias y Documentos Relevantes' que pueden ser cruciales para la solicitud del usuario. Asegúrate de integrar y comparar la información de TODAS las fuentes proporcionadas en esta sección para dar una respuesta completa y precisa, si es pertinente a la consulta.")
-            user_context_parts.append(relevant_memories)
+            user_context_parts.append(escaped_relevant_memories) # Use the escaped version here
         user_context_parts.append("---------------------------------------------------------")
         user_context_string = "\n".join(user_context_parts)
 
@@ -124,15 +129,16 @@ class PromptManager:
             system_prompt_content = system_prompt_content.format(
                 query=user_message,
                 web_summary="",
-                relevant_memories=relevant_memories,
+                relevant_memories=escaped_relevant_memories, # Use the escaped version here
             )
         except KeyError as e:
             logger.warning(f"No se pudo pre-formatear el prompt, puede contener placeholders desconocidos: {e}")
             system_prompt_content = system_prompt_content.replace('{query}', user_message)
             system_prompt_content = system_prompt_content.replace('{web_summary}', '')
+            # Also use the escaped version here if the problematic_placeholder is replaced
             problematic_placeholder = '{relevant_memories if "No se encontraron" not in relevant_memories else "No se encontró información interna relevante."}'
             if problematic_placeholder in system_prompt_content:
-                system_prompt_content = system_prompt_content.replace(problematic_placeholder, relevant_memories)
+                system_prompt_content = system_prompt_content.replace(problematic_placeholder, escaped_relevant_memories)
 
         # 5. Ensamblar el prompt final
         

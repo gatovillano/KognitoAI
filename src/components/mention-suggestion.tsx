@@ -3,12 +3,16 @@ import tippy from 'tippy.js';
 import { MentionList } from '@/components/MentionList';
 import apiClient from '@/lib/api';
 
-export const mentionSuggestion = {
+export const createMentionSuggestion = (fromTeam?: string) => ({
   items: async ({ query }: { query: string }) => {
     try {
-      const response = await apiClient.post('/api/list-notes', { search_term: query });
+      const payload: { search_term: string; workspace_id?: string } = { search_term: query };
+      if (fromTeam) {
+        payload.workspace_id = fromTeam;
+      }
+      const response = await apiClient.post('/api/list-notes', payload);
       // Asegúrate de que la respuesta tenga el formato esperado por MentionList
-      return response.data.map((note: any) => ({
+      return response.data.notes.map((note: any) => ({
         id: note.id,
         label: note.title,
       }));
@@ -70,4 +74,4 @@ export const mentionSuggestion = {
       },
     };
   },
-};
+});

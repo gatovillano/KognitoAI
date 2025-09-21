@@ -1,0 +1,1 @@
+// This component is not used to avoid adding new dependencies (cmdk).
