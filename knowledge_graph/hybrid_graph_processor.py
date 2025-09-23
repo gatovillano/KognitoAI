@@ -57,12 +57,12 @@ class HybridGraphProcessor:
             # Priorizar modelo en español
             model_name = "es_core_news_sm"  # Modelo pequeño para español (~15MB)
             try:
-                self.spacy_model = spacy.load(model_name)
+                self.spacy_model = spacy.load(model_name, disable=["parser", "lemmatizer"])
                 logger.info(f"✅ spaCy modelo español cargado: {model_name}")
             except OSError:
                 logger.info(f"📥 Descargando modelo spaCy español: {model_name}")
                 download(model_name)
-                self.spacy_model = spacy.load(model_name)
+                self.spacy_model = spacy.load(model_name, disable=["parser", "lemmatizer"])
                 logger.info(f"✅ spaCy modelo español descargado y cargado: {model_name}")
 
         except Exception as e:
@@ -71,12 +71,12 @@ class HybridGraphProcessor:
                 import spacy
                 model_name = "en_core_web_sm"
                 try:
-                    self.spacy_model = spacy.load(model_name)
+                    self.spacy_model = spacy.load(model_name, disable=["parser", "lemmatizer"])
                     logger.info(f"✅ spaCy modelo inglés cargado (fallback): {model_name}")
                 except OSError:
                     logger.info(f"📥 Descargando modelo spaCy inglés (fallback): {model_name}")
                     spacy.cli.download(model_name)
-                    self.spacy_model = spacy.load(model_name)
+                    self.spacy_model = spacy.load(model_name, disable=["parser", "lemmatizer"])
                     logger.info(f"✅ spaCy modelo inglés descargado y cargado (fallback): {model_name}")
             except Exception as e2:
                 logger.error(f"❌ Error inicializando spaCy: {e2}")

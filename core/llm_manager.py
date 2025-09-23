@@ -22,6 +22,10 @@ def get_fast_llm() -> Optional[BaseLanguageModel]:
     """Returns the initialized fast task LLM instance, or the main one as a fallback."""
     return _fast_task_llm_instance or _main_agent_llm_instance
 
+async def _invoke_llm_cached(llm: BaseLanguageModel, prompt: str) -> Any:
+    """Función wrapper para invocar el LLM."""
+    return await llm.ainvoke(prompt)
+
 async def initialize_llms():
     """
     Initializes the global instances of the LLMs (main and fast task).
@@ -64,7 +68,7 @@ async def initialize_llms():
 async def get_enhanced_llm_response(
     user_message: str,
     user_id: str,
-    workspace_id: str = None,
+    workspace_id: Optional[str] = None,
     use_knowledge_graph: bool = True
 ) -> Dict[str, Any]:
     """
@@ -95,7 +99,7 @@ async def get_enhanced_llm_response(
         if not llm:
             raise ValueError("LLM no inicializado")
 
-        response = await llm.ainvoke(enriched_prompt)
+        response = await _invoke_llm_cached(llm, enriched_prompt)
 
         # 4. Procesar y enriquecer la respuesta
         enhanced_response = {
@@ -118,7 +122,7 @@ async def get_enhanced_llm_response(
         # Fallback a respuesta tradicional
         return await _get_traditional_response(user_message)
 
-async def _get_enhanced_context(user_message: str, user_id: str, workspace_id: str = None) -> Optional[Dict[str, Any]]:
+async def _get_enhanced_context(user_message: str, user_id: str, workspace_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Obtiene contexto enriquecido del grafo de conocimiento."""
     try:
         from core.enhanced_memory_manager import EnhancedMemoryManager
@@ -126,6 +130,9 @@ async def _get_enhanced_context(user_message: str, user_id: str, workspace_id: s
         from core.config import settings
 
         # Inicializar componentes
+        if not settings.neo4j_uri:
+            logger.error("NEO4J_URI no está configurado.")
+            return None
         graph_db = GraphDB(
             uri=settings.neo4j_uri,
             user=settings.neo4j_user,
@@ -221,7 +228,7 @@ async def _get_traditional_response(user_message: str) -> Dict[str, Any]:
         if not llm:
             raise ValueError("LLM no inicializado")
 
-        response = await llm.ainvoke(user_message)
+        response = await _invoke_llm_cached(llm, user_message)
 
         return {
             "response": response.content if hasattr(response, 'content') else str(response),

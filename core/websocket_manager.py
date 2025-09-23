@@ -1,46 +1,63 @@
 import logging
-from typing import Dict, Any
-from fastapi import WebSocket
+from typing import Dict, Any, List
+from fastapi import WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
 
-# Diccionario para almacenar las conexiones activas.
-# La clave será el account_id (str) y el valor será el objeto WebSocket.
-# En un entorno de producción con múltiples instancias de la API,
-# esto DEBERÍA ser reemplazado por un sistema de Pub/Sub como Redis.
-active_connections: Dict[str, WebSocket] = {}
+class WebSocketManager:
+    def __init__(self):
+        self.active_connections: Dict[str, List[WebSocket]] = {}
 
-async def connect_websocket(account_id: str, websocket: WebSocket):
-    """Maneja la conexión de un nuevo WebSocket."""
-    await websocket.accept()
-    active_connections[account_id] = websocket
-    logger.info(f"WebSocket conectado para la cuenta: {account_id}")
+    async def connect(self, websocket: WebSocket, account_id: str):
+        await websocket.accept()
+        if account_id not in self.active_connections:
+            self.active_connections[account_id] = []
+        self.active_connections[account_id].append(websocket)
+        logger.info(f"WebSocket conectado para la cuenta: {account_id}")
 
-async def disconnect_websocket(account_id: str):
-    """Maneja la desconexión de un WebSocket."""
-    if account_id in active_connections:
-        del active_connections[account_id]
+    def disconnect(self, websocket: WebSocket, account_id: str):
+        if account_id in self.active_connections:
+            self.active_connections[account_id].remove(websocket)
+            if not self.active_connections[account_id]:
+                del self.active_connections[account_id]
         logger.info(f"WebSocket desconectado para la cuenta: {account_id}")
 
-async def send_personal_message(account_id: str, message: Dict[str, Any]):
-    """Envía un mensaje JSON a un usuario específico a través de su WebSocket."""
-    if account_id in active_connections:
-        websocket = active_connections[account_id]
-        try:
-            await websocket.send_json(message)
-            logger.info(f"Mensaje enviado a la cuenta {account_id}: {message.get('type', 'desconocido')}")
-        except Exception as e:
-            logger.error(f"Error al enviar mensaje a la cuenta {account_id}: {e}", exc_info=True)
-            # Si falla el envío, asumimos que la conexión está rota y la eliminamos
-            await disconnect_websocket(account_id)
-    else:
-        logger.debug(f"No se encontró conexión WebSocket activa para la cuenta: {account_id}. Mensaje no enviado.")
+    async def send_personal_message(self, message: Dict[str, Any], account_id: str):
+        if account_id in self.active_connections:
+            for connection in self.active_connections[account_id]:
+                try:
+                    await connection.send_json(message)
+                except WebSocketDisconnect:
+                    self.disconnect(connection, account_id)
+                except Exception as e:
+                    logger.error(f"Error al enviar mensaje a {account_id}: {e}")
 
-# Puedes añadir una función para enviar a todos los conectados si fuera necesario
-# async def broadcast_message(message: Dict[str, Any]):
-#     for account_id, websocket in list(active_connections.items()): # Usar list() para evitar RuntimeError durante la iteración si se modifica el dict
-#         try:
-#             await websocket.send_json(message)
-#         except Exception as e:
-#             logger.error(f"Error al hacer broadcast a {account_id}: {e}")
-#             await disconnect_websocket(account_id)
+    async def broadcast(self, message: Dict[str, Any]):
+        for account_id, connections in self.active_connections.items():
+            for connection in connections:
+                try:
+                    await connection.send_json(message)
+                except WebSocketDisconnect:
+                    self.disconnect(connection, account_id)
+                except Exception as e:
+                    logger.error(f"Error al hacer broadcast a {account_id}: {e}")
+
+# Instancia única del gestor de WebSockets
+manager = WebSocketManager()
+
+# Dependencia de FastAPI para obtener el gestor
+def get_websocket_manager() -> WebSocketManager:
+    return manager
+
+# Para mantener la compatibilidad con el código existente que llama a send_personal_message
+async def send_personal_message(account_id: str, message: Dict[str, Any]):
+    await manager.send_personal_message(message, account_id)
+
+# Funciones de ciclo de vida (ahora vacías, pero se mantienen por si se necesitan en el futuro)
+async def startup_event():
+    logger.info("Ciclo de vida de inicio de WebSocket (en memoria) - No se requiere acción.")
+    pass
+
+async def shutdown_event():
+    logger.info("Ciclo de vida de apagado de WebSocket (en memoria) - No se requiere acción.")
+    pass

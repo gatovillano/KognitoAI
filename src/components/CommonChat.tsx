@@ -262,6 +262,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         }
         return newMessages;
       });
+      console.log('CommonChat: Estado de messages después de handleLlmChunk:', newMessages); // Nuevo log
       
       requestAnimationFrame(() => {
         scrollToBottom(true);
@@ -295,11 +296,13 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         }
         return newMessages;
       });
+      console.log('CommonChat: Estado de messages después de handleLlmEnd:', newMessages); // Nuevo log
       aiMessageIndexRef.current = null; // Resetear el índice al finalizar la respuesta del LLM
     }
   }, [threadId]);
 
   const handleToolStatusUpdate = useCallback((message: ToolStatusMessage) => {
+    console.log("CommonChat: handleToolStatusUpdate recibido. Data:", message); // Nuevo log para depuración
     if (message.thread_id === threadId) {
       if (message.status === 'start') {
         setToolName(message.tool_name);
@@ -311,7 +314,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             }
             return prev;
           });
-        toast.info(`Iniciando ${message.tool_name}...`, {
+        toast.info(`Iniciando ${message.tool_name || 'una herramienta'}...`, {
           description: message.message || "La tarea ha comenzado en segundo plano.",
           duration: 3000, // Show for 3 seconds
         });
@@ -331,7 +334,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             created_at: new Date().toISOString(),
             sources: message.sources || [],
           };
-          toast.success(`Herramienta ${message.tool_name} completada.`);
+          toast.success(`Herramienta ${message.tool_name || 'una herramienta'} completada.`);
+
         } else { // status === 'error'
           completionMessage = {
             text: `Error en herramienta ${message.tool_name}: ${message.error || "Error desconocido."}`,
@@ -413,7 +417,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
       // Si no hay threadId, es un nuevo chat. Creamos el hilo y redirigimos.
       if (!threadId) {
-        setIsResponding(true);
+        setIsResponding(true); // Indicar que estamos respondiendo
         try {
           const response = await apiClient.post('/api/threads', {});
           const newThread = response.data;
@@ -421,28 +425,29 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             throw new Error('No se pudo crear un nuevo hilo de chat.');
           }
           
-          let queryString = `initial_message=${encodeURIComponent(messageToProcess)}`;
-          if (selectedContext && selectedContext.length > 0) {
-            queryString += `&rag_context=${encodeURIComponent(JSON.stringify(selectedContext))}`;
+          const newSearchParams = new URLSearchParams();
+          newSearchParams.set('initial_message', messageToProcess);
+          if (selectedContext.length > 0) {
+            newSearchParams.set('rag_context', JSON.stringify(selectedContext.map((item: SelectedContextItem) => ({ type: item.type, id: item.id }))));
           }
-          // Redirigir a la página del nuevo chat con el mensaje como parámetro
-          router.replace(`/chat/${newThread.id}?${queryString}`);
-
+          router.replace(`/chat/${newThread.id}?${newSearchParams.toString()}`);
         } catch (error) {
           console.error('Error creando nuevo hilo de chat:', error);
           toast.error('No se pudo iniciar una nueva conversación.');
           setIsResponding(false);
         }
+        setNewMessage(''); // Limpiar el input inmediatamente
         return;
       }
 
       // Lógica existente para un chat ya creado
+
       const userMessage: ChatMessageType = {
         text: messageToProcess,
         sender: 'user' as const,
         created_at: new Date().toISOString(),
-        image_base64: '',
-        document_url: '',
+        image_base64: imageBase64 || '',
+        document_url: documentUrl || '',
         ragContext: selectedContext,
       };
       setMessages((prev) => {
@@ -456,10 +461,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         scrollToBottom(true);
       });
 
-      // Clear newMessage only if the message came from the input bar (i.e., messageTextFromInput was provided)
-      if (messageTextFromInput) {
-        setNewMessage('');
-      }
+      // Clear newMessage after sending the message
+      setNewMessage('');
       // setSelectedContext([]); // Keep context persistent
       setIsResponding(true);
 

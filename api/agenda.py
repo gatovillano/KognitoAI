@@ -226,10 +226,7 @@ async def update_event_endpoint(
 
         logger.info(f"[update_event_endpoint] Evento antes de la actualización: {event.description}, {event.event_datetime_utc}")
 
-        # --- PRUEBA DE DIAGNÓSTICO: FORZAR ACTUALIZACIÓN DE DESCRIPCIÓN ---
-        event.description = "TEST_UPDATE_DESCRIPTION"
-        logger.info(f"[update_event_endpoint] Forzando descripción a: {event.description}")
-        # ------------------------------------------------------------------
+
 
         for key, value in update_data.items():
             setattr(event, key, value)

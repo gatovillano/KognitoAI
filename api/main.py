@@ -2,7 +2,7 @@
 
 import logging
 import asyncio # Added
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -20,12 +20,12 @@ from api.search import router as search_router
 from core.config import settings
 from core.database import create_tables
 from core.llm_manager import initialize_llms
-from core.websocket_manager import connect_websocket, disconnect_websocket
+from core.websocket_manager import manager as websocket_manager, startup_event as ws_startup, shutdown_event as ws_shutdown
 from utils.security import decode_access_token
 from utils.embeddings import initialize_embeddings
 from utils.ascii_logo import print_startup_logo
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 logger.propagate = False # Evitar la duplicación de logs del logger principal
 
@@ -34,7 +34,7 @@ from utils.llm_logging_config import setup_llm_detailed_logging, create_llm_log_
 
 # Configurar logging detallado del LLM
 setup_llm_detailed_logging(
-    log_level="DEBUG",
+    log_level="INFO",
     log_file=create_llm_log_filename()
 )
 
@@ -99,10 +99,16 @@ async def startup_event():
         logger.info("Modelos de Lenguaje (LLMs) inicializados.")
         await initialize_embeddings()
         logger.info("Modelo de embeddings inicializado.")
+        await ws_startup()
         logger.info("Servidor listo para aceptar peticiones.")
     except Exception as e:
         logger.error(f"ERROR FATAL DURANTE EL ARRANQUE: {e}", exc_info=True)
         raise
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Se ejecuta al apagar el servidor."""
+    await ws_shutdown()
 
 # Middleware para registrar solicitudes que resultan en error 405
 @app.middleware("http")
@@ -141,18 +147,16 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
         return
 
     account_id = user_id
-    await connect_websocket(account_id, websocket)
+    await websocket_manager.connect(websocket, account_id)
     try:
         while True:
-            # Mantenemos la conexión abierta. El cliente no necesita enviar datos.
-            # El servidor enviará datos cuando sea necesario.
             await websocket.receive_text()
     except WebSocketDisconnect:
         logger.info(f"Cliente WebSocket desconectado (de forma limpia): {account_id}")
+        websocket_manager.disconnect(websocket, account_id)
     except Exception as e:
         logger.error(f"Error en la conexión WebSocket para la cuenta {account_id}: {e}", exc_info=True)
-    finally:
-        await disconnect_websocket(account_id)
+        websocket_manager.disconnect(websocket, account_id)
 
 @app.get("/", include_in_schema=False)
 async def serve_telegram_panel():
@@ -192,8 +196,6 @@ app.include_router(scheduled_tools_router, prefix="/api", tags=["scheduled-tools
 app.include_router(tasks_router, prefix="/api", tags=["tasks"]) # Incluir el router de tasks
 app.include_router(knowledge_graph_router, prefix="/api", tags=["knowledge-graph"])
 app.include_router(search_router, prefix="/api", tags=["search"])
-from api.deep_research import router as deep_research_router
-app.include_router(deep_research_router, prefix="/api", tags=["deep-research"])
 app.include_router(galleries_router, prefix="/api/galleries", tags=["galleries"])
 
 @app.get("/test-connection")

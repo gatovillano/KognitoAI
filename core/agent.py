@@ -385,8 +385,6 @@ async def call_model_node(state: AgentState):
             user_query=user_message,
             user_id=state['account_id'],
             workspace_id=state.get('workspace_id'),
-            filter_topics=filter_topics, # PASAR FILTROS
-            filter_document_ids=filter_document_ids, # PASAR FILTROS
             # max_results=10 # Puedes ajustar este valor si es necesario
         )
         # Extraer información del diccionario enhanced_context_data

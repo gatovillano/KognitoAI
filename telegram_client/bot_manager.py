@@ -29,6 +29,9 @@ from typing import Any, Dict, Optional
 from telegram.ext import Application, ExtBot
 from telegram.ext import JobQueue  # <-- add this import
 
+from core.database import SessionLocal
+from core.repositories.account_repository import AccountRepository
+
 logger = logging.getLogger(__name__)
 
 

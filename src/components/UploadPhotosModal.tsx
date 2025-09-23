@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import Image from 'next/image';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useDropzone } from 'react-dropzone';
@@ -106,7 +107,6 @@ export const UploadPhotosModal: React.FC<UploadPhotosModalProps> = ({
           {files.length > 0 && (
             <div className="mt-4">
               <h4 className="text-lg font-semibold mb-2">Archivos seleccionados ({files.length})</h4>
-import Image from 'next/image';
 
 // ... (the rest of the imports)
 

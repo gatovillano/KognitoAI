@@ -1,47 +1,24 @@
-## 20-09-25 Compilación y Corrección de Errores del Frontend
+## 23-09-2025 Implementación de botón para invertir el orden de las fotos en la galería
+Se ha añadido un botón en la vista de detalle de la galería para permitir a los usuarios invertir el orden de las fotos mostradas. Esto facilita la organización y visualización de las imágenes según sus preferencias.
 
-Se realizó la compilación del frontend y se corrigieron los errores de tipo que impedían su correcto funcionamiento.
-
--   **Instalación de dependencias:** Se ejecutó `npm install` para asegurar que todas las dependencias del frontend estuvieran correctamente instaladas.
--   **Corrección de error de tipo en `react-photo-album`:** Se identificó un error de tipo relacionado con la prop `renderPhoto` del componente `PhotoAlbum` en `src/app/(dashboard)/galleries/[albumId]/client.tsx`. Se intentó una solución con `RenderPhoto` y `components` sin éxito. Finalmente, se aplicó una aserción de tipo (`as any`) a las props del componente `PhotoAlbum` como solución temporal para permitir la compilación.
--   **Corrección de error de tipo en `onClick` del `PhotoAlbum`:** Se corrigió el error `Binding element 'index' implicitly has an 'any' type` en el handler `onClick` del `PhotoAlbum` en `src/app/(dashboard)/galleries/[albumId]/client.tsx` definiendo la interfaz `ClickHandlerProps` y usándola para tipar el parámetro `index`.
--   **Corrección de error de tipo en `renderPhoto` del `PhotoAlbum`:** Se corrigió el error `Binding element 'photo' implicitly has an 'any' type` en el handler `renderPhoto` del `PhotoAlbum` en `src/app/(dashboard)/galleries/[albumId]/client.tsx` definiendo la interfaz `RenderPhotoProps` y usándola para tipar los parámetros `photo`, `wrapperStyle` y `renderDefaultPhoto`.
--   **Corrección de error de tipo en `AlbumResponse`:** Se identificó que la interfaz `AlbumResponse` en `src/types/gallery.ts` no incluía la propiedad `cover_photo`. Se modificó la interfaz para añadir `cover_photo?: PhotoResponse;`.
--   **Corrección de asignación de `coverPhoto`:** Se ajustó la lógica en `src/app/(dashboard)/galleries/page.tsx` para asignar `coverPhoto` utilizando `album.cover_photo` o buscando la foto en el array `photos` mediante `album.cover_photo_id`.
+- **Función `handleInvertOrder`**: Se creó una nueva función en `src/app/(dashboard)/galleries/[albumId]/client.tsx` que invierte el orden de las fotos en el estado local del álbum y actualiza la propiedad `order` de cada foto.
+- **Botón "Invertir Orden"**: Se añadió un botón en la interfaz de usuario de `src/app/(dashboard)/galleries/[albumId]/client.tsx` que, al ser presionado, ejecuta la función `handleInvertOrder`.
+- **Actualización de orden**: La función `handleInvertOrder` actualiza la propiedad `order` de las fotos en el frontend, y se espera que el usuario haga clic en el botón "Guardar Orden" para persistir estos cambios en el backend.
 
 ---
-## 21-09-25 Corrección de visualización de imágenes en álbumes compartidos
 
-Se solucionó un problema que impedía que las imágenes se mostraran en los álbumes compartidos.
+## 23-09-2025 Integración de Lightbox en la vista de detalle de la galería
+Se ha integrado el componente `yet-another-react-lightbox` en la vista de detalle de la galería para mejorar la experiencia de visualización de imágenes.
 
--   **Análisis del problema:** Se detectó que la URL de las imágenes en la página de álbum compartido (`src/app/share/[token]/page.tsx`) estaba incorrectamente formada. La ruta apuntaba a un directorio local del servidor (`/app/media/`) en lugar de a la URL pública de la API.
--   **Solución aplicada:** Se modificó el componente de la imagen para que la URL se construya dinámicamente utilizando la variable de entorno `NEXT_PUBLIC_API_URL`. La nueva URL de la imagen ahora es `${process.env.NEXT_PUBLIC_API_URL}/media/${photo.file_path}`.
--   **Resultado:** Con este cambio, las imágenes ahora se cargan y muestran correctamente en los álbumes compartidos.
+- **Importación de Lightbox**: Se importaron `Lightbox` y sus estilos en `src/app/(dashboard)/galleries/[albumId]/client.tsx`.
+- **Estados de Lightbox**: Se añadieron los estados `lightboxOpen` y `lightboxIndex` en `AlbumDetailPageClient` para controlar la visibilidad y la imagen actual del lightbox.
+- **Actualización de `PhotoResponse`**: Se modificó la interfaz `PhotoResponse` en `src/types/gallery.ts` para incluir la propiedad `order: number;` para el correcto funcionamiento del reordenamiento.
+- **Activación del Lightbox**: Se modificó el `onClick` del componente `PhotoCard` en `src/app/(dashboard)/galleries/[albumId]/client.tsx` para que, al hacer clic en una imagen, se abra el nuevo lightbox en lugar del visor de imágenes anterior.
+- **Eliminación de visor antiguo**: Se eliminó el componente de visor de imágenes personalizado que existía previamente en `src/app/(dashboard)/galleries/[albumId]/client.tsx` para evitar duplicidad y usar la funcionalidad completa del nuevo lightbox.
 
 ---
-## 21-09-25 Estilización de la página de álbumes compartidos
 
-Se aplicaron mejoras de estilo a la página de álbumes compartidos para unificar su apariencia con el resto de la aplicación y mejorar la visualización de las imágenes.
+## 23-09-2025 Guardado automático al invertir el orden de las fotos
+Se modificó la función `handleInvertOrder` para que, al invertir el orden de las fotos, los cambios se guarden automáticamente en el backend.
 
--   **Márgenes unificados:** Se ajustó el contenedor principal de la página (`src/app/share/[token]/page.tsx`) para utilizar las mismas clases de Tailwind CSS (`p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden`) que la vista de galería principal, logrando una apariencia consistente.
--   **Diseño de cuadrícula:** Se modificó la cuadrícula de imágenes para que siempre muestre tres columnas (`grid-cols-3`), simplificando el diseño y mejorando la legibilidad en diferentes tamaños de pantalla.
--   **Miniaturas cuadradas:** Se cambió el estilo de las imágenes para que se muestren como cuadrados perfectos (`aspect-square w-full object-cover`), proporcionando una vista previa más uniforme y estéticamente agradable.
----
-## 21-09-25 Corrección de SyntaxError en core/memory_manager.py
-
-Se corrigió un `SyntaxError` en el archivo `core/memory_manager.py` que impedía el inicio de la API. El error se debía a un bloque `try` incompleto en la función `_get_relevant_documents_from_collection`. Se añadió el `return` y el bloque `except` faltante para cerrar correctamente el `try`.
-
--   **Punto 1**: Se añadió `return retrieved_docs` al final del bloque `try` de la función `_get_relevant_documents_from_collection`.
--   **Punto 2**: Se añadió un bloque `except Exception as e:` con su correspondiente `logger.error` y `return []` al final de la función `_get_relevant_documents_from_collection` para manejar errores.
----
-## 21-09-25 Corrección de IndentationError en core/enhanced_memory_manager.py
-
-Se corrigió un `IndentationError` en el archivo `core/enhanced_memory_manager.py` que impedía el inicio de la API. El error se debía a una línea `d,` mal formada y con indentación incorrecta. Se eliminó esta línea.
-
--   **Punto 1**: Se eliminó la línea `d,` en `core/enhanced_memory_manager.py` que causaba el error de indentación.
----
-## 21-09-25 Corrección de IndentationError y limpieza de código duplicado en core/enhanced_memory_manager.py
-
-Se corrigió un `IndentationError` en el archivo `core/enhanced_memory_manager.py` que impedía el inicio de la API. El error se debía a un bloque de código duplicado y mal indentado. Se eliminó este bloque de código.
-
--   **Punto 1**: Se eliminó un bloque de código duplicado y mal indentado que comenzaba con `"timestamp": datetime.now().isoformat(),` y terminaba con un `logger.info` duplicado.
+- **Llamada a `handleSaveOrder`**: La función `handleInvertOrder` ahora llama a `handleSaveOrder` después de actualizar el orden de las fotos en el estado local, asegurando la persistencia de los cambios.

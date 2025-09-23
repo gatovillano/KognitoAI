@@ -3,10 +3,12 @@
 import asyncio
 import logging
 import os
+import time # Added for timing measurements
 import warnings
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Dict, List, Literal, Optional
 
+import psutil # Added for system resource monitoring
 import aiohttp
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
@@ -32,6 +34,16 @@ from tavily import AsyncTavilyClient
 from open_deep_research.configuration import Configuration, SearchAPI
 from open_deep_research.prompts import summarize_webpage_prompt
 from open_deep_research.state import ResearchComplete, Summary
+
+def time_function(func):
+    """Decorator to measure the execution time of an async function."""
+    async def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = await func(*args, **kwargs)
+        end_time = time.time()
+        logging.info(f"Function {func.__name__} executed in {end_time - start_time:.4f} seconds")
+        return result
+    return wrapper
 
 ##########################
 # Tavily Search Tool Utils
@@ -135,11 +147,12 @@ async def tavily_search(
     
     return formatted_output
 
+@time_function
 async def tavily_search_async(
-    search_queries, 
-    max_results: int = 5, 
-    topic: Literal["general", "news", "finance"] = "general", 
-    include_raw_content: bool = True, 
+    search_queries,
+    max_results: int = 5,
+    topic: Literal["general", "news", "finance"] = "general",
+    include_raw_content: bool = True,
     config: RunnableConfig = None
 ):
     """Execute multiple Tavily search queries asynchronously.
@@ -172,6 +185,7 @@ async def tavily_search_async(
     search_results = await asyncio.gather(*search_tasks)
     return search_results
 
+@time_function
 async def summarize_webpage(model: BaseChatModel, webpage_content: str) -> str:
     """Summarize webpage content using AI model with timeout protection.
     
@@ -185,7 +199,360 @@ async def summarize_webpage(model: BaseChatModel, webpage_content: str) -> str:
     try:
         # Create prompt with current date context
         prompt_content = summarize_webpage_prompt.format(
-            webpage_content=webpage_content, 
+            webpage_content=webpage_content,
+            date=get_today_str()
+        )
+        
+        # Execute summarization with timeout to prevent hanging
+        summary = await asyncio.wait_for(
+            model.ainvoke([HumanMessage(content=prompt_content)]),
+            timeout=60.0  # 60 second timeout for summarization
+        )
+        
+        # Format the summary with structured sections
+        formatted_summary = (
+            f"<summary>\n{summary.summary}\n</summary>\n\n"
+            f"<key_excerpts>\n{summary.key_excerpts}\n</key_excerpts>"
+        )
+        
+        return formatted_summary
+        
+    except asyncio.TimeoutError:
+        # Timeout during summarization - return original content
+        logging.warning("Summarization timed out after 60 seconds, returning original content")
+        return webpage_content
+    except Exception as e:
+        # Other errors during summarization - log and return original content
+        logging.warning(f"Summarization failed with error: {str(e)}, returning original content")
+        return webpage_content
+
+##########################
+# Reflection Tool Utils
+##########################
+
+@tool(description="Strategic reflection tool for research planning")
+def think_tool(reflection: str) -> str:
+    """Tool for strategic reflection on research progress and decision-making.
+
+    Use this tool after each search to analyze results and plan next steps systematically.
+    This creates a deliberate pause in the research workflow for quality decision-making.
+
+    When to use:
+    - After receiving search results: What key information did I find?
+    - Before deciding next steps: Do I have enough to answer comprehensively?
+    - When assessing research gaps: What specific information am I still missing?
+    - Before concluding research: Can I provide a complete answer now?
+
+    Reflection should address:
+    1. Analysis of current findings - What concrete information have I gathered?
+    2. Gap assessment - What crucial information is still missing?
+    3. Quality evaluation - Do I have sufficient evidence/examples for a good answer?
+    4. Strategic decision - Should I continue searching or provide my answer?
+
+    Args:
+        reflection: Your detailed reflection on research progress, findings, gaps, and next steps
+
+    Returns:
+        Confirmation that reflection was recorded for decision-making
+    """
+    return f"Reflection recorded: {reflection}"
+
+##########################
+# MCP Utils
+##########################
+
+async def get_mcp_access_token(
+    supabase_token: str,
+    base_mcp_url: str,
+) -> Optional[Dict[str, Any]]:
+    """Exchange Supabase token for MCP access token using OAuth token exchange.
+    
+    Args:
+        supabase_token: Valid Supabase authentication token
+        base_mcp_url: Base URL of the MCP server
+        
+    Returns:
+        Token data dictionary if successful, None if failed
+    """
+    try:
+        # Prepare OAuth token exchange request data
+        form_data = {
+            "client_id": "mcp_default",
+            "subject_token": supabase_token,
+            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+            "resource": base_mcp_url.rstrip("/") + "/mcp",
+            "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+        }
+        
+        # Execute token exchange request
+        async with aiohttp.ClientSession() as session:
+            token_url = base_mcp_url.rstrip("/") + "/oauth/token"
+            headers = {"Content-Type": "application/x-www-form-urlencoded"}
+            
+            async with session.post(token_url, headers=headers, data=form_data) as response:
+                if response.status == 200:
+                    # Successfully obtained token
+                    token_data = await response.json()
+                    return token_data
+                else:
+                    # Log error details for debugging
+                    response_text = await response.text()
+                    logging.error(f"Token exchange failed: {response_text}")
+                    
+    except Exception as e:
+        logging.error(f"Error during token exchange: {e}")
+    
+    return None
+
+async def get_tokens(config: RunnableConfig):
+    """Retrieve stored authentication tokens with expiration validation.
+    
+    Args:
+        config: Runtime configuration containing thread and user identifiers
+        
+    Returns:
+        Token dictionary if valid and not expired, None otherwise
+    """
+    store = get_store()
+    
+    # Extract required identifiers from config
+    thread_id = config.get("configurable", {}).get("thread_id")
+    if not thread_id:
+        return None
+        
+    user_id = config.get("metadata", {}).get("owner")
+    if not user_id:
+        return None
+    
+    # Retrieve stored tokens
+    tokens = await store.aget((user_id, "tokens"), "data")
+    if not tokens:
+        return None
+    
+    # Check token expiration
+    expires_in = tokens.value.get("expires_in")  # seconds until expiration
+    created_at = tokens.created_at  # datetime of token creation
+    current_time = datetime.now(timezone.utc)
+    expiration_time = created_at + timedelta(seconds=expires_in)
+    
+    if current_time > expiration_time:
+        # Token expired, clean up and return None
+        await store.adelete((user_id, "tokens"), "data")
+        return None
+
+    return tokens.value
+
+async def set_tokens(config: RunnableConfig, tokens: dict[str, Any]):
+    """Store authentication tokens in the configuration store.
+    
+    Args:
+        config: Runtime configuration containing thread and user identifiers
+        tokens: Token dictionary to store
+    """
+    store = get_store()
+    
+    # Extract required identifiers from config
+    thread_id = config.get("configurable", {}).get("thread_id")
+    if not thread_id:
+        return
+        
+    user_id = config.get("metadata", {}).get("owner")
+    if not user_id:
+        return
+    
+    # Store the tokens
+    await store.aput((user_id, "tokens"), "data", tokens)
+
+async def fetch_tokens(config: RunnableConfig) -> dict[str, Any]:
+    """Fetch and refresh MCP tokens, obtaining new ones if needed.
+    
+    Args:
+        config: Runtime configuration with authentication details
+        
+    Returns:
+        Valid token dictionary, or None if unable to obtain tokens
+    """
+    # Try to get existing valid tokens first
+    current_tokens = await get_tokens(config)
+    if current_tokens:
+        return current_tokens
+    
+    # Extract Supabase token for new token exchange
+    supabase_token = config.get("configurable", {}).get("x-supabase-access-token")
+    if not supabase_token:
+        return None
+    
+    # Extract MCP configuration
+    mcp_config = config.get("configurable", {}).get("mcp_config")
+    if not mcp_config or not mcp_config.get("url"):
+        return None
+    
+    # Exchange Supabase token for MCP tokens
+    mcp_tokens = await get_mcp_access_token(supabase_token, mcp_config.get("url"))
+    if not mcp_tokens:
+        return None
+
+    # Store the new tokens and return them
+    await set_tokens(config, mcp_tokens)
+    return mcp_tokens
+
+
+
+##########################
+# Tavily Search Tool Utils
+##########################
+TAVILY_SEARCH_DESCRIPTION = (
+    "A search engine optimized for comprehensive, accurate, and trusted results. "
+    "Useful for when you need to answer questions about current events."
+)
+@tool(description=TAVILY_SEARCH_DESCRIPTION)
+async def tavily_search(
+    queries: List[str],
+    max_results: Annotated[int, InjectedToolArg] = 5,
+    topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
+    config: RunnableConfig = None
+) -> str:
+    """Fetch and summarize search results from Tavily search API.
+
+    Args:
+        queries: List of search queries to execute
+        max_results: Maximum number of results to return per query
+        topic: Topic filter for search results (general, news, or finance)
+        config: Runtime configuration for API keys and model settings
+
+    Returns:
+        Formatted string containing summarized search results
+    """
+    # Step 1: Execute search queries asynchronously
+    search_results = await tavily_search_async(
+        queries,
+        max_results=max_results,
+        topic=topic,
+        include_raw_content=True,
+        config=config
+    )
+    
+    # Step 2: Deduplicate results by URL to avoid processing the same content multiple times
+    unique_results = {}
+    for response in search_results:
+        for result in response['results']:
+            url = result['url']
+            if url not in unique_results:
+                unique_results[url] = {**result, "query": response['query']}
+    
+    # Step 3: Set up the summarization model with configuration
+    configurable = Configuration.from_runnable_config(config)
+    
+    # Character limit to stay within model token limits (configurable)
+    max_char_to_include = configurable.max_content_length
+    
+    # Initialize summarization model with retry logic
+    model_api_key = get_api_key_for_model(configurable.summarization_model, config)
+    summarization_model = init_chat_model(
+        model=configurable.summarization_model,
+        max_tokens=configurable.summarization_model_max_tokens,
+        api_key=model_api_key,
+        tags=["langsmith:nostream"]
+    ).with_structured_output(Summary).with_retry(
+        stop_after_attempt=configurable.max_structured_output_retries
+    )
+    
+    # Step 4: Create summarization tasks (skip empty content)
+    async def noop():
+        """No-op function for results without raw content."""
+        return None
+    
+    summarization_tasks = [
+        noop() if not result.get("raw_content") 
+        else summarize_webpage(
+            summarization_model, 
+            result['raw_content'][:max_char_to_include]
+        )
+        for result in unique_results.values()
+    ]
+    
+    # Step 5: Execute all summarization tasks in parallel
+    summaries = await asyncio.gather(*summarization_tasks)
+    
+    # Step 6: Combine results with their summaries
+    summarized_results = {
+        url: {
+            'title': result['title'], 
+            'content': result['content'] if summary is None else summary
+        }
+        for url, result, summary in zip(
+            unique_results.keys(), 
+            unique_results.values(), 
+            summaries
+        )
+    }
+    
+    # Step 7: Format the final output
+    if not summarized_results:
+        return "No valid search results found. Please try different search queries or use a different search API."
+    
+    formatted_output = "Search results: \n\n"
+    for i, (url, result) in enumerate(summarized_results.items()):
+        formatted_output += f"\n\n--- SOURCE {i+1}: {result['title']} ---\n"
+        formatted_output += f"URL: {url}\n\n"
+        formatted_output += f"SUMMARY:\n{result['content']}\n\n"
+        formatted_output += "\n\n" + "-" * 80 + "\n"
+    
+    return formatted_output
+
+@time_function
+async def tavily_search_async(
+    search_queries,
+    max_results: int = 5,
+    topic: Literal["general", "news", "finance"] = "general",
+    include_raw_content: bool = True,
+    config: RunnableConfig = None
+):
+    """Execute multiple Tavily search queries asynchronously.
+    
+    Args:
+        search_queries: List of search query strings to execute
+        max_results: Maximum number of results per query
+        topic: Topic category for filtering results
+        include_raw_content: Whether to include full webpage content
+        config: Runtime configuration for API key access
+        
+    Returns:
+        List of search result dictionaries from Tavily API
+    """
+    # Initialize the Tavily client with API key from config
+    tavily_client = AsyncTavilyClient(api_key=get_tavily_api_key(config))
+    
+    # Create search tasks for parallel execution
+    search_tasks = [
+        tavily_client.search(
+            query,
+            max_results=max_results,
+            include_raw_content=include_raw_content,
+            topic=topic
+        )
+        for query in search_queries
+    ]
+    
+    # Execute all search queries in parallel and return results
+    search_results = await asyncio.gather(*search_tasks)
+    return search_results
+
+@time_function
+async def summarize_webpage(model: BaseChatModel, webpage_content: str) -> str:
+    """Summarize webpage content using AI model with timeout protection.
+    
+    Args:
+        model: The chat model configured for summarization
+        webpage_content: Raw webpage content to be summarized
+        
+    Returns:
+        Formatted summary with key excerpts, or original content if summarization fails
+    """
+    try:
+        # Create prompt with current date context
+        prompt_content = summarize_webpage_prompt.format(
+            webpage_content=webpage_content,
             date=get_today_str()
         )
         
@@ -523,7 +890,6 @@ async def load_mcp_tools(
     
     return configured_tools
 
-
 ##########################
 # Tool Utils
 ##########################
@@ -540,8 +906,8 @@ async def get_search_tool(search_api: SearchAPI):
     if search_api == SearchAPI.ANTHROPIC:
         # Anthropic's native web search with usage limits
         return [{
-            "type": "web_search_20250305", 
-            "name": "web_search", 
+            "type": "web_search_20250305",
+            "name": "web_search",
             "max_uses": 5
         }]
         
@@ -553,8 +919,8 @@ async def get_search_tool(search_api: SearchAPI):
         # Configure Tavily search tool with metadata
         search_tool = tavily_search
         search_tool.metadata = {
-            **(search_tool.metadata or {}), 
-            "type": "search", 
+            **(search_tool.metadata or {}),
+            "type": "search",
             "name": "web_search"
         }
         return [search_tool]
@@ -586,7 +952,7 @@ async def get_all_tools(config: RunnableConfig):
     
     # Track existing tool names to prevent conflicts
     existing_tool_names = {
-        tool.name if hasattr(tool, "name") else tool.get("name", "web_search") 
+        tool.name if hasattr(tool, "name") else tool.get("name", "web_search")
         for tool in tools
     }
     

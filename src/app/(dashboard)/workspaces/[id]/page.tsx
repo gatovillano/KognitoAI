@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect, use, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -80,7 +80,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const [isViewNoteDialogOpen, setIsViewNoteDialogOpen] = useState(false); // New state for ViewNoteDialog
   const [selectedNoteCategory, setSelectedNoteCategory] = useState<string>('Todas'); // New state for note category filter
 
-  const fetchInitialData = async () => {
+  const fetchInitialData = useCallback(async () => {
     setLoading(true);
     try {
       // Fetch workspace info, collections, events, tasks, and notes in parallel
@@ -106,9 +106,9 @@ export default function WorkspaceDashboard({ params }: PageProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [workspaceId]);
 
-  const fetchChats = async (skip: number, initialLoad = false) => {
+  const fetchChats = useCallback(async (skip: number, initialLoad = false) => {
     if (!initialLoad) {
       setIsFetchingMoreChats(true);
     }
@@ -124,11 +124,11 @@ export default function WorkspaceDashboard({ params }: PageProps) {
         setIsFetchingMoreChats(false);
       }
     }
-  };
+  }, [workspaceId, setChats, setHasMoreChats, setIsFetchingMoreChats]);
 
   useEffect(() => {
     fetchInitialData();
-  }, [workspaceId, fetchInitialData]);
+  }, [workspaceId]);
 
   const handleLoadMoreChats = () => {
     if (hasMoreChats && !isFetchingMoreChats) {

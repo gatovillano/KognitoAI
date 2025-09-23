@@ -500,6 +500,7 @@ class Photo(Base):
     thumbnail_path = Column(String, nullable=True) # NEW COLUMN
     is_favorite = Column(Boolean, default=False)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
+    order = Column(Integer, nullable=False, default=0) # NUEVA COLUMNA PARA EL ORDEN
 
     album = relationship("Album", back_populates="photos", foreign_keys=[album_id])
 
@@ -511,9 +512,10 @@ class SharedAlbumLink(Base):
     album_id = Column(UUID(as_uuid=True), ForeignKey('albums.id'), nullable=False)
     token = Column(String, unique=True, nullable=False, index=True)
     password_hash = Column(String, nullable=True)
-    expiry_date = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    expiry_date = Column(DateTime, nullable=True) # NUEVA COLUMNA
+    created_at = Column(DateTime, default=datetime.utcnow) # NUEVA COLUMNA
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    allow_download = Column(Boolean, default=True, nullable=False) # NUEVA COLUMNA
 
     album = relationship("Album")
 
@@ -866,79 +868,6 @@ async def get_db_session():
     async with DBSession(SessionLocal) as session:
         yield session
 
-async def get_or_create_account_from_platform_id(
-    platform: str, 
-    platform_user_id: str,
-    first_name: str | None = None,
-    last_name: str | None = None,
-    username: str | None = None
-) -> Tuple[Account, bool] | None:
-    async with DBSession(SessionLocal) as db:
-        try:
-            stmt = select(PlatformIdentity).where(
-                PlatformIdentity.platform == platform,
-                PlatformIdentity.platform_user_id == platform_user_id
-            ).options(selectinload(PlatformIdentity.account).selectinload(Account.profile))
-            
-            result = await db.execute(stmt)
-            identity = result.scalars().first()
-            
-            if identity is not None and identity.account is not None:
-                # Si la cuenta existe pero no tiene nombre, la actualizamos.
-                if identity.account.name is None and first_name:  # type: ignore
-                    identity.account.name = first_name
-                if identity.account.username is None and username:  # type: ignore
-                    identity.account.username = username
-                if first_name or username:
-                    await db.commit()
-                return (identity.account, False)
-
-            # Si no existe, crear todo desde cero.
-            logger.info(f"Creando nueva cuenta para {platform}:{platform_user_id}...")
-            new_account = Account(
-                name=first_name,
-                username=username
-            )
-            db.add(new_account)
-            await db.flush()
-            
-            new_identity = PlatformIdentity(
-                account_id=new_account.id,
-                platform=platform,
-                platform_user_id=platform_user_id
-            )
-            db.add(new_identity)
-            
-            new_profile = Perfil(account_id=new_account.id)
-            db.add(new_profile)
-            
-            await db.commit()
-            
-            logger.info(f"✅ Nueva cuenta e identidad creadas para {platform}:{platform_user_id}. Account ID: {new_account.id}")
-            return (new_account, True)
-
-        except Exception as e:
-            logger.error(f"Error en get_or_create_account_from_platform_id para {platform}:{platform_user_id}: {e}", exc_info=True)
-            await db.rollback()
-            return None
-        
-# En core/database.py, al final del archivo
-
-async def get_account_by_telegram_id(db_session, telegram_id: int) -> Optional[Account]:
-    """
-    Busca una cuenta de usuario universal utilizando su ID de plataforma de Telegram.
-    Esta es una función de solo lectura; no crea una cuenta si no existe.
-    """
-    stmt = (
-        select(Account)
-        .join(PlatformIdentity)
-        .where(
-            PlatformIdentity.platform == 'telegram',
-            PlatformIdentity.platform_user_id == str(telegram_id)
-        )
-    )
-    result = await db_session.execute(stmt)
-    return result.scalars().first()
 
 
 from sqlalchemy import delete

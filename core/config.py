@@ -59,7 +59,7 @@ class Config:
         # Temperatura para la generación de texto del LLM principal.
         # Un valor más alto fomenta respuestas más creativas y detalladas.
         self.llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", 0.7))
-        self.ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text") # Modelo de embedding de Ollama
+        self.ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text:q4_K_M") # Modelo de embedding de Ollama cuantizado
         self.ollama_api_url: str = os.getenv("OLLAMA_API_URL", "http://196.168.100.106:11434") # URL interna del servicio Ollama
         self.llm_request_timeout: int = int(os.getenv("LLM_REQUEST_TIMEOUT", 120)) # Nuevo: Tiempo de espera para las solicitudes al LLM en segundos
 
