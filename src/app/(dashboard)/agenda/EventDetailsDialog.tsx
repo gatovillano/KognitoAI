@@ -5,19 +5,20 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { toast } from 'sonner';
 import { useState, useEffect } from 'react';
+import { Pencil } from 'lucide-react'; // Importar el icono de lápiz
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { Form, FormControl, FormField, FormItem, FormLabel } from '@/components/ui/form'; // Eliminar FormMessage
 import apiClient from '@/lib/api';
 import { ProfileSelectorDialog } from '@/components/dialogs/ProfileSelectorDialog';
 import { Tag } from '@/components/ui/tag'; // Assuming a Tag component for displaying linked profiles
 
 const formSchema = z.object({
-  description: z.string().min(3, "La descripción es muy corta."),
-  date: z.string().min(1, "Debes seleccionar una fecha."),
-  time: z.string().min(1, "Debes especificar una hora."),
+  description: z.string(),
+  date: z.string(),
+  time: z.string(),
   team_id: z.string().optional(),
   workspace_id: z.string().optional(),
 });
@@ -25,11 +26,11 @@ const formSchema = z.object({
 interface EventDetailsDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaveSuccess: (event: any) => void;
+  onEditClick: (event: any) => void; // Nueva prop para manejar la edición
   event: any;
 }
 
-export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event }: EventDetailsDialogProps) {
+export function EventDetailsDialog({ isOpen, onOpenChange, onEditClick, event }: EventDetailsDialogProps) {
   const [teams, setTeams] = useState<any[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(false);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
@@ -44,6 +45,7 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
       date: event?.event_datetime_local ? event.event_datetime_local.split('T')[0] : '',
       time: event?.event_datetime_local ? event.event_datetime_local.split('T')[1].substring(0, 5) : '',
       team_id: event?.team_id?.toString() || '',
+      workspace_id: event?.workspace_id?.toString() || '',
     },
   });
 
@@ -65,10 +67,14 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
       setLoadingWorkspaces(true);
       try {
         const response = await apiClient.get('/api/workspaces');
-        if (Array.isArray(response.data)) {
+        // Solución al problema: /api/workspaces did not return an array
+        if (response.data && Array.isArray(response.data.workspaces)) {
+          setWorkspaces(response.data.workspaces);
+        } else if (Array.isArray(response.data)) { // En caso de que la respuesta sea directamente el array
           setWorkspaces(response.data);
-        } else {
-          console.warn("/api/workspaces did not return an array:", response.data);
+        }
+        else {
+          console.warn("/api/workspaces did not return an array in expected format:", response.data);
           setWorkspaces([]);
         }
       } catch (error) {
@@ -111,54 +117,22 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
     }
   }, [event, form]);
 
-  async function onSubmit(values: z.infer<typeof formSchema>) {
-    const localDateTime = new Date(`${values.date}T${values.time}:00`); // Crear un objeto Date con la hora local
-    const eventDateTimeUTC = localDateTime.toISOString(); // Convertir a ISO 8601 (UTC)
-    const toastId = toast.loading('Actualizando evento...');
-    try {
-      const response = await apiClient.put(`/api/agenda/events/${event.id}`, {
-        description: values.description,
-        event_datetime: eventDateTimeUTC, // Enviar la hora en formato ISO 8601 (UTC)
-        team_id: values.team_id ? parseInt(values.team_id) : null,
-        workspace_id: values.workspace_id || null,
-      });
-      toast.success('¡Evento actualizado!', { id: toastId });
-      onSaveSuccess(response.data);
-      onOpenChange(false);
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Error al actualizar el evento.', { id: toastId });
-    }
-  }
+  // No hay onSubmit en este diálogo de solo lectura
 
-  // Function to handle linking a profile
+  // Function to handle linking a profile (se mantiene para visualización)
   const handleLinkProfile = async (selectedProfiles: any[]) => {
     if (!event?.id || selectedProfiles.length === 0) return;
-
-    const profileToLink = selectedProfiles[0]; // Assuming single selection for now
-    try {
-      await apiClient.post(`/api/agenda/events/${event.id}/link-profile`, { profile_id: profileToLink.id });
-      toast.success(`Perfil ${profileToLink.name} vinculado correctamente.`);
-      setLinkedProfiles(prev => [...prev, profileToLink]); // Add to linked profiles state
-      onSaveSuccess(event); // Trigger a refresh in parent if needed
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || `Error al vincular el perfil ${profileToLink.name}.`);
-      console.error("Error linking profile:", error);
-    }
+    // Esta función no debería ser llamada en un diálogo de solo lectura,
+    // pero la mantengo para evitar errores si el botón de "Vincular Perfil" se muestra por error.
+    // En el modo de visualización, este botón debería estar deshabilitado o no visible.
+    toast.info("Para vincular perfiles, por favor edita el evento.");
   };
 
-  // Function to handle unlinking a profile
+  // Function to handle unlinking a profile (se mantiene para visualización)
   const handleUnlinkProfile = async (profileId: string) => {
     if (!event?.id) return;
-
-    try {
-      await apiClient.post(`/api/agenda/events/${event.id}/unlink-profile`, { profile_id: profileId });
-      toast.success(`Perfil desvinculado correctamente.`);
-      setLinkedProfiles(prev => prev.filter(p => p.id !== profileId)); // Remove from linked profiles state
-      onSaveSuccess(event); // Trigger a refresh in parent if needed
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || `Error al desvincular el perfil.`);
-      console.error("Error unlinking profile:", error);
-    }
+    // Similar a handleLinkProfile, esta función no debería ser llamada.
+    toast.info("Para desvincular perfiles, por favor edita el evento.");
   };
 
   return (
@@ -168,16 +142,16 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
           <DialogTitle>Detalles del Evento</DialogTitle>
         </DialogHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <form className="space-y-4"> {/* Eliminar onSubmit */}
             <FormField control={form.control} name="description" render={({ field }) => (
-              <FormItem><FormLabel>Descripción</FormLabel><FormControl><Input placeholder="Reunión de equipo..." {...field} /></FormControl><FormMessage /></FormItem>
+              <FormItem><FormLabel>Descripción</FormLabel><FormControl><Input readOnly {...field} /></FormControl></FormItem>
             )} />
             <div className="grid grid-cols-2 gap-4">
               <FormField control={form.control} name="date" render={({ field }) => (
-                <FormItem><FormLabel>Fecha</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
+                <FormItem><FormLabel>Fecha</FormLabel><FormControl><Input type="date" readOnly {...field} /></FormControl></FormItem>
               )} />
               <FormField control={form.control} name="time" render={({ field }) => (
-                <FormItem><FormLabel>Hora</FormLabel><FormControl><Input type="time" {...field} /></FormControl><FormMessage /></FormItem>
+                <FormItem><FormLabel>Hora</FormLabel><FormControl><Input type="time" readOnly {...field} /></FormControl></FormItem>
               )} />
             </div>
             <FormField control={form.control} name="team_id" render={({ field }) => (
@@ -186,9 +160,8 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
                 <FormControl>
                   <select 
                     className="w-full border rounded-md p-2"
-                    onChange={field.onChange} 
                     value={field.value || ''}
-                    disabled={loadingTeams}
+                    disabled // Deshabilitar el select
                   >
                     <option value="">{loadingTeams ? "Cargando equipos..." : "Seleccionar equipo (opcional)"}</option>
                     {teams.map(team => (
@@ -198,7 +171,6 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
                     ))}
                   </select>
                 </FormControl>
-                <FormMessage />
               </FormItem>
             )} />
             <FormField control={form.control} name="workspace_id" render={({ field }) => (
@@ -207,9 +179,8 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
                 <FormControl>
                   <select
                     className="w-full border rounded-md p-2"
-                    onChange={field.onChange}
                     value={field.value || ''}
-                    disabled={loadingWorkspaces}
+                    disabled // Deshabilitar el select
                   >
                     <option value="">{loadingWorkspaces ? "Cargando workspaces..." : "Seleccionar workspace (opcional)"}</option>
                     {workspaces.map(ws => (
@@ -219,7 +190,6 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
                     ))}
                   </select>
                 </FormControl>
-                <FormMessage />
               </FormItem>
             )} />
             {/* New section for Linked Profiles */}
@@ -232,11 +202,12 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
                   linkedProfiles.map(profile => (
                     <Tag key={profile.id} variant="outline" className="flex items-center gap-1">
                       {profile.name}
+                      {/* Botón de desvincular deshabilitado en modo visualización */}
                       <Button
                         variant="ghost"
                         size="sm"
                         className="h-auto p-1"
-                        onClick={() => handleUnlinkProfile(profile.id)}
+                        disabled
                       >
                         x
                       </Button>
@@ -244,30 +215,31 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onSaveSuccess, event 
                   ))
                 )}
               </div>
+              {/* Botón de vincular perfil deshabilitado en modo visualización */}
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setIsProfileSelectorOpen(true)}
+                disabled
                 className="w-full"
               >
                 Vincular Perfil
               </Button>
             </div>
             <DialogFooter>
-              <Button type="submit" disabled={form.formState.isSubmitting}>
-                {form.formState.isSubmitting ? 'Actualizando...' : 'Actualizar'}
+              <Button type="button" onClick={() => onEditClick(event)}>
+                <Pencil className="mr-2 h-4 w-4" /> Editar Evento
               </Button>
             </DialogFooter>
           </form>
         </Form>
       </DialogContent>
 
-      {/* Profile Selector Dialog */}
+      {/* Profile Selector Dialog (se mantiene pero no debería ser interactivo) */}
       <ProfileSelectorDialog
         isOpen={isProfileSelectorOpen}
         onOpenChange={setIsProfileSelectorOpen}
         onSelectProfiles={handleLinkProfile}
-        multiselect={false} // Events link to single profile at a time
+        multiselect={false}
         preSelectedProfileIds={linkedProfiles.map(p => p.id)}
       />
     </Dialog>

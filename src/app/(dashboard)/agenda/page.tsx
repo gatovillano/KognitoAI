@@ -14,6 +14,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { format, startOfWeek, endOfWeek } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { EventDetailsDialog } from './EventDetailsDialog';
+import { EventEditDialog } from './EventEditDialog'; // Importar EventEditDialog
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { TaskDialog } from './task-dialog'; // Importar TaskDialog
 import { Checkbox } from '@/components/ui/checkbox'; // Importar Checkbox para las tareas
@@ -61,6 +62,7 @@ export default function AgendaPage() {
   const [selectedEvent, setSelectedEvent] = useState<AgendaEvent | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskResponse | null>(null); // Nuevo estado para editar tarea
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+  const [isEventEditDialogOpen, setIsEventEditDialogOpen] = useState(false); // Nuevo estado para el diálogo de edición
 
   const fetchEvents = async () => {
     setIsLoading(true);
@@ -81,8 +83,18 @@ export default function AgendaPage() {
 
   useEffect(() => { fetchEvents(); }, []);
 
-  const handleSaveSuccess = (newEvent: AgendaEvent) => {
-    setAllEvents(prev => [...prev, newEvent].sort((a,b) => new Date(a.event_datetime_utc).getTime() - new Date(b.event_datetime_utc).getTime()));
+  const handleSaveSuccess = (updatedEvent: AgendaEvent) => {
+    setAllEvents(prev => {
+      const existingIndex = prev.findIndex(e => e.id === updatedEvent.id);
+      if (existingIndex > -1) {
+        const updatedEvents = [...prev];
+        updatedEvents[existingIndex] = updatedEvent;
+        return updatedEvents.sort((a,b) => new Date(a.event_datetime_utc).getTime() - new Date(b.event_datetime_utc).getTime());
+      } else {
+        return [...prev, updatedEvent].sort((a,b) => new Date(a.event_datetime_utc).getTime() - new Date(b.event_datetime_utc).getTime());
+      }
+    });
+    setIsEventEditDialogOpen(false); // Cerrar el diálogo de edición después de guardar
   };
 
   const handleTaskSaveSuccess = (newTask: TaskResponse) => {
@@ -439,9 +451,20 @@ export default function AgendaPage() {
         <EventDetailsDialog
           isOpen={isDetailsDialogOpen}
           onOpenChange={setIsDetailsDialogOpen}
-          onSaveSuccess={(updatedEvent) => {
-            setAllEvents(allEvents.map(e => e.id === updatedEvent.id ? updatedEvent : e));
+          onEditClick={(eventToEdit) => { // Manejar el clic en editar desde EventDetailsDialog
+            setSelectedEvent(eventToEdit);
+            setIsDetailsDialogOpen(false); // Cerrar el diálogo de detalles
+            setIsEventEditDialogOpen(true); // Abrir el diálogo de edición
           }}
+          event={selectedEvent}
+        />
+      )}
+      {selectedEvent && (
+        <EventEditDialog
+          isOpen={isEventEditDialogOpen}
+          onOpenChange={setIsEventEditDialogOpen}
+          onSaveSuccess={handleSaveSuccess}
+          onCloseDetails={() => setIsDetailsDialogOpen(false)} // Pasar función para cerrar detalles
           event={selectedEvent}
         />
       )}

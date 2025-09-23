@@ -2,7 +2,7 @@
 
 import logging
 from core.config import settings # Importar settings desde core.config
-from typing import Optional
+from typing import List, Optional
 import asyncio
 
 # Importamos la clase específica de LangChain para los embeddings de Ollama.
@@ -66,6 +66,15 @@ async def initialize_embeddings():
     # Por consistencia con la función original, lo mantenemos.
     return _embedding_model
 
+async def get_cached_embedding(query: str) -> Optional[List[float]]:
+    """
+    Genera y cachea el embedding para una consulta dada.
+    """
+    embedding_model = get_embedding_model()
+    if not embedding_model:
+        logger.error("El modelo de embeddings no está inicializado.")
+        return None
+    return await embedding_model.aembed_query(query)
 
 def get_embedding_model() -> Optional[OllamaEmbeddings]:
     """

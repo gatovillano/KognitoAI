@@ -1,5 +1,6 @@
 // En: src/lib/api.ts (Versión para API Externa)
 import axios from 'axios';
+import { toast } from 'sonner';
 
 const apiClient = axios.create({
   // Usar variable de entorno o fallback a desarrollo local
@@ -45,6 +46,24 @@ apiClient.interceptors.response.use(
         console.warn('🔄 Redirigiendo al login...');
         window.location.href = '/login';
       }
+    } else if (error.response?.status === 422) {
+      // Error de validación de Pydantic (422 Unprocessable Entity)
+      const errors = error.response.data.detail;
+      let errorMessage = "Error de validación:";
+      if (Array.isArray(errors)) {
+        errors.forEach((err: any) => {
+          errorMessage += `\n- ${err.loc.join('.')} ${err.msg}`;
+        });
+      } else if (typeof errors === 'string') {
+        errorMessage = errors;
+      }
+      toast.error(errorMessage);
+    } else if (error.response?.data?.detail) {
+      // Otros errores de la API con un mensaje 'detail'
+      toast.error(error.response.data.detail);
+    } else {
+      // Error genérico
+      toast.error("Ocurrió un error inesperado.");
     }
     return Promise.reject(error);
   }

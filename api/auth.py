@@ -9,7 +9,6 @@ import hashlib
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
-from urllib.parse import unquote, parse_qs
 
 from fastapi import APIRouter, HTTPException, Depends, status, Form
 from fastapi.responses import JSONResponse
@@ -18,7 +17,8 @@ from pydantic import BaseModel, Field, EmailStr
 import httpx
 
 from core.config import settings
-from core.database import SessionLocal, Account, PlatformIdentity, VerificationCode, get_account_by_telegram_id, find_telegram_identity
+from core.database import SessionLocal, Account, PlatformIdentity, VerificationCode
+from core.repositories.account_repository import AccountRepository
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.security import get_password_hash, verify_password, create_access_token, get_current_account_id, oauth2_scheme
@@ -166,21 +166,14 @@ async def handle_telegram_login(login_data: TelegramLoginRequest, db: AsyncSessi
     if not verify_telegram_hash(login_data, settings.telegram_bot_token): raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hash de Telegram inválido.")
     if time.time() - login_data.auth_date > 300: raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Datos de autenticación expirados.")
 
-    identity_result = await db.execute(select(PlatformIdentity).where(PlatformIdentity.platform == 'telegram', PlatformIdentity.platform_user_id == str(login_data.id)))
-    identity = identity_result.scalars().first()
-
-    if identity:
-        account = await db.get(Account, identity.account_id)
-        if not account:
-             raise HTTPException(status_code=500, detail="Error de consistencia de datos.")
-    else:
-        account = Account(name=login_data.first_name, username=login_data.username)
-        db.add(account)
-        await db.flush()
-        new_identity = PlatformIdentity(account_id=account.id, platform='telegram', platform_user_id=str(login_data.id))
-        db.add(new_identity)
-        await db.commit()
-        await db.refresh(account)
+    repo = AccountRepository(db)
+    account, _ = await repo.get_or_create_account_from_platform_id(
+        platform='telegram',
+        platform_user_id=str(login_data.id),
+        first_name=login_data.first_name,
+        last_name=login_data.last_name,
+        username=login_data.username
+    )
 
     access_token = create_access_token(data={"sub": str(account.id)})
     return TokenResponse(access_token=access_token)
@@ -211,7 +204,8 @@ async def request_verification_code_options():
 @router.post("/auth/request-code", summary="Solicitar código de verificación")
 async def request_verification_code(request_data: AuthRequestCode, db: AsyncSession = Depends(get_db)):
     """Busca al usuario, genera un código, lo guarda en la BD y lo envía a Telegram vía HTTP."""
-    identity = await find_telegram_identity(db, request_data.identifier)
+    repo = AccountRepository(db)
+    identity = await repo.find_telegram_identity(request_data.identifier)
     if not identity:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No se encontró usuario con identificador '{request_data.identifier}'.")
     
@@ -252,7 +246,8 @@ async def request_verification_code(request_data: AuthRequestCode, db: AsyncSess
 @router.post("/auth/verify-code", response_model=TokenResponse, summary="Verificar código")
 async def verify_code_and_get_token(request_data: AuthVerifyCode, db: AsyncSession = Depends(get_db)):
     """Verifica un código contra la BD y devuelve un token si es válido."""
-    identity = await find_telegram_identity(db, request_data.identifier)
+    repo = AccountRepository(db)
+    identity = await repo.find_telegram_identity(request_data.identifier)
     if not identity:
         raise HTTPException(status_code=404, detail="No se pudo encontrar la cuenta asociada.")
 
@@ -325,7 +320,8 @@ async def emergency_token(telegram_id: str, db: AsyncSession = Depends(get_db)):
 
     try:
         # Buscar la identidad de Telegram
-        identity = await find_telegram_identity(db, telegram_id)
+        repo = AccountRepository(db)
+        identity = await repo.find_telegram_identity(telegram_id)
         if not identity:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
@@ -356,7 +352,8 @@ async def get_system_prompt(user_id: int = Depends(get_validated_user_id), db: A
     Obtiene el prompt de sistema personalizado para un usuario de Telegram.
     Protegido por `initData` de Telegram.
     """
-    account = await get_account_by_telegram_id(db, user_id)
+    repo = AccountRepository(db)
+    account = await repo.get_account_by_telegram_id(user_id)
     if not account:
         return {"prompt": settings.default_system_prompt, "is_custom": False}
 
@@ -373,7 +370,8 @@ async def save_system_prompt(user_id: int = Depends(get_validated_user_id), syst
     Guarda el prompt de sistema personalizado para un usuario de Telegram.
     Protegido por `initData` de Telegram.
     """
-    account = await get_account_by_telegram_id(db, user_id)
+    repo = AccountRepository(db)
+    account = await repo.get_account_by_telegram_id(user_id)
     if not account:
         raise HTTPException(status_code=404, detail="No se pudo encontrar la cuenta para guardar el prompt.")
 

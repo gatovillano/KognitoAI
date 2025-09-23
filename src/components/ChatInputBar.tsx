@@ -160,7 +160,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
       <div className="flex justify-center w-full">
         <form onSubmit={handleSubmit} className="relative w-full">
 
-          <div className="rounded-lg bg-card border border-border px-4 py-2 shadow-medium hover:shadow-strong transition-shadow duration-300">
+          <div className="rounded-3xl bg-card border border-border px-4 py-2 shadow-medium hover:shadow-strong transition-shadow duration-300">
             {currentContext.length > 0 && (
               <div className="mb-2 flex gap-2 overflow-x-auto pb-2">
                 {currentContext.map((item, index) => (
