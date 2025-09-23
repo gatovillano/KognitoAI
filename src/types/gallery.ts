@@ -5,6 +5,7 @@ export interface PhotoResponse {
   thumbnail_path?: string;
   is_favorite: boolean;
   uploaded_at: string;
+  order: number;
 }
 
 export interface AlbumResponse {

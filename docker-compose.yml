@@ -39,6 +39,10 @@ services:
         condition: service_healthy # Esperar a que la DB esté saludable
       neo4j:
         condition: service_started # Neo4j solo necesita haber arrancado
+      redis:
+        condition: service_started # Esperar a que Redis esté disponible
+      init_neo4j:
+        condition: service_completed_successfully # Esperar a que los índices de Neo4j se creen
     ports:
       - "${API_PORT:-8889}:8000" # API accesible en localhost:8889
     volumes:
@@ -172,7 +176,7 @@ services:
       NEO4J_dbms_connector_http_enabled: "true"
       # Deshabilitamos la validación estricta para evitar problemas de configuración
       NEO4J_server_config_strict__validation_enabled: "false"
-      NEO4J_dbms_memory_transaction_total_max: "6G"   
+      NEO4J_dbms_memory_transaction_total_max: "6G"
     healthcheck:
       test: ["CMD-SHELL", "cypher-shell 'RETURN 1' || exit 1"]
       interval: 30s
@@ -181,6 +185,31 @@ services:
       start_period: 40s
     networks:
       - kognito_network
+
+
+  # 7. Servicio de Caching (Redis)
+  redis:
+    image: redis:7.0-alpine
+    container_name: kognito_redis
+    restart: always
+    ports:
+      - "6379:6379" # Puerto de Redis
+    networks:
+      - kognito_network
+
+  init_neo4j:
+    image: neo4j:5.15-community
+    container_name: kognito_neo4j_init
+    
+    networks:
+      - kognito_network
+    volumes:
+      - ./docker/neo4j/init_neo4j_indexes.cypher:/init_neo4j_indexes.cypher:ro
+    command: >
+      bash -c "
+        sleep 10 && # Dar un poco más de tiempo por si acaso
+        cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-neo4j} -f /init_neo4j_indexes.cypher || true
+      "
 
 networks:
   kognito_network:

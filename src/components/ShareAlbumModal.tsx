@@ -33,6 +33,17 @@ const ShareAlbumModal: React.FC<ShareAlbumModalProps> = ({ isOpen, onClose, albu
   const [error, setError] = useState<string | null>(null);
   const [existingLinks, setExistingLinks] = useState<SharedLinkResponse[]>([]);
   const [showPassword, setShowPassword] = useState(false); // State to toggle password visibility
+  const [allowDownload, setAllowDownload] = useState(true); // NEW STATE for download permission
+
+interface SharedLinkResponse {
+  id: string;
+  album_id: string;
+  token: string;
+  has_password: boolean;
+  expiry_date: string | null;
+  created_at: string;
+  allow_download: boolean; // NEW FIELD
+}
 
   const fetchExistingLinks = async () => {
     if (!albumId) return;
@@ -62,9 +73,10 @@ const ShareAlbumModal: React.FC<ShareAlbumModalProps> = ({ isOpen, onClose, albu
     setGeneratedLink(null);
 
     try {
-      const payload: { password?: string; expiry_days?: number } = {};
+      const payload: { password?: string; expiry_days?: number; allow_download?: boolean } = {};
       if (password) payload.password = password;
       if (expiryDays !== 0) payload.expiry_days = Number(expiryDays);
+      payload.allow_download = allowDownload; // Include allowDownload in the payload
 
       const response = await apiClient.post<SharedLinkResponse>(`${process.env.NEXT_PUBLIC_API_URL}/api/galleries/albums/${albumId}/share-link`, payload);
       const fullLink = `${window.location.origin}/share/${response.data.token}`;
@@ -145,6 +157,15 @@ const ShareAlbumModal: React.FC<ShareAlbumModalProps> = ({ isOpen, onClose, albu
                   disabled={loading}
                 />
               </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="allowDownload"
+                  checked={allowDownload}
+                  onCheckedChange={(checked) => setAllowDownload(checked as boolean)}
+                  disabled={loading}
+                />
+                <Label htmlFor="allowDownload">Permitir descarga de fotos</Label>
+              </div>
               {error && <p className="text-red-500 text-sm">Error: {error}</p>}
               <Button type="submit" disabled={loading} className="w-full">
                 {loading ? 'Generando...' : 'Generar Enlace'}
@@ -178,6 +199,7 @@ const ShareAlbumModal: React.FC<ShareAlbumModalProps> = ({ isOpen, onClose, albu
                       <span className="text-xs text-muted-foreground">
                         {link.has_password && 'Protegido con contraseña | '}
                         {link.expiry_date ? `Caduca: ${new Date(link.expiry_date).toLocaleDateString()}` : 'No caduca'}
+                        {!link.allow_download && ' | Descarga deshabilitada'}
                       </span>
                     </div>
                     <div className="flex items-center gap-1">

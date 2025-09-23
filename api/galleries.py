@@ -52,6 +52,7 @@ class PhotoResponse(BaseModel):
     thumbnail_path: Optional[str] = None # NEW FIELD
     is_favorite: bool
     uploaded_at: datetime
+    order: Optional[int] = None # Modificado para ser opcional
 
     class Config:
         from_attributes = True
@@ -79,6 +80,7 @@ class AlbumResponse(AlbumBase):
     cover_photo: Optional[PhotoResponse] = None # NEW FIELD for album cover
     photos: List[PhotoResponse] = []
     total_photos: int # NEW FIELD
+    allow_download: Optional[bool] = None # NEW FIELD for shared album download permission
 
     class Config:
         from_attributes = True
@@ -87,6 +89,7 @@ class AlbumResponse(AlbumBase):
 class SharedLinkCreate(BaseModel):
     password: Optional[str] = Field(None, min_length=4, description="Contraseña para proteger el enlace (opcional).")
     expiry_days: Optional[int] = Field(None, gt=0, description="Días hasta que el enlace expire (opcional).")
+    allow_download: Optional[bool] = Field(True, description="Permitir la descarga de fotos desde este enlace.")
 
 class SharedLinkResponse(BaseModel):
     id: uuid.UUID
@@ -95,6 +98,7 @@ class SharedLinkResponse(BaseModel):
     has_password: bool
     expiry_date: Optional[datetime]
     created_at: datetime
+    allow_download: bool
 
     class Config:
         from_attributes = True
@@ -206,7 +210,8 @@ async def get_albums(
                         file_path=photo.file_path,
                         thumbnail_path=photo.thumbnail_path,
                         is_favorite=photo.is_favorite,
-                        uploaded_at=photo.uploaded_at
+                        uploaded_at=photo.uploaded_at,
+                        order=photo.order # Assign the new 'order' field
                     )
 
             albums_response.append(AlbumResponse(
@@ -229,9 +234,7 @@ async def get_albums(
 async def get_album(
     album_id: uuid.UUID,
     current_account: Account = Depends(get_current_account),
-    db: AsyncSession = Depends(get_db_session),
-    skip: int = Query(0, ge=0, description="Número de fotos a omitir"),
-    limit: int = Query(20, ge=1, le=100, description="Número máximo de fotos a devolver")
+    db: AsyncSession = Depends(get_db_session)
 ):
     
     logger.warning(f"Attempting to fetch album with ID: {album_id}")
@@ -256,9 +259,7 @@ async def get_album(
         photos_stmt = (
             select(Photo)
             .where(Photo.album_id == album.id)
-            .order_by(Photo.uploaded_at.desc()) # Order by upload date, newest first
-            .offset(skip)
-            .limit(limit)
+            .order_by(Photo.order) # Order by the new 'order' column
         )
         photos_result = await db.execute(photos_stmt)
         paginated_photos = photos_result.scalars().all()
@@ -270,10 +271,13 @@ async def get_album(
                 file_path=photo.file_path,
                 thumbnail_path=photo.thumbnail_path,
                 is_favorite=photo.is_favorite,
-                uploaded_at=photo.uploaded_at
+                uploaded_at=photo.uploaded_at,
+                order=photo.order # Assign the new 'order' field
             ) for photo in paginated_photos
         ]
 
+        logger.error(f"[DEBUG] === ENVIANDO {len(photos_response)} FOTOS PARA EL ÁLBUM {album.id} ===")
+        print(f"[DEBUG] === ENVIANDO {len(photos_response)} FOTOS PARA EL ÁLBUM {album.id} ===")
         return AlbumResponse(
             id=album.id,
             account_id=album.account_id,
@@ -552,7 +556,12 @@ async def upload_photos(
             await generate_thumbnail(file_path, thumbnail_path)
             db_thumbnail_path = os.path.join(str(album_id), thumbnail_filename)
 
-            new_photo = Photo(album_id=album_id, file_path=db_file_path, thumbnail_path=db_thumbnail_path)
+            # Get the current total number of photos in the album to set the order
+            total_photos_stmt = select(func.count(Photo.id)).where(Photo.album_id == album_id)
+            total_photos_result = await db.execute(total_photos_stmt)
+            current_total_photos = total_photos_result.scalar_one()
+
+            new_photo = Photo(album_id=album_id, file_path=db_file_path, thumbnail_path=db_thumbnail_path, order=current_total_photos)
             db.add(new_photo)
             created_photos.append(new_photo)
         except Exception as e:
@@ -626,7 +635,8 @@ async def generate_share_link(
         album_id=album_id,
         token=token,
         password_hash=password_hash,
-        expiry_date=expiry_date
+        expiry_date=expiry_date,
+        allow_download=link_data.allow_download # NEW FIELD
     )
     db.add(new_link)
     await db.commit()
@@ -638,7 +648,8 @@ async def generate_share_link(
         token=new_link.token,
         has_password=bool(new_link.password_hash),
         expiry_date=new_link.expiry_date,
-        created_at=new_link.created_at
+        created_at=new_link.created_at,
+        allow_download=new_link.allow_download # NEW FIELD
     )
 
 @router.get("/albums/{album_id}/share-links", response_model=List[SharedLinkResponse], summary="Listar enlaces compartidos de un álbum")
@@ -664,7 +675,8 @@ async def get_album_share_links(
             token=link.token,
             has_password=bool(link.password_hash),
             expiry_date=link.expiry_date,
-            created_at=link.created_at
+            created_at=link.created_at,
+            allow_download=link.allow_download # NEW FIELD
         )
         for link in links
     ]
@@ -714,7 +726,7 @@ async def get_shared_album(
     photos_stmt = (
         select(Photo)
         .where(Photo.album_id == album.id)
-        .order_by(Photo.uploaded_at.desc()) # Order by upload date, newest first
+        .order_by(Photo.order) # Order by the new 'order' column
     )
     photos_result = await db.execute(photos_stmt)
     album_photos = photos_result.scalars().all()
@@ -726,10 +738,13 @@ async def get_shared_album(
             file_path=photo.file_path,
             thumbnail_path=photo.thumbnail_path,
             is_favorite=photo.is_favorite,
-            uploaded_at=photo.uploaded_at
+            uploaded_at=photo.uploaded_at,
+            order=photo.order # Assign the new 'order' field
         ) for photo in album_photos
     ]
 
+    logger.error(f"[DEBUG] === ENVIANDO {len(photos_response)} FOTOS PARA EL ÁLBUM COMPARTIDO {album.id} ===")
+    print(f"[DEBUG] === ENVIANDO {len(photos_response)} FOTOS PARA EL ÁLBUM COMPARTIDO {album.id} ===")
     return AlbumResponse(
         id=album.id,
         account_id=album.account_id,
@@ -737,11 +752,11 @@ async def get_shared_album(
         description=album.description,
         created_at=album.created_at,
         updated_at=album.updated_at,
-        cover_photo_id=album.cover_photo_id,
-        photos=photos_response,
-        total_photos=total_photos
-    )
-
+                    cover_photo_id=album.cover_photo_id,
+                    photos=photos_response,
+                    total_photos=total_photos,
+                    allow_download=shared_link.allow_download # NEW FIELD
+                )
 @router.delete("/share/{token}", status_code=204, summary="Revocar un enlace compartido")
 async def revoke_share_link(
     token: str,
@@ -793,3 +808,32 @@ async def download_album_as_zip(
 
     zip_io.seek(0)
     return StreamingResponse(zip_io, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename={album.name}.zip"})
+
+
+class PhotoReorderRequest(BaseModel):
+    photo_id: uuid.UUID
+    order: int
+
+@router.post("/albums/{album_id}/reorder-photos", status_code=204, summary="Reordenar fotos en un álbum")
+async def reorder_photos(
+    album_id: uuid.UUID,
+    reorder_data: List[PhotoReorderRequest],
+    current_account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Actualiza el orden de las fotos en un álbum.
+    """
+    album = await db.get(Album, album_id)
+    if not album or album.account_id != current_account.id:
+        raise HTTPException(status_code=404, detail="Álbum no encontrado o no autorizado.")
+
+    for item in reorder_data:
+        photo = await db.get(Photo, item.photo_id)
+        if not photo or photo.album_id != album_id:
+            raise HTTPException(status_code=404, detail=f"Foto {item.photo_id} no encontrada en este álbum.")
+        photo.order = item.order
+        db.add(photo) # Marcar la foto como modificada
+
+    await db.commit()
+    return Response(status_code=204)

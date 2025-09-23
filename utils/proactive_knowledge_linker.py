@@ -52,7 +52,7 @@ async def get_nlp_model() -> "spacy.language.Language":
             asyncio.set_event_loop(loop)
         
         try:
-            _nlp_model = await loop.run_in_executor(None, lambda: spacy.load("en_core_web_sm"))
+            _nlp_model = await loop.run_in_executor(None, lambda: spacy.load("en_core_web_sm", disable=["parser", "lemmatizer"]))
             if _nlp_model is None:
                 raise ValueError("Failed to load spaCy model")
             logger.info("Modelo spaCy cargado.")

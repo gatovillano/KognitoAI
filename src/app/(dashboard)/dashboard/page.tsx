@@ -15,7 +15,9 @@ import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import { QuestionSlider } from '@/components/QuestionSlider';
 import { CustomChartTooltip } from '@/components/CustomChartTooltip';
 import { DashboardHelpCarousel } from '@/components/DashboardHelpCarousel';
-import { WelcomeDialog } from '@/components/WelcomeDialog';
+import dynamic from 'next/dynamic';
+
+const WelcomeDialog = dynamic(() => import('@/components/WelcomeDialog').then(mod => mod.WelcomeDialog), { ssr: false });
 
 // Tipos para los datos que esperamos de la API
 const CustomYAxisTick = (props: any) => {

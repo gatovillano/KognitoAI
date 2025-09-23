@@ -59,6 +59,7 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
         ]);
         setTeams(teamsRes.data);
         setWorkspaces(workspacesRes.data.workspaces);
+        console.log("Workspaces cargados:", workspacesRes.data.workspaces);
       } catch (error) {
         console.error("Error fetching teams or workspaces:", error);
         toast.error('Error al cargar datos necesarios.');
@@ -70,6 +71,12 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
 
     if (isOpen) {
       fetchTeamsAndWorkspaces();
+    }
+  }, [isOpen]);
+
+  // Efecto para inicializar el formulario cuando se abre el diálogo o cambia el evento
+  useEffect(() => {
+    if (isOpen) {
       if (event) {
         const eventDateTime = new Date(event.event_datetime_utc);
         form.reset({
@@ -77,8 +84,9 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
           date: eventDateTime.toLocaleDateString('en-CA'), // 'en-CA' para formato YYYY-MM-DD
           time: eventDateTime.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false }),
           team_id: (typeof event.team_shared === 'string' ? event.team_shared : '') || '',
-          workspace_id: event?.workspace_id?.toString() || workspaceId || '',
+          // workspace_id se establecerá en un useEffect separado
         });
+        console.log("Formulario reseteado para edición (sin workspace_id inicial).");
       } else {
         form.reset({
           description: '',
@@ -87,9 +95,19 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
           team_id: '',
           workspace_id: workspaceId || '',
         });
+        console.log("Formulario reseteado para nuevo evento.");
       }
     }
   }, [isOpen, event, form, workspaceId]);
+
+  // Efecto para establecer el workspace_id una vez que los workspaces estén cargados
+  useEffect(() => {
+    if (isOpen && event && workspaces.length > 0) {
+      const eventWorkspaceId = event?.workspace_id?.toString() || workspaceId || '';
+      form.setValue('workspace_id', eventWorkspaceId);
+      console.log("Workspace_id establecido con setValue:", eventWorkspaceId);
+    }
+  }, [isOpen, event, form, workspaceId, workspaces]);
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     const toastId = toast.loading(event ? 'Actualizando evento...' : 'Agendando evento...');
@@ -112,8 +130,8 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
 
         response = await apiClient.post('/api/add-event', {
           description: values.description,
-          event_datetime: eventDateTimeUTC, // Enviar la hora en formato ISO 8601 (UTC)
-          team_id: values.team_id ? parseInt(values.team_id) : null,
+          event_date: values.date,
+          event_time: values.time,
           workspace_id: values.workspace_id || null,
         });
       }
@@ -121,7 +139,10 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
       onSaveSuccess(response.data);
       onOpenChange(false);
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || (event ? 'Error al actualizar el evento.' : 'Error al agendar el evento.'), { id: toastId });
+      const errorMessage = typeof error.response?.data?.detail === 'object'
+        ? JSON.stringify(error.response.data.detail)
+        : error.response?.data?.detail || (event ? 'Error al actualizar el evento.' : 'Error al agendar el evento.');
+      toast.error(errorMessage, { id: toastId });
     }
   }
 
@@ -164,11 +185,14 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
                 <FormMessage />
               </FormItem>
             )} />
-            <FormField control={form.control} name="workspace_id" render={({ field }) => (
+            <FormField control={form.control} name="workspace_id" render={({ field }) => {
+              console.log("Renderizando select de Workspace:", { fieldValue: field.value, workspaces });
+              return (
               <FormItem>
                 <FormLabel>Asociar a Workspace</FormLabel>
                 <FormControl>
                   <select
+                    key={event?.id ? event.id + workspaces.length : 'new' + workspaces.length} // Añadir key para forzar re-render
                     className="w-full border rounded-md p-2"
                     {...field}
                     disabled={loadingWorkspaces}
@@ -183,7 +207,7 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
                 </FormControl>
                 <FormMessage />
               </FormItem>
-            )} />
+            )}} />
             <DialogFooter>
               <Button type="submit" disabled={form.formState.isSubmitting}>
                 {form.formState.isSubmitting ? (event ? 'Guardando...' : 'Agendando...') : (event ? 'Guardar Cambios' : 'Agendar')}

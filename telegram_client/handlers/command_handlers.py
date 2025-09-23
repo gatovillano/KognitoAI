@@ -28,7 +28,8 @@ from telegram.ext import Application, CommandHandler, CallbackContext
 
 # Importaciones de la nueva arquitectura y del proyecto
 from core.config import settings
-from core.database import get_or_create_account_from_platform_id
+from core.database import SessionLocal
+from core.repositories.account_repository import AccountRepository
 
 logger = logging.getLogger(__name__)
 
@@ -44,15 +45,15 @@ async def start(update: Update, context: CallbackContext) -> None:
     logger.info(f"Comando /start recibido de {user.id} ({user.first_name})")
 
     try:
-        # ¡CORREGIDO! La llamada ahora es simple y coincide con la nueva firma.
-        # Solo pasamos la plataforma y el ID.
-        result = await get_or_create_account_from_platform_id(
-            platform='telegram',
-            platform_user_id=str(user.id),
-            first_name=user.first_name,
-            last_name=user.last_name,
-            username=user.username
-        )
+        async with SessionLocal() as session:
+            repo = AccountRepository(session)
+            result = await repo.get_or_create_account_from_platform_id(
+                platform='telegram',
+                platform_user_id=str(user.id),
+                first_name=user.first_name,
+                last_name=user.last_name,
+                username=user.username
+            )
         # Luego, comprobamos si el resultado es válido antes de desempaquetar.
         if not result:
             logger.error(f"No se pudo obtener/crear una cuenta en /start para {user.id}.")
@@ -120,14 +121,15 @@ async def open_documents_panel(update: Update, context: CallbackContext) -> None
 
     # Es crucial que el usuario esté registrado para poder abrir el panel.
     try:
-        account = await get_or_create_account_from_platform_id(
-            platform='telegram',
-            platform_user_id=str(user.id),
-            first_name=user.first_name,
-            last_name=user.last_name,
-            username=user.username,
-            
-        )
+        async with SessionLocal() as session:
+            repo = AccountRepository(session)
+            account, _ = await repo.get_or_create_account_from_platform_id(
+                platform='telegram',
+                platform_user_id=str(user.id),
+                first_name=user.first_name,
+                last_name=user.last_name,
+                username=user.username,
+            )
 
         if not account:
             raise Exception("La cuenta no pudo ser creada o recuperada.")
@@ -181,13 +183,15 @@ async def open_conversation(update: Update, context: CallbackContext) -> None:
         conversation_name = " ".join(command_text[1:])
         
         # Obtener o crear la cuenta del usuario
-        result = await get_or_create_account_from_platform_id(
-            platform='telegram',
-            platform_user_id=str(user.id),
-            first_name=user.first_name,
-            last_name=user.last_name,
-            username=user.username
-        )
+        async with SessionLocal() as session:
+            repo = AccountRepository(session)
+            result = await repo.get_or_create_account_from_platform_id(
+                platform='telegram',
+                platform_user_id=str(user.id),
+                first_name=user.first_name,
+                last_name=user.last_name,
+                username=user.username
+            )
         
         if not result:
             logger.error(f"No se pudo obtener/crear una cuenta en /abrir_conversacion para {user.id}.")

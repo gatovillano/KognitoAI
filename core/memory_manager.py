@@ -327,8 +327,8 @@ async def get_relevant_memories(
                 return []
 
             async def _aget_relevant_documents(self, query_str: str, **kwargs) -> List[LCDocument]:
-                embedding_model = get_embedding_model()
-                query_embedding = await embedding_model.aembed_query(query_str)
+                from utils.embeddings import get_cached_embedding
+                query_embedding = await get_cached_embedding(query_str)
                 
                 semantic_results_with_scores = await _run_semantic_search(
                     query_embedding=query_embedding,

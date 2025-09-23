@@ -32,9 +32,26 @@ export const GraphVisualization: React.FC<GraphVisualizationProps> = ({ workspac
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchGraphData = async () => {
+    const fetchGraphData = async (forceRefresh = false) => {
       setIsLoading(true);
       setError(null);
+
+      const cacheKey = `graph-data-${workspaceId || 'global'}`;
+      if (!forceRefresh) {
+        const cachedData = localStorage.getItem(cacheKey);
+        if (cachedData) {
+          const { nodes, edges, timestamp } = JSON.parse(cachedData);
+          // Opcional: invalidar caché después de un tiempo (ej. 1 hora)
+          if (Date.now() - timestamp < 3600000) {
+            setNodes(nodes);
+            setEdges(edges);
+            setIsLoading(false);
+            toast.info("Datos del grafo cargados desde caché.");
+            return;
+          }
+        }
+      }
+
       try {
         const params: { workspace_id?: string } = {};
         if (workspaceId !== undefined && workspaceId !== null) {
@@ -45,6 +62,13 @@ export const GraphVisualization: React.FC<GraphVisualizationProps> = ({ workspac
         if (data && data.nodes && data.edges) {
           setNodes(data.nodes);
           setEdges(data.edges);
+          // Guardar en caché
+          const cachePayload = {
+            nodes: data.nodes,
+            edges: data.edges,
+            timestamp: Date.now(),
+          };
+          localStorage.setItem(cacheKey, JSON.stringify(cachePayload));
         } else {
           setNodes([]);
           setEdges([]);
@@ -60,7 +84,7 @@ export const GraphVisualization: React.FC<GraphVisualizationProps> = ({ workspac
     };
 
     fetchGraphData();
-  }, [workspaceId]); // Vuelve a cargar los datos si el workspaceId cambia
+  }, [workspaceId]);
 
   useEffect(() => {
     if (!visJsContainer.current || isLoading || error) return;
@@ -139,6 +163,13 @@ export const GraphVisualization: React.FC<GraphVisualizationProps> = ({ workspac
 
     networkRef.current = new Network(visJsContainer.current, data, options);
 
+    // Desactivar físicas después de la estabilización
+    networkRef.current.on("stabilizationIterationsDone", function () {
+      networkRef.current.setOptions({
+        physics: false
+      });
+    });
+
     // Limpia la instancia de la red cuando el componente se desmonta
     return () => {
       if (networkRef.current) {
@@ -156,8 +187,65 @@ export const GraphVisualization: React.FC<GraphVisualizationProps> = ({ workspac
     return <div className="flex justify-center items-center h-full text-red-500">{error}</div>;
   }
 
+  const handleRefresh = () => {
+    const fetchGraphData = async (forceRefresh = true) => {
+        setIsLoading(true);
+        setError(null);
+
+        const cacheKey = `graph-data-${workspaceId || 'global'}`;
+        if (!forceRefresh) {
+            const cachedData = localStorage.getItem(cacheKey);
+            if (cachedData) {
+                const { nodes, edges, timestamp } = JSON.parse(cachedData);
+                // Opcional: invalidar caché después de un tiempo (ej. 1 hora)
+                if (Date.now() - timestamp < 3600000) {
+                    setNodes(nodes);
+                    setEdges(edges);
+                    setIsLoading(false);
+                    toast.info("Datos del grafo cargados desde caché.");
+                    return;
+                }
+            }
+        }
+
+        try {
+            const params: { workspace_id?: string } = {};
+            if (workspaceId !== undefined && workspaceId !== null) {
+                params.workspace_id = workspaceId;
+            }
+            const response = await apiClient.get('/api/knowledge-graph/data', { params });
+            const data = response.data.data;
+            if (data && data.nodes && data.edges) {
+                setNodes(data.nodes);
+                setEdges(data.edges);
+                // Guardar en caché
+                const cachePayload = {
+                    nodes: data.nodes,
+                    edges: data.edges,
+                    timestamp: Date.now(),
+                };
+                localStorage.setItem(cacheKey, JSON.stringify(cachePayload));
+            } else {
+                setNodes([]);
+                setEdges([]);
+                toast.info("No se encontraron datos de grafo para este workspace.");
+            }
+        } catch (err) {
+            console.error("Error fetching graph data:", err);
+            setError("Error al cargar los datos del grafo.");
+            toast.error("Error al cargar los datos del grafo.");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+    fetchGraphData(true);
+  };
+
   return (
     <div className="w-full h-full">
+      <button onClick={handleRefresh} className="absolute top-4 right-4 z-10 bg-primary text-primary-foreground px-4 py-2 rounded">
+        Refrescar Grafo
+      </button>
       <div ref={visJsContainer} style={{ height: '600px', width: '100%' }} />
     </div>
   );

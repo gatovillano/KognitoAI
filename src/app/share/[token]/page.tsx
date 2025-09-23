@@ -27,6 +27,7 @@ interface AlbumResponse {
   updated_at: string;
   cover_photo_id: string | null;
   photos: PhotoResponse[];
+  allow_download?: boolean; // NEW FIELD
 }
 
 const SharedAlbumPage: React.FC = () => {
@@ -47,6 +48,9 @@ const SharedAlbumPage: React.FC = () => {
     setPasswordRequired(false);
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 segundos de timeout
+
       const payload: { password?: string } = {};
       if (submitPassword) {
         payload.password = submitPassword;
@@ -58,7 +62,10 @@ const SharedAlbumPage: React.FC = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
+        signal: controller.signal, // Pasa la señal al fetch
       });
+
+      clearTimeout(timeoutId); // Limpia el timeout si la solicitud se completa a tiempo
 
       if (response.status === 401) {
         setPasswordRequired(true);
@@ -181,13 +188,15 @@ const SharedAlbumPage: React.FC = () => {
   };
 
   return (
-    <div className="bg-black min-h-screen">
+    <div className="bg-black min-h-screen" onContextMenu={(e) => e.preventDefault()}>
       <div className="p-6 sm:p-12 max-w-7xl mx-auto overflow-x-hidden">
-        <div className="absolute top-6 right-6">
-          <Button onClick={handleDownload} variant="outline" size="icon" className="text-white border-white">
-            <Download className="h-4 w-4" />
-          </Button>
-        </div>
+        {album.allow_download && (
+          <div className="absolute top-6 right-6">
+            <Button onClick={handleDownload} variant="outline" size="icon" className="text-white border-white">
+              <Download className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
         <header className="mb-12 text-center">
           <Image src="/logocl.png" alt="Cuerpo Libre Fotografía" width={200} height={100} className="mx-auto mb-4" />
           <h1 className="text-4xl font-bold text-white mb-2">{album.name}</h1>

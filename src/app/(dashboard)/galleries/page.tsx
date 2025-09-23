@@ -58,7 +58,7 @@ const AlbumCard = ({ album, onEditClick, onDeleteClick, onLinkProfileClick }: { 
       className="h-full"
     >
       <Link href={`/galleries/${album.id}`} passHref>
-        <Card className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full min-h-[320px]">
+        <Card className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/30 flex flex-col h-full min-h-[320px]">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -126,7 +126,7 @@ const AlbumCard = ({ album, onEditClick, onDeleteClick, onLinkProfileClick }: { 
             </p>
           </CardContent>
           <CardFooter className="flex justify-between items-center text-xs text-muted-foreground pt-3 mt-auto border-t border-border/50">
-            <span>{album.photos.length} foto(s)</span>
+            <span>{album.total_photos} foto(s)</span>
             <span>{new Date(album.created_at).toLocaleDateString()}</span>
           </CardFooter>
         </Card>
