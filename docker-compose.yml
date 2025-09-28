@@ -46,9 +46,14 @@ services:
     ports:
       - "${API_PORT:-8889}:8000" # API accesible en localhost:8889
     volumes:
-      - .:/app
+      - ./api:/app/api
+      - ./core:/app/core
+      - ./utils:/app/utils
+      - ./tools:/app/tools
+      - ./knowledge_graph:/app/knowledge_graph
+      - ./run_api.py:/app/run_api.py
+      - ./credentials:/app/credentials:ro
       - "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums:/app/media"
-      - ./credentials/gen-lang-client-0283065579-d517663d377f.json:/app/credentials/gen-lang-client-0283065579-d517663d377f.json:ro
     env_file:
       - ./.env
     networks:
@@ -62,7 +67,7 @@ services:
     container_name: kognito_telegram_client # Nombre explícito
     restart: always
     ports:
-      # Puerto para comunicación interna desde otros servicios.
+      # Puerto para comunicación interna desde otros servicios. 
       - "9090:9090"
     depends_on:
       - core

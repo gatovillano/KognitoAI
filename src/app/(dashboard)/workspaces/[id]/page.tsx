@@ -80,6 +80,24 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const [isViewNoteDialogOpen, setIsViewNoteDialogOpen] = useState(false); // New state for ViewNoteDialog
   const [selectedNoteCategory, setSelectedNoteCategory] = useState<string>('Todas'); // New state for note category filter
 
+  const fetchChats = useCallback(async (skip: number, initialLoad = false) => {
+    if (!initialLoad) {
+      setIsFetchingMoreChats(true);
+    }
+    try {
+      const response = await apiClient.get(`/api/threads?workspace_id=${workspaceId}&skip=${skip}&limit=7`);
+      const newChats = response.data.threads;
+      setChats(prevChats => initialLoad ? newChats : [...prevChats, ...newChats]);
+      setHasMoreChats(newChats.length === 7);
+    } catch (error) {
+      console.error('Error fetching chats:', error);
+    } finally {
+      if (!initialLoad) {
+        setIsFetchingMoreChats(false);
+      }
+    }
+  }, [workspaceId, setChats, setHasMoreChats, setIsFetchingMoreChats]);
+
   const fetchInitialData = useCallback(async () => {
     setLoading(true);
     try {
@@ -106,29 +124,11 @@ export default function WorkspaceDashboard({ params }: PageProps) {
     } finally {
       setLoading(false);
     }
-  }, [workspaceId]);
-
-  const fetchChats = useCallback(async (skip: number, initialLoad = false) => {
-    if (!initialLoad) {
-      setIsFetchingMoreChats(true);
-    }
-    try {
-      const response = await apiClient.get(`/api/threads?workspace_id=${workspaceId}&skip=${skip}&limit=7`);
-      const newChats = response.data.threads;
-      setChats(prevChats => initialLoad ? newChats : [...prevChats, ...newChats]);
-      setHasMoreChats(newChats.length === 7);
-    } catch (error) {
-      console.error('Error fetching chats:', error);
-    } finally {
-      if (!initialLoad) {
-        setIsFetchingMoreChats(false);
-      }
-    }
-  }, [workspaceId, setChats, setHasMoreChats, setIsFetchingMoreChats]);
+  }, [workspaceId, fetchChats]);
 
   useEffect(() => {
     fetchInitialData();
-  }, [workspaceId]);
+  }, [workspaceId, fetchInitialData]);
 
   const handleLoadMoreChats = () => {
     if (hasMoreChats && !isFetchingMoreChats) {

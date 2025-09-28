@@ -1,14 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import uuid
 from pydantic import BaseModel, Field
 from datetime import datetime
 
 from sqlalchemy import func
 
-from core.database import get_db_session, ContactProfile, Account, Nota, AgendaEvent, Task, UserDocumentTopic, Album, Photo
+from core.database import get_db_session, ContactProfile, Account, Nota, AgendaEvent, Task, UserDocumentTopic, Album, Photo, FormResponse
 from api.auth import get_current_account_id
 from sqlalchemy.orm import selectinload
 
@@ -84,6 +84,12 @@ class LinkedAlbumResponse(BaseModel):
     cover_photo: Optional[PhotoResponseForContactProfile] = None
     class Config: from_attributes = True
 
+class LinkedFormResponse(BaseModel):
+    id: uuid.UUID
+    form_id: uuid.UUID
+    submitted_at: datetime
+    answers: List[Dict[str, Any]] # Cambiado de dict a List[Dict[str, Any]]
+    class Config: from_attributes = True
 
 class LinkedObjectsResponse(BaseModel):
     notes: List[LinkedNoteResponse]
@@ -91,12 +97,16 @@ class LinkedObjectsResponse(BaseModel):
     tasks: List[LinkedTaskResponse]
     user_document_topics: List[LinkedUserDocumentTopicResponse]
     albums: List[LinkedAlbumResponse]
+    form_responses: List[LinkedFormResponse]
 
 class LinkNoteToProfileRequest(BaseModel):
     note_id: int
 
 class LinkAlbumToProfileRequest(BaseModel):
     album_id: uuid.UUID
+
+class LinkFormResponseToProfileRequest(BaseModel):
+    form_response_id: uuid.UUID
 
 @router.post("/contact-profiles/{profile_id}/link-note")
 async def link_note_to_profile(
@@ -159,6 +169,68 @@ async def link_album_to_profile(
     profile.albums.append(album)
     await db.commit()
     return {"message": "Álbum vinculado exitosamente al perfil."}
+
+@router.post("/contact-profiles/{profile_id}/link-form-response", summary="Vincular una respuesta de formulario a un perfil")
+async def link_form_response_to_profile(
+    profile_id: uuid.UUID,
+    request: LinkFormResponseToProfileRequest,
+    current_account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Vincula una respuesta de formulario existente a un perfil de contacto.
+    """
+    # 1. Verificar que el perfil de contacto existe y pertenece a la cuenta actual
+    profile = await db.get(ContactProfile, profile_id)
+    if not profile or profile.account_id != current_account.id:
+        raise HTTPException(status_code=404, detail="Perfil de contacto no encontrado o no autorizado.")
+
+    # 2. Verificar que la respuesta de formulario existe y pertenece a la cuenta actual
+    form_response = await db.get(FormResponse, request.form_response_id)
+    if not form_response or form_response.account_id != current_account.id:
+        raise HTTPException(status_code=404, detail="Respuesta de formulario no encontrada o no autorizada.")
+
+    # 3. Verificar si ya está vinculada
+    if form_response.contact_profile_id == profile_id:
+        return {"message": "La respuesta de formulario ya está vinculada a este perfil."}
+
+    # 4. Vincular la respuesta de formulario al perfil de contacto
+    form_response.contact_profile_id = profile_id
+    await db.commit()
+    await db.refresh(form_response) # Refrescar para obtener el contact_profile_id actualizado
+
+    return {"message": "Respuesta de formulario vinculada exitosamente al perfil."}
+
+@router.post("/contact-profiles/{profile_id}/unlink-form-response", summary="Desvincular una respuesta de formulario de un perfil")
+async def unlink_form_response_from_profile(
+    profile_id: uuid.UUID,
+    request: LinkFormResponseToProfileRequest,
+    current_account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Desvincula una respuesta de formulario de un perfil de contacto.
+    """
+    # 1. Verificar que el perfil de contacto existe y pertenece a la cuenta actual
+    profile = await db.get(ContactProfile, profile_id)
+    if not profile or profile.account_id != current_account.id:
+        raise HTTPException(status_code=404, detail="Perfil de contacto no encontrado o no autorizado.")
+
+    # 2. Verificar que la respuesta de formulario existe y pertenece a la cuenta actual
+    form_response = await db.get(FormResponse, request.form_response_id)
+    if not form_response or form_response.account_id != current_account.id:
+        raise HTTPException(status_code=404, detail="Respuesta de formulario no encontrada o no autorizada.")
+
+    # 3. Verificar si la respuesta de formulario está vinculada a este perfil
+    if form_response.contact_profile_id != profile_id:
+        return {"message": "La respuesta de formulario no está vinculada a este perfil."}
+
+    # 4. Desvincular la respuesta de formulario del perfil de contacto
+    form_response.contact_profile_id = None
+    await db.commit()
+    await db.refresh(form_response)
+
+    return {"message": "Respuesta de formulario desvinculada exitosamente del perfil."}
 
 @router.post("/contact-profiles/{profile_id}/unlink-album", summary="Desvincular un álbum de un perfil")
 async def unlink_album_from_profile(
@@ -242,7 +314,8 @@ async def get_linked_objects(
             selectinload(ContactProfile.agenda_events),
             selectinload(ContactProfile.tasks),
             selectinload(ContactProfile.user_document_topics),
-            selectinload(ContactProfile.albums)
+            selectinload(ContactProfile.albums),
+            selectinload(ContactProfile.form_responses) # Cargar las respuestas de formulario
         )
         .where(ContactProfile.id == profile_id, ContactProfile.account_id == current_account.id)
     )
@@ -286,7 +359,8 @@ async def get_linked_objects(
         agenda_events=profile.agenda_events,
         tasks=profile.tasks,
         user_document_topics=profile.user_document_topics,
-        albums=enhanced_albums
+        albums=enhanced_albums,
+        form_responses=profile.form_responses # Añadir las respuestas de formulario
     )
 
 @router.post("/create-contact-profile", response_model=ContactProfileResponse)

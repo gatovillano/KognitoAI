@@ -108,6 +108,19 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     onMessageChange('');
   }, [newMessage, selectedToolName, currentContext, onSendMessage, onMessageChange]);
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (!isResponding && (newMessage.trim() || currentContext.length > 0)) {
+        const form = (e.target as HTMLTextAreaElement).form;
+        if (form) {
+          form.requestSubmit();
+        }
+      }
+    }
+    onKeyDown(e);
+  };
+
   const handleRemoveContextItem = useCallback((item: SelectedContextItem) => {
     onRemoveContextItem(item);
   }, [onRemoveContextItem]);
@@ -181,7 +194,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
             <Textarea
               ref={textAreaRef}
               value={newMessage}
-              onKeyDown={onKeyDown}
+              onKeyDown={handleKeyDown}
               placeholder={inputPlaceholder || (currentContext.length > 0 ? "Escribe tu mensaje..." : "Escribe tu mensaje o selecciona contexto...")}
               autoComplete="on"
               disabled={isResponding}
