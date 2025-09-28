@@ -1,5 +1,5 @@
 // ChatMessage.tsx
-import React, { memo, useState } from 'react';
+import React, { useState } from 'react';
 import Image from 'next/image';
 import { motion } from 'framer-motion'; // Importar motion
 
@@ -70,7 +70,7 @@ const Citation: React.FC<{ source: Source }> = ({ source }) => {
   );
 };
 
-export const ChatMessage: React.FC<ChatMessageProps> = memo(({
+export const ChatMessage: React.FC<ChatMessageProps> = ({
   msg,
   index,
   handleCopyMessage,
@@ -81,9 +81,11 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
   isAudioPaused,
   children, // Recibir children en las props
 }) => {
-  ChatMessage.displayName = 'ChatMessage';
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(msg.text);
+
+
+
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -219,7 +221,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
                   />
                 ) : (
                   <div className="text-foreground break-words font-sans text-xl p-4">
-                    <MarkdownRenderer content={msg.text} fontSize="text-xl" />
+                    <MarkdownRenderer content={msg.chunks?.join('') || msg.text} fontSize="text-xl" isStreaming={msg.chunks !== undefined} />
                   </div>
                 )}
                
@@ -293,4 +295,4 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({
       )}
     </motion.div>
   );
-});
+};

@@ -32,6 +32,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # 2. Esquema de Autenticación OAuth2
 # Esto le dice a FastAPI cómo esperar el token (en el header "Authorization: Bearer <token>")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 # --- Funciones de Contraseña ---
 
@@ -65,14 +66,17 @@ def decode_access_token(token: str) -> Optional[dict]:
     Returns:
         El payload (dict) si el token es válido, o None si ha expirado o es inválido.
     """
+    logger.info(f"🔑 Intentando decodificar token: {token[:50]}...")
+    logger.info(f"🔑 Usando JWT_SECRET_KEY que empieza con: {settings.jwt_secret_key[:10]}...")
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=["HS256"])
+        logger.info("✅ Token decodificado exitosamente.")
         return payload
     except jwt.ExpiredSignatureError:
-        logger.warning("Intento de uso de un token JWT expirado.")
+        logger.warning("❌ Token JWT expirado.")
         return None
     except jwt.PyJWTError as e:
-        logger.error(f"Error de decodificación de JWT: {e}")
+        logger.error(f"❌ Error de decodificación de JWT: {e}", exc_info=True)
         return None
 
 # --- Dependencia de FastAPI ---
@@ -100,6 +104,83 @@ async def get_current_account_id(token: str = Depends(oauth2_scheme)) -> str:
         raise credentials_exception
         
     return account_id
+
+async def get_current_active_account(
+    token: str = Depends(oauth2_scheme),
+    session: AsyncSession = Depends(get_db_session)
+) -> Account:
+    """
+    Dependencia de FastAPI para obtener el objeto Account completo del usuario actual.
+
+    Extrae el token del header, lo valida y devuelve el objeto Account.
+    Si el token es inválido, no se proporciona, o el usuario no está activo, lanza una HTTPException 401.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="No se pudieron validar las credenciales",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    payload = decode_access_token(token)
+    if payload is None:
+        raise credentials_exception
+
+    account_id: str = payload.get("sub")
+    if account_id is None:
+        raise credentials_exception
+    
+    try:
+        query = select(Account).where(
+            Account.id == account_id,
+            Account.is_active == True
+        )
+        result = await session.execute(query)
+        user_account = result.scalars().first()
+
+        if not user_account:
+            raise credentials_exception
+        
+        return user_account
+
+    except Exception as e:
+        logger.error(f"Error obteniendo el objeto Account del usuario: {e}")
+        raise credentials_exception
+
+
+async def get_optional_current_active_account(
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    session: AsyncSession = Depends(get_db_session)
+) -> Optional[Account]:
+    """
+    Dependencia de FastAPI para obtener opcionalmente el objeto Account completo del usuario actual.
+
+    Si se proporciona un token válido, devuelve el objeto Account.
+    Si no se proporciona un token o es inválido, devuelve None sin lanzar un error.
+    """
+    if token is None:
+        return None
+
+    payload = decode_access_token(token)
+    if payload is None:
+        return None
+
+    account_id: str = payload.get("sub")
+    if account_id is None:
+        return None
+    
+    try:
+        query = select(Account).where(
+            Account.id == account_id,
+            Account.is_active == True
+        )
+        result = await session.execute(query)
+        user_account = result.scalars().first()
+        
+        return user_account
+
+    except Exception as e:
+        logger.error(f"Error obteniendo el objeto Account opcional del usuario: {e}")
+        return None
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),

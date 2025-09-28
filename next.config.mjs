@@ -1,7 +1,16 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   images: {
-    domains: ['apibase.gatoslibres.art'],
+    unoptimized: true,
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'apibase.gatoslibres.art',
+        port: '',
+        pathname: '/media/**',
+      },
+    ],
+    minimumCacheTTL: 600,
   },
   experimental: {},
   async rewrites() {
@@ -9,6 +18,10 @@ const nextConfig = {
       {
         source: '/media/:path*',
         destination: 'https://apibase.gatoslibres.art/media/:path*',
+      },
+      {
+        source: '/api/:path*',
+        destination: 'https://apibase.gatoslibres.art/api/:path*',
       },
     ]
   },

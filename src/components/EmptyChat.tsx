@@ -6,6 +6,13 @@ import { motion, Variants, Transition } from 'framer-motion';
 import ChatInputBar from '@/components/ChatInputBar';
 import { ContextSelectorButton } from '@/components/ContextSelectorButton';
 
+interface SelectedContextItem {
+  id: string;
+  type: 'document' | 'collection';
+  name: string;
+  title?: string;
+}
+
 interface EmptyChatProps {
   onSendMessage: (e?: React.FormEvent) => void;
   newMessage: string;
@@ -29,6 +36,8 @@ interface EmptyChatProps {
   onRemoveContextItem: (item: any) => void;
   onPaste: (e: ClipboardEvent) => void;
   workspaceId?: string;
+  selectedContext: SelectedContextItem[]; // Added
+  onContextSelected: (context: SelectedContextItem[]) => void; // Added
 }
 
 export function EmptyChat({
@@ -54,13 +63,9 @@ export function EmptyChat({
   onRemoveContextItem,
   onPaste,
   workspaceId,
+  selectedContext, // Added
+  onContextSelected, // Added
 }: EmptyChatProps) {
-  const [selectedContext, setSelectedContext] = useState<any[]>([]); // Estado para el contexto seleccionado
-
-  const handleContextSelected = (context: any[]) => {
-    setSelectedContext(context);
-    // Aquí podrías hacer algo con el contexto seleccionado si fuera necesario en EmptyChat
-  };
   const examplePrompts = [
     "Analiza los documentos recientes y genera un resumen ejecutivo.",
     "¿Cuáles son las últimas tendencias en inteligencia artificial generativa?",
@@ -133,7 +138,7 @@ export function EmptyChat({
           workspaceId={workspaceId}
         >
           <ContextSelectorButton
-            onContextSelected={handleContextSelected}
+            onContextSelected={onContextSelected}
             currentContext={selectedContext}
             // No pasamos workspaceId aquí, ya que EmptyChat es para chats generales
           />
@@ -159,4 +164,3 @@ export function EmptyChat({
     </div>
   );
 }
-

@@ -60,6 +60,7 @@ interface MarkdownRendererProps {
   content: string;
   fontSize?: string;
   sources?: Source[];
+  isStreaming?: boolean; // Añadir la nueva prop
 }
 
 const Citation: React.FC<{ source: Source }> = ({ source }) => {
@@ -85,7 +86,7 @@ const Citation: React.FC<{ source: Source }> = ({ source }) => {
   );
 };
 
-const MarkdownRendererComponent = ({ content, fontSize, sources = [] }: MarkdownRendererProps) => {
+const MarkdownRendererComponent = ({ content, fontSize, sources = [], isStreaming = false }: MarkdownRendererProps) => {
   const [copiedStates, setCopiedStates] = useState<Record<string, boolean>>({});
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -233,99 +234,102 @@ const MarkdownRendererComponent = ({ content, fontSize, sources = [] }: Markdown
 
   // Effect to add copy and preview buttons and initialize Mermaid
   useEffect(() => {
-    const addButtons = () => {
-      if (!containerRef.current) return;
+    // Solo ejecutar el efecto si el stream ha terminado.
+    if (!isStreaming) {
+      const addButtons = () => {
+        if (!containerRef.current) return;
 
-      const codeBlocks = containerRef.current.querySelectorAll('pre code:not([data-buttons-added="true"])');
+        const codeBlocks = containerRef.current.querySelectorAll('pre code:not([data-buttons-added="true"])');
 
-      codeBlocks.forEach((block, index) => {
-        const wrapper = block.parentNode as HTMLPreElement;
-        if (!wrapper) return;
+        codeBlocks.forEach((block, index) => {
+          const wrapper = block.parentNode as HTMLPreElement;
+          if (!wrapper) return;
 
-        const language = (block.className.split('-')[1] || 'code').toLowerCase();
-        const codeText = block.textContent || '';
-        const codeBlockIndex = `codeblock-${index}`;
+          const language = (block.className.split('-')[1] || 'code').toLowerCase();
+          const codeText = block.textContent || '';
+          const codeBlockIndex = `codeblock-${index}`;
 
-        // Create footer with buttons
-        const footer = document.createElement('div');
-        footer.className = 'flex items-center justify-between px-4 py-2 bg-muted/30 border-t border-border/20 rounded-b-2xl';
+          // Create footer with buttons
+          const footer = document.createElement('div');
+          footer.className = 'flex items-center justify-between px-4 py-2 bg-muted/30 border-t border-border/20 rounded-b-2xl';
 
-        // Language label
-        const languageLabel = document.createElement('span');
-        languageLabel.className = 'text-xs font-medium text-muted-foreground uppercase tracking-wide';
-        languageLabel.textContent = language;
+          // Language label
+          const languageLabel = document.createElement('span');
+          languageLabel.className = 'text-xs font-medium text-muted-foreground uppercase tracking-wide';
+          languageLabel.textContent = language;
 
-        const buttonsWrapper = document.createElement('div');
-        buttonsWrapper.className = 'flex items-center gap-2';
+          const buttonsWrapper = document.createElement('div');
+          buttonsWrapper.className = 'flex items-center gap-2';
 
-        // Preview Button
-        if (language === 'html') {
-          const previewBtn = document.createElement('button');
-          previewBtn.className = 'inline-flex items-center justify-center text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground h-7 px-3 rounded-md border border-border/30 bg-background/50 mr-2';
-          previewBtn.innerHTML = '👁️ Previsualizar';
-          previewBtn.onclick = () => handlePreview(codeText);
-          buttonsWrapper.appendChild(previewBtn);
+          // Preview Button
+          if (language === 'html') {
+            const previewBtn = document.createElement('button');
+            previewBtn.className = 'inline-flex items-center justify-center text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground h-7 px-3 rounded-md border border-border/30 bg-background/50 mr-2';
+            previewBtn.innerHTML = '👁️ Previsualizar';
+            previewBtn.onclick = () => handlePreview(codeText);
+            buttonsWrapper.appendChild(previewBtn);
+          }
+
+          // Copy Button
+          const copyBtn = document.createElement('button');
+          copyBtn.id = `copy-btn-${codeBlockIndex}`;
+          copyBtn.className = 'inline-flex items-center justify-center text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground h-7 px-3 rounded-md border border-border/30 bg-background/50';
+          copyBtn.innerHTML = copiedStates[codeBlockIndex] ? '✓ Copiado' : '📋 Copiar';
+          copyBtn.onclick = () => handleCopy(codeText, codeBlockIndex);
+          buttonsWrapper.appendChild(copyBtn);
+
+          footer.appendChild(languageLabel);
+          footer.appendChild(buttonsWrapper);
+          wrapper.appendChild(footer);
+
+          wrapper.className = 'backdrop-blur-md rounded-2xl border border-border/20 bg-muted/50'; // Bordes más curvos con rounded-2xl y fondo adaptativo
+          wrapper.style.backgroundColor = ''; // Remover fondo fijo
+          (block as HTMLElement).style.color = ''; // Remover color fijo para usar el del tema
+          block.setAttribute('data-buttons-added', 'true');
+        });
+
+      };
+
+      addButtons();
+      // mermaid.init(); // Ya no es necesario aquí, se inicializa en MermaidViewer
+
+      // Hydrate MermaidViewer components
+      const mermaidCodeBlocks = containerRef.current?.querySelectorAll('.mermaid-code-block');
+      mermaidCodeBlocks?.forEach(async (block) => {
+        const encodedMermaidCode = block.getAttribute('data-mermaid-code');
+        if (encodedMermaidCode) {
+          const mermaidCode = decodeURIComponent(encodedMermaidCode);
+
+          // Renderizar el diagrama Mermaid estáticamente para la vista previa
+          let staticMermaidSvg = '';
+          try {
+            const renderId = `mermaid-static-${Math.random().toString(36).substr(2, 9)}`;
+            const { svg } = await mermaid.render(renderId, mermaidCode);
+            staticMermaidSvg = svg;
+          } catch (e) {
+            console.error('Error rendering static mermaid diagram:', e);
+            staticMermaidSvg = '<p>Error al renderizar el diagrama.</p>';
+          }
+
+          // Crear un contenedor temporal para el trigger
+          const triggerContainer = document.createElement('div');
+          block.parentNode?.insertBefore(triggerContainer, block);
+          block.remove(); // Eliminar el div original
+
+          const root = createRoot(triggerContainer);
+          root.render(
+            <MermaidViewer mermaidCode={mermaidCode} trigger={
+              <div
+                className="mermaid-diagram-trigger cursor-pointer p-4 border rounded-lg bg-muted hover:bg-muted/50 transition-colors"
+                dangerouslySetInnerHTML={{ __html: staticMermaidSvg }}
+                title="Haz clic para ver el diagrama interactivo"
+              />
+            } />
+          );
         }
-
-        // Copy Button
-        const copyBtn = document.createElement('button');
-        copyBtn.id = `copy-btn-${codeBlockIndex}`;
-        copyBtn.className = 'inline-flex items-center justify-center text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground h-7 px-3 rounded-md border border-border/30 bg-background/50';
-        copyBtn.innerHTML = copiedStates[codeBlockIndex] ? '✓ Copiado' : '📋 Copiar';
-        copyBtn.onclick = () => handleCopy(codeText, codeBlockIndex);
-        buttonsWrapper.appendChild(copyBtn);
-
-        footer.appendChild(languageLabel);
-        footer.appendChild(buttonsWrapper);
-        wrapper.appendChild(footer);
-
-        wrapper.className = 'backdrop-blur-md rounded-2xl border border-border/20 bg-muted/50'; // Bordes más curvos con rounded-2xl y fondo adaptativo
-        wrapper.style.backgroundColor = ''; // Remover fondo fijo
-        (block as HTMLElement).style.color = ''; // Remover color fijo para usar el del tema
-        block.setAttribute('data-buttons-added', 'true');
       });
-
-    };
-
-    addButtons();
-    // mermaid.init(); // Ya no es necesario aquí, se inicializa en MermaidViewer
-
-    // Hydrate MermaidViewer components
-    const mermaidCodeBlocks = containerRef.current?.querySelectorAll('.mermaid-code-block');
-    mermaidCodeBlocks?.forEach(async (block) => {
-      const encodedMermaidCode = block.getAttribute('data-mermaid-code');
-      if (encodedMermaidCode) {
-        const mermaidCode = decodeURIComponent(encodedMermaidCode);
-
-        // Renderizar el diagrama Mermaid estáticamente para la vista previa
-        let staticMermaidSvg = '';
-        try {
-          const renderId = `mermaid-static-${Math.random().toString(36).substr(2, 9)}`;
-          const { svg } = await mermaid.render(renderId, mermaidCode);
-          staticMermaidSvg = svg;
-        } catch (e) {
-          console.error('Error rendering static mermaid diagram:', e);
-          staticMermaidSvg = '<p>Error al renderizar el diagrama.</p>';
-        }
-
-        // Crear un contenedor temporal para el trigger
-        const triggerContainer = document.createElement('div');
-        block.parentNode?.insertBefore(triggerContainer, block);
-        block.remove(); // Eliminar el div original
-
-        const root = createRoot(triggerContainer);
-        root.render(
-          <MermaidViewer mermaidCode={mermaidCode} trigger={
-            <div
-              className="mermaid-diagram-trigger cursor-pointer p-4 border rounded-lg bg-muted hover:bg-muted/50 transition-colors"
-              dangerouslySetInnerHTML={{ __html: staticMermaidSvg }}
-              title="Haz clic para ver el diagrama interactivo"
-            />
-          } />
-        );
-      }
-    });
-  }, [htmlContent, copiedStates, handleCopy, handlePreview]);
+    }
+  }, [htmlContent, copiedStates, handleCopy, handlePreview, isStreaming]);
 
   // Configurar Mermaid al inicio
   useEffect(() => {

@@ -10,6 +10,8 @@ import { WorkspaceTitleProvider } from '@/contexts/WorkspaceTitleContext';
 import { Toaster } from '@/components/ui/sonner';
 import Image from 'next/image';
 
+import { WebSocketProvider } from '@/contexts/WebSocketContext';
+
 export default function DashboardLayout({
   children,
 }: {
@@ -37,13 +39,15 @@ export default function DashboardLayout({
 
   return (
     <>
-      <DndProvider backend={HTML5Backend}>
-        <WorkspaceTitleProvider>
-          <AppShell>
-            {React.isValidElement(children) ? children : null}
-          </AppShell>
-        </WorkspaceTitleProvider>
-      </DndProvider>
+      <WebSocketProvider>
+        <DndProvider backend={HTML5Backend}>
+          <WorkspaceTitleProvider>
+            <AppShell>
+              {React.isValidElement(children) ? children : null}
+            </AppShell>
+          </WorkspaceTitleProvider>
+        </DndProvider>
+      </WebSocketProvider>
       <Toaster richColors position="top-right" />
     </>
   );

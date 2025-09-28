@@ -134,6 +134,7 @@ class Account(Base):
     mindmap_tasks = relationship("MindmapTask", back_populates="account", cascade="all, delete-orphan")
     upload_tasks = relationship("UploadTask", back_populates="account", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="account", cascade="all, delete-orphan")
+    forms = relationship("Form", back_populates="account", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Account(id={self.id}, name='{self.name}')>"
@@ -436,9 +437,82 @@ class ContactProfile(Base):
     )
 
     albums = relationship("Album", secondary="contact_profile_album_association", back_populates="contact_profiles")
+ 
+    forms = relationship(
+        "Form",
+        secondary="form_contact_profiles_association",
+        back_populates="contact_profiles"
+    )
 
     def __repr__(self):
         return f"<ContactProfile(id={self.id}, name='{self.name}', account_id={self.account_id})>"
+
+
+class Form(Base):
+    """
+    Representa un formulario dinámico creado por el usuario.
+    """
+    __tablename__ = "forms"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+
+    name = Column(String(255), nullable=False, comment="Nombre del formulario.")
+    description = Column(Text, nullable=True, comment="Descripción del formulario.")
+    schema = Column(JSONB, nullable=False, comment="Esquema JSON del formulario.")
+    is_public = Column(Boolean, default=False, nullable=False, comment="Indica si el formulario es accesible públicamente.")
+
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+    # Relación con Account
+    account = relationship("Account", back_populates="forms")
+
+    contact_profiles = relationship(
+        "ContactProfile",
+        secondary="form_contact_profiles_association",
+        back_populates="forms"
+    )
+
+    def __repr__(self):
+        return f"<Form(id={self.id}, name='{self.name}', account_id={self.account_id})>"
+
+
+class FormContactProfileAssociation(Base):
+    """
+    Tabla de asociación para la relación muchos a muchos entre Form y ContactProfile.
+    """
+    __tablename__ = "form_contact_profiles_association"
+
+    form_id = Column(UUID(as_uuid=True), ForeignKey("forms.id"), primary_key=True, nullable=False)
+    contact_profile_id = Column(UUID(as_uuid=True), ForeignKey("contact_profiles.id"), primary_key=True, nullable=False)
+
+    def __repr__(self):
+        return f"<FormContactProfileAssociation(form_id={self.form_id}, contact_profile_id={self.contact_profile_id})>"
+
+
+class FormResponse(Base):
+    """
+    Representa una respuesta enviada a un formulario dinámico.
+    """
+    __tablename__ = "form_responses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    form_id = Column(UUID(as_uuid=True), ForeignKey("forms.id"), nullable=False, index=True)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=True, index=True) # Quien envió la respuesta
+    contact_profile_id = Column(UUID(as_uuid=True), ForeignKey("contact_profiles.id"), nullable=True, index=True) # Si la respuesta está asociada a un perfil de contacto
+
+    answers = Column(JSONB, nullable=False, comment="Respuestas en formato JSONB (campo_id: valor).")
+
+    submitted_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+
+    # Relaciones
+    form = relationship("Form", backref="responses")
+    account = relationship("Account", backref="form_responses")
+    contact_profile = relationship("ContactProfile", backref="form_responses", uselist=False)
+
+    def __repr__(self):
+        return f"<FormResponse(id={self.id}, form_id={self.form_id}, account_id={self.account_id})>"
 
 
 class Nota(Base):
@@ -489,6 +563,7 @@ class Album(Base):
                           back_populates="album",
                           cascade="all, delete-orphan",
                           foreign_keys="[Photo.album_id]")
+    contact_profiles = relationship("ContactProfile", secondary="contact_profile_album_association", back_populates="albums")
     contact_profiles = relationship("ContactProfile", secondary="contact_profile_album_association", back_populates="albums")
 
 
@@ -611,11 +686,11 @@ class Recordatorio(Base):
     # Refactorizado: Se vincula a account_id
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
     
-    text = Column(Text, nullable=False)
+    message = Column(Text, nullable=False)
     due_datetime = Column(DateTime(timezone=True), nullable=False)
     is_active = Column(Boolean, default=True, index=True)
     job_name = Column(String(255), unique=True, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 
     account = relationship("Account", back_populates="recordatorios")
 
@@ -922,6 +997,73 @@ async def find_telegram_identity(db_session, identifier: str) -> Optional[Platfo
             PlatformIdentity.platform == 'telegram',
             Account.username.ilike(identifier) # ilike es case-insensitive
         )
-    
+
     result = await db_session.execute(stmt)
     return result.scalars().first()
+
+async def get_or_create_account_from_platform_id(
+    platform: str,
+    platform_user_id: str,
+    first_name: Optional[str] = None,
+    last_name: Optional[str] = None,
+    username: Optional[str] = None
+) -> Optional[Tuple[Account, bool]]:
+    """
+    Busca o crea una cuenta de usuario basada en una identidad de plataforma.
+
+    Args:
+        platform: Nombre de la plataforma (ej. 'telegram')
+        platform_user_id: ID del usuario en esa plataforma
+        first_name: Nombre del usuario (opcional)
+        last_name: Apellido del usuario (opcional)
+        username: Nombre de usuario (opcional)
+
+    Returns:
+        Tupla (Account, bool) donde bool indica si la cuenta fue creada (True) o ya existía (False),
+        o None si hubo un error.
+    """
+    async with SessionLocal() as db_session:
+        try:
+            # Buscar identidad existente
+            stmt = select(PlatformIdentity).where(
+                PlatformIdentity.platform == platform,
+                PlatformIdentity.platform_user_id == platform_user_id
+            ).options(selectinload(PlatformIdentity.account).selectinload(Account.profile))
+
+            result = await db_session.execute(stmt)
+            identity = result.scalars().first()
+
+            if identity and identity.account:
+                # Actualizar información si está vacía
+                if identity.account.name is None and first_name:
+                    identity.account.name = first_name
+                if identity.account.username is None and username:
+                    identity.account.username = username
+                if first_name or username:
+                    await db_session.commit()
+                return (identity.account, False)
+
+            # Crear nueva cuenta
+            new_account = Account(name=first_name, username=username)
+            db_session.add(new_account)
+            await db_session.flush()
+
+            # Crear identidad de plataforma
+            new_identity = PlatformIdentity(
+                account_id=new_account.id,
+                platform=platform,
+                platform_user_id=platform_user_id
+            )
+            db_session.add(new_identity)
+
+            # Crear perfil vacío
+            new_profile = Perfil(account_id=new_account.id)
+            db_session.add(new_profile)
+
+            await db_session.commit()
+            return (new_account, True)
+
+        except Exception as e:
+            logger.error(f"Error en get_or_create_account_from_platform_id: {e}", exc_info=True)
+            await db_session.rollback()
+            return None

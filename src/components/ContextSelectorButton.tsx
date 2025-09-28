@@ -35,7 +35,7 @@ interface ContextSelectorButtonProps {
 export function ContextSelectorButton({ onContextSelected, currentContext, workspaceId }: ContextSelectorButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [documents, setDocuments] = useState<SelectedContextItem[]>([]);
-  const [selectedDocuments, setSelectedDocuments] = useState<SelectedContextItem[]>(currentContext);
+  const [selectedDocuments, setSelectedDocuments] = useState<SelectedContextItem[]>(currentContext || []);
   const [isLoading, setIsLoading] = useState(false);
   const [collections, setCollections] = useState<{ topic: string; items: SelectedContextItem[] }[]>([]);
   const [expandedTopics, setExpandedTopics] = useState<Record<string, boolean>>({});
