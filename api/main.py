@@ -1,11 +1,13 @@
-# api/main.py
-
 import logging
 import asyncio # Added
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+import json
 import os
 
 from api.auth import router as auth_router
@@ -17,6 +19,7 @@ from api.agenda import router as agenda_router
 from api.teams import router as teams_router
 from api.knowledge_graph import router as knowledge_graph_router
 from api.search import router as search_router
+from api.forms import router as forms_router
 from core.config import settings
 from core.database import create_tables
 from core.llm_manager import initialize_llms
@@ -49,6 +52,14 @@ app = FastAPI(
     description="Procesa la lógica de la IA, sirve el panel de Telegram y gestiona la autenticación universal.",
     version="1.0.0"
 )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.error(f"Request validation error for {request.method} {request.url}: {json.dumps(exc.errors(), indent=2)}")
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content=jsonable_encoder({"detail": exc.errors()}),
+    )
 
 # Configuración de CORS
 origins = [
@@ -112,7 +123,8 @@ async def shutdown_event():
 
 # Middleware para registrar solicitudes que resultan en error 405
 @app.middleware("http")
-async def log_405_errors(request, call_next):
+async def log_requests(request: Request, call_next):
+    logger.info(f"Incoming request: {request.method} {request.url}")
     response = await call_next(request)
     if response.status_code == 405:
         logger.warning(f"Method Not Allowed (405) for request: {request.method} {request.url}")
@@ -197,6 +209,7 @@ app.include_router(tasks_router, prefix="/api", tags=["tasks"]) # Incluir el rou
 app.include_router(knowledge_graph_router, prefix="/api", tags=["knowledge-graph"])
 app.include_router(search_router, prefix="/api", tags=["search"])
 app.include_router(galleries_router, prefix="/api/galleries", tags=["galleries"])
+app.include_router(forms_router, prefix="/api", tags=["forms"])
 
 @app.get("/test-connection")
 async def test_connection():

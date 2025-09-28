@@ -441,17 +441,20 @@ async def transcribe_audio(file: UploadFile = File(...)):
 
     return {"transcription": transcription}
 
-@router.post("/chat", response_model=ChatResponse, summary="Procesar Mensaje de Chat")
+@router.post("/chat", status_code=status.HTTP_202_ACCEPTED, summary="Procesar Mensaje de Chat en Segundo Plano")
 async def handle_chat(
     background_tasks: BackgroundTasks,
-    request: ChatRequest, # Use ChatRequest model for JSON body
+    request: ChatRequest,
     current_account_id: str = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db)
-) -> ChatResponse:
+):
     """
-    Endpoint principal para procesar mensajes de chat con el agente de IA.
-    Requiere autenticación JWT.
+    Acepta una solicitud de chat, inicia una tarea en segundo plano para procesarla
+    y devuelve inmediatamente una respuesta 202 Accepted. Los resultados se envían
+    a través de WebSocket.
     """
+    task_id = str(uuid.uuid4())
+    
     # Parse rag_context if provided
     parsed_rag_context = None
     if request.rag_context:
@@ -463,15 +466,9 @@ async def handle_chat(
             logger.error(f"Error al parsear rag_context: {e}")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Formato de rag_context inválido.")
 
-    logger.info(f"Petición de chat recibida de la cuenta: {request.account_id} con modo: {request.mode}")
+    logger.info(f"Petición de chat recibida de la cuenta: {request.account_id} con modo: {request.mode}. Task ID: {task_id}")
     
-    # Obtener el workspace_id del ChatThread asociado
-    workspace_id = None
-    
-    # Logs de depuración para verificar thread_id y account_id
-    logger.info(f"DEBUG: Intentando recuperar ChatThread con thread_id: {request.thread_id} y account_id: {current_account_id}")
-    
-    thread = await db.scalar(select(ChatThread).where(  # type: ignore[arg-type]
+    thread = await db.scalar(select(ChatThread).where(
         ChatThread.id == uuid.UUID(request.thread_id),
         ChatThread.account_id == uuid.UUID(current_account_id)
     ))
@@ -479,63 +476,32 @@ async def handle_chat(
         logger.warning(f"No se encontró el hilo {request.thread_id} para la cuenta {current_account_id}.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Hilo de chat con id {request.thread_id} no encontrado.")
 
-    if thread.workspace_id:
-        workspace_id = str(thread.workspace_id)
-        logger.info(f"Recuperado workspace_id {workspace_id} para el hilo {request.thread_id}.")
-    else:
-        logger.info(f"El hilo {request.thread_id} no tiene un workspace_id asociado (opcional).")
+    workspace_id = str(thread.workspace_id) if thread.workspace_id else None
 
-    # Implementar la lógica principal del agente aquí y devolver la respuesta real
-    final_agent_response = ""
-    final_tool_code = None
-    final_sources = []
-
-    # Llamar a la función que ahora envía los mensajes por WebSocket
-    await create_and_run_agent_streaming(
+    # Añadir la ejecución del agente como una tarea en segundo plano
+    background_tasks.add_task(
+        create_and_run_agent_streaming,
         account_id=request.account_id,
         thread_id=request.thread_id,
+        task_id=task_id,
         telegram_id=request.telegram_id,
         user_message=request.user_message,
         image_base64=request.image_base64,
         document_url=request.document_url,
         mode=request.mode,
-        rag_context=parsed_rag_context, # rag_context is now directly a list
+        rag_context=parsed_rag_context,
         background_tasks=background_tasks,
         workspace_id=workspace_id
     )
 
-    # Después de que el agente ha terminado y los mensajes se han guardado en el historial,
-    # recuperamos el último mensaje del historial para devolverlo como respuesta final HTTP.
-    db_sync_url = settings.database_url.replace("+psycopg", "")
-    chat_message_history = PostgresChatMessageHistory(
-        connection_string=db_sync_url,
-        session_id=request.thread_id, # Changed to request.thread_id
-        table_name="langchain_chat_history",
-    )
-    history_messages = await chat_message_history.aget_messages()
-    
-    if history_messages and isinstance(history_messages[-1], AIMessage):
-        content = history_messages[-1].content
-        if isinstance(content, list):
-            # Convert list content to string, handling dicts if present
-            final_agent_response = "".join([part.get("text", "") if isinstance(part, dict) else str(part) for part in content])
-        else:
-            final_agent_response = str(content) # Ensure it's a string
-
-        # Aquí podrías intentar extraer tool_code y sources si se guardan en additional_kwargs
-        # o si tienes una forma de recuperarlos del historial.
-        # Por ahora, los dejaremos como None/vacíos si no se guardan explícitamente en el historial.
-        final_tool_code = history_messages[-1].additional_kwargs.get('tool_code')
-        final_sources = history_messages[-1].additional_kwargs.get('sources', [])
-
-
-    logger.info(f"DEBUG (handle_chat): Retornando ChatResponse con response_text: {final_agent_response[:100]}..., tool_code: {final_tool_code}, sources: {len(final_sources)} fuentes.")
-    return ChatResponse(response_text=final_agent_response, tool_code=final_tool_code, sources=final_sources)
+    # Devolver una respuesta inmediata
+    return {"thread_id": request.thread_id, "taskId": task_id}
 
 
 async def create_and_run_agent_streaming(
     account_id: str,
     thread_id: str,
+    task_id: str, # Nuevo taskId para seguimiento
     telegram_id: Optional[int],
     user_message: str,
     image_base64: Optional[str] = None,
@@ -560,15 +526,12 @@ async def create_and_run_agent_streaming(
 
     logger.info(f"--- Iniciando agente LangGraph para account_id: {account_id}, thread_id: {thread_id} ---")
 
-    llm_task_id = str(uuid.uuid4()) # Generar un ID único para esta tarea del LLM
-
     try:
-        # Enviar mensaje de inicio del LLM
+        # Enviar mensaje de inicio de stream
         await send_personal_message(account_id, {
-            "type": "llm_start",
+            "type": "stream_start",
             "thread_id": thread_id,
-            "task_id": llm_task_id,
-            "message": "El agente está pensando..."
+            "taskId": task_id,
         })
 
         # --- Preparación del Contexto RAG ---
@@ -639,85 +602,37 @@ async def create_and_run_agent_streaming(
 
         config: RunnableConfig = {"configurable": {"thread_id": thread_id}} # Castear a RunnableConfig
         final_state = None
-        full_response_content = "" # Inicializar aquí
+        full_response_content = ""
+        last_llm_content = ""
 
-        # Iterar sobre los chunks del astream
         async for chunk in agent_app.astream(initial_state, config=config):
-            # LangGraph emite un diccionario con el nombre del nodo como clave
-            # y el estado actualizado de ese nodo como valor.
-            # Aquí, solo nos interesa el nodo 'generateResponse' y 'action'
-            # para el streaming al cliente.
-
             if "generateResponse" in chunk:
-                # Este es el nodo que genera la respuesta final del LLM
-                # y contiene el AIMessage completo.
-                # Extraemos el mensaje y lo enviamos caracter por caracter.
                 final_response_message = chunk["generateResponse"]["messages"][-1]
                 if isinstance(final_response_message, AIMessage):
-                    # Asegurarse de que el contenido es un string o convertirlo
-                    content_to_stream = final_response_message.content
-                    if isinstance(content_to_stream, list):
-                        # Si es una lista de partes de contenido (ej. para multimodal), unirlas
-                        content_to_stream = "".join([part.get("text", "") if isinstance(part, dict) else str(part) for part in content_to_stream])
+                    current_llm_content = final_response_message.content
+                    if isinstance(current_llm_content, list):
+                        current_llm_content = "".join([part.get("text", "") if isinstance(part, dict) else str(part) for part in current_llm_content])
                     else:
-                        content_to_stream = str(content_to_stream)
+                        current_llm_content = str(current_llm_content)
 
-                    # Si el AIMessage tiene tool_calls, enviarlos primero
-                    if final_response_message.tool_calls:
-                        tool_code_to_send = json.dumps([
-                            {
-                                "name": tc["name"],
-                                "arguments": tc["args"],
-                            }
-                            for tc in final_response_message.tool_calls
-                        ])
+                    # LangGraph nos da el contenido completo, no el delta.
+                    # El frontend se encargará de la concatenación.
+                    new_chunk = current_llm_content[len(last_llm_content):]
+                    last_llm_content = current_llm_content
+
+                    if new_chunk:
+                        full_response_content += new_chunk
                         await send_personal_message(account_id, {
-                            "type": "tool_code",
+                            "type": "stream_chunk",
                             "thread_id": thread_id,
-                            "task_id": llm_task_id,
-                            "tool_code": tool_code_to_send
+                            "taskId": task_id,
+                            "chunk": new_chunk
                         })
-                        logger.info(f"DEBUG (create_and_run_agent_streaming): Enviado tool_code durante streaming: {tool_code_to_send}")
 
-                    for char in content_to_stream:
-                        full_response_content += char
-                        await send_personal_message(account_id, {
-                            "type": "llm_chunk",
-                            "thread_id": thread_id,
-                            "task_id": llm_task_id,
-                            "chunk": char
-                        })
-                        await asyncio.sleep(0.001) # Pequeña pausa para simular streaming
-                    final_state = chunk["generateResponse"] # Guardar el estado final
-
-            elif "action" in chunk:
-                # Este nodo representa la ejecución de una herramienta.
-                # LangGraph devuelve el ToolMessage después de la ejecución.
-                tool_message = chunk["action"]["messages"][-1]
-                if isinstance(tool_message, ToolMessage):
-                    # --- MODIFICACIÓN: No enviar el resultado crudo de la herramienta al frontend ---
-                    # El resultado completo (tool_message.content) es para el LLM, no para el usuario.
-                    # Solo notificamos que la herramienta terminó.
-                    await send_personal_message(account_id, {
-                        "type": "tool_status",
-                        "thread_id": thread_id,
-                        "task_id": llm_task_id,
-                        "tool_name": tool_message.name or "herramienta",
-                        "status": "end",
-                        "message": f"Herramienta '{tool_message.name or 'herramienta'}' finalizada.",
-                        # "result": tool_message.content # ELIMINADO
-                    })
+                    final_state = chunk["generateResponse"]
             
-            # Otros estados intermedios del agente para notificaciones de "pensando"
-            if "agent" in chunk: # El nodo 'agent' es el que llama al LLM para decidir
-                # Podemos usar esto para enviar un estado de "pensando" o "analizando"
-                if any(isinstance(msg, AIMessage) and msg.tool_calls for msg in chunk["agent"]["messages"]):
-                     # El agente decidió usar una herramienta
-                    tool_call_names = ", ".join([tc.get("name", "herramienta desconocida") for tc in chunk["agent"]["messages"][-1].tool_calls])
-                    await send_personal_message(account_id, {"type": "llm_status", "thread_id": thread_id, "task_id": llm_task_id, "message": f"El agente está usando: {tool_call_names} 🛠️"})
-                else:
-                    # El agente está pensando en una respuesta
-                    await send_personal_message(account_id, {"type": "llm_status", "thread_id": thread_id, "task_id": llm_task_id, "message": "El agente está pensando... 🤔"})
+            # La lógica de 'action' y 'agent' se manejará en el tool_node de core/agent.py
+            # para emitir 'tool_start' y 'tool_end'.
 
         # Al finalizar el bucle astream, debemos haber recolectado la respuesta final
         if not final_state:
@@ -734,10 +649,11 @@ async def create_and_run_agent_streaming(
                     final_ai_message_kwargs["tool_calls"] = last_ai_message.tool_calls
                 if last_ai_message.additional_kwargs.get("sources"):
                     final_ai_message_kwargs["sources"] = last_ai_message.additional_kwargs["sources"]
-
+ 
+        logger.info(f"DEBUG (create_and_run_agent_streaming): Guardando respuesta final en historial. thread_id: {thread_id}, task_id: {task_id}, full_response_content: {full_response_content}")
         await chat_message_history.aadd_messages([AIMessage(content=full_response_content, additional_kwargs=final_ai_message_kwargs)])
-
-
+ 
+ 
         if background_tasks:
             updated_history = await chat_message_history.aget_messages()
             real_messages = [m for m in updated_history if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
@@ -760,276 +676,33 @@ async def create_and_run_agent_streaming(
         tool_code_to_send = None
         sources_to_send = []
 
-        for msg in final_state["messages"]:
-            if isinstance(msg, AIMessage) and msg.tool_calls:
-                tool_code_to_send = json.dumps([
-                    {
-                        "name": tc["name"],
-                        "arguments": tc["args"],
-                    }
-                    for tc in msg.tool_calls
-                ])
-                logger.info(f"DEBUG (create_and_run_agent_streaming): Encontrado tool_code en AIMessage: {tool_code_to_send}")
-                break
+        # Recuperar tool_code y sources del último AIMessage guardado en el historial
+        if final_ai_message_kwargs.get("tool_calls"):
+            tool_code_to_send = json.dumps([
+                {"name": tc["name"], "arguments": tc["args"]}
+                for tc in final_ai_message_kwargs["tool_calls"]
+            ])
+        if final_ai_message_kwargs.get("sources"):
+            sources_to_send = final_ai_message_kwargs["sources"]
 
         await send_personal_message(account_id, {
-            "type": "llm_end",
+            "type": "stream_end",
             "thread_id": thread_id,
-            "task_id": llm_task_id,
-            "message": "Respuesta completada",
-            "tool_code": tool_code_to_send,
-            "sources": sources_to_send
+            "taskId": task_id,
         })
 
     except Exception as e:
         logger.error(f"Error en streaming agent LangGraph: {e}", exc_info=True)
         await send_personal_message(account_id, {
-            "type": "llm_error",
+            "type": "error",
             "thread_id": thread_id,
-            "task_id": llm_task_id,
+            "taskId": task_id,
             "message": str(e)
         })
 
 
 
 
-@router.post("/chat/stream")
-async def handle_chat_stream(
-    background_tasks: BackgroundTasks,
-    request: ChatRequest,
-    current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Endpoint para procesar mensajes de chat con el agente de IA y devolver un stream de eventos.
-    """
-    parsed_rag_context = None
-    if request.rag_context:
-        try:
-            parsed_rag_context = json.loads(request.rag_context)
-            if not isinstance(parsed_rag_context, list):
-                raise ValueError("rag_context no es una lista válida.")
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.error(f"Error al parsear rag_context: {e}")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Formato de rag_context inválido.")
-
-    logger.info(f"Petición de chat stream recibida de la cuenta: {request.account_id} con modo: {request.mode}")
-
-    thread = await db.scalar(select(ChatThread).where(
-        ChatThread.id == uuid.UUID(request.thread_id),
-        ChatThread.account_id == uuid.UUID(current_account_id)
-    ))
-    if not thread:
-        logger.warning(f"No se encontró el hilo {request.thread_id} para la cuenta {current_account_id}.")
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Hilo de chat con id {request.thread_id} no encontrado.")
-
-    workspace_id = str(thread.workspace_id) if thread.workspace_id else None
-
-    async def stream_generator():
-        from core.agent import create_langgraph_agent, AgentState
-        from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-        from langchain_community.chat_message_histories import PostgresChatMessageHistory
-        from core.config import settings
-        from core.database import LangchainPgEmbedding
-        from sqlalchemy.future import select
-        from sqlalchemy.orm import selectinload
-
-        logger.info(f"--- Iniciando agente LangGraph para STREAM HTTP para account_id: {request.account_id}, thread_id: {request.thread_id} ---")
-
-        llm_task_id = str(uuid.uuid4())
-
-        try:
-            yield json.dumps({
-                "type": "llm_start",
-                "thread_id": request.thread_id,
-                "task_id": llm_task_id,
-                "message": "El agente está pensando..."
-            }) + "\n"
-
-            # --- Preparación del Contexto RAG ---
-            context_text = ""
-            if parsed_rag_context:
-                logger.info(f"Enriqueciendo contexto con {len(parsed_rag_context)} item(s) de RAG.")
-                document_ids_to_fetch = [item['id'] for item in parsed_rag_context if item.get('type') == 'document']
-                
-                if document_ids_to_fetch:
-                    async with SessionLocal() as session:
-                        stmt = (
-                            select(LangchainPgEmbedding)
-                            .filter(LangchainPgEmbedding.cmetadata['document_id'].astext.in_(document_ids_to_fetch))
-                            .order_by(cast(LangchainPgEmbedding.cmetadata['chunk_index'].astext, Integer))
-                        )
-                        result = await session.execute(stmt)
-                        all_chunks = result.scalars().all()
-
-                        docs_content = {}
-                        for chunk in all_chunks:
-                            doc_id = chunk.cmetadata.get('document_id')
-                            if doc_id not in docs_content:
-                                docs_content[doc_id] = {
-                                    'title': chunk.cmetadata.get('title', chunk.cmetadata.get('file_name')),
-                                    'chunks': []
-                                }
-                            docs_content[doc_id]['chunks'].append(chunk.document)
-
-                        for doc_id, data in docs_content.items():
-                            full_content = "".join(data['chunks'])
-                            context_text += f"\n\n--- Contexto del Documento: {data['title']} ---"
-                            context_text += f"\nContenido: {full_content}\n"
-                            context_text += "--- Fin del Contexto del Documento ---"
-
-            if context_text:
-                logger.info("Contexto RAG preparado para el LLM.")
-
-            # --- Preparación Inicial ---
-            agent_app = create_langgraph_agent()
-            db_sync_url = settings.database_url.replace("+psycopg", "")
-            chat_message_history = PostgresChatMessageHistory(
-                connection_string=db_sync_url,
-                session_id=request.thread_id,
-                table_name="langchain_chat_history",
-            )
-            history_messages = await chat_message_history.aget_messages()
-
-            user_message_with_rag_context = HumanMessage(
-                content=request.user_message,
-                additional_kwargs={'rag_context': parsed_rag_context} if parsed_rag_context else {}
-            )
-
-            if context_text:
-                user_message = f"{request.user_message}\n\n--- Contexto RAG ---\n{context_text}\n--- Fin Contexto RAG ---"
-            else:
-                user_message = request.user_message
-
-            initial_state: AgentState = {
-                "messages": history_messages + [HumanMessage(content=user_message)],
-                "account_id": request.account_id,
-                "telegram_id": request.telegram_id,
-                "workspace_id": workspace_id,
-                "rag_context": parsed_rag_context,
-                "sources": [],
-            }
-
-            await chat_message_history.aadd_messages([HumanMessage(content=user_message)])
-
-            config: RunnableConfig = {"configurable": {"thread_id": request.thread_id}}
-            final_state = None
-            full_response_content = ""
-
-            async for chunk in agent_app.astream(initial_state, config=config):
-                if "generateResponse" in chunk:
-                    final_response_message = chunk["generateResponse"]["messages"][-1]
-                    if isinstance(final_response_message, AIMessage):
-                        content_to_stream = final_response_message.content
-                        if isinstance(content_to_stream, list):
-                            content_to_stream = "".join([part.get("text", "") if isinstance(part, dict) else str(part) for part in content_to_stream])
-                        else:
-                            content_to_stream = str(content_to_stream)
-
-                        if final_response_message.tool_calls:
-                            tool_code_to_send = json.dumps([
-                                {"name": tc["name"], "arguments": tc["args"]}
-                                for tc in final_response_message.tool_calls
-                            ])
-                            yield json.dumps({
-                                "type": "tool_code",
-                                "thread_id": request.thread_id,
-                                "task_id": llm_task_id,
-                                "tool_code": tool_code_to_send
-                            }) + "\n"
-
-                        for char in content_to_stream:
-                            full_response_content += char
-                            yield json.dumps({
-                                "type": "llm_chunk",
-                                "thread_id": request.thread_id,
-                                "task_id": llm_task_id,
-                                "chunk": char
-                            }) + "\n"
-                            await asyncio.sleep(0.001)
-                        final_state = chunk["generateResponse"]
-
-                elif "action" in chunk:
-                    tool_message = chunk["action"]["messages"][-1]
-                    if isinstance(tool_message, ToolMessage):
-                        yield json.dumps({
-                            "type": "tool_status",
-                            "thread_id": request.thread_id,
-                            "task_id": llm_task_id,
-                            "tool_name": tool_message.name or "herramienta",
-                            "status": "end",
-                            "message": f"Herramienta '{tool_message.name or 'herramienta'}' finalizada.",
-                        }) + "\n"
-                
-                if "agent" in chunk:
-                    if any(isinstance(msg, AIMessage) and msg.tool_calls for msg in chunk["agent"]["messages"]):
-                        tool_call_names = ", ".join([tc.get("name", "herramienta desconocida") for tc in chunk["agent"]["messages"][-1].tool_calls])
-                        yield json.dumps({"type": "llm_status", "thread_id": request.thread_id, "task_id": llm_task_id, "message": f"El agente está usando: {tool_call_names} 🛠️"}) + "\n"
-                    else:
-                        yield json.dumps({"type": "llm_status", "thread_id": request.thread_id, "task_id": llm_task_id, "message": "El agente está pensando... 🤔"}) + "\n"
-
-            if not final_state:
-                raise ValueError("El grafo no produjo un estado final válido.")
-            
-            final_ai_message_kwargs = {}
-            if final_state and "generateResponse" in final_state and final_state["generateResponse"]["messages"]:
-                last_ai_message = final_state["generateResponse"]["messages"][-1]
-                if isinstance(last_ai_message, AIMessage):
-                    if last_ai_message.tool_calls:
-                        final_ai_message_kwargs["tool_calls"] = last_ai_message.tool_calls
-                    if last_ai_message.additional_kwargs.get("sources"):
-                        final_ai_message_kwargs["sources"] = last_ai_message.additional_kwargs["sources"]
-
-            await chat_message_history.aadd_messages([AIMessage(content=full_response_content, additional_kwargs=final_ai_message_kwargs)])
-
-            if background_tasks:
-                updated_history = await chat_message_history.aget_messages()
-                real_messages = [m for m in updated_history if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
-                message_count = len(real_messages)
-
-                async with SessionLocal() as db:
-                    thread = await db.get(ChatThread, uuid.UUID(request.thread_id))
-                    current_title = thread.title if thread else ""
-
-                should_rename = (
-                    (current_title == "Nuevo Chat" and message_count >= 3) or
-                    (message_count >= 10 and message_count % 10 == 0)
-                )
-
-                if should_rename:
-                    from core.agent import force_update_thread_title
-                    background_tasks.add_task(force_update_thread_title, request.thread_id)
-            
-            tool_code_to_send = None
-            sources_to_send = []
-
-            for msg in final_state["messages"]:
-                if isinstance(msg, AIMessage) and msg.tool_calls:
-                    tool_code_to_send = json.dumps([
-                        {"name": tc["name"], "arguments": tc["args"]}
-                        for tc in msg.tool_calls
-                    ])
-                    break
-
-            yield json.dumps({
-                "type": "llm_end",
-                "thread_id": request.thread_id,
-                "task_id": llm_task_id,
-                "message": "Respuesta completada",
-                "tool_code": tool_code_to_send,
-                "sources": sources_to_send
-            }) + "\n"
-
-        except Exception as e:
-            logger.error(f"Error en streaming agent LangGraph (HTTP): {e}", exc_info=True)
-            yield json.dumps({
-                "type": "llm_error",
-                "thread_id": request.thread_id,
-                "task_id": llm_task_id,
-                "message": str(e)
-            }) + "\n"
-
-    return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
 
 
 @router.get("/threads", summary="Obtener lista de hilos de chat")

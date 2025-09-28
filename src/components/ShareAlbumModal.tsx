@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -45,7 +45,7 @@ interface SharedLinkResponse {
   allow_download: boolean; // NEW FIELD
 }
 
-  const fetchExistingLinks = async () => {
+  const fetchExistingLinks = useCallback(async () => {
     if (!albumId) return;
     try {
       const response = await apiClient.get<SharedLinkResponse[]>(`${process.env.NEXT_PUBLIC_API_URL}/api/galleries/albums/${albumId}/share-links`);
@@ -54,7 +54,7 @@ interface SharedLinkResponse {
       console.error('Error fetching existing share links:', e);
       toast.error('Error al cargar los enlaces compartidos existentes.');
     }
-  };
+  }, [albumId]); // Add albumId to the dependency array
 
   useEffect(() => {
     if (isOpen && albumId) {

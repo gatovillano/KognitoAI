@@ -331,7 +331,7 @@ async def get_all_knowledge(account_id: str) -> List[Dict[str, Any]]:
         # Usar la nueva estructura optimizada con account_id directo
         memories = []
         memories_stmt = select(LangchainPgEmbedding).where(
-            LangchainPgEmbedding.account_id == account_id_uuid,
+            LangchainPgEmbedding.account_id == account_uuid,
             LangchainPgEmbedding.content_type == 'user_memories'
         )
         result = await db.execute(memories_stmt)

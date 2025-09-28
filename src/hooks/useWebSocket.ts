@@ -1,216 +1,83 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { toast } from 'sonner';
 
-interface WebSocketMessage {
+export interface WebSocketMessage {
   type: string;
+  taskId?: string; // Añadido para la nueva arquitectura de streaming
   [key: string]: any;
 }
 
 interface UseWebSocketOptions {
-  onTitleUpdated?: (data: { file_name: string; new_title: string; progress: number; total: number }) => void;
-  onTitleExtractionStarted?: (data: { total_documents: number; message: string }) => void;
-  onTitleExtractionCompleted?: (data: { updated_count: number; total_processed: number; message: string }) => void;
-  onUploadStarted?: (data: { task_id: string; file_names: string[]; topic: string; created_at: string; }) => void;
-  onUploadProgress?: (data: { task_id: string; progress: number; message: string; }) => void;
-  onUploadCompleted?: (data: { task_id: string; message: string; }) => void;
-  onUploadFailed?: (data: { task_id: string; error_message: string; }) => void;
-  onLlmChunk?: (data: { chunk: string; thread_id: string; task_id: string; }) => void;
-  onLlmStart?: (data: { thread_id: string; task_id: string; message: string; }) => void;
-  onLlmEnd?: (data: { thread_id: string; task_id: string; message: string; tool_code?: string; sources?: any[]; }) => void;
-  onLlmError?: (data: { thread_id: string; task_id: string; message: string; }) => void;
-  onLlmStatus?: (data: { thread_id: string; task_id: string; message: string; }) => void; // Added
-  onToolStatusUpdate?: (data: { thread_id: string; tool_name: string; status: 'start' | 'end' | 'error'; timestamp: string; message?: string; result?: string; error?: string; sources?: any[]; }) => void;
-  onThreadTitleUpdated?: (data: { thread_id: string; new_title: string; }) => void; // Added
-  onToolCode?: (data: { thread_id: string; task_id: string; tool_code: string; }) => void;
-  userId?: string; // <--- AÑADIR ESTA PROP
+  userId?: string;
 }
 
 export const useWebSocket = (options: UseWebSocketOptions = {}) => {
-  const { userId } = options; // <--- OBTENER EL USER ID DE LAS OPCIONES
+  const { userId } = options;
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [latestMessage, setLatestMessage] = useState<WebSocketMessage | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 5;
 
   const connect = useCallback(() => {
-    console.log('WS: Intentando conectar...'); // Nuevo log
+    console.log('WS: Intentando conectar...');
     try {
       const token = localStorage.getItem('authToken');
-      // const userInfo = localStorage.getItem('userInfo'); // Ya no es necesario aquí si userId viene de props
-      
-      if (!token || !userId) { // <--- USAR userId DE LAS PROPS
-        console.error('WS: No hay token de acceso o ID de usuario disponible. No se puede conectar.'); // Nuevo log
+      if (!token || !userId) {
+        console.error('WS: No hay token de acceso o ID de usuario disponible. No se puede conectar.');
         setConnectionError('No hay token de acceso o ID de usuario disponible');
         return;
       }
 
-      // const { id: userId } = JSON.parse(userInfo); // Ya no es necesario
-
       const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || window.location.origin;
-      console.log(`WS: apiBaseUrl (antes de parsear): ${apiBaseUrl}`); // Nuevo log para depuración
-      let wsProtocol = 'ws';
-      let wsHost = '';
+      let wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      let wsHost = window.location.host;
 
       try {
         const url = new URL(apiBaseUrl);
         wsProtocol = url.protocol === 'https:' ? 'wss' : 'ws';
         wsHost = url.host;
       } catch (e) {
-        console.error("WS: Error parsing API_BASE_URL, falling back to window.location.origin", e); // Nuevo log
-        wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        wsHost = window.location.host;
+        console.error("WS: Error parsing API_BASE_URL, falling back to window.location.origin", e);
       }
-      
-      
 
       const wsUrl = `${wsProtocol}://${wsHost}/ws/${userId}?token=${encodeURIComponent(token)}`;
-      console.log(`WS: Intentando conectar a: ${wsUrl}`); // Log detallado de la URL
+      console.log(`WS: Intentando conectar a: ${wsUrl}`);
       
       wsRef.current = new WebSocket(wsUrl);
 
       wsRef.current.onopen = () => {
-        console.log('WS: 🔌 WebSocket conectado exitosamente.'); // Log más claro
+        console.log('WS: 🔌 WebSocket conectado exitosamente.');
         setIsConnected(true);
         setConnectionError(null);
         reconnectAttempts.current = 0;
       };
 
       wsRef.current.onmessage = (event) => {
+        console.log('WS: onmessage triggered', event);
+        console.log('WS: event.data (raw):', event.data);
+        const msgStr = event.data as string;
+        if (!msgStr) return;
+
         try {
-          const message: WebSocketMessage = JSON.parse(event.data);
+          const message: WebSocketMessage = JSON.parse(msgStr);
           console.log('WS: 📨 Mensaje WebSocket recibido:', message);
+          setLatestMessage(message);
+          console.log('WS: setLatestMessage called with:', message);
 
-          switch (message.type) {
-            case 'title_updated':
-              if (options.onTitleUpdated) {
-                options.onTitleUpdated({
-                  file_name: message.file_name,
-                  new_title: message.new_title,
-                  progress: message.progress,
-                  total: message.total
-                });
-              }
-              toast.success(`📄 Título actualizado: ${message.file_name}`, {
-                description: `Nuevo título: "${message.new_title}"`
-              });
-              break;
-
-            case 'title_extraction_started':
-              if (options.onTitleExtractionStarted) {
-                options.onTitleExtractionStarted({
-                  total_documents: message.total_documents,
-                  message: message.message
-                });
-              }
-              toast.info(`🚀 ${message.message}`);
-              break;
-
-            case 'title_extraction_completed':
-              if (options.onTitleExtractionCompleted) {
-                options.onTitleExtractionCompleted({
-                  updated_count: message.updated_count,
-                  total_processed: message.total_processed,
-                  message: message.message
-                });
-              }
-              toast.success(`✅ Extracción completada`, {
-                description: `${message.updated_count} títulos actualizados`
-              });
-              break;
-
-            case 'upload_started':
-              if (options.onUploadStarted) {
-                options.onUploadStarted({
-                  task_id: message.task_id,
-                  file_names: message.file_names,
-                  topic: message.topic,
-                  created_at: message.created_at
-                });
-              }
-              toast.info(`📤 Subida iniciada: ${message.file_names.join(', ')} a la colección ${message.topic}`);
-              break;
-
-            case 'upload_progress':
-              if (options.onUploadProgress) {
-                options.onUploadProgress({
-                  task_id: message.task_id,
-                  progress: message.progress,
-                  message: message.message
-                });
-              }
-              break;
-
-            case 'upload_completed':
-              if (options.onUploadCompleted) {
-                options.onUploadCompleted({
-                  task_id: message.task_id,
-                  message: message.message
-                });
-              }
-              toast.success(`✅ Subida completada: ${message.message}`);
-              break;
-
-            case 'upload_failed':
-              if (options.onUploadFailed) {
-                options.onUploadFailed({
-                  task_id: message.task_id,
-                  error_message: message.error_message
-                });
-              }
-              toast.error(`❌ Subida fallida: ${message.error_message}`);
-              break;
-
-            case 'llm_chunk':
-                if (options.onLlmChunk) {
-                    options.onLlmChunk(message as any);
-                }
-                break;
-            case 'llm_start':
-                if (options.onLlmStart) {
-                    options.onLlmStart(message as any);
-                }
-                break;
-            case 'llm_end':
-                if (options.onLlmEnd) {
-                    options.onLlmEnd(message as any);
-                }
-                break;
-            case 'llm_error':
-                if (options.onLlmError) {
-                    options.onLlmError(message as any);
-                }
-                toast.error(`Error del LLM: ${message.message}`);
-                break;
-            case 'llm_status':
-                if (options.onLlmStatus) {
-                    options.onLlmStatus(message as any);
-                }
-                break;
-            case 'tool_status':
-                if (options.onToolStatusUpdate) {
-                    options.onToolStatusUpdate(message as any);
-                }
-                break;
-            case 'thread_title_updated':
-                if (options.onThreadTitleUpdated) {
-                    options.onThreadTitleUpdated(message as any);
-                }
-                break;
-            case 'tool_code': // Added case for tool_code
-                if (options.onToolCode) {
-                    options.onToolCode(message as any);
-                }
-                break;
-
-            default:
-              console.log('WS: 📨 Mensaje WebSocket no manejado:', message);
-          }
         } catch (error) {
-          console.error('WS: ❌ Error al procesar mensaje WebSocket:', error);
+          // If JSON parsing fails, check if it's a known non-JSON message like 'pong' or 'ping'
+          if (msgStr === 'pong') {
+            console.log('WS: 💓 Recibido pong del servidor.');
+          } else if (msgStr === 'ping') {
+            console.log('WS: 💓 Recibido ping del servidor (inesperado, pero ignorado).');
+          } else {
+            console.error('WS: ❌ Error al procesar mensaje WebSocket (no JSON o formato inesperado):', error, 'Mensaje recibido:', msgStr);
+          }
         }
       };
+
 
       wsRef.current.onclose = (event) => {
         console.log(`WS: 🔌 WebSocket desconectado. Código: ${event.code}, Razón: "${event.reason}", Limpio: ${event.wasClean}.`);
@@ -225,12 +92,9 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
             connect();
           }, delay);
         } else if (reconnectAttempts.current >= maxReconnectAttempts) {
-          const errorMessage = 'No se pudo reconectar al servidor después de varios intentos. Verifica la conexión y la configuración del servidor.';
+          const errorMessage = 'No se pudo reconectar al servidor después de varios intentos.';
           console.error(`WS: ${errorMessage}`);
           setConnectionError(errorMessage);
-          toast.error("Error de conexión", {
-            description: errorMessage,
-          });
         }
       };
 
@@ -243,10 +107,10 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       console.error('WS: ❌ Error al crear WebSocket:', error);
       setConnectionError('Error al crear conexión WebSocket');
     }
-  }, [options, userId]); // <--- AÑADIR userId A LAS DEPENDENCIAS DE useCallback
+  }, [userId]);
 
   const disconnect = useCallback(() => {
-    console.log('WS: Desconectando WebSocket...'); // Nuevo log
+    console.log('WS: Desconectando WebSocket...');
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
@@ -262,15 +126,28 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
   }, []);
 
   useEffect(() => {
-    console.log('WS: useEffect: Montando useWebSocket hook.');
+    let heartbeatInterval: NodeJS.Timeout | null = null;
+
     if (userId) {
       connect();
+
+      // Iniciar el heartbeat del cliente
+      heartbeatInterval = setInterval(() => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          console.log("WS: 💓 Enviando ping desde el cliente.");
+          wsRef.current.send('ping');
+        }
+      }, 20000); // 20 segundos
+
     } else {
       console.log("WS: No userId available yet, skipping WebSocket connection attempt.");
     }
 
     return () => {
-      console.log('WS: useEffect: Desmontando useWebSocket hook. Limpiando...');
+      // Limpiar el intervalo y desconectar
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+      }
       disconnect();
     };
   }, [userId, connect, disconnect]);
@@ -278,6 +155,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
   return {
     isConnected,
     connectionError,
+    latestMessage,
     reconnect: connect,
     disconnect
   };

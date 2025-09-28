@@ -290,10 +290,10 @@ export default function AlbumDetailPageClient({ albumId }: AlbumClientPageProps)
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        {photo.id === album.cover_photo_id && (
+        {photo.id === album?.cover_photo_id && (
           <span className="absolute top-2 left-2 bg-blue-500 text-white text-xs px-2 py-1 rounded-full">Portada</span>
         )}
-        {photo.is_favorite && photo.id !== album.cover_photo_id && (
+        {photo.is_favorite && photo.id !== album?.cover_photo_id && (
           <span className="absolute top-2 right-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full">Favorita</span>
         )}
       </div>

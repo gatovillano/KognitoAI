@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Plus, MessageSquare, BookMarked, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical, FolderKanban, Settings, BarChart3, Smartphone, User, Image as ImageIcon } from 'lucide-react';
+import { Plus, MessageSquare, BookMarked, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical, FolderKanban, Settings, BarChart3, Smartphone, User, Image as ImageIcon, ClipboardList } from 'lucide-react';
 import Image from 'next/image';
 import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { InlineMarkdownRenderer } from './InlineMarkdownRenderer';
 import { toast } from 'sonner';
 import { useDrag, useDrop } from 'react-dnd';
+import { useWebSocketContext } from '@/contexts/WebSocketContext';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -46,6 +47,8 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [platformFilter, setPlatformFilter] = useState<'all' | 'web' | 'telegram'>('all');
 
+  const { latestMessage } = useWebSocketContext();
+
   useEffect(() => {
     const updateActiveWorkspace = async () => {
       const threadIdMatch = pathname?.match(/\/chat\/([a-f0-9-]+)/);
@@ -74,17 +77,17 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
     const fetchThreads = async () => {
       if (user) {
         try {
-          // Se obtienen los hilos y se filtran en el cliente. Se pide un límite alto para simular la carga de "todos".
           let apiUrl = '/api/threads?limit=100';
           if (activeWorkspaceId) {
             apiUrl += `&workspace_id=${activeWorkspaceId}`;
-          } else {
-            apiUrl += `&workspace_id=none`; // Request threads with no workspace_id
           }
           const response = await apiClient.get(apiUrl);
-          const allThreads = response.data.threads.sort((a: ChatThread, b: ChatThread) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          let allThreads = response.data.threads.sort((a: ChatThread, b: ChatThread) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
           
-          // No need for client-side filtering by workspace_id anymore, as the API handles it
+          if (!activeWorkspaceId) {
+            allThreads = allThreads.filter((thread: ChatThread) => !thread.workspace_id);
+          }
+
           setThreads(allThreads.filter((thread: ChatThread) => !thread.isPinned));
           setPinnedThreads(allThreads.filter((thread: ChatThread) => thread.isPinned));
         } catch (error) {
@@ -93,47 +96,36 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
       }
     };
     fetchThreads();
-
-    if (!user?.id) return;
-
-    // --- LÓGICA DE WEBSOCKET PARA ACTUALIZACIONES EN TIEMPO REAL ---
-    if (!user?.id) return; // Evita la conexión si no hay ID de usuario
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/ws';
-    const ws = new WebSocket(`${wsUrl}/${user?.id}`);
-
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-
-      if (data.type === 'thread_title_updated') {
-        toast.info(`Conversación renombrada: "${data.new_title}"`);
-        const { thread_id, new_title } = data;
-
-        const updateThreadTitle = (thread: ChatThread) => 
-          thread.id === thread_id ? { ...thread, title: new_title } : thread;
-
-        setThreads(prev => prev.map(updateThreadTitle));
-        setPinnedThreads(prev => prev.map(updateThreadTitle));
-      }
-    };
-
-    ws.onopen = () => {
-      console.log('WebSocket conectado para actualizaciones de sidebar.');
-    };
-
-    ws.onerror = (event) => {
-      console.error('Error de WebSocket en sidebar:', event);
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket desconectado de sidebar.');
-    };
-
-    // Limpiar la conexión al desmontar el componente
-    return () => {
-      ws.close();
-    };
-    // Añadir user?.id a las dependencias para reconectar si el usuario cambia
   }, [user, activeWorkspaceId]);
+
+  useEffect(() => {
+    if (!latestMessage) return;
+
+    const { type, ...data } = latestMessage;
+
+    if (type === 'thread_title_updated') {
+      toast.info(`Conversación renombrada: "${data.new_title}"`);
+      const { thread_id, new_title } = data;
+      const updateThreadTitle = (thread: ChatThread) =>
+        thread.id === thread_id ? { ...thread, title: new_title } : thread;
+
+      setThreads(prev => prev.map(updateThreadTitle));
+      setPinnedThreads(prev => prev.map(updateThreadTitle));
+    } else if (type === 'thread_created') {
+      const newThread: ChatThread = data.thread;
+      const shouldAdd = (activeWorkspaceId && newThread.workspace_id === activeWorkspaceId) || (!activeWorkspaceId && !newThread.workspace_id);
+      if (shouldAdd) {
+        setThreads(prev => {
+          const exists = prev.some(t => t.id === newThread.id);
+          if (!exists) {
+            return [newThread, ...prev].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          }
+          return prev;
+        });
+        toast.success(`Nueva conversación creada: "${newThread.title || 'Sin título'}"`);
+      }
+    }
+  }, [latestMessage, activeWorkspaceId]);
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(e.target.value);
@@ -142,12 +134,10 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
   const applyFilters = (threadList: ChatThread[]) => {
     let filtered = threadList;
 
-    // Filtro por búsqueda
     if (searchTerm) {
       filtered = filtered.filter(thread => thread.title.toLowerCase().includes(searchTerm.toLowerCase()));
     }
 
-    // Filtro por plataforma
     if (platformFilter !== 'all') {
       filtered = filtered.filter(thread => thread.platform === platformFilter);
     }
@@ -178,8 +168,6 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
     try {
       const response = await apiClient.post('/api/threads/generate-all-titles');
       toast.success(response.data.message || "Proceso iniciado correctamente. Los títulos se actualizarán en breve.");
-      // Opcionalmente, se podría implementar un mecanismo de sondeo o usar WebSockets
-      // para refrescar la lista de hilos automáticamente cuando el proceso termine.
     } catch (error) {
       console.error('Error starting the process to rename all threads:', error);
       toast.error("Hubo un error al iniciar el proceso. Por favor, inténtalo de nuevo.");
@@ -283,7 +271,6 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                         e.stopPropagation();
                         toast.info("Generando un nuevo título para la conversación...");
                         try {
-                          // La llamada a la API activará un evento WebSocket que actualizará la UI
                           await apiClient.post(`/api/threads/${thread.id}/generate-title`);
                         } catch (error) {
                           console.error('Error generating title for thread:', error);
@@ -435,6 +422,19 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
             >
               <ImageIcon className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
               {!isCollapsed && <span className="text-xs font-medium">Galerías</span>}
+            </Button>
+          </Link>
+          <Link href="/forms" passHref onClick={onLinkClick} title="Formularios">
+            <Button
+              variant={pathname?.startsWith('/forms') ? 'secondary' : 'ghost'}
+              className={cn(
+                "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
+                pathname?.startsWith('/forms') && "bg-primary/10 text-primary border border-primary/20"
+              )}
+            >
+              <ClipboardList className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
+              {!isCollapsed && <span className="text-xs font-medium">Formularios</span>}
             </Button>
           </Link>
           <Link href="/analysis" passHref onClick={onLinkClick} title="Análisis">

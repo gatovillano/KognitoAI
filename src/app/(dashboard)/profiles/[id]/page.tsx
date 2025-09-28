@@ -1,36 +1,51 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import React, { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { Loader2, ArrowLeft, Edit, Mail, Phone, Tag, Calendar, ListTodo, FileText, Image, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Mail, Phone, User, Notebook, Calendar, FolderKanban, ListTodo, ArrowLeft, MoreVertical, Edit, Trash2, Image as ImageIcon } from 'lucide-react'; // Import Image icon
-import Link from 'next/link';
-import Image from 'next/image';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { ContactProfile } from '../page';
-import { Note } from '../../notes/page';
-import { AgendaEvent, TaskResponse } from '../../agenda/page';
-import { ManageLinkedObjectsDialog } from '../manage-linked-objects-dialog';
-import { NoteDialog } from '../../notes/note-dialog';
-import { ViewNoteDialog } from '../../notes/view-note-dialog';
-import { EventDialog } from '../../agenda/event-dialog';
-import { ProfileDialog } from '../profile-dialog';
-import { TaskDialog } from '../../agenda/task-dialog';
-import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { ViewNoteDialog } from '@/app/(dashboard)/notes/view-note-dialog';
+import { EventDialog } from '@/app/(dashboard)/agenda/event-dialog';
+import { TaskDialog } from '@/app/(dashboard)/agenda/task-dialog';
 
-interface LinkedObject {
-  id: string | number;
-  description?: string;
-  title?: string;
-  name?: string;
+// Interfaces para los objetos vinculados (de api/contact_profiles.py)
+interface LinkedNoteResponse {
+  id: number;
+  title: string | null;
+  content: string;
+  created_at: string;
 }
 
-// Define LinkedAlbumResponse interface
+interface LinkedAgendaEventResponse {
+  id: number;
+  description: string;
+  event_datetime_utc: string;
+  event_datetime_local: string;
+}
+
+interface LinkedTaskResponse {
+  id: string;
+  description: string;
+  is_completed: boolean;
+  due_date: string | null;
+}
+
+interface LinkedUserDocumentTopicResponse {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
+interface PhotoResponseForContactProfile {
+  id: string;
+  file_path: string;
+  thumbnail_path: string | null;
+}
+
 interface LinkedAlbumResponse {
   id: string;
   name: string;
@@ -38,214 +53,162 @@ interface LinkedAlbumResponse {
   cover_photo_id: string | null;
   created_at: string;
   total_photos: number;
-  cover_photo: {
-    file_path: string;
-    thumbnail_path: string;
-  } | null;
+  cover_photo: PhotoResponseForContactProfile | null;
 }
 
-interface LinkedObjects {
-  notes: Note[];
-  agenda_events: AgendaEvent[];
-  tasks: TaskResponse[];
-  user_document_topics: LinkedObject[];
-  albums: LinkedAlbumResponse[]; // Add albums to linked objects
+interface LinkedFormResponse {
+  id: string;
+  form_id: string;
+  submitted_at: string;
+  answers: Record<string, any>;
+}
+
+interface LinkedObjectsResponse {
+  notes: LinkedNoteResponse[];
+  agenda_events: LinkedAgendaEventResponse[];
+  tasks: LinkedTaskResponse[];
+  user_document_topics: LinkedUserDocumentTopicResponse[];
+  albums: LinkedAlbumResponse[];
+  form_responses: LinkedFormResponse[]; // Añadido
+}
+
+interface ContactProfile {
+  id: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  tags: string[] | null;
+  category: string | null;
+  custom_fields: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export default function ProfileDetailsPage() {
-  console.log('ProfileDetailsPage component mounted.');
   const router = useRouter();
   const params = useParams();
-  const profileId = (params?.id || '') as string;
-
-  console.log('Profile ID from params:', profileId);
+  const profileId = params?.id as string;
 
   const [profile, setProfile] = useState<ContactProfile | null>(null);
-  const [linkedObjects, setLinkedObjects] = useState<LinkedObjects | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isLoadingLinkedObjects, setIsLoadingLinkedObjects] = useState(false);
-  const [isManageLinkedObjectsDialogOpen, setIsManageLinkedObjectsDialogOpen] = useState(false);
+  const [linkedObjects, setLinkedObjects] = useState<LinkedObjectsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Estados para diálogos de edición/visualización
-  const [isNoteDialogOpen, setIsNoteDialogOpen] = useState(false);
-  const [viewingNote, setViewingNote] = useState<Note | null>(null);
-  const [isViewNoteDialogOpen, setIsViewNoteDialogOpen] = useState(false);
-  const [isEventDialogOpen, setIsEventDialogOpen] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<AgendaEvent | null>(null);
-  const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState<TaskResponse | null>(null);
-  const [editingNoteForDialog, setEditingNoteForDialog] = useState<Note | null>(null);
-  const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false);
-  const [deletingProfile, setDeletingProfile] = useState<ContactProfile | null>(null);
+  const [showViewNoteDialog, setShowViewNoteDialog] = useState(false);
+  const [selectedNote, setSelectedNote] = useState<LinkedNoteResponse | null>(null);
 
-  const fetchProfileDetails = useCallback(async () => {
-    setIsLoading(true);
+  const [showViewEventDialog, setShowViewEventDialog] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<LinkedAgendaEventResponse | null>(null);
+
+  const [showViewTaskDialog, setShowViewTaskDialog] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<LinkedTaskResponse | null>(null);
+
+  const fetchProfileDetails = async () => {
+    if (!profileId) return;
+    setLoading(true);
+    setError(null);
     try {
-      const response = await apiClient.get(`/api/contact-profiles/${profileId}`);
-      setProfile(response.data);
-    } catch (error) {
+      const [profileRes, linkedObjectsRes] = await Promise.all([
+        apiClient.get(`/api/contact-profiles/${profileId}`),
+        apiClient.get(`/api/contact-profiles/${profileId}/linked-objects`),
+      ]);
+      setProfile(profileRes.data);
+      setLinkedObjects(linkedObjectsRes.data);
+    } catch (err) {
+      setError('No se pudo cargar el perfil o sus objetos vinculados. Puede que no exista o haya ocurrido un error.');
       toast.error('Error al cargar los detalles del perfil.');
-      console.error('Error fetching profile details:', error);
-      router.push('/profiles'); // Redirigir si el perfil no se encuentra
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
-  }, [profileId, router]);
-
-  const fetchLinkedObjects = useCallback(async () => {
-    setIsLoadingLinkedObjects(true);
-    try {
-      const response = await apiClient.get(`/api/contact-profiles/${profileId}/linked-objects`);
-      setLinkedObjects(response.data);
-    } catch (error) {
-      toast.error('Error al cargar objetos vinculados.');
-      console.error('Error fetching linked objects:', error);
-      setLinkedObjects(null);
-    } finally {
-      setIsLoadingLinkedObjects(false);
-    }
-  }, [profileId]);
+  };
 
   useEffect(() => {
-    console.log('useEffect triggered with profileId:', profileId);
-    if (profileId) {
-      fetchProfileDetails();
-      fetchLinkedObjects();
-    }
-  }, [profileId, fetchProfileDetails, fetchLinkedObjects]);
+    fetchProfileDetails();
+  }, [profileId]);
 
-  const handleEditProfile = () => {
-    setIsProfileDialogOpen(true);
-  };
-
-  const handleDeleteProfile = async () => {
-    if (!deletingProfile) return;
-    const toastId = toast.loading(`Eliminando perfil...`);
-    try {
-      await apiClient.post('/api/delete-contact-profile', { profile_id: deletingProfile.id });
-      toast.success('Perfil eliminado', { id: toastId });
-      setDeletingProfile(null);
-      router.push('/profiles');
-    } catch (error) {
-      toast.error('Error al eliminar el perfil', { id: toastId });
-      console.error('Error deleting profile:', error);
-    }
-  };
-
-  const handleNoteClick = (note: Note) => {
-    setViewingNote(note);
-    setIsViewNoteDialogOpen(true);
-  };
-
-  const handleEventClick = (event: AgendaEvent) => {
-    setEditingEvent(event);
-    setIsEventDialogOpen(true);
-  };
-
-  const handleTaskClick = (task: TaskResponse) => {
-    setEditingTask(task);
-    setIsTaskDialogOpen(true);
-  };
-
-  if (isLoading) {
+  if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Cargando detalles del perfil...</p>
-        </div>
+      <div className="p-4 sm:p-8 max-w-7xl mx-auto flex justify-center items-center">
+        <Loader2 className="h-8 w-8 animate-spin" />
+        <span className="ml-4">Cargando perfil...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 sm:p-8 max-w-7xl mx-auto text-center text-destructive">
+        <h2 className="text-xl font-bold mb-4">Error</h2>
+        <p>{error}</p>
+        <Button onClick={() => router.push('/profiles')} className="mt-4">
+          <ArrowLeft className="mr-2 h-4 w-4" /> Volver a Perfiles
+        </Button>
       </div>
     );
   }
 
   if (!profile) {
     return (
-      <div className="text-center py-16">
-        <User className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
-        <h3 className="text-xl font-semibold mb-2">Perfil no encontrado</h3>
-        <p className="text-muted-foreground mb-6">
-          No se pudo acceder a este perfil o no existe.
-        </p>
-        <Button onClick={() => router.push('/profiles')} size="lg">
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Volver a Perfiles
+      <div className="p-4 sm:p-8 max-w-7xl mx-auto text-center">
+        <p className="text-muted-foreground">Perfil no encontrado.</p>
+        <Button onClick={() => router.push('/profiles')} className="mt-4">
+          <ArrowLeft className="mr-2 h-4 w-4" /> Volver a Perfiles
         </Button>
       </div>
     );
   }
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-3">
-          <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
-            <User className="h-6 w-6 text-primary" />
+        <div className="flex items-center gap-4">
+          <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+            <Info className="h-6 w-6 text-primary" />
           </div>
           <div>
             <h1 className="text-3xl font-bold">{profile.name || 'Perfil sin nombre'}</h1>
-            <p className="text-muted-foreground">Detalles completos del perfil de contacto</p>
+            <p className="text-muted-foreground">Detalles y elementos vinculados a este contacto.</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex gap-2">
           <Button variant="outline" onClick={() => router.push('/profiles')}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Volver a Perfiles
+            <ArrowLeft className="mr-2 h-4 w-4" /> Volver a Perfiles
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon">
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={handleEditProfile}>
-                <Edit className="mr-2 h-4 w-4" />
-                Editar Perfil
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setDeletingProfile(profile)} className="text-destructive">
-                <Trash2 className="mr-2 h-4 w-4" />
-                Eliminar Perfil
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button onClick={() => router.push(`/profiles/${profileId}/edit`)}>
+            <Edit className="mr-2 h-4 w-4" /> Editar Perfil
+          </Button>
         </div>
       </div>
 
-      <Card className="mb-8 w-full">
-        <CardContent className="p-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-x-8 gap-y-6">
-            {/* Columna de Información Principal */}
-            <div className="lg:col-span-1 space-y-6">
-              <h2 className="text-xl font-semibold border-b pb-2">Información General</h2>
-              <div className="space-y-4">
-                {profile.category && (
-                  <div>
-                    <h3 className="text-sm font-medium text-muted-foreground flex items-center"><FolderKanban className="h-4 w-4 mr-2" />Categoría</h3>
-                    <p className="text-base font-semibold">{profile.category}</p>
-                  </div>
-                )}
-                {profile.email && (
-                  <div>
-                    <h3 className="text-sm font-medium text-muted-foreground flex items-center"><Mail className="h-4 w-4 mr-2" />Email</h3>
-                    <p className="text-base font-semibold break-all">{profile.email}</p>
-                  </div>
-                )}
-                {profile.phone && (
-                  <div>
-                    <h3 className="text-sm font-medium text-muted-foreground flex items-center"><Phone className="h-4 w-4 mr-2" />Teléfono</h3>
-                    <p className="text-base font-semibold">{profile.phone}</p>
-                  </div>
-                )}
-                <div>
-                  <h3 className="text-sm font-medium text-muted-foreground flex items-center"><Calendar className="h-4 w-4 mr-2" />Creado</h3>
-                  <p className="text-base font-semibold">{new Date(profile.created_at).toLocaleDateString()}</p>
-                </div>
-              </div>
-
+      <div className="grid gap-8 lg:grid-cols-12">
+        {/* Columna de Información General */}
+        <div className="lg:col-span-5">
+          <Card className="bg-card/50 border-dashed">
+            <CardHeader>
+              <CardTitle>Información General</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {profile.email && (
+                <p className="flex items-center gap-2 text-muted-foreground">
+                  <Mail className="h-4 w-4 text-primary" /> {profile.email}
+                </p>
+              )}
+              {profile.phone && (
+                <p className="flex items-center gap-2 text-muted-foreground">
+                  <Phone className="h-4 w-4 text-primary" /> {profile.phone}
+                </p>
+              )}
+              {profile.category && (
+                <p className="flex items-center gap-2 text-muted-foreground">
+                  <Tag className="h-4 w-4 text-primary" /> Categoría: {profile.category}
+                </p>
+              )}
               {profile.tags && profile.tags.length > 0 && (
                 <div>
-                  <h3 className="text-lg font-semibold mb-3 border-b pb-2">Etiquetas</h3>
-                  <div className="flex flex-wrap gap-2 pt-2">
+                  <p className="font-semibold mb-2 flex items-center gap-2 text-muted-foreground">
+                    <Tag className="h-4 w-4 text-primary" /> Etiquetas:
+                  </p>
+                  <div className="flex flex-wrap gap-2">
                     {profile.tags.map((tag, index) => {
                       const colors = ['bg-blue-100 text-blue-800', 'bg-green-100 text-green-800', 'bg-yellow-100 text-yellow-800', 'bg-purple-100 text-purple-800', 'bg-pink-100 text-pink-800'];
                       const colorClass = colors[index % colors.length];
@@ -258,358 +221,206 @@ export default function ProfileDetailsPage() {
                   </div>
                 </div>
               )}
-
-              {(profile.custom_fields && Object.keys(profile.custom_fields).length > 0) && (
+              {profile.custom_fields && Object.keys(profile.custom_fields).length > 0 && (
                 <div>
-                  <h3 className="text-lg font-semibold mb-3 border-b pb-2">Campos Personalizados</h3>
-                  <div className="space-y-3 pt-2">
-                    {Object.entries(profile.custom_fields).map(([key, value]) => (
-                       <div key={key}>
-                        <h4 className="text-sm font-medium text-muted-foreground">{key}</h4>
-                        <p className="text-base font-semibold">{String(value)}</p>
-                      </div>
-                    ))}
-                  </div>
+                  <p className="font-semibold mb-2 text-muted-foreground">Campos Personalizados:</p>
+                  {Object.entries(profile.custom_fields).map(([key, value]) => (
+                    <p key={key} className="text-sm text-muted-foreground">
+                      <span className="font-medium">{key}:</span> {String(value)}
+                    </p>
+                  ))}
                 </div>
               )}
-            </div>
+              <p className="text-xs text-muted-foreground mt-4">
+                Creado: {new Date(profile.created_at).toLocaleDateString()} | Actualizado: {new Date(profile.updated_at).toLocaleDateString()}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
 
-            {/* Columna de Objetos Vinculados */}
-            <div className="lg:col-span-2 space-y-6">
-              <div className="flex items-center justify-between border-b pb-2">
-                <h2 className="text-xl font-semibold">Actividad y Vinculaciones</h2>
-                <Button variant="outline" size="sm" onClick={() => setIsManageLinkedObjectsDialogOpen(true)}>
-                  <Edit className="mr-2 h-4 w-4" />
-                  Gestionar
-                </Button>
-              </div>
+        {/* Columna de Elementos Vinculados */}
+        <div className="lg:col-span-7 space-y-6">
+          {/* Notas Vinculadas */}
+          <Card className="bg-card/50 border-dashed hover:border-yellow-500/50 transition-colors">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-yellow-500">
+                <FileText className="h-5 w-5" /> Notas Vinculadas ({linkedObjects?.notes.length || 0})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {linkedObjects?.notes && linkedObjects.notes.length > 0 ? (
+                linkedObjects.notes.map(note => (
+                  <Card key={note.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => { setSelectedNote(note); setShowViewNoteDialog(true); }}>
+                    <CardContent className="py-3">
+                      <h3 className="font-semibold text-base">{note.title || 'Sin título'}</h3>
+                      <p className="text-sm text-muted-foreground mt-1">{note.content.substring(0, 150) + (note.content.length > 150 ? '...' : '')}</p>
+                      <p className="text-xs text-muted-foreground mt-1">Creado: {new Date(note.created_at).toLocaleDateString()}</p>
+                    </CardContent>
+                  </Card>
+                ))
+              ) : (
+                <p className="text-muted-foreground">No hay notas vinculadas.</p>
+              )}
+            </CardContent>
+          </Card>
 
-              {/* Álbumes */}
-              <div className="space-y-3">
-                <h3 className="text-lg font-semibold flex items-center"><ImageIcon className="mr-2 h-5 w-5 text-primary" />Álbumes</h3>
-                 {isLoadingLinkedObjects ? (
-                  <p className="text-muted-foreground">Cargando...</p>
-                ) : linkedObjects?.albums && linkedObjects.albums.length > 0 ? (
-                  <div className="grid gap-6 md:grid-cols-2">
-                    {linkedObjects.albums.map((album) => (
-                      <Link href={`/galleries/${album.id}`} passHref key={album.id}>
-                        <Card className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full min-h-[320px]">
-                          <CardHeader className="pb-3">
-                            <CardTitle className="flex items-start justify-between gap-3">
-                              <div className="flex items-center gap-3 min-w-0 flex-1">
-                                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                                  <ImageIcon className="h-5 w-5 text-primary" alt="Album icon" />
-                                </div>
-                                <span className="font-semibold text-lg truncate">{album.name}</span>
-                              </div>
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent className="pt-0 flex-grow flex flex-col">
-                            <div className="relative w-full h-40 bg-muted rounded-md overflow-hidden mb-3">
-                              {album.cover_photo ? (
-                                <Image
-                                  src={`${process.env.NEXT_PUBLIC_API_URL}/media/${album.cover_photo.file_path}`}
-                                  alt={album.name}
-                                  width={500}
-                                  height={500}
-                                  className="w-full h-full object-cover"
-                                />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                                  <ImageIcon className="h-10 w-10 opacity-50" alt="No image placeholder" />
-                                </div>
-                              )}
-                            </div>
-                            <p className="text-sm text-muted-foreground line-clamp-2">
-                              {album.description || 'Sin descripción'}
-                            </p>
-                          </CardContent>
-                          <CardFooter className="flex justify-between items-center text-xs text-muted-foreground pt-3 mt-auto border-t border-border/50">
-                            <span>{album.total_photos} foto(s)</span>
-                            <span>{new Date(album.created_at).toLocaleDateString()}</span>
-                          </CardFooter>
-                        </Card>
-                      </Link>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground p-4 text-center bg-muted/50 rounded-md">No hay álbumes vinculados.</p>
-                )}
-              </div>
-              <Separator />
-              {/* Notas */}
-              <div className="space-y-3">
-                <h3 className="text-lg font-semibold flex items-center"><Notebook className="mr-2 h-5 w-5 text-primary" />Notas</h3>
-                {isLoadingLinkedObjects ? (
-                  <p className="text-muted-foreground">Cargando...</p>
-                ) : linkedObjects?.notes && linkedObjects.notes.length > 0 ? (
-                  <div className="grid gap-6 md:grid-cols-2">
-                    {linkedObjects.notes.map((note) => (
-                      <Card key={note.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleNoteClick(note)}>
-                        <CardHeader className="pb-3">
-                          <CardTitle className="flex items-start justify-between gap-3">
-                            <div className="flex items-start gap-3 min-w-0 flex-1">
-                              <div className="h-10 w-10 rounded-lg bg-yellow-500/10 flex items-center justify-center flex-shrink-0">
-                                <Notebook className="h-5 w-5 text-yellow-600" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="font-semibold text-sm line-clamp-2">
-                                  {note.title || 'Nota sin título'}
-                                </div>
-                              </div>
-                            </div>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setEditingNoteForDialog(note); setIsNoteDialogOpen(true); }}>
-                                  <Edit className="mr-2 h-4 w-4" />Editar
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleNoteClick(note); }}>
-                                  <Notebook className="mr-2 h-4 w-4" />Ver
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="pt-0">
-                          <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
-                            {note.content || 'Nota sin contenido.'}
-                          </p>
-                          <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                            <span className="text-xs text-muted-foreground">
-                              {note.category || 'Sin categoría'}
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              {new Date(note.created_at).toLocaleDateString()}
-                            </span>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground p-4 text-center bg-muted/50 rounded-md">No hay notas vinculadas.</p>
-                )}
-              </div>
-              <Separator />
-              {/* Eventos */}
-              <div className="space-y-3">
-                <h3 className="text-lg font-semibold flex items-center"><Calendar className="mr-2 h-5 w-5 text-primary" />Eventos</h3>
-                 {isLoadingLinkedObjects ? (
-                  <p className="text-muted-foreground">Cargando...</p>
-                ) : linkedObjects?.agenda_events && linkedObjects.agenda_events.length > 0 ? (
-                  <div className="grid gap-6 md:grid-cols-2">
-                    {linkedObjects.agenda_events.map((event) => (
-                      <Card key={event.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleEventClick(event)}>
-                        <CardHeader className="pb-3">
-                          <CardTitle className="flex items-start justify-between gap-3">
-                            <div className="flex items-start gap-3 min-w-0 flex-1">
-                              <div className="h-10 w-10 rounded-lg bg-purple-500/10 flex items-center justify-center flex-shrink-0">
-                                <Calendar className="h-5 w-5 text-purple-600" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="font-semibold text-sm line-clamp-2">
-                                  {event.description}
-                                </div>
-                              </div>
-                            </div>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleEventClick(event); }}>
-                                  <Edit className="mr-2 h-4 w-4" />Editar
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="pt-0">
-                          <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
-                            Ver detalles al abrir.
-                          </p>
-                          <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                            <span className="text-xs text-muted-foreground">
-                              {new Date(event.event_datetime_local).toLocaleString([], {dateStyle: 'short', timeStyle: 'short'})}
-                            </span>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground p-4 text-center bg-muted/50 rounded-md">No hay eventos vinculados.</p>
-                )}
-              </div>
-              <Separator />
-              {/* Tareas */}
-              <div className="space-y-3">
-                <h3 className="text-lg font-semibold flex items-center"><ListTodo className="mr-2 h-5 w-5 text-primary" />Tareas</h3>
-                 {isLoadingLinkedObjects ? (
-                  <p className="text-muted-foreground">Cargando...</p>
-                ) : linkedObjects?.tasks && linkedObjects.tasks.length > 0 ? (
-                  <div className="grid gap-6 md:grid-cols-2">
-                    {linkedObjects.tasks.map((task) => (
-                      <Card key={task.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleTaskClick(task)}>
-                        <CardHeader className="pb-3">
-                          <CardTitle className="flex items-start justify-between gap-3">
-                            <div className="flex items-start gap-3 min-w-0 flex-1">
-                              <div className="h-10 w-10 rounded-lg bg-orange-500/10 flex items-center justify-center flex-shrink-0">
-                                <ListTodo className="h-5 w-5 text-orange-600" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="font-semibold text-sm line-clamp-2">
-                                  {task.description}
-                                </div>
-                              </div>
-                            </div>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleTaskClick(task); }}>
-                                  <Edit className="mr-2 h-4 w-4" />Editar
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="pt-0">
-                          <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
-                            Ver detalles al abrir.
-                          </p>
-                          <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                            <span className="text-xs text-muted-foreground">
-                              {task.due_date ? `Vence: ${new Date(task.due_date).toLocaleDateString()}` : 'Sin fecha límite'}
-                            </span>
-                            <div className="flex items-center gap-1">
-                              <div className={`h-2 w-2 rounded-full ${task.is_completed ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
-                              <span className="text-xs text-muted-foreground">
-                                {task.is_completed ? 'Completada' : 'Pendiente'}
-                              </span>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground p-4 text-center bg-muted/50 rounded-md">No hay tareas vinculadas.</p>
-                )}
-              </div>
-              <Separator />
-              {/* Colecciones */}
-               <div className="space-y-3">
-                <h3 className="text-lg font-semibold flex items-center"><FolderKanban className="mr-2 h-5 w-5 text-primary" />Colecciones</h3>
-                 {isLoadingLinkedObjects ? (
-                  <p className="text-muted-foreground">Cargando...</p>
-                ) : linkedObjects?.user_document_topics && linkedObjects.user_document_topics.length > 0 ? (
-                  <div className="grid gap-6 md:grid-cols-2">
-                    {linkedObjects.user_document_topics.map((collection) => (
-                       <Card key={collection.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20">
-                        <CardHeader className="pb-3">
-                          <CardTitle className="flex items-start justify-between gap-3">
-                            <div className="flex items-start gap-3 min-w-0 flex-1">
-                              <div className="h-10 w-10 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                                <FolderKanban className="h-5 w-5 text-blue-600" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="font-semibold text-sm line-clamp-2">
-                                  {collection.name || collection.title || 'Colección sin nombre'}
-                                </div>
-                              </div>
-                            </div>
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="pt-0">
-                           <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
-                              {collection.description || 'Sin descripción.'}
-                            </p>
-                            <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                                <span className="text-xs text-muted-foreground">Colección de documentos</span>
-                            </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground p-4 text-center bg-muted/50 rounded-md">No hay colecciones vinculadas.</p>
-                )}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          {/* Eventos de Agenda Vinculados */}
+          <Card className="bg-card/50 border-dashed hover:border-purple-500/50 transition-colors">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-purple-500">
+                <Calendar className="h-5 w-5" /> Eventos de Agenda ({linkedObjects?.agenda_events.length || 0})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {linkedObjects?.agenda_events && linkedObjects.agenda_events.length > 0 ? (
+                linkedObjects.agenda_events.map(event => (
+                  <Card key={event.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => { setSelectedEvent(event); setShowViewEventDialog(true); }}>
+                    <CardContent className="py-3">
+                      <h3 className="font-semibold text-base">{event.description}</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Fecha/Hora: {new Date(event.event_datetime_local).toLocaleString()}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))
+              ) : (
+                <p className="text-muted-foreground">No hay eventos de agenda vinculados.</p>
+              )}
+            </CardContent>
+          </Card>
 
-      {/* Diálogos de edición/visualización */}
-      <ViewNoteDialog
-        note={viewingNote}
-        isOpen={isViewNoteDialogOpen}
-        onOpenChange={setIsViewNoteDialogOpen}
-        onNoteUpdated={fetchLinkedObjects}
-      />
-      <NoteDialog
-        isOpen={isNoteDialogOpen}
-        onOpenChange={setIsNoteDialogOpen}
-        onSaveSuccess={fetchLinkedObjects}
-        note={editingNoteForDialog}
-      />
-      <EventDialog
-        isOpen={isEventDialogOpen}
-        onOpenChange={setIsEventDialogOpen}
-        onSaveSuccess={fetchLinkedObjects}
-        event={editingEvent}
-      />
-      <TaskDialog
-        isOpen={isTaskDialogOpen}
-        onOpenChange={setIsTaskDialogOpen}
-        onSaveSuccess={fetchLinkedObjects}
-        task={editingTask}
-      />
+          {/* Tareas Vinculadas */}
+          <Card className="bg-card/50 border-dashed hover:border-green-500/50 transition-colors">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-green-500">
+                <ListTodo className="h-5 w-5" /> Tareas Vinculadas ({linkedObjects?.tasks.length || 0})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {linkedObjects?.tasks && linkedObjects.tasks.length > 0 ? (
+                linkedObjects.tasks.map(task => (
+                  <Card key={task.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => { setSelectedTask(task); setShowViewTaskDialog(true); }}>
+                    <CardContent className="py-3">
+                      <h3 className="font-semibold text-base">{task.description}</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Estado: {task.is_completed ? 'Completada' : 'Pendiente'}
+                        {task.due_date && ` | Vence: ${new Date(task.due_date).toLocaleDateString()}`}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))
+              ) : (
+                <p className="text-muted-foreground">No hay tareas vinculadas.</p>
+              )}
+            </CardContent>
+          </Card>
 
-      {/* Diálogo de gestión de vinculaciones */}
-      {profile && (
-        <ManageLinkedObjectsDialog
-          isOpen={isManageLinkedObjectsDialogOpen}
-          onOpenChange={setIsManageLinkedObjectsDialogOpen}
-          profile={profile}
-          onLinkedObjectsUpdated={fetchLinkedObjects}
+          {/* Colecciones de Documentos Vinculadas */}
+          <Card className="bg-card/50 border-dashed hover:border-blue-500/50 transition-colors">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-blue-500">
+                <FileText className="h-5 w-5" /> Colecciones de Documentos ({linkedObjects?.user_document_topics.length || 0})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {linkedObjects?.user_document_topics && linkedObjects.user_document_topics.length > 0 ? (
+                linkedObjects.user_document_topics.map(topic => (
+                  <Card key={topic.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => router.push(`/workspaces/${profileId}/collections/${topic.id}`)}> {/* Asumiendo que profileId puede usarse como workspaceId aquí */}
+                    <CardContent className="py-3">
+                      <h3 className="font-semibold text-base">{topic.name}</h3>
+                      {topic.description && <p className="text-sm text-muted-foreground mt-1">{topic.description}</p>}
+                    </CardContent>
+                  </Card>
+                ))
+              ) : (
+                <p className="text-muted-foreground">No hay colecciones de documentos vinculadas.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Álbumes Vinculados */}
+          <Card className="bg-card/50 border-dashed hover:border-orange-500/50 transition-colors">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-orange-500">
+                <Image className="h-5 w-5" /> Álbumes Vinculados ({linkedObjects?.albums.length || 0})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {linkedObjects?.albums && linkedObjects.albums.length > 0 ? (
+                linkedObjects.albums.map(album => (
+                  <Card key={album.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => router.push(`/galleries/albums/${album.id}`)}> {/* Navegar a la página de detalles del álbum */}
+                    <CardContent className="py-3 flex items-center gap-4">
+                      {album.cover_photo?.thumbnail_path && (
+                        <img src={album.cover_photo.thumbnail_path} alt={album.name} className="w-16 h-16 object-cover rounded-md" />
+                      )}
+                      <div>
+                        <h3 className="font-semibold text-base">{album.name}</h3>
+                        {album.description && <p className="text-sm text-muted-foreground mt-1">{album.description}</p>}
+                        <p className="text-xs text-muted-foreground mt-1">{album.total_photos} fotos</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              ) : (
+                <p className="text-muted-foreground">No hay álbumes vinculados.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Respuestas de Formulario Vinculadas */}
+          <Card className="bg-card/50 border-dashed hover:border-cyan-500/50 transition-colors">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-cyan-500">
+                <FileText className="h-5 w-5" /> Respuestas de Formulario ({linkedObjects?.form_responses.length || 0})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {linkedObjects?.form_responses && linkedObjects.form_responses.length > 0 ? (
+                linkedObjects.form_responses.map(response => (
+                  <Card key={response.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => router.push(`/forms/${response.form_id}/responses`)}> {/* Navegar a la página de respuestas del formulario */}
+                    <CardContent className="py-3">
+                      <h3 className="font-semibold text-base">Respuesta #{response.id.slice(-6)}</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Enviado el: {new Date(response.submitted_at).toLocaleString()}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))
+              ) : (
+                <p className="text-muted-foreground">No hay respuestas de formulario vinculadas.</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Diálogos para elementos vinculados */}
+      {selectedNote && (
+        <ViewNoteDialog
+          note={selectedNote}
+          isOpen={showViewNoteDialog}
+          onOpenChange={setShowViewNoteDialog}
+          onNoteUpdated={fetchProfileDetails} // Para refrescar los datos después de una actualización
         />
       )}
 
-      {profile && (
-        <ProfileDialog
-          isOpen={isProfileDialogOpen}
-          onOpenChange={setIsProfileDialogOpen}
-          onSaveSuccess={fetchProfileDetails}
-          profile={profile}
+      {selectedEvent && (
+        <EventDialog
+          isOpen={showViewEventDialog}
+          onOpenChange={setShowViewEventDialog}
+          onSaveSuccess={fetchProfileDetails} // Para refrescar los datos después de una actualización
+          event={selectedEvent}
         />
       )}
 
-      <AlertDialog open={!!deletingProfile} onOpenChange={(open) => !open && setDeletingProfile(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta acción es irreversible y eliminará el perfil permanentemente.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteProfile} className="bg-destructive hover:bg-destructive/90">Sí, eliminar</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {selectedTask && (
+        <TaskDialog
+          isOpen={showViewTaskDialog}
+          onOpenChange={setShowViewTaskDialog}
+          onSaveSuccess={fetchProfileDetails} // Para refrescar los datos después de una actualización
+          task={selectedTask}
+        />
+      )}
     </div>
   );
 }

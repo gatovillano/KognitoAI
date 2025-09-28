@@ -1,7 +1,7 @@
  'use client';
 
 import Image from 'next/image';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, ClipboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,7 @@ import apiClient from '@/lib/api';
 import { Send, Search, BookMarked, BrainCircuit, Upload, Mic, MessageSquare } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { EmptyChat } from '@/components/EmptyChat';
 
 export default function ChatLandingPage() {
   const { user } = useAuth();
@@ -21,6 +22,9 @@ export default function ChatLandingPage() {
   const [isWebSearchActive, setIsWebSearchActive] = useState(false);
   const [isComprehensiveAnalysisActive, setIsComprehensiveAnalysisActive] = useState(false);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
+  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+  const [isDeepResearchActive, setIsDeepResearchActive] = useState(false);
+  const [workspaceId, setWorkspaceId] = useState<string | undefined>(undefined);
   const router = useRouter();
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -82,8 +86,8 @@ export default function ChatLandingPage() {
     }
   };
 
-  const handleChatSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleChatSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!chatInput.trim() || isResponding) return;
 
     setIsResponding(true);
@@ -170,6 +174,20 @@ export default function ChatLandingPage() {
     if (isWebSearchActive) setIsWebSearchActive(false);
   };
 
+  const onToggleDeepResearch = () => {
+    setIsDeepResearchActive(!isDeepResearchActive);
+  };
+
+  const onRemoveContextItem = (item: any) => {
+    console.log('Removing context item:', item);
+    // Implement actual removal logic if needed
+  };
+
+  const onPaste = (e: any) => { // Changed to 'any' to resolve type incompatibility with ClipboardEvent
+    console.log('Paste event:', e);
+    // Implement actual paste logic if needed
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0 || isUploadingFile) return;
     setIsUploadingFile(true);
@@ -205,152 +223,29 @@ export default function ChatLandingPage() {
   ];
 
   return (
-    <div className="flex flex-col h-full">
-      <motion.div
-        className="flex flex-col items-center justify-center flex-grow px-4"
-        animate={{
-          justifyContent: isInputMoved ? 'flex-start' : 'center',
-          paddingTop: isInputMoved ? '8vh' : '0',
-        }}
-        transition={{ duration: 0.5, ease: 'easeOut' }}
-      >
-        {/* Logo y Título */}
-        <div className="flex flex-col items-center mb-8">
-          <div className="flex items-center gap-4 mb-4">
-            <Image src="/logo-simple.png" alt="Kognito AI Labs" width={120} height={120} />
-            <h1 className="text-5xl font-bold tracking-tight">
-              Kognito
-            </h1>
-          </div>
-          <p className="text-lg text-muted-foreground">
-            ¿Qué quieres saber?
-          </p>
-        </div>
-
-        {/* Input Principal */}
-        <form onSubmit={handleChatSubmit} className="w-full max-w-4xl">
-          <div className="relative">
-            <div className="rounded-3xl bg-card border border-border px-4 py-3 shadow-medium">
-              <Textarea
-                ref={textAreaRef}
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Pregúntame lo que quieras..."
-                autoComplete="off"
-                disabled={isResponding}
-                className="w-full resize-none bg-transparent border-0 focus:ring-0 p-0 text-lg placeholder:text-muted-foreground/70"
-                rows={1}
-              />
-              
-              {/* Barra de acciones */}
-              <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50">
-                {/* Botones de modo */}
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant={isKnowledgeAnalysisActive ? "default" : "outline"}
-                    size="sm"
-                    onClick={toggleKnowledgeAnalysis}
-                    className="rounded-full"
-                  >
-                    <BookMarked className="h-4 w-4 mr-2" />
-                    Conocimientos
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={isWebSearchActive ? "default" : "outline"}
-                    size="sm"
-                    onClick={toggleWebSearch}
-                    className="rounded-full"
-                  >
-                    <Search className="h-4 w-4 mr-2" />
-                    Web
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={isComprehensiveAnalysisActive ? "default" : "outline"}
-                    size="sm"
-                    onClick={toggleComprehensiveAnalysis}
-                    className="rounded-full"
-                  >
-                    <BrainCircuit className="h-4 w-4 mr-2" />
-                    Análisis
-                  </Button>
-                </div>
-
-                {/* Botones de acción */}
-                <div className="flex items-center gap-3">
-                  <input
-                    type="file"
-                    multiple
-                    onChange={handleFileUpload}
-                    className="hidden"
-                    id="file-upload"
-                    disabled={isUploadingFile}
-                  />
-                  <label
-                    htmlFor="file-upload"
-                    className={`cursor-pointer p-2 rounded-full hover:bg-muted transition-colors ${isUploadingFile ? 'opacity-50' : ''}`}
-                  >
-                    <Upload className="h-5 w-5 text-muted-foreground" />
-                  </label>
-                  
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={isRecording ? stopRecording : startRecording}
-                    className={`rounded-full ${isRecording ? 'text-red-500 bg-red-50 dark:bg-red-950' : ''}`}
-                  >
-                    <Mic className="h-5 w-5" />
-                  </Button>
-                  
-                  <Button
-                    type="submit"
-                    disabled={isResponding || !chatInput.trim()}
-                    className="rounded-full px-6"
-                  >
-                    {isResponding ? (
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-background border-t-transparent" />
-                    ) : (
-                      <Send className="h-4 w-4 mr-2" />
-                    )}
-                    {isResponding ? 'Enviando...' : 'Enviar'}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </form>
-
-        {/* Preguntas de ejemplo */}
-        {!isInputMoved && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="w-full max-w-4xl mt-8"
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {exampleQuestions.map((question, index) => (
-                <motion.button
-                  key={index}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.3 + index * 0.1 }}
-                  onClick={() => setChatInput(question)}
-                  className="p-4 text-left rounded-2xl bg-card/50 hover:bg-card border border-border/50 hover:border-border transition-all duration-200 group"
-                >
-                  <p className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
-                    {question}
-                  </p>
-                </motion.button>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </motion.div>
-    </div>
+    <EmptyChat
+      onSendMessage={handleChatSubmit}
+      newMessage={chatInput}
+      setNewMessage={setChatInput}
+      isResponding={isResponding}
+      isRecording={isRecording}
+      isProcessingAudio={isProcessingAudio}
+      isUploadingFile={isUploadingFile}
+      isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+      isWebSearchActive={isWebSearchActive}
+      isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+      isDeepResearchActive={isDeepResearchActive}
+      onKeyDown={handleKeyDown}
+      onToggleKnowledgeAnalysis={toggleKnowledgeAnalysis}
+      onToggleWebSearch={toggleWebSearch}
+      onToggleComprehensiveAnalysis={toggleComprehensiveAnalysis}
+      onToggleDeepResearch={onToggleDeepResearch}
+      onStartRecording={startRecording}
+      onStopRecording={stopRecording}
+      onFileUpload={handleFileUpload}
+      onRemoveContextItem={onRemoveContextItem}
+      onPaste={onPaste}
+      workspaceId={workspaceId}
+    />
   );
 }

@@ -12,6 +12,8 @@ const apiClient = axios.create({
   timeout: 900000, // 15 minutos en milisegundos
 });
 
+console.log('DEBUG (apiClient): Final baseURL used by axios:', apiClient.defaults.baseURL); // Nuevo log
+
 // Interceptor para manejar tokens
 apiClient.interceptors.request.use(
   (config) => {

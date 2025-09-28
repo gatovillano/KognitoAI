@@ -1,7 +1,7 @@
 // webapp/script.js - Versión FINAL Completa con Gestor de Notas
 
 document.addEventListener('DOMContentLoaded', function () {
-    console.log("Script iniciado");
+    tg.showAlert("Script iniciado."); // Alerta para verificar la ejecución del script
     // --- 1. INICIALIZACIÓN Y VERIFICACIÓN ---
     if (!window.Telegram || !window.Telegram.WebApp) {
         console.error("SDK de Telegram no encontrado.");
@@ -9,7 +9,7 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
     }
     const tg = window.Telegram.WebApp;
-    console.log("SDK de Telegram cargado:", tg);
+    tg.showAlert("SDK de Telegram cargado.");
 
     // --- 2. REFERENCIAS A ELEMENTOS ---
     const elements = {
@@ -57,12 +57,85 @@ document.addEventListener('DOMContentLoaded', function () {
         noteTitleInput: document.getElementById('note-title-input'),
         noteContentInput: document.getElementById('note-content-input'),
         noteCategoryInput: document.getElementById('note-category-input'),
+        llmOutput: document.getElementById('llm-output'), // Nuevo elemento para la respuesta del LLM
     };
-    console.log("Elementos referenciados:", elements);
+    tg.showAlert("Elementos referenciados cargados.");
+
+    // --- 3. GESTIÓN DE WEBSOCKETS ---
+    let websocket;
+    let currentLlmResponse = ""; // Para acumular la respuesta del LLM
+
+    function connectWebSocket() {
+        if (!tg.initDataUnsafe || !tg.initDataUnsafe.user || !tg.initData) {
+            console.error("Datos de usuario de Telegram o initData no disponibles para WebSocket.");
+            return;
+        }
+
+        const userId = tg.initDataUnsafe.user.id;
+        const token = tg.initData; // initData contiene el token de autenticación
+        // Ajusta la URL si es necesario. Asumiendo que el backend está en el mismo host y puerto 8000
+        const wsUrl = `ws://${window.location.hostname}:8000/ws/${userId}?token=${token}`;
+
+        websocket = new WebSocket(wsUrl);
+
+        websocket.onopen = function(event) {
+            console.log("WebSocket conectado:", event);
+            elements.llmOutput.innerHTML = "Conectado al LLM. Esperando respuesta...";
+            currentLlmResponse = "";
+        };
+
+        websocket.onmessage = function(event) {
+            const message = JSON.parse(event.data);
+            console.log("Mensaje WebSocket recibido:", message);
+
+            switch (message.type) {
+                case "llm_start":
+                    currentLlmResponse = "";
+                    elements.llmOutput.innerHTML = "El agente está pensando...";
+                    break;
+                case "llm_chunk":
+                    currentLlmResponse += message.chunk;
+                    elements.llmOutput.innerHTML = currentLlmResponse;
+                    break;
+                case "llm_end":
+                    elements.llmOutput.innerHTML = currentLlmResponse + "<br>Respuesta completada.";
+                    // Aquí podrías manejar tool_code y sources si los necesitas en el frontend
+                    break;
+                case "llm_error":
+                    elements.llmOutput.innerHTML = `Error del LLM: ${message.message}`;
+                    break;
+                case "llm_status":
+                    elements.llmOutput.innerHTML = message.message;
+                    break;
+                case "tool_code":
+                    // Mostrar el código de la herramienta si es relevante para el usuario
+                    console.log("Código de herramienta:", message.tool_code);
+                    break;
+                case "tool_status":
+                    // Actualizar el estado de la herramienta
+                    console.log(`Estado de herramienta: ${message.tool_name} - ${message.status}`);
+                    break;
+                default:
+                    console.log("Tipo de mensaje desconocido:", message.type);
+            }
+        };
+
+        websocket.onclose = function(event) {
+            console.log("WebSocket desconectado:", event);
+            elements.llmOutput.innerHTML = "WebSocket desconectado. Reconectando en 5 segundos...";
+            setTimeout(connectWebSocket, 5000); // Intentar reconectar
+        };
+
+        websocket.onerror = function(error) {
+            console.error("WebSocket error:", error);
+            elements.llmOutput.innerHTML = "Error en la conexión WebSocket.";
+            websocket.close();
+        };
+    }
 
     let initialPrompt = '';
 
-    // --- 3. FUNCIÓN CENTRAL PARA LLAMADAS A LA API ---
+    // --- 4. FUNCIÓN CENTRAL PARA LLAMADAS A LA API ---
     async function apiPost(endpoint, formData) {
         if (!tg.initData) throw new Error("Datos de usuario de Telegram no disponibles.");
         formData.append('initData', tg.initData);
@@ -73,9 +146,13 @@ document.addEventListener('DOMContentLoaded', function () {
         return data;
     }
 
-    // --- 4. LÓGICA DE NAVEGACIÓN ---
+    // --- 5. LÓGICA DE NAVEGACIÓN ---
     function showView(viewId) {
-        elements.views.forEach(view => view.classList.toggle('active', view.id === viewId));
+        tg.showAlert("Mostrando vista: " + viewId);
+        elements.views.forEach(view => {
+            view.classList.toggle('active', view.id === viewId);
+            tg.showAlert("Vista " + view.id + " activa: " + view.classList.contains('active'));
+        });
         updateMainButton(viewId);
 
         if (viewId === 'personalization-screen') loadPrompt();
@@ -84,11 +161,17 @@ document.addEventListener('DOMContentLoaded', function () {
         if (viewId === 'notes-screen') loadNotes();
     }
     console.log("Adjuntando eventListeners a iconButtons");
-    elements.iconButtons.forEach(button => button.addEventListener('click', () => showView(button.dataset.targetView)));
+    elements.iconButtons.forEach(button => {
+        tg.showAlert("Icono: " + button.dataset.targetView + " listener adjuntado.");
+        button.addEventListener('click', () => showView(button.dataset.targetView));
+    });
     console.log("Adjuntando eventListeners a backButtons");
-    elements.backButtons.forEach(button => button.addEventListener('click', () => showView('home-screen')));
+    elements.backButtons.forEach(button => {
+        tg.showAlert("Botón de retroceso listener adjuntado.");
+        button.addEventListener('click', () => showView('home-screen'));
+    });
 
-    // --- 5. LÓGICA DEL BOTÓN PRINCIPAL DE TELEGRAM ---
+    // --- 6. LÓGICA DEL BOTÓN PRINCIPAL DE TELEGRAM ---
     function updateMainButton(currentViewId) {
         tg.MainButton.hide();
         if (currentViewId === 'personalization-screen' && elements.promptInput.value.trim() !== initialPrompt.trim()) {
@@ -105,7 +188,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (activeView.id === 'upload-screen') handleUpload();
     });
 
-    // --- 6. FUNCIONALIDAD DE PERSONALIZACIÓN ---
+    // --- 7. FUNCIONALIDAD DE PERSONALIZACIÓN ---
     async function loadPrompt() {
         elements.personalizationLoader.classList.remove('hidden');
         elements.restoreButton.classList.add('hidden');
@@ -144,7 +227,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     elements.promptInput.addEventListener('input', () => updateMainButton('personalization-screen'));
 
-    // --- 7. FUNCIONALIDAD DEL GESTOR DE DOCUMENTOS ---
+    // --- 8. FUNCIONALIDAD DEL GESTOR DE DOCUMENTOS ---
     function updateFileListUI() {
         elements.fileList.innerHTML = '';
         Array.from(elements.fileInput.files).forEach(file => {
@@ -204,7 +287,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     elements.docListContainer.appendChild(docEl);
                 });
             }
-        } catch (e) { tg.showAlert('Error al cargar documentos: ' + e.message); } 
+        } catch (e) { tg.showAlert('Error al cargar documentos: ' + e.message); }
         finally { elements.docListLoader.classList.add('hidden'); }
     }
 
@@ -250,7 +333,7 @@ document.addEventListener('DOMContentLoaded', function () {
     elements.fileInput.addEventListener('change', updateFileListUI);
     elements.topicInput.addEventListener('input', () => updateMainButton('upload-screen'));
     
-    // --- 8. FUNCIONALIDAD DEL GESTOR DE AGENDA ---
+    // --- 9. FUNCIONALIDAD DEL GESTOR DE AGENDA ---
     async function loadEvents() {
         elements.eventListLoader.classList.remove('hidden');
         elements.eventListContainer.innerHTML = '';
@@ -341,7 +424,7 @@ document.addEventListener('DOMContentLoaded', function () {
     elements.addEventForm.addEventListener('submit', handleAddEvent);
     elements.addEventModal.addEventListener('click', (e) => { if (e.target === elements.addEventModal) closeAddEventModal(); });
 
-    // --- 9. FUNCIONALIDAD DEL GESTOR DE NOTAS ---
+    // --- 10. FUNCIONALIDAD DEL GESTOR DE NOTAS ---
     async function loadNotes() {
         elements.noteListLoader.classList.remove('hidden');
         elements.noteListContainer.innerHTML = '';
@@ -443,9 +526,9 @@ document.addEventListener('DOMContentLoaded', function () {
     elements.noteModal.addEventListener('click', (e) => { if (e.target === elements.noteModal) closeNoteModal(); });
     elements.noteForm.addEventListener('submit', handleNoteFormSubmit);
 
-    // --- 10. INICIO DE LA APLICACIÓN ---
+    // --- 11. INICIO DE LA APLICACIÓN ---
     tg.ready(() => {
         tg.expand();
         showView('home-screen');
     });
-});
+});nada

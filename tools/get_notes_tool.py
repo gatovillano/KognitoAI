@@ -44,28 +44,32 @@ class GetNotesTool(BaseTool):
         try:
             async with SessionLocal() as session:
                 notes_manager = NotesManager(session)
+                notes_list = []
+                total_notes = 0
+
                 if self.workspace_id:
-                    notes = await notes_manager.get_notes_as_dicts(
+                    total_notes, notes_list = await notes_manager.get_notes_as_dicts(
                         account_id=self.account_id,
                         workspace_id=self.workspace_id,
                         search_query=search_query,
                         category=category
                     )
                 else:
-                    notes = await notes_manager.list_all_notes(
+                    total_notes, notes_list = await notes_manager.list_all_notes(
                         account_id=self.account_id,
                         search_query=search_query,
                         category=category
                     )
 
-            if not notes:
+            if not notes_list:
                 return "No tienes ninguna nota guardada o ninguna coincide con tu búsqueda."
 
-            response_lines = ["Aquí están tus notas:"]
-            for note in notes:
-                title = f"<b>{note['title']}</b>" if note['title'] else "Nota sin título"
+            response_lines = [f"Encontré {total_notes} nota(s). Aquí están las primeras:"]
+            for note in notes_list:
+                title = f"<b>{note['title']}</b>" if note.get('title') else "Nota sin título"
                 team_info = f" (Equipo: {note['team_id']})" if note.get('team_shared') else ""
-                response_lines.append(f"\n- <b>ID: {note['id']}</b> | {title} (Categoría: {note['category']}){team_info}\n  <i>{note['content']}</i>")
+                workspace_info = f" (Workspace: {note.get('workspace_name')})" if note.get('workspace_id') else ""
+                response_lines.append(f"\n- <b>ID: {note['id']}</b> | {title} (Categoría: {note['category']}){team_info}{workspace_info}\n  <i>{note['content']}</i>")
 
             return "\n".join(response_lines)
 

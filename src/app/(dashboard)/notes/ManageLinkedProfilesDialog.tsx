@@ -8,8 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useEffect, useState, useCallback } from 'react';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { ContactProfile } from '../profiles/page'; // Importar la interfaz ContactProfile
-// import { Note } from './page'; // No longer needed directly
+import { ContactProfile } from '../profiles/page';
 
 interface LinkedProfileDisplay extends ContactProfile {
   linked: boolean;
@@ -18,15 +17,27 @@ interface LinkedProfileDisplay extends ContactProfile {
 interface ManageLinkedProfilesDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  item: { id: string; name?: string; title?: string; } | null; // Generic item
-  itemType: 'note' | 'album'; // New prop to specify item type
-  onLinkedProfilesUpdated: () => void; // Callback para refrescar las notas o perfiles si es necesario
+  item: { id: string; name?: string; title?: string; } | null;
+  itemType: 'note' | 'document' | 'form' | 'form-response';
+  onLinkedProfilesUpdated: () => void;
+  onLink: (profileId: string, itemId: string) => Promise<void>;
+  onUnlink: (profileId: string, itemId: string) => Promise<void>;
 }
 
-export function ManageLinkedProfilesDialog({ isOpen, onOpenChange, item, itemType, onLinkedProfilesUpdated }: ManageLinkedProfilesDialogProps) {
+export function ManageLinkedProfilesDialog({
+  isOpen, onOpenChange, item, itemType, onLinkedProfilesUpdated, onLink, onUnlink
+}: ManageLinkedProfilesDialogProps) {
   const [availableProfiles, setAvailableProfiles] = useState<LinkedProfileDisplay[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+
+  const getEndpointPrefix = (type: string) => {
+    if (type === 'note') return 'notes';
+    if (type === 'document') return 'documents';
+    if (type === 'form') return 'forms';
+    if (type === 'form-response') return 'form-responses';
+    return 'galleries/albums';
+  };
 
   const fetchAvailableProfiles = useCallback(async () => {
     setIsLoading(true);
@@ -34,7 +45,7 @@ export function ManageLinkedProfilesDialog({ isOpen, onOpenChange, item, itemTyp
       const allProfilesResponse = await apiClient.get('/api/contact-profiles');
       const allProfiles: ContactProfile[] = allProfilesResponse.data;
 
-      const linkedProfilesResponse = await apiClient.get(`/api/${itemType === 'album' ? 'galleries/albums' : `${itemType}s`}/${item?.id}/linked-profiles`);
+      const linkedProfilesResponse = await apiClient.get(`/api/${getEndpointPrefix(itemType)}/${item?.id}/linked-profiles`);
       const linkedProfilesIds: string[] = linkedProfilesResponse.data.map((p: any) => p.id.toString());
 
       const profilesWithLinkStatus: LinkedProfileDisplay[] = allProfiles.map(profile => ({
@@ -63,12 +74,12 @@ export function ManageLinkedProfilesDialog({ isOpen, onOpenChange, item, itemTyp
   const handleToggleLink = async (profileToToggle: LinkedProfileDisplay) => {
     if (!item?.id) return;
 
-    const endpoint = profileToToggle.linked
-      ? `/api/${itemType === 'album' ? 'galleries/albums' : `${itemType}s`}/${item.id}/unlink-profile/${profileToToggle.id}`
-      : `/api/${itemType === 'album' ? 'galleries/albums' : `${itemType}s`}/${item.id}/link-profile/${profileToToggle.id}`;
-
     try {
-      await apiClient.post(endpoint);
+      if (profileToToggle.linked) {
+        await onUnlink(profileToToggle.id, item.id);
+      } else {
+        await onLink(profileToToggle.id, item.id);
+      }
       toast.success(`${profileToToggle.name} ${profileToToggle.linked ? 'desvinculado' : 'vinculado'} correctamente.`);
       setAvailableProfiles(prevProfiles =>
         prevProfiles.map(p =>
@@ -121,9 +132,9 @@ export function ManageLinkedProfilesDialog({ isOpen, onOpenChange, item, itemTyp
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Vincular Perfiles a {itemType === 'note' ? 'Nota' : 'Álbum'}: {itemDisplayName}</DialogTitle>
+          <DialogTitle>Vincular Perfiles a {itemType === 'note' ? 'Nota' : itemType === 'form' ? 'Formulario' : itemType === 'form-response' ? 'Respuesta de Formulario' : 'Álbum'}: {itemDisplayName}</DialogTitle>
           <DialogDescription>
-            Selecciona los perfiles que deseas vincular o desvincular de este {itemType === 'note' ? 'nota' : 'álbum'}.
+            Selecciona los perfiles que deseas vincular o desvincular de este {itemType === 'note' ? 'nota' : itemType === 'form' ? 'formulario' : itemType === 'form-response' ? 'respuesta de formulario' : 'álbum'}.
           </DialogDescription>
         </DialogHeader>
 

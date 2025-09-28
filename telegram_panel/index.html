@@ -27,6 +27,10 @@
                     <div class="icon-bubble">📝</div><span class="icon-label">Notas</span>
                 </div>
             </div>
+            <div id="llm-response-container" class="llm-response-container">
+                <h3>Respuesta del LLM (Streaming)</h3>
+                <div id="llm-output" class="llm-output"></div>
+            </div>
         </section>
 
         <!-- VISTA 2: Personalización -->
@@ -36,7 +40,7 @@
                 <h2>Configurar Personalidad</h2>
             </div>
             <div class="card-content">
-                <p class="description">Modifica el prompt de sistema para definir el tono o la personalidad del Bot. Puedes darle detalles como el estilo de habla, o entregarle alguna especialidad. Ejemplo: "Eres un experto en la medicina", o "eres un asistente de negocios". "Te expresas con un estilo de habla formal" , o "Hablas con jerga coloquial chilena". Etc. Todo lo que se te ocurra</p> </p>
+                <p class="description">Modifica el prompt de sistema para definir el tono o la personalidad del Bot. Puedes darle detalles como el estilo de habla, o entregarle alguna especialidad. Ejemplo: "Eres un experto en la medicina", o "eres un asistente de negocios". "Te expresas con un estilo de habla formal" , o "Hablas con jerga coloquial chilena". Etc. Todo lo que se te ocurra</p>
                 <div class="form-group">
                     <label for="system-prompt-input">Prompt de Sistema:</label>
                     <textarea id="system-prompt-input" rows="10"></textarea>
@@ -166,6 +170,6 @@
         </div>
     </div>
     
-    <script src="/script.js?v=NOTES_FINAL_COMPLETE"></script>
+    <script src="script.js?v=NOTES_FINAL_COMPLETE"></script>
 </body>
 </html>

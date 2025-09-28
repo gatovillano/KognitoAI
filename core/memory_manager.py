@@ -460,7 +460,7 @@ async def get_relevant_memories(
                 }
             ))
         
-        return ToolOutputWithSources(content="\n".join(final_content_list), sources=final_sources)
+        return ToolOutputWithSources(context_for_llm="\n".join(final_content_list), sources=final_sources)
 
     except Exception as e:
         logger.error(f"❌ Error al recuperar memorias/documentos relevantes: {e}", exc_info=True)

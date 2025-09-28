@@ -165,9 +165,11 @@ export const GraphVisualization: React.FC<GraphVisualizationProps> = ({ workspac
 
     // Desactivar físicas después de la estabilización
     networkRef.current.on("stabilizationIterationsDone", function () {
-      networkRef.current.setOptions({
-        physics: false
-      });
+      if (networkRef.current) {
+        networkRef.current.setOptions({
+          physics: false
+        });
+      }
     });
 
     // Limpia la instancia de la red cuando el componente se desmonta

@@ -1,3 +1,4 @@
+/* eslint-disable react/jsx-no-undef */
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -85,6 +86,7 @@ export default function ProfilesPage() {
 
   const ProfileCard = ({ profile }: { profile: ContactProfile }) => {
     const router = useRouter();
+    console.log('Router in ProfileCard:', router); // Añadir este console.log
     const [{ isDragging }, drag] = useDrag({
       type: 'PROFILE',
       item: { id: profile.id, category: profile.category },

@@ -124,6 +124,8 @@ class AgentState(TypedDict):
     rag_context: Optional[List[Dict[str, Any]]]
     # Las fuentes recuperadas para la citación
     sources: Optional[List[Dict[str, Any]]]
+    # El ID de la tarea para los eventos de WebSocket
+    task_id: Optional[str]
 
 # ==============================================================================
 # SECCIÓN 2: MANEJO DE CONTEXTO Y MEMORIA
@@ -573,6 +575,14 @@ async def tool_node(state: AgentState):
         tool_name = tool_call.get("name")
         tool_args = tool_call.get("args")
         
+        # Enviar evento tool_start
+        from core.websocket_manager import send_personal_message
+        await send_personal_message(state['account_id'], {
+            "type": "tool_start",
+            "taskId": state.get("task_id"),
+            "toolName": tool_name,
+        })
+
         if tool_name not in tool_map:
             logger.error(f"Herramienta '{tool_name}' no encontrada.")
             tool_messages.append(ToolMessage(
@@ -589,7 +599,7 @@ async def tool_node(state: AgentState):
         selected_tool.telegram_id = state.get('telegram_id')
         
         if hasattr(selected_tool, 'thread_id'):
-            selected_tool.thread_id = state['messages'][-1].additional_kwargs.get('thread_id') 
+            selected_tool.thread_id = state['messages'][-1].additional_kwargs.get('thread_id')
         # --- FIN INYECCIÓN ---
 
         try:
@@ -636,12 +646,30 @@ async def tool_node(state: AgentState):
                 content=tool_content_for_llm,
                 tool_call_id=tool_call.get("id")
             ))
+            
+            # Enviar evento tool_end con éxito
+            await send_personal_message(state['account_id'], {
+                "type": "tool_end",
+                "taskId": state.get("task_id"),
+                "toolName": tool_name,
+                "result": tool_content_for_llm,
+                "sources": [s for s in current_sources if s['url'] in [src.url for src in getattr(output, 'sources', [])]] # Enviar solo las fuentes de esta herramienta
+            })
+
         except Exception as e:
             logger.error(f"Error al ejecutar la herramienta {tool_name}: {e}", exc_info=True)
             tool_messages.append(ToolMessage(
                 content=f"Error: {e}",
                 tool_call_id=tool_call.get("id")
             ))
+            # Enviar evento tool_end con error
+            await send_personal_message(state['account_id'], {
+                "type": "tool_end",
+                "taskId": state.get("task_id"),
+                "toolName": tool_name,
+                "result": f"Error: {e}",
+                "error": True
+            })
             
     # Devolver los mensajes de la herramienta Y las fuentes actualizadas al estado del grafo
     return {"messages": state["messages"] + tool_messages, "sources": current_sources}

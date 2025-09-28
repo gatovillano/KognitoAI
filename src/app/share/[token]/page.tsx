@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Image from 'next/image';
 import { Button } from '@/components/ui/button';
-import { Download } from 'lucide-react';
+import { Download, Loader2 } from 'lucide-react';
 import Lightbox from "yet-another-react-lightbox";
 import "yet-another-react-lightbox/styles.css";
 import Masonry from 'react-masonry-css';
@@ -39,6 +39,7 @@ const SharedAlbumPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [password, setPassword] = useState('');
   const [passwordRequired, setPasswordRequired] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [open, setOpen] = React.useState(false); // Corregido a 'false'
   const [currentIndex, setCurrentIndex] = React.useState(0);
 
@@ -162,7 +163,8 @@ const SharedAlbumPage: React.FC = () => {
   };
 
   const handleDownload = async () => {
-    if (!album) return;
+    if (!album || isDownloading) return;
+    setIsDownloading(true);
     try {
       console.log('Attempting to download album:', album.name, 'ID:', album.id);
       const downloadUrl = `${process.env.NEXT_PUBLIC_API_URL}/api/galleries/albums/${album.id}/download`;
@@ -184,6 +186,8 @@ const SharedAlbumPage: React.FC = () => {
       console.log('Album download initiated successfully.');
     } catch (error) {
       console.error('Error downloading album:', error);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -192,8 +196,8 @@ const SharedAlbumPage: React.FC = () => {
       <div className="p-6 sm:p-12 max-w-7xl mx-auto overflow-x-hidden">
         {album.allow_download && (
           <div className="absolute top-6 right-6">
-            <Button onClick={handleDownload} variant="outline" size="icon" className="text-white border-white">
-              <Download className="h-4 w-4" />
+            <Button onClick={handleDownload} variant="outline" size="icon" className="text-white border-white" disabled={isDownloading}>
+              {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             </Button>
           </div>
         )}

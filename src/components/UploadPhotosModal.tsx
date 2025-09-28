@@ -107,11 +107,6 @@ export const UploadPhotosModal: React.FC<UploadPhotosModalProps> = ({
           {files.length > 0 && (
             <div className="mt-4">
               <h4 className="text-lg font-semibold mb-2">Archivos seleccionados ({files.length})</h4>
-
-// ... (the rest of the imports)
-
-// ... (the rest of the component)
-
               <div className="grid grid-cols-3 gap-2 max-h-40 overflow-y-auto border rounded-md p-2">
                 {files.map((file, index) => (
                   <div key={index} className="relative group">
