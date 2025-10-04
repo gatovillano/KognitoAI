@@ -63,6 +63,7 @@ class NoteUpdateRequest(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     category: Optional[str] = None
+    workspace_id: Optional[str] = None
 
 class NoteDeleteRequest(BaseModel):
     note_id: int
@@ -107,7 +108,7 @@ async def get_linked_profiles_for_note_endpoint(
     
     return note["linked_profiles"]
 
-@router.post("/list-notes", response_model=PaginatedNotesResponse, summary="Listar notas del usuario con paginación")
+@router.post("/notes/list-notes", response_model=PaginatedNotesResponse, summary="Listar notas del usuario con paginación")
 async def list_notes_endpoint(
     request: ListNotesRequest,
     current_account_id: str = Depends(get_current_account_id),
@@ -185,11 +186,12 @@ async def update_note_endpoint(
 ):
     """Actualiza una nota existente del usuario."""
     success = await notes_manager.update_note(
-        account_id=current_account_id,\
-        note_id=note.note_id,\
-        new_title=note.title,\
-        new_content=note.content,\
-        new_category=note.category\
+        account_id=current_account_id,
+        note_id=note.note_id,
+        new_title=note.title,
+        new_content=note.content,
+        new_category=note.category,
+        new_workspace_id=note.workspace_id
     )
     if not success:
         raise HTTPException(status_code=404, detail="Nota no encontrada o no pertenece al usuario.")

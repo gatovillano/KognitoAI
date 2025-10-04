@@ -103,10 +103,11 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
       const [docsRes, analysesRes, collectionRes] = await Promise.all([
         apiClient.get('/api/list-documents', { params: commonParams }),
         apiClient.post('/api/get-saved-analyses', commonParams),
-        apiClient.get(`/api/collections/${topic}`, { params: { ...(workspaceId && { workspace_id: workspaceId }) } })
+        apiClient.get(`/api/collections/${topic}/details`, { params: { ...(workspaceId && { workspace_id: workspaceId }) } })
       ]);
       
       const serverDocuments = docsRes.data;
+      console.log('DEBUG (Frontend): Documentos recibidos de /api/list-documents:', serverDocuments);
       const savedAnalysesData = analysesRes.data;
       const collectionData = collectionRes.data;
 
@@ -211,28 +212,43 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     ));
   }, []);
 
-  const webSocketOptions = useMemo(() => ({
-    onTitleUpdated: (data: any) => onTitleUpdatedRef.current(data),
-    onTitleExtractionCompleted,
-    onUploadStarted,
-    onUploadProgress,
-    onUploadCompleted,
-    onUploadFailed,
-    onDocumentProcessingStarted,
-    onDocumentProcessingCompleted,
-    onDocumentProcessingFailed,
-  }), [
-    onTitleExtractionCompleted,
-    onUploadStarted,
-    onUploadProgress, 
-    onUploadCompleted, 
-    onUploadFailed,
-    onDocumentProcessingStarted,
-    onDocumentProcessingCompleted,
-    onDocumentProcessingFailed,
-  ]);
 
-  const { isConnected } = useWebSocket(webSocketOptions);
+
+  const { isConnected, latestMessage } = useWebSocket({ userId: user?.id });
+
+  useEffect(() => {
+    if (latestMessage) {
+      switch (latestMessage.type) {
+        case 'title_updated':
+          onTitleUpdated(latestMessage.data);
+          break;
+        case 'title_extraction_completed':
+          onTitleExtractionCompleted(latestMessage.data);
+          break;
+        case 'upload_started':
+          onUploadStarted(latestMessage.data);
+          break;
+        case 'upload_progress':
+          onUploadProgress(latestMessage.data);
+          break;
+        case 'upload_completed':
+          onUploadCompleted(latestMessage.data);
+          break;
+        case 'upload_failed':
+          onUploadFailed(latestMessage.data);
+          break;
+        case 'document_processing_started':
+          onDocumentProcessingStarted(latestMessage.data);
+          break;
+        case 'document_processing_completed':
+          onDocumentProcessingCompleted(latestMessage.data);
+          break;
+        case 'document_processing_failed':
+          onDocumentProcessingFailed(latestMessage.data);
+          break;
+      }
+    }
+  }, [latestMessage]);
 
   useEffect(() => {
     fetchPageData();

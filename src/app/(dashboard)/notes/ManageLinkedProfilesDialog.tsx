@@ -18,7 +18,7 @@ interface ManageLinkedProfilesDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   item: { id: string; name?: string; title?: string; } | null;
-  itemType: 'note' | 'document' | 'form' | 'form-response';
+  itemType: 'note' | 'document' | 'form' | 'form-response' | 'album';
   onLinkedProfilesUpdated: () => void;
   onLink: (profileId: string, itemId: string) => Promise<void>;
   onUnlink: (profileId: string, itemId: string) => Promise<void>;

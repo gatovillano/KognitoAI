@@ -154,6 +154,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
   const audioStreamRef = useRef<MediaStream | null>(null); // Para almacenar el stream del micrófono
+  const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
+  const [isAudioLoading, setIsAudioLoading] = useState(false);
+  const [isAudioPaused, setIsAudioPaused] = useState(false);
 
   // Refs to hold latest values for stable callbacks
   const isRespondingRef = useRef(isResponding);
@@ -428,7 +431,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       console.log('DEBUG: Acceso al micrófono concedido.');
       audioStreamRef.current = stream;
       const recorder = new MediaRecorder(stream);
-      let localAudioChunks: Blob[] = []; // Variable local para acumular los chunks
+      let localAudioChunks: Blob[] = [];
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -444,12 +447,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         toast.info('Deteniendo grabación de audio y procesando...');
 
         if (localAudioChunks.length > 0) {
-          console.log('DEBUG: localAudioChunks length:', localAudioChunks.length);
           const audioBlob = new Blob(localAudioChunks, { type: 'audio/webm' });
-          console.log('DEBUG: audioBlob created:', audioBlob);
-          console.log('DEBUG: audioBlob size:', audioBlob.size, 'bytes');
-          console.log('DEBUG: audioBlob type:', audioBlob.type);
-
           if (audioBlob.size === 0) {
             toast.error('El audio grabado está vacío. Intenta de nuevo.');
             setIsProcessingAudio(false);
@@ -457,56 +455,37 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           }
 
           const formData = new FormData();
-          console.log('DEBUG: AudioBlob antes de añadir a FormData:', audioBlob); // Nuevo log
           formData.append('file', audioBlob, 'audio.webm');
-          console.log('DEBUG: FormData prepared. Sending to /transcribe-audio');
-          console.log('DEBUG: Contenido de formData (solo para depuración, no enviar datos sensibles):', Array.from(formData.entries()));
 
           try {
-            console.log('DEBUG: Realizando llamada a apiClient.post(/api/transcribe-audio)...');
             const response = await apiClient.post('/api/transcribe-audio', formData, {
-              headers: {
-                'Content-Type': 'multipart/form-data', // Forzar el Content-Type
-              },
-            });            console.log('DEBUG: Respuesta completa del backend:', response);
+              headers: { 'Content-Type': 'multipart/form-data' },
+            });
             const { transcription } = response.data;
-            console.log('DEBUG: Transcripción recibida:', transcription);
-            setNewMessage(transcription);
+            setNewMessage(prev => prev + transcription); // Usar función de actualización para evitar problemas de closure
             toast.success('Audio transcrito y listo para enviar.');
           } catch (error: any) {
             console.error('DEBUG: Error en la llamada a /transcribe-audio:', error);
-            if (error.response) {
-              console.error('DEBUG: Datos de error del servidor:', error.response.data);
-              console.error('DEBUG: Estado de error del servidor:', error.response.status);
-              console.error('DEBUG: Headers de error del servidor:', error.response.headers);
-            } else if (error.request) {
-              console.error('DEBUG: No se recibió respuesta del servidor:', error.request);
-            } else {
-              console.error('DEBUG: Error desconocido al configurar la solicitud:', error.message);
-            }
             toast.error('Error al transcribir el audio.');
           } finally {
             setIsProcessingAudio(false);
           }
         } else {
-          console.log('DEBUG: localAudioChunks está vacío. No se grabó audio.');
           toast.error('No se grabó audio.');
           setIsProcessingAudio(false);
         }
       };
 
       recorder.start();
-      console.log('DEBUG: MediaRecorder iniciado. Estado:', recorder.state);
       setMediaRecorder(recorder);
       setIsRecording(true);
-      // No es necesario setAudioChunks([]) aquí, ya que localAudioChunks se encarga
       toast.info('Iniciando grabación de audio...');
     } catch (error) {
       console.error('DEBUG: Error al acceder al micrófono:', error);
       toast.error('No se pudo acceder al micrófono. Asegúrate de dar permisos.');
       setIsRecording(false);
     }
-  }, [setNewMessage]); // Dependencias actualizadas
+  }, []); // Se eliminan las dependencias para que el closure no sea un problema
 
   const handleStopRecording = useCallback(async () => {
     if (mediaRecorder && mediaRecorder.state === 'recording') {
@@ -548,10 +527,65 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     }
   }, [threadId, user?.id, selectedContext]);
 
-  const handlePlayAudio = useCallback((text: string, index: number) => {
-    // Por ahora, mostrar un mensaje indicando que la funcionalidad de audio no está implementada
-    toast.info('Funcionalidad de audio próximamente');
-  }, []);
+  const handlePlayAudio = useCallback(async (text: string, index: number) => {
+    if (isAudioLoading) return;
+
+    if (playingMessageIndex === index && !isAudioPaused) {
+      // Pausar si ya está reproduciendo este mensaje
+      setIsAudioPaused(true);
+      setPlayingMessageIndex(null);
+      // Aquí podrías pausar el audio si tuvieras una referencia al AudioContext o AudioElement
+      return;
+    }
+
+    if (playingMessageIndex !== null) {
+      // Detener el audio anterior si hay uno reproduciéndose
+      setPlayingMessageIndex(null);
+      setIsAudioPaused(false);
+      // Lógica para detener el audio anterior
+    }
+
+    setPlayingMessageIndex(index);
+    setIsAudioLoading(true);
+    setIsAudioPaused(false);
+    toast.info('Generando audio...');
+
+    try {
+      const response = await apiClient.post('/api/text-to-speech', { text }, {
+        responseType: 'blob', // Importante para recibir el audio como Blob
+      });
+
+      const audioBlob = new Blob([response.data], { type: 'audio/mpeg' }); // Asumiendo que el TTS devuelve MP3
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+
+      audio.onended = () => {
+        setPlayingMessageIndex(null);
+        setIsAudioLoading(false);
+        setIsAudioPaused(false);
+        URL.revokeObjectURL(audioUrl); // Liberar el objeto URL
+      };
+
+      audio.onerror = (e) => {
+        console.error('Error al reproducir el audio:', e);
+        toast.error('Error al reproducir el audio.');
+        setPlayingMessageIndex(null);
+        setIsAudioLoading(false);
+        setIsAudioPaused(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      await audio.play();
+      toast.success('Reproduciendo audio.');
+
+    } catch (error) {
+      console.error('Error al obtener el audio TTS:', error);
+      toast.error('Error al generar el audio. Asegúrate de que el servicio TTS esté funcionando en el puerto 5050.');
+      setPlayingMessageIndex(null);
+      setIsAudioLoading(false);
+      setIsAudioPaused(false);
+    }
+  }, [isAudioLoading, playingMessageIndex, isAudioPaused]);
 
   // Main effect for loading a thread's data
   useEffect(() => {
@@ -680,9 +714,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                     handleCopyMessage={handleCopyMessage}
                     handleRetry={handleRetry}
                     handlePlayAudio={handlePlayAudio}
-                    isAudioLoading={false}
-                    playingMessageIndex={null}
-                    isAudioPaused={false}
+                    isAudioLoading={isAudioLoading}
+                    playingMessageIndex={playingMessageIndex}
+                    isAudioPaused={isAudioPaused}
                   />
                 </div>
               ))}
@@ -718,6 +752,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
                 isDeepResearchActive={isDeepResearchActive}
                 onMessageChange={setNewMessage}
+                setNewMessage={setNewMessage}
                 onSendMessage={handleSendMessage}
                 onKeyDown={() => {}}
                 onToggleKnowledgeAnalysis={() => {}}
@@ -744,4 +779,3 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     </div>
   );
 }
-
