@@ -26,6 +26,7 @@ from core.llm_manager import initialize_llms
 from core.websocket_manager import manager as websocket_manager, startup_event as ws_startup, shutdown_event as ws_shutdown
 from utils.security import decode_access_token
 from utils.embeddings import initialize_embeddings
+from utils.audio_transcriber import load_whisper_model
 from utils.ascii_logo import print_startup_logo
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -110,6 +111,7 @@ async def startup_event():
         logger.info("Modelos de Lenguaje (LLMs) inicializados.")
         await initialize_embeddings()
         logger.info("Modelo de embeddings inicializado.")
+        load_whisper_model()
         await ws_startup()
         logger.info("Servidor listo para aceptar peticiones.")
     except Exception as e:
@@ -182,7 +184,7 @@ async def serve_telegram_panel():
 app.include_router(auth_router, prefix="/api", tags=["auth"])
 app.include_router(users_router, prefix="/api", tags=["users"])
 app.include_router(chat_router, prefix="/api", tags=["chat"])
-app.include_router(documents_router, prefix="/api", tags=["documents"])
+app.include_router(documents_router, prefix="/api/documents", tags=["documents"])
 app.include_router(notes_router, prefix="/api", tags=["notes"])
 app.include_router(agenda_router, prefix="/api", tags=["agenda"])
 from api.workspaces import router as workspaces_router

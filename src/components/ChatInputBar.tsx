@@ -4,9 +4,10 @@ import { useState, useRef, useEffect, memo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { Send, ArrowUp, X, Paperclip, Upload, Loader2, Mic } from 'lucide-react';
+import { Send, ArrowUp, X, Paperclip, Upload, Loader2, Mic, NotebookText } from 'lucide-react';
 import { ContextSelectorButton } from '@/components/ContextSelectorButton';
 import { MoreActionsMenu } from './MoreActionsMenu';
+import NoteSelectorDialog from './NoteSelectorDialog';
 
 interface SelectedContextItem {
   id: string;
@@ -36,6 +37,7 @@ interface ChatInputBarProps {
   selectedToolName?: string; // Nueva prop para forzar la ejecución de una herramienta
   messages?: ChatMessage[];
   onMessageChange: (value: string) => void;
+  setNewMessage: (value: string) => void;
   onSendMessage: (e?: React.FormEvent, message?: string) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onToggleKnowledgeAnalysis?: () => void;
@@ -67,6 +69,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   isDeepResearchActive,
   selectedToolName,
   onMessageChange,
+  setNewMessage,
   onSendMessage,
   onKeyDown = () => {},
   onToggleKnowledgeAnalysis = () => {},
@@ -86,8 +89,15 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   inputPlaceholder
 }) => {
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
+  const [isNoteSelectorOpen, setIsNoteSelectorOpen] = useState(false);
+  const [inputValue, setInputValue] = useState(newMessage);
+
+  useEffect(() => {
+    setInputValue(newMessage);
+  }, [newMessage]);
 
   const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputValue(e.target.value);
     onMessageChange(e.target.value);
   }, [onMessageChange]);
 
@@ -107,6 +117,12 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     onSendMessage(e, messageText);
     onMessageChange('');
   }, [newMessage, selectedToolName, currentContext, onSendMessage, onMessageChange]);
+
+  const handleAttachNote = useCallback((note: { title?: string; content: string }) => {
+    const noteText = note.title ? `Nota: ${note.title}\n${note.content}` : `Nota: ${note.content}`;
+    onMessageChange(newMessage + '\n' + noteText);
+    setIsNoteSelectorOpen(false);
+  }, [onMessageChange, newMessage]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -168,6 +184,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     }
   }, [isProcessingAudio]);
 
+
   return (
     <div className={isFixedPosition ? "fixed bottom-0 w-full md:w-[calc(100%-320px)] right-0 p-4 md:p-6 bg-background z-30" : "relative w-full"}>
       <div className="flex justify-center w-full">
@@ -193,7 +210,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
             )}
             <Textarea
               ref={textAreaRef}
-              value={newMessage}
+              value={inputValue}
               onKeyDown={handleKeyDown}
               placeholder={inputPlaceholder || (currentContext.length > 0 ? "Escribe tu mensaje..." : "Escribe tu mensaje o selecciona contexto...")}
               autoComplete="on"
@@ -204,7 +221,6 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
             />
             <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50">
               <div className="flex items-center gap-2">
-                {children}
                 <MoreActionsMenu
                   isWebSearchActive={isWebSearchActive}
                   isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
@@ -218,30 +234,19 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                   onStartRecording={onStartRecording}
                   onStopRecording={onStopRecording}
                 />
-              </div>
-              <div className="flex items-center gap-3">
-                <input
-                  id="file-upload-chat-bar"
-                  type="file"
-                  multiple
-                  accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.gif"
-                  className="hidden"
-                  onChange={handleFileUploadChange}
-                  disabled={isUploadingFile}
-                />
-                <label htmlFor="file-upload-chat-bar" className="flex items-center justify-center h-9 w-9 rounded-full text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer">
-                  {isUploadingFile ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}
-                </label>
+                {children}
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className={`rounded-full ${isRecording && !isProcessingAudio ? 'text-red-500 animate-pulse' : 'text-muted-foreground'} hover:bg-accent hover:text-accent-foreground`}
-                  onClick={isRecording ? onStopRecording : onStartRecording}
-                  disabled={isUploadingFile || isResponding || isProcessingAudio}
+                  className="rounded-full text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  onClick={() => setIsNoteSelectorOpen(true)}
+                  disabled={isResponding}
                 >
-                  {isProcessingAudio ? <Loader2 className="h-5 w-5 animate-spin" /> : isRecording ? <Mic className="h-5 w-5 text-red-500" /> : <Mic className="h-5 w-5" />}
+                  <NotebookText className="h-5 w-5" />
                 </Button>
+              </div>
+              <div className="flex items-center gap-2">
                 <Button
                   type="submit"
                   size="icon"
@@ -253,6 +258,13 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
               </div>
             </div>
           </div>
+
+          <NoteSelectorDialog
+            isOpen={isNoteSelectorOpen}
+            onClose={() => setIsNoteSelectorOpen(false)}
+            onSelectNote={handleAttachNote}
+            workspaceId={workspaceId}
+          />
 
         </form>
       </div>

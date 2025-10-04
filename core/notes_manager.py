@@ -129,7 +129,7 @@ class NotesManager:
         )
         return total, notes
 
-    async def update_note(self, account_id: str, note_id: int, new_title: Optional[str] = None, new_content: Optional[str] = None, new_category: Optional[str] = None) -> bool:
+    async def update_note(self, account_id: str, note_id: int, new_title: Optional[str] = None, new_content: Optional[str] = None, new_category: Optional[str] = None, new_workspace_id: Optional[str] = None) -> bool:
         """
         Actualiza una nota existente. Devuelve True si fue exitoso, False en caso contrario.
         """
@@ -149,6 +149,8 @@ class NotesManager:
             content_changed = True
         if new_category is not None:
             update_data['category'] = new_category
+        if new_workspace_id is not None:
+            update_data['workspace_id'] = uuid.UUID(new_workspace_id) if new_workspace_id else None
 
         if content_changed:
             embeddings_model = get_embedding_model()

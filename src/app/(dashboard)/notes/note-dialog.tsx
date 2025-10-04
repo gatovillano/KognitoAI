@@ -18,6 +18,8 @@ import {
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
+
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -31,6 +33,7 @@ import {
 import apiClient from '@/lib/api';
 import type { Note } from './page';
 import { BookUp } from 'lucide-react';
+
 
 // Schema de validación para el formulario
 const formSchema = z.object({
@@ -126,7 +129,9 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
 
     try {
       const endpoint = isEditing ? '/api/update-note' : '/api/add-note';
-      const payload = isEditing ? { note_id: note.id, ...values } : { ...values, workspace_id: workspaceId }; // Pass workspaceId for new notes
+      const payload = isEditing
+        ? { note_id: note.id, ...values }
+        : { workspace_id: workspaceId, ...values }; // Prioritize form values
       // team_id is included in the payload as per schema
 
       const response = await apiClient.post(endpoint, payload);
@@ -153,9 +158,23 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
       // Llamamos al callback para actualizar la UI de la página principal
       // Si estamos editando, fusionamos los datos viejos y nuevos. Si no, usamos la respuesta de la API.
       // Aseguramos que team_shared se actualice basado en si hay un team_id seleccionado.
+      const selectedWorkspace = workspaces.find(ws => ws.id === values.workspace_id);
+
       const updatedNote = isEditing 
-        ? { ...note, ...values, team_shared: !!values.team_id } 
-        : { ...response.data, team_shared: !!values.team_id, workspace_id: workspaceId }; // Ensure workspace_id is included in updatedNote
+        ? { 
+            ...note, 
+            ...values, 
+            team_shared: !!values.team_id,
+            workspace_name: selectedWorkspace?.name || '',
+            workspace_color: selectedWorkspace?.color || '',
+          }
+        : {
+            ...response.data,
+            team_shared: !!values.team_id,
+            workspace_id: values.workspace_id, // Usar el valor del formulario para notas nuevas
+            workspace_name: selectedWorkspace?.name || '',
+            workspace_color: selectedWorkspace?.color || '',
+          };
       onSaveSuccess(updatedNote);
       onOpenChange(false);
     } catch (error) {
@@ -174,7 +193,7 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[625px]">
+      <DialogContent className="sm:max-w-lg md:max-w-2xl lg:max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>{isEditing ? 'Editar Nota Rápida' : 'Crear Nueva Nota'}</DialogTitle>
           <DialogDescription>
@@ -183,7 +202,8 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <ScrollArea className="h-[400px] pr-4">
+              <div className="grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="title" render={({ field }) => (
                 <FormItem><FormLabel>Título</FormLabel><FormControl><Input placeholder="Título de la nota" {...field} /></FormControl><FormMessage /></FormItem>
                 )} />
@@ -213,7 +233,7 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
               </FormItem>
             )} />
             <FormField control={form.control} name="content" render={({ field }) => (
-              <FormItem><FormLabel>Contenido (soporta Markdown)</FormLabel><FormControl><Textarea placeholder="Escribe tu nota aquí..." className="min-h-[200px] resize-y" {...field} /></FormControl><FormMessage /></FormItem>
+              <FormItem><FormLabel>Contenido</FormLabel><FormControl><Textarea placeholder="Contenido de la nota" {...field} rows={10} /></FormControl><FormMessage /></FormItem>
             )} />
             <FormField control={form.control} name="team_id" render={({ field }) => (
               <FormItem>
@@ -236,6 +256,7 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
                 <FormMessage />
               </FormItem>
             )} />
+            </ScrollArea>
             <DialogFooter className="flex-col-reverse sm:flex-row sm:justify-between sm:space-x-2">
               <Button type="button" variant="outline" onClick={handleGoToAdvancedEditor}>
                 <BookUp className="mr-2 h-4 w-4" />

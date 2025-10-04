@@ -55,7 +55,7 @@ export default function NotesPage() {
       setIsFetchingMore(true);
     }
     try {
-      const response = await apiClient.post('/api/list-notes', { skip: newSkip, limit: newLimit });
+      const response = await apiClient.post('/api/notes/list-notes', { skip: newSkip, limit: newLimit });
       console.log("API Response Data:", response.data);
       const fetchedNotes = response.data.notes.sort((a: Note, b: Note) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
@@ -84,11 +84,21 @@ export default function NotesPage() {
     }
   };
 
-  const handleSaveSuccess = () => {
-    // Recargar todas las notas desde el principio después de guardar
-    setSkip(0);
-    setHasMore(true);
-    fetchNotes(0, limit);
+  const handleSaveSuccess = (updatedNote: Note) => {
+    setNotes(prevNotes => {
+      const existingNoteIndex = prevNotes.findIndex(note => note.id === updatedNote.id);
+      if (existingNoteIndex > -1) {
+        // Actualizar nota existente
+        const newNotes = [...prevNotes];
+        newNotes[existingNoteIndex] = updatedNote;
+        return newNotes;
+      } else {
+        // Añadir nueva nota al principio
+        return [updatedNote, ...prevNotes];
+      }
+    });
+    // Opcional: Si quieres recargar para asegurar consistencia con el backend después de la actualización optimista
+    // fetchNotes(0, limit);
   };
 
   const handleDeleteConfirm = async () => {
@@ -474,7 +484,27 @@ export default function NotesPage() {
             onOpenChange={setIsLinkProfileDialogOpen}
             item={{ id: String(linkingNote.id), name: linkingNote.title || undefined }} // Convertir id a string y pasar title como name
             itemType="note" // Especificar el tipo de item
-            onLinkedProfilesUpdated={() => fetchNotes(0, limit, false)} // Para refrescar las notas si es necesario
+            onLinkedProfilesUpdated={() => fetchNotes(0, limit, false)}
+            onLink={async (profileId, noteId) => {
+              try {
+                await apiClient.post(`/api/notes/${noteId}/link-profile`, { profileId });
+                toast.success('Perfil vinculado exitosamente.');
+                fetchNotes(0, limit, false);
+              } catch (error) {
+                toast.error('Error al vincular el perfil.');
+                console.error('Error linking profile:', error);
+              }
+            }}
+            onUnlink={async (profileId, noteId) => {
+              try {
+                await apiClient.post(`/api/notes/${noteId}/unlink-profile`, { profileId });
+                toast.success('Perfil desvinculado exitosamente.');
+                fetchNotes(0, limit, false);
+              } catch (error) {
+                toast.error('Error al desvincular el perfil.');
+                console.error('Error unlinking profile:', error);
+              }
+            }}
           />
         )}
 

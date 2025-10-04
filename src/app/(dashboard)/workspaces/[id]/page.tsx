@@ -104,15 +104,15 @@ export default function WorkspaceDashboard({ params }: PageProps) {
       // Fetch workspace info, collections, events, tasks, and notes in parallel
       const [wsResponse, collectionsResponse, eventsResponse, tasksResponse, notesResponse] = await Promise.all([
         apiClient.get(`/api/workspaces/${workspaceId}`),
-        apiClient.get(`/api/collections?workspace_id=${workspaceId}`),
+        apiClient.get(`/api/documents/collections?workspace_id=${workspaceId}`),
         apiClient.post('/api/list-events', { workspace_id: workspaceId }),
         apiClient.get('/api/tasks', { params: { workspace_id: workspaceId } }),
-        apiClient.post('/api/list-notes', { workspace_id: workspaceId })
+        apiClient.post('/api/notes/list-notes', { workspace_id: workspaceId })
       ]);
 
       setWorkspace(wsResponse.data);
       setCollections(collectionsResponse.data);
-      setAgendaEvents(eventsResponse.data.filter((event: AgendaEvent) => event.workspace_id === workspaceId));
+      setAgendaEvents(eventsResponse.data); // El backend ya filtra por workspace_id
       setTasks(tasksResponse.data.filter((task: TaskResponse) => task.workspace_id === workspaceId));
       setNotes(notesResponse.data.notes);
 
@@ -261,7 +261,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
     // Actualizar la lista de colecciones después de crear una nueva
     const fetchCollections = async () => {
       try {
-        const collectionsResponse = await apiClient.get(`/api/collections?workspace_id=${workspaceId}`);
+        const collectionsResponse = await apiClient.get(`/api/documents/collections?workspace_id=${workspaceId}`);
         console.log('Fetched collections after creation:', collectionsResponse.data);
         setCollections(collectionsResponse.data);
       } catch (error) {
@@ -296,9 +296,9 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const handleOpenAddExistingCollectionDialog = async () => {
       setLoadingCollections(true);
       try {
-        const response = await apiClient.get('/api/collections');
+        const response = await apiClient.get('/api/documents/collections');
         const allCollections = response.data.map((col: any) => ({
-          id: col.topic || col.id || col.title || `collection-${Math.random().toString(36).substr(2, 9)}`,
+          id: col.topic || col.id || col.title || `collection-${Math.random().toString(36).substring(2, 11)}`,
           title: col.topic || col.title || 'Sin título',
           name: col.topic || col.title || 'Sin título',
           topic: col.topic || col.title || '',

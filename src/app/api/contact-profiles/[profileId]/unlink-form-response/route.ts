@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 
-export async function POST(request: NextRequest, { params }: { params: { profileId: string } }) {
+export async function POST(request: NextRequest, { params: paramsPromise }: { params: Promise<{ profileId: string }> }) {
   try {
+    const params = await paramsPromise; // Esperar la resolución de la promesa de params
     const { profileId } = params;
     const { form_response_id } = await request.json();
 

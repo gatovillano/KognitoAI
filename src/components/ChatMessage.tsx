@@ -254,16 +254,12 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                   size="sm"
                   className="h-8 w-8 p-0 rounded-full"
                   onClick={() => handlePlayAudio(msg.text, index)}
-                  disabled={isAudioLoading && playingMessageIndex === index}
+                  disabled={isAudioLoading && playingMessageIndex !== index}
                 >
                   {isAudioLoading && playingMessageIndex === index ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : playingMessageIndex === index ? (
-                    isAudioPaused ? (
-                      <Play className="h-3 w-3" />
-                    ) : (
-                      <Pause className="h-3 w-3" />
-                    )
+                  ) : playingMessageIndex === index && !isAudioPaused ? (
+                    <Pause className="h-3 w-3" />
                   ) : (
                     <Play className="h-3 w-3" />
                   )}

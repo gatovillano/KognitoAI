@@ -97,12 +97,15 @@ async def get_current_account_id(token: str = Depends(oauth2_scheme)) -> str:
     payload = decode_access_token(token)
     
     if payload is None:
+        logger.warning("❌ Payload es None después de decodificar el token.")
         raise credentials_exception
 
     account_id: str = payload.get("sub")
     if account_id is None:
+        logger.warning("❌ account_id es None en el payload del token.")
         raise credentials_exception
-        
+    
+    logger.info(f"✅ account_id extraído del token: {account_id}")
     return account_id
 
 async def get_current_active_account(

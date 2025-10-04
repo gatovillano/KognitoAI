@@ -9,7 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useEffect, useState, useCallback } from 'react';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { ContactProfile } from './page'; // Importar la interfaz ContactProfile
+import { ContactProfile } from '../[id]/page'; // Importar la interfaz ContactProfile
 
 interface ManageLinkedObjectsDialogProps {
   isOpen: boolean;

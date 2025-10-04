@@ -234,3 +234,11 @@ Se solucionaron tres errores críticos que afectaban la experiencia del usuario 
 -   **Solución**: Se modificó el método `_arun` en `tools/web_search_tool.py`. Ahora, la cadena JSON devuelta por `BraveSearch` se decodifica explícitamente en un objeto Python (una lista de diccionarios) usando `json.loads()`. Esto asegura que el método `_format_results` reciba los datos en el formato esperado, resolviendo el `AttributeError`. Se añadió también un manejo de errores para el caso de que la respuesta no sea un JSON válido.
 
 ---
+
+## 03-10-2025 - `ReferenceError: CardFooter is not defined` en componente React
+
+-   **Error**: Se produjo un `ReferenceError: CardFooter is not defined` en `src/app/(dashboard)/profiles/[id]/page.tsx`.
+-   **Causa**: El componente `CardFooter` se estaba utilizando en el código JSX sin haber sido importado junto con los otros componentes de `Card` desde la librería de componentes UI (`@/components/ui/card`).
+-   **Solución**: Se actualizó la sentencia `import` en la parte superior del archivo para incluir `CardFooter`, resolviendo así el error de referencia. La línea de importación corregida es: `import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';`.
+
+---

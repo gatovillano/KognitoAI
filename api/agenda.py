@@ -70,62 +70,67 @@ async def get_linked_profiles_to_event_endpoint(
 
 class ListEventsRequest(BaseModel):
     include_past: bool = False
+    workspace_id: Optional[str] = None # Nuevo campo
 
 @router.post("/list-events")
 async def list_events_endpoint(request: ListEventsRequest, current_account_id: str = Depends(get_current_account_id)):
-    """Lista los eventos de la agenda del usuario, incluyendo eventos compartidos con equipos y workspaces."""
+    """Lista los eventos de la agenda del usuario, incluyendo eventos compartidos con equipos y workspaces, filtrados por workspace_id si se proporciona."""
     account_uuid = uuid.UUID(current_account_id)
     
-    # Importar get_events_as_dicts aquí para asegurar que esté disponible
     from core.agenda_manager import get_events_as_dicts
 
-    # Obtener eventos personales
-    personal_events = await get_events_as_dicts(current_account_id, include_past=request.include_past)
-    logger.info(f"Personal events for account {current_account_id}: {len(personal_events)} events found")
-    
-    # Obtener equipos del usuario
-    async with DBSession(SessionLocal) as db:
-        member_teams_result = await db.execute(
-            select(TeamMember).where(TeamMember.account_id == account_uuid)
+    if request.workspace_id:
+        # Si se proporciona workspace_id, solo obtener eventos para ese workspace
+        workspace_events = await get_events_as_dicts(
+            account_id=current_account_id,
+            workspace_id=request.workspace_id,
+            include_past=request.include_past
         )
-        member_teams = member_teams_result.scalars().all()
-        team_ids = [str(team.team_id) for team in member_teams]
-        logger.info(f"Teams for account {current_account_id} (events): {team_ids})")
+        logger.info(f"Workspace events for workspace {request.workspace_id} and account {current_account_id}: {len(workspace_events)} events found")
+        return list(workspace_events)
+    else:
+        # Lógica existente para listar todos los eventos si no hay workspace_id
+        personal_events = await get_events_as_dicts(current_account_id, include_past=request.include_past)
+        logger.info(f"Personal events for account {current_account_id}: {len(personal_events)} events found")
+        
+        async with DBSession(SessionLocal) as db:
+            member_teams_result = await db.execute(
+                select(TeamMember).where(TeamMember.account_id == account_uuid)
+            )
+            member_teams = member_teams_result.scalars().all()
+            team_ids = [str(team.team_id) for team in member_teams]
+            logger.info(f"Teams for account {current_account_id} (events): {team_ids})")
 
-        # Obtener workspaces del usuario
-        workspaces_result = await db.execute(
-            select(Workspace).where(Workspace.account_id == account_uuid)
-        )
-        workspaces = workspaces_result.scalars().all()
-        workspace_ids = [str(ws.id) for ws in workspaces]
-        logger.info(f"Workspaces for account {current_account_id} (events): {workspace_ids})")
-    
-    # Obtener eventos de equipos
-    team_events = []
-    for team_id in team_ids:
-        team_events_for_id = await get_events_as_dicts(
-            account_id=current_account_id,
-            team_id=team_id,
-            include_past=request.include_past
-        )
-        logger.info(f"Team events for team {team_id} and account {current_account_id}: {len(team_events_for_id)} events found")
-        team_events.extend(team_events_for_id)
-    
-    # Obtener eventos de workspaces
-    workspace_events = []
-    for workspace_id in workspace_ids:
-        workspace_events_for_id = await get_events_as_dicts(
-            account_id=current_account_id,
-            workspace_id=workspace_id,
-            include_past=request.include_past
-        )
-        logger.info(f"Workspace events for workspace {workspace_id} and account {current_account_id}: {len(workspace_events_for_id)} events found")
-        workspace_events.extend(workspace_events_for_id)
-    
-    # Combinar eventos personales, de equipos y de workspaces, eliminando duplicados por ID
-    combined_events = {event['id']: event for event in personal_events + team_events + workspace_events}.values()
-    logger.info(f"Total combined events for account {current_account_id}: {len(combined_events)} events")
-    return list(combined_events)
+            workspaces_result = await db.execute(
+                select(Workspace).where(Workspace.account_id == account_uuid)
+            )
+            workspaces = workspaces_result.scalars().all()
+            workspace_ids = [str(ws.id) for ws in workspaces]
+            logger.info(f"Workspaces for account {current_account_id} (events): {workspace_ids})")
+        
+        team_events = []
+        for team_id in team_ids:
+            team_events_for_id = await get_events_as_dicts(
+                account_id=current_account_id,
+                team_id=team_id,
+                include_past=request.include_past
+            )
+            logger.info(f"Team events for team {team_id} and account {current_account_id}: {len(team_events_for_id)} events found")
+            team_events.extend(team_events_for_id)
+        
+        workspace_events = []
+        for workspace_id in workspace_ids:
+            workspace_events_for_id = await get_events_as_dicts(
+                account_id=current_account_id,
+                workspace_id=workspace_id,
+                include_past=request.include_past
+            )
+            logger.info(f"Workspace events for workspace {workspace_id} and account {current_account_id}: {len(workspace_events_for_id)} events found")
+            workspace_events.extend(workspace_events_for_id)
+        
+        combined_events = {event['id']: event for event in personal_events + team_events + workspace_events}.values()
+        logger.info(f"Total combined events for account {current_account_id}: {len(combined_events)} events")
+        return list(combined_events)
 
 # --- MODELOS PYDANTIC PARA AGENDA ---
 class EventRequest(BaseModel):
