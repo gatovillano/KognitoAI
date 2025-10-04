@@ -126,7 +126,7 @@ const AlbumCard = ({ album, onEditClick, onDeleteClick, onLinkProfileClick }: { 
             </p>
           </CardContent>
           <CardFooter className="flex justify-between items-center text-xs text-muted-foreground pt-3 mt-auto border-t border-border/50">
-            <span>{album.total_photos} foto(s)</span>
+            <span>{album.photos.length} foto(s)</span>
             <span>{new Date(album.created_at).toLocaleDateString()}</span>
           </CardFooter>
         </Card>
@@ -292,7 +292,28 @@ const GalleriesPage = () => {
         onOpenChange={setShowManageProfilesDialog}
         item={itemToManageProfiles}
         itemType="album"
-        onLinkedProfilesUpdated={fetchAlbums}
+                onLinkedProfilesUpdated={fetchAlbums}
+        onLink={async (profileId, albumId) => {
+          try {
+            await apiClient.post(`/api/galleries/albums/${albumId}/link-profile`, { profileId });
+            toast.success('Perfil vinculado exitosamente.');
+            fetchAlbums();
+          } catch (error) {
+            toast.error('Error al vincular el perfil.');
+            console.error('Error linking profile:', error);
+          }
+        }}
+        onUnlink={async (profileId, albumId) => {
+          try {
+            await apiClient.post(`/api/galleries/albums/${albumId}/unlink-profile`, { profileId });
+            toast.success('Perfil desvinculado exitosamente.');
+            fetchAlbums();
+          } catch (error) {
+            toast.error('Error al desvincular el perfil.');
+            console.error('Error unlinking profile:', error);
+          }
+        }}
+
       />
     </div>
   );

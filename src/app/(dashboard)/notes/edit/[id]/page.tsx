@@ -11,11 +11,7 @@ import { TiptapEditor } from '@/components/TiptapEditor'; // Importamos el edito
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
-import TurndownService from 'turndown'; // Librería para convertir HTML a Markdown
 import { marked } from 'marked'; // Librería para convertir Markdown a HTML
-
-// Necesitamos instalar esta librería: npm install turndown @types/turndown
-// Opcional, pero muy recomendado para guardar en Markdown limpio.
 
 export default function EditNotePage() {
   const params = useParams();
@@ -26,15 +22,12 @@ export default function EditNotePage() {
 
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('');
-  const [content, setContent] = useState(''); // El contenido será HTML
+  const [content, setContent] = useState(''); // El contenido será Markdown
   const [isLoading, setIsLoading] = useState(true);
   const [isShared, setIsShared] = useState(false);
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
   const [teams, setTeams] = useState<any[]>([]);
-
-  // Inicializamos el servicio de conversión
-  const turndownService = useMemo(() => new TurndownService(), []);
 
     useEffect(() => {
     // Si es una nota nueva, el ID será 'new'. Si no, cargamos los datos.
@@ -53,7 +46,7 @@ export default function EditNotePage() {
             console.log("Datos de notas personales recibidos:", response.data);
           }
           // Filtramos por ID y tipo 'note' para notas compartidas
-          const note = fromTeam 
+          const note = fromTeam
             ? response.data.find((n: { id: number, type: string }) => n.id === parseInt(noteId) && n.type === 'note')
             : response.data.notes.find((n: { id: number }) => n.id === parseInt(noteId));
           console.log("Nota encontrada:", note);
@@ -61,24 +54,16 @@ export default function EditNotePage() {
             setTitle(note.title || '');
             setCategory(note.category || 'General');
             setIsShared(note.team_shared || false);
-            // Convert Markdown content from API to HTML for the editor
+            // El contenido de la API ya es Markdown, lo pasamos directamente al editor
             if (note.content) {
-              try {
-                const htmlContent = await marked.parse(note.content);
-                setContent(htmlContent);
-              } catch (error) {
-                console.error("Error converting Markdown to HTML:", error);
                 setContent(note.content);
-                toast.error("Error al convertir el contenido de Markdown a HTML.");
-              }
             } else {
               console.warn("No content field found in note object, attempting to fetch full note:", note);
               try {
                 const fullNoteResponse = await apiClient.get(`/api/notes/${noteId}`);
                 console.log("Full note data received:", fullNoteResponse.data);
                 if (fullNoteResponse.data && fullNoteResponse.data.content) {
-                  const htmlContent = await marked.parse(fullNoteResponse.data.content);
-                  setContent(htmlContent);
+                  setContent(fullNoteResponse.data.content);
                 } else {
                   setContent('');
                   toast.error("El contenido de la nota no está disponible incluso después de intentar cargarlo.");
@@ -116,13 +101,11 @@ export default function EditNotePage() {
   const autoSaveNote = useCallback(async (currentTitle: string, currentCategory: string, currentContent: string, isNewNote: boolean) => {
     if (isNewNote) return; // No auto-guardar notas nuevas hasta que se guarden manualmente por primera vez
 
-    const markdownContent = turndownService.turndown(currentContent);
-
     const payload = {
       note_id: parseInt(noteId),
       title: currentTitle,
       category: currentCategory,
-      content: markdownContent,
+      content: currentContent, // El contenido ya es Markdown
     };
 
     let endpoint = '/api/update-note';
@@ -133,7 +116,7 @@ export default function EditNotePage() {
         type: 'note',
         itemId: noteId,
         title: currentTitle,
-        content: markdownContent,
+        content: currentContent, // El contenido ya es Markdown
       };
     } else {
       requestPayload = payload;
@@ -146,16 +129,14 @@ export default function EditNotePage() {
       console.error("Error al auto-guardar la nota:", error);
       // Opcional: toast.error("Error al auto-guardar la nota.");
     }
-  }, [noteId, fromTeam, turndownService]);
+  }, [noteId, fromTeam]);
 
   const handleSave = async () => {
-    const markdownContent = turndownService.turndown(content);
-
     const payload = {
         note_id: noteId !== 'new' ? parseInt(noteId) : undefined,
         title,
         category,
-        content: markdownContent,
+        content: content, // El contenido ya es Markdown
     };
     
     let endpoint = noteId === 'new' ? '/api/add-note' : '/api/update-note';
@@ -166,7 +147,7 @@ export default function EditNotePage() {
         type: 'note',
         itemId: noteId,
         title,
-        content: markdownContent,
+        content: content, // El contenido ya es Markdown
       };
     } else {
       requestPayload = payload;
@@ -241,8 +222,8 @@ export default function EditNotePage() {
   if (isLoading) return <div>Cargando editor...</div>;
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden space-y-6">
-      <header className="flex items-center justify-between mb-4">
+    <div className="flex flex-col h-screen">
+      <header className="flex items-center justify-between p-4 bg-background z-10">
         <Button variant="ghost" onClick={() => router.push(fromTeam ? `/teams/${fromTeam}/dashboard` : '/notes')}>
           <ArrowLeft className="mr-2 h-4 w-4" /> {fromTeam ? 'Volver a Equipo' : 'Volver a Notas'}
         </Button>
@@ -257,12 +238,12 @@ export default function EditNotePage() {
           </Button>
         </div>
       </header>
-      <div className="space-y-4">
-        <Input placeholder="Título de la nota..." value={title} onChange={(e) => setTitle(e.target.value)} className="text-2xl font-bold h-auto border-none focus-visible:ring-0 shadow-none p-0" />
+      <div className="px-8 py-4 space-y-4">
+        <Input placeholder="Título de la nota..." value={title} onChange={(e) => setTitle(e.target.value)} className="!text-4xl font-bold h-auto border-none focus-visible:ring-0 shadow-none p-0" />
         <Input placeholder="Categoría" value={category} onChange={(e) => setCategory(e.target.value)} className="w-fit border-none focus-visible:ring-0 shadow-none p-0 text-sm text-muted-foreground" />
       </div>
-      <div className="flex-grow mt-4">
-        <TiptapEditor content={content} onChange={setContent} fromTeam={fromTeam ?? undefined} />
+      <div className="flex-grow overflow-y-auto px-8 pb-8">
+        <TiptapEditor content={content} onChange={setContent} fromTeam={fromTeam ?? undefined} containerClassName="border rounded-md" />
       </div>
       <AlertDialog open={isShareDialogOpen} onOpenChange={(open) => !open && setIsShareDialogOpen(false)}>
         <AlertDialogContent>

@@ -171,3 +171,19 @@ ANTES: 25+ herramientas  →      DESPUÉS: 30+ herramientas
 ---
 
 *Para más detalles sobre cada versión, consulta los commits y pull requests correspondientes.*
+
+---
+
+## 03-10-2025 Corrección de carga de colecciones
+Se corrigió un error en el frontend donde las colecciones no cargaban debido a una ruta de API incorrecta.
+
+- **Ruta de API**: Se actualizó la llamada a la API de `/api/list-collections` a `/api/collections` en el archivo [`src/app/(dashboard)/rag/page.tsx`](src/app/(dashboard)/rag/page.tsx:64:1).
+- **Diagnóstico**: Se identificó que el error 404 se debía a una discrepancia entre la ruta de la API definida en el backend (`/api/collections` en [`api/documents.py`](api/documents.py:417:1)) y la ruta utilizada en el frontend.
+
+---
+
+## 03-10-2025 Corrección de carga de documentos en página de detalle de colección
+Se corrigió un error en el frontend donde los documentos no cargaban en la página de detalle de la colección (`src/app/(dashboard)/rag/[topic]/page.tsx`).
+
+- **Ruta de API**: Se actualizó la llamada a la API de `/api/collections/{topic}` a `/api/collections/{topic}/details` en el archivo [`src/components/DocumentCollectionDisplay.tsx`](src/components/DocumentCollectionDisplay.tsx:106:9).
+- **Diagnóstico**: Se identificó que el error 404 se debía a una discrepancia entre la ruta de la API definida en el backend (`/api/collections/{topic}/details` en [`api/documents.py`](api/documents.py:381:1)) y la ruta utilizada en el frontend.

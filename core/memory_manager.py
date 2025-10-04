@@ -1511,7 +1511,9 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
                     "topic": topic.name,
                     "document_count": 0,
                     "description": topic.description,
-                    "workspace_id": str(topic.workspace_id) if topic.workspace_id else None # Añadir workspace_id
+                    "workspace_id": str(topic.workspace_id) if topic.workspace_id else None,
+                    "team_shared": topic.team_id is not None, # Derivar de team_id
+                    "has_knowledge_graph": False # Por defecto, se puede actualizar después si se verifica
                 }
             logger.info(f"DEBUG: collections_map después de UserDocumentTopic: {collections_map}")
             
@@ -1577,8 +1579,10 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
                     collections_map[f"{topic_name}-{current_workspace_id}"] = { # Usar clave compuesta para evitar sobrescribir
                         "topic": topic_name,
                         "document_count": collection["document_count"],
-                        "description": None,
-                        "workspace_id": current_workspace_id
+                        "description": None, # No tenemos descripción de los embeddings
+                        "workspace_id": current_workspace_id,
+                        "team_shared": collection.get("team_id") is not None, # Derivar de team_id del embedding
+                        "has_knowledge_graph": False # Por defecto
                     }
             
             return_list = list(collections_map.values())
@@ -1645,7 +1649,9 @@ async def create_empty_collection(
                 workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
                 team_id=uuid.UUID(team_id) if team_id else None,
                 name=topic_name,
-                description=description
+                description=description,
+                team_shared=team_id is not None, # Inicializar team_shared
+                has_knowledge_graph=False # Inicializar has_knowledge_graph
             )
             
             db.add(new_collection)

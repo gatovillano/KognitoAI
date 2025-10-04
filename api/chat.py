@@ -588,9 +588,10 @@ async def create_and_run_agent_streaming(
         if context_text:
             user_message = f"{user_message}\n\n--- Contexto RAG ---\n{context_text}\n--- Fin Contexto RAG ---"
 
-        initial_state: AgentState = { # Explicitly cast to AgentState
+        initial_state: AgentState = {
             "messages": history_messages + [HumanMessage(content=user_message)],
             "account_id": account_id,
+            "task_id": task_id,
             "telegram_id": telegram_id,
             "workspace_id": workspace_id,
             "rag_context": rag_context,
@@ -615,18 +616,16 @@ async def create_and_run_agent_streaming(
                     else:
                         current_llm_content = str(current_llm_content)
 
-                    # LangGraph nos da el contenido completo, no el delta.
-                    # El frontend se encargará de la concatenación.
-                    new_chunk = current_llm_content[len(last_llm_content):]
-                    last_llm_content = current_llm_content
+                    # LangGraph nos da el contenido completo, no el delta, por lo que calculamos el delta.
+                    new_chunk = current_llm_content[len(full_response_content):]
 
-                    if new_chunk:
-                        full_response_content += new_chunk
+                    if new_chunk: # Solo enviar si hay un nuevo chunk
+                        full_response_content += new_chunk # Acumular el contenido completo
                         await send_personal_message(account_id, {
                             "type": "stream_chunk",
                             "thread_id": thread_id,
                             "taskId": task_id,
-                            "chunk": new_chunk
+                            "chunk": new_chunk # Enviar solo el delta
                         })
 
                     final_state = chunk["generateResponse"]
@@ -699,129 +698,3 @@ async def create_and_run_agent_streaming(
             "taskId": task_id,
             "message": str(e)
         })
-
-
-
-
-
-
-@router.get("/threads", summary="Obtener lista de hilos de chat")
-async def get_threads(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
-    """
-    Endpoint para obtener la lista de todos los hilos de chat del usuario autenticado.
-    """
-    try:
-        # MODIFICADO: Añadido .order_by() para ordenar por fecha de creación descendente
-        threads = await db.execute(
-            select(ChatThread)
-            .where(ChatThread.account_id == uuid.UUID(current_account_id))
-            .order_by(ChatThread.created_at.desc())
-        )
-        thread_list = threads.scalars().all()
-        return [{"id": str(thread.id), "title": thread.title, "isPinned": thread.is_pinned, "platform": thread.platform, "workspace_id": str(thread.workspace_id) if thread.workspace_id else None} for thread in thread_list]
-    except Exception as e:
-        logger.error(f"Error al obtener la lista de hilos para la cuenta {current_account_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Ocurrió un error al obtener la lista de hilos de chat.")
-
-@router.get("/threads/{thread_id}", summary="Obtener detalles de un hilo de chat")
-async def get_thread(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
-    """
-    Endpoint para obtener los detalles de un hilo de chat específico.
-    """
-    try:
-        thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
-        if not thread:
-            raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
-        return {"id": str(thread.id), "title": thread.title, "isPinned": thread.is_pinned, "platform": thread.platform, "workspace_id": str(thread.workspace_id) if thread.workspace_id else None}
-    except ValueError:
-        logger.error(f"El thread_id proporcionado no es un UUID válido: {thread_id}")
-        raise HTTPException(status_code=400, detail="El thread_id proporcionado no tiene un formato válido.")
-    except HTTPException:
-        # Re-raise HTTPExceptions (like 404) without modification
-        raise
-    except Exception as e:
-        logger.error(f"Error al obtener detalles del hilo {thread_id} para la cuenta {current_account_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Ocurrió un error al obtener los detalles del hilo de chat.")
-
-
-
-
-
-@router.put("/threads/{thread_id}/pin", summary="Fijar o desfijar un hilo de chat")
-async def pin_thread(thread_id: str, request: PinThreadRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
-    """
-    Endpoint para fijar o desfijar un hilo de chat específico.
-    """
-    try:
-        thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
-        if not thread:
-            raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
-        await db.execute(update(ChatThread).where(ChatThread.id == uuid.UUID(thread_id)).values(is_pinned=request.isPinned))
-        await db.commit()
-        return {"id": str(thread.id), "isPinned": request.isPinned}
-    except ValueError:
-        logger.error(f"El thread_id proporcionado no es un UUID válido: {thread_id}")
-        raise HTTPException(status_code=400, detail="El thread_id proporcionado no tiene un formato válido.")
-    except Exception as e:
-        logger.error(f"Error al actualizar el estado de fijado del hilo {thread_id} para la cuenta {current_account_id}: {e}", exc_info=True)
-        await db.rollback()
-        raise HTTPException(status_code=500, detail="Ocurrió un error al actualizar el estado de fijado del hilo de chat.")
-
-@router.delete("/threads/{thread_id}", summary="Eliminar un hilo de chat")
-async def delete_thread(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
-    """
-    Endpoint para eliminar un hilo de chat específico.
-    """
-    try:
-        thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
-        if not thread:
-            raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
-        await db.delete(thread)
-        await db.commit()
-        return {"id": thread_id, "deleted": True}
-    except ValueError:
-        logger.error(f"El thread_id proporcionado no es un UUID válido: {thread_id}")
-        raise HTTPException(status_code=400, detail="El thread_id proporcionado no tiene un formato válido.")
-    except Exception as e:
-        logger.error(f"Error al eliminar el hilo {thread_id} para la cuenta {current_account_id}: {e}", exc_info=True)
-        await db.rollback()
-        raise HTTPException(status_code=500, detail="Ocurrió un error al eliminar el hilo de chat.")
-
-@router.post("/threads/{thread_id}/generate-title", summary="Generar un título para un hilo de chat")
-async def generate_thread_title(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
-    """
-    Endpoint para generar un título para un hilo de chat específico basado en su contenido.
-    """
-    try:
-        thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id), ChatThread.account_id == uuid.UUID(current_account_id)))
-        if not thread:
-            raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
-        from core.agent import force_update_thread_title
-        await force_update_thread_title(thread_id)
-        updated_thread = await db.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id)))
-        if not updated_thread:
-            raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
-        return {"id": thread_id, "title": updated_thread.title}
-    except ValueError:
-        logger.error(f"El thread_id proporcionado no es un UUID válido: {thread_id}")
-        raise HTTPException(status_code=400, detail="El thread_id proporcionado no tiene un formato válido.")
-    except Exception as e:
-        logger.error(f"Error al generar título para el hilo {thread_id} para la cuenta {current_account_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Ocurrió un error al generar el título del hilo de chat.")
-
-@router.post("/threads/generate-all-titles", summary="Generar títulos para todos los hilos de chat")
-async def generate_all_thread_titles(
-    background_tasks: BackgroundTasks,
-    current_account_id: str = Depends(get_current_account_id)
-):
-    """
-    Inicia una tarea en segundo plano para generar títulos para todos los hilos de chat del usuario.
-    """
-    try:
-        from core.agent import force_update_all_thread_titles
-        logger.info(f"Iniciando tarea en segundo plano para generar todos los títulos para la cuenta {current_account_id}")
-        background_tasks.add_task(force_update_all_thread_titles, current_account_id)
-        return {"message": "El proceso de nombrar todas las conversaciones ha comenzado en segundo plano."}
-    except Exception as e:
-        logger.error(f"Error al iniciar la generación de todos los títulos para la cuenta {current_account_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Ocurrió un error al iniciar el proceso.")

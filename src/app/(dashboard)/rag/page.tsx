@@ -61,16 +61,23 @@ export default function RagCollectionsPage() {
   const fetchCollections = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await apiClient.get('/api/list-collections');
+      const response = await apiClient.get('/api/collections');
+      console.log('API raw response data:', response.data); // Nuevo log para la data cruda
+      console.log('API raw response data:', response.data); // Nuevo log para la data cruda
       setCollections(response.data);
+      console.log('Collections state after update:', response.data); // Nuevo log para el estado actualizado
+      console.log('Collections state after update:', response.data); // Nuevo log para el estado actualizado
     } catch (error) {
+      console.error('Error fetching collections:', error); // Debug log
       toast.error('Error al cargar las colecciones.');
     } finally {
       setIsLoading(false);
+      console.log('Finished fetching collections. isLoading set to false.'); // Debug log
     }
   }, []);
 
   useEffect(() => {
+    console.log('useEffect: Fetching collections...'); // Debug log
     fetchCollections();
   }, [fetchCollections]);
 
@@ -209,11 +216,14 @@ export default function RagCollectionsPage() {
   };
 
   const renderContent = () => {
+    console.log('renderContent called. isLoading:', isLoading, 'collections.length:', collections.length); // Debug log
     if (isLoading) {
+      console.log('renderContent: Displaying loading message.'); // Debug log
       return <p className="text-center py-10">Cargando colecciones...</p>;
     }
 
     if (collections.length === 0) {
+      console.log('renderContent: Displaying no collections message.'); // Debug log
       return (
         <div className="text-center py-20 px-8">
           <FolderKanban className="mx-auto h-16 w-16 text-muted-foreground/50 mb-6" />
@@ -228,6 +238,7 @@ export default function RagCollectionsPage() {
         </div>
       );
     }
+    console.log('renderContent: Displaying collections.'); // Debug log
 
     return (
       <motion.div layout className="grid gap-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 px-2">

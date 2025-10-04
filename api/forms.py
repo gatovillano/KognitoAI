@@ -267,7 +267,7 @@ async def create_form_response(
     db_form_response = DBFormResponse(
         id=uuid.uuid4(),
         form_id=form_id,
-        account_id=current_user.id if current_user else None,
+        account_id=form.account_id, # Usar el ID de la cuenta del propietario del formulario
         contact_profile_id=response_data.contact_profile_id,
         answers=serialized_answers
     )
@@ -286,11 +286,13 @@ async def get_form_responses(
     """
     Get all responses for a specific form.
     """
+    # Primero, verifica que el usuario actual es el propietario del formulario
+    form = await db.get(DBForm, form_id)
+    if not form or str(form.account_id) != str(current_user.id):
+        raise HTTPException(status_code=404, detail="Form not found or you do not have permission to view its responses")
+
     result = await db.execute(
-        select(DBFormResponse).where(
-            DBFormResponse.form_id == form_id,
-            DBFormResponse.account_id == current_user.id
-        )
+        select(DBFormResponse).where(DBFormResponse.form_id == form_id)
     )
     responses = result.scalars().all()
     return responses

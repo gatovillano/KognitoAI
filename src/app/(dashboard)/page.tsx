@@ -25,6 +25,7 @@ export default function ChatLandingPage() {
   const [isProcessingAudio, setIsProcessingAudio] = useState(false);
   const [isDeepResearchActive, setIsDeepResearchActive] = useState(false);
   const [workspaceId, setWorkspaceId] = useState<string | undefined>(undefined);
+  const [selectedContext, setSelectedContext] = useState<any[]>([]);
   const router = useRouter();
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -246,6 +247,8 @@ export default function ChatLandingPage() {
       onRemoveContextItem={onRemoveContextItem}
       onPaste={onPaste}
       workspaceId={workspaceId}
+      selectedContext={selectedContext}
+      onContextSelected={setSelectedContext}
     />
   );
 }

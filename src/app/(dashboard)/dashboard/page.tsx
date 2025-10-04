@@ -99,17 +99,28 @@ export default function DashboardPage() {
         ]);
 
         // Transform insights data to ensure related_items is always an array
-        const transformedData = {
-          ...insightsResponse.data,
-          proactive_insights: (insightsResponse.data.proactive_insights || []).map((insight: any) => ({
-            ...insight,
-            related_items: insight.related_items || []
-          }))
-        };
+        const transformedInsights = (insightsResponse.data.proactive_insights || []).map((insight: any) => ({
+          ...insight,
+          related_items: insight.related_items || []
+        }));
 
-        setData(transformedData);
+        // Extraer el array de conversaciones si la API devuelve un objeto con una propiedad 'threads'
+        let fetchedConversations = conversationsResponse.data;
+        if (fetchedConversations && typeof fetchedConversations === 'object' && fetchedConversations.threads) {
+          fetchedConversations = fetchedConversations.threads;
+        }
+        // Asegurarse de que fetchedConversations sea siempre un array
+        if (!Array.isArray(fetchedConversations)) {
+          console.warn("API /api/threads did not return an array or an object with a 'threads' array:", conversationsResponse.data);
+          fetchedConversations = [];
+        }
+
+        setData({
+          ...insightsResponse.data,
+          proactive_insights: transformedInsights
+        });
         setAnalysisData(analysesResponse.data);
-        setConversations(conversationsResponse.data); // Guardar las conversaciones
+        setConversations(fetchedConversations); // Guardar las conversaciones
 
         const hasVisited = localStorage.getItem('hasVisitedDashboard');
         if (!hasVisited) {

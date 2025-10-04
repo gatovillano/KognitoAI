@@ -364,12 +364,14 @@ export default function FormResponsesPage() {
       {currentResponseToLink && (
         <ManageLinkedProfilesDialog
           itemType="form-response"
-          itemId={currentResponseToLink.id}
-          linkedProfiles={currentResponseToLink.contact_profile_id ? [{ id: currentResponseToLink.contact_profile_id, name: currentResponseToLink.contact_profile_name || 'Perfil desconocido' }] : []}
+          item={currentResponseToLink}
+          onLinkedProfilesUpdated={() => router.refresh()}
           isOpen={showLinkProfileDialog}
-          onClose={() => {
-            setShowLinkProfileDialog(false);
-            setCurrentResponseToLink(null);
+          onOpenChange={(open) => {
+            if (!open) {
+              setShowLinkProfileDialog(false);
+              setCurrentResponseToLink(null);
+            }
           }}
           onLink={async (profileId, itemId) => {
             try {

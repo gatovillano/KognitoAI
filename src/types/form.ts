@@ -39,3 +39,11 @@ export interface FormResponse {
   contact_profile_id?: string;
   contact_profile_name?: string;
 }
+
+export interface LinkedFormResponse {
+  id: string;
+  form_id: string;
+  form_title: string;
+  submitted_at: string;
+  answers: Record<string, any>;
+}

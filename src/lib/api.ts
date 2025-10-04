@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 
 const apiClient = axios.create({
   // Usar variable de entorno o fallback a desarrollo local
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'https://apibase.gatoslibres.art', // Cambiado a HTTPS para depuración
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000', // Cambiado a localhost para desarrollo
   headers: {
     'Content-Type': 'application/json',
   },
