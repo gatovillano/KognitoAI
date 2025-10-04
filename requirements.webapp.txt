@@ -4,3 +4,4 @@ uvicorn[standard]
 python-multipart
 httpx
 python-dotenv
+pydub==0.25.1

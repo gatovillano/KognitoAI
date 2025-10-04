@@ -154,12 +154,10 @@ export function ContextSelectorButton({ onContextSelected, currentContext, works
         <Button
           variant="ghost"
           size="sm"
-          className={`rounded-full overflow-hidden transition-all duration-300 ease-in-out hover:w-auto w-8 h-8 p-0 hover:px-3 group flex items-center justify-center ${selectedDocuments.length > 0 ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}
+          className={`rounded-full w-8 h-8 p-0 group flex items-center justify-center ${selectedDocuments.length > 0 ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}
         >
           <BookMarked className="h-4 w-4 flex-shrink-0" />
-          <span className="ml-2 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 max-w-0 group-hover:max-w-xs overflow-hidden">
-            {selectedDocuments.length > 0 ? `${selectedDocuments.length} ítem(s) en contexto` : 'Seleccionar Contexto'}
-          </span>
+
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-80 p-0" align="start">

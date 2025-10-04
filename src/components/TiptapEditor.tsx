@@ -6,29 +6,16 @@ import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Mention from '@tiptap/extension-mention';
-import { Bold, Italic, Strikethrough, Code, Heading1, Heading2, List, ListOrdered, Quote, CheckSquare } from 'lucide-react';
+import { Markdown } from 'tiptap-markdown';
+import { Bold, Italic, Strikethrough, Code, Heading1, Heading2, List, ListOrdered, Quote, CheckSquare, Table as TableIcon } from 'lucide-react';
 import { Button } from './ui/button';
+import Table from '@tiptap/extension-table';
+import TableCell from '@tiptap/extension-table-cell';
+import TableHeader from '@tiptap/extension-table-header';
+import TableRow from '@tiptap/extension-table-row';
 import { createMentionSuggestion } from './mention-suggestion';
+import { TiptapToolbar as Toolbar } from './TiptapToolbar';
 
-// --- La Barra de Herramientas ---
-const Toolbar = ({ editor }: { editor: any }) => {
-  if (!editor) return null;
-
-  return (
-    <div className="border rounded-t-md p-2 flex flex-wrap gap-1">
-      <Button variant={editor.isActive('bold') ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleBold().run()}><Bold className="h-4 w-4" /></Button>
-      <Button variant={editor.isActive('italic') ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleItalic().run()}><Italic className="h-4 w-4" /></Button>
-      <Button variant={editor.isActive('strike') ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleStrike().run()}><Strikethrough className="h-4 w-4" /></Button>
-      <Button variant={editor.isActive('code') ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleCode().run()}><Code className="h-4 w-4" /></Button>
-      <Button variant={editor.isActive('heading', { level: 1 }) ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}><Heading1 className="h-4 w-4" /></Button>
-      <Button variant={editor.isActive('heading', { level: 2 }) ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}><Heading2 className="h-4 w-4" /></Button>
-      <Button variant={editor.isActive('bulletList') ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleBulletList().run()}><List className="h-4 w-4" /></Button>
-      <Button variant={editor.isActive('orderedList') ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered className="h-4 w-4" /></Button>
-      <Button variant={editor.isActive('taskList') ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleTaskList().run()}><CheckSquare className="h-4 w-4" /></Button>
-      <Button variant={editor.isActive('blockquote') ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleBlockquote().run()}><Quote className="h-4 w-4" /></Button>
-    </div>
-  );
-};
 
 interface TiptapEditorProps {
   content: string;
@@ -48,6 +35,12 @@ export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName }
       TaskItem.configure({
         nested: true,
       }),
+      Table.configure({
+        resizable: true,
+      }),
+      TableRow,
+      TableHeader,
+      TableCell,
       Mention.configure({
         HTMLAttributes: {
           class: 'mention',
@@ -63,11 +56,14 @@ export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName }
         },
         suggestion: createMentionSuggestion(fromTeam),
       }),
+      Markdown.configure({
+        html: false,
+      }),
     ],
     content: content,
     editorProps: {
       attributes: {
-        class: `prose dark:prose-invert max-w-full rounded-b-md border p-4 focus:outline-none min-h-[300px]`,
+        class: `prose dark:prose-invert max-w-full rounded-b-md p-4 focus:outline-none`,
       },
     },
     onUpdate({ editor }) {
@@ -76,7 +72,7 @@ export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName }
         clearTimeout(debounceTimeoutRef.current);
       }
       debounceTimeoutRef.current = setTimeout(() => {
-        onChange(editor.getHTML()); // Tiptap trabaja con HTML, no con Markdown
+        onChange(editor.storage.markdown.getMarkdown()); // Tiptap ahora trabaja con Markdown
       }, 250);
     },
     onDestroy() {
@@ -88,8 +84,14 @@ export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName }
 
   return (
     <div className={containerClassName}> {/* Aplicar containerClassName aquí */}
-      <Toolbar editor={editor} />
-      <EditorContent editor={editor} />
+      <div className="flex flex-col flex-grow"> {/* Contenedor principal del editor con flex y altura flexible */}
+        <div className="sticky top-0 z-10 p-2 flex flex-wrap gap-1 bg-background border-b rounded-md rounded-b-none"> {/* Contenedor de la barra de herramientas sticky */}
+          <Toolbar editor={editor} />
+        </div>
+        <div className="flex-1 overflow-y-auto"> {/* Contenedor del contenido con scroll */}
+          <EditorContent editor={editor} />
+        </div>
+      </div>
     </div>
   );
-}
+};

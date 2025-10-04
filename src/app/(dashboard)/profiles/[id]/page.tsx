@@ -2,15 +2,18 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Loader2, ArrowLeft, Edit, Mail, Phone, Tag, Calendar, ListTodo, FileText, Image, Info } from 'lucide-react';
+import { Loader2, ArrowLeft, Edit, Mail, Phone, Tag, Calendar, ListTodo, FileText, Image, Info, MoreHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ViewNoteDialog } from '@/app/(dashboard)/notes/view-note-dialog';
 import { EventDialog } from '@/app/(dashboard)/agenda/event-dialog';
 import { TaskDialog } from '@/app/(dashboard)/agenda/task-dialog';
+import { ManageLinkedObjectsDialog } from '@/app/(dashboard)/profiles/manage-linked-objects-dialog';
+import { FormResponseDialog } from '@/components/forms/FormResponseDialog';
 
 // Interfaces para los objetos vinculados (de api/contact_profiles.py)
 interface LinkedNoteResponse {
@@ -56,12 +59,7 @@ interface LinkedAlbumResponse {
   cover_photo: PhotoResponseForContactProfile | null;
 }
 
-interface LinkedFormResponse {
-  id: string;
-  form_id: string;
-  submitted_at: string;
-  answers: Record<string, any>;
-}
+import { LinkedFormResponse } from '@/types/form';
 
 interface LinkedObjectsResponse {
   notes: LinkedNoteResponse[];
@@ -102,6 +100,11 @@ export default function ProfileDetailsPage() {
 
   const [showViewTaskDialog, setShowViewTaskDialog] = useState(false);
   const [selectedTask, setSelectedTask] = useState<LinkedTaskResponse | null>(null);
+
+  const [showManageLinkedObjectsDialog, setShowManageLinkedObjectsDialog] = useState(false);
+
+  const [showFormResponseDialog, setShowFormResponseDialog] = useState(false);
+  const [selectedFormResponse, setSelectedFormResponse] = useState<LinkedFormResponse | null>(null);
 
   const fetchProfileDetails = async () => {
     if (!profileId) return;
@@ -174,20 +177,35 @@ export default function ProfileDetailsPage() {
           <Button variant="outline" onClick={() => router.push('/profiles')}>
             <ArrowLeft className="mr-2 h-4 w-4" /> Volver a Perfiles
           </Button>
-          <Button onClick={() => router.push(`/profiles/${profileId}/edit`)}>
-            <Edit className="mr-2 h-4 w-4" /> Editar Perfil
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <MoreHorizontal className="mr-2 h-4 w-4" /> Acciones
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => router.push(`/profiles/${profileId}/edit`)}>
+                <Edit className="mr-2 h-4 w-4" />
+                <span>Editar Perfil</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowManageLinkedObjectsDialog(true)}>
+                <ListTodo className="mr-2 h-4 w-4" />
+                <span>Gestionar Vinculaciones</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-12">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Columna de Información General */}
-        <div className="lg:col-span-5">
-          <Card className="bg-card/50 border-dashed">
-            <CardHeader>
-              <CardTitle>Información General</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+        <div className="lg:col-span-1 space-y-6">
+          <h2 className="text-2xl font-semibold flex items-center mb-6">
+            <Info className="mr-3 h-6 w-6 text-primary" />
+            Información General
+          </h2>
+          <Card>
+            <CardContent className="space-y-4 pt-6">
               {profile.email && (
                 <p className="flex items-center gap-2 text-muted-foreground">
                   <Mail className="h-4 w-4 text-primary" /> {profile.email}
@@ -231,173 +249,232 @@ export default function ProfileDetailsPage() {
                   ))}
                 </div>
               )}
-              <p className="text-xs text-muted-foreground mt-4">
-                Creado: {new Date(profile.created_at).toLocaleDateString()} | Actualizado: {new Date(profile.updated_at).toLocaleDateString()}
+              <p className="text-xs text-muted-foreground pt-4 border-t border-border/50">
+                Creado: {new Date(profile.created_at).toLocaleDateString()}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Actualizado: {new Date(profile.updated_at).toLocaleDateString()}
               </p>
             </CardContent>
           </Card>
         </div>
 
         {/* Columna de Elementos Vinculados */}
-        <div className="lg:col-span-7 space-y-6">
-          {/* Notas Vinculadas */}
-          <Card className="bg-card/50 border-dashed hover:border-yellow-500/50 transition-colors">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-yellow-500">
-                <FileText className="h-5 w-5" /> Notas Vinculadas ({linkedObjects?.notes.length || 0})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {linkedObjects?.notes && linkedObjects.notes.length > 0 ? (
-                linkedObjects.notes.map(note => (
-                  <Card key={note.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => { setSelectedNote(note); setShowViewNoteDialog(true); }}>
-                    <CardContent className="py-3">
-                      <h3 className="font-semibold text-base">{note.title || 'Sin título'}</h3>
-                      <p className="text-sm text-muted-foreground mt-1">{note.content.substring(0, 150) + (note.content.length > 150 ? '...' : '')}</p>
-                      <p className="text-xs text-muted-foreground mt-1">Creado: {new Date(note.created_at).toLocaleDateString()}</p>
-                    </CardContent>
-                  </Card>
-                ))
-              ) : (
-                <p className="text-muted-foreground">No hay notas vinculadas.</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Eventos de Agenda Vinculados */}
-          <Card className="bg-card/50 border-dashed hover:border-purple-500/50 transition-colors">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-purple-500">
-                <Calendar className="h-5 w-5" /> Eventos de Agenda ({linkedObjects?.agenda_events.length || 0})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {linkedObjects?.agenda_events && linkedObjects.agenda_events.length > 0 ? (
-                linkedObjects.agenda_events.map(event => (
-                  <Card key={event.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => { setSelectedEvent(event); setShowViewEventDialog(true); }}>
-                    <CardContent className="py-3">
-                      <h3 className="font-semibold text-base">{event.description}</h3>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Fecha/Hora: {new Date(event.event_datetime_local).toLocaleString()}
-                      </p>
-                    </CardContent>
-                  </Card>
-                ))
-              ) : (
-                <p className="text-muted-foreground">No hay eventos de agenda vinculados.</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Tareas Vinculadas */}
-          <Card className="bg-card/50 border-dashed hover:border-green-500/50 transition-colors">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-green-500">
-                <ListTodo className="h-5 w-5" /> Tareas Vinculadas ({linkedObjects?.tasks.length || 0})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {linkedObjects?.tasks && linkedObjects.tasks.length > 0 ? (
-                linkedObjects.tasks.map(task => (
-                  <Card key={task.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => { setSelectedTask(task); setShowViewTaskDialog(true); }}>
-                    <CardContent className="py-3">
-                      <h3 className="font-semibold text-base">{task.description}</h3>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Estado: {task.is_completed ? 'Completada' : 'Pendiente'}
-                        {task.due_date && ` | Vence: ${new Date(task.due_date).toLocaleDateString()}`}
-                      </p>
-                    </CardContent>
-                  </Card>
-                ))
-              ) : (
-                <p className="text-muted-foreground">No hay tareas vinculadas.</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Colecciones de Documentos Vinculadas */}
-          <Card className="bg-card/50 border-dashed hover:border-blue-500/50 transition-colors">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-blue-500">
-                <FileText className="h-5 w-5" /> Colecciones de Documentos ({linkedObjects?.user_document_topics.length || 0})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {linkedObjects?.user_document_topics && linkedObjects.user_document_topics.length > 0 ? (
-                linkedObjects.user_document_topics.map(topic => (
-                  <Card key={topic.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => router.push(`/workspaces/${profileId}/collections/${topic.id}`)}> {/* Asumiendo que profileId puede usarse como workspaceId aquí */}
-                    <CardContent className="py-3">
-                      <h3 className="font-semibold text-base">{topic.name}</h3>
-                      {topic.description && <p className="text-sm text-muted-foreground mt-1">{topic.description}</p>}
-                    </CardContent>
-                  </Card>
-                ))
-              ) : (
-                <p className="text-muted-foreground">No hay colecciones de documentos vinculadas.</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Álbumes Vinculados */}
-          <Card className="bg-card/50 border-dashed hover:border-orange-500/50 transition-colors">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-orange-500">
-                <Image className="h-5 w-5" /> Álbumes Vinculados ({linkedObjects?.albums.length || 0})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {linkedObjects?.albums && linkedObjects.albums.length > 0 ? (
-                linkedObjects.albums.map(album => (
-                  <Card key={album.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => router.push(`/galleries/albums/${album.id}`)}> {/* Navegar a la página de detalles del álbum */}
-                    <CardContent className="py-3 flex items-center gap-4">
-                      {album.cover_photo?.thumbnail_path && (
-                        <img src={album.cover_photo.thumbnail_path} alt={album.name} className="w-16 h-16 object-cover rounded-md" />
-                      )}
-                      <div>
-                        <h3 className="font-semibold text-base">{album.name}</h3>
-                        {album.description && <p className="text-sm text-muted-foreground mt-1">{album.description}</p>}
-                        <p className="text-xs text-muted-foreground mt-1">{album.total_photos} fotos</p>
+        <div className="lg:col-span-2">
+          <h2 className="text-2xl font-semibold flex items-center mb-6">
+            <ListTodo className="mr-3 h-6 w-6 text-primary" />
+            Elementos Vinculados
+          </h2>
+          <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2">
+            {/* Notas Vinculadas */}
+            {(linkedObjects?.notes.length || 0) > 0 && linkedObjects?.notes.map(note => (
+              <Card key={note.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => { setSelectedNote(note); setShowViewNoteDialog(true); }}>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="h-10 w-10 rounded-lg bg-yellow-500/10 flex items-center justify-center flex-shrink-0">
+                        <FileText className="h-5 w-5 text-yellow-600" />
                       </div>
-                    </CardContent>
-                  </Card>
-                ))
-              ) : (
-                <p className="text-muted-foreground">No hay álbumes vinculados.</p>
-              )}
-            </CardContent>
-          </Card>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm line-clamp-2">
+                          {note.title || 'Sin título'}
+                        </div>
+                      </div>
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
+                    {note.content}
+                  </p>
+                  <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                    <span className="text-xs text-muted-foreground">
+                      Nota
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(note.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
 
-          {/* Respuestas de Formulario Vinculadas */}
-          <Card className="bg-card/50 border-dashed hover:border-cyan-500/50 transition-colors">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-cyan-500">
-                <FileText className="h-5 w-5" /> Respuestas de Formulario ({linkedObjects?.form_responses.length || 0})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {linkedObjects?.form_responses && linkedObjects.form_responses.length > 0 ? (
-                linkedObjects.form_responses.map(response => (
-                  <Card key={response.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => router.push(`/forms/${response.form_id}/responses`)}> {/* Navegar a la página de respuestas del formulario */}
-                    <CardContent className="py-3">
-                      <h3 className="font-semibold text-base">Respuesta #{response.id.slice(-6)}</h3>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Enviado el: {new Date(response.submitted_at).toLocaleString()}
-                      </p>
-                    </CardContent>
-                  </Card>
-                ))
-              ) : (
-                <p className="text-muted-foreground">No hay respuestas de formulario vinculadas.</p>
-              )}
-            </CardContent>
-          </Card>
+            {/* Eventos de Agenda Vinculados */}
+            {(linkedObjects?.agenda_events.length || 0) > 0 && linkedObjects?.agenda_events.map(event => (
+              <Card key={event.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => { setSelectedEvent(event); setShowViewEventDialog(true); }}>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="h-10 w-10 rounded-lg bg-purple-500/10 flex items-center justify-center flex-shrink-0">
+                        <Calendar className="h-5 w-5 text-purple-600" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm line-clamp-2">
+                          {event.description}
+                        </div>
+                      </div>
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                    <span className="text-xs text-muted-foreground">
+                      Evento
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(event.event_datetime_local).toLocaleString()}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+
+            {/* Tareas Vinculadas */}
+            {(linkedObjects?.tasks.length || 0) > 0 && linkedObjects?.tasks.map(task => (
+              <Card key={task.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => { setSelectedTask(task); setShowViewTaskDialog(true); }}>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="h-10 w-10 rounded-lg bg-green-500/10 flex items-center justify-center flex-shrink-0">
+                        <ListTodo className="h-5 w-5 text-green-600" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm line-clamp-2">
+                          {task.description}
+                        </div>
+                      </div>
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                    <span className="text-xs text-muted-foreground">
+                      Tarea
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <div className={`h-2 w-2 rounded-full ${task.is_completed ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                      <span className="text-xs text-muted-foreground">{task.is_completed ? 'Completada' : 'Pendiente'}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+
+            {/* Colecciones de Documentos Vinculadas */}
+            {(linkedObjects?.user_document_topics.length || 0) > 0 && linkedObjects?.user_document_topics.map(topic => (
+              <Card key={topic.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => router.push(`/workspaces/${profileId}/collections/${topic.id}`)}>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="h-10 w-10 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                        <FileText className="h-5 w-5 text-blue-600" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm line-clamp-2">
+                          {topic.name}
+                        </div>
+                      </div>
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
+                    {topic.description || 'Colección de documentos'}
+                  </p>
+                  <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                    <span className="text-xs text-muted-foreground">
+                      Colección
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+
+            {/* Álbumes Vinculados */}
+            {(linkedObjects?.albums.length || 0) > 0 && linkedObjects?.albums.map(album => (
+              <Card key={album.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col" onClick={() => router.push(`/galleries/albums/${album.id}`)}>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="h-10 w-10 rounded-lg bg-orange-500/10 flex items-center justify-center flex-shrink-0">
+                        <Image className="h-5 w-5 text-orange-600" />
+                      </div>
+                      <span className="font-semibold text-lg truncate">{album.name}</span>
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0 flex-grow flex flex-col">
+                  <div className="relative w-full aspect-square bg-muted rounded-md overflow-hidden mb-3">
+                    {album.cover_photo?.file_path ? (
+                      <img
+                        src={`${process.env.NEXT_PUBLIC_API_URL}/media/${album.cover_photo.file_path}`}
+                        alt={album.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                        <Image className="h-10 w-10 opacity-50" />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground line-clamp-2">
+                    {album.description || 'Sin descripción'}
+                  </p>
+                </CardContent>
+                <CardFooter className="flex justify-between items-center text-xs text-muted-foreground pt-3 mt-auto border-t border-border/50">
+                  <span>{album.total_photos} foto(s)</span>
+                  <span>{new Date(album.created_at).toLocaleDateString()}</span>
+                </CardFooter>
+              </Card>
+            ))}
+
+            {/* Respuestas de Formulario Vinculadas */}
+            {(linkedObjects?.form_responses.length || 0) > 0 && linkedObjects?.form_responses.map(response => (
+              <Card key={response.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => { setSelectedFormResponse(response); setShowFormResponseDialog(true); }}>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="h-10 w-10 rounded-lg bg-cyan-500/10 flex items-center justify-center flex-shrink-0">
+                        <FileText className="h-5 w-5 text-cyan-600" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm line-clamp-2">
+                          Respuesta al formulario: {response.form_name || 'Sin nombre'}
+                        </div>
+                      </div>
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                    <span className="text-xs text-muted-foreground">
+                      Respuesta
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(response.submitted_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Diálogos para elementos vinculados */}
       {selectedNote && (
         <ViewNoteDialog
-          note={selectedNote}
+          note={selectedNote ? {
+            ...selectedNote,
+            category: '', // Add a default value for category
+            team_shared: false,
+            team_id: undefined,
+            workspace_id: undefined,
+            workspace_name: undefined,
+            workspace_color: undefined,
+          } : null}
+
+
           isOpen={showViewNoteDialog}
           onOpenChange={setShowViewNoteDialog}
           onNoteUpdated={fetchProfileDetails} // Para refrescar los datos después de una actualización
@@ -409,7 +486,16 @@ export default function ProfileDetailsPage() {
           isOpen={showViewEventDialog}
           onOpenChange={setShowViewEventDialog}
           onSaveSuccess={fetchProfileDetails} // Para refrescar los datos después de una actualización
-          event={selectedEvent}
+          event={selectedEvent ? {
+            ...selectedEvent,
+            user_timezone: '', // Add a default value for user_timezone
+            team_shared: false,
+            workspace_id: undefined,
+            workspace_name: undefined,
+            workspace_color: undefined,
+            linked_profiles: [],
+          } : null}
+
         />
       )}
 
@@ -418,9 +504,32 @@ export default function ProfileDetailsPage() {
           isOpen={showViewTaskDialog}
           onOpenChange={setShowViewTaskDialog}
           onSaveSuccess={fetchProfileDetails} // Para refrescar los datos después de una actualización
-          task={selectedTask}
+          task={selectedTask ? {
+            ...selectedTask,
+            due_date: selectedTask.due_date || undefined,
+            created_at: '', // Add a default value for created_at
+            updated_at: '', // Add a default value for updated_at
+            account_id: '', // Add a default value for account_id
+          } : null}
+
+
         />
       )}
+
+      {showManageLinkedObjectsDialog && (
+        <ManageLinkedObjectsDialog
+          isOpen={showManageLinkedObjectsDialog}
+          onOpenChange={setShowManageLinkedObjectsDialog}
+          profile={profile}
+          onLinkedObjectsUpdated={fetchProfileDetails}
+        />
+      )}
+
+      <FormResponseDialog
+        isOpen={showFormResponseDialog}
+        onOpenChange={setShowFormResponseDialog}
+        response={selectedFormResponse}
+      />
     </div>
   );
 }

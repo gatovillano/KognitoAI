@@ -354,9 +354,11 @@ class UpdateCollectionRequest(BaseModel):
 
 # --- Modelos Pydantic para Colecciones ---
 class CollectionResponse(BaseModel):
-    id: str
-    name: str
+    topic: str
     document_count: int
+    description: Optional[str] = None
+    team_shared: Optional[bool] = None
+    has_knowledge_graph: Optional[bool] = None
 
 class CollectionCreateRequest(BaseModel):
     topic: str
@@ -415,9 +417,19 @@ async def list_collection_documents(collection_id: str, current_account_id: str 
 @router.get("/collections", response_model=List[CollectionResponse], summary="Listar colecciones del usuario")
 async def list_collections(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
     logger.info(f"API: list_collections - Listando colecciones para account_id: {current_account_id}, workspace_id recibido: {workspace_id}")
-    collections = await list_user_collections(account_id=current_account_id, workspace_id=workspace_id)
-    logger.info(f"API: list_collections - Collections retrieved from memory_manager: {collections}")
-    return [CollectionResponse(id=c['topic'], name=c['topic'], document_count=c['document_count']) for c in collections]
+    try:
+        collections = await list_user_collections(account_id=current_account_id, workspace_id=workspace_id)
+        logger.info(f"API: list_collections - Collections retrieved from memory_manager: {collections}")
+        return [CollectionResponse(
+            topic=c['topic'],
+            document_count=c['document_count'],
+            description=c.get('description'),
+            team_shared=c.get('team_shared'),
+            has_knowledge_graph=c.get('has_knowledge_graph')
+        ) for c in collections]
+    except Exception as e:
+        logger.error(f"API: list_collections - Error al listar colecciones para account_id: {current_account_id}, error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno del servidor al listar colecciones.")
  
 @router.post("/collections", status_code=status.HTTP_201_CREATED, summary="Crear una nueva colección")
 async def create_collection(request: CollectionCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
