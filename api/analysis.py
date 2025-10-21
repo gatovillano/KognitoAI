@@ -1487,7 +1487,7 @@ async def get_all_analysis_endpoint(
 
         for insight in insights:
             # Obtener herramienta usada desde los metadatos o usar fallback
-            tool_used = "proactive_knowledge_linker_tool.py"
+            tool_used = "proactive_knowledge_linker_tool_removed.py"
             related_items = insight.related_items or {}
 
             if isinstance(related_items, dict):

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import SessionLocal
 from core.notes_manager import NotesManager
-from utils.security import get_current_account_id
+from utils.security import get_current_account_id, check_workspace_permission
 from api.contact_profiles import ContactProfileResponse # Importar ContactProfileResponse
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -91,6 +91,12 @@ async def get_note_by_id_endpoint(
     note = await notes_manager.get_note_by_id(current_account_id, note_id)
     if not note:
         raise HTTPException(status_code=404, detail="Nota no encontrada o no autorizada.")
+    
+    # Si la nota tiene un workspace_id, verificar permisos
+    if note.get("workspace_id"):
+        if not await check_workspace_permission(current_account_id, note["workspace_id"], notes_manager.db, required_roles=['admin', 'owner', 'member', 'viewer']):
+            raise HTTPException(status_code=403, detail="No tienes permiso para acceder a esta nota.")
+            
     return NoteResponse(**note)
 
 @router.get("/notes/{note_id}/linked-profiles", response_model=List[ContactProfileResponse], summary="Obtener perfiles vinculados a una nota")
@@ -106,6 +112,11 @@ async def get_linked_profiles_for_note_endpoint(
     if not note:
         raise HTTPException(status_code=404, detail="Nota no encontrada o no autorizada.")
     
+    # Si la nota tiene un workspace_id, verificar permisos
+    if note.get("workspace_id"):
+        if not await check_workspace_permission(current_account_id, note["workspace_id"], notes_manager.db, required_roles=['admin', 'owner', 'member', 'viewer']):
+            raise HTTPException(status_code=403, detail="No tienes permiso para acceder a esta nota.")
+            
     return note["linked_profiles"]
 
 @router.post("/notes/list-notes", response_model=PaginatedNotesResponse, summary="Listar notas del usuario con paginación")
@@ -117,10 +128,7 @@ async def list_notes_endpoint(
     """
     Devuelve todas las notas de un usuario, incluyendo personales y de equipos, o filtradas por workspace, con paginación.
     """
-    if request.workspace_id:
-        total, notes = await notes_manager.get_notes_as_dicts(current_account_id, request.search_term, workspace_id=request.workspace_id, skip=request.skip, limit=request.limit)
-    else:
-        total, notes = await notes_manager.list_all_notes(current_account_id, request.search_term, skip=request.skip, limit=request.limit)
+    total, notes = await notes_manager.get_notes_as_dicts(current_account_id, request.search_term, workspace_id=request.workspace_id, skip=request.skip, limit=request.limit)
     
     return PaginatedNotesResponse(total=total, notes=[NoteResponse(**note) for note in notes])
 
@@ -134,6 +142,15 @@ async def link_profile_to_note_endpoint(
     """
     Vincula un perfil de contacto a una nota.
     """
+    # Obtener la nota para verificar el workspace_id
+    note_data = await notes_manager.get_note_by_id(current_account_id, note_id)
+    if not note_data:
+        raise HTTPException(status_code=404, detail="Nota no encontrada o no autorizada.")
+
+    # Verificar permisos de workspace si la nota pertenece a uno
+    if note_data.get("workspace_id"):
+                    if not await check_workspace_permission(current_account_id, note_data["workspace_id"], notes_manager.db, required_roles=['admin', 'owner', 'member']):
+                        raise HTTPException(status_code=403, detail="No tienes permiso para vincular perfiles a esta nota.")
     success = await notes_manager.link_profile_to_note(
         account_id=current_account_id,
         note_id=note_id,
@@ -153,6 +170,16 @@ async def unlink_profile_from_note_endpoint(
     """
     Desvincula un perfil de contacto de una nota.
     """
+    # Obtener la nota para verificar el workspace_id
+    note_data = await notes_manager.get_note_by_id(current_account_id, note_id)
+    if not note_data:
+        raise HTTPException(status_code=404, detail="Nota no encontrada o no autorizada.")
+
+    # Verificar permisos de workspace si la nota pertenece a uno
+    if note_data.get("workspace_id"):
+        if not await check_workspace_permission(current_account_id, note_data["workspace_id"], notes_manager.db, required_roles=['admin', 'owner', 'member']):
+            raise HTTPException(status_code=403, detail="No tienes permiso para desvincular perfiles de esta nota.")
+
     success = await notes_manager.unlink_profile_from_note(
         account_id=current_account_id,\
         note_id=note_id,\
@@ -185,6 +212,16 @@ async def update_note_endpoint(
     notes_manager: NotesManager = Depends(get_notes_manager)
 ):
     """Actualiza una nota existente del usuario."""
+    # Obtener la nota para verificar el workspace_id
+    note_data = await notes_manager.get_note_by_id(current_account_id, note.note_id)
+    if not note_data:
+        raise HTTPException(status_code=404, detail="Nota no encontrada o no autorizada.")
+
+    # Verificar permisos de workspace si la nota pertenece a uno
+    if note_data.get("workspace_id"):
+        if not await check_workspace_permission(current_account_id, note_data["workspace_id"], notes_manager.db, required_roles=['admin', 'owner', 'member']):
+            raise HTTPException(status_code=403, detail="No tienes permiso para actualizar esta nota.")
+
     success = await notes_manager.update_note(
         account_id=current_account_id,
         note_id=note.note_id,
@@ -204,21 +241,17 @@ async def delete_note_endpoint(
     notes_manager: NotesManager = Depends(get_notes_manager)
 ):
     """Elimina una nota del usuario."""
+    # Obtener la nota para verificar el workspace_id
+    note_data = await notes_manager.get_note_by_id(current_account_id, note.note_id)
+    if not note_data:
+        raise HTTPException(status_code=404, detail="Nota no encontrada o no autorizada.")
+
+    # Verificar permisos de workspace si la nota pertenece a uno
+    if note_data.get("workspace_id"):
+        if not await check_workspace_permission(current_account_id, note_data["workspace_id"], notes_manager.db, required_roles=['admin', 'owner', 'member']):
+            raise HTTPException(status_code=403, detail="No tienes permiso para eliminar esta nota.")
+
     success = await notes_manager.delete_note(current_account_id, note.note_id)
     if not success:
         raise HTTPException(status_code=404, detail="Nota no encontrada o no pertenece al usuario.")
     return {"message": f"Nota con ID {note.note_id} eliminada."}
-
-@router.post("/notes/{note_id}/unshare", summary="Eliminar compartición de una nota")
-async def unshare_note_endpoint(
-    note_id: int,
-    current_account_id: str = Depends(get_current_account_id),
-    notes_manager: NotesManager = Depends(get_notes_manager)
-):
-    """
-    Elimina la asociación de una nota con cualquier equipo.
-    """
-    success = await notes_manager.unshare_note(note_id, current_account_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Nota no encontrada o no pertenece al usuario.")
-    return {"message": "Nota ya no está compartida con ningún equipo."}

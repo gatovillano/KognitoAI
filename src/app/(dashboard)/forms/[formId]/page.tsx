@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ArrowLeft, Edit, Share2, Loader2, FileText, Table as TableIcon, Link } from 'lucide-react';
+import { ArrowLeft, Edit, Share2, Loader2, FileText, Table as TableIcon, Link, Download } from 'lucide-react';
 import ResponseCard from '@/components/forms/ResponseCard';
 import { useToast } from '@/hooks/use-toast';
 import apiClient from '@/lib/api';
@@ -135,6 +135,27 @@ export default function FormViewPage() {
     }
   };
 
+  const handleDownloadReport = async () => {
+    try {
+      const response = await apiClient.get(`/api/forms/${formId}/responses/pdf`, {
+        responseType: 'blob', // Important: receive as a blob
+      });
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `reporte_formulario_${formId.substring(0, 8)}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      sonnerToast.success('Reporte PDF del formulario descargado exitosamente.');
+    } catch (error) {
+      console.error('Error al descargar el reporte PDF del formulario:', error);
+      sonnerToast.error('Error al descargar el reporte PDF del formulario.');
+    }
+  };
+
   const handleDeleteResponse = async (responseId: string) => {
     try {
       await apiClient.delete(`/api/form-responses/${responseId}`);
@@ -189,6 +210,7 @@ export default function FormViewPage() {
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => router.push('/forms')}><ArrowLeft className="mr-2 h-4 w-4" />Volver</Button>
           <Button variant="outline" onClick={handleShare}><Share2 className="mr-2 h-4 w-4" />Compartir</Button>
+          <Button variant="outline" onClick={handleDownloadReport}><Download className="mr-2 h-4 w-4" />Descargar Reporte PDF</Button>
           <Button variant="outline" onClick={() => router.push(`/forms/${formId}/responses`)}><TableIcon className="mr-2 h-4 w-4" />Ver Respuestas</Button>
           <Button onClick={() => router.push(`/forms/${formId}/edit`)}><Edit className="mr-2 h-4 w-4" />Editar</Button>
         </div>

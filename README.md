@@ -83,7 +83,6 @@ Kognito AI System
 │   │   ├── comprehensive_web_analysis_tool.py
 │   │   ├── document_rag_tool.py
 │   │   ├── image_generation_tool.py
-│   │   ├── proactive_knowledge_linker_tool.py
 │   │   └── ... (otras herramientas)
 │   └── utils/ (Utilidades Compartidas)
 │       ├── advanced_text_analyzer.py

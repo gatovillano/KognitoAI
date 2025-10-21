@@ -30,6 +30,14 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
         return;
       }
 
+      // --- NUEVA LÓGICA: Cerrar conexión existente si la hay ---
+      if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+        console.log('WS: Cerrando conexión WebSocket existente antes de abrir una nueva.');
+        wsRef.current.close(1000, 'Reconexión');
+        wsRef.current = null;
+      }
+      // --- FIN NUEVA LÓGICA ---
+
       const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || window.location.origin;
       let wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
       let wsHost = window.location.host;

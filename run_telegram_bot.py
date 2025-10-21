@@ -157,7 +157,7 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Polling detenido.")
             
         # Cancelar las tareas de fondo explícitamente.
-        for task in app.state.get("background_tasks", []):
+        for task in getattr(app.state, "background_tasks", []):
             task.cancel()
             try:
                 await task

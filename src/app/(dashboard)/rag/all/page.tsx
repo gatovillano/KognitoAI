@@ -53,7 +53,7 @@ export default function AllDocumentsPage() {
     setIsLoading(true);
     try {
       const [docsRes, analysesRes] = await Promise.all([
-        apiClient.get('/api/list-documents'),
+        apiClient.get('/api/documents/list-documents'),
         // --- CAMBIO CLAVE: Pedimos TODOS los análisis guardados ---
         apiClient.post('/api/get-saved-analyses', { all: true })
       ]);

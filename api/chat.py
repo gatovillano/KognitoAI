@@ -192,7 +192,7 @@ async def get_threads(
         total_threads = total_result.scalar_one()
 
         # Consulta para los hilos paginados
-        threads_stmt = base_query.order_by(ChatThread.created_at.asc()).offset(skip).limit(limit)
+        threads_stmt = base_query.order_by(ChatThread.created_at.desc()).offset(skip).limit(limit)
         result = await db.execute(threads_stmt)
         thread_list = result.scalars().all()
         
@@ -246,17 +246,29 @@ async def get_messages_for_thread(
         real_messages = []
         for msg in all_messages:
             if not (hasattr(msg, 'additional_kwargs') and msg.additional_kwargs.get("role") == "summary"):
-                # Convertir el contenido a string si es una lista o un objeto
-                content = msg.content
-                if isinstance(content, list):
-                    content = "".join([part.get("text", "") if isinstance(part, dict) else str(part) for part in content])
+                text_content = ""
+                image_content = None
+                
+                if isinstance(msg.content, list):
+                    # Handle multimodal content
+                    for part in msg.content:
+                        if isinstance(part, dict):
+                            if part.get("type") == "text":
+                                text_content += part.get("text", "")
+                            elif part.get("type") == "image_url":
+                                image_url_data = part.get("image_url")
+                                if isinstance(image_url_data, dict):
+                                    image_content = image_url_data.get("url")
+                        else:
+                            text_content += str(part)
                 else:
-                    content = str(content)
+                    text_content = str(msg.content)
 
                 real_messages.append(Message(
-                    text=content,
+                    text=text_content,
                     sender="user" if isinstance(msg, HumanMessage) else "ai",
-                    created_at=msg.additional_kwargs.get("created_at", datetime.now(timezone.utc))
+                    created_at=msg.additional_kwargs.get("created_at", datetime.now(timezone.utc)),
+                    image_base64=image_content
                 ))
 
         # Sort messages by created_at in ascending order
@@ -423,23 +435,23 @@ async def transcribe_audio(file: UploadFile = File(...)):
     """
     Endpoint para transcribir un archivo de audio utilizando Faster Whisper.
     """
-    logger.info(f"Recibida solicitud para transcribir el archivo: {file.filename}")
-    
-    # Leer el contenido del archivo en memoria
     try:
-        audio_bytes = await file.read()
-        audio_file_io = BytesIO(audio_bytes)
+        audio_file_io = BytesIO(await file.read())
+        
+        # Extraer el formato del nombre del archivo
+        file_format = file.filename.split('.')[-1] if file.filename else "webm"
+        
+        logger.info(f"Recibida solicitud para transcribir el archivo: {file.filename}")
+        
+        transcription = await transcribe_audio_file(audio_file_io, file_format)
+
+        if transcription is None:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="No se pudo transcribir el audio.")
+
+        return {"transcription": transcription}
     except Exception as e:
-        logger.error(f"Error al leer el archivo cargado: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No se pudo leer el archivo de audio.")
-
-    # Transcribir el audio
-    transcription = await transcribe_audio_file(audio_file_io)
-
-    if transcription is None:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="No se pudo transcribir el audio.")
-
-    return {"transcription": transcription}
+        logger.error(f"Error en la transcripción de audio: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error interno del servidor: {e}")
 
 @router.post("/chat", status_code=status.HTTP_202_ACCEPTED, summary="Procesar Mensaje de Chat en Segundo Plano")
 async def handle_chat(
@@ -534,41 +546,6 @@ async def create_and_run_agent_streaming(
             "taskId": task_id,
         })
 
-        # --- Preparación del Contexto RAG ---
-        context_text = ""
-        if rag_context:
-            logger.info(f"Enriqueciendo contexto con {len(rag_context)} item(s) de RAG.")
-            document_ids_to_fetch = [item['id'] for item in rag_context if item.get('type') == 'document']
-            
-            if document_ids_to_fetch:
-                async with SessionLocal() as session:
-                    stmt = (
-                        select(LangchainPgEmbedding)
-                        .filter(LangchainPgEmbedding.cmetadata['document_id'].astext.in_(document_ids_to_fetch))
-                        .order_by(cast(LangchainPgEmbedding.cmetadata['chunk_index'].astext, Integer))
-                    )
-                    result = await session.execute(stmt)
-                    all_chunks = result.scalars().all()
-
-                    docs_content = {}
-                    for chunk in all_chunks:
-                        doc_id = chunk.cmetadata.get('document_id')
-                        if doc_id not in docs_content:
-                            docs_content[doc_id] = {
-                                'title': chunk.cmetadata.get('title', chunk.cmetadata.get('file_name')),
-                                'chunks': []
-                            }
-                        docs_content[doc_id]['chunks'].append(chunk.document)
-
-                    for doc_id, data in docs_content.items():
-                        full_content = "".join(data['chunks'])
-                        context_text += f"\n\n--- Contexto del Documento: {data['title']} ---\n"
-                        context_text += f"Contenido: {full_content}\n"
-                        context_text += "--- Fin del Contexto del Documento ---"
-
-        if context_text:
-            logger.info("Contexto RAG preparado para el LLM.")
-
         # --- Preparación Inicial ---
         agent_app = create_langgraph_agent()
         db_sync_url = settings.database_url.replace("+psycopg", "")
@@ -579,17 +556,27 @@ async def create_and_run_agent_streaming(
         )
         history_messages = await chat_message_history.aget_messages()
 
-        user_message_with_rag_context = HumanMessage(
-            content=user_message,
-            additional_kwargs={'rag_context': rag_context} if rag_context else {}
-        )
+        # El rag_context se pasará directamente al estado del agente, no se pre-procesa aquí.
+        # El user_message se mantiene sin modificar aquí.
 
-        # Pre-procesar el user_message para incluir el contexto RAG si existe
-        if context_text:
-            user_message = f"{user_message}\n\n--- Contexto RAG ---\n{context_text}\n--- Fin Contexto RAG ---"
+
+
+        # --- Construcción del Mensaje Multimodal ---
+        content_parts = [{"type": "text", "text": user_message}]
+        if image_base64:
+            # Asumimos que image_base64 es una data URL (p.ej., "data:image/jpeg;base64,...")
+            # y la pasamos directamente. Los modelos de Google aceptan este formato.
+            logger.info("Adjuntando imagen al mensaje para el LLM.")
+            content_parts.append({
+                "type": "image_url",
+                "image_url": {"url": image_base64},
+            })
+        
+        initial_human_message = HumanMessage(content=content_parts)
+        # --- Fin Construcción ---
 
         initial_state: AgentState = {
-            "messages": history_messages + [HumanMessage(content=user_message)],
+            "messages": history_messages + [initial_human_message],
             "account_id": account_id,
             "task_id": task_id,
             "telegram_id": telegram_id,
@@ -599,7 +586,7 @@ async def create_and_run_agent_streaming(
         }
 
         # Asegurarse de que el historial de mensajes se inicialice con el mensaje del usuario
-        await chat_message_history.aadd_messages([HumanMessage(content=user_message)])
+        await chat_message_history.aadd_messages([initial_human_message])
 
         config: RunnableConfig = {"configurable": {"thread_id": thread_id}} # Castear a RunnableConfig
         final_state = None
@@ -617,7 +604,7 @@ async def create_and_run_agent_streaming(
                         current_llm_content = str(current_llm_content)
 
                     # LangGraph nos da el contenido completo, no el delta, por lo que calculamos el delta.
-                    new_chunk = current_llm_content[len(full_response_content):]
+                    new_chunk = current_llm_content[len(last_llm_content):]
 
                     if new_chunk: # Solo enviar si hay un nuevo chunk
                         full_response_content += new_chunk # Acumular el contenido completo
@@ -627,6 +614,8 @@ async def create_and_run_agent_streaming(
                             "taskId": task_id,
                             "chunk": new_chunk # Enviar solo el delta
                         })
+                        await asyncio.sleep(0.05) # Pequeño retraso para ralentizar el stream
+                    last_llm_content = current_llm_content
 
                     final_state = chunk["generateResponse"]
             

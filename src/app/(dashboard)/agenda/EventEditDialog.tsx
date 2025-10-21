@@ -15,9 +15,13 @@ import { ProfileSelectorDialog } from '@/components/dialogs/ProfileSelectorDialo
 import { Tag } from '@/components/ui/tag'; // Assuming a Tag component for displaying linked profiles
 
 const formSchema = z.object({
-  description: z.string().min(3, "La descripción es muy corta."),
+  summary: z.string().min(3, "El título es muy corto."),
+  description: z.string().optional(),
+  location: z.string().optional(),
   date: z.string().min(1, "Debes seleccionar una fecha."),
   time: z.string().min(1, "Debes especificar una hora."),
+  attendee_ids: z.array(z.string()).optional(),
+  external_attendees: z.array(z.string()).optional(),
   team_id: z.string().optional(),
   workspace_id: z.string().optional(),
 });
@@ -41,9 +45,13 @@ export function EventEditDialog({ isOpen, onOpenChange, onSaveSuccess, onCloseDe
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      summary: event?.summary || '',
       description: event?.description || '',
+      location: event?.location || '',
       date: event?.event_datetime_local ? event.event_datetime_local.split('T')[0] : '',
       time: event?.event_datetime_local ? event.event_datetime_local.split('T')[1].substring(0, 5) : '',
+      attendees: event?.attendees || [],
+      external_attendees: event?.external_attendees || [],
       team_id: event?.team_id?.toString() || '',
       workspace_id: event?.workspace_id?.toString() || '',
     },
@@ -108,9 +116,13 @@ export function EventEditDialog({ isOpen, onOpenChange, onSaveSuccess, onCloseDe
   useEffect(() => {
     if (event) {
       form.reset({
+        summary: event.summary || '',
         description: event.description || '',
+        location: event.location || '',
         date: event.event_datetime_local ? new Date(event.event_datetime_local).toLocaleDateString('en-CA') : '',
         time: event.event_datetime_local ? new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false }) : '',
+        attendees: event.attendees || [],
+        external_attendees: event.external_attendees || [],
         team_id: event.team_id?.toString() || '',
         workspace_id: event.workspace_id?.toString() || '',
       });
@@ -118,18 +130,16 @@ export function EventEditDialog({ isOpen, onOpenChange, onSaveSuccess, onCloseDe
   }, [event, form]);
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    // Convertir la fecha y hora local a un objeto Date
-    const localDateTime = new Date(`${values.date}T${values.time}:00`);
-    // Obtener la diferencia horaria del usuario en minutos y convertirla a milisegundos
-    const timezoneOffsetMs = localDateTime.getTimezoneOffset() * 60 * 1000;
-    // Ajustar la fecha y hora local para obtener la hora UTC
-    const eventDateTimeUTC = new Date(localDateTime.getTime() - timezoneOffsetMs).toISOString();
-
     const toastId = toast.loading('Actualizando evento...');
     try {
       const response = await apiClient.put(`/api/agenda/events/${event.id}`, {
+        summary: values.summary,
         description: values.description,
-        event_datetime: eventDateTimeUTC, // Enviar la hora en formato ISO 8601 (UTC)
+        location: values.location,
+        event_date: values.date,
+        event_time: values.time,
+        attendee_ids: values.attendee_ids,
+        external_attendees: values.external_attendees,
         team_id: values.team_id ? parseInt(values.team_id) : null,
         workspace_id: values.workspace_id || null,
       });
@@ -181,8 +191,20 @@ export function EventEditDialog({ isOpen, onOpenChange, onSaveSuccess, onCloseDe
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <FormField control={form.control} name="summary" render={({ field }) => (
+              <FormItem><FormLabel>Título</FormLabel><FormControl><Input placeholder="Reunión de equipo..." {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
             <FormField control={form.control} name="description" render={({ field }) => (
-              <FormItem><FormLabel>Descripción</FormLabel><FormControl><Input placeholder="Reunión de equipo..." {...field} /></FormControl><FormMessage /></FormItem>
+              <FormItem><FormLabel>Descripción</FormLabel><FormControl><Input placeholder="Detalles de la reunión..." {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
+            <FormField control={form.control} name="location" render={({ field }) => (
+              <FormItem><FormLabel>Ubicación</FormLabel><FormControl><Input placeholder="Oficina, Sala de Juntas, Enlace de Zoom..." {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
+            <FormField control={form.control} name="attendee_ids" render={({ field }) => (
+              <FormItem><FormLabel>IDs de Asistentes (separados por comas)</FormLabel><FormControl><Input placeholder="uuid1, uuid2..." {...field} value={field.value ? field.value.join(', ') : ''} onChange={e => field.onChange(e.target.value.split(',').map(s => s.trim()).filter(Boolean))} /></FormControl><FormMessage /></FormItem>
+            )} />
+            <FormField control={form.control} name="external_attendees" render={({ field }) => (
+              <FormItem><FormLabel>Asistentes Externos (nombres separados por comas)</FormLabel><FormControl><Input placeholder="Juan Pérez, María García..." {...field} value={field.value ? field.value.join(', ') : ''} onChange={e => field.onChange(e.target.value.split(',').map(s => s.trim()).filter(Boolean))} /></FormControl><FormMessage /></FormItem>
             )} />
             <div className="grid grid-cols-2 gap-4">
               <FormField control={form.control} name="date" render={({ field }) => (

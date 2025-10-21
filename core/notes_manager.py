@@ -4,12 +4,13 @@ import logging
 from typing import Any, Optional, List, Dict
 import uuid
 
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from core.database import Nota, TeamMember, ContactProfile, Workspace, NoteContactProfileAssociation
+from core.database import Nota, TeamMember, ContactProfile, Workspace, NoteContactProfileAssociation, WorkspacePermission
 from utils.embeddings import get_embedding_model
+from utils.security import check_workspace_permission # Importar check_workspace_permission
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +19,9 @@ class NotesManager:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def add_note(self, account_id: str, title: Optional[str], content: str, category: Optional[str] = None, team_id: Optional[str] = None, workspace_id: Optional[str] = None) -> Dict[str, Any]:
+    async def add_note(self, account_id: str, title: Optional[str], content: str, category: Optional[str] = None, workspace_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Añade una nueva nota a la base de datos para una cuenta o equipo.
+        Añade una nueva nota a la base de datos para una cuenta o workspace.
         """
         logger.info(f"Añadiendo nueva nota para la cuenta {account_id} con título '{title}'")
         effective_category = category if category and category.strip() else "General"
@@ -35,7 +36,6 @@ class NotesManager:
 
         new_note = Nota(
             account_id=uuid.UUID(account_id),
-            team_id=uuid.UUID(team_id) if team_id else None,
             title=title,
             content=content,
             category=effective_category,
@@ -53,23 +53,39 @@ class NotesManager:
             "content": new_note.content,
             "category": new_note.category,
             "created_at": new_note.created_at.isoformat(),
-            "team_id": str(new_note.team_id) if new_note.team_id else None,
+            "workspace_id": str(new_note.workspace_id) if new_note.workspace_id else None,
         }
 
-    async def get_notes_as_dicts(self, account_id: str, search_query: Optional[str] = None, team_id: Optional[str] = None, workspace_id: Optional[str] = None, category: Optional[str] = None, skip: int = 0, limit: int = 10) -> tuple[int, List[Dict[str, Any]]]:
+    async def get_notes_as_dicts(self, account_id: str, search_query: Optional[str] = None, workspace_id: Optional[str] = None, category: Optional[str] = None, skip: int = 0, limit: int = 10) -> tuple[int, List[Dict[str, Any]]]:
         """
         Recupera notas como una lista de diccionarios, incluyendo perfiles vinculados, con paginación.
         Devuelve una tupla (total_notas, lista_de_notas_paginadas).
         """
-        logger.info(f"get_notes_as_dicts called for account_id: {account_id}, workspace_id: {workspace_id}, team_id: {team_id}, skip: {skip}, limit: {limit}")
+        logger.info(f"get_notes_as_dicts called for account_id: {account_id}, workspace_id: {workspace_id}, skip: {skip}, limit: {limit}")
         
         base_stmt = select(Nota).where(Nota.account_id == uuid.UUID(account_id))
         
-        if team_id:
-            base_stmt = base_stmt.where(Nota.team_id == uuid.UUID(team_id))
-        elif workspace_id:
+        if workspace_id:
+            # Si se especifica un workspace, verificar permisos
+            try:
+                await check_workspace_permission(account_id, workspace_id, self.db, required_roles=['admin', 'owner', 'member', 'viewer'])
+            except Exception as e:
+                logger.warning(f"Permission denied for account {account_id} on workspace {workspace_id}: {e}")
+                # Si no tiene permiso, no devolver ninguna nota de ese workspace
+                return 0, []
             base_stmt = base_stmt.where(Nota.workspace_id == uuid.UUID(workspace_id))
-        # Si no se especifica team_id ni workspace_id, se obtienen todas las notas del account_id
+        else:
+            # Si no se especifica un workspace, obtener notas personales y de todos los workspaces a los que tiene acceso
+            accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == uuid.UUID(account_id))
+            result = await self.db.execute(accessible_workspaces_stmt)
+            accessible_workspace_ids = [row[0] for row in result.fetchall()]
+            
+            base_stmt = base_stmt.where(
+                or_(
+                    Nota.workspace_id.is_(None),
+                    Nota.workspace_id.in_(accessible_workspace_ids)
+                )
+            )
             
         if search_query:
             base_stmt = base_stmt.where(Nota.title.ilike(f"%{search_query}%") | Nota.content.ilike(f"%{search_query}%"))
@@ -95,11 +111,9 @@ class NotesManager:
                 "id": note.id, "title": note.title, "content": note.content,
                 "category": note.category, "created_at": note.created_at.isoformat(),
                 "updated_at": note.updated_at.isoformat(),
-                "team_id": str(note.team_id) if note.team_id else None,
                 "workspace_id": str(note.workspace_id) if note.workspace_id else None,
                 "workspace_name": note.workspace.name if note.workspace else None,
                 "workspace_color": note.workspace.color if note.workspace else None,
-                "team_shared": bool(note.team_id),
                 "linked_profiles": [{
                     "id": str(cp.id),
                     "account_id": str(cp.account_id),
@@ -115,11 +129,11 @@ class NotesManager:
 
     async def list_all_notes(self, account_id: str, search_query: Optional[str] = None, category: Optional[str] = None, skip: int = 0, limit: int = 10) -> tuple[int, List[Dict[str, Any]]]:
         """
-        Devuelve todas las notas de un usuario, incluyendo personales, de workspaces y compartidas por equipos, con paginación.
+        Devuelve todas las notas de un usuario, incluyendo personales y de workspaces, con paginación.
         """
         logger.info(f"Listando todas las notas para la cuenta {account_id}, skip: {skip}, limit: {limit}")
         
-        # Ahora get_notes_as_dicts puede manejar la lógica de obtener todas las notas si no se especifica team_id o workspace_id
+        # Ahora get_notes_as_dicts puede manejar la lógica de obtener todas las notas si no se especifica workspace_id
         total, notes = await self.get_notes_as_dicts(
             account_id=account_id,
             search_query=search_query,
@@ -139,6 +153,12 @@ class NotesManager:
         if not note_to_update:
             logger.warning(f"Nota {note_id} no encontrada para la cuenta {account_id}.")
             return False
+        
+        # Verificar permisos de workspace si la nota pertenece a uno
+        if note_to_update.workspace_id:
+            if not await check_workspace_permission(account_id, str(note_to_update.workspace_id), self.db, required_roles=['admin', 'owner', 'member']):
+                logger.warning(f"Acceso denegado para actualizar la nota {note_id} en workspace {note_to_update.workspace_id} para la cuenta {account_id}.")
+                return False
 
         update_data = {}
         content_changed = False
@@ -182,28 +202,16 @@ class NotesManager:
         if not note_to_delete:
             logger.warning(f"Nota {note_id} no encontrada para eliminar para la cuenta {account_id}.")
             return False
+        
+        # Verificar permisos de workspace si la nota pertenece a uno
+        if note_to_delete.workspace_id:
+            if not await check_workspace_permission(account_id, str(note_to_delete.workspace_id), self.db, required_roles=['admin', 'owner', 'member']):
+                logger.warning(f"Acceso denegado para eliminar la nota {note_id} en workspace {note_to_delete.workspace_id} para la cuenta {account_id}.")
+                return False
             
         await self.db.delete(note_to_delete)
         await self.db.commit()
         logger.info(f"Nota {note_id} eliminada para la cuenta {account_id}.")
-        return True
-
-    async def unshare_note(self, note_id: int, account_id: str) -> bool:
-        """
-        Quita la asociación de una nota con un equipo.
-        """
-        result = await self.db.execute(
-            update(Nota)
-            .where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
-            .values(team_id=None)
-        )
-        await self.db.commit()
-        
-        if result.rowcount == 0:
-            logger.warning(f"No se pudo des-compartir la nota {note_id} para la cuenta {account_id}. Puede que no exista o no pertenezca al usuario.")
-            return False
-        
-        logger.info(f"Nota {note_id} des-compartida para la cuenta {account_id}.")
         return True
 
     async def link_profile_to_note(self, account_id: str, note_id: int, profile_id: uuid.UUID) -> bool: # CAMBIO: profile_id ahora es uuid.UUID
@@ -218,6 +226,12 @@ class NotesManager:
         if not note:
             logger.warning(f"Nota {note_id} no encontrada o no pertenece a la cuenta {account_id}.")
             return False
+        
+        # Verificar permisos de workspace si la nota pertenece a uno
+        if note.workspace_id:
+            if not await check_workspace_permission(account_id, str(note.workspace_id), self.db, required_roles=['admin', 'owner', 'member']):
+                logger.warning(f"Acceso denegado para vincular perfil a la nota {note_id} en workspace {note.workspace_id} para la cuenta {account_id}.")
+                return False
 
         # Verificar que el perfil existe y pertenece al usuario
         profile_stmt = select(ContactProfile).where(ContactProfile.id == profile_id, ContactProfile.account_id == uuid.UUID(account_id)) # CAMBIO: Se usa profile_id directamente
@@ -250,6 +264,12 @@ class NotesManager:
         if not note:
             logger.warning(f"Nota {note_id} no encontrada o no pertenece a la cuenta {account_id}.")
             return False
+        
+        # Verificar permisos de workspace si la nota pertenece a uno
+        if note.workspace_id:
+            if not await check_workspace_permission(account_id, str(note.workspace_id), self.db, required_roles=['admin', 'owner', 'member']):
+                logger.warning(f"Acceso denegado para desvincular perfil de la nota {note_id} en workspace {note.workspace_id} para la cuenta {account_id}.")
+                return False
 
         # Eliminar el vínculo
         # Necesitamos obtener el objeto ContactProfile para poder removerlo de la lista
@@ -270,7 +290,8 @@ class NotesManager:
         Recupera una nota específica por su ID, incluyendo perfiles vinculados.
         """
         logger.info(f"Consultando nota {note_id} para la cuenta {account_id}.")
-        stmt = select(Nota).options(selectinload(Nota.contact_profiles)).where(
+        
+        stmt = select(Nota).options(selectinload(Nota.contact_profiles), selectinload(Nota.workspace)).where(
             Nota.id == note_id,
             Nota.account_id == uuid.UUID(account_id)
         )
@@ -280,6 +301,12 @@ class NotesManager:
         if not note:
             logger.warning(f"Nota {note_id} no encontrada o no pertenece a la cuenta {account_id}.")
             return None
+        
+        # Verificar permisos de workspace si la nota pertenece a uno
+        if note.workspace_id:
+            if not await check_workspace_permission(account_id, str(note.workspace_id), self.db, required_roles=['admin', 'owner', 'member', 'viewer']):
+                logger.warning(f"Acceso denegado a la nota {note_id} en workspace {note.workspace_id} para la cuenta {account_id}.")
+                return None
         
         linked_profiles_data = []
         for cp in note.contact_profiles:
@@ -300,8 +327,6 @@ class NotesManager:
             "category": note.category,
             "created_at": note.created_at.isoformat(),
             "updated_at": note.updated_at.isoformat(),
-            "team_id": str(note.team_id) if note.team_id else None,
             "workspace_id": str(note.workspace_id) if note.workspace_id else None,
-            "team_shared": bool(note.team_id),
             "linked_profiles": linked_profiles_data
         }

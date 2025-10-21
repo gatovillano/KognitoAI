@@ -1,8 +1,5 @@
 'use client';
 
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import * as z from 'zod';
 import { toast } from 'sonner';
 import { useState, useEffect } from 'react';
 import { Pencil } from 'lucide-react'; // Importar el icono de lápiz
@@ -10,18 +7,9 @@ import { Pencil } from 'lucide-react'; // Importar el icono de lápiz
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Form, FormControl, FormField, FormItem, FormLabel } from '@/components/ui/form'; // Eliminar FormMessage
 import apiClient from '@/lib/api';
 import { ProfileSelectorDialog } from '@/components/dialogs/ProfileSelectorDialog';
 import { Tag } from '@/components/ui/tag'; // Assuming a Tag component for displaying linked profiles
-
-const formSchema = z.object({
-  description: z.string(),
-  date: z.string(),
-  time: z.string(),
-  team_id: z.string().optional(),
-  workspace_id: z.string().optional(),
-});
 
 interface EventDetailsDialogProps {
   isOpen: boolean;
@@ -37,17 +25,6 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onEditClick, event }:
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
   const [isProfileSelectorOpen, setIsProfileSelectorOpen] = useState(false);
   const [linkedProfiles, setLinkedProfiles] = useState<any[]>([]); // State to store linked profiles
-
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      description: event?.description || '',
-      date: event?.event_datetime_local ? event.event_datetime_local.split('T')[0] : '',
-      time: event?.event_datetime_local ? event.event_datetime_local.split('T')[1].substring(0, 5) : '',
-      team_id: event?.team_id?.toString() || '',
-      workspace_id: event?.workspace_id?.toString() || '',
-    },
-  });
 
   useEffect(() => {
     const fetchTeams = async () => {
@@ -105,18 +82,6 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onEditClick, event }:
     }
   }, [isOpen, event?.id]);
 
-  useEffect(() => {
-    if (event) {
-      form.reset({
-        description: event.description || '',
-        date: event.event_datetime_local ? new Date(event.event_datetime_local).toLocaleDateString('en-CA') : '',
-        time: event.event_datetime_local ? new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false }) : '',
-        team_id: event.team_id?.toString() || '',
-        workspace_id: event.workspace_id?.toString() || '',
-      });
-    }
-  }, [event, form]);
-
   // No hay onSubmit en este diálogo de solo lectura
 
   // Function to handle linking a profile (se mantiene para visualización)
@@ -141,60 +106,48 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onEditClick, event }:
         <DialogHeader>
           <DialogTitle>Detalles del Evento</DialogTitle>
         </DialogHeader>
-        <Form {...form}>
-          <form className="space-y-4"> {/* Eliminar onSubmit */}
-            <FormField control={form.control} name="description" render={({ field }) => (
-              <FormItem><FormLabel>Descripción</FormLabel><FormControl><Input readOnly {...field} /></FormControl></FormItem>
-            )} />
-            <div className="grid grid-cols-2 gap-4">
-              <FormField control={form.control} name="date" render={({ field }) => (
-                <FormItem><FormLabel>Fecha</FormLabel><FormControl><Input type="date" readOnly {...field} /></FormControl></FormItem>
-              )} />
-              <FormField control={form.control} name="time" render={({ field }) => (
-                <FormItem><FormLabel>Hora</FormLabel><FormControl><Input type="time" readOnly {...field} /></FormControl></FormItem>
-              )} />
+        <form className="space-y-4"> {/* Eliminar onSubmit */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Título</p>
+              <p className="text-sm font-medium">{event?.summary || 'N/A'}</p>
             </div>
-            <FormField control={form.control} name="team_id" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Compartir con Equipo</FormLabel>
-                <FormControl>
-                  <select 
-                    className="w-full border rounded-md p-2"
-                    value={field.value || ''}
-                    disabled // Deshabilitar el select
-                  >
-                    <option value="">{loadingTeams ? "Cargando equipos..." : "Seleccionar equipo (opcional)"}</option>
-                    {teams.map(team => (
-                      <option key={team.id} value={team.id.toString()}>
-                        {team.name}
-                      </option>
-                    ))}
-                  </select>
-                </FormControl>
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="workspace_id" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Asociar a Workspace</FormLabel>
-                <FormControl>
-                  <select
-                    className="w-full border rounded-md p-2"
-                    value={field.value || ''}
-                    disabled // Deshabilitar el select
-                  >
-                    <option value="">{loadingWorkspaces ? "Cargando workspaces..." : "Seleccionar workspace (opcional)"}</option>
-                    {workspaces.map(ws => (
-                      <option key={ws.id} value={ws.id.toString()}>
-                        {ws.name}
-                      </option>
-                    ))}
-                  </select>
-                </FormControl>
-              </FormItem>
-            )} />
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Descripción</p>
+              <p className="text-sm text-muted-foreground">{event?.description || 'N/A'}</p>
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Ubicación</p>
+              <p className="text-sm text-muted-foreground">{event?.location || 'N/A'}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Fecha</p>
+                <p className="text-sm text-muted-foreground">{event?.event_datetime_local ? new Date(event.event_datetime_local).toLocaleDateString('es-ES') : 'N/A'}</p>
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Hora</p>
+                <p className="text-sm text-muted-foreground">{event?.event_datetime_local ? new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">IDs de Asistentes</p>
+              <p className="text-sm text-muted-foreground">{event?.attendees?.join(', ') || 'N/A'}</p>
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Asistentes Externos</p>
+              <p className="text-sm text-muted-foreground">{event?.external_attendees?.join(', ') || 'N/A'}</p>
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Compartir con Equipo</p>
+              <p className="text-sm text-muted-foreground">{event?.team_shared ? (teams.find(t => t.id.toString() === event.team_shared)?.name || event.team_shared) : 'N/A'}</p>
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Asociar a Workspace</p>
+              <p className="text-sm text-muted-foreground">{event?.workspace_id ? (workspaces.find(ws => ws.id.toString() === event.workspace_id)?.name || event.workspace_name || event.workspace_id) : 'N/A'}</p>
+            </div>
             {/* New section for Linked Profiles */}
             <div className="space-y-2">
-              <FormLabel>Perfiles Vinculados</FormLabel>
+              <p className="text-sm font-medium">Perfiles Vinculados</p>
               <div className="flex flex-wrap gap-2 p-2 border rounded-md min-h-[40px]">
                 {linkedProfiles.length === 0 ? (
                   <span className="text-sm text-muted-foreground">Ningún perfil vinculado.</span>
@@ -231,8 +184,7 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onEditClick, event }:
               </Button>
             </DialogFooter>
           </form>
-        </Form>
-      </DialogContent>
+        </DialogContent>
 
       {/* Profile Selector Dialog (se mantiene pero no debería ser interactivo) */}
       <ProfileSelectorDialog

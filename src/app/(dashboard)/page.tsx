@@ -191,6 +191,10 @@ export default function ChatLandingPage() {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0 || isUploadingFile) return;
+
+    const fileNames = Array.from(e.target.files).map(f => f.name).join(', ');
+    toast.info(`Subiendo: ${fileNames}`);
+
     setIsUploadingFile(true);
     try {
       const response = await apiClient.post('/api/threads'); // Crea el hilo solo si hay archivos

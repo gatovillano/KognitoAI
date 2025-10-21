@@ -16,8 +16,8 @@ export default function ChatPage() {
   useEffect(() => {
     if (!searchParams) return; // Add null check for searchParams
 
-    const message = searchParams.get('initial_message');
-    const ragContext = searchParams.get('rag_context');
+    const message = searchParams.get('initialMessage');
+    const ragContext = searchParams.get('initialRagContext');
 
     setInitialMessage(message);
     setInitialRagContext(ragContext);
@@ -25,10 +25,10 @@ export default function ChatPage() {
     if (message || ragContext) {
       const newSearchParams = new URLSearchParams(searchParams.toString());
       if (message) {
-        newSearchParams.delete('initial_message');
+        newSearchParams.delete('initialMessage');
       }
       if (ragContext) {
-        newSearchParams.delete('rag_context');
+        newSearchParams.delete('initialRagContext');
       }
       const path = `/chat/${threadId}`;
       router.replace(`${path}?${newSearchParams.toString()}`, { scroll: false });

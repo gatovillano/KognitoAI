@@ -130,7 +130,9 @@ class ScheduleToolExecutionTool(BaseTool):
                     tool_name=tool_name,
                     tool_function=tool_function,
                     execution_time=time(hour=hour, minute=minute),
-                    account_id=account_id
+                    account_id=account_id,
+                    workspace_id=self.workspace_id,
+                    telegram_id=self.telegram_id
                 )
                 schedule_info = f"diariamente a las {hour:02d}:{minute:02d}"
                 
@@ -143,7 +145,9 @@ class ScheduleToolExecutionTool(BaseTool):
                     tool_function=tool_function,
                     day_of_week=day_of_week,
                     execution_time=time(hour=hour, minute=minute),
-                    account_id=account_id
+                    account_id=account_id,
+                    workspace_id=self.workspace_id,
+                    telegram_id=self.telegram_id
                 )
                 
                 days = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
@@ -157,7 +161,9 @@ class ScheduleToolExecutionTool(BaseTool):
                     tool_name=tool_name,
                     tool_function=tool_function,
                     interval_hours=interval_hours,
-                    account_id=account_id
+                    account_id=account_id,
+                    workspace_id=self.workspace_id,
+                    telegram_id=self.telegram_id
                 )
                 schedule_info = f"cada {interval_hours} horas"
                 
@@ -209,6 +215,7 @@ class ListScheduledToolsInput(BaseModel):
     Esquema de entrada para listar herramientas programadas.
     """
     account_id: str = Field(description="ID de la cuenta del usuario")
+    workspace_id: Optional[str] = Field(None, description="ID del espacio de trabajo (opcional)")
 
 class ListScheduledToolsTool(BaseTool):
     """
@@ -219,6 +226,8 @@ class ListScheduledToolsTool(BaseTool):
     args_schema: Type[BaseModel] = ListScheduledToolsInput
     return_direct: bool = False
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    workspace_id: Optional[str] = Field(None, description="El ID del espacio de trabajo, inyectado automáticamente si está disponible.")
+    telegram_id: Optional[int] = Field(None, description="El ID de Telegram del usuario, inyectado automáticamente si está disponible.")
 
     async def _arun(self, account_id: str, **kwargs: Any) -> str:
         """
@@ -238,11 +247,27 @@ class ListScheduledToolsTool(BaseTool):
             if not scheduled_jobs:
                 return "📅 No hay herramientas programadas actualmente."
             
-            # Filtrar jobs para esta cuenta
-            account_jobs = {
-                name: info for name, info in scheduled_jobs.items()
-                if account_id in name or "all" in name
-            }
+            # Filtrar jobs para esta cuenta y workspace
+            account_jobs = {}
+            for name, info in scheduled_jobs.items():
+                job_account_id = info.get("data", {}).get("account_id")
+                job_workspace_id = info.get("data", {}).get("workspace_id")
+                job_telegram_id = info.get("data", {}).get("telegram_id")
+
+                if job_account_id == account_id:
+                    if self.workspace_id:
+                        if job_workspace_id == self.workspace_id:
+                            if self.telegram_id:
+                                if job_telegram_id == self.telegram_id:
+                                    account_jobs[name] = info
+                            elif job_telegram_id is None:
+                                account_jobs[name] = info
+                    elif job_workspace_id is None:
+                        if self.telegram_id:
+                            if job_telegram_id == self.telegram_id:
+                                account_jobs[name] = info
+                        elif job_telegram_id is None:
+                            account_jobs[name] = info
             
             if not account_jobs:
                 return f"📅 No hay herramientas programadas para tu cuenta."

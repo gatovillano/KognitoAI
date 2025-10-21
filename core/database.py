@@ -82,6 +82,16 @@ Base = declarative_base()
 # SECCIÓN 1: MODELOS DE DATOS (ORM)
 # ==============================================================================
 
+
+# Tabla de asociación para la relación muchos a muchos entre AgendaEvent y Account (para asistentes)
+agenda_event_attendees_association = Table(
+    "agenda_event_attendees_association",
+    Base.metadata,
+    Column("agenda_event_id", Integer, ForeignKey("agenda_events.id"), primary_key=True),
+    Column("account_id", UUID(as_uuid=True), ForeignKey("accounts.id"), primary_key=True)
+)
+
+
 # --- Nuevos Modelos de Identidad Universal ---
 class Account(Base):
     """
@@ -120,6 +130,11 @@ class Account(Base):
     notas = relationship("Nota", back_populates="account", cascade="all, delete-orphan")
     recordatorios = relationship("Recordatorio", back_populates="account", cascade="all, delete-orphan")
     agenda_events = relationship("AgendaEvent", back_populates="account", cascade="all, delete-orphan")
+    agenda_events_attended = relationship( # Nueva relación para eventos a los que asiste
+        "AgendaEvent",
+        secondary=agenda_event_attendees_association,
+        back_populates="attendees"
+    )
     chat_threads = relationship("ChatThread", back_populates="account", cascade="all, delete-orphan")
     proactive_insights = relationship(
         "ProactiveInsight",
@@ -135,6 +150,7 @@ class Account(Base):
     upload_tasks = relationship("UploadTask", back_populates="account", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="account", cascade="all, delete-orphan")
     forms = relationship("Form", back_populates="account", cascade="all, delete-orphan")
+    workspace_permissions = relationship("WorkspacePermission", back_populates="account", cascade="all, delete-orphan") # NUEVA RELACIÓN
 
     def __repr__(self):
         return f"<Account(id={self.id}, name='{self.name}')>"
@@ -176,44 +192,6 @@ class Team(Base):
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
     admin_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, comment="ID del administrador del equipo.")
 
-    # Relaciones
-    admin = relationship("Account", backref="administered_teams")
-    members = relationship("TeamMember", back_populates="team", cascade="all, delete-orphan")
-    notas = relationship("Nota", back_populates="team", cascade="all, delete-orphan")
-    agenda_events = relationship("AgendaEvent", back_populates="team", cascade="all, delete-orphan")
-    # ELIMINADO: La tabla 'Memory' se eliminará, por lo que esta relación ya no es necesaria.
-    # memories = relationship("Memory", back_populates="team", cascade="all, delete-orphan")
-    proactive_insights = relationship("ProactiveInsight", back_populates="team", cascade="all, delete-orphan")
-    # AÑADIDO: Relación con la nueva tabla de temas/colecciones de documentos definidos por el equipo
-    user_document_topics = relationship("UserDocumentTopic", back_populates="team", cascade="all, delete-orphan")
-    tasks = relationship("Task", back_populates="team", cascade="all, delete-orphan")
-
-
-    def __repr__(self):
-        return f"<Team(id={self.id}, name='{self.name}')>"
-
-
-class TeamMember(Base):
-    """
-    Tabla de relación que vincula a los usuarios (accounts) con los equipos (teams).
-    """
-    __tablename__ = "team_members"
-
-    id = Column(Integer, primary_key=True)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False, index=True)
-    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
-    joined_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
-
-    # Relaciones
-    team = relationship("Team", back_populates="members")
-    account = relationship("Account", backref="team_memberships")
-
-    __table_args__ = (UniqueConstraint('team_id', 'account_id', name='_team_account_uc'),)
-
-    def __repr__(self):
-        return f"<TeamMember(team_id={self.team_id}, account_id={self.account_id})>"
-
-
 class Workspace(Base):
     """
     Representa un espacio de trabajo para separar proyectos y lógicas.
@@ -237,9 +215,64 @@ class Workspace(Base):
     user_document_topics = relationship("UserDocumentTopic", back_populates="workspace", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="workspace", cascade="all, delete-orphan")
     agenda_events = relationship("AgendaEvent", back_populates="workspace", cascade="all, delete-orphan")
+    permissions = relationship("WorkspacePermission", back_populates="workspace", cascade="all, delete-orphan") # NUEVA RELACIÓN
 
     def __repr__(self):
         return f"<Workspace(id={self.id}, name='{self.name}')>"
+
+
+class WorkspacePermission(Base):
+    """
+    Gestiona los permisos de acceso de los usuarios a los workspaces.
+    """
+    __tablename__ = "workspace_permissions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=False, index=True)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete='CASCADE'), nullable=False, index=True)
+    role = Column(String(50), nullable=False, comment="Nivel de permiso (owner, editor, viewer).")
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+    # Relaciones
+    workspace = relationship("Workspace", back_populates="permissions")
+    account = relationship("Account", back_populates="workspace_permissions")
+
+    __table_args__ = (
+        UniqueConstraint('workspace_id', 'account_id', name='_workspace_account_permission_uc'),
+        Index('ix_workspace_permission_workspace_id', workspace_id),
+        Index('ix_workspace_permission_account_id', account_id),
+    )
+
+    def __repr__(self):
+        return f"<WorkspacePermission(id={self.id}, workspace_id={self.workspace_id}, account_id={self.account_id}, role='{self.role}')>"
+
+
+class TeamMember(Base):
+    """
+    Representa la membresía de un usuario en un equipo.
+    """
+    __tablename__ = "team_members"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete='CASCADE'), nullable=False, index=True)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete='CASCADE'), nullable=False, index=True)
+    role = Column(String(50), nullable=False, default="member", comment="Rol del miembro en el equipo (ej. admin, member).")
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+    # Relaciones
+    team = relationship("Team", backref="members")
+    account = relationship("Account", backref="team_members")
+
+    __table_args__ = (
+        UniqueConstraint('team_id', 'account_id', name='_team_account_member_uc'),
+        Index('ix_team_member_team_id', team_id),
+        Index('ix_team_member_account_id', account_id),
+    )
+
+    def __repr__(self):
+        return f"<TeamMember(id={self.id}, team_id={self.team_id}, account_id={self.account_id}, role='{self.role}')>"
 
 class LangchainPgCollection(Base):
     """
@@ -278,8 +311,6 @@ class LangchainPgEmbedding(Base):
     workspace_id = Column(UUID(as_uuid=True), nullable=True, index=True) # ⭐ COLUMNA DIRECTA
     topic = Column(String(100), nullable=True) # ⭐ COLUMNA DIRECTA
     category = Column(String(50), nullable=True) # ⭐ COLUMNA DIRECTA
-    team_id = Column(UUID(as_uuid=True), nullable=True, index=True) # ⭐ COLUMNA DIRECTA
-    visibility_teams = Column(JSONB, nullable=True) # ⭐ COLUMNA DIRECTA
     telegram_id = Column(BigInteger, nullable=True, index=True) # ⭐ COLUMNA DIRECTA
     thread_id = Column(UUID(as_uuid=True), nullable=True, index=True) # ⭐ COLUMNA DIRECTA
     text_search_vector = Column(TSVECTOR, nullable=True) # ⭐ COLUMNA DIRECTA para FTS
@@ -288,7 +319,6 @@ class LangchainPgEmbedding(Base):
     __table_args__ = (
         Index('idx_langchain_pg_embedding_account_id', account_id),
         Index('idx_langchain_pg_embedding_workspace_id', workspace_id),
-        Index('idx_langchain_pg_embedding_team_id', team_id),
         Index('ix_cmetadata_gin', cmetadata, postgresql_using="gin"),
     )
 
@@ -324,7 +354,6 @@ class UserDocumentTopic(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=True, index=True)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete='CASCADE'), nullable=True, index=True) # Opcional: si las colecciones pueden ser de equipo
 
     name = Column(String(255), nullable=False, comment="El nombre del tema/colección (corresponde al 'topic' en cmetadata).")
     description = Column(Text, nullable=True, comment="Descripción opcional de la colección.")
@@ -334,7 +363,6 @@ class UserDocumentTopic(Base):
     # Relaciones
     account = relationship("Account", back_populates="user_document_topics")
     workspace = relationship("Workspace", back_populates="user_document_topics")
-    team = relationship("Team", back_populates="user_document_topics") # Si se añade team_id
 
     contact_profiles = relationship(
         "ContactProfile",
@@ -342,11 +370,10 @@ class UserDocumentTopic(Base):
         back_populates="user_document_topics"
     )
 
-    # Restricciones para asegurar que un usuario/workspace/equipo no tenga dos colecciones con el mismo nombre
+    # Restricciones para asegurar que un usuario/workspace no tenga dos colecciones con el mismo nombre
     __table_args__ = (
         Index('ix_account_workspace_topic', 'account_id', 'workspace_id', 'name', unique=True, postgresql_where=text("workspace_id IS NOT NULL")),
-        Index('ix_account_team_topic', 'account_id', 'team_id', 'name', unique=True, postgresql_where=text("team_id IS NOT NULL")),
-        Index('ix_account_personal_topic', 'account_id', 'name', unique=True, postgresql_where=text("workspace_id IS NULL AND team_id IS NULL")),
+        Index('ix_account_personal_topic', 'account_id', 'name', unique=True, postgresql_where=text("workspace_id IS NULL")),
     )
 
     def __repr__(self):
@@ -521,7 +548,6 @@ class Nota(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     # Refactorizado: Se vincula a account_id
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True, index=True)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=True, index=True)
     
     title = Column(String, nullable=True)
@@ -538,7 +564,6 @@ class Nota(Base):
     )
 
     account = relationship("Account", back_populates="notas")
-    team = relationship("Team", back_populates="notas")
     workspace = relationship("Workspace", backref="notas")
 
     def __repr__(self):
@@ -607,14 +632,13 @@ class AgendaEvent(Base):
 
     id = Column(Integer, primary_key=True)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True, index=True)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=True, index=True)
-    description = Column(String, nullable=False)
+    summary = Column(String, nullable=False, comment="Resumen conciso del evento.")
+    description = Column(Text, nullable=True, comment="Descripción detallada del evento.")
+    location = Column(String(255), nullable=True, comment="Ubicación del evento.")
     event_datetime_utc = Column(DateTime(timezone=True), nullable=False)
-    
-    # CORREGIDO: Añadimos la columna 'is_active' que faltaba.
+    external_attendees = Column(ARRAY(String), nullable=True, comment="Nombres de asistentes no registrados.")
     is_active = Column(Boolean, default=True, nullable=False)
-    
     job_name = Column(String, nullable=True, unique=True) # Para poder cancelar los jobs de Telegram
 
     contact_profiles = relationship(
@@ -622,34 +646,42 @@ class AgendaEvent(Base):
         secondary="agenda_event_contact_profiles_association",
         back_populates="agenda_events"
     )
+    
+    attendees = relationship(
+        "Account",
+        secondary=agenda_event_attendees_association,
+        back_populates="agenda_events_attended"
+    )
 
     account = relationship("Account", back_populates="agenda_events")
-    team = relationship("Team", back_populates="agenda_events")
     workspace = relationship("Workspace", back_populates="agenda_events")
 
     def to_dict(self, timezone_str: str | None = "UTC") -> Dict[str, Any]:
         """Convierte el objeto a un diccionario para su uso en APIs."""
         user_tz = pytz.timezone(timezone_str) if timezone_str else pytz.utc
-        local_datetime = self.event_datetime_utc.astimezone(user_tz);
+        local_datetime = self.event_datetime_utc.astimezone(user_tz)
         
         workspace_name = None
         workspace_color = None
-        if self.workspace: # workspace relationship is now always loaded
+        if self.workspace:
             workspace_name = self.workspace.name
             workspace_color = self.workspace.color
 
         return {
             "id": self.id,
             "account_id": str(self.account_id),
-            "team_id": str(self.team_id) if self.team_id else None, # type: ignore
             "workspace_id": str(self.workspace_id) if self.workspace_id else None,
-            "workspace_name": workspace_name, # NEW
-            "workspace_color": workspace_color, # NEW
+            "workspace_name": workspace_name,
+            "workspace_color": workspace_color,
+            "summary": self.summary,
             "description": self.description,
+            "location": self.location,
             "event_datetime_utc": self.event_datetime_utc.isoformat(),
             "event_datetime_local": local_datetime.isoformat(),
             "user_timezone": str(user_tz),
-            "is_active": self.is_active
+            "is_active": self.is_active,
+            "attendees": [str(att.id) for att in self.attendees],
+            "external_attendees": self.external_attendees if self.external_attendees else []
         }
 
 
@@ -677,6 +709,9 @@ class AgendaEventContactProfileAssociation(Base):
 
     def __repr__(self):
         return f"<AgendaEventContactProfileAssociation(agenda_event_id={self.agenda_event_id}, contact_profile_id={self.contact_profile_id})>"
+
+
+
 
 
 class Recordatorio(Base):
@@ -717,7 +752,6 @@ class ProactiveInsight(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True, index=True)
     type = Column(String(50), nullable=False)
     insight_message = Column(Text, nullable=False)
     confidence_score = Column(Float, nullable=False)
@@ -726,7 +760,6 @@ class ProactiveInsight(Base):
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False)
 
     account = relationship("Account", back_populates="proactive_insights")
-    team = relationship("Team", back_populates="proactive_insights")
 
 
 class VerificationCode(Base):
@@ -839,14 +872,13 @@ class Task(Base):
     """
 
     Representa una tarea en el sistema, que puede estar asociada a una cuenta,
-    un espacio de trabajo o un equipo.
+    o un espacio de trabajo.
     """
     __tablename__ = "tasks"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), index=True, nullable=False)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), index=True, nullable=True)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), index=True, nullable=True)
     
     description = Column(Text, nullable=False)
     is_completed = Column(Boolean, default=False, nullable=False)
@@ -858,7 +890,6 @@ class Task(Base):
     # Relaciones
     account = relationship("Account", back_populates="tasks")
     workspace = relationship("Workspace", back_populates="tasks")
-    team = relationship("Team", back_populates="tasks")
 
     contact_profiles = relationship(
         "ContactProfile",

@@ -107,7 +107,7 @@ export function MonthlyScheduleView({
                     style={{ backgroundColor: event.workspace_color || '#DBEAFE' }} // bg-blue-100
                     onClick={() => onEditEvent(event as AgendaEvent)}
                   >
-                    <p className="font-semibold truncate">{event.description}</p>
+                    <p className="font-semibold truncate">{event.summary}</p>
                     {'event_datetime_local' in event && (
                       <div className="flex items-center mt-1">
                         <Clock className="h-3 w-3 mr-1" />

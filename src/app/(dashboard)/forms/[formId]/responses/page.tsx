@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ArrowLeft, Loader2, Table as TableIcon, BarChart, Link, Trash2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Table as TableIcon, BarChart, Link, Trash2, Download } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import apiClient from '@/lib/api';
 import { toast as sonnerToast } from 'sonner';
@@ -79,6 +79,27 @@ export default function FormResponsesPage() {
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [showLinkProfileDialog, setShowLinkProfileDialog] = useState(false);
   const [currentResponseToLink, setCurrentResponseToLink] = useState<FormResponse | null>(null);
+
+  const handleDownloadPdf = async (responseId: string) => {
+    try {
+      const response = await apiClient.get(`/api/form-responses/${responseId}/pdf`, {
+        responseType: 'blob', // Important: receive as a blob
+      });
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `respuesta_${responseId.substring(0, 8)}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      sonnerToast.success('PDF de la respuesta descargado exitosamente.');
+    } catch (error) {
+      console.error('Error al descargar el PDF de la respuesta:', error);
+      sonnerToast.error('Error al descargar el PDF de la respuesta.');
+    }
+  };
 
   const handleDeleteResponse = async (responseId: string) => {
     try {
@@ -279,6 +300,7 @@ export default function FormResponsesPage() {
                                           <TableHead key={field.id}>{field.label}</TableHead>
                                         ))}
                                         <TableHead>Acciones</TableHead>
+                                        <TableHead>Descargar</TableHead>
                                       </TableRow>
                                     </TableHeader>
                                     <TableBody>
@@ -347,6 +369,15 @@ export default function FormResponsesPage() {
                                                   </DialogFooter>
                                                 </DialogContent>
                                               </Dialog>
+                                            </TableCell>
+                                            <TableCell>
+                                              <Button
+                                                variant="outline"
+                                                size="icon"
+                                                onClick={() => handleDownloadPdf(response.id)}
+                                              >
+                                                <Download className="h-4 w-4" />
+                                              </Button>
                                             </TableCell>
                                           </TableRow>
                                         );

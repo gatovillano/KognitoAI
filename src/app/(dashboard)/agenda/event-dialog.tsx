@@ -16,11 +16,15 @@ import { AgendaEvent } from './page';
 
 // Schema actualizado para campos específicos
 const formSchema = z.object({
-  description: z.string().min(3, "La descripción es muy corta."),
+  summary: z.string().min(3, "El título es muy corto."),
+  description: z.string().optional(),
+  location: z.string().optional(),
   date: z.string().min(1, "Debes seleccionar una fecha."),
   time: z.string().min(1, "Debes especificar una hora."),
-  team_id: z.string().optional(), // Optional field for sharing with a team
-  workspace_id: z.string().optional(), // New field for workspace
+  attendee_ids: z.array(z.string()).optional(), // Asistentes registrados (UUIDs)
+  external_attendees: z.array(z.string()).optional(), // Asistentes externos (nombres)
+  team_id: z.string().optional(),
+  workspace_id: z.string().optional(),
 });
 
 interface EventDialogProps {
@@ -40,9 +44,13 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      summary: '',
       description: '',
+      location: '',
       date: '',
       time: '',
+      attendee_ids: [],
+      external_attendees: [],
       team_id: '',
       workspace_id: '',
     },
@@ -80,15 +88,20 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
       if (event) {
         const eventDateTime = new Date(event.event_datetime_utc);
         form.reset({
-          description: event.description,
+          summary: event.summary || '',
+          description: event.description || '',
+          location: event.location || '',
           date: eventDateTime.toLocaleDateString('en-CA'), // 'en-CA' para formato YYYY-MM-DD
           time: eventDateTime.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          attendee_ids: event.attendees ? event.attendees.map(String) : [],
+          external_attendees: event.external_attendees || [],
           team_id: (typeof event.team_shared === 'string' ? event.team_shared : '') || '',
           // workspace_id se establecerá en un useEffect separado
         });
         console.log("Formulario reseteado para edición (sin workspace_id inicial).");
       } else {
         form.reset({
+          summary: '',
           description: '',
           date: '',
           time: '',
@@ -115,23 +128,24 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
     try {
       let response;
       if (event) {
-        const localDateTime = new Date(`${values.date}T${values.time}:00`); // Crear un objeto Date con la hora local
-        const eventDateTimeUTC = localDateTime.toISOString(); // Convertir a ISO 8601 (UTC)
-
         response = await apiClient.put(`/api/agenda/events/${event.id}`, {
           description: values.description,
-          event_datetime: eventDateTimeUTC, // Enviar la hora en formato ISO 8601 (UTC)
-          team_id: values.team_id ? parseInt(values.team_id) : null,
+          location: values.location,
+          event_date: values.date,
+          event_time: values.time,
+          attendee_ids: values.attendee_ids,
+          external_attendees: values.external_attendees,
           workspace_id: values.workspace_id || null,
         });
       } else {
-        const localDateTime = new Date(`${values.date}T${values.time}:00`); // Crear un objeto Date con la hora local
-        const eventDateTimeUTC = localDateTime.toISOString(); // Convertir a ISO 8601 (UTC)
-
         response = await apiClient.post('/api/add-event', {
+          summary: values.summary,
           description: values.description,
+          location: values.location,
           event_date: values.date,
           event_time: values.time,
+          attendee_ids: values.attendee_ids,
+          external_attendees: values.external_attendees,
           workspace_id: values.workspace_id || null,
         });
       }
@@ -154,8 +168,20 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <FormField control={form.control} name="summary" render={({ field }) => (
+              <FormItem><FormLabel>Título</FormLabel><FormControl><Input placeholder="Reunión de equipo..." {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
             <FormField control={form.control} name="description" render={({ field }) => (
-              <FormItem><FormLabel>Descripción</FormLabel><FormControl><Input placeholder="Reunión de equipo..." {...field} /></FormControl><FormMessage /></FormItem>
+              <FormItem><FormLabel>Descripción</FormLabel><FormControl><Input placeholder="Detalles de la reunión..." {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
+            <FormField control={form.control} name="location" render={({ field }) => (
+              <FormItem><FormLabel>Ubicación</FormLabel><FormControl><Input placeholder="Oficina, Sala de Juntas, Enlace de Zoom..." {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
+            <FormField control={form.control} name="attendee_ids" render={({ field }) => (
+              <FormItem><FormLabel>IDs de Asistentes (separados por comas)</FormLabel><FormControl><Input placeholder="uuid1, uuid2..." {...field} value={field.value ? field.value.join(', ') : ''} onChange={e => field.onChange(e.target.value.split(',').map(s => s.trim()).filter(Boolean))} /></FormControl><FormMessage /></FormItem>
+            )} />
+            <FormField control={form.control} name="external_attendees" render={({ field }) => (
+              <FormItem><FormLabel>Asistentes Externos (nombres separados por comas)</FormLabel><FormControl><Input placeholder="Juan Pérez, María García..." {...field} value={field.value ? field.value.join(', ') : ''} onChange={e => field.onChange(e.target.value.split(',').map(s => s.trim()).filter(Boolean))} /></FormControl><FormMessage /></FormItem>
             )} />
             <div className="grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="date" render={({ field }) => (

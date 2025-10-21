@@ -68,7 +68,7 @@ from tools.knowledge_search_tool import KnowledgeSearchTool
 from tools.mindmap_generator_tool import MindmapGeneratorTool
 from tools.multi_query_search_tool import MultiQuerySearchTool
 from tools.natural_query_interpreter_tool import NaturalQueryInterpreterTool
-from tools.proactive_knowledge_linker_tool import ProactiveKnowledgeLinkerTool
+
 from tools.schedule_event_tool import ScheduleEventTool
 from tools.scoped_rag_analysis_tool import ScopedRagAnalysisTool
 from tools.set_reminder_tool import SetReminderTool
@@ -114,7 +114,6 @@ tool_classes_to_instantiate = [
     MindmapGeneratorTool,
     MultiQuerySearchTool,
     NaturalQueryInterpreterTool,
-    ProactiveKnowledgeLinkerTool,
     ScheduleEventTool,
     ScopedRagAnalysisTool,
     SearchNotesTool,
@@ -208,7 +207,6 @@ def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = None, 
                     "ListScheduledToolsTool",
                     
                     "NaturalQueryInterpreterTool",
-                    "ProactiveKnowledgeLinkerTool",
                     "GetProactiveInsightsTool",
                     "MindmapGeneratorTool",
                     "ConversationHistoryAnalyzerTool",
