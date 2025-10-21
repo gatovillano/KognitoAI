@@ -19,9 +19,11 @@ from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 
 from core.config import settings
-from core.database import get_db_session, Account # Importar Account y get_db_session
+from core.database import get_db_session, Account, Workspace, WorkspacePermission # Importar WorkspacePermission
 from sqlalchemy.ext.asyncio import AsyncSession # Importar AsyncSession
 from sqlalchemy import select # Importar select
+import uuid # Importar uuid
+from typing import List # Importar List
 
 logger = logging.getLogger(__name__)
 
@@ -232,3 +234,32 @@ async def get_current_user(
     except Exception as e:
         logger.error(f"Error obteniendo información del usuario: {e}")
         raise credentials_exception
+import uuid # Importar uuid
+
+async def check_workspace_permission(
+    account_id: str,
+    workspace_id: str,
+    db: AsyncSession,
+    required_roles: List[str]
+) -> bool:
+    """
+    Verifica si el account_id tiene los permisos requeridos para acceder al workspace_id.
+    """
+    if not workspace_id:
+        return False # No se puede verificar el permiso sin un workspace_id
+
+    stmt = select(WorkspacePermission).where(
+        WorkspacePermission.account_id == uuid.UUID(account_id),
+        WorkspacePermission.workspace_id == uuid.UUID(workspace_id)
+    )
+    result = await db.execute(stmt)
+    permission = result.scalar_one_or_none()
+
+    if not permission or permission.role not in required_roles:
+        logger.warning(f"Permiso denegado para account {account_id} en workspace {workspace_id} con roles {required_roles}. Rol actual: {permission.role if permission else 'N/A'}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permiso denegado. No tienes acceso a este workspace o tu rol no es el adecuado."
+        )
+    logger.info(f"Permiso concedido para account {account_id} en workspace {workspace_id} con rol {permission.role}.")
+    return True

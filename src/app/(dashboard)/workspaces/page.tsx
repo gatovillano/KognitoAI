@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Plus, Bot, Info } from 'lucide-react';
+import { Plus, Bot, Info, Share2 } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { WorkspaceDialog } from './workspace-dialog';
+import ShareWorkspaceDialog from './ShareWorkspaceDialog'; // Importar el nuevo componente
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 
@@ -15,6 +16,7 @@ interface Workspace {
   name: string;
   system_prompt: string | null;
   color: string | null;
+  role: string;
 }
 
 interface PaginatedWorkspacesResponse {
@@ -26,6 +28,8 @@ export default function WorkspacesPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedWorkspace, setSelectedWorkspace] = useState<Workspace | null>(null);
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false); // Estado para el diálogo de compartir
+  const [selectedWorkspaceForShare, setSelectedWorkspaceForShare] = useState<{ id: string; name: string } | null>(null); // Estado para el workspace a compartir
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(9); // Puedes ajustar esto según tus necesidades
   const [totalPages, setTotalPages] = useState(0);
@@ -144,10 +148,10 @@ export default function WorkspacesPage() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                         </svg>
                       </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="h-8 w-8 p-0 hover:bg-destructive hover:text-destructive-foreground" 
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0 hover:bg-destructive hover:text-destructive-foreground"
                         onClick={(e) => { e.stopPropagation(); handleDelete(workspace.id); }}
                         title="Eliminar workspace"
                       >
@@ -155,6 +159,21 @@ export default function WorkspacesPage() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                         </svg>
                       </Button>
+                      {(workspace.role === 'owner' || workspace.role === 'editor') && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 hover:bg-muted"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedWorkspaceForShare({ id: workspace.id, name: workspace.name });
+                            setIsShareDialogOpen(true);
+                          }}
+                          title="Compartir workspace"
+                        >
+                          <Share2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   </CardTitle>
                 </CardHeader>
@@ -215,6 +234,16 @@ export default function WorkspacesPage() {
         onSuccess={fetchWorkspaces}
         workspace={selectedWorkspace}
       />
+
+      {selectedWorkspaceForShare && (
+        <ShareWorkspaceDialog
+          isOpen={isShareDialogOpen}
+          onClose={() => setIsShareDialogOpen(false)}
+          workspaceId={selectedWorkspaceForShare.id}
+          workspaceName={selectedWorkspaceForShare.name}
+          onPermissionsUpdated={fetchWorkspaces} // Recargar la lista de workspaces después de actualizar permisos
+        />
+      )}
     </div>
   );
 }

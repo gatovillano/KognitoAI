@@ -142,6 +142,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [isComprehensiveAnalysisActive, setIsComprehensiveAnalysisActive] = useState(false);
   const [isDeepResearchActive, setIsDeepResearchActive] = useState(false);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [uploadedImage, setUploadedImage] = useState<{ preview: string; base64: string } | null>(null);
   const [backgroundTasks, setBackgroundTasks] = useState<{ taskId: string; type: string }[]>([]);
   const [isProcessingAudio, setIsProcessingAudio] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -150,10 +152,11 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [selectedContext, setSelectedContext] = useState<SelectedContextItem[]>([]);
   const [toolName, setToolName] = useState<string | undefined>(undefined);
   const [reactState, setReactState] = useState<string | undefined>(undefined);
-  const [streamingMessages, setStreamingMessages] = useState<{ [taskId: string]: ChatMessageType }>({});
+  const [recordingMimeType, setRecordingMimeType] = useState<string>('');
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
   const audioStreamRef = useRef<MediaStream | null>(null); // Para almacenar el stream del micrófono
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null); // Para almacenar la instancia del objeto Audio
   const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
   const [isAudioPaused, setIsAudioPaused] = useState(false);
@@ -202,147 +205,127 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       return;
     }
 
-    switch (type) {
-      case 'stream_start': // Renombrado de llm_start
-        setIsResponding(true);
-        setIsThinking(true);
+    setMessages(prevMessages => {
+        let updatedMessages = [...prevMessages];
+        let messageIndex = -1;
         if (taskId) {
-          setStreamingMessages((prev) => ({
-            ...prev,
-            [taskId]: {
-              text: '',
-              sender: 'ai',
-              created_at: new Date().toISOString(),
-              sources: [],
-              chunks: [],
-            },
-          }));
+            messageIndex = updatedMessages.findIndex(msg => msg.taskId === taskId);
         }
-        break;
 
-      case 'stream_chunk': // Renombrado de llm_chunk
-        console.log(`Stream Chunk recibido:`, data);
-        setIsThinking(false);
-        if (toolNameRef.current) {
-          setToolName(undefined);
-          setReactState(undefined);
-        }
-        if (taskId && (data.chunk || data.content)) {
-          setStreamingMessages((prev) => {
-            const existingMessage = prev[taskId];
-            if (existingMessage) {
-              const newText = existingMessage.text + (data.chunk || data.content);
-              return {
-                ...prev,
-                [taskId]: {
-                  ...existingMessage,
-                  text: newText,
-                  chunks: [...(existingMessage.chunks || []), data.chunk],
-                },
-              };
-            }
-            return prev;
-          });
-        }
-        requestAnimationFrame(() => scrollToBottom(true));
-        break;
+        switch (type) {
+            case 'stream_start':
+                setIsResponding(true);
+                setIsThinking(true);
+                if (taskId && messageIndex === -1) { // Solo añadir si no existe ya
+                    updatedMessages.push({
+                        text: '',
+                        sender: 'ai',
+                        created_at: new Date().toISOString(),
+                        sources: [],
+                        chunks: [],
+                        taskId: taskId, // Añadir taskId al mensaje
+                    });
+                }
+                break;
 
-      case 'stream_end': // Renombrado de llm_end
-        console.log(`Stream finalizado. thread_id="${data.thread_id}", task_id="${taskId}"`);
-        setIsResponding(false);
-        setIsThinking(false);
-        if (taskId) {
-          const messageToMove = streamingMessages[taskId];
-          if (messageToMove) {
-            setMessages(prev => [...prev, { ...messageToMove, chunks: undefined }]);
-            setStreamingMessages(prev => {
-                const newStreamingState = { ...prev };
-                delete newStreamingState[taskId];
-                return newStreamingState;
-            });
-          }
-        }
-        break;
+            case 'stream_chunk':
+                setIsThinking(false);
+                if (toolNameRef.current) {
+                    setToolName(undefined);
+                    setReactState(undefined);
+                }
+                if (taskId && (data.chunk || data.content) && messageIndex !== -1) {
+                    const existingMessage = updatedMessages[messageIndex];
+                    const newText = existingMessage.text + (data.chunk || data.content);
+                    updatedMessages[messageIndex] = {
+                        ...existingMessage,
+                        text: newText,
+                        chunks: [...(existingMessage.chunks || []), data.chunk],
+                    };
+                }
+                requestAnimationFrame(() => scrollToBottom(true));
+                break;
 
-      case 'tool_start': // Renombrado de tool_status (start)
-        const toolStartMessage = data as ToolStatusMessage;
-        setToolName(toolStartMessage.tool_name);
-        setReactState('ejecutando');
-        if (toolStartMessage.task_id) {
-          setBackgroundTasks((prev) => {
-            const currentTaskId = toolStartMessage.task_id as string;
-            return prev.some((task) => task.taskId === currentTaskId) ? prev : [...prev, { taskId: currentTaskId, type: toolStartMessage.tool_name }];
-          });
-          toast.info(`Iniciando ${toolStartMessage.tool_name || 'una herramienta'}...`, {
-            description: toolStartMessage.message || "La tarea ha comenzado en segundo plano.",
-            duration: 3000,
-          });
-          setStreamingMessages((prev) => ({
-            ...prev,
-            [toolStartMessage.task_id!]: {
-              text: `Usando herramienta: ${toolStartMessage.tool_name || 'desconocida'}...`,
-              sender: 'ai',
-              created_at: new Date().toISOString(),
-              sources: [],
-              tool_code: undefined,
-            },
-          }));
-        }
-        break;
+            case 'stream_end':
+                console.log(`Stream finalizado. thread_id="${data.thread_id}", task_id="${taskId}"`);
+                setIsResponding(false);
+                setIsThinking(false);
+                if (taskId && messageIndex !== -1) {
+                    const finalMessage = updatedMessages[messageIndex];
+                    updatedMessages[messageIndex] = {
+                        ...finalMessage,
+                        chunks: undefined, // Eliminar chunks una vez finalizado
+                        taskId: undefined, // Eliminar taskId una vez finalizado
+                    };
+                }
+                break;
 
-      case 'tool_end': // Renombrado de tool_status (end/error)
-        const toolEndMessage = data as ToolStatusMessage;
-        setToolName(undefined);
-        setReactState(undefined);
-        if (toolEndMessage.task_id) {
-          setBackgroundTasks((prev) => prev.filter((t) => t.taskId !== toolEndMessage.task_id));
-          setStreamingMessages((prev) => {
-            const finalToolMessage = prev[toolEndMessage.task_id!];
-            if (finalToolMessage) {
-              const updatedMessage = {
-                ...finalToolMessage,
-                text: toolEndMessage.status === 'end' ? toolEndMessage.result || `Herramienta ${toolEndMessage.tool_name} finalizada.` : `Error en herramienta ${toolEndMessage.tool_name}: ${toolEndMessage.error || "Error desconocido."}`,
-                sources: toolEndMessage.sources || [],
-              };
-              setMessages((prevMessages) => [...prevMessages, updatedMessage]);
-              const newStreamingMessages = { ...prev };
-              delete newStreamingMessages[toolEndMessage.task_id!];
-              return newStreamingMessages;
-            }
-            return prev;
-          });
-        }
-        toast[toolEndMessage.status === 'end' ? 'success' : 'error'](`Herramienta ${toolEndMessage.tool_name || 'una herramienta'} ${toolEndMessage.status === 'end' ? 'completada' : 'falló'}.`);
-        break;
+            case 'tool_start':
+                const toolStartMessage = data as ToolStatusMessage;
+                setToolName(toolStartMessage.tool_name);
+                setReactState('ejecutando');
+                if (toolStartMessage.task_id && messageIndex === -1) {
+                    setBackgroundTasks((prev) => {
+                        const currentTaskId = toolStartMessage.task_id as string;
+                        return prev.some((task) => task.taskId === currentTaskId) ? prev : [...prev, { taskId: currentTaskId, type: toolStartMessage.tool_name }];
+                    });
+                    toast.info(`Iniciando ${toolStartMessage.tool_name || 'una herramienta'}...`, {
+                        description: toolStartMessage.message || "La tarea ha comenzado en segundo plano.",
+                        duration: 3000,
+                    });
+                    updatedMessages.push({
+                        text: `Usando herramienta: ${toolStartMessage.tool_name || 'desconocida'}...`,
+                        sender: 'ai',
+                        created_at: new Date().toISOString(),
+                        sources: [],
+                        tool_code: undefined,
+                        taskId: toolStartMessage.task_id, // Añadir taskId al mensaje de herramienta
+                    });
+                }
+                break;
 
-      case 'tool_code':
-        if (taskId && data.tool_code) {
-          setStreamingMessages((prev) => {
-            const existingMessage = prev[taskId];
-            if (existingMessage) {
-              return {
-                ...prev,
-                [taskId]: {
-                  ...existingMessage,
-                  tool_code: data.tool_code,
-                },
-              };
-            }
-            return prev;
-          });
-        }
-        break;
+            case 'tool_end':
+                const toolEndMessage = data as ToolStatusMessage;
+                setToolName(undefined);
+                setReactState(undefined);
+                if (toolEndMessage.task_id) {
+                    setBackgroundTasks((prev) => prev.filter((t) => t.taskId !== toolEndMessage.task_id));
+                    const toolMessageIndex = updatedMessages.findIndex(msg => msg.taskId === toolEndMessage.task_id);
+                    if (toolMessageIndex !== -1) {
+                        const finalToolMessage = updatedMessages[toolMessageIndex];
+                        updatedMessages[toolMessageIndex] = {
+                            ...finalToolMessage,
+                            text: toolEndMessage.status === 'end' ? toolEndMessage.result || `Herramienta ${toolEndMessage.tool_name} finalizada.` : `Error en herramienta ${toolEndMessage.tool_name}: ${toolEndMessage.error || "Error desconocido."}`,
+                            sources: toolEndMessage.sources || [],
+                            taskId: undefined, // Eliminar taskId una vez finalizado
+                        };
+                    }
+                }
+                toast[toolEndMessage.status === 'end' ? 'success' : 'error'](`Herramienta ${toolEndMessage.tool_name || 'una herramienta'} ${toolEndMessage.status === 'end' ? 'completada' : 'falló'}.`);
+                break;
 
-      default:
-        console.log('[CommonChat] Unhandled message type:', type);
-    }
-  }, [latestMessage, scrollToBottom]);
+            case 'tool_code':
+                if (taskId && data.tool_code && messageIndex !== -1) {
+                    const existingMessage = updatedMessages[messageIndex];
+                    updatedMessages[messageIndex] = {
+                        ...existingMessage,
+                        tool_code: data.tool_code,
+                    };
+                }
+                break;
+
+            default:
+                console.log('[CommonChat] Unhandled message type:', type);
+        }
+        return updatedMessages;
+    });
+}, [latestMessage, scrollToBottom, threadIdRef, toolNameRef]);
 
   const handleSendMessage = useCallback(
     async (e?: React.FormEvent, messageTextFromInput?: string) => {
       if (e) e.preventDefault();
       const messageToProcess = messageTextFromInput || newMessageRef.current;
-      if ((!messageToProcess.trim() && selectedContext.length === 0) || isRespondingRef.current) return;
+      if ((!messageToProcess.trim() && selectedContext.length === 0 && !uploadedImage) || isRespondingRef.current) return;
 
       if (!user?.id) {
         toast.error('Error: Usuario no autenticado.');
@@ -363,6 +346,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           if (selectedContext.length > 0) {
             formData.append('rag_context', JSON.stringify(selectedContext.map(item => ({ type: item.type, id: item.id }))));
           }
+          if (uploadedImage) {
+            formData.append('image_base64', uploadedImage.base64);
+          }
           await apiClient.post('/api/chat', formData); // CORRECTED ENDPOINT
 
           const newSearchParams = new URLSearchParams();
@@ -376,6 +362,10 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           setIsResponding(false);
         }
         setNewMessage('');
+        if (uploadedImage) {
+            URL.revokeObjectURL(uploadedImage.preview);
+            setUploadedImage(null);
+        }
         return;
       }
 
@@ -384,10 +374,15 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         sender: 'user',
         created_at: new Date().toISOString(),
         ragContext: selectedContext,
+        image_base64: uploadedImage?.base64,
       };
       setMessages((prev) => [...prev, userMessage]);
       requestAnimationFrame(() => scrollToBottom(true));
       setNewMessage('');
+      if (uploadedImage) {
+        URL.revokeObjectURL(uploadedImage.preview);
+        setUploadedImage(null);
+      }
       setIsResponding(true);
 
       try {
@@ -398,21 +393,15 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         if (selectedContext.length > 0) {
           formData.append('rag_context', JSON.stringify(selectedContext.map(item => ({ type: item.type, id: item.id }))));
         }
+        if (uploadedImage) {
+            formData.append('image_base64', uploadedImage.base64);
+        }
         const response = await apiClient.post('/api/chat', formData); // CORRECTED ENDPOINT
         const responseTaskId = response.data?.taskId; // Captura el taskId de la respuesta
 
         if (responseTaskId) {
           // Opcional: inicializar un mensaje de streaming si el backend no envía stream_start inmediatamente
-          setStreamingMessages((prev) => ({
-            ...prev,
-            [responseTaskId]: {
-              text: '',
-              sender: 'ai',
-              created_at: new Date().toISOString(),
-              sources: [],
-              chunks: [],
-            },
-          }));
+          // Ya no es necesario inicializar aquí, se maneja en stream_start dentro del useEffect de latestMessage
         }
 
       } catch (error: any) {
@@ -421,8 +410,44 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         setIsResponding(false);
       }
     },
-    [user, threadId, selectedContext, router, scrollToBottom, setNewMessage]
+    [user, threadId, selectedContext, router, scrollToBottom, setNewMessage, uploadedImage]
   );
+
+  const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingImage(true);
+    toast.info(`Cargando imagen: ${file.name}`);
+
+    try {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const base64String = reader.result as string;
+            setUploadedImage({
+                preview: URL.createObjectURL(file),
+                base64: base64String,
+            });
+            setIsUploadingImage(false);
+            toast.success(`Imagen '${file.name}' lista para enviar.`);
+        };
+        reader.onerror = () => {
+            toast.error("Error al leer el archivo de imagen.");
+            setIsUploadingImage(false);
+        };
+        reader.readAsDataURL(file);
+    } catch (error) {
+        toast.error("Error al procesar la imagen.");
+        setIsUploadingImage(false);
+    }
+  }, []);
+
+  const handleRemoveImage = useCallback(() => {
+      if (uploadedImage) {
+          URL.revokeObjectURL(uploadedImage.preview);
+          setUploadedImage(null);
+      }
+  }, [uploadedImage]);
 
   const handleStartRecording = useCallback(async () => {
     try {
@@ -430,7 +455,23 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       console.log('DEBUG: Acceso al micrófono concedido.');
       audioStreamRef.current = stream;
-      const recorder = new MediaRecorder(stream);
+      
+      const mimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/ogg',
+      ];
+      const supportedMimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type));
+
+      if (!supportedMimeType) {
+        toast.error('Tu navegador no soporta los formatos de audio necesarios para la grabación.');
+        return;
+      }
+      
+      setRecordingMimeType(supportedMimeType); // Guardar el mime type en el estado
+      console.log(`DEBUG: Usando el tipo de MIME soportado: ${supportedMimeType}`);
+      const recorder = new MediaRecorder(stream, { mimeType: supportedMimeType });
       let localAudioChunks: Blob[] = [];
 
       recorder.ondataavailable = (event) => {
@@ -442,20 +483,24 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
       recorder.onstop = async () => {
         console.log('DEBUG: MediaRecorder onstop event fired.');
+        const mimeType = recorder.mimeType;
+        console.log(`DEBUG: Mime type obtenido del MediaRecorder: ${mimeType}`);
+
         setIsRecording(false);
         setIsProcessingAudio(true);
         toast.info('Deteniendo grabación de audio y procesando...');
 
         if (localAudioChunks.length > 0) {
-          const audioBlob = new Blob(localAudioChunks, { type: 'audio/webm' });
+          const audioBlob = new Blob(localAudioChunks, { type: mimeType });
           if (audioBlob.size === 0) {
             toast.error('El audio grabado está vacío. Intenta de nuevo.');
             setIsProcessingAudio(false);
             return;
           }
 
+          const fileExtension = mimeType.split('/')[1].split(';')[0] || 'webm';
           const formData = new FormData();
-          formData.append('file', audioBlob, 'audio.webm');
+          formData.append('file', audioBlob, `audio.${fileExtension}`);
 
           try {
             const response = await apiClient.post('/api/transcribe-audio', formData, {
@@ -485,7 +530,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       toast.error('No se pudo acceder al micrófono. Asegúrate de dar permisos.');
       setIsRecording(false);
     }
-  }, []); // Se eliminan las dependencias para que el closure no sea un problema
+  }, [setRecordingMimeType, setMediaRecorder, setIsRecording, setIsProcessingAudio, setNewMessage]); // Se añaden las dependencias para evitar closures viciados
 
   const handleStopRecording = useCallback(async () => {
     if (mediaRecorder && mediaRecorder.state === 'recording') {
@@ -530,19 +575,30 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const handlePlayAudio = useCallback(async (text: string, index: number) => {
     if (isAudioLoading) return;
 
-    if (playingMessageIndex === index && !isAudioPaused) {
-      // Pausar si ya está reproduciendo este mensaje
-      setIsAudioPaused(true);
-      setPlayingMessageIndex(null);
-      // Aquí podrías pausar el audio si tuvieras una referencia al AudioContext o AudioElement
-      return;
+    // Si se hace clic en el mismo mensaje que ya está reproduciéndose o pausado
+    if (playingMessageIndex === index) {
+      if (currentAudioRef.current) {
+        if (isAudioPaused) {
+          // Si estaba pausado, reanudar
+          currentAudioRef.current.play();
+          setIsAudioPaused(false);
+          toast.success('Reanudando audio.');
+        } else {
+          // Si estaba reproduciéndose, pausar
+          currentAudioRef.current.pause();
+          setIsAudioPaused(true);
+          toast.info('Audio pausado.');
+        }
+      }
+      return; // No hacer nada más, ya se manejó la pausa/reanudación
     }
 
-    if (playingMessageIndex !== null) {
-      // Detener el audio anterior si hay uno reproduciéndose
-      setPlayingMessageIndex(null);
-      setIsAudioPaused(false);
-      // Lógica para detener el audio anterior
+    // Si se hace clic en un mensaje diferente mientras otro está reproduciéndose
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current.currentTime = 0; // Reiniciar el audio anterior
+      URL.revokeObjectURL(currentAudioRef.current.src); // Liberar el objeto URL del audio anterior
+      currentAudioRef.current = null;
     }
 
     setPlayingMessageIndex(index);
@@ -559,11 +615,16 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
 
+      currentAudioRef.current = audio; // Guardar la referencia al objeto Audio
+
       audio.onended = () => {
         setPlayingMessageIndex(null);
         setIsAudioLoading(false);
         setIsAudioPaused(false);
-        URL.revokeObjectURL(audioUrl); // Liberar el objeto URL
+        if (currentAudioRef.current) {
+          URL.revokeObjectURL(currentAudioRef.current.src); // Liberar el objeto URL
+          currentAudioRef.current = null;
+        }
       };
 
       audio.onerror = (e) => {
@@ -572,7 +633,10 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         setPlayingMessageIndex(null);
         setIsAudioLoading(false);
         setIsAudioPaused(false);
-        URL.revokeObjectURL(audioUrl);
+        if (currentAudioRef.current) {
+          URL.revokeObjectURL(currentAudioRef.current.src);
+          currentAudioRef.current = null;
+        }
       };
 
       await audio.play();
@@ -584,8 +648,58 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       setPlayingMessageIndex(null);
       setIsAudioLoading(false);
       setIsAudioPaused(false);
+      if (currentAudioRef.current) {
+        URL.revokeObjectURL(currentAudioRef.current.src);
+        currentAudioRef.current = null;
+      }
     }
   }, [isAudioLoading, playingMessageIndex, isAudioPaused]);
+
+  const handleRemoveContextItem = useCallback((itemToRemove: SelectedContextItem) => {
+    setSelectedContext(prev => prev.filter(item => item.id !== itemToRemove.id));
+    toast.info(`"${itemToRemove.name}" eliminado del contexto.`);
+  }, []);
+
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploadingFile(true);
+    toast.info(`Subiendo ${files.length} archivo(s)...`);
+
+    const uploadPromises = Array.from(files).map(async (file) => {
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (workspaceId) {
+          formData.append('workspace_id', workspaceId);
+        }
+
+        const response = await apiClient.post('/api/documents/upload-chat-document', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        });
+
+        const newContextItem = response.data;
+        return newContextItem;
+      } catch (error) {
+        console.error(`Error al subir el archivo ${file.name}:`, error);
+        toast.error(`Error al subir el archivo ${file.name}.`);
+        return null;
+      }
+    });
+
+    const results = await Promise.all(uploadPromises);
+    const newContextItems = results.filter(item => item !== null) as SelectedContextItem[];
+
+    if (newContextItems.length > 0) {
+      setSelectedContext(prev => [...prev, ...newContextItems]);
+      toast.success(`${newContextItems.length} archivo(s) subido(s) y añadido(s) al contexto.`);
+    }
+
+    setIsUploadingFile(false);
+  }, [workspaceId]);
 
   // Main effect for loading a thread's data
   useEffect(() => {
@@ -640,14 +754,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   // ... (other effects and handlers remain the same) ...
 
   const { searchTerm } = useSearch();
-  const allMessages = useMemo(() => {
-    const currentStreamingMessages = Object.values(streamingMessages);
-    return [...messages, ...currentStreamingMessages];
-  }, [messages, streamingMessages]);
-
   const filteredMessages = searchTerm
-    ? allMessages.filter(msg => msg.text.toLowerCase().includes(searchTerm.toLowerCase()))
-    : allMessages;
+    ? messages.filter(msg => msg.text.toLowerCase().includes(searchTerm.toLowerCase()))
+    : messages;
 
   if (isLoading) {
     return (
@@ -657,7 +766,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     );
   }
 
-  if (messages.length === 0 && Object.keys(streamingMessages).length === 0 && !isResponding) {
+  if (messages.length === 0 && !isResponding) {
       return <EmptyChat
           onSendMessage={handleSendMessage}
           newMessage={newMessage}
@@ -666,6 +775,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           isRecording={isRecording}
           isProcessingAudio={isProcessingAudio}
           isUploadingFile={isUploadingFile}
+          isUploadingImage={isUploadingImage}
+          uploadedImagePreview={uploadedImage?.preview}
           isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
           isWebSearchActive={isWebSearchActive}
           isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
@@ -675,10 +786,12 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           onToggleWebSearch={() => {}}
           onToggleComprehensiveAnalysis={() => {}}
           onToggleDeepResearch={() => {}}
-          onStartRecording={() => {}}
-          onStopRecording={() => {}}
-          onFileUpload={() => {}}
-          onRemoveContextItem={() => {}}
+          onStartRecording={handleStartRecording}
+          onStopRecording={handleStopRecording}
+          onFileUpload={handleFileUpload}
+          onImageUpload={handleImageUpload}
+          onRemoveImage={handleRemoveImage}
+          onRemoveContextItem={handleRemoveContextItem}
           onPaste={() => {}}
           workspaceId={workspaceId}
           selectedContext={selectedContext}
@@ -690,7 +803,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     <div className="flex h-screen bg-background overflow-x-hidden">
       <div className="flex flex-col h-full w-full">
         <div ref={scrollAreaRef} className="flex-1 overflow-y-auto">
-          <div className="p-4 md:p-6 space-y-6 w-full md:max-w-4xl mx-auto">
+          <div className="p-4 md:p-6 space-y-6 w-full md:max-w-6xl mx-auto">
             <div>
               {hasMoreMessages && (
                 <div ref={topSentinelRef} className="flex justify-center p-4">
@@ -720,7 +833,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                   />
                 </div>
               ))}
-              {isThinking && (Object.keys(streamingMessages).length === 0) && ( // Solo mostrar si no hay mensajes de streaming activos
+              {isThinking && ( // Mostrar si está pensando, ya que los mensajes en streaming ahora están en `messages`
                 <div>
                   <LoadingIndicator
                     isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
@@ -738,7 +851,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             </div>
           </div>
         </div>
-        <div className="w-full md:max-w-4xl mx-auto px-4 pb-4">
+        <div className="w-full md:max-w-6xl mx-auto px-4 pb-4">
           <div className="relative">
             <ChatInputBar
                 newMessage={newMessage}
@@ -747,6 +860,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 isProcessingAudio={isProcessingAudio}
                 currentContext={selectedContext}
                 isUploadingFile={isUploadingFile}
+                isUploadingImage={isUploadingImage}
+                uploadedImagePreview={uploadedImage?.preview}
                 isKnowledgeAnalysisActive={selectedContext.length > 0}
                 isWebSearchActive={isWebSearchActive}
                 isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
@@ -761,8 +876,10 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 onToggleDeepResearch={() => {}}
                 onStartRecording={handleStartRecording}
                 onStopRecording={handleStopRecording}
-                onFileUpload={() => {}}
-                onRemoveContextItem={() => {}}
+                onFileUpload={handleFileUpload}
+                onImageUpload={handleImageUpload}
+                onRemoveImage={handleRemoveImage}
+                onRemoveContextItem={handleRemoveContextItem}
                 onPaste={() => {}}
                 isFixedPosition={false}
                 workspaceId={workspaceId}
@@ -778,4 +895,18 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       </div>
     </div>
   );
+}
+
+// Modificar la definición de ChatMessageType para incluir taskId
+interface ChatMessageType {
+  text: string;
+  sender: 'user' | 'ai';
+  created_at: string;
+  image_base64?: string;
+  document_url?: string;
+  ragContext?: SelectedContextItem[];
+  sources?: Source[];
+  chunks?: string[];
+  tool_code?: string;
+  taskId?: string; // Añadir taskId
 }

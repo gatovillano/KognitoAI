@@ -242,3 +242,9 @@ Se solucionaron tres errores críticos que afectaban la experiencia del usuario 
 -   **Solución**: Se actualizó la sentencia `import` en la parte superior del archivo para incluir `CardFooter`, resolviendo así el error de referencia. La línea de importación corregida es: `import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';`.
 
 ---
+
+## 06-10-2025 - `ProgrammingError` por comparación de tipos `text` y `smallint` en `core/memory_manager.py`
+
+-   **Error**: Se produjo un `(psycopg.errors.UndefinedFunction) operator does not exist: text = smallint` en la función `get_full_document_content` de `core/memory_manager.py`.
+-   **Causa**: La consulta SQL intentaba comparar el campo `cmetadata->>'document_id'` (que es de tipo `text`) con el parámetro `document_id` (que se pasaba como un número, `smallint`). PostgreSQL no permite la comparación directa entre estos dos tipos de datos sin una conversión explícita.
+-   **Solución**: Se modificó la función `get_full_document_content` en `core/memory_manager.py`. Antes de añadir el parámetro `document_id` a los parámetros de la consulta, se convierte explícitamente a una cadena de texto usando `str(document_id)`. Esto asegura que la comparación en la base de datos se realice entre dos valores de tipo `text`, resolviendo el error de operador indefinido.

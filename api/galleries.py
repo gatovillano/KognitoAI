@@ -57,6 +57,9 @@ class PhotoResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class ProfileLinkRequest(BaseModel):
+    profile_id: uuid.UUID
+
 class AlbumBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Nombre del álbum.")
     description: Optional[str] = Field(None, max_length=500, description="Descripción opcional del álbum.")
@@ -441,10 +444,10 @@ async def get_linked_profiles_for_album(
     return [ContactProfileResponse.model_validate(profile) for profile in album.contact_profiles]
 
 
-@router.post("/albums/{album_id}/link-profile/{profile_id}", status_code=200, summary="Vincular un perfil a un álbum")
+@router.post("/albums/{album_id}/link-profile", status_code=200, summary="Vincular un perfil a un álbum")
 async def link_profile_to_album(
     album_id: uuid.UUID,
-    profile_id: uuid.UUID,
+    profile_link_request: ProfileLinkRequest,
     current_account: Account = Depends(get_current_account),
     db: AsyncSession = Depends(get_db_session)
 ):
@@ -462,7 +465,7 @@ async def link_profile_to_album(
         raise HTTPException(status_code=404, detail="Álbum no encontrado o no autorizado.")
 
     profile_stmt = select(ContactProfile).where(
-        ContactProfile.id == profile_id,
+        ContactProfile.id == profile_link_request.profile_id,
         ContactProfile.account_id == current_account.id
     )
     profile_result = await db.execute(profile_stmt)
@@ -479,10 +482,10 @@ async def link_profile_to_album(
     return {"message": "Perfil vinculado exitosamente al álbum."}
 
 
-@router.post("/albums/{album_id}/unlink-profile/{profile_id}", status_code=200, summary="Desvincular un perfil de un álbum")
+@router.post("/albums/{album_id}/unlink-profile", status_code=200, summary="Desvincular un perfil de un álbum")
 async def unlink_profile_from_album(
     album_id: uuid.UUID,
-    profile_id: uuid.UUID,
+    profile_link_request: ProfileLinkRequest,
     current_account: Account = Depends(get_current_account),
     db: AsyncSession = Depends(get_db_session)
 ):
@@ -500,7 +503,7 @@ async def unlink_profile_from_album(
         raise HTTPException(status_code=404, detail="Álbum no encontrado o no autorizado.")
 
     profile_stmt = select(ContactProfile).where(
-        ContactProfile.id == profile_id,
+        ContactProfile.id == profile_link_request.profile_id,
         ContactProfile.account_id == current_account.id
     )
     profile_result = await db.execute(profile_stmt)

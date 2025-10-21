@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, memo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { Send, ArrowUp, X, Paperclip, Upload, Loader2, Mic, NotebookText } from 'lucide-react';
+import { Send, ArrowUp, X, Paperclip, Upload, Loader2, Mic, NotebookText, Image as ImageIcon } from 'lucide-react';
 import { ContextSelectorButton } from '@/components/ContextSelectorButton';
 import { MoreActionsMenu } from './MoreActionsMenu';
 import NoteSelectorDialog from './NoteSelectorDialog';
@@ -30,6 +30,8 @@ interface ChatInputBarProps {
   isRecording?: boolean;
   isProcessingAudio?: boolean;
   isUploadingFile?: boolean;
+  isUploadingImage?: boolean;
+  uploadedImagePreview?: string | null;
   isKnowledgeAnalysisActive: boolean;
   isWebSearchActive: boolean;
   isComprehensiveAnalysisActive: boolean;
@@ -47,6 +49,8 @@ interface ChatInputBarProps {
   onStartRecording?: () => void;
   onStopRecording?: () => void;
   onFileUpload?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onImageUpload?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onRemoveImage?: () => void;
   onPaste?: (e: ClipboardEvent) => void;
   currentContext: SelectedContextItem[];
   onRemoveContextItem?: (item: SelectedContextItem) => void;
@@ -63,6 +67,8 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   isRecording = false,
   isProcessingAudio = false,
   isUploadingFile = false,
+  isUploadingImage = false,
+  uploadedImagePreview = null,
   isKnowledgeAnalysisActive,
   isWebSearchActive,
   isComprehensiveAnalysisActive,
@@ -79,6 +85,8 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   onStartRecording = () => {},
   onStopRecording = () => {},
   onFileUpload = () => {},
+  onImageUpload = () => {},
+  onRemoveImage = () => {},
   onRemoveContextItem = () => {},
   onPaste = () => {},
   currentContext,
@@ -109,11 +117,6 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
       messageText = `[USE_TOOL:${selectedToolName}] ${newMessage}`;
     }
 
-    if (currentContext.length > 0) {
-      const contextNames = currentContext.map(item => item.name).join(', ');
-      messageText = `${messageText.trim()}. Considerando el siguiente contexto: ${contextNames}. Mi pregunta es: ${newMessage}`;
-    }
-
     onSendMessage(e, messageText);
     onMessageChange('');
   }, [newMessage, selectedToolName, currentContext, onSendMessage, onMessageChange]);
@@ -127,7 +130,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (!isResponding && (newMessage.trim() || currentContext.length > 0)) {
+      if (!isResponding && (newMessage.trim() || currentContext.length > 0 || uploadedImagePreview)) {
         const form = (e.target as HTMLTextAreaElement).form;
         if (form) {
           form.requestSubmit();
@@ -140,11 +143,6 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   const handleRemoveContextItem = useCallback((item: SelectedContextItem) => {
     onRemoveContextItem(item);
   }, [onRemoveContextItem]);
-
-  const handleFileUploadChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    onFileUpload(e);
-    e.target.value = '';
-  }, [onFileUpload]);
 
   useEffect(() => {
     const textArea = textAreaRef.current;
@@ -208,6 +206,18 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                 ))}
               </div>
             )}
+            {uploadedImagePreview && (
+              <div className="relative w-24 h-24 mb-2">
+                <img src={uploadedImagePreview} alt="Image preview" className="w-full h-full object-cover rounded-md" />
+                <button
+                  type="button"
+                  onClick={onRemoveImage}
+                  className="absolute top-1 right-1 bg-gray-900/50 text-white rounded-full p-1 hover:bg-gray-900/75 transition-colors"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
             <Textarea
               ref={textAreaRef}
               value={inputValue}
@@ -225,14 +235,13 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                   isWebSearchActive={isWebSearchActive}
                   isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
                   isDeepResearchActive={isDeepResearchActive}
-                  isRecording={isRecording}
                   isUploadingFile={isUploadingFile}
+                  isUploadingImage={isUploadingImage}
                   onToggleWebSearch={onToggleWebSearch}
                   onToggleComprehensiveAnalysis={onToggleComprehensiveAnalysis}
                   onToggleDeepResearch={onToggleDeepResearch}
                   onFileUpload={onFileUpload}
-                  onStartRecording={onStartRecording}
-                  onStopRecording={onStopRecording}
+                  onImageUpload={onImageUpload}
                 />
                 {children}
                 <Button
@@ -248,9 +257,23 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
               </div>
               <div className="flex items-center gap-2">
                 <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    console.log('Mic button clicked. isRecording:', isRecording);
+                    const action = isRecording ? onStopRecording : onStartRecording;
+                    action?.();
+                  }}
+                  disabled={isResponding || isProcessingAudio}
+                  className={`rounded-full ${isRecording ? 'text-red-500 hover:bg-red-100 dark:hover:bg-red-900/50' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'}`}
+                >
+                  {isProcessingAudio ? <Loader2 className="h-5 w-5 animate-spin" /> : <Mic className="h-5 w-5" />}
+                </Button>
+                <Button
                   type="submit"
                   size="icon"
-                  disabled={isResponding || (!newMessage.trim() && currentContext.length === 0)}
+                  disabled={isResponding || (!newMessage.trim() && currentContext.length === 0 && !uploadedImagePreview)}
                   className="rounded-full"
                 >
                   {isResponding ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}

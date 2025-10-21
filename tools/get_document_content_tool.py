@@ -26,7 +26,7 @@ from langchain_core.tools import BaseTool
 # Importaciones de la lógica de negocio y gestión de estado
 from core.memory_manager import get_full_document_content
 from telegram_client.bot_manager import bot_manager
-from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger # Mantener si se usa en el módulo, aunque no directamente en esta función.
+
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -83,7 +83,6 @@ class GetDocumentContentTool(BaseTool):
             full_content = await get_full_document_content(
                 account_id=self.account_id,
                 file_name=file_name,
-                team_id=None, # Mantener None o pasar team_id si aplica en tu lógica
                 workspace_id=self.workspace_id # <-- Pasar el workspace_id
             )
 

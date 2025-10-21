@@ -37,6 +37,7 @@ interface DocumentCollectionDisplayProps {
 }
 
 export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, backButtonText = "Volver a Colecciones", backButtonHref = "/rag/all" }: DocumentCollectionDisplayProps) {
+  console.log("DocumentCollectionDisplay - Received props ->", { topic, workspaceId, collectionName }); // DEBUG
   const { user } = useAuth(); // Obtener el usuario del contexto de autenticación
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -101,9 +102,9 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     try {
       const commonParams = { topic: topic, ...(workspaceId && { workspace_id: workspaceId }) };
       const [docsRes, analysesRes, collectionRes] = await Promise.all([
-        apiClient.get('/api/list-documents', { params: commonParams }),
+        apiClient.get('/api/documents/list-documents', { params: commonParams }),
         apiClient.post('/api/get-saved-analyses', commonParams),
-        apiClient.get(`/api/collections/${topic}/details`, { params: { ...(workspaceId && { workspace_id: workspaceId }) } })
+        apiClient.get(`/api/documents/collections/${topic}/details`, { params: workspaceId ? { workspace_id: workspaceId } : {} })
       ]);
       
       const serverDocuments = docsRes.data;

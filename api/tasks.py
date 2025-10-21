@@ -33,25 +33,23 @@ def get_tasks_manager(db: AsyncSession = Depends(get_db)) -> TasksManager:
 
 class TaskResponse(BaseModel):
     """Define la estructura de datos para la respuesta de una tarea."""
-    id: str # Revertido a str
+    id: str
     description: str
     is_completed: bool
     due_date: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
-    account_id: str # Revertido a str
-    workspace_id: Optional[str] = None # Revertido a Optional[str]
-    team_id: Optional[str] = None # Revertido a Optional[str]
+    account_id: str
+    workspace_id: Optional[str] = None
 
     class Config:
-        from_attributes = True # Habilita compatibilidad con ORM de SQLAlchemy
+        from_attributes = True
 
 class TaskCreateRequest(BaseModel):
     """Define la estructura de datos para crear una nueva tarea."""
     description: str = Field(..., min_length=1, max_length=500)
     due_date: Optional[datetime] = None
     workspace_id: Optional[str] = None
-    team_id: Optional[str] = None
 
 class TaskUpdateRequest(BaseModel):
     """Define la estructura de datos para actualizar una tarea existente."""
@@ -78,8 +76,7 @@ async def create_task(
             account_id=current_account_id,
             description=request.description,
             due_date=request.due_date,
-            workspace_id=request.workspace_id,
-            team_id=request.team_id
+            workspace_id=request.workspace_id
         )
         return new_task
     except Exception as e:
@@ -129,7 +126,6 @@ async def list_tasks(
     current_account_id: str = Depends(get_current_account_id),
     tasks_manager: TasksManager = Depends(get_tasks_manager),
     workspace_id: Optional[str] = None,
-    team_id: Optional[str] = None,
     is_completed: Optional[bool] = None,
     search_term: Optional[str] = None
 ):
@@ -140,7 +136,6 @@ async def list_tasks(
         tasks = await tasks_manager.list_tasks(
             account_id=current_account_id,
             workspace_id=workspace_id,
-            team_id=team_id,
             is_completed=is_completed,
             search_term=search_term
         )

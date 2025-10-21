@@ -23,7 +23,9 @@ import { MonthlyScheduleView } from './MonthlyScheduleView'; // Importar Monthly
 
 export interface AgendaEvent {
   id: number;
+  summary: string;
   description: string;
+  location?: string;
   event_datetime_utc: string;
   event_datetime_local: string;
   user_timezone: string;
@@ -32,6 +34,8 @@ export interface AgendaEvent {
   workspace_name?: string;
   workspace_color?: string;
   linked_profiles?: any[]; // Add linked_profiles to AgendaEvent interface
+  attendees?: string[];
+  external_attendees?: string[];
 }
 
 // Nuevo tipo para las tareas
@@ -369,7 +373,7 @@ export default function AgendaPage() {
                                 <div key={event.id} className="p-4 border rounded-lg flex items-center justify-between hover:border-primary/50 cursor-pointer" onClick={() => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}>
                                     <div>
                                         <p className="font-semibold flex items-center">
-                                            {event.description}
+                                            {event.summary}
                                             {event.team_shared && (
                                                 <span title="Compartido con equipo">
                                                     <Users className="ml-2 h-4 w-4 text-blue-500" />
