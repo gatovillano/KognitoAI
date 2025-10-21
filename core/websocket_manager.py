@@ -37,7 +37,7 @@ class WebSocketManager:
         if account_id not in self.active_connections:
             self.active_connections[account_id] = []
         self.active_connections[account_id].append(websocket)
-        logger.info(f"WebSocket conectado para la cuenta: {account_id}. Total de conexiones: {len(self.active_connections[account_id])}")
+        logger.info(f"WebSocket conectado para la cuenta: {account_id}. Total de conexiones: {len(self.active_connections[account_id])}. Nueva conexión: {id(websocket)}")
 
         # Inicia el heartbeat solo si es la primera conexión para esta cuenta
         if account_id not in self.heartbeat_tasks:
@@ -48,7 +48,7 @@ class WebSocketManager:
     def disconnect(self, websocket: WebSocket, account_id: str):
         if account_id in self.active_connections and websocket in self.active_connections[account_id]:
             self.active_connections[account_id].remove(websocket)
-            logger.info(f"WebSocket desconectado para la cuenta: {account_id}. Conexiones restantes: {len(self.active_connections[account_id])}")
+            logger.info(f"WebSocket desconectado para la cuenta: {account_id}. Conexiones restantes: {len(self.active_connections[account_id])}. Conexión eliminada: {id(websocket)}")
             if not self.active_connections[account_id]:
                 logger.info(f"Último cliente desconectado para la cuenta: {account_id}. Deteniendo heartbeat.")
                 del self.active_connections[account_id]
@@ -59,14 +59,16 @@ class WebSocketManager:
 
     async def send_personal_message(self, message: Dict[str, Any], account_id: str):
         if account_id in self.active_connections:
+            logger.info(f"DEBUG: Intentando enviar mensaje a {account_id}. Conexiones activas: {len(self.active_connections[account_id])}")
             for connection in self.active_connections[account_id]:
                 try:
-                    logger.info(f"DEBUG: Sending message to {account_id} via WebSocket: {message}")
+                    logger.info(f"DEBUG: Enviando mensaje a {account_id} via WebSocket (conexión {id(connection)}): {message}")
                     await connection.send_json(message)
                 except WebSocketDisconnect:
+                    logger.warning(f"WebSocketDisconnect al enviar mensaje a {account_id} (conexión {id(connection)}). Desconectando.")
                     self.disconnect(connection, account_id)
                 except Exception as e:
-                    logger.error(f"Error al enviar mensaje a {account_id}: {e}")
+                    logger.error(f"Error al enviar mensaje a {account_id} (conexión {id(connection)}): {e}")
 
     async def broadcast(self, message: Dict[str, Any]):
         for account_id, connections in self.active_connections.items():

@@ -80,3 +80,4 @@ pytest>=7.4.0
 black>=23.11.0
 flake8>=6.1.0
 fastapi_cache2>=0.1.0
+fpdf2

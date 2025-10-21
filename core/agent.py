@@ -62,46 +62,11 @@ from utils.image_generation import GENERATED_IMAGE_KEY
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-# --- Módulos de Memoria Mejorada ---
-from knowledge_graph.graph_database import GraphDB
-from core.enhanced_memory_manager import EnhancedMemoryManager
-from utils.embeddings import get_embedding_model
 
 # --- Configuración del Logger ---
 logger = logging.getLogger(__name__)
 
-# Inicialización global de GraphDB y EnhancedMemoryManager
-graph_db_instance: Optional[GraphDB] = None
-enhanced_memory_manager_instance: Optional[EnhancedMemoryManager] = None
 
-async def initialize_enhanced_memory_components():
-    global graph_db_instance, enhanced_memory_manager_instance
-    if graph_db_instance is None:
-        logger.info("Initializing GraphDB connection...")
-        try:
-            graph_db_instance = GraphDB(
-                uri=settings.neo4j_uri,
-                user=settings.neo4j_user,
-                password=settings.neo4j_password
-            )
-            graph_db_instance.connect()
-            logger.info("✅ GraphDB connected successfully.")
-        except Exception as e:
-            logger.error(f"❌ Failed to connect to GraphDB: {e}", exc_info=True)
-            graph_db_instance = None # Asegurarse de que sea None si falla
-
-    if enhanced_memory_manager_instance is None and graph_db_instance is not None:
-        logger.info("Initializing EnhancedMemoryManager...")
-        try:
-            embedding_manager = get_embedding_model() # Obtener el manager de embeddings
-            enhanced_memory_manager_instance = EnhancedMemoryManager(
-                graph_db=graph_db_instance,
-                embedding_manager=embedding_manager
-            )
-            logger.info("✅ EnhancedMemoryManager initialized successfully.")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize EnhancedMemoryManager: {e}", exc_info=True)
-            enhanced_memory_manager_instance = None
 
 
 # ==============================================================================
@@ -346,132 +311,50 @@ async def call_model_node(state: AgentState):
     user_message = extract_text_content(state["messages"][-1].content)
     user_profile = await get_user_profile(state['account_id'])
 
-    # --- INICIO DE LA NUEVA LÓGICA DE RAG EXPLÍCITO ---
+    # --- INICIO DE LA LÓGICA DE RAG EXPLÍCITO ---
     rag_context = state.get("rag_context")
-    filter_topics = None
-    filter_document_ids = None
     sources_for_prompt = []
+    relevant_memories_text = ""
+    messages_for_this_turn = list(state["messages"])
 
     if rag_context:
-        logger.info(f"Aplicando RAG explícito con {len(rag_context)} item(s) de contexto.")
-        filter_document_ids = [item['id'] for item in rag_context if item.get('type') == 'document']
-        filter_topics = [item['id'] for item in rag_context if item.get('type') == 'collection']
-    
-    # Asegurar que los componentes de memoria mejorada estén inicializados
-    if enhanced_memory_manager_instance is None:
-        await initialize_enhanced_memory_components()
-        if enhanced_memory_manager_instance is None:
-            logger.error("EnhancedMemoryManager no pudo ser inicializado. Fallback a memoria tradicional.")
-            # Aquí podríamos tener una lógica de fallback si es necesario,
-            # pero por ahora, el código seguirá usando la memoria tradicional si falla la mejorada.
-
-    # 1. Construir el prompt del sistema dinámicamente
-    user_message = extract_text_content(state["messages"][-1].content)
-    user_profile = await get_user_profile(state['account_id'])
-
-    # --- INICIO DE LA NUEVA LÓGICA DE RAG EXPLÍCITO ---
-    rag_context = state.get("rag_context")
-    filter_topics = None
-    filter_document_ids = None
-    sources_for_prompt = []
-
-    if rag_context:
-        logger.info(f"Aplicando RAG explícito con {len(rag_context)} item(s) de contexto.")
-        filter_document_ids = [item['id'] for item in rag_context if item.get('type') == 'document']
-        filter_topics = [item['id'] for item in rag_context if item.get('type') == 'collection']
-
-    # MODIFICACIÓN: Usar EnhancedMemoryManager si está disponible
-    if enhanced_memory_manager_instance:
-        logger.info("Using EnhancedMemoryManager for context retrieval.")
-        enhanced_context_data = await enhanced_memory_manager_instance.get_enhanced_context(
-            user_query=user_message,
-            user_id=state['account_id'],
-            workspace_id=state.get('workspace_id'),
-            # max_results=10 # Puedes ajustar este valor si es necesario
-        )
-        # Extraer información del diccionario enhanced_context_data
-        # Esto es una simplificación, la estructura real de enhanced_context_data
-        # puede requerir un parseo más sofisticado.
-        relevant_memories_text = ""
-        extracted_sources = []
-
-        if enhanced_context_data.get("enhanced_insights"):
-            relevant_memories_text += """Insights enriquecidos:
-"""
-            for insight in enhanced_context_data["enhanced_insights"]:
-                relevant_memories_text += f"""- {insight.get('description', '')}
-"""
-
-        if enhanced_context_data.get("reasoning_paths"):
-            relevant_memories_text += """
-Caminos de razonamiento:
-"""
-            for path in enhanced_context_data["reasoning_paths"]:
-                relevant_memories_text += f"""- {path.get('description', '')}
-"""
-
-        # También puedes añadir el contenido de traditional_embeddings si es relevante
-        if enhanced_context_data.get("sources", {}).get("traditional_embeddings", {}).get("results"):
-            relevant_memories_text += """
-Contexto tradicional:
-"""
-            for res in enhanced_context_data["sources"]["traditional_embeddings"]["results"]:
-                relevant_memories_text += f"""- {res.get('content', '')}
-"""
-                # Aquí podrías extraer las fuentes de los resultados tradicionales si están en un formato compatible
-
-        # Para las fuentes, EnhancedMemoryManager devuelve un diccionario con 'sources'
-        # Necesitamos adaptar esto al formato de ToolOutputWithSources
-        # Por ahora, asumiremos que las fuentes están en enhanced_context_data.get("sources")
-        # y las convertiremos a un formato compatible con ToolOutputWithSources si es necesario.
-        # La clase ToolOutputWithSources espera una lista de objetos Source.
-        # Si enhanced_context_data ya devuelve objetos Source o un formato fácilmente convertible,
-        # podemos usarlo directamente.
-        # Por simplicidad, si enhanced_context_data tiene un campo 'sources' que es una lista de dicts,
-        # lo usaremos.
-        if enhanced_context_data.get("sources"):
-            # Aquí se asume que enhanced_context_data.get("sources") es un diccionario
-            # que contiene 'traditional_embeddings' y 'knowledge_graph'.
-            # Necesitamos extraer las fuentes de ambos y combinarlas.
-            # La estructura de Source es {url, title, snippet, metadata}.
-            # Necesitamos adaptar la salida de enhanced_memory_manager a este formato.
-
-            # Ejemplo de cómo combinar y adaptar fuentes (esto puede variar según la estructura real)
-            combined_sources = []
-            if enhanced_context_data.get("sources", {}).get("traditional_embeddings", {}).get("sources"):
-                for s in enhanced_context_data["sources"]["traditional_embeddings"]["sources"]:
-                    combined_sources.append(s) # Asumiendo que ya son objetos Source o dicts compatibles
-
-            if enhanced_context_data.get("sources", {}).get("knowledge_graph", {}).get("sources"):
-                for s in enhanced_context_data["sources"]["knowledge_graph"]["sources"]:
-                    combined_sources.append(s) # Asumiendo que ya son objetos Source o dicts compatibles
-
-            # Si enhanced_context_data tiene un campo 'sources' directamente en el nivel superior
-            if enhanced_context_data.get("sources_list"): # Si EnhancedMemoryManager devuelve una lista de fuentes
-                for s in enhanced_context_data["sources_list"]:
-                    combined_sources.append(s)
-
-            sources_for_prompt = combined_sources
+        logger.info(f"Aplicando RAG explícito con {len(rag_context)} item(s) de contexto. Se inyectará el contenido completo en el mensaje del usuario.")
         
-        # Si enhanced_memory_manager_instance no está disponible o falla, se usa la lógica original
-    else:
-        logger.warning("EnhancedMemoryManager no está disponible. Usando get_relevant_memories tradicional.")
-        # La llamada a get_relevant_memories ahora devuelve un objeto ToolOutputWithSources
-        # Necesitamos re-importar get_relevant_memories si EnhancedMemoryManager no está disponible
-        from core.memory_manager import get_relevant_memories
-        rag_results = await get_relevant_memories(
-            state['account_id'],
-            user_message,
-            k=10, # Aumentamos k para tener más contexto
-            workspace_id=state.get('workspace_id'),
-            filter_topics=filter_topics,
-            filter_document_ids=filter_document_ids
-        )
+        from core.memory_manager import get_full_document_content
+        
+        all_content = []
+        document_ids_to_fetch = [item['id'] for item in rag_context if item.get('type') == 'document']
+        
+        for doc_id in document_ids_to_fetch:
+            content = await get_full_document_content(
+                account_id=state['account_id'],
+                document_id=doc_id,
+                workspace_id=state.get('workspace_id')
+            )
+            if content:
+                all_content.append(f"--- INICIO DEL DOCUMENTO ADJUNTO (ID: {doc_id}) ---\n{content}\n--- FIN DEL DOCUMENTO ADJUNTO ---")
 
-        relevant_memories_text = rag_results.context_for_llm
-        sources_for_prompt = rag_results.sources
-    # --- FIN DE LA NUEVA LÓGICA ---
-    state['sources'] = sources_for_prompt # Añadir esta línea para guardar las fuentes en el estado
+        if all_content:
+            full_context_text = "\n\n".join(all_content)
+            
+            # Modificar el último mensaje (del usuario) para incluir el contexto
+            original_user_message_obj = messages_for_this_turn.pop()
+            original_user_message_text = extract_text_content(original_user_message_obj.content)
+            
+            new_message_content = (
+                f"He adjuntado uno o más documentos. Debes basar tu respuesta prioritaria y exclusivamente en su contenido. "
+                f"Aquí están los documentos:\n\n"
+                f"{full_context_text}\n\n"
+                f"Considerando la información de los documentos adjuntos, esta es mi pregunta: {original_user_message_text}"
+            )
+            
+            messages_for_this_turn.append(HumanMessage(content=new_message_content))
+            
+    # --- FIN DE LA LÓGICA DE RAG EXPLÍCITO ---
+    state['sources'] = sources_for_prompt
+
+    # relevant_memories_text se deja vacío porque el contexto ya está en el mensaje del usuario
+    relevant_memories_text = ""
     
     from core.prompt_manager import PromptManager
     prompt_manager = PromptManager(settings={"default_system_prompt": settings.default_system_prompt})
@@ -516,7 +399,7 @@ Contexto tradicional:
     chain = prompt | llm_with_tools
     
     # 4. Invocar la cadena y añadir la respuesta al estado
-    response = await chain.ainvoke({"messages": state["messages"]})
+    response = await chain.ainvoke({"messages": messages_for_this_turn})
     
     # Adjuntar fuentes y tool_calls a la respuesta del LLM si existen
     if isinstance(response, AIMessage):

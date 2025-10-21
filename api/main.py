@@ -67,15 +67,15 @@ origins = [
     "http://localhost:8880",
     "http://localhost:8000",
     "https://kognito.gatoslibres.art",
-    "http://192.168.100.106:8880",
-    "http://192.168.100.106:8000",
+    "http://192.168.1.7:8880",
+    "http://192.168.1.7:18000",
     "https://api.telegram.org",
     "https://web.telegram.org",
     "https://t.me",
     "https://kognito.gatoslibres.art",
     "https://apibase.gatoslibres.art",
     "http://localhost:8880",
-    "http://192.168.100.106:8880",
+    "http://192.168.1.7:8880",
 ]
 
 app.add_middleware(

@@ -6,6 +6,8 @@ logger = logging.getLogger(__name__)
 from typing import List, Optional, Any, Literal, Union, Dict
 import uuid
 from datetime import datetime
+from fpdf import FPDF
+import io
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -412,3 +414,117 @@ async def delete_form_response(
     await db.commit()
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+@router.get("/form-responses/{response_id}/pdf", tags=["Form Responses"])
+async def get_form_response_pdf(
+    response_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db_session),
+    current_user: Account = Depends(get_current_active_account)
+):
+    """
+    Generates a PDF for a specific form response.
+    """
+    form_response = await db.get(DBFormResponse, response_id)
+    if not form_response:
+        raise HTTPException(status_code=404, detail="Form response not found")
+
+    form = await db.get(DBForm, form_response.form_id)
+    if not form or str(form.account_id) != str(current_user.id):
+        raise HTTPException(status_code=404, detail="Form not found or unauthorized")
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=16)
+    pdf.cell(200, 10, txt=f"Respuesta del Formulario: {form.name}", ln=True, align="C")
+    pdf.set_font("Arial", size=12)
+    pdf.cell(200, 10, txt=f"Enviado el: {form_response.submitted_at.strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align="L")
+    pdf.ln(10)
+
+    # Extract all fields from the form schema to map field_id to label
+    field_map = {}
+    def extract_fields(elements):
+        for element in elements:
+            if "type" in element: # It's a FormField
+                field_map[element["id"]] = element["label"]
+            elif "elements" in element: # It's a FormSection
+                extract_fields(element["elements"])
+    extract_fields(form.schema)
+
+    for answer in form_response.answers:
+        field_label = field_map.get(answer["field_id"], answer["field_id"])
+        pdf.set_font("Arial", "B", size=12)
+        pdf.multi_cell(0, 10, txt=f"Pregunta: {field_label}")
+        pdf.set_font("Arial", size=12)
+        answer_value = answer["value"]
+        if isinstance(answer_value, list):
+            answer_value = ", ".join(map(str, answer_value))
+        pdf.multi_cell(0, 10, txt=f"Respuesta: {answer_value}")
+        pdf.ln(5)
+
+    pdf_output = pdf.output(dest='S').encode('latin-1') # Output as string, then encode to bytes
+    return Response(content=pdf_output, media_type="application/pdf", headers={
+        "Content-Disposition": f"attachment; filename='form_response_{response_id}.pdf'"
+    })
+
+@router.get("/forms/{form_id}/responses/pdf", tags=["Form Responses"])
+async def get_form_responses_pdf_report(
+    form_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db_session),
+    current_user: Account = Depends(get_current_active_account)
+):
+    """
+    Generates a PDF report for all responses of a specific form.
+    """
+    form = await db.get(DBForm, form_id)
+    if not form or str(form.account_id) != str(current_user.id):
+        raise HTTPException(status_code=404, detail="Form not found or unauthorized")
+
+    result = await db.execute(
+        select(DBFormResponse).where(DBFormResponse.form_id == form_id)
+    )
+    form_responses = result.scalars().all()
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=16)
+    pdf.cell(200, 10, txt=f"Reporte de Respuestas para: {form.name}", ln=True, align="C")
+    pdf.ln(10)
+
+    field_map = {}
+    def extract_fields(elements):
+        for element in elements:
+            if "type" in element: # It's a FormField
+                field_map[element["id"]] = element["label"]
+            elif "elements" in element: # It's a FormSection
+                extract_fields(element["elements"])
+    extract_fields(form.schema)
+
+    if not form_responses:
+        pdf.set_font("Arial", size=12)
+        pdf.cell(200, 10, txt="No hay respuestas para este formulario.", ln=True, align="C")
+    else:
+        for i, form_response in enumerate(form_responses):
+            if i > 0:
+                pdf.add_page() # New page for each response in the report
+            pdf.set_font("Arial", "B", size=14)
+            pdf.cell(200, 10, txt=f"Respuesta #{i+1} (ID: {str(form_response.id)[:8]}...)", ln=True, align="L")
+            pdf.set_font("Arial", size=12)
+            pdf.cell(200, 10, txt=f"Enviado el: {form_response.submitted_at.strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align="L")
+            pdf.ln(5)
+
+            for answer in form_response.answers:
+                field_label = field_map.get(answer["field_id"], answer["field_id"])
+                pdf.set_font("Arial", "B", size=12)
+                pdf.multi_cell(0, 10, txt=f"Pregunta: {field_label}")
+                pdf.set_font("Arial", size=12)
+                answer_value = answer["value"]
+                if isinstance(answer_value, list):
+                    answer_value = ", ".join(map(str, answer_value))
+                pdf.multi_cell(0, 10, txt=f"Respuesta: {answer_value}")
+                pdf.ln(5)
+            pdf.ln(10) # Add some space between responses if on the same page
+
+    pdf_output = pdf.output(dest='S').encode('latin-1')
+    return Response(content=pdf_output, media_type="application/pdf", headers={
+        "Content-Disposition": f"attachment; filename='form_responses_report_{form_id}.pdf'"
+    })

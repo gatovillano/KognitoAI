@@ -23,7 +23,7 @@ from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de memoria.
 from core.memory_manager import add_memory_to_vector_db
-from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger
+from utils.proactive_knowledge_linker import proactive_knowledge_linker_trigger
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)

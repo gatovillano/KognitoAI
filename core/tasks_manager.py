@@ -9,7 +9,7 @@ from sqlalchemy import select, update, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from core.database import Task, Account, Workspace, Team, ContactProfile # Importar los modelos necesarios
+from core.database import Task, Account, Workspace, ContactProfile # Importar los modelos necesarios
 from utils.db_session import DBSession # Para manejar la sesión de la base de datos
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,6 @@ class TasksManager:
             "updated_at": task.updated_at.isoformat(),
             "account_id": str(task.account_id),
             "workspace_id": str(task.workspace_id) if task.workspace_id else None,
-            "team_id": str(task.team_id) if task.team_id else None,
             "linked_profiles": linked_profiles_data
         }
 
@@ -47,8 +46,7 @@ class TasksManager:
         account_id: str,
         description: str,
         due_date: Optional[datetime] = None,
-        workspace_id: Optional[str] = None,
-        team_id: Optional[str] = None
+        workspace_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Añade una nueva tarea a la base de datos.
@@ -57,8 +55,7 @@ class TasksManager:
             account_id=uuid.UUID(account_id),
             description=description,
             due_date=due_date,
-            workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
-            team_id=uuid.UUID(team_id) if team_id else None
+            workspace_id=uuid.UUID(workspace_id) if workspace_id else None
         )
         self.db_session.add(new_task)
         await self.db_session.commit()
@@ -80,20 +77,17 @@ class TasksManager:
         self,
         account_id: str,
         workspace_id: Optional[str] = None,
-        team_id: Optional[str] = None,
         is_completed: Optional[bool] = None,
         search_term: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        Lista las tareas de un usuario, opcionalmente filtradas por workspace, equipo,
+        Lista las tareas de un usuario, opcionalmente filtradas por workspace,
         estado de completado y término de búsqueda.
         """
         stmt = select(Task).options(selectinload(Task.contact_profiles)).where(Task.account_id == uuid.UUID(account_id))
 
         if workspace_id:
             stmt = stmt.where(Task.workspace_id == uuid.UUID(workspace_id))
-        if team_id:
-            stmt = stmt.where(Task.team_id == uuid.UUID(team_id))
         if is_completed is not None:
             stmt = stmt.where(Task.is_completed == is_completed)
         if search_term:

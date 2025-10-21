@@ -76,6 +76,8 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
       text_content: '',
     },
   });
+
+  const files = form.watch('files');
   
   // Rellenamos el formulario cuando cambia el estado de apertura o el defaultTopic
   useEffect(() => {
@@ -226,6 +228,18 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
                     </FormItem>
                   )}
                 />
+                {files && files.length > 0 && (
+                  <div className="mt-4 space-y-2 text-sm">
+                    <p className="font-medium">Archivos seleccionados:</p>
+                    <ul className="list-disc list-inside space-y-1">
+                      {Array.from(files as FileList).map((file: File) => (
+                        <li key={file.name} className="truncate">
+                          {file.name} ({Math.round(file.size / 1024)} KB)
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </TabsContent>
               <TabsContent value="text">
                 <FormField

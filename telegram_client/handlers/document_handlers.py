@@ -31,7 +31,7 @@ from core.config import settings
 from core.database import get_or_create_account_from_platform_id
 from core.memory_manager import process_document_for_rag
 from utils.document_parser import extract_text_and_metadata_from_document
-from tools.proactive_knowledge_linker_tool import proactive_knowledge_linker_trigger, proactive_knowledge_linker_trigger
+
 
 logger = logging.getLogger(__name__)
 
@@ -101,17 +101,7 @@ async def document_message_handler(update: Update, context: CallbackContext) -> 
         logger.error(f"Error al procesar documento para la cuenta {account_id_log}: {e}", exc_info=True)
         await message.reply_text("Lo siento, ocurrió un error inesperado al procesar tu documento.")
     
-        # 1) Preparamos la entrada para el trigger proactivo
-        new_entry = {
-            "account_id": account_id,
-            "content": extracted_text,
-            "title": document.file_name,
-            "type": "document",
-            # opcional: timestamp, categorías, etc.
-        }
 
-        # 2) Disparamos el análisis proactivo en background
-        asyncio.create_task(proactive_knowledge_linker_trigger(new_entry))
 
 
         await message.reply_text("✅ ¡Documento procesado y añadido a tu base de conocimiento!")

@@ -90,7 +90,7 @@ export function WeeklyScheduleView({
                   className="p-2 bg-blue-100 text-blue-800 rounded-md text-sm cursor-pointer hover:bg-blue-200 relative"
                   onClick={() => onEditEvent(event as AgendaEvent)}
                 >
-                  <p className="font-semibold">{event.description}</p>
+                  <p className="font-semibold">{event.summary}</p>
                   {'event_datetime_local' in event && (
                     <div className="flex items-center text-xs mt-1">
                       <Clock className="h-3 w-3 mr-1" />

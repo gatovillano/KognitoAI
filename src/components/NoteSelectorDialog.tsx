@@ -50,6 +50,7 @@ const NoteSelectorDialog: React.FC<NoteSelectorDialogProps> = ({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
         },
         body: JSON.stringify({
           search_term: searchTerm,

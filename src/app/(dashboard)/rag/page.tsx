@@ -29,6 +29,8 @@ interface Collection {
   description?: string;
   team_shared?: boolean;
   has_knowledge_graph?: boolean;
+  workspace_id?: string;
+  workspace_name?: string;
 }
 
 export default function RagCollectionsPage() {
@@ -61,11 +63,9 @@ export default function RagCollectionsPage() {
   const fetchCollections = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await apiClient.get('/api/collections');
-      console.log('API raw response data:', response.data); // Nuevo log para la data cruda
+      const response = await apiClient.get('/api/documents/collections');
       console.log('API raw response data:', response.data); // Nuevo log para la data cruda
       setCollections(response.data);
-      console.log('Collections state after update:', response.data); // Nuevo log para el estado actualizado
       console.log('Collections state after update:', response.data); // Nuevo log para el estado actualizado
     } catch (error) {
       console.error('Error fetching collections:', error); // Debug log
@@ -260,17 +260,32 @@ export default function RagCollectionsPage() {
             className="bg-muted"
           />
           {collections.map((collection) => (
-            <CollectionDisplay
-              key={collection.topic}
-              collection={collection}
-              onAnalyze={handleAnalyzeCollection}
-              onDelete={openDeleteDialog}
-              onEdit={handleEditCollection}
-              onShare={handleShareCollection}
-              onProcessKnowledgeGraph={handleProcessKnowledgeGraph}
-              isAnalyzing={collectionPollingId !== null && analyzingTopic === collection.topic}
-              type="list" // Specify type as 'list'
-            /> 
+            <motion.div key={collection.topic} className="relative h-full" layout initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
+              <CollectionDisplay
+                collection={collection}
+                onAnalyze={handleAnalyzeCollection}
+                onDelete={openDeleteDialog}
+                onEdit={handleEditCollection}
+                onShare={handleShareCollection}
+                onProcessKnowledgeGraph={handleProcessKnowledgeGraph}
+                isAnalyzing={collectionPollingId !== null && analyzingTopic === collection.topic}
+                type="list" // Specify type as 'list'
+              />
+              {collection.workspace_name && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="absolute bottom-4 right-4 bg-primary/10 text-primary font-bold text-xs px-2 py-1 rounded-lg shadow-sm cursor-default border border-primary/20">
+                        {collection.workspace_name}
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Workspace</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </motion.div>
           ))}
           {/* Tarjeta para crear nueva colección */}
           <motion.div

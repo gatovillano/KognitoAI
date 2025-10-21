@@ -16,6 +16,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { MessageSquare, MoreVertical } from 'lucide-react';
+import apiClient from '@/lib/api';
+import { toast } from 'sonner';
 
 // Define the Form type
 interface Form {
@@ -40,24 +42,16 @@ export default function FormCard({ form }: FormCardProps) {
     router.push(`/forms/${form.id}/edit`);
   };
 
-  const handleDeleteConfirm = async () => {
-    try {
-      const response = await fetch(`/api/forms/${form.id}`, {
-        method: 'DELETE',
-      });
-      if (response.ok) {
+    const handleDeleteConfirm = async () => {
+      try {
+        await apiClient.delete(`/api/forms/${form.id}`);
         router.refresh();
-      } else {
-        console.error('Failed to delete form');
-        // Consider using a toast notification here instead of alert
-        alert('No se pudo eliminar el formulario.');
+        toast.success('Formulario eliminado exitosamente.');
+      } catch (error) {
+        console.error('Error al eliminar el formulario:', error);
+        toast.error('Error al eliminar el formulario. Por favor, inténtalo de nuevo.');
       }
-    } catch (error) {
-      console.error('An error occurred:', error);
-      alert('Ocurrió un error al eliminar el formulario.');
-    }
-  };
-
+    };
   return (
     <>
       <Card 

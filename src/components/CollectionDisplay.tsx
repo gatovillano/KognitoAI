@@ -17,6 +17,7 @@ interface Collection {
   description?: string;
   team_shared?: boolean;
   has_knowledge_graph?: boolean;
+  workspace_id?: string;
 }
 
 interface CollectionDisplayProps {
@@ -63,10 +64,11 @@ export const CollectionDisplay = ({
           (e.target as HTMLElement).closest('[data-dropdown-content]')) {
         return;
       }
-      router.push(workspaceId 
-        ? `/workspaces/${workspaceId}/collections/${encodeURIComponent(collection.topic)}`
-        : `/rag/${encodeURIComponent(collection.topic)}`
-      );
+      const url = `/rag/${encodeURIComponent(collection.topic)}`;
+      // La API ahora provee workspace_id dentro del objeto collection
+      const workspaceId = collection.workspace_id;
+      const finalUrl = workspaceId ? `${url}?workspace_id=${workspaceId}` : url;
+      router.push(finalUrl);
     }
   };
 

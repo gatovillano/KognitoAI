@@ -79,18 +79,5 @@ pandas>=2.0.0
 pytest>=7.4.0
 black>=23.11.0
 flake8>=6.1.0
-tavily-python>=0.1.0
-langchain-openai>=0.1.0
-torch>=2.0.0
-
-# === CACHING ===
-fastapi-cache2[redis]>=0.2.1
-redis<5.0.0
-
-
-# === WEBSOCKETS Y PUB/SUB ===
-broadcaster>=0.2.0
-slowapi>=0.1.9
-
-# === MONITOREO ===
-starlette-prometheus>=0.9.0
+fastapi_cache2>=0.1.0
+fpdf2

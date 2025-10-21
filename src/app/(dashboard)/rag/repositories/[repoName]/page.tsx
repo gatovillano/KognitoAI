@@ -336,25 +336,28 @@ export default function RepositoryDetailPage() {
     } else {
       return (
         <AccordionItem key={node.path} value={node.path}>
-          <AccordionTrigger style={{ paddingLeft: `${indent + 16}px` }}>
-            <div className="flex items-center gap-2 flex-1 justify-between">
+          <div className="flex items-center w-full">
+            <AccordionTrigger
+              style={{ paddingLeft: `${indent + 16}px` }}
+              className="flex-grow justify-start"
+            >
               <div className="flex items-center gap-2">
                 <Folder className="h-5 w-5" />
                 <span>{node.name}</span>
               </div>
-              <div className="flex gap-1">
-                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); /* Lógica para analizar carpeta */ toast.info(`Analizando carpeta ${node.name}`); }} title="Analizar Carpeta">
-                  <ScanSearch className="h-4 w-4" />
-                </Button>
-                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); /* Lógica para compartir carpeta */ toast.info(`Compartiendo carpeta ${node.name}`); }} title="Compartir Carpeta">
-                  <Share2 className="h-4 w-4" />
-                </Button>
-                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); handleDeleteFolder(node.path); }} title="Eliminar Carpeta">
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
+            </AccordionTrigger>
+            <div className="flex gap-1 pr-4">
+              <Button size="sm" variant="ghost" onClick={() => { /* Lógica para analizar carpeta */ toast.info(`Analizando carpeta ${node.name}`); }} title="Analizar Carpeta">
+                <ScanSearch className="h-4 w-4" />
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { /* Lógica para compartir carpeta */ toast.info(`Compartiendo carpeta ${node.name}`); }} title="Compartir Carpeta">
+                <Share2 className="h-4 w-4" />
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { handleDeleteFolder(node.path); }} title="Eliminar Carpeta">
+                <Trash2 className="h-4 w-4" />
+              </Button>
             </div>
-          </AccordionTrigger>
+          </div>
           <AccordionContent>
             {Object.values(node.children).length > 0 && 
               Object.values(node.children).map(child => (
