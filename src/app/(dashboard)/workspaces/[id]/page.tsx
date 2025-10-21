@@ -47,6 +47,7 @@ interface PageProps {
 }
 
 export default function WorkspaceDashboard({ params }: PageProps) {
+  console.log('DEBUG: WorkspaceDashboard component rendering.');
   const router = useRouter();
   const resolvedParams = use(params);
   const { id: workspaceId } = resolvedParams;
@@ -102,16 +103,19 @@ export default function WorkspaceDashboard({ params }: PageProps) {
     setLoading(true);
     try {
       // Fetch workspace info, collections, events, tasks, and notes in parallel
+      console.log('DEBUG: Fetching collections with workspace_id:', workspaceId);
       const [wsResponse, collectionsResponse, eventsResponse, tasksResponse, notesResponse] = await Promise.all([
         apiClient.get(`/api/workspaces/${workspaceId}`),
-        apiClient.get(`/api/documents/collections?workspace_id=${workspaceId}`),
+        apiClient.get(`/api/documents/collections`, { params: { workspace_id: workspaceId } }),
         apiClient.post('/api/list-events', { workspace_id: workspaceId }),
         apiClient.get('/api/tasks', { params: { workspace_id: workspaceId } }),
         apiClient.post('/api/notes/list-notes', { workspace_id: workspaceId })
       ]);
+      console.log('DEBUG: collectionsResponse from API:', collectionsResponse);
 
       setWorkspace(wsResponse.data);
       setCollections(collectionsResponse.data);
+      console.log('DEBUG: Collections data from API:', collectionsResponse.data);
       setAgendaEvents(eventsResponse.data); // El backend ya filtra por workspace_id
       setTasks(tasksResponse.data.filter((task: TaskResponse) => task.workspace_id === workspaceId));
       setNotes(notesResponse.data.notes);
@@ -246,10 +250,10 @@ export default function WorkspaceDashboard({ params }: PageProps) {
     }
   };
 
-  const handleCollectionClick = (collectionId: string) => {
-    // Asegurarse de que el collectionId esté codificado para la URL
-    const encodedCollectionId = encodeURIComponent(collectionId);
-    router.push(`/workspaces/${workspaceId}/collections/${encodedCollectionId}`);
+  const handleCollectionClick = (collectionTopic: string) => {
+    // Asegurarse de que el collectionTopic esté codificado para la URL
+    const encodedCollectionTopic = encodeURIComponent(collectionTopic);
+    router.push(`/workspaces/${workspaceId}/collections/${encodedCollectionTopic}`);
   };
 
   const handleCloseCollectionDialog = () => {
@@ -589,7 +593,7 @@ const handleDeleteCollection = async (collectionId: string) => {
               <h3 className="font-semibold text-lg mb-1">Nuevo Chat</h3>
               <p className="text-sm text-muted-foreground">Iniciar nueva conversación</p>
             </Card>
-            {[...filteredChats].reverse().map((chat) => (
+            {filteredChats.map((chat) => (
               <Card key={chat.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 min-h-[180px] flex flex-col" onClick={() => handleChatClick(chat.id)}>
                 <CardHeader className="pb-3 flex-1">
                   <CardTitle className="flex items-start justify-between gap-3 h-full">
@@ -646,8 +650,8 @@ const handleDeleteCollection = async (collectionId: string) => {
           </div>
         )}
         {hasMoreChats && !searchTerm && (
-          <div className="flex justify-center mt-6">
-            <Button onClick={handleLoadMoreChats} disabled={isFetchingMoreChats}>
+          <div className="flex justify-end mt-6">
+            <Button variant="outline" onClick={handleLoadMoreChats} disabled={isFetchingMoreChats}>
               {isFetchingMoreChats ? "Cargando..." : "Cargar más chats"}
             </Button>
           </div>
@@ -697,7 +701,7 @@ const handleDeleteCollection = async (collectionId: string) => {
               <p className="text-xs text-muted-foreground">Nuevo tema de documentos</p>
             </Card>
             {filteredCollections.map((collection) => (
-              <Card key={collection.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleCollectionClick(collection.id)}>
+              <Card key={collection.topic} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleCollectionClick(collection.topic)}>
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -706,7 +710,7 @@ const handleDeleteCollection = async (collectionId: string) => {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold text-sm line-clamp-2">
-                          <InlineMarkdownRenderer content={collection.title || collection.name || ''} />
+                          <InlineMarkdownRenderer content={collection.topic} />
                         </div>
                       </div>
                     </div>

@@ -20,11 +20,11 @@ from pydantic import BaseModel
 from sqlalchemy import select, text, update
 import asyncio
 
-from core.database import SessionLocal, TeamMember, LangchainPgCollection, UploadTask, GitHubDocument, get_db_session
-from utils.security import get_current_account_id
+from core.database import SessionLocal, LangchainPgCollection, UploadTask, GitHubDocument, get_db_session
+from utils.security import get_current_account_id, check_workspace_permission
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.document_parser import extract_text_and_metadata_from_document
-from core.memory_manager import process_document_for_rag, list_user_documents, list_user_documents_all_teams, delete_document_chunks, get_full_document_content, update_document_metadata, list_user_collections, link_profile_to_collection, unlink_profile_from_collection, get_user_document_topic_by_name
+from core.memory_manager import process_document_for_rag, list_user_documents, list_user_documents_all_teams, delete_document_chunks, get_full_document_content, update_document_metadata, list_user_collections, link_profile_to_collection, unlink_profile_from_collection, get_user_document_topic_by_name, update_collection_workspace, create_empty_collection
 from utils.db_session import DBSession
 from tools.add_web_to_rag_tool import AddWebToRAGTool
 from core.websocket_manager import send_personal_message
@@ -57,17 +57,22 @@ async def link_profile_to_collection_endpoint(
     topic: str = Depends(decoded_topic),
     current_account_id: str = Depends(get_current_account_id),
     workspace_id: Optional[str] = Query(None),
-    team_id: Optional[str] = Query(None)
+    # team_id: Optional[str] = Query(None) # Eliminado, ya no se usa team_id
 ):
     """
     Vincula un perfil de contacto a una colección de documentos.
     """
+    # Verificar permisos de workspace si se proporciona
+    if workspace_id:
+        async with DBSession(SessionLocal) as db:
+            if not await check_workspace_permission(current_account_id, workspace_id, db, required_roles=["owner", "editor"]):
+                raise HTTPException(status_code=403, detail="No tienes permiso para vincular perfiles a colecciones en este workspace.")
+
     success = await link_profile_to_collection(
         account_id=current_account_id,
         topic_name=topic,
         profile_id=str(profile_link_request.profile_id), # Convertir a str
-        workspace_id=workspace_id,
-        team_id=team_id
+        workspace_id=workspace_id
     )
     if not success:
         raise HTTPException(status_code=404, detail="Colección o perfil no encontrado, o no autorizado.")
@@ -78,18 +83,22 @@ async def unlink_profile_from_collection_endpoint(
     profile_link_request: ProfileLinkRequest,
     topic: str = Depends(decoded_topic),
     current_account_id: str = Depends(get_current_account_id),
-    workspace_id: Optional[str] = Query(None),
-    team_id: Optional[str] = Query(None)
+    workspace_id: Optional[str] = Query(None)
 ):
     """
     Desvincula un perfil de contacto de una colección de documentos.
     """
+    # Verificar permisos de workspace si se proporciona
+    if workspace_id:
+        async with DBSession(SessionLocal) as db:
+            if not await check_workspace_permission(current_account_id, workspace_id, db, required_roles=["owner", "editor"]):
+                raise HTTPException(status_code=403, detail="No tienes permiso para desvincular perfiles de colecciones en este workspace.")
+
     success = await unlink_profile_from_collection(
         account_id=current_account_id,
         topic_name=topic,
         profile_id=str(profile_link_request.profile_id), # Convertir a str
-        workspace_id=workspace_id,
-        team_id=team_id
+        workspace_id=workspace_id
     )
     if not success:
         raise HTTPException(status_code=404, detail="Vínculo no encontrado, o colección/perfil no autorizado.")
@@ -107,6 +116,12 @@ async def upload_document_endpoint(
 ):
     """Inicia una tarea de subida de documentos y devuelve un ID de tarea."""
     account_id_uuid = uuid.UUID(current_account_id)
+
+    # Verificar permisos de workspace si se proporciona
+    if workspace_id:
+        async with DBSession(SessionLocal) as db_session:
+            if not await check_workspace_permission(current_account_id, workspace_id, db_session, required_roles=["owner", "editor"]):
+                raise HTTPException(status_code=403, detail="No tienes permiso para subir documentos a este workspace.")
 
     # Leer y almacenar los datos de los archivos
     file_data_list = []
@@ -179,6 +194,12 @@ async def upload_chat_document_endpoint(
     Sube un documento para el contexto de un chat, lo procesa para RAG y lo devuelve.
     No se asigna a una colección (topic) específica, quedando como un documento flotante.
     """
+    # Verificar permisos de workspace si se proporciona
+    if workspace_id:
+        async with DBSession(SessionLocal) as db_session:
+            if not await check_workspace_permission(current_account_id, workspace_id, db_session, required_roles=["owner", "editor", "viewer"]):
+                raise HTTPException(status_code=403, detail="No tienes permiso para subir documentos a este workspace.")
+
     try:
         content_bytes = await file.read()
         file_name = file.filename or "documento_subido"
@@ -226,6 +247,12 @@ async def list_documents_endpoint(
     topic_filter = topic # Ahora el topic ya viene directamente
     logger.info(f"DEBUG_API: list_documents_endpoint called with account_id={current_account_id}, topic_filter={topic_filter}, workspace_id={workspace_id}")
     
+    # Verificar permisos de workspace si se proporciona
+    if workspace_id:
+        async with DBSession(SessionLocal) as db_session:
+            if not await check_workspace_permission(current_account_id, workspace_id, db_session, required_roles=["owner", "editor", "viewer"]):
+                raise HTTPException(status_code=403, detail="No tienes permiso para listar documentos de este workspace.")
+
     # Usar list_user_documents para filtrar por workspace_id
     # Si workspace_id es None, list_user_documents listará documentos con workspace_id IS NULL
     # Si topic_filter es None, list_user_documents listará todos los topics para ese workspace_id
@@ -246,11 +273,11 @@ async def list_all_user_documents_endpoint(
     db: AsyncSession = Depends(get_db)
 ):
     """Lista TODOS los documentos subidos por el usuario, ignorando el workspace_id y el topic.
-    Protegido por JWT. Utiliza list_user_documents_all_teams."""
+    Protegido por JWT."""
     account_id_uuid = uuid.UUID(current_account_id)
     logger.info(f"list_all_user_documents_endpoint called for account_id={current_account_id}")
     
-    all_user_docs = await list_user_documents_all_teams(str(account_id_uuid))
+    all_user_docs = await list_user_documents(str(account_id_uuid))
     logger.info(f"All user documents for account {current_account_id}: {len(all_user_docs)} documents found")
 
     return all_user_docs
@@ -268,6 +295,13 @@ async def delete_document_endpoint(
         logger.warning(f"Validation failed: file_name is empty for account: {current_account_id}")
         raise HTTPException(status_code=422, detail="El nombre del archivo no puede estar vacío.")
     account_id_uuid = uuid.UUID(current_account_id)
+
+    # Verificar permisos de workspace si se proporciona
+    if request.workspace_id:
+        async with DBSession(SessionLocal) as db_session:
+            if not await check_workspace_permission(current_account_id, request.workspace_id, db_session, required_roles=["owner", "editor"]):
+                raise HTTPException(status_code=403, detail="No tienes permiso para eliminar documentos de este workspace.")
+
     success = await delete_document_chunks(
         account_id=str(account_id_uuid),
         file_name=request.file_name,
@@ -291,12 +325,24 @@ async def update_document_metadata_endpoint(
 ):
     """Actualiza el título y/o la categoría de un documento del usuario."""
     account_id_uuid = uuid.UUID(current_account_id)
+    
+    # Verificar permisos de workspace si se proporciona
+    # Primero, necesitamos obtener el workspace_id del documento si no viene en la request
+    # Esto implica una consulta adicional o que el frontend siempre envíe el workspace_id
+    # Por simplicidad, asumiremos que si request.workspace_id es None, es un documento personal
+    # Si request.workspace_id está presente, verificamos permisos
+    if request.workspace_id:
+        async with DBSession(SessionLocal) as db_session:
+            if not await check_workspace_permission(current_account_id, request.workspace_id, db_session, required_roles=["owner", "editor"]):
+                raise HTTPException(status_code=403, detail="No tienes permiso para actualizar metadatos de documentos en este workspace.")
+
     # Usa los datos del objeto 'request'
     success = await update_document_metadata(
-        str(account_id_uuid), 
-        request.file_name, 
-        request.new_title, 
-        request.new_topic
+        str(account_id_uuid),
+        request.file_name,
+        request.new_title,
+        request.new_topic,
+        workspace_id=request.workspace_id
     )
     if not success:
         raise HTTPException(status_code=404, detail="Documento no encontrado o no actualizado.")
@@ -350,14 +396,15 @@ class UpdateCollectionRequest(BaseModel):
     new_topic: Optional[str] = None
     new_description: Optional[str] = None
     workspace_id: Optional[str] = None
-    team_id: Optional[str] = None
+    # team_id: Optional[str] = None # Eliminado, ya no se usa team_id
 
 # --- Modelos Pydantic para Colecciones ---
 class CollectionResponse(BaseModel):
     topic: str
     document_count: int
     description: Optional[str] = None
-    team_shared: Optional[bool] = None
+    workspace_id: Optional[str] = None
+    workspace_name: Optional[str] = None
     has_knowledge_graph: Optional[bool] = None
 
 class CollectionCreateRequest(BaseModel):
@@ -375,7 +422,6 @@ class DocumentResponse(BaseModel):
     author: Optional[str] = None
     document_id: Optional[str] = None
     workspace_id: Optional[str] = None
-    team_id: Optional[str] = None
 
 # --- Endpoints para Colecciones ---
 @router.get("/collections/{topic}/details", summary="Obtener detalles de una colección por nombre")
@@ -383,16 +429,22 @@ async def get_collection_details_by_name(
     current_account_id: str = Depends(get_current_account_id),
     topic: str = Depends(decoded_topic),
     workspace_id: Optional[str] = Query(None),
-    team_id: Optional[str] = Query(None)
+    # team_id: Optional[str] = Query(None) # Eliminado, ya no se usa team_id
 ):
     """
     Obtiene los detalles de una colección específica por su nombre, incluyendo los perfiles de contacto vinculados.
     """
+    # Verificar permisos de workspace si se proporciona
+    if workspace_id:
+        async with DBSession(SessionLocal) as db_session:
+            if not await check_workspace_permission(current_account_id, workspace_id, db_session, required_roles=["owner", "editor", "viewer"]):
+                raise HTTPException(status_code=403, detail="No tienes permiso para acceder a esta colección.")
+
     collection_details = await get_user_document_topic_by_name(
         account_id=current_account_id,
         topic_name=topic,
         workspace_id=workspace_id,
-        team_id=team_id
+        # team_id=team_id # Eliminado, ya no se usa team_id
     )
     if not collection_details:
         raise HTTPException(status_code=404, detail=f"Colección '{topic}' no encontrada o no autorizada.")
@@ -419,12 +471,13 @@ async def list_collections(current_account_id: str = Depends(get_current_account
     logger.info(f"API: list_collections - Listando colecciones para account_id: {current_account_id}, workspace_id recibido: {workspace_id}")
     try:
         collections = await list_user_collections(account_id=current_account_id, workspace_id=workspace_id)
-        logger.info(f"API: list_collections - Collections retrieved from memory_manager: {collections}")
+        logger.info(f"API: list_collections - Collections retrieved from memory_manager: {len(collections)} collections")
         return [CollectionResponse(
             topic=c['topic'],
             document_count=c['document_count'],
             description=c.get('description'),
-            team_shared=c.get('team_shared'),
+            workspace_id=c.get('workspace_id'),
+            workspace_name=c.get('workspace_name'),
             has_knowledge_graph=c.get('has_knowledge_graph')
         ) for c in collections]
     except Exception as e:
@@ -507,7 +560,6 @@ async def extract_titles_endpoint(request: ExtractTitleRequest, background_tasks
             account_id=current_account_id,
             topic=request.topic,
             workspace_id=None,
-            team_id=None,
             file_name=request.file_name
         )
         return {"message": "El proceso de extracción de títulos ha comenzado en segundo plano. Recibirás una actualización una vez que finalice."}

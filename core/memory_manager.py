@@ -1,3 +1,4 @@
+
 # telegram_bot/memory/memory_manager.py
 
 """
@@ -31,6 +32,7 @@ from langchain_core.documents import Document as LCDocument # Renombrado para ev
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import PGVector
 from sqlalchemy import Table, MetaData, update
+from sqlalchemy.orm import selectinload, joinedload
 from langchain_core.retrievers import BaseRetriever # Nueva importación
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -42,7 +44,8 @@ from core.database import (
     engine,
     LangchainPgCollection,
     UserDocumentTopic,
-    GitHubDocument # <--- NUEVA IMPORTACIÓN
+    GitHubDocument,
+    ContactProfile # <--- NUEVA IMPORTACIÓN
 )
 from utils.db_session import DBSession
 from utils.embeddings import get_embedding_model
@@ -70,7 +73,6 @@ async def _run_semantic_search(
     filter_document_ids: Optional[List[str]] = None,
     account_id: str = None,
     workspace_id: str = None,
-    team_id: str = None,
     visibility_teams: List[str] = None,
     content_type: Optional[str] = None,
     category: Optional[str] = None,
@@ -86,8 +88,6 @@ async def _run_semantic_search(
                 topic,
                 category,
                 workspace_id,
-                team_id,
-                visibility_teams,
                 (embedding <-> CAST(:query_embedding AS vector)) AS similarity_score
             FROM langchain_pg_embedding
             WHERE collection_id = :collection_id
@@ -108,10 +108,6 @@ async def _run_semantic_search(
             query_params["workspace_id"] = workspace_id
         else:
             filter_clauses.append("workspace_id IS NULL")
-
-        if team_id:
-            filter_clauses.append("team_id = :team_id")
-            query_params["team_id"] = team_id
         
         if filter_topics:
             filter_clauses.append("topic = ANY(:filter_topics)")
@@ -120,10 +116,6 @@ async def _run_semantic_search(
         if filter_document_ids:
             filter_clauses.append("cmetadata->>'document_id' = ANY(:filter_document_ids)")
             query_params["filter_document_ids"] = filter_document_ids
-
-        if visibility_teams:
-            filter_clauses.append("(visibility_teams ?| :visibility_teams OR team_id = ANY(:visibility_teams))")
-            query_params["visibility_teams"] = visibility_teams
 
         if content_type: # NUEVO
             filter_clauses.append("content_type = :content_type")
@@ -147,7 +139,7 @@ async def _run_semantic_search(
         for row in rows:
             doc_content = row[0]
             doc_metadata = row[1]
-            similarity_score = row[7]
+            similarity_score = row[5]
             
             if isinstance(doc_metadata, str):
                 try:
@@ -160,8 +152,6 @@ async def _run_semantic_search(
             if row[2] is not None: doc_metadata['topic'] = row[2]
             if row[3] is not None: doc_metadata['category'] = row[3]
             if row[4] is not None: doc_metadata['workspace_id'] = str(row[4])
-            if row[5] is not None: doc_metadata['team_id'] = str(row[5])
-            if row[6] is not None: doc_metadata['visibility_teams'] = row[6]
 
             processed_results.append((LCDocument(page_content=doc_content, metadata=doc_metadata), similarity_score))
 
@@ -179,8 +169,6 @@ async def _run_fts_search(
     filter_document_ids: Optional[List[str]] = None,
     account_id: str = None,
     workspace_id: str = None,
-    team_id: str = None,
-    visibility_teams: List[str] = None,
     content_type: Optional[str] = None, # NUEVO
     category: Optional[str] = None, # NUEVO
 ) -> List[LCDocument]:
@@ -195,8 +183,6 @@ async def _run_fts_search(
                 topic,
                 category,
                 workspace_id,
-                team_id,
-                visibility_teams,
                 ts_rank(text_search_vector, plainto_tsquery('spanish', :query_fts)) AS rank_score
             FROM langchain_pg_embedding
             WHERE collection_id = :collection_id AND text_search_vector @@ plainto_tsquery('spanish', :query_fts)
@@ -217,10 +203,6 @@ async def _run_fts_search(
             query_params["workspace_id"] = workspace_id
         else:
             filter_clauses.append("workspace_id IS NULL")
-
-        if team_id:
-            filter_clauses.append("team_id = :team_id")
-            query_params["team_id"] = team_id
         
         if filter_topics:
             filter_clauses.append("topic = ANY(:filter_topics)")
@@ -229,10 +211,6 @@ async def _run_fts_search(
         if filter_document_ids:
             filter_clauses.append("cmetadata->>'document_id' = ANY(:filter_document_ids)")
             query_params["filter_document_ids"] = filter_document_ids
-
-        if visibility_teams:
-            filter_clauses.append("(visibility_teams ?| :visibility_teams OR team_id = ANY(:visibility_teams))")
-            query_params["visibility_teams"] = visibility_teams
 
         if content_type: # NUEVO
             filter_clauses.append("content_type = :content_type")
@@ -268,8 +246,6 @@ async def _run_fts_search(
             if row[2] is not None: doc_metadata['topic'] = row[2]
             if row[3] is not None: doc_metadata['category'] = row[3]
             if row[4] is not None: doc_metadata['workspace_id'] = str(row[4])
-            if row[5] is not None: doc_metadata['team_id'] = str(row[5])
-            if row[6] is not None: doc_metadata['visibility_teams'] = row[6]
 
             processed_results.append(LCDocument(page_content=doc_content, metadata=doc_metadata))
         
@@ -284,7 +260,6 @@ async def get_relevant_memories(
     account_id: str,
     query: str,
     k: int = 10,
-    team_id: Optional[str] = None,
     workspace_id: Optional[str] = None,
     filter_topics: Optional[List[str]] = None,
     filter_document_ids: Optional[List[str]] = None,
@@ -294,7 +269,6 @@ async def get_relevant_memories(
     content_type: Optional[str] = None, # NUEVO
     category: Optional[str] = None, # NUEVO
     similarity_threshold: float = 0.7, # NUEVO
-    visibility_teams: Optional[List[str]] = None, # AÑADIDO
 ) -> ToolOutputWithSources:
     """
     Recupera memorias y/o documentos relevantes, los formatea para citación
@@ -318,8 +292,6 @@ async def get_relevant_memories(
             filter_document_ids: Optional[List[str]]
             account_id: str
             workspace_id: Optional[str]
-            team_id: Optional[str]
-            visibility_teams: Optional[List[str]]
             content_type: Optional[str]
             category: Optional[str]
 
@@ -339,8 +311,6 @@ async def get_relevant_memories(
                     filter_document_ids=self.filter_document_ids,
                     account_id=self.account_id,
                     workspace_id=self.workspace_id,
-                    team_id=self.team_id,
-                    visibility_teams=self.visibility_teams,
                     content_type=self.content_type, # NUEVO
                     category=self.category, # NUEVO
                 )
@@ -355,8 +325,6 @@ async def get_relevant_memories(
             filter_document_ids: Optional[List[str]]
             account_id: str
             workspace_id: Optional[str]
-            team_id: Optional[str]
-            visibility_teams: Optional[List[str]]
             content_type: Optional[str]
             category: Optional[str]
 
@@ -372,8 +340,6 @@ async def get_relevant_memories(
                     filter_document_ids=self.filter_document_ids,
                     account_id=self.account_id,
                     workspace_id=self.workspace_id,
-                    team_id=self.team_id,
-                    visibility_teams=self.visibility_teams,
                     content_type=self.content_type, # NUEVO
                     category=self.category, # NUEVO
                 )
@@ -402,8 +368,6 @@ async def get_relevant_memories(
             filter_document_ids=filter_document_ids,
             account_id=account_id,
             workspace_id=workspace_id,
-            team_id=team_id,
-            visibility_teams=visibility_teams, # Pasado
             content_type=content_type, # Pasado
             category=category, # Pasado
         )
@@ -416,8 +380,6 @@ async def get_relevant_memories(
             filter_document_ids=filter_document_ids,
             account_id=account_id,
             workspace_id=workspace_id,
-            team_id=team_id,
-            visibility_teams=visibility_teams,
             content_type=content_type, # Pasado
             category=category, # Pasado
         )
@@ -476,8 +438,6 @@ async def _update_embedding_columns_after_insert(
     topic: str | None = None,
     category: str | None = None,
     workspace_id: str | None = None,
-    team_id: str | None = None,
-    visibility_teams: List[str] | None = None,
     telegram_id: Optional[str] = None,
     thread_id: Optional[str] = None
 ) -> int:
@@ -502,8 +462,6 @@ async def _update_embedding_columns_after_insert(
                 topic = :topic,
                 category = :category,
                 workspace_id = :workspace_id,
-                team_id = :team_id,
-                visibility_teams = :visibility_teams,
                 telegram_id = :telegram_id,
                 thread_id = :thread_id
             WHERE
@@ -523,8 +481,6 @@ async def _update_embedding_columns_after_insert(
             "topic": topic,
             "category": category,
             "workspace_id": processed_workspace_id,
-            "team_id": team_id,
-            "visibility_teams": visibility_teams,
             "telegram_id": processed_telegram_id,
             "thread_id": processed_thread_id,
             "collection_uuid": collection_uuid,
@@ -635,7 +591,6 @@ async def add_memory_to_vector_db(
     account_id: str,
     content: str,
     type: str = "general_memory",
-    team_id: Optional[str] = None,
     workspace_id: Optional[str] = None,
     topic: Optional[str] = None,
     category: Optional[str] = None,
@@ -643,7 +598,7 @@ async def add_memory_to_vector_db(
     thread_id: Optional[str] = None, # Nuevo parámetro
 ) -> None:
     """
-    Genera embeddings para el contenido y lo guarda en la DB vectorial del usuario o equipo.
+    Genera embeddings para el contenido y lo guarda en la DB vectorial del usuario o workspace.
 
     ACTUALIZADO: Ahora actualiza las nuevas columnas optimizadas después de la inserción
     para permitir búsquedas 10-50x más rápidas sin JOINs.
@@ -659,7 +614,7 @@ async def add_memory_to_vector_db(
             )
             return
 
-        collection_name = f"user_memories_{account_id}" if not team_id else f"team_memories_{team_id}"
+        collection_name = f"user_memories_{account_id}"
 
         # Usar el motor asíncrono preconfigurado desde core/database.py
         from core.database import engine
@@ -673,12 +628,10 @@ async def add_memory_to_vector_db(
         metadata = {
             "account_id": str(account_id),
             "type": type,
-            "scope": "personal" if not team_id else "team",
+            "scope": "personal",
             "topic": topic if topic else "general",
             "category": category if category else "general"
         }
-        if team_id:
-            metadata["team_id"] = str(team_id)
         if workspace_id:
             metadata["workspace_id"] = str(workspace_id)
             metadata["scope"] = "workspace"
@@ -701,11 +654,10 @@ async def add_memory_to_vector_db(
                     collection_uuid=str(collection_obj.uuid),
                     file_name="memory",  # Identificador para memorias
                     account_id=account_id,
-                    content_type="user_memories" if not team_id else "team_memories",
+                    content_type="user_memories",
                     topic=topic,
                     category=category,
                     workspace_id=workspace_id,
-                    team_id=team_id,
                     telegram_id=telegram_id, # Nuevo
                     thread_id=thread_id # Nuevo
                 )
@@ -727,7 +679,6 @@ async def process_document_for_rag(
     topic: str = "general_documents",
     account_id: Optional[str] = None,
     is_global: bool = False,
-    team_id: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
     workspace_id: Optional[str] = None,
 ) -> int:
@@ -779,7 +730,7 @@ async def process_document_for_rag(
         
         # Determinar la colección de LangChain (topic)
         # Si se proporciona workspace_id, la colección será específica de ese workspace.
-        # Si no, será una colección de usuario/equipo/global.
+        # Si no, será una colección de usuario/global.
         if workspace_id:
             # Para colecciones de workspace, el nombre de la colección en PGVector será el topic
             # El topic es el nombre de la colección dentro del workspace.
@@ -791,11 +742,8 @@ async def process_document_for_rag(
         elif account_id:
             langchain_collection_name = f"user_documents_{account_id}"
             scope = "personal"
-        elif team_id:
-            langchain_collection_name = f"team_documents_{team_id}"
-            scope = "team"
         else:
-            logger.error("❌ process_document_for_rag llamado sin account_id, team_id, workspace_id o is_global=True.")
+            logger.error("❌ process_document_for_rag llamado sin account_id, workspace_id o is_global=True.")
             return 0
  
         logger.info(f"📊 Iniciando procesamiento RAG para '{file_name}' en la colección LangChain '{langchain_collection_name}'.")
@@ -803,18 +751,16 @@ async def process_document_for_rag(
         # Preparar metadatos base
         base_metadata = metadata if metadata else {}
         base_metadata.update({
-            "file_name": file_name, 
+            "file_name": file_name,
             "topic": topic, # El topic sigue siendo el tema del documento
             "type": "document_chunk",
             "scope": scope,
         })
         
         # Agregar IDs según corresponda
-        if account_id: 
+        if account_id:
             base_metadata["account_id"] = str(account_id)
-        if team_id: 
-            base_metadata["team_id"] = str(team_id)
-        if workspace_id: 
+        if workspace_id:
             base_metadata["workspace_id"] = str(workspace_id) # Añadir workspace_id a los metadatos
 
         # Generar documento único ID para agrupar chunks
@@ -852,16 +798,39 @@ async def process_document_for_rag(
             else:
                 logger.info(f"Colección '{langchain_collection_name}' no existe. Permitir que LangChain la cree.")
                 langchain_collection_uuid = None # Se obtendrá después de aadd_documents
-
+ 
         vectorstore = PGVector(
             embeddings=embeddings,
             collection_name=langchain_collection_name,
             connection=engine,
             use_jsonb=True
         )
-        logger.info(f"Iniciando aadd_documents para {len(lc_documents)} chunks en colección '{langchain_collection_name}'.")
-        await vectorstore.aadd_documents(lc_documents)
-        logger.info(f"Finalizado aadd_documents para {len(lc_documents)} chunks en colección '{langchain_collection_name}'.")
+
+        # --- OPTIMIZATION: Batch embedding and insertion ---
+        logger.info(f"Optimizando la subida de {len(lc_documents)} chunks.")
+        
+        # 1. Extraer textos, metadatos e IDs
+        all_texts = [doc.page_content for doc in lc_documents]
+        all_metadatas = [doc.metadata for doc in lc_documents]
+        
+        # 2. Generar embeddings en un solo batch
+        logger.info(f"Iniciando aembed_documents para {len(all_texts)} chunks.")
+        all_embeddings = await embeddings.aembed_documents(all_texts)
+        logger.info(f"Finalizado aembed_documents.")
+
+        if len(all_embeddings) != len(all_texts):
+            raise ValueError("La cantidad de embeddings generados no coincide con la cantidad de textos.")
+
+        # 3. Añadir embeddings y documentos a la base de datos en un solo batch
+        logger.info(f"Iniciando aadd_embeddings para {len(all_texts)} chunks en colección '{langchain_collection_name}'.")
+        await vectorstore.aadd_embeddings(
+            texts=all_texts,
+            embeddings=all_embeddings,
+            metadatas=all_metadatas,
+            ids=ids
+        )
+        logger.info(f"Finalizado aadd_embeddings para {len(all_texts)} chunks en colección '{langchain_collection_name}'.")
+        # --- END OPTIMIZATION ---
 
         # Obtener el UUID de la colección de LangChain recién creada/existente
         async with DBSession(SessionLocal) as db:
@@ -883,8 +852,7 @@ async def process_document_for_rag(
                 account_id=account_id,
                 content_type="user_documents",
                 topic=topic,
-                workspace_id=workspace_id,
-                team_id=team_id
+                workspace_id=workspace_id
             )
 
             # Los documentos de workspace se identifican por sus metadatos
@@ -910,7 +878,7 @@ async def process_document_for_rag(
             logger.error(f"Error sending WebSocket notification: {e}")
 
         # Trigger proactivo deshabilitado para documentos (se analizará en un job nocturno)
-        if account_id or team_id:
+        if account_id:
             logger.info("[Memory Manager] Análisis proactivo no programado para documentos. Se analizará en el job nocturno.")
             # TODO: Implementar job nocturno para análisis de documentos una vez al día.
             
@@ -938,7 +906,6 @@ async def remove_document_from_rag(
     account_id: str,
     file_name: str,
     topic: str = "repositorio",
-    team_id: Optional[str] = None,
     workspace_id: Optional[str] = None
 ) -> int:
     """
@@ -949,8 +916,6 @@ async def remove_document_from_rag(
         # Determinar el nombre de la colección
         if workspace_id:
             langchain_collection_name = topic
-        elif team_id:
-            langchain_collection_name = f"team_documents_{team_id}"
         else:
             langchain_collection_name = f"user_documents_{account_id}"
         
@@ -959,7 +924,6 @@ async def remove_document_from_rag(
             account_id=account_id,
             file_name=file_name,
             topic=topic,
-            team_id=team_id,
             workspace_id=workspace_id
         )
         
@@ -976,7 +940,6 @@ async def delete_document_chunks(
     file_name: Optional[str] = None,
     file_name_prefix: Optional[str] = None, # Nuevo parámetro
     topic: Optional[str] = None,
-    team_id: Optional[str] = None,
     workspace_id: Optional[str] = None,
     repo_url: Optional[str] = None # Nuevo parámetro para filtrar por repo
 ) -> int:
@@ -993,7 +956,6 @@ async def delete_document_chunks(
     logger.info(f"📄 File name: {file_name}")
     logger.info(f"📁 File name prefix: {file_name_prefix}") # Log del nuevo parámetro
     logger.info(f"🏷️ Topic: {topic}")
-    logger.info(f"👥 Team ID: {team_id}")
     logger.info(f"🏢 Workspace ID: {workspace_id}")
 
     try:
@@ -1015,10 +977,6 @@ async def delete_document_chunks(
             if topic:
                 clauses.append("topic = :topic")
                 params["topic"] = topic.description if isinstance(topic, FieldInfo) else topic
-
-            if team_id:
-                clauses.append("team_id = :team_id")
-                params["team_id"] = team_id
 
             if workspace_id:
                 clauses.append("workspace_id = :workspace_id")
@@ -1067,8 +1025,8 @@ async def delete_document_chunks(
 
 async def get_full_document_content(
     account_id: str,
-    file_name: str,
-    team_id: Optional[str] = None,
+    file_name: Optional[str] = None,
+    document_id: Optional[str] = None,
     workspace_id: Optional[str] = None,
 ) -> Optional[str]:
     """
@@ -1079,13 +1037,17 @@ async def get_full_document_content(
     Args:
         account_id: El ID universal de la cuenta del usuario.
         file_name: El nombre del archivo a reconstruir.
-        team_id: El ID del equipo (UUID en formato string) para buscar en la colección del equipo, si aplica.
+        document_id: El ID único del documento a reconstruir.
         workspace_id: El ID del workspace (UUID en formato string) para buscar en la colección del workspace, si aplica.
     Returns:
         El contenido completo del documento como una cadena, o None si no se encuentra.
     """
+    if not file_name and not document_id:
+        raise ValueError("Se debe proporcionar file_name o document_id.")
+
+    log_identifier = f"'{file_name}'" if file_name else f"documento ID '{document_id}'"
     logger.info(
-        f"📄 Recuperando contenido completo (OPTIMIZADO) de '{file_name}' para la cuenta {account_id}"
+        f"📄 Recuperando contenido completo (OPTIMIZADO) de {log_identifier} para la cuenta {account_id}"
         f" (Workspace: {workspace_id if workspace_id else 'N/A'})"
     )
 
@@ -1094,17 +1056,18 @@ async def get_full_document_content(
             # Construir consulta optimizada usando las nuevas columnas directamente
             clauses = [
                 "account_id = :account_id",
-                "cmetadata->>'file_name' = :file_name",
                 "cmetadata->>'type' = 'document_chunk'"
             ]
             params: Dict[str, Any] = {
                 "account_id": account_id,
-                "file_name": file_name
             }
 
-            if team_id:
-                clauses.append("team_id = :team_id")
-                params["team_id"] = team_id
+            if file_name:
+                clauses.append("cmetadata->>'file_name' = :file_name")
+                params["file_name"] = file_name
+            elif document_id:
+                clauses.append("cmetadata->>'document_id' = :document_id")
+                params["document_id"] = str(document_id)
 
             # Manejo de workspace_id: Asegurarse de que sea un string UUID válido
             processed_workspace_id = None
@@ -1177,7 +1140,6 @@ async def get_full_document_content(
 
 async def list_user_documents(
     account_id: str,
-    team_id: Optional[str] = None,
     workspace_id: Optional[str] = None,
     topic: Optional[str] = None, # Mantener para compatibilidad
     document_ids: Optional[List[str]] = None, # Nuevo
@@ -1190,7 +1152,7 @@ async def list_user_documents(
 
     - Si se proporciona `document_ids` o `topics`, filtra específicamente por ellos.
     - Si se proporciona `workspace_id`, lista los documentos de ese workspace Y del contexto general.
-    - Si no, lista los documentos de la colección general del usuario o equipo.
+    - Si no, lista los documentos de la colección general del usuario.
     """
     logger.info(f"📋 list_user_documents - account_id: {account_id}, workspace_id: {workspace_id}, topic: {topic}, topics: {topics}, doc_ids: {document_ids}")
     async with DBSession(SessionLocal) as db:
@@ -1208,7 +1170,6 @@ async def list_user_documents(
                     context_filters.append("cmetadata->>'document_id' = ANY(:document_ids)")
                     params["document_ids"] = document_ids
                 if topics: # Nuevo parámetro topics (lista)
-                    # Si se especifican topics, filtrar por ellos
                     context_filters.append("topic = ANY(:topics)")
                     params["topics"] = topics
                 
@@ -1220,12 +1181,8 @@ async def list_user_documents(
                 if topic == "all_documents":
                     logger.info("📎 Topic es 'all_documents', no se aplicará filtro de topic.")
                 else:
-                    if team_id:
-                        base_clauses.append("team_id = :team_id")
-                        params["team_id"] = team_id
-
                     if isinstance(workspace_id, str) and workspace_id:
-                        base_clauses.append("(workspace_id = :workspace_id OR workspace_id IS NULL)")
+                        base_clauses.append("workspace_id = :workspace_id")
                         params["workspace_id"] = workspace_id
                     else:
                         base_clauses.append("workspace_id IS NULL")
@@ -1241,9 +1198,7 @@ async def list_user_documents(
                        cmetadata->>'title' AS title,
                        cmetadata->>'author' AS author,
                        cmetadata->>'document_id' AS document_id,
-                       workspace_id::text AS workspace_id,
-                       team_id::text AS team_id,
-                       CASE WHEN team_id IS NOT NULL THEN true ELSE false END AS team_shared
+                       workspace_id::text AS workspace_id
                 FROM langchain_pg_embedding
                 WHERE {" AND ".join(base_clauses)}
                 ORDER BY cmetadata->>'document_id', id;
@@ -1305,24 +1260,22 @@ async def list_user_documents_all_teams(
                        cmetadata->>'title' AS title,
                        cmetadata->>'author' AS author,
                        cmetadata->>'document_id' AS document_id,
-                       workspace_id::text AS workspace_id,
-                       team_id::text AS team_id,
-                       CASE WHEN team_id IS NOT NULL THEN true ELSE false END AS team_shared
+                       workspace_id::text AS workspace_id
                 FROM langchain_pg_embedding
                 WHERE {" AND ".join(clauses)}
                 ORDER BY cmetadata->>'document_id', id;
             """
-
-            logger.info(f"� Query SQL para todos los documentos: {query_str}")
+ 
+            logger.info(f" Query SQL para todos los documentos: {query_str}")
             logger.info(f"📋 Parámetros: {params}")
-
+ 
             document_list_query = text(query_str)
             document_list_result = await db.execute(document_list_query, params)
             documents = [dict(row) for row in document_list_result.mappings()]
-
+ 
             logger.info(f"✅ Listados {len(documents)} documentos totales del usuario.")
             return documents
-
+ 
         except Exception as e:
             logger.error(f"❌ Error listando todos los documentos del usuario {account_id}: {e}", exc_info=True)
             return []
@@ -1333,7 +1286,6 @@ async def update_document_metadata(
     file_name: str,
     new_title: Optional[str],
     new_topic: Optional[str],
-    team_id: Optional[str] = None,
     workspace_id: Optional[str] = None,
 ) -> bool:
     """
@@ -1346,7 +1298,6 @@ async def update_document_metadata(
         file_name: El nombre del archivo a actualizar.
         new_title: El nuevo título (si se proporciona).
         new_topic: La nueva categoría/base de conocimiento (si se proporciona).
-        team_id: El ID del equipo (UUID en formato string) para actualizar en la colección del equipo, si aplica.
         workspace_id: El ID del workspace (UUID en formato string) para actualizar el documento de un workspace específico, si aplica.
 
     Returns:
@@ -1373,10 +1324,6 @@ async def update_document_metadata(
                 "account_id": account_id,
                 "file_name": file_name
             }
-
-            if team_id:
-                clauses.append("team_id = :team_id")
-                params["team_id"] = team_id
 
             if workspace_id:
                 clauses.append("workspace_id = :workspace_id")
@@ -1439,7 +1386,6 @@ async def update_document_metadata(
                         "new_title": new_title,
                         "new_topic": new_topic,
                         "workspace_id": workspace_id,
-                        "team_id": team_id,
                         "message": f"Título actualizado para '{file_name}'"
                     })
                     logger.info(f"📡 Notificación WebSocket enviada para actualización de título de '{file_name}'")
@@ -1458,66 +1404,57 @@ async def update_document_metadata(
 
 
 
-async def list_user_collections(account_id: str, team_id: Optional[str] = None, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
+async def list_user_collections(account_id: str, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Obtiene una lista de todas las colecciones (temas) únicas de documentos de un usuario o equipo.
+    Obtiene una lista de todas las colecciones (temas) únicas de documentos de un usuario.
 
     Combina:
-    1. Colecciones definidas por el usuario en UserDocumentTopic (incluye vacías)
-    2. Colecciones que tienen documentos en langchain_pg_embedding (con conteo)
+    1. Colecciones definidas por el usuario en UserDocumentTopic (incluye vacías).
+    2. Colecciones que tienen documentos en langchain_pg_embedding (con conteo).
 
-    IMPORTANTE: Cuando se especifica workspace_id, se incluyen SOLO las colecciones específicas de ese workspace.
-    Para acceder a colecciones del contexto general, no se debe especificar workspace_id.
+    NUEVO COMPORTAMIENTO:
+    - Si se especifica `workspace_id`, se devuelven SOLO las colecciones de ese workspace.
+    - Si `workspace_id` es `None`, se devuelven TODAS las colecciones del usuario a través de todos sus workspaces,
+      incluyendo las que no tienen workspace asignado.
 
     Args:
-        account_id: ID de la cuenta del usuario. Obligatorio para listar colecciones de usuario.
-        team_id: ID del equipo (opcional). Usado para filtrar documentos de equipo.
-        workspace_id: ID del workspace (opcional). Usado para filtrar documentos de un workspace específico.
+        account_id: ID de la cuenta del usuario. Obligatorio.
+        workspace_id: ID del workspace (opcional). Usado para filtrar por un workspace específico.
     """
-    logger.info(f"Listando colecciones (temas) de documentos para la cuenta {account_id}, workspace: {workspace_id}")
+    logger.info(f"Listando colecciones para cuenta {account_id}, workspace: {workspace_id if workspace_id else 'TODOS'}")
 
     async with DBSession(SessionLocal) as db:
         try:
             collections_map = {}
 
             # 1. Obtener colecciones definidas por el usuario en UserDocumentTopic
-            user_topics_query = select(UserDocumentTopic).where(
+            user_topics_query = select(UserDocumentTopic).options(joinedload(UserDocumentTopic.workspace)).where(
                 UserDocumentTopic.account_id == uuid.UUID(account_id)
             )
 
+            # Si se especifica un workspace, filtramos. Si no, traemos todas.
             if workspace_id:
-                # Para workspaces, incluir SOLO las colecciones específicas del workspace
                 user_topics_query = user_topics_query.where(
                     UserDocumentTopic.workspace_id == uuid.UUID(workspace_id)
-                )
-            elif team_id:
-                user_topics_query = user_topics_query.where(
-                    UserDocumentTopic.team_id == uuid.UUID(team_id)
-                )
-            else:
-                # Colecciones personales (sin workspace ni team)
-                user_topics_query = user_topics_query.where(
-                    UserDocumentTopic.workspace_id.is_(None),
-                    UserDocumentTopic.team_id.is_(None)
                 )
             
             result = await db.execute(user_topics_query)
             user_topics = result.scalars().all()
-            logger.info(f"DEBUG: user_topics obtenidos de UserDocumentTopic: {[t.name + ' (workspace_id: ' + (str(t.workspace_id) if t.workspace_id else 'None') + ')' for t in user_topics]}")
             
             # Añadir todas las colecciones definidas por el usuario (con 0 documentos por defecto)
             for topic in user_topics:
-                collections_map[topic.name] = {
+                # Usar una clave compuesta para evitar colisiones de nombres entre workspaces
+                map_key = f"{topic.name}-{topic.workspace_id}"
+                collections_map[map_key] = {
                     "topic": topic.name,
                     "document_count": 0,
                     "description": topic.description,
                     "workspace_id": str(topic.workspace_id) if topic.workspace_id else None,
-                    "team_shared": topic.team_id is not None, # Derivar de team_id
-                    "has_knowledge_graph": False # Por defecto, se puede actualizar después si se verifica
+                    "workspace_name": topic.workspace.name if topic.workspace else None, # Añadir nombre del workspace
+                    "has_knowledge_graph": False 
                 }
-            logger.info(f"DEBUG: collections_map después de UserDocumentTopic: {collections_map}")
             
-            # 2. Obtener conteos reales de documentos desde langchain_pg_embedding (OPTIMIZADO)
+            # 2. Obtener conteos reales de documentos desde langchain_pg_embedding
             where_clause_parts = [
                 "account_id = :account_id",
                 "cmetadata->>'type' = 'document_chunk'",
@@ -1525,17 +1462,10 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
             ]
             params = {"account_id": account_id}
 
-            if team_id:
-                where_clause_parts.append("team_id = :team_id")
-                params["team_id"] = team_id
-
+            # Si se especifica un workspace, filtramos. Si no, traemos de todos.
             if workspace_id:
-                # Para workspaces, incluir SOLO las colecciones específicas del workspace
                 where_clause_parts.append("workspace_id = :workspace_id")
                 params["workspace_id"] = workspace_id
-            else:
-                # Para contexto general, incluir solo documentos sin workspace_id
-                where_clause_parts.append("workspace_id IS NULL")
 
             final_where_clause = " AND ".join(where_clause_parts)
 
@@ -1543,54 +1473,50 @@ async def list_user_collections(account_id: str, team_id: Optional[str] = None, 
                 f"""
                 SELECT
                     topic AS topic,
-                    COUNT(DISTINCT cmetadata->>'document_id') as document_count, -- Contar documentos únicos
-                    workspace_id::text as workspace_id -- Obtener el workspace_id de los documentos
+                    COUNT(DISTINCT cmetadata->>'document_id') as document_count,
+                    workspace_id::text as workspace_id
                 FROM langchain_pg_embedding
                 WHERE {final_where_clause}
-                GROUP BY topic, workspace_id -- Agrupar también por workspace_id
+                GROUP BY topic, workspace_id
                 ORDER BY topic;
                 """
             )
             
-            logger.info(f"DEBUG: list_user_collections - Querying langchain_pg_embedding with SQL: {collections_query} and params: {params}")
             result = await db.execute(collections_query, params)
             embedding_collections = [dict(row) for row in result.mappings()]
-            logger.info(f"DEBUG: embedding_collections (conteos) obtenidos: {embedding_collections}")
             
             # 3. Actualizar conteos y agregar colecciones que solo existen en embeddings
             for collection in embedding_collections:
                 topic_name = collection["topic"]
-                current_workspace_id = collection["workspace_id"] # Obtener workspace_id del embedding
-                
-                # Usar una clave compuesta para manejar colecciones con el mismo nombre en diferentes workspaces
-                # Si la colección ya existe en collections_map con el mismo nombre y workspace_id, actualizar
-                # Si la colección existe con el mismo nombre pero diferente workspace_id (o None), añadirla como nueva entrada
-                
-                # Buscar si ya existe una entrada para esta combinación de topic y workspace_id
-                found_match = False
-                for k, v in collections_map.items():
-                    if v["topic"] == topic_name and v["workspace_id"] == current_workspace_id:
-                        v["document_count"] = collection["document_count"]
-                        found_match = True
-                        break
-                
-                if not found_match:
-                    # Si no se encontró una combinación existente, añadir como nueva
-                    collections_map[f"{topic_name}-{current_workspace_id}"] = { # Usar clave compuesta para evitar sobrescribir
+                current_workspace_id = collection["workspace_id"]
+                map_key = f"{topic_name}-{current_workspace_id}"
+
+                if map_key in collections_map:
+                    collections_map[map_key]["document_count"] = collection["document_count"]
+                else:
+                    # Si no existe, es una colección creada implícitamente al subir un doc.
+                    workspace_name = None
+                    if current_workspace_id:
+                        from core.database import Workspace
+                        ws = await db.get(Workspace, uuid.UUID(current_workspace_id))
+                        if ws:
+                            workspace_name = ws.name
+
+                    collections_map[map_key] = {
                         "topic": topic_name,
                         "document_count": collection["document_count"],
-                        "description": None, # No tenemos descripción de los embeddings
+                        "description": None,
                         "workspace_id": current_workspace_id,
-                        "team_shared": collection.get("team_id") is not None, # Derivar de team_id del embedding
-                        "has_knowledge_graph": False # Por defecto
+                        "workspace_name": workspace_name,
+                        "has_knowledge_graph": False
                     }
             
-            return_list = list(collections_map.values())
-            logger.info(f"DEBUG: collections_map final antes de retornar: {return_list}")
-            return return_list
+            final_list = list(collections_map.values())
+            logger.info(f"✅ Devolviendo {len(final_list)} colecciones para la cuenta {account_id} (workspace: {workspace_id if workspace_id else 'TODOS'})")
+            return final_list
             
         except Exception as e:
-            logger.error(f"❌ Error listando colecciones (temas) de documentos para la cuenta {account_id}: {e}", exc_info=True)
+            logger.error(f"❌ Error listando colecciones para la cuenta {account_id}: {e}", exc_info=True)
             return []
 
 
@@ -1598,8 +1524,7 @@ async def create_empty_collection(
     account_id: str, 
     topic_name: str, 
     description: Optional[str] = None,
-    workspace_id: Optional[str] = None,
-    team_id: Optional[str] = None
+    workspace_id: Optional[str] = None
 ) -> bool:
     """
     Crea una colección vacía en la tabla UserDocumentTopic.
@@ -1609,7 +1534,6 @@ async def create_empty_collection(
         topic_name: Nombre de la nueva colección.
         description: Descripción opcional de la colección.
         workspace_id: ID del workspace (opcional).
-        team_id: ID del equipo (opcional).
         
     Returns:
         True si la colección se creó exitosamente, False si ya existe o hay error.
@@ -1620,536 +1544,221 @@ async def create_empty_collection(
         try:
             # Verificar si la colección ya existe
             existing_query = select(UserDocumentTopic).where(
-                UserDocumentTopic.account_id == uuid.UUID(account_id),
-                UserDocumentTopic.name == topic_name
+                UserDocumentTopic.account_id == uuid.UUID(account_id)
             )
-            
             if workspace_id:
-                existing_query = existing_query.where(
-                    UserDocumentTopic.workspace_id == uuid.UUID(workspace_id)
-                )
-            elif team_id:
-                existing_query = existing_query.where(
-                    UserDocumentTopic.team_id == uuid.UUID(team_id)
-                )
+                existing_query = existing_query.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
             else:
-                existing_query = existing_query.where(
-                    UserDocumentTopic.workspace_id.is_(None),
-                    UserDocumentTopic.team_id.is_(None)
-                )
+                existing_query = existing_query.where(UserDocumentTopic.workspace_id.is_(None))
+            
+            existing_query = existing_query.where(UserDocumentTopic.name == topic_name)
             
             existing_collection = await db.scalar(existing_query)
             if existing_collection:
-                logger.warning(f"La colección '{topic_name}' ya existe para la cuenta {account_id}")
+                logger.warning(f"Colección '{topic_name}' ya existe para la cuenta {account_id} en workspace {workspace_id}.")
                 return False
             
-            # Crear la nueva colección
-            new_collection = UserDocumentTopic(
+            new_topic = UserDocumentTopic(
                 account_id=uuid.UUID(account_id),
-                workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
-                team_id=uuid.UUID(team_id) if team_id else None,
                 name=topic_name,
                 description=description,
-                team_shared=team_id is not None, # Inicializar team_shared
-                has_knowledge_graph=False # Inicializar has_knowledge_graph
+                workspace_id=uuid.UUID(workspace_id) if workspace_id else None
             )
-            
-            db.add(new_collection)
+            db.add(new_topic)
             await db.commit()
-            
-            logger.info(f"✅ Colección '{topic_name}' creada exitosamente para cuenta {account_id}")
+            await db.refresh(new_topic)
+            logger.info(f"✅ Colección vacía '{topic_name}' creada exitosamente.")
             return True
-            
         except Exception as e:
-            logger.error(f"❌ Error creando colección '{topic_name}' para cuenta {account_id}: {e}", exc_info=True)
+            logger.error(f"❌ Error al crear colección vacía '{topic_name}': {e}", exc_info=True)
             await db.rollback()
             return False
 
-async def update_collection_metadata(
-    account_id: str,
-    old_topic_name: str,
-    new_topic_name: Optional[str] = None,
-    new_description: Optional[str] = None,
-    workspace_id: Optional[str] = None,
-    team_id: Optional[str] = None
-) -> bool:
-    """
-    Actualiza los metadatos de una colección (nombre y/o descripción).
 
-    Args:
-        account_id: ID de la cuenta del usuario.
-        old_topic_name: Nombre actual de la colección.
-        new_topic_name: Nuevo nombre de la colección (opcional).
-        new_description: Nueva descripción de la colección (opcional).
-        workspace_id: ID del workspace (opcional).
-        team_id: ID del equipo (opcional).
-
-    Returns:
-        True si la colección fue actualizada exitosamente, False si hay error.
+async def update_collection_workspace(account_id: str, topic_name: str, workspace_id: str) -> bool:
     """
-    logger.info(f"🔄 Actualizando metadatos de colección '{old_topic_name}' para cuenta {account_id}")
+    Actualiza el workspace_id de una colección existente en la tabla UserDocumentTopic.
+    """
+    logger.info(f"Actualizando workspace_id para la colección '{topic_name}' de la cuenta {account_id} a {workspace_id}")
 
     async with DBSession(SessionLocal) as db:
         try:
-            # Iniciar transacción
-            async with db.begin():
-                # 1. Actualizar la definición de la colección en UserDocumentTopic
-                update_topic_stmt = update(UserDocumentTopic).where(
-                    UserDocumentTopic.account_id == uuid.UUID(account_id),
-                    UserDocumentTopic.name == old_topic_name
-                )
-                
-                if workspace_id:
-                    update_topic_stmt = update_topic_stmt.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
-                elif team_id:
-                    update_topic_stmt = update_topic_stmt.where(UserDocumentTopic.team_id == uuid.UUID(team_id))
-                else:
-                    update_topic_stmt = update_topic_stmt.where(UserDocumentTopic.workspace_id.is_(None), UserDocumentTopic.team_id.is_(None))
+            # Buscar la colección
+            collection_query = select(UserDocumentTopic).where(
+                UserDocumentTopic.account_id == uuid.UUID(account_id),
+                UserDocumentTopic.name == topic_name
+            )
+            collection = (await db.execute(collection_query)).scalars().first()
 
-                values_to_update = {}
-                if new_topic_name is not None:
-                    values_to_update['name'] = new_topic_name
-                if new_description is not None:
-                    values_to_update['description'] = new_description
+            if not collection:
+                logger.warning(f"Colección '{topic_name}' no encontrada para la cuenta {account_id}.")
+                return False
 
-                if values_to_update:
-                    result_topic = await db.execute(update_topic_stmt.values(**values_to_update))
-                    if result_topic.rowcount == 0:
-                        logger.warning(f"No se encontró la colección '{old_topic_name}' en UserDocumentTopic para actualizar.")
-                        # No retornamos False todavía, puede que solo existan en embeddings
+            # Actualizar el workspace_id
+            collection.workspace_id = uuid.UUID(workspace_id)
+            await db.commit()
+            await db.refresh(collection)
 
-                # 2. Si se cambió el nombre, actualizar todos los chunks en langchain_pg_embedding
-                if new_topic_name is not None and new_topic_name != old_topic_name:
-                    clauses = [
-                        "account_id = :account_id",
-                        "topic = :old_topic_name",
-                        "cmetadata->>'type' = 'document_chunk'"
-                    ]
-                    params: Dict[str, Any] = {
-                        "account_id": account_id,
-                        "old_topic_name": old_topic_name,
-                        "new_topic_name": new_topic_name,
-                        "new_cmetadata_topic": json.dumps(new_topic_name)
-                    }
-
-                    if workspace_id:
-                        clauses.append("workspace_id = :workspace_id")
-                        params["workspace_id"] = workspace_id
-                    elif team_id:
-                        clauses.append("team_id = :team_id")
-                        params["team_id"] = team_id
-                    else:
-                        clauses.append("workspace_id IS NULL")
-
-                    # Usamos jsonb_set para actualizar solo el campo 'topic' en cmetadata
-                    update_embeddings_sql = text(f"""
-                        UPDATE langchain_pg_embedding
-                        SET
-                            cmetadata = :new_cmetadata,
-                            topic = :new_topic_name
-                        WHERE {" AND ".join(clauses)}
-                    """)
-
-                    result_embeddings = await db.execute(update_embeddings_sql, params)
-                    logger.info(f"✅ Se actualizaron {result_embeddings.rowcount} chunks en langchain_pg_embedding con el nuevo nombre de colección.")
-
-            logger.info(f"✅ Colección '{old_topic_name}' actualizada exitosamente.")
+            logger.info(f"✅ Workspace_id de la colección '{topic_name}' actualizado exitosamente a {workspace_id}.")
             return True
-
         except Exception as e:
-            logger.error(f"❌ Error actualizando colección '{old_topic_name}': {e}", exc_info=True)
+            logger.error(f"❌ Error al actualizar workspace_id para la colección '{topic_name}': {e}", exc_info=True)
+            await db.rollback()
             return False
 
-async def update_collection_workspace(
-    account_id: str,
-    topic_name: str,
-    workspace_id: str
-) -> bool:
+
+async def link_profile_to_collection(account_id: str, topic_name: str, profile_id: str, workspace_id: Optional[str] = None) -> bool:
     """
-    Actualiza el workspace_id en los metadatos de todos los documentos de una colección.
-    OPTIMIZADO: Usa filtros directos en langchain_pg_embedding sin JOINs.
-    Args:
-        account_id: El ID de la cuenta del usuario.
-        topic_name: Nombre de la colección a actualizar.
-        workspace_id: ID del workspace al que se asociará la colección.
-    Returns:
-        True si la colección fue actualizada exitosamente, False si hay error.
+    Vincula un perfil de contacto a una colección de documentos (UserDocumentTopic).
     """
-    logger.info(f"🔄 Asociando colección (OPTIMIZADO) '{topic_name}' al workspace {workspace_id} para cuenta {account_id}")
+    logger.info(f"Intentando vincular perfil {profile_id} a la colección '{topic_name}' para la cuenta {account_id} (workspace: {workspace_id})")
     async with DBSession(SessionLocal) as db:
         try:
-            # Construir filtros usando las nuevas columnas directamente
-            clauses = [
+            # 1. Obtener la colección
+            topic_query = select(UserDocumentTopic).where(
+                UserDocumentTopic.account_id == uuid.UUID(account_id),
+                UserDocumentTopic.name == topic_name
+            )
+            if workspace_id:
+                topic_query = topic_query.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
+            else:
+                topic_query = topic_query.where(UserDocumentTopic.workspace_id.is_(None))
+
+            collection = (await db.execute(topic_query)).scalars().first()
+            if not collection:
+                logger.warning(f"Colección '{topic_name}' no encontrada para la cuenta {account_id} en workspace {workspace_id}.")
+                return False
+
+            # 2. Obtener el perfil de contacto
+            profile = await db.get(ContactProfile, uuid.UUID(profile_id))
+            if not profile or profile.account_id != uuid.UUID(account_id):
+                logger.warning(f"Perfil {profile_id} no encontrado o no pertenece a la cuenta {account_id}.")
+                return False
+
+            # 3. Verificar si ya está vinculado
+            if profile in collection.contact_profiles:
+                logger.info(f"El perfil {profile_id} ya está vinculado a la colección '{topic_name}'.")
+                return True
+
+            # 4. Vincular
+            collection.contact_profiles.append(profile)
+            await db.commit()
+            await db.refresh(collection)
+            logger.info(f"✅ Perfil {profile_id} vinculado exitosamente a la colección '{topic_name}'.")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error al vincular perfil {profile_id} a la colección '{topic_name}': {e}", exc_info=True)
+            await db.rollback()
+            return False
+
+
+async def unlink_profile_from_collection(account_id: str, topic_name: str, profile_id: str, workspace_id: Optional[str] = None) -> bool:
+    """
+    Desvincula un perfil de contacto de una colección de documentos (UserDocumentTopic).
+    """
+    logger.info(f"Intentando desvincular perfil {profile_id} de la colección '{topic_name}' para la cuenta {account_id} (workspace: {workspace_id})")
+    async with DBSession(SessionLocal) as db:
+        try:
+            # 1. Obtener la colección
+            topic_query = select(UserDocumentTopic).where(
+                UserDocumentTopic.account_id == uuid.UUID(account_id),
+                UserDocumentTopic.name == topic_name
+            )
+            if workspace_id:
+                topic_query = topic_query.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
+            else:
+                topic_query = topic_query.where(UserDocumentTopic.workspace_id.is_(None))
+
+            collection = (await db.execute(topic_query)).scalars().first()
+            if not collection:
+                logger.warning(f"Colección '{topic_name}' no encontrada para la cuenta {account_id} en workspace {workspace_id}.")
+                return False
+
+            # 2. Obtener el perfil de contacto
+            profile = await db.get(ContactProfile, uuid.UUID(profile_id))
+            if not profile or profile.account_id != uuid.UUID(account_id):
+                logger.warning(f"Perfil {profile_id} no encontrado o no pertenece a la cuenta {account_id}.")
+                return False
+
+            # 3. Verificar si está vinculado
+            if profile not in collection.contact_profiles:
+                logger.info(f"El perfil {profile_id} no está vinculado a la colección '{topic_name}'.")
+                return True # Already unlinked or never linked
+
+            # 4. Desvincular
+            collection.contact_profiles.remove(profile)
+            await db.commit()
+            await db.refresh(collection)
+            logger.info(f"✅ Perfil {profile_id} desvinculado exitosamente de la colección '{topic_name}'.")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error al desvincular perfil {profile_id} de la colección '{topic_name}': {e}", exc_info=True)
+            await db.rollback()
+            return False
+
+
+async def get_user_document_topic_by_name(account_id: str, topic_name: str, workspace_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Obtiene los detalles de una colección (UserDocumentTopic) por su nombre.
+    """
+    logger.info(f"Obteniendo detalles de colección '{topic_name}' para cuenta {account_id} (workspace: {workspace_id})")
+    async with DBSession(SessionLocal) as db:
+        try:
+            topic_query = select(UserDocumentTopic).options(selectinload(UserDocumentTopic.contact_profiles)).where(
+                UserDocumentTopic.account_id == uuid.UUID(account_id),
+                UserDocumentTopic.name == topic_name
+            )
+            if workspace_id:
+                topic_query = topic_query.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
+            else:
+                topic_query = topic_query.where(UserDocumentTopic.workspace_id.is_(None))
+            
+            collection = (await db.execute(topic_query)).scalars().first()
+            if not collection:
+                logger.warning(f"Colección '{topic_name}' no encontrada para la cuenta {account_id} en workspace {workspace_id}.")
+                return None
+
+            # Contar documentos en langchain_pg_embedding
+            count_clauses = [
                 "account_id = :account_id",
-                "topic = :topic_name",
-                "cmetadata->>'type' = 'document_chunk'"
+                "cmetadata->>'type' = 'document_chunk'",
+                "topic = :topic_name"
             ]
-            params: Dict[str, Any] = {
+            count_params: Dict[str, Any] = {
                 "account_id": account_id,
                 "topic_name": topic_name
             }
-
-            # Primero, obtener el cmetadata actual para no sobrescribir otros metadatos
-            select_sql = text(f"""
-                SELECT cmetadata
+            if workspace_id:
+                count_clauses.append("workspace_id = :workspace_id")
+                count_params["workspace_id"] = workspace_id
+            else:
+                count_clauses.append("workspace_id IS NULL")
+            
+            count_query = text(f"""
+                SELECT COUNT(DISTINCT cmetadata->>'document_id')
                 FROM langchain_pg_embedding
-                WHERE {" AND ".join(clauses)}
-                LIMIT 1
+                WHERE {" AND ".join(count_clauses)}
             """)
+            document_count = await db.scalar(count_query, count_params) or 0
 
-            cmetadata_result = await db.execute(select_sql, params)
-            current_cmetadata = cmetadata_result.scalar_one_or_none()
+            linked_profiles_data = []
+            for cp in collection.contact_profiles:
+                linked_profiles_data.append({
+                    "id": str(cp.id),
+                    "name": cp.name,
+                    "email": cp.email,
+                    "phone": cp.phone,
+                })
 
-            if not current_cmetadata:
-                logger.warning(f"No se encontraron documentos para la colección '{topic_name}'.")
-                return False
-
-            # Actualizar metadatos con el nuevo workspace_id
-            values_to_update = current_cmetadata.copy()
-            values_to_update['workspace_id'] = workspace_id
-
-            # Actualizar tanto cmetadata como la columna optimizada workspace_id
-            update_sql = text(f"""
-                UPDATE langchain_pg_embedding
-                SET
-                    cmetadata = :new_cmetadata,
-                    workspace_id = :workspace_id_column
-                WHERE {" AND ".join(clauses)}
-            """)
-
-            update_params = params.copy()
-            update_params.update({
-                "new_cmetadata": json.dumps(values_to_update),  # Serializar a JSON string para PostgreSQL
-                "workspace_id_column": workspace_id
-            })
-
-            logger.info(f"🔧 Query SQL optimizada: {update_sql}")
-            logger.info(f"📋 Parámetros: {update_params}")
-
-            result = await db.execute(update_sql, update_params)
-            await db.commit()
-
-            if result.rowcount > 0:
-                logger.info(f"✅ Se actualizaron {result.rowcount} documentos para la colección '{topic_name}' con workspace_id {workspace_id} usando consulta optimizada.")
-                return True
-            else:
-                logger.warning(f"No se encontraron documentos para actualizar en la colección '{topic_name}'.")
-                return False
-
+            return {
+                "id": str(collection.id),
+                "topic": collection.name,
+                "description": collection.description,
+                "document_count": document_count,
+                "workspace_id": str(collection.workspace_id) if collection.workspace_id else None,
+                "linked_profiles": linked_profiles_data,
+                "has_knowledge_graph": False # Placeholder, se actualizará si se genera un KG
+            }
         except Exception as e:
-            logger.error(f"❌ Error asociando colección optimizado '{topic_name}' al workspace {workspace_id}: {e}", exc_info=True)
-            await db.rollback()
-            return False
-
-async def delete_collection(
-    account_id: str, 
-    topic_name: str, 
-    workspace_id: Optional[str] = None,
-    team_id: Optional[str] = None
-) -> bool:
-    """
-    Elimina una colección y todos los documentos asociados de la base de datos.
-    
-    Args:
-        account_id: ID de la cuenta del usuario.
-        topic_name: Nombre de la colección a eliminar.
-        workspace_id: ID del workspace (opcional).
-        team_id: ID del equipo (opcional).
-        
-    Returns:
-        True si la colección y sus documentos fueron eliminados exitosamente, False si hay error.
-    """
-    logger.info(f"Eliminando colección '{topic_name}' para cuenta {account_id}")
-    
-    async with DBSession(SessionLocal) as db:
-        try:
-            # Eliminar los documentos asociados a la colección
-            deleted_chunks = await delete_document_chunks(
-                account_id=account_id,
-                topic=topic_name,
-                team_id=team_id,
-                workspace_id=workspace_id
-            )
-            logger.info(f"Se eliminaron {deleted_chunks} fragmentos de documentos de la colección '{topic_name}'")
-            
-            # Construir la consulta de eliminación para UserDocumentTopic de forma más robusta
-            delete_query = delete(UserDocumentTopic).where(
-                UserDocumentTopic.account_id == uuid.UUID(account_id),
-                UserDocumentTopic.name == topic_name
-            )
-            
-            if workspace_id:
-                # Si se proporcionó un workspace_id, buscar la colección asociada a ese workspace
-                delete_query = delete_query.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
-            else:
-                # Si no se proporcionó workspace_id, buscar colecciones sin workspace (generales/personales)
-                delete_query = delete_query.where(UserDocumentTopic.workspace_id.is_(None))
-            
-            if team_id:
-                # Si se proporcionó un team_id, buscar la colección asociada a ese team
-                delete_query = delete_query.where(UserDocumentTopic.team_id == uuid.UUID(team_id))
-            else:
-                # Si no se proporcionó team_id, buscar colecciones sin team (personales/generales)
-                delete_query = delete_query.where(UserDocumentTopic.team_id.is_(None))
-            
-            result = await db.execute(delete_query)
-            await db.commit()
-            
-            if result.rowcount > 0:
-                logger.info(f"✅ Colección '{topic_name}' eliminada exitosamente de UserDocumentTopic para cuenta {account_id}")
-                return True
-            else:
-                logger.warning(f"La colección '{topic_name}' no se encontró en UserDocumentTopic para la cuenta {account_id} con los criterios especificados.")
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ Error eliminando colección '{topic_name}' para cuenta {account_id}: {e}", exc_info=True)
-            await db.rollback()
-            return False
-async def extract_titles_and_update_metadata(account_id: str, topic: Optional[str] = None, workspace_id: Optional[str] = None, team_id: Optional[str] = None) -> int:
-    """
-    Extrae títulos de los documentos y actualiza sus metadatos en la base de conocimiento del usuario.
-    
-    Args:
-        account_id: El ID universal de la cuenta del usuario.
-        topic: Tema de los documentos a procesar (opcional).
-        workspace_id: El ID del workspace (UUID en formato string) para procesar documentos de un workspace específico, si aplica.
-        team_id: El ID del equipo (opcional).
-    
-    Returns:
-        Número de documentos actualizados.
-    """
-    logger.info(
-        f"Iniciando extracción y actualización de títulos para cuenta {account_id}. "
-        f"Tema: {topic}, Workspace ID: {workspace_id if workspace_id else 'N/A'}."
-    )
-    
-    updated_count = 0
-    async with DBSession(SessionLocal) as db:
-        try:
-            # Construir consulta optimizada usando las nuevas columnas directamente
-            logger.info(f"📊 Procesando documentos (OPTIMIZADO) para cuenta {account_id}.")
-
-            clauses = [
-                "account_id = :account_id",
-                "cmetadata->>'type' = 'document_chunk'"
-            ]
-            params: Dict[str, Any] = {"account_id": account_id}
-
-            if topic:
-                clauses.append("topic = :topic")
-                params["topic"] = topic.description if isinstance(topic, FieldInfo) else topic.description if isinstance(topic, FieldInfo) else topic
-            if workspace_id:
-                clauses.append("workspace_id = :workspace_id")
-                params["workspace_id"] = workspace_id
-            if team_id:
-                clauses.append("team_id = :team_id")
-                params["team_id"] = team_id
-
-            select_sql = text("SELECT * FROM langchain_pg_embedding WHERE " + " AND ".join(clauses))
-            logger.info(f"🔧 Ejecutando consulta SQL optimizada: {select_sql} con parámetros: {params}")
-            result = await db.execute(select_sql, params)
-            chunks = result.mappings().all()
-            logger.info(f"📊 Se encontraron {len(chunks)} fragmentos de documentos para procesar usando consulta optimizada.")
-
-            if not chunks:
-                logger.info("No se encontraron fragmentos de documentos para procesar.")
-                return 0
-
-            documents = {}
-            for chunk in chunks:
-                file_name = chunk['cmetadata'].get('file_name')
-                if file_name:
-                    if file_name not in documents:
-                        documents[file_name] = []
-                    documents[file_name].append(chunk)
-                else:
-                    logger.warning(f"Fragmento sin 'file_name' en cmetadata: {chunk['cmetadata']}")
-
-            for file_name, doc_chunks in documents.items():
-                logger.info(f"Procesando documento: {file_name} con {len(doc_chunks)} fragmentos.")
-                
-                full_content = "".join([c['document'] for c in sorted(doc_chunks, key=lambda x: x['cmetadata'].get('chunk_index', 0))])
-
-                new_title = None
-                if full_content:
-                    lines = [line.strip() for line in full_content.split('\n') if line.strip()]
-                    if lines:
-                        first_line = lines[0]
-                        if 5 < len(first_line) < 100:
-                            new_title = first_line
-                        else:
-                            for line in lines[:5]:
-                                if len(line) > 10 and len(line) < 150 and line.isupper() and line.count(' ') < len(line)/3:
-                                    new_title = line.title()
-                                    break
-                        if not new_title and len(lines) > 1:
-                            combined_lines = " ".join(lines[:2])
-                            if 10 < len(combined_lines) < 150:
-                                new_title = combined_lines
-
-                if new_title and new_title != doc_chunks[0]['cmetadata'].get('title'):
-                    logger.info(f"Título extraído para {file_name}: '{new_title}'")
-                    success = await update_document_metadata(account_id, file_name, new_title=new_title, new_topic=None, team_id=team_id, workspace_id=workspace_id)
-                    if success:
-                        updated_count += 1
-                        logger.info(f"Actualizado título para el documento {file_name}.")
-                    else:
-                        logger.warning(f"No se pudo actualizar el título para el documento {file_name}.")
-                else:
-                    logger.info(f"No se encontró un nuevo título válido o el título es el mismo para {file_name}. Primera línea: {new_title}")
-
-            if updated_count > 0:
-                logger.info(f"Se actualizaron los títulos de {updated_count} documentos para la cuenta {account_id}.")
-            else:
-                logger.info(f"No se encontraron títulos para actualizar en los documentos de la cuenta {account_id}.")
-            
-            return updated_count
-        except Exception as e:
-            logger.error(f"Error al extraer y actualizar títulos para la cuenta {account_id} (workspace {workspace_id}): {e}", exc_info=True)
-            await db.rollback()
-            return 0
-
-async def get_user_document_topic_by_name(
-    account_id: str,
-    topic_name: str,
-    workspace_id: Optional[str] = None,
-    team_id: Optional[str] = None
-) -> Optional[UserDocumentTopic]:
-    """
-    Obtiene un UserDocumentTopic por su nombre y contexto (account_id, workspace_id, team_id).
-
-    Args:
-        account_id: ID de la cuenta del usuario.
-        topic_name: Nombre del topic/colección.
-        workspace_id: ID del workspace (opcional).
-        team_id: ID del equipo (opcional).
-
-    Returns:
-        El objeto UserDocumentTopic si se encuentra, de lo contrario None.
-    """
-    logger.info(f"Buscando UserDocumentTopic '{topic_name}' para cuenta {account_id}, workspace {workspace_id}, team {team_id}")
-    async with DBSession(SessionLocal) as db:
-        try:
-            query = select(UserDocumentTopic).where(
-                UserDocumentTopic.account_id == uuid.UUID(account_id),
-                UserDocumentTopic.name == topic_name
-            )
-
-            if workspace_id:
-                query = query.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
-            else:
-                query = query.where(UserDocumentTopic.workspace_id.is_(None))
-
-            if team_id:
-                query = query.where(UserDocumentTopic.team_id == uuid.UUID(team_id))
-            else:
-                query = query.where(UserDocumentTopic.team_id.is_(None))
-
-            result = await db.execute(query)
-            topic = result.scalars().first()
-            if topic:
-                logger.info(f"✅ UserDocumentTopic '{topic_name}' encontrado.")
-            else:
-                logger.warning(f"UserDocumentTopic '{topic_name}' no encontrado.")
-            return topic
-        except Exception as e:
-            logger.error(f"❌ Error al buscar UserDocumentTopic '{topic_name}': {e}", exc_info=True)
+            logger.error(f"❌ Error al obtener detalles de colección '{topic_name}': {e}", exc_info=True)
             return None
-
-async def link_profile_to_collection(
-    account_id: str,
-    topic_name: str,
-    description: Optional[str] = None,
-    workspace_id: Optional[str] = None,
-    team_id: Optional[str] = None
-) -> bool:
-    """
-    Vincula un perfil (account_id) a una colección (topic) en UserDocumentTopic.
-    Si la colección no existe para el contexto dado, la crea.
-
-    Args:
-        account_id: ID de la cuenta del usuario.
-        topic_name: Nombre del topic/colección a vincular.
-        description: Descripción opcional para la nueva colección.
-        workspace_id: ID del workspace (opcional).
-        team_id: ID del equipo (opcional).
-
-    Returns:
-        True si la vinculación fue exitosa (ya existía o se creó), False en caso de error.
-    """
-    logger.info(f"Vinculando perfil {account_id} a colección '{topic_name}' (workspace: {workspace_id}, team: {team_id})")
-    async with DBSession(SessionLocal) as db:
-        try:
-            existing_topic = await get_user_document_topic_by_name(account_id, topic_name, workspace_id, team_id)
-
-            if existing_topic:
-                logger.info(f"La colección '{topic_name}' ya está vinculada al perfil {account_id}.")
-                return True
-            else:
-                new_topic = UserDocumentTopic(
-                    account_id=uuid.UUID(account_id),
-                    name=topic_name,
-                    description=description,
-                    workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
-                    team_id=uuid.UUID(team_id) if team_id else None
-                )
-                db.add(new_topic)
-                await db.commit()
-                logger.info(f"✅ Colección '{topic_name}' creada y vinculada al perfil {account_id}.")
-                return True
-        except Exception as e:
-            logger.error(f"❌ Error al vincular perfil {account_id} a colección '{topic_name}': {e}", exc_info=True)
-            await db.rollback()
-            return False
-
-async def unlink_profile_from_collection(
-    account_id: str,
-    topic_name: str,
-    workspace_id: Optional[str] = None,
-    team_id: Optional[str] = None
-) -> bool:
-    """
-    Desvincula un perfil (account_id) de una colección (topic) en UserDocumentTopic.
-    Esto elimina la entrada de la tabla UserDocumentTopic.
-
-    Args:
-        account_id: ID de la cuenta del usuario.
-        topic_name: Nombre del topic/colección a desvincular.
-        workspace_id: ID del workspace (opcional).
-        team_id: ID del equipo (opcional).
-
-    Returns:
-        True si la desvinculación fue exitosa, False si no se encontró o hubo un error.
-    """
-    logger.info(f"Desvinculando perfil {account_id} de colección '{topic_name}' (workspace: {workspace_id}, team: {team_id})")
-    async with DBSession(SessionLocal) as db:
-        try:
-            query = delete(UserDocumentTopic).where(
-                UserDocumentTopic.account_id == uuid.UUID(account_id),
-                UserDocumentTopic.name == topic_name
-            )
-
-            if workspace_id:
-                query = query.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
-            else:
-                query = query.where(UserDocumentTopic.workspace_id.is_(None))
-
-            if team_id:
-                query = query.where(UserDocumentTopic.team_id == uuid.UUID(team_id))
-            else:
-                query = query.where(UserDocumentTopic.team_id.is_(None))
-
-            result = await db.execute(query)
-            await db.commit()
-
-            if result.rowcount > 0:
-                logger.info(f"✅ Colección '{topic_name}' desvinculada exitosamente del perfil {account_id}.")
-                return True
-            else:
-                logger.warning(f"La colección '{topic_name}' no se encontró para desvincular del perfil {account_id}.")
-                return False
-        except Exception as e:
-            logger.error(f"❌ Error buscando UserDocumentTopic '{topic_name}': {e}", exc_info=True)
-            await db.rollback()
-            return False

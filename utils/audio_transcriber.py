@@ -34,12 +34,13 @@ async def get_whisper_model() -> Optional[WhisperModel]:
         load_whisper_model()
     return _whisper_model
 
-async def transcribe_audio_file(audio_file: BytesIO) -> Optional[str]:
+async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> Optional[str]:
     """
     Transcribe un archivo de audio usando el modelo Whisper.
 
     Args:
         audio_file: Un objeto BytesIO que contiene los datos del audio.
+        file_format: El formato del archivo de audio (ej. "webm", "ogg").
 
     Returns:
         El texto transcrito, o None si ocurre un error.
@@ -54,10 +55,10 @@ async def transcribe_audio_file(audio_file: BytesIO) -> Optional[str]:
         audio_file.seek(0, 2)
         file_size = audio_file.tell()
         audio_file.seek(0)
-        logger.info(f"Transcribiendo archivo de audio con tamaño: {file_size} bytes.")
+        logger.info(f"Transcribiendo archivo de audio con tamaño: {file_size} bytes y formato: {file_format}.")
 
         # Convertir el audio a formato WAV usando pydub
-        audio_segment = AudioSegment.from_file(audio_file, format="webm")
+        audio_segment = AudioSegment.from_file(audio_file, format=file_format)
         wav_file = BytesIO()
         audio_segment.export(wav_file, format="wav")
         wav_file.seek(0)

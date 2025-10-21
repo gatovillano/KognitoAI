@@ -43,7 +43,7 @@ async def initialize_llms():
             model=settings.google_main_model_name,
             temperature=settings.llm_temperature,
             google_api_key=settings.google_api_key,
-            stream=True
+            streaming=True
         )
         _main_agent_llm_instance = main_llm
         logger.info("✅ Main agent LLM initialized.")
@@ -57,7 +57,7 @@ async def initialize_llms():
             model=settings.google_summary_model_name,
             temperature=0.0,
             google_api_key=settings.google_api_key,
-            stream=True
+            streaming=True
         )
         _fast_task_llm_instance = fast_llm
         logger.info("✅ Fast task LLM initialized.")

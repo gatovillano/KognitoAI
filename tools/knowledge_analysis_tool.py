@@ -12,7 +12,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 
 # Importamos la función de bajo nivel que ejecuta el job.
-from tools.proactive_knowledge_linker_tool import run_batch_analysis_job
+from utils.proactive_knowledge_linker import run_batch_analysis_job
 
 logger = logging.getLogger(__name__)
 

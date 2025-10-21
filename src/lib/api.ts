@@ -17,6 +17,14 @@ console.log('DEBUG (apiClient): Final baseURL used by axios:', apiClient.default
 // Interceptor para manejar tokens
 apiClient.interceptors.request.use(
   (config) => {
+    // Asegurarse de que config.params sea un objeto mutable
+    if (config.params && typeof config.params === 'object' && !Object.isFrozen(config.params)) {
+      // Si ya es un objeto mutable y no está congelado, no hacer nada
+    } else {
+      // Si no existe, es nulo, no es un objeto, o está congelado, crear una copia mutable
+      config.params = { ...(config.params || {}) };
+    }
+
     if (typeof window !== 'undefined') {
       const token = localStorage.getItem('authToken');
       if (token) {

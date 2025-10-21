@@ -1,82 +1,103 @@
 // src/components/MoreActionsMenu.tsx
+import React from 'react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { Plus, Search, Lightbulb, BrainCircuit, Upload, Mic, Loader2 } from 'lucide-react';
-import { Switch } from '@/components/ui/switch';
+import { Plus, Search, Lightbulb, BrainCircuit, Upload, Mic, Loader2, Image as ImageIcon } from 'lucide-react';
 
 interface MoreActionsMenuProps {
   isWebSearchActive: boolean;
   isComprehensiveAnalysisActive: boolean;
   isDeepResearchActive: boolean;
-  isRecording: boolean;
   isUploadingFile: boolean;
+  isUploadingImage?: boolean;
   onToggleWebSearch: () => void;
   onToggleComprehensiveAnalysis: () => void;
   onToggleDeepResearch: () => void;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onStartRecording: () => void;
-  onStopRecording: () => void;
+  onImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
 export function MoreActionsMenu({
   isWebSearchActive,
   isComprehensiveAnalysisActive,
   isDeepResearchActive,
-  isRecording,
   isUploadingFile,
+  isUploadingImage,
   onToggleWebSearch,
   onToggleComprehensiveAnalysis,
   onToggleDeepResearch,
   onFileUpload,
-  onStartRecording,
-  onStopRecording,
+  onImageUpload,
 }: MoreActionsMenuProps) {
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="rounded-full">
-          <Plus className="h-5 w-5" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
-        {/* Mode Buttons */}
-        <DropdownMenuItem onClick={onToggleWebSearch}>
-          <Search className="mr-2 h-4 w-4" /> Búsqueda Web {isWebSearchActive && '✅'}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onToggleComprehensiveAnalysis}>
-          <Lightbulb className="mr-2 h-4 w-4" /> Búsqueda Analítica {isComprehensiveAnalysisActive && '✅'}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onToggleDeepResearch}>
-          <BrainCircuit className="mr-2 h-4 w-4" /> Investigación Profunda {isDeepResearchActive && '✅'}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        {/* Action Buttons */}
-        <DropdownMenuItem>
-          <input
-            id="file-upload-menu" // Unique ID for this input
-            type="file"
-            multiple
-            accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.gif"
-            className="hidden"
-            onChange={(e) => {
-              onFileUpload(e);
-              e.target.value = '';
-            }}
-            disabled={isUploadingFile}
-          />
-          <label htmlFor="file-upload-menu" className="flex items-center cursor-pointer w-full">
-            {isUploadingFile ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Upload className="mr-2 h-4 w-4" />
-            )}
-            Subir Documentos
-          </label>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={isRecording ? onStopRecording : onStartRecording}>
-          <Mic className="mr-2 h-4 w-4" /> {isRecording ? 'Detener Grabación' : 'Grabar Audio'}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="rounded-full">
+            <Plus className="h-5 w-5" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          {/* Mode Buttons */}
+          <DropdownMenuItem onClick={onToggleWebSearch}>
+            <Search className="mr-2 h-4 w-4" /> Búsqueda Web {isWebSearchActive && '✅'}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onToggleComprehensiveAnalysis}>
+            <Lightbulb className="mr-2 h-4 w-4" /> Búsqueda Analítica {isComprehensiveAnalysisActive && '✅'}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onToggleDeepResearch}>
+            <BrainCircuit className="mr-2 h-4 w-4" /> Investigación Profunda {isDeepResearchActive && '✅'}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {/* Action Buttons */}
+          <DropdownMenuItem asChild>
+            <label htmlFor="file-upload-menu" className="cursor-pointer">
+              {isUploadingFile ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="mr-2 h-4 w-4" />
+              )}
+              Subir Documentos
+            </label>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <label htmlFor="image-upload-menu" className="cursor-pointer">
+              {isUploadingImage ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <ImageIcon className="mr-2 h-4 w-4" />
+              )}
+              Subir Imagen
+            </label>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {/* Hidden file input for documents */}
+      <input
+        id="file-upload-menu"
+        type="file"
+        multiple
+        accept=".pdf,.docx,.txt,.md"
+        className="hidden"
+        onChange={(e) => {
+          onFileUpload(e);
+          if (e.target) e.target.value = '';
+        }}
+        disabled={isUploadingFile}
+      />
+      {/* Hidden file input for images */}
+      <input
+        id="image-upload-menu"
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          onImageUpload(e);
+          if (e.target) e.target.value = '';
+        }}
+        disabled={isUploadingImage}
+      />
+    </>
   );
 }

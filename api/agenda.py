@@ -11,11 +11,11 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
 from sqlalchemy import select, desc, update, or_
 
-from core.database import SessionLocal, Account, TeamMember, AgendaEvent, Workspace, get_db_session, ContactProfile # Import ContactProfile model
-from utils.security import get_current_account_id
+from core.database import SessionLocal, Account, TeamMember, AgendaEvent, Workspace, get_db_session, ContactProfile, WorkspacePermission # Import ContactProfile model, WorkspacePermission
+from utils.security import get_current_account_id, check_workspace_permission
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload # Import selectinload
-from core.agenda_manager import schedule_event, cancel_event, get_event_by_id # Import schedule_event, cancel_event, get_event_by_id
+from core.agenda_manager import schedule_event, cancel_event, get_event_by_id, add_attendees_to_event, remove_attendees_from_event # Import schedule_event, cancel_event, get_event_by_id, add_attendees_to_event, remove_attendees_from_event
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -35,6 +35,14 @@ async def get_event_by_id_endpoint(
     event = await get_event_by_id(current_account_id, event_id)
     if not event:
         raise HTTPException(status_code=404, detail="Evento no encontrado o no autorizado.")
+    
+    # Si el evento tiene un workspace_id, verificar permisos
+    if event.get("workspace_id"):
+        # Necesitamos una sesión de DB para check_workspace_permission
+        async with DBSession(SessionLocal) as db:
+            if not await check_workspace_permission(current_account_id, event["workspace_id"], db, required_roles=['owner', 'editor', 'viewer']):
+                raise HTTPException(status_code=403, detail="No tienes permiso para acceder a este evento.")
+                
     return event
 
 @router.get("/agenda/events/{event_id}/linked-profiles", summary="Obtener perfiles vinculados a un evento")
@@ -55,6 +63,11 @@ async def get_linked_profiles_to_event_endpoint(
 
         if not event:
             raise HTTPException(status_code=404, detail="Evento no encontrado o no autorizado.")
+        
+        # Si el evento tiene un workspace_id, verificar permisos
+        if event.workspace_id:
+            if not await check_workspace_permission(current_account_id, str(event.workspace_id), db, required_roles=['owner', 'editor', 'viewer']):
+                raise HTTPException(status_code=403, detail="No tienes permiso para acceder a este evento.")
         
         # Convertir los perfiles vinculados a un formato serializable
         linked_profiles_data = []
@@ -80,7 +93,12 @@ async def list_events_endpoint(request: ListEventsRequest, current_account_id: s
     from core.agenda_manager import get_events_as_dicts
 
     if request.workspace_id:
-        # Si se proporciona workspace_id, solo obtener eventos para ese workspace
+        # Si se proporciona workspace_id, verificar permisos
+        async with DBSession(SessionLocal) as db:
+            if not await check_workspace_permission(current_account_id, request.workspace_id, db, required_roles=['owner', 'editor', 'viewer']):
+                raise HTTPException(status_code=403, detail="No tienes permiso para acceder a eventos en este workspace.")
+        
+        # Luego, obtener eventos para ese workspace
         workspace_events = await get_events_as_dicts(
             account_id=current_account_id,
             workspace_id=request.workspace_id,
@@ -94,29 +112,12 @@ async def list_events_endpoint(request: ListEventsRequest, current_account_id: s
         logger.info(f"Personal events for account {current_account_id}: {len(personal_events)} events found")
         
         async with DBSession(SessionLocal) as db:
-            member_teams_result = await db.execute(
-                select(TeamMember).where(TeamMember.account_id == account_uuid)
-            )
-            member_teams = member_teams_result.scalars().all()
-            team_ids = [str(team.team_id) for team in member_teams]
-            logger.info(f"Teams for account {current_account_id} (events): {team_ids})")
-
+            # Obtener todos los workspaces a los que el usuario tiene acceso
             workspaces_result = await db.execute(
-                select(Workspace).where(Workspace.account_id == account_uuid)
+                select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == account_uuid)
             )
-            workspaces = workspaces_result.scalars().all()
-            workspace_ids = [str(ws.id) for ws in workspaces]
+            workspace_ids = [str(ws_id) for ws_id in workspaces_result.scalars().all()]
             logger.info(f"Workspaces for account {current_account_id} (events): {workspace_ids})")
-        
-        team_events = []
-        for team_id in team_ids:
-            team_events_for_id = await get_events_as_dicts(
-                account_id=current_account_id,
-                team_id=team_id,
-                include_past=request.include_past
-            )
-            logger.info(f"Team events for team {team_id} and account {current_account_id}: {len(team_events_for_id)} events found")
-            team_events.extend(team_events_for_id)
         
         workspace_events = []
         for workspace_id in workspace_ids:
@@ -128,38 +129,95 @@ async def list_events_endpoint(request: ListEventsRequest, current_account_id: s
             logger.info(f"Workspace events for workspace {workspace_id} and account {current_account_id}: {len(workspace_events_for_id)} events found")
             workspace_events.extend(workspace_events_for_id)
         
-        combined_events = {event['id']: event for event in personal_events + team_events + workspace_events}.values()
+        combined_events = {event['id']: event for event in personal_events + workspace_events}.values()
         logger.info(f"Total combined events for account {current_account_id}: {len(combined_events)} events")
         return list(combined_events)
 
 # --- MODELOS PYDANTIC PARA AGENDA ---
 class EventRequest(BaseModel):
+    summary: str
     description: str
     event_date: str  # Fecha en formato YYYY-MM-DD
     event_time: str  # Hora en formato HH:MM
+    location: Optional[str] = None # Nuevo campo para la ubicación
+    attendee_ids: Optional[List[uuid.UUID]] = None # Nuevo campo para IDs de asistentes registrados
+    external_attendees: Optional[List[str]] = None # Nuevo campo para nombres de asistentes externos
     workspace_id: Optional[str] = None
 
 class EventUpdateRequest(BaseModel):
+    summary: Optional[str] = None
     description: Optional[str] = None
     event_date: Optional[str] = None
     event_time: Optional[str] = None
-    team_id: Optional[str] = None
+    location: Optional[str] = None # Nuevo campo para la ubicación
+    attendee_ids: Optional[List[uuid.UUID]] = None # Nuevo campo para IDs de asistentes registrados
+    external_attendees: Optional[List[str]] = None # Nuevo campo para nombres de asistentes externos
     workspace_id: Optional[str] = None
 
 @router.post("/add-event")
-async def add_event_endpoint(event: EventRequest, current_account_id: str = Depends(get_current_account_id)):
+async def add_event_endpoint(
+    event: EventRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session) # Inyectar la sesión de DB
+):
     """Añade un nuevo evento a la agenda del usuario. Protegido por JWT."""
-    success, message, new_event = await schedule_event(
+    success, message, new_event_instance = await schedule_event( # Renombrar new_event a new_event_instance para evitar conflicto
         account_id=current_account_id,
+        summary=event.summary,
         description=event.description,
-        event_date=event.event_date, # Pasar fecha por separado
-        event_time=event.event_time, # Pasar hora por separado
+        event_date=event.event_date,
+        event_time=event.event_time,
+        location=event.location,
+        attendee_ids=event.attendee_ids,
+        external_attendees=event.external_attendees,
         workspace_id=event.workspace_id
     )
-    if not success or not new_event:
+    if not success or not new_event_instance:
         raise HTTPException(status_code=400, detail=message or "Error desconocido al crear el evento.")
-    # Devolvemos el evento creado para añadirlo al estado del frontend
-    return new_event.to_dict()
+
+    # Recargar el evento con la relación 'attendees' cargada ansiosamente
+    # para evitar DetachedInstanceError al llamar a to_dict()
+    async with db as session:
+        stmt = select(AgendaEvent).options(selectinload(AgendaEvent.attendees), selectinload(AgendaEvent.workspace)).where(AgendaEvent.id == new_event_instance.id)
+        reloaded_event = (await session.execute(stmt)).scalars().first()
+
+        if not reloaded_event:
+            raise HTTPException(status_code=500, detail="Error al recargar el evento creado.")
+
+        # Devolvemos el evento creado para añadirlo al estado del frontend
+        # Asegurarse de pasar la zona horaria si to_dict la requiere
+        account = await session.get(Account, uuid.UUID(current_account_id))
+        return reloaded_event.to_dict(account.timezone) # Asumiendo que to_dict puede tomar timezone
+
+async def _update_event_attendees(
+    event: AgendaEvent,
+    current_account_id: str,
+    attendee_ids: Optional[List[uuid.UUID]],
+    external_attendees: Optional[List[str]]
+):
+    # Lógica para attendee_ids
+    if attendee_ids is not None:
+        current_attendee_ids = {str(att.id) for att in event.attendees}
+        
+        to_add_attendee_ids = [str(aid) for aid in attendee_ids if str(aid) not in current_attendee_ids]
+        to_remove_attendee_ids = [att_id for att_id in current_attendee_ids if att_id not in {str(aid) for aid in attendee_ids}]
+
+        if to_add_attendee_ids:
+            await add_attendees_to_event(current_account_id, event.id, attendee_ids=to_add_attendee_ids)
+        if to_remove_attendee_ids:
+            await remove_attendees_from_event(current_account_id, event.id, attendee_ids=to_remove_attendee_ids)
+
+    # Lógica para external_attendees
+    if external_attendees is not None:
+        current_external_attendees = set(event.external_attendees if event.external_attendees else [])
+        
+        to_add_external_attendees = [att for att in external_attendees if att not in current_external_attendees]
+        to_remove_external_attendees = [att for att in current_external_attendees if att not in external_attendees]
+
+        if to_add_external_attendees:
+            await add_attendees_to_event(current_account_id, event.id, external_attendees=to_add_external_attendees)
+        if to_remove_external_attendees:
+            await remove_attendees_from_event(current_account_id, event.id, external_attendees=to_remove_external_attendees)
 
 @router.put("/agenda/events/{event_id}", summary="Actualizar un evento")
 async def update_event_endpoint(
@@ -172,44 +230,62 @@ async def update_event_endpoint(
     Actualiza un evento existente.
     """
     async with db as session:
-        event_stmt = select(AgendaEvent).options(selectinload(AgendaEvent.workspace)).where(AgendaEvent.id == event_id)
+        event_stmt = select(AgendaEvent).options(selectinload(AgendaEvent.workspace), selectinload(AgendaEvent.attendees)).where(AgendaEvent.id == event_id)
         event = (await session.execute(event_stmt)).scalars().first()
 
         if not event or event.account_id != uuid.UUID(current_account_id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evento no encontrado o no autorizado.")
+        
+        # Si el evento tiene un workspace_id, verificar permisos
+        if event.workspace_id:
+            if not await check_workspace_permission(current_account_id, str(event.workspace_id), session, required_roles=['owner', 'editor']):
+                raise HTTPException(status_code=403, detail="No tienes permiso para actualizar este evento.")
 
         update_data = event_update.model_dump(exclude_unset=True)
         logger.info(f"[update_event_endpoint] update_data: {update_data}")
         
-        if ('event_date' in update_data and update_data['event_date']) and ('event_time' in update_data and update_data['event_time']):
+        # Manejar la actualización de asistentes por separado
+        attendee_ids_to_update = update_data.pop("attendee_ids", None)
+        external_attendees_to_update = update_data.pop("external_attendees", None)
+
+        if attendee_ids_to_update is not None or external_attendees_to_update is not None:
+            await _update_event_attendees(event, current_account_id, attendee_ids_to_update, external_attendees_to_update)
+
+        if ('event_date' in update_data and update_data['event_date']) or ('event_time' in update_data and update_data['event_time']):
             account = await session.get(Account, uuid.UUID(current_account_id))
             if not account or not account.timezone:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No se pudo determinar la zona horaria del usuario.")
             
             user_tz = pytz.timezone(account.timezone)
             
+            # Obtener la fecha/hora local actual del evento para usarla como base
+            current_local_datetime = event.event_datetime_utc.astimezone(user_tz)
+            
+            # Usar los nuevos valores si se proporcionan, de lo contrario, mantener los actuales
+            new_date_str = update_data.get('event_date', current_local_datetime.strftime('%Y-%m-%d'))
+            new_time_str = update_data.get('event_time', current_local_datetime.strftime('%H:%M'))
+
             try:
                 # Combinar fecha y hora en un string y parsear como datetime naive
-                local_datetime_str = f"{update_data['event_date']} {update_data['event_time']}"
+                local_datetime_str = f"{new_date_str} {new_time_str}"
                 naive_datetime = datetime.strptime(local_datetime_str, "%Y-%m-%d %H:%M")
-                logger.info(f"[update_event_endpoint] naive_datetime: {naive_datetime}")
+                logger.info(f"[update_event_endpoint] Combined naive_datetime for update: {naive_datetime}")
                 
-                # Obtener el offset actual de la zona horaria del usuario para la fecha/hora dada
-                offset = user_tz.utcoffset(naive_datetime)
-                logger.info(f"[update_event_endpoint] user_tz: {user_tz}, offset: {offset}")
-                
-                # Convertir la hora local naive a UTC restando el offset
-                event_datetime_utc = naive_datetime - offset
-                # Asegurarse de que sea un datetime aware en UTC
-                event_datetime_utc = pytz.utc.localize(event_datetime_utc)
-                logger.info(f"[update_event_endpoint] event_datetime_utc (antes de asignar): {event_datetime_utc}")
+                # Localizar el datetime naive con la zona horaria del usuario y luego convertir a UTC
+                # Este método maneja correctamente los cambios de horario de verano (DST)
+                localized_dt = user_tz.localize(naive_datetime)
+                event_datetime_utc = localized_dt.astimezone(pytz.utc)
+                logger.info(f"[update_event_endpoint] New event_datetime_utc: {event_datetime_utc}")
 
             except ValueError:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Formato de fecha u hora inválido: {update_data['event_date']} {update_data['event_time']}")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Formato de fecha u hora inválido: {new_date_str} {new_time_str}")
             
             event.event_datetime_utc = event_datetime_utc
-            del update_data['event_date']
-            del update_data['event_time']
+            # Eliminar las claves para que no se procesen de nuevo en el bucle de abajo
+            if 'event_date' in update_data:
+                del update_data['event_date']
+            if 'event_time' in update_data:
+                del update_data['event_time']
         elif 'event_datetime' in update_data: # Mantener compatibilidad si se envía event_datetime (ej. desde el agente)
             account = await session.get(Account, uuid.UUID(current_account_id))
             user_tz = pytz.timezone(account.timezone)
@@ -260,7 +336,17 @@ class ProfileLinkRequest(BaseModel):
 @router.post("/cancel-event")
 async def cancel_event_endpoint(event: EventCancelRequest, current_account_id: str = Depends(get_current_account_id)):
     """Cancela un evento de la agenda del usuario. Protegido por JWT."""
-    success, message = await cancel_event(current_account_id, event.event_id, workspace_id=event.workspace_id)
+    # Obtener el evento para verificar el workspace_id
+    event_data = await get_event_by_id(current_account_id, event.event_id)
+    if not event_data:
+        raise HTTPException(status_code=404, detail="Evento no encontrado o no autorizado.")
+
+    # Verificar permisos de workspace si el evento pertenece a uno
+    if event_data.get("workspace_id"):
+        async with DBSession(SessionLocal) as db:
+                            if not await check_workspace_permission(current_account_id, event_data["workspace_id"], db, required_roles=['owner', 'editor']):
+                                raise HTTPException(status_code=403, detail="No tienes permiso para cancelar este evento.")
+    success, message = await cancel_event(current_account_id, event.event_id, workspace_id=event_data.get("workspace_id"))
     if not success:
         raise HTTPException(status_code=404, detail=message)
     return {"message": message}
@@ -274,6 +360,16 @@ async def link_profile_to_event_endpoint(
     """
     Vincula un perfil de contacto a un evento.
     """
+    # Obtener el evento para verificar el workspace_id
+    event_data = await get_event_by_id(current_account_id, event_id)
+    if not event_data:
+        raise HTTPException(status_code=404, detail="Evento o perfil no encontrado, o no autorizado.")
+
+    # Verificar permisos de workspace si el evento pertenece a uno
+    if event_data.get("workspace_id"):
+        async with DBSession(SessionLocal) as db:
+            if not await check_workspace_permission(current_account_id, event_data["workspace_id"], db, required_roles=['owner', 'editor']):
+                raise HTTPException(status_code=403, detail="No tienes permiso para vincular perfiles a este evento.")
     from core.agenda_manager import link_profile_to_event # Explicit import
     success = await link_profile_to_event(
         account_id=current_account_id,
@@ -293,6 +389,17 @@ async def unlink_profile_from_event_endpoint(
     """
     Desvincula un perfil de contacto de un evento.
     """
+    # Obtener el evento para verificar el workspace_id
+    event_data = await get_event_by_id(current_account_id, event_id)
+    if not event_data:
+        raise HTTPException(status_code=404, detail="Evento o perfil no encontrado, o no autorizado.")
+
+    # Verificar permisos de workspace si el evento pertenece a uno
+    if event_data.get("workspace_id"):
+        async with DBSession(SessionLocal) as db:
+            if not await check_workspace_permission(current_account_id, event_data["workspace_id"], db, required_roles=['owner', 'editor']):
+                raise HTTPException(status_code=403, detail="No tienes permiso para desvincular perfiles de este evento.")
+
     from core.agenda_manager import unlink_profile_from_event # Explicit import
     success = await unlink_profile_from_event(
         account_id=current_account_id,

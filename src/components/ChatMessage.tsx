@@ -134,6 +134,20 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
               )}
 
               {/* Archivos adjuntos */}
+              {msg.ragContext && msg.ragContext.length > 0 && (
+                <div className="mt-3 border-t border-border/20 pt-3">
+                  <p className="text-xs font-semibold text-muted-foreground mb-2">Archivos Adjuntos:</p>
+                  <div className="space-y-2">
+                    {msg.ragContext.map((item, index) => (
+                      <div key={index} className="flex items-center gap-2 text-sm p-2 bg-background/50 rounded-lg">
+                        {item.type === 'document' ? <FileIcon className="h-4 w-4 flex-shrink-0" /> : <Folder className="h-4 w-4 flex-shrink-0" />}
+                        <span className="truncate" title={item.name}>{item.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {msg.image && (
                 <div className="mt-3">
                   <Image

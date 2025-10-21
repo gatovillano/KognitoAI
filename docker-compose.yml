@@ -54,6 +54,8 @@ services:
       - ./run_api.py:/app/run_api.py
       - ./credentials:/app/credentials:ro
       - "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums:/app/media"
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
     env_file:
       - ./.env
     networks:
