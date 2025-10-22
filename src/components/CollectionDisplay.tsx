@@ -169,19 +169,19 @@ export const CollectionDisplay = ({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.8 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      className={`h-full ${type === 'list' ? '' : 'w-full'}`}
+      className="h-full w-full"
     >
       <Card
         className={`group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full ${className || ''}`}
         onClick={handleCardClick}
       >
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0 flex-1">
+          <CardTitle className="flex items-start gap-3 flex-wrap overflow-hidden">
+            <div className="flex items-center gap-3 min-w-0 max-w-full">
               <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                 <FolderKanban className="h-5 w-5 text-primary" />
               </div>
-              <span className="font-semibold text-lg truncate">{collection.topic}</span>
+              <span className="font-semibold text-lg whitespace-normal break-words flex-shrink min-w-0 text-wrap">{collection.topic}</span>
               {collection.team_shared && (
                 <span className="text-blue-500" title="Compartido con equipo">👥</span>
               )}
@@ -238,17 +238,17 @@ export const StaticCollectionCard = ({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.8 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      className="h-full"
+      className="h-full w-full"
     >
       <Link href={href} className="h-full block">
         <Card className={`group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full ${className || ''}`}>
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-start gap-3">
-              <div className="flex items-center gap-3 min-w-0 flex-1">
+            <CardTitle className="flex items-start gap-3 flex-wrap overflow-hidden">
+              <div className="flex items-center gap-3 min-w-0">
                 <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                   <Icon className="h-5 w-5 text-primary" />
                 </div>
-                <span className="font-semibold text-lg truncate">{title}</span>
+                <span className="font-semibold text-lg whitespace-normal break-words flex-shrink min-w-0 text-wrap">{title}</span>
               </div>
             </CardTitle>
           </CardHeader>

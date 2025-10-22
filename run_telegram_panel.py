@@ -249,7 +249,7 @@ async def cancel_event_endpoint(event_id: int = Form(...), initData: str = Form(
         raise HTTPException(status_code=500, detail="Error al cancelar el evento.")
 
 # ===== ENDPOINTS PARA EL GESTOR DE NOTAS =====
-@app.post("/api/list-notes")
+@app.post("/api/notes/list-notes")
 async def list_notes_endpoint(initData: str = Form(...)):
     user = await validate_telegram_data(initData)
     jwt_token = await get_jwt_token(user)

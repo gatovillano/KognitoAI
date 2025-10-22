@@ -10,7 +10,7 @@ export const createMentionSuggestion = (fromTeam?: string) => ({
       if (fromTeam) {
         payload.workspace_id = fromTeam;
       }
-      const response = await apiClient.post('/api/list-notes', payload);
+      const response = await apiClient.post('/api/notes/list-notes', payload);
       // Asegúrate de que la respuesta tenga el formato esperado por MentionList
       return response.data.notes.map((note: any) => ({
         id: note.id,

@@ -430,7 +430,7 @@ document.addEventListener('DOMContentLoaded', function () {
         elements.noteListContainer.innerHTML = '';
         elements.noNotesMessage.classList.add('hidden');
         try {
-            const notes = await apiPost('/api/list-notes', new FormData());
+            const notes = await apiPost('/api/notes/list-notes', new FormData());
             if (notes.length === 0) {
                 elements.noNotesMessage.classList.remove('hidden');
             } else {

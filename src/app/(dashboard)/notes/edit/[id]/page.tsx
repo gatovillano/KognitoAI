@@ -35,20 +35,27 @@ export default function EditNotePage() {
       const fetchNote = async () => {
         setIsLoading(true);
         try {
-          let response;
+          let note;
           if (fromTeam) {
             // Para notas compartidas, buscamos en los elementos compartidos del equipo
-            response = await apiClient.get(`/api/teams/${fromTeam}/shared-items`);
+            const response = await apiClient.get(`/api/teams/${fromTeam}/shared-items`);
             console.log("Datos de elementos compartidos recibidos:", response.data);
+            note = response.data.find((n: { id: number, type: string }) => n.id === parseInt(noteId) && n.type === 'note');
           } else {
-            // Usamos /api/list-notes y filtramos por ID para notas personales
-            response = await apiClient.post('/api/list-notes', { search_term: '' });
-            console.log("Datos de notas personales recibidos:", response.data);
+            // Para notas personales, intentamos obtenerla directamente por ID
+            try {
+              console.log("Intentando obtener nota directamente por ID:", noteId);
+              const directResponse = await apiClient.get(`/api/notes/${noteId}`);
+              note = directResponse.data;
+              console.log("Nota personal obtenida directamente por ID:", note);
+            } catch (error) {
+              console.warn("No se pudo obtener la nota directamente por ID, intentando listar notas:", error);
+              // Fallback: Si no se encuentra directamente, intentar listar y buscar
+              const fallbackResponse = await apiClient.post('/api/notes/list-notes', { search_term: '' });
+              console.log("Datos de notas personales recibidos (fallback):", fallbackResponse.data);
+              note = fallbackResponse.data.notes.find((n: { id: number }) => n.id === parseInt(noteId));
+            }
           }
-          // Filtramos por ID y tipo 'note' para notas compartidas
-          const note = fromTeam
-            ? response.data.find((n: { id: number, type: string }) => n.id === parseInt(noteId) && n.type === 'note')
-            : response.data.notes.find((n: { id: number }) => n.id === parseInt(noteId));
           console.log("Nota encontrada:", note);
           if (note) {
             setTitle(note.title || '');
@@ -58,21 +65,8 @@ export default function EditNotePage() {
             if (note.content) {
                 setContent(note.content);
             } else {
-              console.warn("No content field found in note object, attempting to fetch full note:", note);
-              try {
-                const fullNoteResponse = await apiClient.get(`/api/notes/${noteId}`);
-                console.log("Full note data received:", fullNoteResponse.data);
-                if (fullNoteResponse.data && fullNoteResponse.data.content) {
-                  setContent(fullNoteResponse.data.content);
-                } else {
-                  setContent('');
-                  toast.error("El contenido de la nota no está disponible incluso después de intentar cargarlo.");
-                }
-              } catch (error) {
-                console.error("Error fetching full note content:", error);
-                setContent('');
-                toast.error("Error al intentar cargar el contenido completo de la nota.");
-              }
+              setContent(''); // Asegurarse de que el contenido sea una cadena vacía si no se encuentra
+              toast.error("El contenido de la nota no está disponible.");
             }
           } else {
             toast.error("Nota no encontrada.");
@@ -89,12 +83,12 @@ export default function EditNotePage() {
     }
   }, [noteId, fromTeam]);
 
-  // Ensure content is properly set when switching between notes
+  // Asegurarse de que el contenido se establezca correctamente al cambiar entre notas o al crear una nueva.
   useEffect(() => {
-    if (!isLoading && noteId === 'new') {
-      setContent(''); // Reset content for new note
+    if (noteId === 'new' && !isLoading) {
+      setContent(''); // Resetear contenido solo para notas nuevas una vez que la carga inicial ha terminado.
     }
-  }, [isLoading, noteId]);
+  }, [noteId, isLoading]);
 
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 

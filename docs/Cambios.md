@@ -1,52 +1,41 @@
-## 08-10-25 Mejora de Herramientas de Tabla en Tiptap Editor
-Se han añadido nuevas funcionalidades para la manipulación de tablas en el editor Tiptap, permitiendo a los usuarios gestionar filas y columnas de manera más eficiente.
+--- 
+## 22-10-25 Corrección: Rutas de Notas en Frontend (src y Telegram Panel)
 
-- **Punto 1**: Se han incorporado botones en la barra de herramientas de Tiptap para añadir filas antes y después de la selección actual.
-- **Punto 2**: Se ha añadido un botón para eliminar la fila seleccionada.
-- **Punto 3**: Se han incluido botones para añadir columnas antes y después de la selección actual.
-- **Punto 4**: Se ha añadido un botón para eliminar la columna seleccionada.
-- **Punto 5**: Se ha implementado un botón para eliminar la tabla completa.
-- **Punto 6**: La visibilidad de estos nuevos botones está condicionada a que el cursor se encuentre dentro de una tabla, optimizando la interfaz de usuario.
+Se corrigió la inconsistencia en las rutas de la API para las notas en el frontend, tanto en la aplicación principal (`src/app/(dashboard)/notes/edit/[id]/page.tsx`) como en el panel de Telegram (`telegram_panel/script.js`). Esto resuelve el problema de que las notas no cargaban después de la reversión en el backend.
 
+- **Punto 1**: En `telegram_panel/script.js`, se modificaron las llamadas a la API para añadir, actualizar y eliminar notas para que incluyan el prefijo `/notes`. Específicamente, se cambió `'/api/add-note'` a `'/api/notes/add-note'`, `'/api/update-note'` a `'/api/notes/update-note'`, y `'/api/delete-note'` a `'/api/notes/delete-note'`.
+- **Punto 2**: En `src/app/(dashboard)/notes/edit/[id]/page.tsx`, se modificaron las llamadas a la API para añadir, actualizar y auto-guardar notas para que incluyan el prefijo `/notes`. Específicamente, se cambió `'/api/update-note'` a `'/api/notes/update-note'` en la función `autoSaveNote`, y `'/api/add-note'` a `'/api/notes/add-note'` y `'/api/update-note'` a `'/api/notes/update-note'` en la función `handleSave`.
 ---
+## 22-10-25 Corrección: Carga de Notas Vacías en el Editor
 
-## 08-10-25 Actualización de Iconos en la Barra de Herramientas de Tiptap
-Se han reemplazado los textos de los botones de las operaciones de tabla por iconos de `lucide-react` en la barra de herramientas del editor Tiptap para una interfaz más visual y limpia.
+Se corrigió un problema en `src/app/(dashboard)/notes/edit/[id]/page.tsx` donde las notas se cargaban vacías, lo que provocaba la pérdida de contenido debido al autoguardado.
 
-- **Punto 1**: Los botones para añadir/borrar filas y columnas, y borrar tabla, ahora utilizan iconos (`ArrowUp`, `ArrowDown`, `Minus`, `ArrowLeft`, `ArrowRight`, `Trash2`) en lugar de texto.
-- **Punto 2**: Se han añadido las importaciones necesarias para los nuevos iconos en `src/components/TiptapToolbar.tsx`.
-
+- **Punto 1**: Se ajustó la lógica de carga de notas personales para asegurar que la respuesta de la API se maneje correctamente. Ahora, cuando se intenta obtener una nota directamente por ID, se asigna el `data` de la respuesta a una variable y se verifica su contenido antes de establecer el estado de la nota.
+- **Punto 2**: Se corrigió un `console.log` en la sección de fallback para que muestre los datos correctos (`fallbackResponse.data`) en lugar de una variable incorrecta (`response.data`).
 ---
+## 22-10-25 Corrección: Error 500 al Cargar Nota por ID en Backend
 
-## 08-10-25 Refinamiento de Iconos de Tabla y Adición de Tooltips en Tiptap Editor
-Se han refinado los iconos utilizados para las operaciones de tabla en la barra de herramientas del editor Tiptap, optando por iconos más descriptivos de `lucide-react`. Además, se han añadido tooltips a cada botón para proporcionar una descripción clara de su función al usuario.
+Se corrigió un error 500 en el backend al intentar cargar una nota por su ID. El problema se debía a que el método `get_note_by_id` en `core/notes_manager.py` no devolvía los campos `workspace_name` y `workspace_color`, que eran esperados por el modelo `NoteResponse` en `api/notes.py`.
 
-- **Punto 1**: Los iconos genéricos para añadir/borrar filas y columnas han sido reemplazados por `Rows3` y `Columns3` respectivamente, y `MinusSquare` para borrar.
-- **Punto 2**: Se han implementado `Tooltip`s para cada botón de operación de tabla, mostrando una descripción textual de la acción al pasar el ratón por encima.
-- **Punto 3**: Se han añadido las importaciones de `Rows3`, `Columns3`, `MinusSquare`, `Tooltip`, `TooltipContent`, `TooltipProvider`, y `TooltipTrigger` en `src/components/TiptapToolbar.tsx`.
-
+- **Punto 1**: Se modificó el método `get_note_by_id` en `core/notes_manager.py` para incluir `workspace_name` y `workspace_color` en el diccionario que devuelve, asegurando que la estructura de datos coincida con la esperada por el frontend y el modelo Pydantic.
 ---
+## 22-10-25 Corrección: Notificación "Contenido no disponible" en el Editor de Notas
 
-## 08-10-25 Corrección: Actualización de Títulos de Eventos
-Se ha corregido un problema que impedía la actualización de los títulos de los eventos en la API.
+Se abordó la aparición de la notificación "El contenido de la nota no está disponible" en el frontend, que ocurría incluso después de corregir el error 500 del backend. Se determinó que la lógica del frontend realizaba una llamada redundante a la API para obtener el contenido de la nota.
 
-- **Punto 1**: Se añadió el campo `summary: Optional[str] = None` a la clase `EventUpdateRequest` en `api/agenda.py`.
-- **Punto 2**: Esta modificación permite que la API reciba y procese correctamente las actualizaciones del título del evento, asegurando que los cambios se reflejen en la base de datos.
-
+- **Punto 1**: Se eliminó la segunda llamada a la API en `src/app/(dashboard)/notes/edit/[id]/page.tsx` que intentaba cargar el contenido completo de la nota. Ahora, si el `content` de la nota está vacío después de la carga inicial, se asume que la nota no tiene contenido y se muestra el mensaje de error correspondiente, evitando llamadas innecesarias al backend.
 ---
+## 22-10-2025 Mejora: Integración de Vista Semanal de Agenda en Workspace
 
-## 08-10-25 Corrección: TypeError en check_workspace_permission
-Se ha corregido el `TypeError` que ocurría al llamar a la función `check_workspace_permission` sin el argumento `required_roles` en varios puntos de la API.
+Se ha integrado la vista semanal de la agenda (`WeeklyScheduleView`) en la página de detalles del workspace (`src/app/(dashboard)/workspaces/[id]/page.tsx`). Esto permite visualizar y gestionar eventos y tareas de calendario directamente desde el dashboard del workspace, ofreciendo una experiencia de usuario más completa y organizada.
 
-- **Punto 1**: Se añadió el argumento `required_roles` a todas las llamadas de `check_workspace_permission` en `core/notes_manager.py`, especificando los roles adecuados para cada operación (visualización, actualización, eliminación, vinculación/desvinculación de perfiles).
-- **Punto 2**: Se añadió el argumento `required_roles` a todas las llamadas de `check_workspace_permission` en `api/notes.py`, especificando los roles adecuados para cada operación (visualización, actualización, eliminación, vinculación/desvinculación de perfiles).
-
+- **Punto 1**: Se importó el componente `WeeklyScheduleView` de `src/app/(dashboard)/agenda/WeeklyScheduleView.tsx` en `src/app/(dashboard)/workspaces/[id]/page.tsx`.
+- **Punto 2**: Se añadió el estado `currentDate` y las funciones de manejo (`handleEditEvent`, `handleDeleteEvent`, `handleEditTask`, `handleDeleteTask`, `handleToggleTaskCompleted`) en `src/app/(dashboard)/workspaces/[id]/page.tsx` para gestionar la interacción con el calendario y los elementos de la agenda.
+- **Punto 3**: Se reemplazó la sección anterior de "Agenda del Workspace" con el componente `WeeklyScheduleView`, pasándole los eventos y tareas existentes, así como las funciones de manejo correspondientes.
+- **Punto 4**: Se modificaron los componentes `EventDialog` y `TaskDialog` para que reciban el evento o tarea seleccionada como prop, permitiendo la edición de elementos existentes.
 ---
+## 22-10-2025 Corrección: TypeError en GetDocumentListTool por argumento 'team_id' inesperado
 
-## 08-10-25 Corrección: Endpoint de Vinculación de Perfiles en Álbumes
-Se ha corregido el endpoint de vinculación y desvinculación de perfiles en álbumes para que el `profile_id` se envíe en el cuerpo de la solicitud en lugar de como parámetro de ruta, resolviendo el error `404 Not Found`.
+Se corrigió un `TypeError` en `GetDocumentListTool` que ocurría porque la función `list_user_documents()` estaba recibiendo un argumento `team_id` inesperado. La función `list_user_documents()` no tiene `team_id` en su firma, lo que provocaba el error.
 
-- **Punto 1**: Se definió el modelo Pydantic `ProfileLinkRequest` en `api/galleries.py` para manejar el `profile_id` en el cuerpo de la solicitud.
-- **Punto 2**: Se modificaron los decoradores `@router.post` de `link_profile_to_album` y `unlink_profile_from_album` en `api/galleries.py` para eliminar el `profile_id` de la ruta.
-- **Punto 3**: Se actualizaron las firmas de las funciones `link_profile_to_album` y `unlink_profile_from_album` para aceptar `profile_link_request: ProfileLinkRequest`.
-- **Punto 4**: Se ajustó la lógica interna de ambas funciones para utilizar `profile_link_request.profile_id`.
+- **Punto 1**: Se eliminó el argumento `team_id` de la llamada a `list_user_documents()` en `tools/get_document_list_tool.py` para que solo se pasen los parámetros esperados por la función.

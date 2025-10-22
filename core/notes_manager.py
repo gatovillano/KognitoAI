@@ -328,5 +328,7 @@ class NotesManager:
             "created_at": note.created_at.isoformat(),
             "updated_at": note.updated_at.isoformat(),
             "workspace_id": str(note.workspace_id) if note.workspace_id else None,
+            "workspace_name": note.workspace.name if note.workspace else None,
+            "workspace_color": note.workspace.color if note.workspace else None,
             "linked_profiles": linked_profiles_data
         }
