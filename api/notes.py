@@ -99,6 +99,21 @@ async def get_note_by_id_endpoint(
             
     return NoteResponse(**note)
 
+@router.get("/notes/{note_id}/debug", summary="DEBUG: Obtener contenido crudo de una nota por ID")
+async def debug_get_note_content_by_id_endpoint(
+    note_id: int,
+    current_account_id: str = Depends(get_current_account_id),
+    notes_manager: NotesManager = Depends(get_notes_manager)
+):
+    """
+    DEBUG: Obtiene el contenido crudo de una nota específica por su ID, sin serialización Pydantic.
+    Útil para verificar el contenido directamente de la base de datos.
+    """
+    note_data = await notes_manager.get_note_by_id(current_account_id, note_id)
+    if not note_data:
+        raise HTTPException(status_code=404, detail="Nota no encontrada o no autorizada.")
+    return {"id": note_data["id"], "title": note_data["title"], "content": note_data["content"], "category": note_data["category"], "workspace_id": note_data["workspace_id"]}
+
 @router.get("/notes/{note_id}/linked-profiles", response_model=List[ContactProfileResponse], summary="Obtener perfiles vinculados a una nota")
 async def get_linked_profiles_for_note_endpoint(
     note_id: int,

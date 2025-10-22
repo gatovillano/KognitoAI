@@ -153,7 +153,7 @@ export default function FormEditorPage() {
 
   const handleLinkProfile = useCallback(async (profileId: string, itemId: string) => {
     try {
-      await apiClient.post(`/api/forms/${itemId}/link-profile`, { profileId });
+      await apiClient.post(`/api/forms/${itemId}/link-profile`, { profile_id: profileId });
       toast.success('Perfil vinculado correctamente.');
       fetchLinkedProfiles(); // Refresh linked profiles after linking
     } catch (error) {
@@ -165,7 +165,7 @@ export default function FormEditorPage() {
 
   const handleUnlinkProfile = useCallback(async (profileId: string, itemId: string) => {
     try {
-      await apiClient.delete(`/api/forms/${itemId}/unlink-profile`, { data: { profileId } });
+      await apiClient.delete(`/api/forms/${itemId}/unlink-profile`, { data: { profile_id: profileId } });
       toast.success('Perfil desvinculado correctamente.');
       fetchLinkedProfiles(); // Refresh linked profiles after unlinking
     } catch (error) {

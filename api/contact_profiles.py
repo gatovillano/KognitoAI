@@ -48,7 +48,7 @@ class LinkedNoteResponse(BaseModel):
 
 class LinkedAgendaEventResponse(BaseModel):
     id: int
-    description: str
+    description: Optional[str]
     event_datetime_utc: datetime
     event_datetime_local: Optional[datetime] = None
     class Config: from_attributes = True

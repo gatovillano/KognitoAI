@@ -84,7 +84,7 @@ export default function TeamsPage() {
     const fetchNotes = async () => {
       setLoadingNotes(true);
       try {
-        const response = await apiClient.post('/api/list-notes', { search_term: '' });
+        const response = await apiClient.post('/api/notes/list-notes', { search_term: '' });
         setNotes(response.data);
       } catch (error) {
         console.error("Error fetching notes:", error);
