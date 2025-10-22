@@ -30,65 +30,49 @@ export default function EditNotePage() {
   const [teams, setTeams] = useState<any[]>([]);
 
     useEffect(() => {
-    // Si es una nota nueva, el ID será 'new'. Si no, cargamos los datos.
-    if (noteId && noteId !== 'new') {
-      const fetchNote = async () => {
-        setIsLoading(true);
+    const fetchNote = async () => {
+      setIsLoading(true);
+      if (noteId && noteId !== 'new') {
         try {
           let note;
           if (fromTeam) {
-            // Para notas compartidas, buscamos en los elementos compartidos del equipo
             const response = await apiClient.get(`/api/teams/${fromTeam}/shared-items`);
-            console.log("Datos de elementos compartidos recibidos:", response.data);
             note = response.data.find((n: { id: number, type: string }) => n.id === parseInt(noteId) && n.type === 'note');
           } else {
-            // Para notas personales, intentamos obtenerla directamente por ID
             try {
-              console.log("Intentando obtener nota directamente por ID:", noteId);
               const directResponse = await apiClient.get(`/api/notes/${noteId}`);
               note = directResponse.data;
-              console.log("Nota personal obtenida directamente por ID:", note);
             } catch (error) {
-              console.warn("No se pudo obtener la nota directamente por ID, intentando listar notas:", error);
-              // Fallback: Si no se encuentra directamente, intentar listar y buscar
               const fallbackResponse = await apiClient.post('/api/notes/list-notes', { search_term: '' });
-              console.log("Datos de notas personales recibidos (fallback):", fallbackResponse.data);
               note = fallbackResponse.data.notes.find((n: { id: number }) => n.id === parseInt(noteId));
             }
           }
-          console.log("Nota encontrada:", note);
           if (note) {
             setTitle(note.title || '');
             setCategory(note.category || 'General');
             setIsShared(note.team_shared || false);
-            // El contenido de la API ya es Markdown, lo pasamos directamente al editor
-            if (note.content) {
-                setContent(note.content);
-            } else {
-              setContent(''); // Asegurarse de que el contenido sea una cadena vacía si no se encuentra
-              toast.error("El contenido de la nota no está disponible.");
-            }
+            setContent(note.content || '');
           } else {
             toast.error("Nota no encontrada.");
+            setContent('');
           }
         } catch (error) {
           toast.error("No se pudo cargar la nota.");
+          setContent('');
         } finally {
           setIsLoading(false);
         }
-      };
-      fetchNote();
-    } else {
-      setIsLoading(false);
-    }
+      } else {
+        // Para notas nuevas, inicializar con contenido vacío
+        setTitle('');
+        setCategory('General');
+        setContent('');
+        setIsShared(false);
+        setIsLoading(false);
+      }
+    };
+    fetchNote();
   }, [noteId, fromTeam]);
-
-  // Asegurarse de que el contenido se establezca correctamente al cambiar entre notas o al crear una nueva.
-  useEffect(() => {
-    if (noteId === 'new' && !isLoading) {
-      setContent(''); // Resetear contenido solo para notas nuevas una vez que la carga inicial ha terminado.
-    }
-  }, [noteId, isLoading]);
 
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -237,7 +221,7 @@ export default function EditNotePage() {
         <Input placeholder="Categoría" value={category} onChange={(e) => setCategory(e.target.value)} className="w-fit border-none focus-visible:ring-0 shadow-none p-0 text-sm text-muted-foreground" />
       </div>
       <div className="flex-grow overflow-y-auto px-8 pb-8">
-        <TiptapEditor content={content} onChange={setContent} fromTeam={fromTeam ?? undefined} containerClassName="border rounded-md" />
+      {isLoading ? <div>Cargando editor...</div> : <TiptapEditor content={content} onChange={setContent} fromTeam={fromTeam ?? undefined} containerClassName="border rounded-md" />}
       </div>
       <AlertDialog open={isShareDialogOpen} onOpenChange={(open) => !open && setIsShareDialogOpen(false)}>
         <AlertDialogContent>
