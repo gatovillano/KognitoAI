@@ -20,16 +20,18 @@ class MultiQueryRetriever:
     Genera múltiples consultas reformuladas y combina los resultados.
     """
     
-    def __init__(self, num_queries: int = 3, fusion_method: str = "rrf"):
+    def __init__(self, num_queries: int = 3, fusion_method: str = "rrf", k: int = 20):
         """
         Inicializa el MultiQueryRetriever.
         
         Args:
             num_queries: Número de consultas alternativas a generar
             fusion_method: Método de fusión ('rrf' para Reciprocal Rank Fusion, 'simple' para concatenación)
+            k: Número de documentos a recuperar.
         """
         self.num_queries = num_queries
         self.fusion_method = fusion_method
+        self.k = k
         
     async def generate_alternative_queries(self, original_query: str) -> List[str]:
         """
@@ -99,14 +101,12 @@ class MultiQueryRetriever:
             task = get_relevant_memories(
                 account_id=account_id,
                 query=query,
-                filter_topics=topics,
                 workspace_id=workspace_id,
-                team_id=team_id,
-                visibility_teams=visibility_teams,
+                filter_topics=topics,
+                k=self.k,
+                content_type=content_type,
+                category=category,
                 filter_document_ids=document_ids,
-                k=k,
-                hybrid_search=True,
-                reranking=True
             )
             search_tasks.append(task)
         
@@ -244,7 +244,7 @@ async def multi_query_search(
     """
     Función de conveniencia para realizar búsqueda con múltiples consultas.
     """
-    retriever = MultiQueryRetriever(num_queries=num_queries, fusion_method=fusion_method)
+    retriever = MultiQueryRetriever(num_queries=num_queries, fusion_method=fusion_method, k=k)
     return await retriever.search_with_multiple_queries(
         account_id=account_id,
         original_query=query,
