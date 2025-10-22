@@ -52,7 +52,7 @@ export function ManageLinkedObjectsDialog({ isOpen, onOpenChange, profile, onLin
       const linkedData = linkedResponse.data;
 
       // Fetch all notes
-      const notesResponse = await apiClient.post('/api/list-notes', { search_term: '' });
+      const notesResponse = await apiClient.post('/api/notes/list-notes', { search_term: '' });
       const allNotes: LinkedObjectDisplay[] = notesResponse.data.notes.map((note: any) => ({
         id: note.id,
         title: note.title || note.content.substring(0, 50) + '...',

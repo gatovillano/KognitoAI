@@ -79,7 +79,7 @@ class GetDocumentListTool(BaseTool):
         try:
             # --- MODIFICACIÓN: Pasar workspace_id Y topic a list_user_documents ---
             logger.info(f"DEBUG: Llamando a list_user_documents con account_id={self.account_id}, workspace_id={self.workspace_id}, topic={topic}")
-            documents_list = await list_user_documents(account_id=self.account_id, team_id=None, workspace_id=self.workspace_id, topic=topic)
+            documents_list = await list_user_documents(account_id=self.account_id, workspace_id=self.workspace_id, topic=topic)
 
             if self.telegram_id is not None:
                 user_data = bot_manager.get_user_data(self.telegram_id)

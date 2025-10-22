@@ -13,7 +13,7 @@ export default function CollectionDetailPage() {
   console.log("[topic] page - workspaceId from URL:", workspaceId); // DEBUG
 
   return (
-    <div className="p-4 sm:p-8 mx-auto overflow-x-hidden">
+    <div className="p-4 sm:p-8 mx-auto">
       <DocumentCollectionDisplay
         topic={topic}
         collectionName={topic}

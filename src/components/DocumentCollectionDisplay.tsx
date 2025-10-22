@@ -495,7 +495,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                 ))}
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto w-full">
                 <DataTable columns={columns} data={documents} />
               </div>
             )}
@@ -529,10 +529,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                         {analysis.file_name.startsWith('Colección:') && analysis.result_payload?.collection_summary && (
                           <div className="p-3 bg-muted rounded-lg">
                             <h4 className="font-medium text-sm mb-2">Resumen de la Colección:</h4>
-                            <p className="text-sm text-muted-foreground" style={{
-                              display: '-webkit-box',
-                              WebkitBoxOrient: 'vertical'
-                            }}>
+                            <p className="text-sm text-muted-foreground">
                               {analysis.result_payload.collection_summary}
                             </p>
                           </div>
@@ -541,10 +538,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                         {analysis.file_name.startsWith('Resumen Semántico:') && analysis.result_payload?.resumen_semantico && (
                           <div className="p-3 bg-muted rounded-lg">
                             <h4 className="font-medium text-sm mb-2">Resumen Semántico:</h4>
-                            <p className="text-sm text-muted-foreground" style={{
-                              display: '-webkit-box',
-                              WebkitBoxOrient: 'vertical'
-                            }}>
+                            <p className="text-sm text-muted-foreground">
                               {analysis.result_payload.resumen_semantico}
                             </p>
                           </div>
@@ -553,10 +547,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                         {analysis.file_name.startsWith('Análisis Personalizado:') && analysis.result_payload?.analysis_result && (
                           <div className="p-3 bg-muted rounded-lg">
                             <h4 className="font-medium text-sm mb-2">Resultado del Análisis:</h4>
-                            <p className="text-sm text-muted-foreground" style={{
-                              display: '-webkit-box',
-                              WebkitBoxOrient: 'vertical'
-                            }}>
+                            <p className="text-sm text-muted-foreground">
                               {typeof analysis.result_payload.analysis_result === 'string'
                                 ? analysis.result_payload.analysis_result
                                 : JSON.stringify(analysis.result_payload.analysis_result).substring(0, 200) + '...'}
@@ -570,10 +561,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                          analysis.result_payload?.resumen_ejecutivo && (
                           <div className="p-3 bg-muted rounded-lg">
                             <h4 className="font-medium text-sm mb-2">Resumen Ejecutivo:</h4>
-                            <p className="text-sm text-muted-foreground" style={{
-                              display: '-webkit-box',
-                              WebkitBoxOrient: 'vertical'
-                            }}>
+                            <p className="text-sm text-muted-foreground">
                               {analysis.result_payload.resumen_ejecutivo}
                             </p>
                           </div>
