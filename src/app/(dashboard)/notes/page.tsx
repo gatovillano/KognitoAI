@@ -487,7 +487,7 @@ export default function NotesPage() {
             onLinkedProfilesUpdated={() => fetchNotes(0, limit, false)}
             onLink={async (profileId, noteId) => {
               try {
-                await apiClient.post(`/api/notes/${noteId}/link-profile`, { profileId });
+                await apiClient.post(`/api/notes/${noteId}/link-profile`, { profile_id: profileId });
                 toast.success('Perfil vinculado exitosamente.');
                 fetchNotes(0, limit, false);
               } catch (error) {
@@ -497,7 +497,7 @@ export default function NotesPage() {
             }}
             onUnlink={async (profileId, noteId) => {
               try {
-                await apiClient.post(`/api/notes/${noteId}/unlink-profile`, { profileId });
+                await apiClient.post(`/api/notes/${noteId}/unlink-profile`, { profile_id: profileId });
                 toast.success('Perfil desvinculado exitosamente.');
                 fetchNotes(0, limit, false);
               } catch (error) {

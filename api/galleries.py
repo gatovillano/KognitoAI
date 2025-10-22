@@ -58,7 +58,7 @@ class PhotoResponse(BaseModel):
         from_attributes = True
 
 class ProfileLinkRequest(BaseModel):
-    profile_id: uuid.UUID
+    profile_id: uuid.UUID = Field(..., alias="profileId")
 
 class AlbumBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Nombre del álbum.")

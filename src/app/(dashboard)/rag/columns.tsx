@@ -63,7 +63,7 @@ export const getColumns = (
       }
 
       return (
-        <div className="font-medium">
+        <div className="font-medium whitespace-normal break-words">
           {doc.title || <span className="text-muted-foreground italic">Sin título</span>}
           {doc.team_shared && (
             <span className="ml-2 text-blue-500" title="Compartido con equipo">👥</span>

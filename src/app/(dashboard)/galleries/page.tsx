@@ -295,7 +295,7 @@ const GalleriesPage = () => {
                 onLinkedProfilesUpdated={fetchAlbums}
         onLink={async (profileId, albumId) => {
           try {
-            await apiClient.post(`/api/galleries/albums/${albumId}/link-profile`, { profileId });
+            await apiClient.post(`/api/galleries/albums/${albumId}/link-profile`, { profile_id: profileId });
             toast.success('Perfil vinculado exitosamente.');
             fetchAlbums();
           } catch (error) {
@@ -305,7 +305,7 @@ const GalleriesPage = () => {
         }}
         onUnlink={async (profileId, albumId) => {
           try {
-            await apiClient.post(`/api/galleries/albums/${albumId}/unlink-profile`, { profileId });
+            await apiClient.post(`/api/galleries/albums/${albumId}/unlink-profile`, { profile_id: profileId });
             toast.success('Perfil desvinculado exitosamente.');
             fetchAlbums();
           } catch (error) {

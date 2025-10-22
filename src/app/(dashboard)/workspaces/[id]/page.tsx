@@ -18,6 +18,7 @@ import { TaskDialog } from '../../agenda/task-dialog'; // Import TaskDialog
 import { NoteDialog } from '../../notes/note-dialog'; // Import NoteDialog
 import { ViewNoteDialog } from '../../notes/view-note-dialog'; // Import ViewNoteDialog
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { WeeklyScheduleView } from '../../agenda/WeeklyScheduleView'; // Import WeeklyScheduleView
 
 interface ChatThread {
   id: string;
@@ -80,6 +81,54 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null); // New state for selected note
   const [isViewNoteDialogOpen, setIsViewNoteDialogOpen] = useState(false); // New state for ViewNoteDialog
   const [selectedNoteCategory, setSelectedNoteCategory] = useState<string>('Todas'); // New state for note category filter
+  const [currentDate, setCurrentDate] = useState(new Date()); // New state for current date in weekly view
+  const [selectedEvent, setSelectedEvent] = useState<AgendaEvent | null>(null); // New state for selected event
+  const [selectedTask, setSelectedTask] = useState<TaskResponse | null>(null); // New state for selected task
+
+  const handleEditEvent = (event: AgendaEvent) => {
+    setSelectedEvent(event);
+    setIsEventDialogOpen(true);
+  };
+
+  const handleDeleteEvent = async (event: AgendaEvent) => {
+    if (confirm('¿Estás seguro de que deseas eliminar este evento?')) {
+      try {
+        await apiClient.post('/api/delete-event', { event_id: event.id, workspace_id: workspaceId });
+        setAgendaEvents(prev => prev.filter(e => e.id !== event.id));
+      } catch (error) {
+        console.error('Error deleting event:', error);
+        alert('Error al eliminar el evento.');
+      }
+    }
+  };
+
+  const handleEditTask = (task: TaskResponse) => {
+    setSelectedTask(task);
+    setIsTaskDialogOpen(true);
+  };
+
+  const handleDeleteTask = async (task: TaskResponse) => {
+    if (confirm('¿Estás seguro de que deseas eliminar esta tarea?')) {
+      try {
+        await apiClient.delete(`/api/tasks/${task.id}`, { params: { workspace_id: workspaceId } });
+        setTasks(prev => prev.filter(t => t.id !== task.id));
+      } catch (error) {
+        console.error('Error deleting task:', error);
+        alert('Error al eliminar la tarea.');
+      }
+    }
+  };
+
+  const handleToggleTaskCompleted = async (task: TaskResponse) => {
+    try {
+      const updatedTask = { ...task, is_completed: !task.is_completed };
+      await apiClient.put(`/api/tasks/${task.id}`, updatedTask);
+      setTasks(prev => prev.map(t => t.id === task.id ? updatedTask : t));
+    } catch (error) {
+      console.error('Error toggling task completed status:', error);
+      alert('Error al actualizar el estado de la tarea.');
+    }
+  };
 
   const fetchChats = useCallback(async (skip: number, initialLoad = false) => {
     if (!initialLoad) {
@@ -783,80 +832,33 @@ const handleDeleteCollection = async (collectionId: string) => {
             <p className="text-muted-foreground mt-1">Eventos y tareas programadas para este espacio</p>
           </div>
         </div>
-        {filteredAgendaEvents.length === 0 && filteredTasks.length === 0 ? (
-          <div className="text-center py-16 border-2 border-dashed border-border rounded-xl">
-            <Calendar className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
-            <h3 className="text-xl font-semibold mb-2">
-              {searchTerm ? 'No hay eventos ni tareas que coincidan' : 'No hay eventos ni tareas aún'}
-            </h3>
-            <p className="text-muted-foreground mb-6 max-w-md mx-auto">
-              Programa eventos y tareas específicas para este workspace.
-            </p>
-            {/* Add buttons to create new event/task if needed */}
-          </div>
-        ) : (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {/* Display Agenda Events */}
-            {filteredAgendaEvents.map((event) => (
-              <Card key={event.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20">
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      <div className="h-10 w-10 rounded-lg bg-purple-500/10 flex items-center justify-center flex-shrink-0">
-                        <Calendar className="h-5 w-5 text-purple-600" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="font-semibold text-sm line-clamp-2">
-                          {event.description}
-                        </div>
-                      </div>
-                    </div>
-                    {/* Add dropdown for actions if needed */}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(event.event_datetime_local).toLocaleDateString()} {new Date(event.event_datetime_local).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                    {/* Add status/team info if needed */}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-            {/* Display Tasks */}
-            {filteredTasks.map((task) => (
-              <Card key={task.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20">
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      <div className="h-10 w-10 rounded-lg bg-orange-500/10 flex items-center justify-center flex-shrink-0">
-                        <ListTodo className="h-5 w-5 text-orange-600" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="font-semibold text-sm line-clamp-2">
-                          {task.description}
-                        </div>
-                      </div>
-                    </div>
-                    {/* Add dropdown for actions if needed */}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                    <span className="text-xs text-muted-foreground">
-                      {task.due_date ? new Date(task.due_date).toLocaleDateString() : 'Sin fecha límite'}
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <div className={`h-2 w-2 rounded-full ${task.is_completed ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                      <span className="text-xs text-muted-foreground">{task.is_completed ? 'Completada' : 'Pendiente'}</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
+        <div className="flex justify-end mb-4">
+          <Button variant="outline" onClick={() => {
+            setSelectedEvent(null);
+            setIsEventDialogOpen(true);
+          }} className="mr-2">
+            <Plus className="mr-2 h-4 w-4" />
+            Nuevo Evento
+          </Button>
+          <Button variant="outline" onClick={() => {
+            setSelectedTask(null);
+            setIsTaskDialogOpen(true);
+          }}>
+            <Plus className="mr-2 h-4 w-4" />
+            Nueva Tarea
+          </Button>
+        </div>
+        <WeeklyScheduleView
+          currentDate={currentDate}
+          events={agendaEvents}
+          tasks={tasks}
+          onDateChange={setCurrentDate}
+          onEditEvent={handleEditEvent}
+          onDeleteEvent={handleDeleteEvent}
+          onEditTask={handleEditTask}
+          onDeleteTask={handleDeleteTask}
+          onToggleTaskCompleted={handleToggleTaskCompleted}
+        />
       </div>
 
       {/* Notes Section (NEW) */}
@@ -1087,12 +1089,14 @@ const handleDeleteCollection = async (collectionId: string) => {
         onOpenChange={setIsEventDialogOpen}
         onSaveSuccess={handleEventSaveSuccess}
         workspaceId={workspaceId}
+        event={selectedEvent}
       />
       <TaskDialog
         isOpen={isTaskDialogOpen}
         onOpenChange={setIsTaskDialogOpen}
         onSaveSuccess={handleTaskSaveSuccess}
         workspaceId={workspaceId}
+        task={selectedTask}
       />
       <NoteDialog
         isOpen={isNoteDialogOpen}
