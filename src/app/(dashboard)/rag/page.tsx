@@ -31,6 +31,7 @@ interface Collection {
   has_knowledge_graph?: boolean;
   workspace_id?: string;
   workspace_name?: string;
+  workspace_color?: string; // Nuevo campo
 }
 
 export default function RagCollectionsPage() {
@@ -149,7 +150,7 @@ export default function RagCollectionsPage() {
     if (!deletingTopic) return;
     const toastId = toast.loading(`Eliminando colección...`);
     try {
-      await apiClient.post('/api/delete-collection', { topic: deletingTopic });
+      await apiClient.post('/api/documents/collections/delete', { topic: deletingTopic });
       toast.success(`Colección "${deletingTopic}" eliminada.`, { id: toastId });
       // Actualización optimista: eliminar la colección del estado inmediatamente
       setCollections(prevCollections => prevCollections.filter(col => col.topic !== deletingTopic));
@@ -271,20 +272,7 @@ export default function RagCollectionsPage() {
                 isAnalyzing={collectionPollingId !== null && analyzingTopic === collection.topic}
                 type="list" // Specify type as 'list'
               />
-              {collection.workspace_name && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="absolute bottom-4 right-4 bg-primary/10 text-primary font-bold text-xs px-2 py-1 rounded-lg shadow-sm cursor-default border border-primary/20">
-                        {collection.workspace_name}
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Workspace</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
+              {/* La etiqueta del workspace ahora se renderiza dentro de CollectionDisplay */}
             </motion.div>
           ))}
           {/* Tarjeta para crear nueva colección */}

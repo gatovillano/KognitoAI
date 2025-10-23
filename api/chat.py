@@ -490,6 +490,7 @@ async def handle_chat(
 
     workspace_id = str(thread.workspace_id) if thread.workspace_id else None
 
+    logger.debug(f"DEBUG (api/chat.py): Llamando create_and_run_agent_streaming con thread_id: {request.thread_id}") # <--- NUEVO LOG
     # Añadir la ejecución del agente como una tarea en segundo plano
     background_tasks.add_task(
         create_and_run_agent_streaming,
@@ -583,65 +584,41 @@ async def create_and_run_agent_streaming(
             "workspace_id": workspace_id,
             "rag_context": rag_context,
             "sources": [],
+            "thread_id": thread_id, # Añadir thread_id al estado inicial
         }
 
         # Asegurarse de que el historial de mensajes se inicialice con el mensaje del usuario
         await chat_message_history.aadd_messages([initial_human_message])
 
         config: RunnableConfig = {"configurable": {"thread_id": thread_id}} # Castear a RunnableConfig
-        final_state = None
-        full_response_content = ""
-        last_llm_content = ""
+        final_graph_state = None
+        async for chunk_data in agent_app.astream(initial_state, config=config):
+            final_graph_state = chunk_data
 
-        async for chunk in agent_app.astream(initial_state, config=config):
-            if "generateResponse" in chunk:
-                final_response_message = chunk["generateResponse"]["messages"][-1]
-                if isinstance(final_response_message, AIMessage):
-                    current_llm_content = final_response_message.content
-                    if isinstance(current_llm_content, list):
-                        current_llm_content = "".join([part.get("text", "") if isinstance(part, dict) else str(part) for part in current_llm_content])
-                    else:
-                        current_llm_content = str(current_llm_content)
+        # El estado final es un diccionario con el nombre del último nodo ejecutado como clave.
+        if not final_graph_state or "generateResponse" not in final_graph_state:
+            logger.error("El grafo no produjo una salida de 'generateResponse' válida.")
+            raise ValueError("El grafo no produjo una salida de 'generateResponse' válida.")
 
-                    # LangGraph nos da el contenido completo, no el delta, por lo que calculamos el delta.
-                    new_chunk = current_llm_content[len(last_llm_content):]
+        final_node_output = final_graph_state.get("generateResponse", {})
+        final_messages = final_node_output.get("messages", [])
 
-                    if new_chunk: # Solo enviar si hay un nuevo chunk
-                        full_response_content += new_chunk # Acumular el contenido completo
-                        await send_personal_message(account_id, {
-                            "type": "stream_chunk",
-                            "thread_id": thread_id,
-                            "taskId": task_id,
-                            "chunk": new_chunk # Enviar solo el delta
-                        })
-                        await asyncio.sleep(0.05) # Pequeño retraso para ralentizar el stream
-                    last_llm_content = current_llm_content
+        if not final_messages:
+            logger.error("La salida final del grafo no contenía mensajes.")
+            raise ValueError("La salida final del grafo no contenía mensajes.")
 
-                    final_state = chunk["generateResponse"]
-            
-            # La lógica de 'action' y 'agent' se manejará en el tool_node de core/agent.py
-            # para emitir 'tool_start' y 'tool_end'.
+        # Buscar el último AIMessage en el historial del estado final
+        final_ai_message = next((msg for msg in reversed(final_messages) if isinstance(msg, AIMessage)), None)
 
-        # Al finalizar el bucle astream, debemos haber recolectado la respuesta final
-        if not final_state:
-            logger.error("El grafo no produjo un estado final válido.")
-            raise ValueError("El grafo no produjo un estado final válido.")
-        
-        # Guardar el AIMessage final en el historial después de que se haya transmitido
-        # Esto asegura que el historial refleje la conversación completa.
-        final_ai_message_kwargs = {}
-        if final_state and "generateResponse" in final_state and final_state["generateResponse"]["messages"]:
-            last_ai_message = final_state["generateResponse"]["messages"][-1]
-            if isinstance(last_ai_message, AIMessage):
-                if last_ai_message.tool_calls:
-                    final_ai_message_kwargs["tool_calls"] = last_ai_message.tool_calls
-                if last_ai_message.additional_kwargs.get("sources"):
-                    final_ai_message_kwargs["sources"] = last_ai_message.additional_kwargs["sources"]
- 
-        logger.info(f"DEBUG (create_and_run_agent_streaming): Guardando respuesta final en historial. thread_id: {thread_id}, task_id: {task_id}, full_response_content: {full_response_content}")
-        await chat_message_history.aadd_messages([AIMessage(content=full_response_content, additional_kwargs=final_ai_message_kwargs)])
- 
- 
+        if not final_ai_message:
+            logger.error("El grafo no produjo un AIMessage en su estado final.")
+            raise ValueError("El grafo no produjo un AIMessage en su estado final.")
+
+        # Guardar el AIMessage final completo en el historial
+        logger.info(f"DEBUG (create_and_run_agent_streaming): Guardando respuesta final en historial. thread_id: {thread_id}, task_id: {task_id}")
+        await chat_message_history.aadd_messages([final_ai_message])
+
+        # El resto de la lógica para actualizar el título y enviar el evento final
         if background_tasks:
             updated_history = await chat_message_history.aget_messages()
             real_messages = [m for m in updated_history if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
@@ -661,18 +638,6 @@ async def create_and_run_agent_streaming(
                 logger.info(f"[AUTO-TÍTULO] Hilo {thread_id} cumple condición para nombrar/renombrar con {message_count} mensajes. Título actual: '{current_title}'")
                 background_tasks.add_task(force_update_thread_title, thread_id)
         
-        tool_code_to_send = None
-        sources_to_send = []
-
-        # Recuperar tool_code y sources del último AIMessage guardado en el historial
-        if final_ai_message_kwargs.get("tool_calls"):
-            tool_code_to_send = json.dumps([
-                {"name": tc["name"], "arguments": tc["args"]}
-                for tc in final_ai_message_kwargs["tool_calls"]
-            ])
-        if final_ai_message_kwargs.get("sources"):
-            sources_to_send = final_ai_message_kwargs["sources"]
-
         await send_personal_message(account_id, {
             "type": "stream_end",
             "thread_id": thread_id,

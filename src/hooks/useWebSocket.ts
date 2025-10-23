@@ -11,10 +11,9 @@ interface UseWebSocketOptions {
 }
 
 export const useWebSocket = (options: UseWebSocketOptions = {}) => {
-  const { userId } = options;
+  const { userId, onMessage } = options;
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [latestMessage, setLatestMessage] = useState<WebSocketMessage | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttempts = useRef(0);
@@ -30,13 +29,11 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
         return;
       }
 
-      // --- NUEVA LÓGICA: Cerrar conexión existente si la hay ---
       if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
         console.log('WS: Cerrando conexión WebSocket existente antes de abrir una nueva.');
         wsRef.current.close(1000, 'Reconexión');
         wsRef.current = null;
       }
-      // --- FIN NUEVA LÓGICA ---
 
       const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || window.location.origin;
       let wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -63,29 +60,27 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       };
 
       wsRef.current.onmessage = (event) => {
-        console.log('WS: onmessage triggered', event);
-        console.log('WS: event.data (raw):', event.data);
         const msgStr = event.data as string;
         if (!msgStr) return;
 
+        if (msgStr === 'ping') {
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send('pong');
+          }
+          return;
+        }
+        
+        if (msgStr === 'pong') {
+          return;
+        }
+
         try {
           const message: WebSocketMessage = JSON.parse(msgStr);
-          console.log('WS: 📨 Mensaje WebSocket recibido:', message);
-          setLatestMessage(message);
-          console.log('WS: setLatestMessage called with:', message);
-
+          onMessage?.(message);
         } catch (error) {
-          // If JSON parsing fails, check if it's a known non-JSON message like 'pong' or 'ping'
-          if (msgStr === 'pong') {
-            console.log('WS: 💓 Recibido pong del servidor.');
-          } else if (msgStr === 'ping') {
-            console.log('WS: 💓 Recibido ping del servidor (inesperado, pero ignorado).');
-          } else {
-            console.error('WS: ❌ Error al procesar mensaje WebSocket (no JSON o formato inesperado):', error, 'Mensaje recibido:', msgStr);
-          }
+          console.error('WS: ❌ ERROR CRÍTICO al parsear mensaje WebSocket:', error, 'Mensaje RAW recibido:', msgStr);
         }
       };
-
 
       wsRef.current.onclose = (event) => {
         console.log(`WS: 🔌 WebSocket desconectado. Código: ${event.code}, Razón: "${event.reason}", Limpio: ${event.wasClean}.`);
@@ -115,7 +110,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       console.error('WS: ❌ Error al crear WebSocket:', error);
       setConnectionError('Error al crear conexión WebSocket');
     }
-  }, [userId]);
+  }, [userId, onMessage]);
 
   const disconnect = useCallback(() => {
     console.log('WS: Desconectando WebSocket...');
@@ -139,20 +134,17 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
     if (userId) {
       connect();
 
-      // Iniciar el heartbeat del cliente
       heartbeatInterval = setInterval(() => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          console.log("WS: 💓 Enviando ping desde el cliente.");
           wsRef.current.send('ping');
         }
-      }, 20000); // 20 segundos
+      }, 20000);
 
     } else {
       console.log("WS: No userId available yet, skipping WebSocket connection attempt.");
     }
 
     return () => {
-      // Limpiar el intervalo y desconectar
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);
       }
@@ -163,8 +155,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
   return {
     isConnected,
     connectionError,
-    latestMessage,
     reconnect: connect,
     disconnect
   };
-};
+}
