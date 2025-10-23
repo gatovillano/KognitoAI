@@ -36,6 +36,8 @@ interface Collection {
   description?: string;
   name?: string;
   document_count?: number;
+  workspace_name?: string; // Añadido para consistencia
+  workspace_color?: string; // Nuevo campo
 }
 
 interface Workspace {
@@ -497,7 +499,7 @@ const handleDeleteCollection = async (collectionId: string) => {
           alert('No se pudo identificar la colección para eliminar.');
           return;
         }
-        const url = `/api/delete-collection`; // Cambiar a la ruta POST para eliminar
+        const url = `/api/documents/collections/delete`; // Cambiar a la ruta POST para eliminar
         const data = {
           topic: collectionIdentifier,
           workspace_id: workspaceId // Asegurarse de pasar el workspace_id

@@ -398,6 +398,29 @@ class UpdateCollectionRequest(BaseModel):
     workspace_id: Optional[str] = None
     # team_id: Optional[str] = None # Eliminado, ya no se usa team_id
 
+class CollectionDeleteRequest(BaseModel):
+    topic: str
+    workspace_id: Optional[str] = None
+
+@router.post("/collections/delete", status_code=status.HTTP_200_OK, summary="Eliminar una colección")
+async def delete_collection_endpoint(
+    request: CollectionDeleteRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    logger.info(f"API: delete_collection_endpoint - Petición para eliminar colección: {request.topic}, workspace_id: {request.workspace_id}, account: {current_account_id}")
+    from core.memory_manager import delete_collection
+    success = await delete_collection(
+        account_id=current_account_id,
+        topic_name=request.topic,
+        workspace_id=request.workspace_id
+    )
+    if not success:
+        logger.error(f"API: delete_collection_endpoint - No se pudo eliminar la colección o no existe: {request.topic}")
+        raise HTTPException(status_code=404, detail="Colección no encontrada o no se pudo eliminar.")
+    logger.info(f"API: delete_collection_endpoint - Colección '{request.topic}' eliminada con éxito del workspace {request.workspace_id if request.workspace_id else 'global'}.")
+    return {"message": f"Colección '{request.topic}' eliminada con éxito."}
+
 # --- Modelos Pydantic para Colecciones ---
 class CollectionResponse(BaseModel):
     topic: str
@@ -405,6 +428,7 @@ class CollectionResponse(BaseModel):
     description: Optional[str] = None
     workspace_id: Optional[str] = None
     workspace_name: Optional[str] = None
+    workspace_color: Optional[str] = None # Nuevo campo
     has_knowledge_graph: Optional[bool] = None
 
 class CollectionCreateRequest(BaseModel):

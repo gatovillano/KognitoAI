@@ -91,6 +91,8 @@ class AgentState(TypedDict):
     sources: Optional[List[Dict[str, Any]]]
     # El ID de la tarea para los eventos de WebSocket
     task_id: Optional[str]
+    # El ID del hilo de chat
+    thread_id: Optional[str]
 
 # ==============================================================================
 # SECCIÓN 2: MANEJO DE CONTEXTO Y MEMORIA
@@ -399,24 +401,63 @@ async def call_model_node(state: AgentState):
     chain = prompt | llm_with_tools
     
     # 4. Invocar la cadena y añadir la respuesta al estado
-    response = await chain.ainvoke({"messages": messages_for_this_turn})
-    
-    # Adjuntar fuentes y tool_calls a la respuesta del LLM si existen
-    if isinstance(response, AIMessage):
-        if state.get("sources"):
-            response.additional_kwargs["sources"] = state["sources"]
-        
-        if response.tool_calls:
-            tool_code_data = [
-                {
-                    "name": tc.get("name"),
-                    "arguments": tc.get("args"),
-                }
-                for tc in response.tool_calls
-            ]
-            response.additional_kwargs["tool_code"] = json.dumps(tool_code_data)
+    # MODIFICACIÓN CLAVE: Usar astream en lugar de ainvoke
+    full_ai_message_content = ""
+    tool_calls_from_llm = []
+    final_response_message = None
+
+    from core.websocket_manager import send_personal_message # Importar aquí para evitar circular imports
+
+    async for chunk in chain.astream({"messages": messages_for_this_turn}):
+        if isinstance(chunk, AIMessage):
+            # Acumular contenido
+            if isinstance(chunk.content, str):
+                full_ai_message_content += chunk.content
+            elif isinstance(chunk.content, list):
+                for part in chunk.content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        full_ai_message_content += part.get("text", "")
             
-    return {"messages": state["messages"] + [response]}
+            # Acumular tool_calls
+            if chunk.tool_calls:
+                tool_calls_from_llm.extend(chunk.tool_calls)
+            
+            # Enviar el chunk al WebSocket
+            logger.debug(f"DEBUG (agent.py): Enviando stream_chunk para taskId {state.get('task_id')}: {chunk.content}")
+            await send_personal_message(state['account_id'], {
+                "type": "stream_chunk",
+                "thread_id": state['thread_id'],
+                "taskId": state.get("task_id"),
+                "chunk": str(chunk.content or "") # Ensure chunk is always a string
+            })
+            
+            final_response_message = chunk # Guardar el último chunk para construir el mensaje final
+
+    # Construir el AIMessage final con el contenido acumulado y tool_calls
+    if final_response_message:
+        final_ai_message = AIMessage(
+            content=full_ai_message_content,
+            tool_calls=tool_calls_from_llm,
+            additional_kwargs=final_response_message.additional_kwargs # Mantener otros kwargs
+        )
+    else:
+        final_ai_message = AIMessage(content=full_ai_message_content, tool_calls=tool_calls_from_llm)
+
+    # Adjuntar fuentes y tool_calls a la respuesta del LLM si existen
+    if state.get("sources"):
+        final_ai_message.additional_kwargs["sources"] = state["sources"]
+    
+    if final_ai_message.tool_calls:
+        tool_code_data = [
+            {
+                "name": tc.get("name"),
+                "arguments": tc.get("args"),
+            }
+            for tc in final_ai_message.tool_calls
+        ]
+        final_ai_message.additional_kwargs["tool_code"] = json.dumps(tool_code_data)
+            
+    return {"messages": state["messages"] + [final_ai_message]}
 
 async def generate_response_node(state: AgentState):
     """
@@ -460,6 +501,7 @@ async def tool_node(state: AgentState):
         
         # Enviar evento tool_start
         from core.websocket_manager import send_personal_message
+        logger.debug(f"DEBUG (agent.py): Enviando tool_start para taskId {state.get('task_id')}, tool {tool_name}")
         await send_personal_message(state['account_id'], {
             "type": "tool_start",
             "taskId": state.get("task_id"),
@@ -531,6 +573,7 @@ async def tool_node(state: AgentState):
             ))
             
             # Enviar evento tool_end con éxito
+            logger.debug(f"DEBUG (agent.py): Enviando tool_end (success) para taskId {state.get('task_id')}, tool {tool_name}")
             await send_personal_message(state['account_id'], {
                 "type": "tool_end",
                 "taskId": state.get("task_id"),
@@ -546,6 +589,7 @@ async def tool_node(state: AgentState):
                 tool_call_id=tool_call.get("id")
             ))
             # Enviar evento tool_end con error
+            logger.debug(f"DEBUG (agent.py): Enviando tool_end (error) para taskId {state.get('task_id')}, tool {tool_name}")
             await send_personal_message(state['account_id'], {
                 "type": "tool_end",
                 "taskId": state.get("task_id"),

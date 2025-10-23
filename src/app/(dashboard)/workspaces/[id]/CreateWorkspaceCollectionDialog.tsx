@@ -33,11 +33,11 @@ export function CreateWorkspaceCollectionDialog({ isOpen, onOpenChange, onCreate
     }
     setIsLoading(true);
     try {
-      console.log('Attempting to create collection with topic:', topicName, 'description:', description, 'workspaceId:', workspaceId);
-      const response = await apiClient.post('/api/collections', {
+      console.log('DEBUG: Creating collection with workspaceId:', workspaceId, 'name:', topicName, 'description:', description);
+      const response = await apiClient.post(`/api/documents/collections`, {
         topic: topicName,
-        description: description || undefined,
-        workspaceId: workspaceId
+        description: description,
+        workspaceId: workspaceId,
       });
       console.log('API response for collection creation:', response.data);
       toast.success(`Colección "${topicName}" creada.`);
