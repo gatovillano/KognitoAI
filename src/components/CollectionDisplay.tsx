@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2, Upload, CheckCircle, XCircle, Clock, Network, ChevronDown, Settings, Text, Brain } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
@@ -216,7 +217,7 @@ export const CollectionDisplay = ({
                 ? `${collection.document_count} documento(s)`
                 : 'Calculando...'}
             </span>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-2">
               {collection.workspace_name && (
                 <TooltipProvider>
                   <Tooltip>
@@ -243,8 +244,7 @@ export const CollectionDisplay = ({
                   </Tooltip>
                 </TooltipProvider>
               )}
-              <div className="h-2 w-2 rounded-full bg-blue-500"></div>
-              <span className="text-xs text-muted-foreground">Disponible</span>
+
             </div>
           </div>
       </Card>
