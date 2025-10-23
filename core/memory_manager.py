@@ -1499,11 +1499,13 @@ async def list_user_collections(account_id: str, workspace_id: Optional[str] = N
                 else:
                     # Si no existe, es una colección creada implícitamente al subir un doc.
                     workspace_name = None
+                    workspace_color = None # Add this
                     if current_workspace_id:
                         from core.database import Workspace
                         ws = await db.get(Workspace, uuid.UUID(current_workspace_id))
                         if ws:
                             workspace_name = ws.name
+                            workspace_color = ws.color # Add this
 
                     collections_map[map_key] = {
                         "topic": topic_name,
@@ -1511,6 +1513,7 @@ async def list_user_collections(account_id: str, workspace_id: Optional[str] = N
                         "description": None,
                         "workspace_id": current_workspace_id,
                         "workspace_name": workspace_name,
+                        "workspace_color": workspace_color, # Add this
                         "has_knowledge_graph": False
                     }
             

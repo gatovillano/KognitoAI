@@ -502,6 +502,7 @@ async def list_collections(current_account_id: str = Depends(get_current_account
             description=c.get('description'),
             workspace_id=c.get('workspace_id'),
             workspace_name=c.get('workspace_name'),
+            workspace_color=c.get('workspace_color'),
             has_knowledge_graph=c.get('has_knowledge_graph')
         ) for c in collections]
     except Exception as e:
