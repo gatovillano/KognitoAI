@@ -19,6 +19,8 @@ interface Collection {
   team_shared?: boolean;
   has_knowledge_graph?: boolean;
   workspace_id?: string;
+  workspace_name?: string;
+  workspace_color?: string;
 }
 
 interface CollectionDisplayProps {
@@ -211,7 +213,7 @@ export const CollectionDisplay = ({
             </p>
           )}
         </CardContent>
-          <div className="flex items-center justify-between pt-2 border-t border-border/50">
+          <div className="flex items-center justify-between p-3 border-t border-border/50">
             <span className="text-xs text-muted-foreground">
               {collection.document_count !== undefined
                 ? `${collection.document_count} documento(s)`
@@ -223,10 +225,9 @@ export const CollectionDisplay = ({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <div
-                        className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-lg shadow-sm cursor-default border"
+                        className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full m-1"
                         style={{
                             backgroundColor: collection.workspace_color ? `${collection.workspace_color}20` : '#f3f4f6',
-                            borderColor: collection.workspace_color ? `${collection.workspace_color}50` : '#e5e7eb',
                         }}
                       >
                         <span
