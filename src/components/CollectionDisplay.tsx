@@ -210,9 +210,43 @@ export const CollectionDisplay = ({
             </p>
           )}
         </CardContent>
-        <CardFooter className="flex justify-between items-center text-xs text-muted-foreground pt-3 mt-auto border-t border-border/50">
-          <span>{collection.document_count} documento(s)</span>
-        </CardFooter>
+          <div className="flex items-center justify-between pt-2 border-t border-border/50">
+            <span className="text-xs text-muted-foreground">
+              {collection.document_count !== undefined
+                ? `${collection.document_count} documento(s)`
+                : 'Calculando...'}
+            </span>
+            <div className="flex items-center gap-1">
+              {collection.workspace_name && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div
+                        className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-lg shadow-sm cursor-default border"
+                        style={{
+                            backgroundColor: collection.workspace_color ? `${collection.workspace_color}20` : '#f3f4f6',
+                            borderColor: collection.workspace_color ? `${collection.workspace_color}50` : '#e5e7eb',
+                        }}
+                      >
+                        <span
+                            className="h-2 w-2 rounded-full"
+                            style={{ backgroundColor: collection.workspace_color || '#888888' }}
+                        ></span>
+                        <span style={{ color: collection.workspace_color || '#374151' }}>
+                            {collection.workspace_name}
+                        </span>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Workspace</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+              <div className="h-2 w-2 rounded-full bg-blue-500"></div>
+              <span className="text-xs text-muted-foreground">Disponible</span>
+            </div>
+          </div>
       </Card>
     </motion.div>
   );

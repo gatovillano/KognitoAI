@@ -1428,7 +1428,9 @@ async def list_user_collections(account_id: str, workspace_id: Optional[str] = N
             collections_map = {}
 
             # 1. Obtener colecciones definidas por el usuario en UserDocumentTopic
-            user_topics_query = select(UserDocumentTopic).options(joinedload(UserDocumentTopic.workspace)).where(
+            user_topics_query = select(UserDocumentTopic).options(
+                joinedload(UserDocumentTopic.workspace)
+            ).where(
                 UserDocumentTopic.account_id == uuid.UUID(account_id)
             )
 
@@ -1451,6 +1453,7 @@ async def list_user_collections(account_id: str, workspace_id: Optional[str] = N
                     "description": topic.description,
                     "workspace_id": str(topic.workspace_id) if topic.workspace_id else None,
                     "workspace_name": topic.workspace.name if topic.workspace else None, # Añadir nombre del workspace
+                    "workspace_color": topic.workspace.color if topic.workspace else None, # Añadir color del workspace
                     "has_knowledge_graph": False 
                 }
             
@@ -1693,6 +1696,47 @@ async def unlink_profile_from_collection(account_id: str, topic_name: str, profi
             return True
         except Exception as e:
             logger.error(f"❌ Error al desvincular perfil {profile_id} de la colección '{topic_name}': {e}", exc_info=True)
+            await db.rollback()
+            return False
+
+
+async def delete_collection(account_id: str, topic_name: str, workspace_id: Optional[str] = None) -> bool:
+    """
+    Elimina una colección (UserDocumentTopic) y todos sus documentos asociados.
+    """
+    logger.info(f"Eliminando colección '{topic_name}' para cuenta {account_id} en workspace {workspace_id}")
+    async with DBSession(SessionLocal) as db:
+        try:
+            # 1. Eliminar todos los chunks de documentos asociados a esta colección
+            deleted_chunks_count = await delete_document_chunks(
+                account_id=account_id,
+                topic=topic_name,
+                workspace_id=workspace_id
+            )
+            logger.info(f"Eliminados {deleted_chunks_count} chunks de documentos para la colección '{topic_name}'.")
+
+            # 2. Eliminar la entrada de la colección de la tabla UserDocumentTopic
+            delete_query = delete(UserDocumentTopic).where(
+                UserDocumentTopic.account_id == uuid.UUID(account_id),
+                UserDocumentTopic.name == topic_name
+            )
+            if workspace_id:
+                delete_query = delete_query.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
+            else:
+                delete_query = delete_query.where(UserDocumentTopic.workspace_id.is_(None))
+            
+            result = await db.execute(delete_query)
+            deleted_collection_entries = result.rowcount or 0
+            await db.commit()
+
+            if deleted_chunks_count > 0 or deleted_collection_entries > 0:
+                logger.info(f"✅ Colección '{topic_name}' y sus documentos eliminados exitosamente.")
+                return True
+            else:
+                logger.warning(f"No se encontraron documentos ni entradas de colección para eliminar para '{topic_name}'.")
+                return False
+        except Exception as e:
+            logger.error(f"❌ Error al eliminar colección '{topic_name}': {e}", exc_info=True)
             await db.rollback()
             return False
 

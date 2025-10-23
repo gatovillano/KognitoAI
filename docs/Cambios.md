@@ -72,3 +72,24 @@ Se corrigió un problema en `src/app/(dashboard)/notes/edit/[id]/page.tsx` donde
 - **Punto 1**: Se refactorizó el `useEffect` principal para manejar de forma unificada la carga de notas existentes y la inicialización de notas nuevas. Ahora, el contenido se establece correctamente (ya sea cargado de la API o vacío para notas nuevas) antes de que el editor se renderice.
 - **Punto 2**: Se eliminó un `useEffect` redundante que reseteaba el contenido para notas nuevas, ya que esta lógica se integró en el `useEffect` principal.
 - **Punto 3**: Se añadió una condición de renderizado al `TiptapEditor` para que solo se muestre cuando `isLoading` sea `false`. Esto asegura que el editor no se inicialice con un contenido vacío y evita problemas de autoguardado prematuro.
+---
+## 22-10-25 Mejora: Streaming de Respuestas del LLM en Tiempo Real
+
+Se implementó el streaming de las respuestas del LLM en tiempo real para que los mensajes se muestren en el frontend en fragmentos, en lugar de aparecer completos de una vez. Esto mejora la experiencia del usuario al interactuar con el asistente.
+
+- **Punto 1**: En `core/agent.py`, se modificó el `call_model_node` para utilizar `chain.astream` en lugar de `chain.ainvoke`. Esto permite procesar la respuesta del LLM en chunks.
+- **Punto 2**: Dentro del `call_model_node` en `core/agent.py`, se añadió la lógica para enviar cada chunk de la respuesta del LLM directamente al frontend a través de `send_personal_message` (WebSocket) con el tipo `stream_chunk`.
+- **Punto 3**: En `api/chat.py`, se ajustó la función `create_and_run_agent_streaming` para que, en lugar de calcular deltas y enviar chunks, simplemente acumule la respuesta completa del LLM (que ya ha sido transmitida por `core/agent.py`) y la guarde en el historial de mensajes una vez que el proceso del agente ha finalizado.
+- **Punto 4**: Se aseguró que el LLM principal en `core/llm_manager.py` esté configurado con `streaming=True`.
+---
+## 22-10-25 Corrección: Visualización de Mensajes de Streaming en Frontend
+
+Se corrigió el problema por el cual los mensajes de streaming del LLM no se mostraban en tiempo real en el frontend, sino que solo aparecían al recargar la página. Esto se debía a que el hook `useWebSocket` no estaba acumulando los chunks de los mensajes de streaming, sino que sobrescribía el mensaje anterior con cada nuevo chunk.
+
+- **Punto 1**: En `src/hooks/useWebSocket.ts`, se añadió un nuevo estado `streamingMessage` para acumular el contenido de los chunks de un mensaje de streaming.
+- **Punto 2**: Se modificó el `onmessage` handler en `src/hooks/useWebSocket.ts` para:
+    - Inicializar `streamingMessage` cuando se recibe un mensaje de tipo `stream_start`.
+    - Acumular el `chunk` al `content` de `streamingMessage` cuando se recibe un mensaje de tipo `stream_chunk`.
+    - Finalizar el streaming y transferir el mensaje completo a `latestMessage` (y limpiar `streamingMessage`) cuando se recibe un mensaje de tipo `stream_end`.
+- **Punto 3**: Se expuso el nuevo estado `streamingMessage` en el retorno del hook `useWebSocket`.
+- **Punto 4**: En `src/contexts/WebSocketContext.tsx`, se actualizó `WebSocketContextType` y el `contextValue` en `WebSocketProvider` para incluir y exponer `streamingMessage` a los componentes que consumen el contexto.
