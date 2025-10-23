@@ -1,39 +1,53 @@
-'use client';
-
-import { createContext, useContext, ReactNode, useMemo } from 'react';
+import { createContext, useContext, ReactNode, useMemo, useRef, useCallback } from 'react';
 import { useWebSocket, WebSocketMessage } from '@/hooks/useWebSocket';
 import { useAuth } from '@/contexts/AuthContext';
 
+// Type for the handler function
+type MessageHandler = (message: WebSocketMessage) => void;
+
 interface WebSocketContextType {
-  latestMessage: WebSocketMessage | null;
   isConnected: boolean;
   connectionError: string | null;
   reconnect: () => void;
   disconnect: () => void;
+  registerMessageHandler: (handler: MessageHandler) => () => void; // Takes a handler, returns an unregister function
 }
 
 const WebSocketContext = createContext<WebSocketContextType | undefined>(undefined);
 
 export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
   const { user } = useAuth();
-  const { 
+  const handlersRef = useRef<Set<MessageHandler>>(new Set());
+
+  const handleMessage = useCallback((message: WebSocketMessage) => {
+    // Call all registered handlers
+    handlersRef.current.forEach(handler => handler(message));
+  }, []);
+
+  const {
     isConnected,
     connectionError,
-    latestMessage,
     reconnect,
     disconnect
-  } = useWebSocket({ userId: user?.id });
+  } = useWebSocket({ userId: user?.id, onMessage: handleMessage });
+
+  const registerMessageHandler = useCallback((handler: MessageHandler) => {
+    handlersRef.current.add(handler);
+    // Return a cleanup function to unregister the handler
+    return () => {
+      handlersRef.current.delete(handler);
+    };
+  }, []);
 
   const contextValue = useMemo(() => {
-    console.log('[WebSocketContext] Context value updated. Latest message:', latestMessage);
     return {
-      latestMessage,
       isConnected,
       connectionError,
       reconnect,
-      disconnect
+      disconnect,
+      registerMessageHandler
     };
-  }, [latestMessage, isConnected, connectionError, reconnect, disconnect]);
+  }, [isConnected, connectionError, reconnect, disconnect, registerMessageHandler]);
 
   return (
     <WebSocketContext.Provider value={contextValue}>
@@ -41,7 +55,6 @@ export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
     </WebSocketContext.Provider>
   );
 };
-
 export const useWebSocketContext = () => {
   const context = useContext(WebSocketContext);
   if (context === undefined) {
