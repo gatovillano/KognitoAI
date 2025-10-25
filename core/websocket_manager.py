@@ -16,7 +16,7 @@ class WebSocketManager:
             try:
                 await asyncio.sleep(20)
                 # Recopila todas las conexiones activas para esta cuenta, de todos los tipos
-                all_connections_for_account = []
+                all_connections_for_account: List[WebSocket] = []
                 if account_id in self.active_connections:
                     for conn_type_dict in self.active_connections[account_id].values():
                         all_connections_for_account.extend(conn_type_dict)
@@ -44,7 +44,7 @@ class WebSocketManager:
 
 
     async def connect(self, websocket: WebSocket, account_id: str, connection_type: str = "chat"):
-        await websocket.accept()
+        # No llamar a websocket.accept() aquí, ya que FastAPI lo hace automáticamente.
         if account_id not in self.active_connections:
             self.active_connections[account_id] = {}
         if connection_type not in self.active_connections[account_id]:
@@ -82,10 +82,10 @@ class WebSocketManager:
         if account_id in self.active_connections:
             # Si se especifica un tipo de conexión, enviar solo a esas conexiones
             if connection_type and connection_type in self.active_connections[account_id]:
-                connections_to_send = self.active_connections[account_id][connection_type]
+                connections_to_send: List[WebSocket] = self.active_connections[account_id][connection_type]
             # Si no se especifica un tipo, o el tipo no existe, enviar a todas las conexiones de la cuenta
             else:
-                connections_to_send = []
+                connections_to_send: List[WebSocket] = []
                 for conn_type_dict in self.active_connections[account_id].values():
                     connections_to_send.extend(conn_type_dict)
 
@@ -108,14 +108,17 @@ class WebSocketManager:
                     logger.error(f"Error al enviar mensaje a {account_id} (conexión {id(connection)}): {e}")
 
     async def broadcast(self, message: Dict[str, Any]):
-        for account_id, connections in self.active_connections.items():
-            for connection in connections:
-                try:
-                    await connection.send_json(message)
-                except WebSocketDisconnect:
-                    self.disconnect(connection, account_id)
-                except Exception as e:
-                    logger.error(f"Error al hacer broadcast a {account_id}: {e}")
+        for account_id, connections_by_type in self.active_connections.items():
+            for connection_list in connections_by_type.values():
+                for connection in connection_list:
+                    try:
+                        await connection.send_json(message)
+                    except WebSocketDisconnect:
+                        # Aquí la desconexión es más compleja, ya que no tenemos el tipo de conexión directamente.
+                        # Podríamos iterar sobre los tipos para encontrarla o simplemente dejar que el heartbeat la limpie.
+                        logger.warning(f"WebSocketDisconnect durante broadcast a {account_id}. La conexión será limpiada por el heartbeat.")
+                    except Exception as e:
+                        logger.error(f"Error al hacer broadcast a {account_id}: {e}")
 
 # Instancia única del gestor de WebSockets
 manager = WebSocketManager()

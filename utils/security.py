@@ -35,6 +35,8 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Esto le dice a FastAPI cómo esperar el token (en el header "Authorization: Bearer <token>")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+from fastapi import WebSocket, WebSocketException # Añadido
+from starlette.websockets import WebSocketDisconnect # Añadido
 
 # --- Funciones de Contraseña ---
 
@@ -68,8 +70,10 @@ def decode_access_token(token: str) -> Optional[dict]:
     Returns:
         El payload (dict) si el token es válido, o None si ha expirado o es inválido.
     """
-    logger.debug(f"🔑 DEBUG: Intentando decodificar token: {token[:50]}...")
+    logger.debug(f"🔑 DEBUG: Token recibido en decode_access_token: {token[:50]}...")
     logger.debug(f"🔑 DEBUG: Usando JWT_SECRET_KEY que empieza con: {settings.jwt_secret_key[:10]}...")
+    logger.debug(f"🔑 DEBUG: Intentando decodificar token: {token[:50]}...")
+    logger.debug(f"🔑 DEBUG: Usando JWT_SECRET_KEY que empieza con: {settings.jwt_secret_key[:10]}... (longitud: {len(settings.jwt_secret_key)})")
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=["HS256"])
         logger.debug(f"✅ DEBUG: Token decodificado exitosamente. Payload: {payload}")
@@ -129,10 +133,72 @@ def verify_token_ws(token: str) -> str:
     account_id: str = payload.get("sub")
     if account_id is None:
         logger.warning("❌ account_id es None en el payload del token WebSocket.")
+async def get_websocket_token(websocket: WebSocket) -> str:
+    """
+    Extrae y valida el token JWT de la conexión WebSocket.
+    El token se espera en el encabezado 'Authorization' como 'Bearer <token>'.
+    """
+    try:
+        token: str = websocket.headers.get("Authorization")
+        if not token:
+            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason="Token de autenticación no proporcionado")
+        
+        scheme, credentials = token.split(" ")
+        if scheme.lower() != "bearer":
+            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason="Esquema de autenticación no soportado")
+        
+        payload = decode_access_token(credentials)
+        if payload is None:
+            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason="Token inválido o expirado")
+        
+        account_id: str = payload.get("sub")
+        if account_id is None:
+            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason="ID de cuenta no encontrado en el token")
+        
+        return account_id
+    except WebSocketException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al obtener token de WebSocket: {e}", exc_info=True)
+        raise WebSocketException(code=status.WS_1011_INTERNAL_ERROR, reason="Error interno del servidor al procesar el token")
         raise credentials_exception
     
     logger.debug(f"✅ DEBUG: account_id extraído del token WebSocket: {account_id}")
     return account_id
+
+async def _get_user_from_token_payload(payload: dict, session: AsyncSession) -> dict:
+    """
+    Función auxiliar para obtener la información del usuario a partir de un payload de token decodificado.
+    """
+    from core.database import Account # Necesitamos importar Account para el tipo
+
+    account_id: str = payload.get("sub")
+    if account_id is None:
+        logger.warning("❌ account_id es None en el payload del token.")
+        return None # O lanzar una excepción específica
+
+    try:
+        query = select(Account).where(
+            Account.id == account_id,
+            Account.is_active == True
+        )
+        result = await session.execute(query)
+        user_account = result.scalars().first()
+
+        if not user_account:
+            return None # O lanzar una excepción específica
+        
+        return {
+            "account_id": str(user_account.id), # Convertir UUID a str
+            "email": user_account.email,
+            "username": user_account.username,
+            "is_active": user_account.is_active,
+            "created_at": user_account.created_at.isoformat() # Convertir datetime a str
+        }
+
+    except Exception as e:
+        logger.error(f"Error obteniendo información del usuario desde el payload: {e}", exc_info=True)
+        return None # O lanzar una excepción específica
 
 async def get_current_active_account(
     token: str = Depends(oauth2_scheme),
@@ -221,8 +287,6 @@ async def get_current_user(
     Extrae el token del header, lo valida y devuelve información del usuario.
     Si el token es inválido o no se proporciona, lanza una HTTPException 401.
     """
-    from core.database import Account # Necesitamos importar Account para el tipo
-
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="No se pudieron validar las credenciales",
@@ -234,34 +298,37 @@ async def get_current_user(
     if payload is None:
         raise credentials_exception
 
-    account_id: str = payload.get("sub")
-    if account_id is None:
+    user_info = await _get_user_from_token_payload(payload, session)
+    if user_info is None:
+        raise credentials_exception
+    return user_info
+
+async def get_current_user_from_websocket_query_param(
+    websocket: WebSocket,
+    session: AsyncSession = Depends(get_db_session)
+) -> dict:
+    """
+    Dependencia de FastAPI para obtener información completa del usuario actual desde un WebSocket,
+    leyendo el token de los query_params.
+    """
+    credentials_exception = WebSocketException(
+        code=status.WS_1008_POLICY_VIOLATION,
+        reason="No se pudieron validar las credenciales WebSocket",
+    )
+
+    token = websocket.url.query_params.get("token")
+    if not token:
         raise credentials_exception
 
-    # Obtener información del usuario desde la base de datos
-    try:
-        # Ahora usamos la sesión inyectada directamente
-        query = select(Account).where(
-            Account.id == account_id,
-            Account.is_active == True
-        )
-        result = await session.execute(query)
-        user_account = result.scalars().first()
-
-        if not user_account:
-            raise credentials_exception
-
-        return {
-            "account_id": str(user_account.id), # Convertir UUID a str
-            "email": user_account.email,
-            "username": user_account.username,
-            "is_active": user_account.is_active,
-            "created_at": user_account.created_at.isoformat() # Convertir datetime a str
-        }
-
-    except Exception as e:
-        logger.error(f"Error obteniendo información del usuario: {e}")
+    payload = decode_access_token(token)
+    if payload is None:
         raise credentials_exception
+
+    user_info = await _get_user_from_token_payload(payload, session)
+    if user_info is None:
+        raise credentials_exception
+    return user_info
+
 import uuid # Importar uuid
 
 async def check_workspace_permission(

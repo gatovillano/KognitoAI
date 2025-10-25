@@ -29,7 +29,7 @@ from utils.embeddings import initialize_embeddings
 from utils.audio_transcriber import load_whisper_model
 from utils.ascii_logo import print_startup_logo
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 logger.propagate = False # Evitar la duplicación de logs del logger principal
 
@@ -172,6 +172,51 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
         websocket_manager.disconnect(websocket, account_id)
 
 
+from utils.audio_transcriber import StreamingTranscriber, get_whisper_model # Importar aquí
+
+@app.websocket("/ws/audio/transcribe/{account_id}")
+async def websocket_transcribe(websocket: WebSocket, account_id: str):
+    """Endpoint para manejar conexiones WebSocket de transcripción con autenticación."""
+    await websocket.accept()
+    
+    token = websocket.query_params.get('token')
+    if not token:
+        logger.warning(f"Intento de conexión WebSocket de transcripción sin token para el usuario {account_id}.")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Token no proporcionado")
+        return
+
+    try:
+        payload = decode_access_token(token)
+        token_account_id = payload.get("sub")
+        if token_account_id != account_id:
+            logger.warning(f"Conflicto de ID de usuario en WebSocket de transcripción. Token ID: {token_account_id}, Path ID: {account_id}")
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Conflicto de ID de usuario")
+            return
+    except HTTPException as e:
+        logger.error(f"Error de autenticación de token en WebSocket de transcripción para el usuario {account_id}: {e.detail}")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=f"Token inválido: {e.detail}")
+        return
+    except Exception as e:
+        logger.error(f"Error inesperado al decodificar token en WebSocket de transcripción para el usuario {account_id}: {e}", exc_info=True)
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Error de token")
+        return
+
+    logger.info(f"WebSocket de transcripción conectado y autenticado para la cuenta: {account_id}")
+
+    whisper_model = await get_whisper_model()
+    if not whisper_model:
+        logger.error("Modelo de Whisper no disponible para transcripción en streaming.")
+        await websocket.send_json({"type": "error", "message": "Modelo de transcripción no disponible."})
+        return
+
+    transcriber = StreamingTranscriber(whisper_model)
+    try:
+        await transcriber.start_transcription_session(websocket)
+    except Exception as e:
+        logger.error(f"Error en la sesión de transcripción para la cuenta {account_id}: {e}", exc_info=True)
+    finally:
+        logger.info(f"Conexión WebSocket de transcripción cerrada para {account_id}")
+
 
 @app.get("/", include_in_schema=False)
 async def serve_telegram_panel():
@@ -182,9 +227,11 @@ async def serve_telegram_panel():
     return FileResponse(panel_path)
 
 # Incluir routers de los módulos
+# Incluir routers de los módulos
+app.include_router(chat_router, prefix="/api", tags=["chat"]) # Mover arriba para dar prioridad a las rutas de chat
+
 app.include_router(auth_router, prefix="/api", tags=["auth"])
 app.include_router(users_router, prefix="/api", tags=["users"])
-app.include_router(chat_router, prefix="/api", tags=["chat"])
 app.include_router(documents_router, prefix="/api/documents", tags=["documents"])
 app.include_router(notes_router, prefix="/api", tags=["notes"])
 app.include_router(agenda_router, prefix="/api", tags=["agenda"])

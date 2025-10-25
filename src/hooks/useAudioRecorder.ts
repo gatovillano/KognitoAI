@@ -23,12 +23,14 @@ export const useAudioRecorder = (): AudioRecorderHook => {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 5;
+  const isIntentionalClosure = useRef(false);
 
   const startRecording = useCallback(async () => {
     if (!user?.id) {
       toast.error('No se pudo iniciar la grabación: usuario no autenticado.');
       return;
     }
+    isIntentionalClosure.current = false;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -63,7 +65,7 @@ export const useAudioRecorder = (): AudioRecorderHook => {
       console.log('DEBUG WS Transcribe Frontend: authToken from localStorage:', token ? token.substring(0, 30) + '...' : 'No token');
       // --- FIN DE LOS CONSOLE.LOG AÑADIDOS ---
 
-      const wsUrl = `${wsProtocol}://${wsHost}/ws/transcribe/${user.id}?token=${encodeURIComponent(token)}`; // Añadir el token a la URL
+      const wsUrl = `${wsProtocol}://${wsHost}/ws/audio/transcribe/${user.id}?token=${encodeURIComponent(token)}`; // Añadir el token a la URL
       console.log('DEBUG WS Transcribe Frontend: Constructed WebSocket URL:', wsUrl); // Añadir log de la URL completa
       wsRef.current = new WebSocket(wsUrl);
 
@@ -111,8 +113,14 @@ export const useAudioRecorder = (): AudioRecorderHook => {
         console.log(`WS Transcribe: Desconectado. Código: ${event.code}, Razón: "${event.reason}", Limpio: ${event.wasClean}.`);
         setIsRecording(false);
         setIsProcessingAudio(false);
+
+        if (isIntentionalClosure.current) {
+          console.log('WS Transcribe: Cierre intencional, no se reconectará.');
+          isIntentionalClosure.current = false; // Reset for next time
+          return;
+        }
         
-        if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
+        if (reconnectAttempts.current < maxReconnectAttempts) {
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
           console.log(`WS Transcribe: 🔄 Reintentando conexión en ${delay}ms (intento ${reconnectAttempts.current + 1}/${maxReconnectAttempts}).`);
           
@@ -160,6 +168,7 @@ export const useAudioRecorder = (): AudioRecorderHook => {
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
+      isIntentionalClosure.current = true;
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       toast.info('Grabación detenida. Esperando transcripción final...');
