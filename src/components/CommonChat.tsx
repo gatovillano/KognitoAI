@@ -43,7 +43,7 @@ interface ChatMessageType {
   text: string;
   sender: 'user' | 'ai';
   created_at: string;
-  image_base64?: string;
+  image?: string;
   document_url?: string;
   ragContext?: SelectedContextItem[];
   sources?: Source[];
@@ -406,8 +406,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         text: messageToProcess,
         sender: 'user',
         created_at: new Date().toISOString(),
-        ragContext: selectedContext,
-        image_base64: uploadedImage?.base64,
+        ragContext: selectedContext.length > 0 ? selectedContext : undefined,
+        image: uploadedImage?.base64,
       };
       setMessages((prev) => [...prev, userMessage]);
       requestAnimationFrame(() => scrollToBottom(true));
@@ -918,7 +918,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 workspaceId={workspaceId}
             >
               <ContextSelectorButton
-                onContextSelected={() => {}}
+                onContextSelected={setSelectedContext}
                 currentContext={selectedContext}
                 workspaceId={workspaceId}
               />
@@ -935,7 +935,7 @@ interface ChatMessageType {
   text: string;
   sender: 'user' | 'ai';
   created_at: string;
-  image_base64?: string;
+  image?: string;
   document_url?: string;
   ragContext?: SelectedContextItem[];
   sources?: Source[];
