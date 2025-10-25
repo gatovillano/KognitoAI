@@ -11,7 +11,7 @@ from typing import Optional, AsyncGenerator, Any, List, Dict
 from io import BytesIO
 import httpx
 from fastapi import APIRouter, HTTPException, Depends, status, Form, File, UploadFile, Query
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
@@ -24,8 +24,8 @@ TTS_SERVICE_URL = "http://openai-edge-tts:5050/v1/audio/speech"
 from sqlalchemy import update, Integer, cast, func # Added cast # Added Integer # Added func
 
 
-from utils.audio_transcriber import transcribe_audio_file
-from utils.security import get_current_account_id
+from utils.audio_transcriber import transcribe_audio_file, StreamingTranscriber, get_whisper_model
+from utils.security import get_current_account_id, decode_access_token # Añadido decode_access_token
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from core.database import SessionLocal, ChatThread, settings, Workspace
@@ -528,7 +528,7 @@ async def create_and_run_agent_streaming(
     """
     Ejecuta el agente LangGraph y transmite los resultados a través de WebSockets.
     """
-    from core.agent import create_langgraph_agent, AgentState
+    from core.agent import create_langgraph_agent
     from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
     from langchain_community.chat_message_histories import PostgresChatMessageHistory
     from core.config import settings
@@ -652,3 +652,95 @@ async def create_and_run_agent_streaming(
             "taskId": task_id,
             "message": str(e)
         })
+
+@router.websocket("/ws-transcribe/{account_id}")
+async def websocket_transcribe(websocket: WebSocket, account_id: str):
+    logger.debug(f"DEBUG: Entrando a websocket_transcribe para account_id: {account_id}")
+    await websocket.accept() # Aceptar la conexión primero para poder enviar mensajes de error
+    
+    token = websocket.url.query_params.get("token")
+    logger.info(f"DEBUG WS Transcribe Backend: Token recibido (parcial): {token[:30]}...")
+    logger.info(f"DEBUG WS Transcribe Backend: account_id de la URL: {account_id}")
+    payload = decode_access_token(token)
+    logger.info(f"DEBUG WS Transcribe Backend: Payload decodificado: {payload}")
+    authenticated_account_id = payload.get("sub")
+    logger.info(f"DEBUG WS Transcribe Backend: authenticated_account_id del token: {authenticated_account_id}")
+    if not token:
+        logger.warning(f"Intento de conexión de transcripción sin token para account_id: {account_id}")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Token de autenticación no proporcionado")
+        return
+
+    try:
+        # Verificar el token de autenticación
+        try:
+            # --- INICIO DE LOS LOGS AÑADIDOS EN EL BACKEND ---
+            logger.info(f"DEBUG WS Transcribe Backend: Token recibido (parcial): {token[:30]}...")
+            logger.info(f"DEBUG WS Transcribe Backend: account_id de la URL: {account_id}")
+            # --- FIN DE LOS LOGS AÑADIDOS EN EL BACKEND ---
+
+            payload = decode_access_token(token)
+            authenticated_account_id = payload.get("sub")
+
+            # --- INICIO DE LOS LOGS AÑADIDOS EN EL BACKEND ---
+            logger.info(f"DEBUG WS Transcribe Backend: Payload decodificado: {payload}")
+            logger.info(f"DEBUG WS Transcribe Backend: authenticated_account_id del token: {authenticated_account_id}")
+            # --- FIN DE LOS LOGS AÑADIDOS EN EL BACKEND ---
+
+            if authenticated_account_id != account_id:
+                logger.warning(f"Intento de conexión de transcripción no autorizado para account_id: {account_id} con token de {authenticated_account_id}. Razón: Conflicto de ID de usuario.")
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="No autorizado: Conflicto de ID de usuario")
+                return
+        except HTTPException as e:
+            logger.error(f"Error de autenticación de token en WebSocket de transcripción para la cuenta {account_id}: {e.detail}. Razón: {e.detail}")
+            await websocket.close(code=e.status_code, reason=f"Error de autenticación: {e.detail}")
+            return
+        except Exception as e:
+            logger.error(f"Error inesperado al decodificar token en WebSocket de transcripción para la cuenta {account_id}: {e}", exc_info=True)
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR, reason="Error interno del servidor")
+            return
+
+        logger.info(f"WebSocket de transcripción conectado y autenticado para la cuenta: {account_id}")
+    except HTTPException as e:
+        logger.error(f"Error de autenticación en WebSocket de transcripción para la cuenta {account_id}: {e.detail}")
+        await websocket.close(code=e.status_code, reason=e.detail)
+        return
+    except Exception as e:
+        logger.error(f"Error inesperado al establecer conexión WebSocket de transcripción para la cuenta {account_id}: {e}", exc_info=True)
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR, reason="Error interno del servidor")
+        return
+
+    # Conectar el WebSocket al manager
+    await websocket_manager.connect(websocket, account_id, "transcribe")
+
+    whisper_model = await get_whisper_model()
+    if not whisper_model:
+        logger.error("Modelo de Whisper no disponible para transcripción en streaming.")
+        await websocket.send_json({"type": "error", "message": "Modelo de transcripción no disponible."})
+        await websocket_manager.disconnect(websocket, account_id, "transcribe") # Desconectar en caso de error
+        return
+
+    transcriber = StreamingTranscriber(whisper_model)
+
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            
+            # Asumimos que el frontend envía el formato de archivo junto con el audio
+            # Por ahora, lo hardcodeamos a "webm" ya que es lo que esperamos del frontend
+            file_format = "webm" 
+
+            transcript_chunk = await transcriber.process_audio_chunk(data, file_format)
+            if transcript_chunk:
+                await websocket.send_json({"type": "transcript_chunk", "text": transcript_chunk})
+
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket de transcripción desconectado para la cuenta: {account_id}")
+        final_transcript = await transcriber.finalize_transcription()
+        if final_transcript:
+            await websocket.send_json({"type": "final_transcript", "text": final_transcript})
+    except Exception as e:
+        logger.error(f"Error en WebSocket de transcripción para la cuenta {account_id}: {e}", exc_info=True)
+        await websocket.send_json({"type": "error", "message": f"Error en la transcripción: {e}"})
+    finally:
+        logger.info(f"Cerrando conexión WebSocket de transcripción para {account_id}")
+        websocket_manager.disconnect(websocket, account_id, "transcribe") # Asegurarse de desconectar

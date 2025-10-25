@@ -56,6 +56,8 @@ from core.config import settings
 from core.citation_models import ToolOutputWithSources
 from core.llm_manager import get_main_llm, get_fast_llm
 from core.prompts import SUMMARIZATION_PROMPT, THREAD_TITLE_PROMPT
+from core.enhanced_memory_manager import EnhancedMemoryManager
+from knowledge_graph.graph_database import GraphDB
 # --- Claves para estado temporal ---
 from utils.image_generation import GENERATED_IMAGE_KEY
 # from tools.get_document_content_tool import DOCUMENT_NAME_KEY
@@ -351,17 +353,37 @@ async def call_model_node(state: AgentState):
             )
             
             messages_for_this_turn.append(HumanMessage(content=new_message_content))
+        
+        # relevant_memories_text se deja vacío porque el contexto ya está en el mensaje del usuario
+        relevant_memories_text = ""
+    else:
+        # --- INICIO DE LA LÓGICA DE MEMORIA MEJORADA (si no hay RAG explícito) ---
+        graph_db = GraphDB(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
+        graph_db.connect()
+        enhanced_memory_manager = EnhancedMemoryManager(graph_db=graph_db)
+
+        enhanced_context = await enhanced_memory_manager.get_enhanced_context(
+            user_query=user_message,
+            user_id=state['account_id'],
+            workspace_id=state.get('workspace_id')
+        )
+
+        # Convert Source objects to dicts for JSON serialization
+        if enhanced_context and 'sources' in enhanced_context:
+            traditional_sources = enhanced_context['sources'].get('traditional_embeddings', {}).get('results', [])
+            enhanced_context['sources']['traditional_embeddings']['results'] = [source.dict() for source in traditional_sources]
+
+        relevant_memories_text = json.dumps(enhanced_context, indent=2, ensure_ascii=False)
+        sources_for_prompt = enhanced_context.get('sources', {}).get('traditional_embeddings', {}).get('results', [])
+        # --- FIN DE LA LÓGICA DE MEMORIA MEJORADA ---
             
     # --- FIN DE LA LÓGICA DE RAG EXPLÍCITO ---
     state['sources'] = sources_for_prompt
-
-    # relevant_memories_text se deja vacío porque el contexto ya está en el mensaje del usuario
-    relevant_memories_text = ""
     
     from core.prompt_manager import PromptManager
     prompt_manager = PromptManager(settings={"default_system_prompt": settings.default_system_prompt})
     
-    tools = get_all_langchain_tools(
+    tools = await get_all_langchain_tools(
         account_id=state['account_id'],
         telegram_id=state.get('telegram_id')
     )
@@ -482,7 +504,7 @@ async def tool_node(state: AgentState):
     if not tool_calls:
         return {"messages": state["messages"]}
 
-    tools = get_all_langchain_tools(
+    tools = await get_all_langchain_tools(
         account_id=state['account_id'],
         telegram_id=state.get('telegram_id')
     )

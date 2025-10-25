@@ -201,7 +201,7 @@ export default function RagCollectionsPage() {
     );
 
     try {
-      const response = await apiClient.post('/api/process-knowledge-graph',
+      const response = await apiClient.post('/api/documents/process-knowledge-graph',
         topic ? { topic } : {}
       );
 

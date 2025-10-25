@@ -95,12 +95,14 @@ class GetProactiveInsightsTool(BaseTool):
                         response_lines.append(f"   - **Sugerencia**: {insight.action_suggestion}")
                     if insight.related_items:
                         response_lines.append("   - **Elementos Relacionados**:")
-                        for item in insight.related_items[:2]:  # Limitar a 2 para no sobrecargar el chat
+                        # Asegurarse de que related_items sea una lista antes de intentar iterar o hacer slicing
+                        related_items_list = insight.related_items if isinstance(insight.related_items, list) else []
+                        for item in related_items_list[:2]:  # Limitar a 2 para no sobrecargar el chat
                             item_title = item.get('title', 'Sin título')
                             item_type = item.get('type', 'N/A')
                             response_lines.append(f"     - {item_type}: {item_title}")
-                        if len(insight.related_items) > 2:
-                            response_lines.append(f"     - y {len(insight.related_items) - 2} más...")
+                        if len(related_items_list) > 2:
+                            response_lines.append(f"     - y {len(related_items_list) - 2} más...")
 
                 if len(insights) == limit:
                     response_lines.append(f"\n(Mostrando los {limit} más recientes. Si deseas ver más, puedo buscarlos.)")

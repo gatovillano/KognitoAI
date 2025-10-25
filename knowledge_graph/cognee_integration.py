@@ -9,6 +9,7 @@ import os
 import numpy as np
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+import asyncio
 
 # Importar Cognee real
 try:
@@ -50,16 +51,16 @@ class CogneeIntegration:
             self._configure_cognee()
             
             # Asegurarse de que el dataset exista antes de usarlo
-            try:
-                import cognee.modules.data as data
-                # Esta es una llamada síncrona, pero la ejecutamos en el constructor
-                # que es síncrono. Si se mueve a un método asíncrono, usar asyncio.to_thread
-                data.add_dataset("default")
-                logger.info("✅ Dataset 'default' de Cognee asegurado.")
-            except Exception as e:
-                # Es posible que la función falle si el dataset ya existe,
-                # lo cual es un comportamiento esperado y no un error crítico.
-                logger.warning(f"⚠️ No se pudo asegurar el dataset 'default' de Cognee (puede que ya exista): {e}")
+            # try:
+            #     import cognee.modules.data as data
+            #     # Esta es una llamada síncrona, pero la ejecutamos en el constructor
+            #     # que es síncrono. Si se mueve a un método asíncrono, usar asyncio.to_thread
+            #     data.add_dataset("default")
+            #     logger.info("✅ Dataset 'default' de Cognee asegurado.")
+            # except Exception as e:
+            #     # Es posible que la función falle si el dataset ya existe,
+            #     # lo cual es un comportamiento esperado y no un error crítico.
+            #     logger.warning(f"⚠️ No se pudo asegurar el dataset 'default' de Cognee (puede que ya exista): {e}")
 
         else:
             logger.warning("⚠️ CogneeIntegration inicializada en modo fallback (sin Cognee)")
@@ -68,6 +69,33 @@ class CogneeIntegration:
         from knowledge_graph.neo4j_adapter import Neo4jAdapter
         self.hybrid_adapter = Neo4jAdapter(graph_db)
         logger.info("✅ Neo4jAdapter inicializado para pipeline híbrido")
+
+    async def _create_fulltext_indexes(self):
+        """Asegura que los índices full-text necesarios existan en Neo4j."""
+        try:
+            logger.info("🔍 Verificando y creando índices full-text en Neo4j...")
+
+            # Índice para nodos (CONCEPTUAL_QUOTE y IDEA_PROFILE)
+            node_index_query = """
+            CREATE FULLTEXT INDEX node_fulltext_index IF NOT EXISTS
+            FOR (n:CONCEPTUAL_QUOTE | IDEA_PROFILE)
+            ON EACH [n.name, n.description, n.concept, n.full_text, n.category]
+            """
+            await self.graph_db.execute_query(node_index_query)
+            logger.info("✅ Índice 'node_fulltext_index' para nodos asegurado.")
+
+            # Índice para relaciones (THEMATIC_RELATIONSHIP y CONTAINS_IDEA)
+            relationship_index_query = """
+            CREATE FULLTEXT INDEX relationship_fulltext_index IF NOT EXISTS
+            FOR ()-[r:THEMATIC_RELATIONSHIP | CONTAINS_IDEA]-()
+            ON EACH [r.description]
+            """
+            await self.graph_db.execute_query(relationship_index_query)
+            logger.info("✅ Índice 'relationship_fulltext_index' para relaciones asegurado.")
+
+        except Exception as e:
+            logger.error(f"❌ Error creando índices full-text: {e}", exc_info=True)
+            # No relanzar la excepción para no detener la inicialización
 
     def _configure_cognee(self):
         """Configura Cognee con las credenciales y configuración del proyecto."""
@@ -147,7 +175,7 @@ class CogneeIntegration:
             logger.error(f"❌ Error configurando Cognee: {e}")
             self.cognee_available = False
 
-    async def process_documents(self, documents: List[Dict[str, Any]], dataset_name: str = "default") -> Dict[str, Any]:
+    async def process_documents(self, documents: List[Dict[str, Any]], dataset_name: str = "default", account_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Procesa documentos usando un enfoque híbrido donde el LLM es el principal analista
         para crear grafos conceptuales.
@@ -157,6 +185,7 @@ class CogneeIntegration:
         Args:
             documents: Lista de documentos a procesar.
             dataset_name: Nombre del dataset.
+            account_id: ID del usuario o cuenta propietaria de los documentos.
 
         Returns:
             Dict con el resultado del procesamiento conceptual.
@@ -166,7 +195,7 @@ class CogneeIntegration:
         try:
             # Reconstruir contenido completo desde chunks vectorizados
             # Esta función ya está implementada y es necesaria para obtener el texto completo
-            processed_documents = await self._reconstruct_document_content(documents)
+            processed_documents = await self._reconstruct_document_content(documents, account_id=account_id)
 
             if not processed_documents:
                 raise ValueError("No se pudo reconstruir contenido de documentos para procesamiento conceptual.")
@@ -362,17 +391,16 @@ class CogneeIntegration:
             "processing_method": "hybrid_pipeline"
         }
 
-    async def _reconstruct_document_content(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def _reconstruct_document_content(self, documents: List[Dict[str, Any]], account_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Reconstruye el contenido completo de documentos desde chunks vectorizados."""
         processed_documents = []
 
-        # Extraer account_id del primer documento
-        account_id = None
-        if documents:
+        # Si no se proporciona account_id, intentar extraerlo del primer documento
+        if not account_id and documents:
             account_id = documents[0].get("metadata", {}).get("account_id")
 
         if not account_id:
-            logger.error("❌ No se encontró account_id en los documentos")
+            logger.error("❌ No se encontró account_id ni en los parámetros ni en los documentos")
             return []
 
         for i, doc in enumerate(documents):

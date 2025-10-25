@@ -5,7 +5,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button'; // Importar Button
-import { Volume2, Pencil, Lightbulb, FileText, MoreHorizontal, Link } from 'lucide-react'; // Importar el icono de volumen, el de lápiz y el de enlace
+import { Volume2, Pencil, Lightbulb, FileText, MoreHorizontal, Link, Download } from 'lucide-react'; // Importar el icono de volumen, el de lápiz, el de enlace y el de descarga
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'; // Reutilizamos nuestro potente renderizador
@@ -145,6 +145,39 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
     }
   };
 
+  const handleDownloadPdf = async () => {
+    if (!note) {
+      toast.error("No hay nota para descargar.");
+      return;
+    }
+    const toastId = toast.loading("Generando PDF...");
+    try {
+      const response = await apiClient.post(
+        '/api/notes/generate-pdf',
+        { note_id: note.id, format: 'markdown' }, // Puedes ajustar el formato si el backend lo permite
+        { responseType: 'blob' } // Importante para recibir el archivo como blob
+      );
+
+      // Crear un blob a partir de la respuesta
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+
+      // Crear un enlace temporal y simular un click para descargar el archivo
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${note.title || 'nota-sin-titulo'}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      toast.success("PDF generado y descargado.", { id: toastId });
+    } catch (error) {
+      toast.error("Error al generar el PDF.", { id: toastId });
+      console.error("Error al generar el PDF:", error);
+    }
+  };
+
   // Si no hay nota para mostrar, no renderizamos nada para evitar errores.
   if (!note) {
     return null;
@@ -182,6 +215,10 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
                     Vincular a Perfil
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleDownloadPdf}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Descargar PDF
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={handleTextToSpeech} disabled={isSpeaking}>
                     <Volume2 className={isSpeaking ? "mr-2 h-4 w-4 animate-pulse text-primary" : "mr-2 h-4 w-4"} />
                     Reproducir Audio

@@ -27,6 +27,7 @@ import { CollectionAnalysisDialog } from '@/app/(dashboard)/rag/collection-analy
 import { SemanticAnalysisDialog } from '@/app/(dashboard)/rag/semantic-analysis-dialog';
 import { ShareDocumentDialog } from '@/app/(dashboard)/rag/share-document-dialog';
 import { CustomAnalysisDialog } from '@/app/(dashboard)/rag/custom-analysis-dialog';
+import { KnowledgeGraphAnalysisDialog } from '@/app/(dashboard)/rag/knowledge-graph-analysis-dialog';
 
 interface DocumentCollectionDisplayProps {
   topic: string;
@@ -96,6 +97,9 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
 
   // Estados para procesamiento de grafos de conocimiento
   const [isProcessingKnowledgeGraph, setIsProcessingKnowledgeGraph] = useState(false);
+  // Nuevo estado para el análisis de grafo de conocimiento
+  const [knowledgeGraphAnalysisResult, setKnowledgeGraphAnalysisResult] = useState<any>(null);
+  const [isKnowledgeGraphAnalysisOpen, setIsKnowledgeGraphAnalysisOpen] = useState(false);
 
   const fetchPageData = useCallback(async () => {
     setIsLoading(true);
@@ -303,11 +307,15 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         const { status, result, error } = response.data;
         if (status === 'completed') {
           clearInterval(poller); setCollectionPollingId(null);
-          // Verificar si es análisis semántico por el nombre del archivo
+          // Verificar si es análisis semántico o de grafo de conocimiento
           if (result?.analysis_metadata?.analysis_type === 'semantic_summary') {
             setSemanticAnalysisResult(result);
             setIsSemanticAnalysisOpen(true);
             toast.success("¡Resumen semántico completado!");
+          } else if (result?.analysis_metadata?.analysis_type === 'knowledge_graph_analysis') {
+            setKnowledgeGraphAnalysisResult(result);
+            setIsKnowledgeGraphAnalysisOpen(true);
+            toast.success("¡Análisis de grafo de conocimiento completado!");
           } else {
             setCollectionAnalysisResult(result);
             setIsCollectionAnalysisOpen(true);
@@ -371,6 +379,16 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     } finally {
       setIsProcessingKnowledgeGraph(false);
     }
+  };
+
+  // --- Handler para Análisis de Grafo de Conocimiento ---
+  const handleKnowledgeGraphAnalysis = async () => {
+    if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
+    try {
+      const response = await apiClient.post('/api/documents/start-knowledge-graph-analysis', { topic, ...(workspaceId && { workspace_id: workspaceId }) });
+      setCollectionPollingId(response.data.task_id);
+      toast.info(`Análisis de Grafo de Conocimiento para la colección "${collectionName || topic}" iniciado.`);
+    } catch (error) { toast.error("No se pudo iniciar el análisis de grafo de conocimiento."); }
   };
 
   const columns = useMemo(() => getColumns(
@@ -453,6 +471,10 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
               <DropdownMenuItem onClick={handleProcessKnowledgeGraph} disabled={isProcessingKnowledgeGraph}>
                 <Network className="mr-2 h-4 w-4" />
                 <span>Crear Grafo</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleKnowledgeGraphAnalysis} disabled={!!docPollingId || !!collectionPollingId}>
+                <Brain className="mr-2 h-4 w-4" />
+                <span>Análisis de Grafo de Conocimiento</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -555,9 +577,19 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                           </div>
                         )}
 
+                        {analysis.file_name.startsWith('Análisis de Grafo de Conocimiento:') && analysis.result_payload?.graph_summary && (
+                          <div className="p-3 bg-muted rounded-lg">
+                            <h4 className="font-medium text-sm mb-2">Resumen del Grafo de Conocimiento:</h4>
+                            <p className="text-sm text-muted-foreground">
+                              {analysis.result_payload.graph_summary}
+                            </p>
+                          </div>
+                        )}
+
                         {!analysis.file_name.startsWith('Colección:') &&
                          !analysis.file_name.startsWith('Resumen Semántico:') &&
                          !analysis.file_name.startsWith('Análisis Personalizado:') &&
+                         !analysis.file_name.startsWith('Análisis de Grafo de Conocimiento:') &&
                          analysis.result_payload?.resumen_ejecutivo && (
                           <div className="p-3 bg-muted rounded-lg">
                             <h4 className="font-medium text-sm mb-2">Resumen Ejecutivo:</h4>
@@ -579,6 +611,10 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                             console.log('✨ Abriendo análisis personalizado');
                             setDocAnalysisResult(analysis.result_payload);
                             setIsDocAnalysisOpen(true);
+                          } else if (analysis.file_name.startsWith('Análisis de Grafo de Conocimiento:')) {
+                            console.log('🧠 Abriendo análisis de grafo de conocimiento');
+                            setKnowledgeGraphAnalysisResult(analysis.result_payload);
+                            setIsKnowledgeGraphAnalysisOpen(true);
                           } else {
                             console.log('📄 Abriendo análisis de documento');
                             setDocAnalysisResult(analysis.result_payload);
@@ -625,6 +661,12 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
           setCollectionPollingId(taskId); // Usar el mismo polling para análisis de colección
           toast.info("Análisis personalizado iniciado. Esperando resultados...");
         }}
+      />
+
+      <KnowledgeGraphAnalysisDialog
+        isOpen={isKnowledgeGraphAnalysisOpen}
+        onOpenChange={setIsKnowledgeGraphAnalysisOpen}
+        analysis={knowledgeGraphAnalysisResult}
       />
     </>
   );

@@ -22,10 +22,15 @@ interface TiptapEditorProps {
   onChange: (html: string) => void;
   fromTeam?: string; // Cambiado a string | undefined
   containerClassName?: string; // Nueva propiedad
+  isRecording?: boolean;
+  isProcessingAudio?: boolean;
+  onStartRecording?: () => void;
+  onStopRecording?: () => void;
+  onInsertContent?: (text: string) => void; // Nueva prop para insertar contenido
 }
 
 // --- El Editor Principal ---
-export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName }: TiptapEditorProps) => {
+export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName, isRecording, isProcessingAudio, onStartRecording, onStopRecording, onInsertContent }: TiptapEditorProps) => {
   const debounceTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
   const editor = useEditor({
@@ -63,7 +68,7 @@ export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName }
     content: content,
     editorProps: {
       attributes: {
-        class: `prose dark:prose-invert max-w-full rounded-b-md p-4 focus:outline-none`,
+        class: `prose dark:prose-invert max-w-full rounded-b-lg p-4 focus:outline-none border-b border-l border-r border-border/20`,
       },
     },
     onUpdate({ editor }) {
@@ -82,14 +87,29 @@ export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName }
     },
   });
 
+  // Exponer la función de inserción de contenido
+  React.useEffect(() => {
+    if (editor && onInsertContent) {
+      onInsertContent((text: string) => {
+        editor.commands.insertContent(text);
+      });
+    }
+  }, [editor, onInsertContent]);
+
   return (
     <div className={containerClassName}> {/* Aplicar containerClassName aquí */}
-      <div className="flex flex-col flex-grow"> {/* Contenedor principal del editor con flex y altura flexible */}
-        <div className="sticky top-0 z-10 p-2 flex flex-wrap gap-1 bg-background border-b rounded-md rounded-b-none"> {/* Contenedor de la barra de herramientas sticky */}
-          <Toolbar editor={editor} />
+      <div className="flex flex-col flex-grow rounded-lg border border-border/20"> {/* Contenedor principal del editor con bordes curvos */}
+        <div className="sticky top-0 z-10 p-2 flex flex-wrap gap-1 bg-card/80 backdrop-blur-xl border-b rounded-t-lg"> {/* Contenedor de la barra de herramientas sticky */}
+          <Toolbar
+            editor={editor}
+            isRecording={isRecording}
+            isProcessingAudio={isProcessingAudio}
+            onStartRecording={onStartRecording}
+            onStopRecording={onStopRecording}
+          />
         </div>
-        <div className="flex-1 overflow-y-auto"> {/* Contenedor del contenido con scroll */}
-          <EditorContent editor={editor} />
+        <div className="flex-1 overflow-y-auto rounded-b-lg"> {/* Contenedor del contenido con scroll y bordes curvos */}
+          <EditorContent editor={editor} className="p-4" /> {/* Añadido padding */} 
         </div>
       </div>
     </div>

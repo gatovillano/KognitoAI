@@ -136,7 +136,8 @@ class CogneeKnowledgeGraphTool(BaseTool):
                 logger.info(f"🧠 Procesando {len(documents)} documentos con Cognee para dataset: {dataset_name_with_account}")
                 result = await cognee_integration.process_documents(
                     documents=documents,
-                    dataset_name=dataset_name_with_account
+                    dataset_name=dataset_name_with_account,
+                    account_id=self.account_id
                 )
                 
                 return f"""✅ Documentos procesados exitosamente con Cognee
