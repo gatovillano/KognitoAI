@@ -2,6 +2,7 @@
 
 import logging
 import asyncio
+import re
 from typing import List, Dict, Optional, TypeVar, cast, Type
 
 # LangChain y Pydantic para robustez y estructura
@@ -97,7 +98,16 @@ class AdvancedTextAnalyzer:
             elif not isinstance(response_content, str):
                 response_content = str(response_content)
 
-            parsed_output = await output_parser.aparse(response_content)
+            # Intentar extraer el JSON si está envuelto en un bloque de código Markdown
+            json_match = re.search(r"```json\n(.*?)```", response_content, re.DOTALL)
+            if json_match:
+                json_string = json_match.group(1)
+                logger.debug(f"JSON extraído de bloque Markdown: {json_string}")
+            else:
+                json_string = response_content
+                logger.debug(f"No se encontró bloque Markdown, intentando parsear directamente: {json_string}")
+
+            parsed_output = await output_parser.aparse(json_string)
             return cast(pydantic_object, parsed_output)
         except Exception as e:
             logger.error(f"Fallo en el pipeline de análisis y parseo del LLM: {e}", exc_info=True)
@@ -196,8 +206,21 @@ class AdvancedTextAnalyzer:
         output_parser = PydanticOutputParser(pydantic_object=CollectionAnalysis)
         prompt = f"""
         Eres un analista de investigación experto en síntesis de conocimiento. Analiza esta colección de documentos.
-        Tu tarea es encontrar las conexiones, patrones, temas emergentes con citas relacionadas de los documentos, conceptos centrales con sus definiciones y las relaciones entre estos conceptos que existen **entre** ellos.
-        Para los temas emergentes y conceptos centrales, utiliza nombres claros y específicos que reflejen el contenido y el contexto de los documentos, asegurándote de que sean relevantes para el usuario. Los conceptos centrales deben estar en el formato 'CONCEPTO: DEFINICIÓN'. Para cada tema transversal, incluye citas o fragmentos relevantes de los documentos que lo ilustran.
+
+        INSTRUCCIONES ESPECÍFICAS PARA EL ANÁLISIS DE COLECCIÓN:
+        Tu tarea es generar un análisis exhaustivo de la colección de documentos, asegurándote de incluir TODOS los siguientes campos en tu respuesta JSON, siguiendo las descripciones y formatos indicados:
+
+        1.  **collection_summary**: Un resumen analítico que sintetiza la información de TODOS los documentos como un todo. Debe ser comprehensivo y detallado (200-300 palabras).
+        2.  **cross_cutting_themes**: Una lista de hasta 10 temas recurrentes que identificas entre los documentos. Cada tema debe incluir citas relevantes de los documentos que lo ilustren. Agrupa conceptos similares semánticamente.
+        3.  **central_concepts**: Una lista de hasta 8 conceptos, ideas o tesis centrales de la colección. Cada uno debe estar en el formato 'CONCEPTO: DEFINICIÓN DETALLADA'. Destaca el nombre del concepto en negrita.
+        4.  **concept_relationships**: Una lista de hasta 8 descripciones detalladas de cómo los conceptos centrales se relacionan entre sí dentro de la colección.
+        5.  **identified_connections**: Una lista de insights específicos que conectan dos o más documentos. Incluye sinergias, evoluciones, contradicciones o complementariedades. Cada conexión debe especificar los títulos de los documentos involucrados y una descripción del insight.
+        6.  **emergent_knowledge_gaps**: Una lista de 5-8 preguntas inteligentes o áreas que la colección en su conjunto no responde o deja abiertas.
+        7.  **final_reflections**: 3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales, puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión.
+        8.  **collection_insights**: 3-5 insights únicos que emergen del análisis conjunto de todos los documentos, que no serían evidentes analizando documentos individuales.
+        9.  **methodological_notes**: 2-3 observaciones sobre la metodología, enfoque o perspectiva común en los documentos analizados.
+
+        Asegúrate de que cada campo esté presente en la salida JSON, incluso si está vacío (en cuyo caso, usa un array vacío `[]` para las listas o un string vacío `""` para los strings).
 
         Colección de documentos:
         {full_context_text}

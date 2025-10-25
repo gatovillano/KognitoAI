@@ -4,12 +4,22 @@ import logging
 from typing import List, Optional
 import uuid
 from datetime import datetime # Importar datetime
+import io # Para manejar el PDF en memoria
+import markdown # Para convertir Markdown a HTML
+from weasyprint import HTML, CSS # Para generar PDF desde HTML
 
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import StreamingResponse # Para devolver el PDF
 from pydantic import BaseModel
 from sqlalchemy import select, desc
 from sqlalchemy.orm import selectinload # Import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# Ya no necesitamos reportlab
+# from reportlab.lib.pagesizes import letter
+# from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+# from reportlab.lib.styles import getSampleStyleSheet
+# from reportlab.lib.units import inch
 
 from core.database import SessionLocal
 from core.notes_manager import NotesManager
@@ -77,7 +87,78 @@ class PaginatedNotesResponse(BaseModel):
 class ProfileLinkRequest(BaseModel):
     profile_id: uuid.UUID
 
+class GeneratePdfRequest(BaseModel):
+    note_id: int
+    format: str = "markdown" # Por ahora solo soportamos markdown
+
 # --- Endpoints de la API ---
+
+@router.post("/notes/generate-pdf", summary="Generar PDF de una nota")
+async def generate_note_pdf_endpoint(
+    request: GeneratePdfRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    notes_manager: NotesManager = Depends(get_notes_manager)
+):
+    """
+    Genera un PDF a partir del contenido de una nota.
+    """
+    note_data = await notes_manager.get_note_by_id(current_account_id, request.note_id)
+    if not note_data:
+        raise HTTPException(status_code=404, detail="Nota no encontrada o no autorizada.")
+
+    # Verificar permisos de workspace si la nota pertenece a uno
+    if note_data.get("workspace_id"):
+        if not await check_workspace_permission(current_account_id, note_data["workspace_id"], notes_manager.db, required_roles=['admin', 'owner', 'member', 'viewer']):
+            raise HTTPException(status_code=403, detail="No tienes permiso para generar PDF de esta nota.")
+
+    buffer = io.BytesIO()
+
+    # Convertir Markdown a HTML
+    html_content = markdown.markdown(note_data["content"])
+
+    # Convertir created_at a datetime si es una cadena y asegurar que siempre esté definida
+    created_at_dt = note_data['created_at']
+    if isinstance(created_at_dt, str):
+        try:
+            created_at_dt = datetime.fromisoformat(created_at_dt.replace('Z', '+00:00')) # Manejar formato ISO con Z
+        except ValueError:
+            # Si falla la conversión, se puede loggear o manejar de otra forma
+            # En este caso, si no se puede parsear, created_at_dt seguirá siendo un string
+            pass
+
+    # Crear un HTML completo con estilos básicos
+    full_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>{note_data.get("title", "Nota sin título")}</title>
+        <style>
+            body {{ font-family: sans-serif; margin: 1in; }}
+            h1 {{ color: #333; border-bottom: 1px solid #eee; padding-bottom: 0.2em; }}
+            p {{ line-height: 1.5; }}
+            pre {{ background-color: #f4f4f4; padding: 1em; border-radius: 5px; overflow-x: auto; }}
+            code {{ font-family: monospace; }}
+            .note-meta {{ font-size: 0.9em; color: #666; margin-top: 1em; border-top: 1px solid #eee; padding-top: 0.5em; }}
+        </style>
+    </head>
+    <body>
+        <h1>{note_data.get("title", "Nota sin título")}</h1>
+        {html_content}
+        <div class="note-meta">
+            <p>Categoría: {note_data.get('category', 'N/A')}</p>
+            <p>Creada el: {created_at_dt.strftime('%Y-%m-%d %H:%M:%S') if isinstance(created_at_dt, datetime) else str(created_at_dt)}</p>
+        </div>
+    </body>
+    </html>
+    """
+
+    # Generar PDF usando WeasyPrint
+    HTML(string=full_html).write_pdf(buffer)
+    buffer.seek(0)
+
+    return StreamingResponse(buffer, media_type="application/pdf", headers={
+        "Content-Disposition": f"attachment; filename=\"{note_data.get('title', 'nota')}.pdf\""
+    })
 
 @router.get("/notes/{note_id}", response_model=NoteResponse, summary="Obtener una nota por ID")
 async def get_note_by_id_endpoint(

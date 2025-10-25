@@ -10,8 +10,9 @@ import { Input } from '@/components/ui/input';
 import { TiptapEditor } from '@/components/TiptapEditor'; // Importamos el editor
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { ArrowLeft, Save } from 'lucide-react';
+import { ArrowLeft, Save, Mic, Loader2 } from 'lucide-react';
 import { marked } from 'marked'; // Librería para convertir Markdown a HTML
+import { useAudioRecorder } from '@/hooks/useAudioRecorder'; // Importar el hook de grabación de audio
 
 export default function EditNotePage() {
   const params = useParams();
@@ -27,54 +28,63 @@ export default function EditNotePage() {
   const [isShared, setIsShared] = useState(false);
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
-  const [teams, setTeams] = useState<any[]>([]);
-
-    useEffect(() => {
-    const fetchNote = async () => {
-      setIsLoading(true);
-      if (noteId && noteId !== 'new') {
-        try {
-          let note;
-          if (fromTeam) {
-            const response = await apiClient.get(`/api/teams/${fromTeam}/shared-items`);
-            note = response.data.find((n: { id: number, type: string }) => n.id === parseInt(noteId) && n.type === 'note');
-          } else {
-            try {
-              const directResponse = await apiClient.get(`/api/notes/${noteId}`);
-              note = directResponse.data;
-            } catch (error) {
-              const fallbackResponse = await apiClient.post('/api/notes/list-notes', { search_term: '' });
-              note = fallbackResponse.data.notes.find((n: { id: number }) => n.id === parseInt(noteId));
+          const [teams, setTeams] = useState<any[]>([]);
+          const { isRecording, isProcessingAudio, transcript, startRecording, stopRecording, clearTranscript } = useAudioRecorder();
+          const insertContentRef = useRef<((text: string) => void) | null>(null); // Ref para la función de inserción de contenido del editor
+        
+          useEffect(() => {
+            const fetchNote = async () => {
+              setIsLoading(true);
+              if (noteId && noteId !== 'new') {
+                try {
+                  let note;
+                  if (fromTeam) {
+                    const response = await apiClient.get(`/api/teams/${fromTeam}/shared-items`);
+                    note = response.data.find((n: { id: number, type: string }) => n.id === parseInt(noteId) && n.type === 'note');
+                  } else {
+                    try {
+                      const directResponse = await apiClient.get(`/api/notes/${noteId}`);
+                      note = directResponse.data;
+                    } catch (error) {
+                      const fallbackResponse = await apiClient.post('/api/notes/list-notes', { search_term: '' });
+                      note = fallbackResponse.data.notes.find((n: { id: number }) => n.id === parseInt(noteId));
+                    }
+                    }
+                  if (note) {
+                    setTitle(note.title || '');
+                    setCategory(note.category || 'General');
+                    setIsShared(note.team_shared || false);
+                    setContent(note.content || '');
+                  } else {
+                    toast.error("Nota no encontrada.");
+                    setContent('');
+                  }
+                } catch (error) {
+                  toast.error("No se pudo cargar la nota.");
+                  setContent('');
+                } finally {
+                  setIsLoading(false);
+                }
+              }
+              else {
+                // Para notas nuevas, inicializar con contenido vacío
+                setTitle('');
+                setCategory('General');
+                setContent('');
+                setIsShared(false);
+                setIsLoading(false);
+              }
+            };
+            fetchNote();
+          }, [noteId, fromTeam]);
+        
+          // Efecto para insertar la transcripción en el editor
+          useEffect(() => {
+            if (transcript && insertContentRef.current) {
+              insertContentRef.current(transcript + ' '); // Insertar el transcript y un espacio
+              clearTranscript(); // Limpiar el transcript después de usarlo
             }
-          }
-          if (note) {
-            setTitle(note.title || '');
-            setCategory(note.category || 'General');
-            setIsShared(note.team_shared || false);
-            setContent(note.content || '');
-          } else {
-            toast.error("Nota no encontrada.");
-            setContent('');
-          }
-        } catch (error) {
-          toast.error("No se pudo cargar la nota.");
-          setContent('');
-        } finally {
-          setIsLoading(false);
-        }
-      } else {
-        // Para notas nuevas, inicializar con contenido vacío
-        setTitle('');
-        setCategory('General');
-        setContent('');
-        setIsShared(false);
-        setIsLoading(false);
-      }
-    };
-    fetchNote();
-  }, [noteId, fromTeam]);
-
-  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+          }, [transcript, clearTranscript]);  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const autoSaveNote = useCallback(async (currentTitle: string, currentCategory: string, currentContent: string, isNewNote: boolean) => {
     if (isNewNote) return; // No auto-guardar notas nuevas hasta que se guarden manualmente por primera vez
@@ -206,6 +216,22 @@ export default function EditNotePage() {
           <ArrowLeft className="mr-2 h-4 w-4" /> {fromTeam ? 'Volver a Equipo' : 'Volver a Notas'}
         </Button>
         <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => {
+              if (isRecording) {
+                stopRecording();
+              } else {
+                startRecording();
+              }
+            }}
+            disabled={isProcessingAudio}
+            className={`rounded-full ${isRecording ? 'text-red-500 hover:bg-red-100 dark:hover:bg-red-900/50' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'}`}
+          >
+            {isProcessingAudio ? <Loader2 className="h-5 w-5 animate-spin" /> : <Mic className="h-5 w-5" />}
+          </Button>
           {noteId !== 'new' && (
             <Button variant={isShared ? "default" : "outline"} onClick={handleShare}>
               <Users className="mr-2 h-4 w-4" /> {isShared ? 'Compartido' : 'Compartir'}
@@ -220,10 +246,23 @@ export default function EditNotePage() {
         <Input placeholder="Título de la nota..." value={title} onChange={(e) => setTitle(e.target.value)} className="!text-4xl font-bold h-auto border-none focus-visible:ring-0 shadow-none p-0" />
         <Input placeholder="Categoría" value={category} onChange={(e) => setCategory(e.target.value)} className="w-fit border-none focus-visible:ring-0 shadow-none p-0 text-sm text-muted-foreground" />
       </div>
-      <div className="flex-grow overflow-y-auto px-8 pb-8">
-      {isLoading ? <div>Cargando editor...</div> : <TiptapEditor content={content} onChange={setContent} fromTeam={fromTeam ?? undefined} containerClassName="border rounded-md" />}
-      </div>
-      <AlertDialog open={isShareDialogOpen} onOpenChange={(open) => !open && setIsShareDialogOpen(false)}>
+            <div className="flex-grow overflow-y-auto px-8 pb-8">
+            {isLoading ? (
+              <div>Cargando editor...</div>
+            ) : (
+                      <TiptapEditor
+                        content={content}
+                        onChange={setContent}
+                        fromTeam={fromTeam ?? undefined}
+                        isRecording={isRecording}
+                        isProcessingAudio={isProcessingAudio}
+                        onStartRecording={startRecording}
+                        onStopRecording={stopRecording}
+                        onInsertContent={(insertFn) => {
+                          insertContentRef.current = insertFn; // Almacenar la función de inserción del editor
+                        }}
+                      />            )}
+            </div>      <AlertDialog open={isShareDialogOpen} onOpenChange={(open) => !open && setIsShareDialogOpen(false)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Compartir con Equipo</AlertDialogTitle>

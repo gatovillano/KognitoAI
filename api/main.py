@@ -133,10 +133,9 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-@app.websocket("/ws/{user_id}")
+@app.websocket("/ws/chat/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
     """Endpoint para manejar conexiones WebSocket con autenticación."""
-    logger.info(f"INTENTO DE CONEXIÓN WEBSOCKET para user_id: {user_id}") # Nuevo log
     token = websocket.query_params.get('token')
 
     if not token:
@@ -171,6 +170,8 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
     except Exception as e:
         logger.error(f"Error en la conexión WebSocket para la cuenta {account_id}: {e}", exc_info=True)
         websocket_manager.disconnect(websocket, account_id)
+
+
 
 @app.get("/", include_in_schema=False)
 async def serve_telegram_panel():

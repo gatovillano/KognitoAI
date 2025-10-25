@@ -66,62 +66,66 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-5xl w-full max-h-[95vh] sm:max-h-[90vh] p-4 sm:p-6">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
-              <BarChart3 className="h-5 w-5" />
+        <DialogContent className="max-w-5xl w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col p-0">
+          <DialogHeader className="p-6 pb-0">
+            <DialogTitle className="flex items-center gap-2 text-2xl font-bold text-foreground">
+              <BarChart3 className="h-6 w-6" />
               Análisis Completo de la Colección &quot;{topic}&quot;
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-muted-foreground">
               Análisis profundo e interactivo de la colección con temas transversales, conexiones y brechas de conocimiento
             </DialogDescription>
           </DialogHeader>
 
-          <Tabs defaultValue="overview" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 text-xs">
-              <TabsTrigger value="overview">Resumen</TabsTrigger>
-              <TabsTrigger value="themes">Temas</TabsTrigger>
-              <TabsTrigger value="concepts">Conceptos</TabsTrigger>
-              <TabsTrigger value="connections">Conexiones</TabsTrigger>
-              <TabsTrigger value="relationships">Relaciones</TabsTrigger>
-              <TabsTrigger value="insights">Insights</TabsTrigger>
-              <TabsTrigger value="reflections">Reflexiones</TabsTrigger>
-              <TabsTrigger value="gaps">Brechas</TabsTrigger>
-            </TabsList>
+          <div className="p-6 pt-0 flex flex-col flex-grow">
+            <Tabs defaultValue="overview" className="w-full flex flex-col flex-grow">
+              <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 text-xs bg-transparent border-b border-border/50 mb-4">
+                <TabsTrigger value="overview">Resumen</TabsTrigger>
+                <TabsTrigger value="themes">Temas</TabsTrigger>
+                <TabsTrigger value="concepts">Conceptos</TabsTrigger>
+                <TabsTrigger value="connections">Conexiones</TabsTrigger>
+                <TabsTrigger value="relationships">Relaciones</TabsTrigger>
+                <TabsTrigger value="insights">Insights</TabsTrigger>
+                <TabsTrigger value="reflections">Reflexiones</TabsTrigger>
+                <TabsTrigger value="gaps">Brechas</TabsTrigger>
+              </TabsList>
 
-            <ScrollArea className="h-[70vh] sm:h-[65vh] md:h-[60vh] mt-4">
+              <ScrollArea className="flex-1 pr-4">
+                <div className="space-y-6 pb-4"> {/* Añadido pb-4 para espacio al final del scroll */}
               {/* Pestaña de Resumen */}
               <TabsContent value="overview" className="space-y-3">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <FileText className="h-4 w-4" />
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <FileText className="h-5 w-5" />
                       Resumen General de la Colección
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <InlineMarkdownRenderer content={mappedAnalysis.resumen_general_coleccion} />
+                  <CardContent className="p-0">
+                    <div className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed p-3 bg-muted rounded-md border border-border/50">
+                      <InlineMarkdownRenderer content={mappedAnalysis.resumen_general_coleccion} />
+                    </div>
                   </CardContent>
                 </Card>
               </TabsContent>
               {/* Pestaña de Temas Transversales */}
               <TabsContent value="themes" className="space-y-3">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Network className="h-4 w-4" />
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <Network className="h-5 w-5" />
                       Temas Transversales
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {mappedAnalysis.temas_transversales?.map((t: any, index: number) => (
                         <div
                           key={index}
-                          className="p-4 border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
+                          className="p-4 border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors border-border/50"
                           onClick={() => handleThemeClick(t)}
                         >
-                          <div className="font-medium mb-2">
+                          <div className="font-medium mb-2 text-foreground">
                             {typeof t === 'string' ? t : t.theme}
                           </div>
                           {typeof t !== 'string' && t.related_quotes && (
@@ -137,17 +141,17 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
               </TabsContent>
               {/* Pestaña de Conceptos Centrales */}
               <TabsContent value="concepts" className="space-y-3">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Lightbulb className="h-4 w-4" />
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <Lightbulb className="h-5 w-5" />
                       Conceptos Centrales
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     <div className="space-y-3">
                       {mappedAnalysis.conceptos_centrales?.map((concepto: string, index: number) => (
-                        <div key={index} className="p-4 bg-muted rounded-lg">
+                        <div key={index} className="p-3 bg-muted rounded-md border border-border/50">
                           <InlineMarkdownRenderer content={concepto} />
                         </div>
                       ))}
@@ -158,22 +162,22 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
 
               {/* Pestaña de Conexiones */}
               <TabsContent value="connections" className="space-y-3">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Link className="h-4 w-4" />
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <Link className="h-5 w-5" />
                       Conexiones Identificadas
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     <div className="space-y-3">
                       {mappedAnalysis.conexiones_identificadas?.map((conn: any, index: number) => (
                         <div
                           key={index}
-                          className="p-3 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
+                          className="p-3 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors border-border/50"
                           onClick={() => handleConnectionClick(conn)}
                         >
-                          <div className="font-semibold text-sm mb-1">
+                          <div className="font-semibold text-sm mb-1 text-foreground">
                             {conn.documentos.join(' ↔ ')}
                           </div>
                           <InlineMarkdownRenderer content={conn.insight} />
@@ -186,17 +190,17 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
 
               {/* Pestaña de Relaciones */}
               <TabsContent value="relationships" className="space-y-3">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Network className="h-4 w-4" />
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <Network className="h-5 w-5" />
                       Relaciones entre Conceptos
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     <div className="space-y-3">
                       {mappedAnalysis.relaciones_conceptos?.map((relacion: string, index: number) => (
-                        <div key={index} className="p-4 bg-muted rounded-lg">
+                        <div key={index} className="p-3 bg-muted rounded-md border border-border/50">
                           <InlineMarkdownRenderer content={relacion} />
                         </div>
                       ))}
@@ -207,26 +211,26 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
 
               {/* Pestaña de Insights */}
               <TabsContent value="insights" className="space-y-3">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Lightbulb className="h-4 w-4" />
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <Lightbulb className="h-5 w-5" />
                       Insights de la Colección
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     <div className="space-y-4">
                       {mappedAnalysis.insights_coleccion?.map((insight: string, index: number) => (
-                        <div key={index} className="p-4 bg-blue-50 border-l-4 border-blue-200 rounded-r-lg">
+                        <div key={index} className="p-3 bg-blue-50 border-l-4 border-blue-200 rounded-r-lg border border-border/50">
                           <InlineMarkdownRenderer content={insight} />
                         </div>
                       ))}
                       {mappedAnalysis.notas_metodologicas && mappedAnalysis.notas_metodologicas.length > 0 && (
                         <div className="mt-6">
-                          <h4 className="font-semibold mb-3 text-sm">Notas Metodológicas</h4>
+                          <h4 className="font-semibold mb-3 text-sm text-foreground">Notas Metodológicas</h4>
                           <div className="space-y-2">
                             {mappedAnalysis.notas_metodologicas.map((nota: string, index: number) => (
-                              <div key={index} className="p-3 bg-gray-50 border-l-4 border-gray-200 rounded-r-lg">
+                              <div key={index} className="p-3 bg-gray-50 border-l-4 border-gray-200 rounded-r-lg border border-border/50">
                                 <InlineMarkdownRenderer content={nota} />
                               </div>
                             ))}
@@ -240,17 +244,17 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
 
               {/* Pestaña de Reflexiones */}
               <TabsContent value="reflections" className="space-y-3">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <HelpCircle className="h-4 w-4" />
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <HelpCircle className="h-5 w-5" />
                       Reflexiones Finales
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     <div className="space-y-4">
                       {mappedAnalysis.reflexiones_finales?.map((reflexion: string, index: number) => (
-                        <div key={index} className="p-4 bg-green-50 border-l-4 border-green-200 rounded-r-lg">
+                        <div key={index} className="p-3 bg-green-50 border-l-4 border-green-200 rounded-r-lg border border-border/50">
                           <InlineMarkdownRenderer content={reflexion} />
                         </div>
                       ))}
@@ -261,10 +265,10 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
 
               {/* Pestaña de Brechas de Conocimiento */}
               <TabsContent value="gaps" className="space-y-3">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Search className="h-4 w-4" />
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <Search className="h-5 w-5" />
                       Brechas de Conocimiento
                       <Button
                         variant="ghost"
@@ -276,16 +280,16 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
                       </Button>
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     {mappedAnalysis.brechas_conocimiento && mappedAnalysis.brechas_conocimiento.length > 0 ? (
                       <div className="space-y-3">
                         {mappedAnalysis.brechas_conocimiento.slice(0, 5).map((brecha: string, index: number) => (
-                          <div key={index} className="p-4 bg-orange-50 border-l-4 border-orange-200 rounded-r-lg">
+                          <div key={index} className="p-3 bg-orange-50 border-l-4 border-orange-200 rounded-r-lg border border-border/50">
                             <InlineMarkdownRenderer content={brecha} />
                           </div>
                         ))}
                         {mappedAnalysis.brechas_conocimiento.length > 5 && (
-                          <div className="text-center">
+                          <div className="text-center pt-4">
                             <Button
                               variant="outline"
                               size="sm"
@@ -304,11 +308,13 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
                   </CardContent>
                 </Card>
               </TabsContent>
-            </ScrollArea>
-          </Tabs>
+                </div>
+              </ScrollArea>
+            </Tabs>
+          </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => onOpenChange(false)} className="w-full sm:w-auto">Cerrar</Button> {/* Añadido w-full */}
+          <DialogFooter className="p-6 pt-0">
+            <Button variant="outline" onClick={() => onOpenChange(false)} className="w-full sm:w-auto">Cerrar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -316,9 +322,9 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
 
       {/* Diálogo secundario para mostrar detalles de la conexión */}
       <Dialog open={isConnectionDialogOpen} onOpenChange={setIsConnectionDialogOpen}>
-        <DialogContent className="max-w-lg w-full">
+        <DialogContent className="max-w-xl w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col">
           <DialogHeader>
-            <DialogTitle>Detalles de la Conexión</DialogTitle>
+            <DialogTitle className="text-xl font-bold text-foreground">Detalles de la Conexión</DialogTitle>
           </DialogHeader>
           {selectedConnection && (
             <div className="space-y-4">
@@ -339,9 +345,9 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
 
       {/* Diálogo secundario para mostrar citas relacionadas con el tema transversal */}
       <Dialog open={isThemeDialogOpen} onOpenChange={setIsThemeDialogOpen}>
-        <DialogContent className="max-w-lg w-full">
+        <DialogContent className="max-w-xl w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col">
           <DialogHeader>
-            <DialogTitle>Detalles del Tema Transversal</DialogTitle>
+            <DialogTitle className="text-xl font-bold text-foreground">Detalles del Tema Transversal</DialogTitle>
           </DialogHeader>
           {selectedTheme && (
             <div className="space-y-4">

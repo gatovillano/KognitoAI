@@ -9,6 +9,9 @@ import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { AnalysisDetailDialog } from './analysis-detail-dialog';
+import { AnalysisResultDialog } from '../rag/analysis-result-dialog';
+import { CollectionAnalysisDialog } from '../rag/collection-analysis-dialog';
+import { CodeAnalysisResultDialog } from '../rag/code-analysis-result-dialog';
 import { SemanticAnalysisDialog } from '../rag/semantic-analysis-dialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
@@ -124,7 +127,9 @@ export default function AnalysisPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
-  const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
+  const [isAnalysisResultDialogOpen, setIsAnalysisResultDialogOpen] = useState(false); // Para AnalysisResultDialog
+  const [isCollectionAnalysisDialogOpen, setIsCollectionAnalysisDialogOpen] = useState(false); // Para CollectionAnalysisDialog
+  const [isCodeAnalysisResultDialogOpen, setIsCodeAnalysisResultDialogOpen] = useState(false); // Para CodeAnalysisResultDialog
   const [isSemanticDialogOpen, setIsSemanticDialogOpen] = useState(false);
   const offsetRef = useRef(0); // Use useRef for offset
   const [hasMore, setHasMore] = useState(false);
@@ -186,10 +191,24 @@ export default function AnalysisPage() {
 
   const handleViewDetails = (analysis: Analysis) => {
     setSelectedAnalysis(analysis);
-    if (analysis.type === 'semantic' || analysis.type === 'semantic_summary') {
-      setIsSemanticDialogOpen(true);
-    } else {
-      setIsDetailDialogOpen(true);
+    switch (analysis.type) {
+      case 'document':
+      case 'mindmap':
+        setIsAnalysisResultDialogOpen(true);
+        break;
+      case 'collection':
+        setIsCollectionAnalysisDialogOpen(true);
+        break;
+      case 'code':
+        setIsCodeAnalysisResultDialogOpen(true);
+        break;
+      case 'semantic':
+      case 'semantic_summary':
+        setIsSemanticDialogOpen(true);
+        break;
+      default:
+        setIsAnalysisResultDialogOpen(true); // Fallback
+        break;
     }
   };
 
@@ -431,11 +450,37 @@ export default function AnalysisPage() {
       )}
 
       {/* Dialog de detalles especializado */}
-      <AnalysisDetailDialog
-        analysis={selectedAnalysis}
-        isOpen={isDetailDialogOpen}
-        onOpenChange={setIsDetailDialogOpen}
-      />
+      {selectedAnalysis && isAnalysisResultDialogOpen && (
+        <AnalysisResultDialog
+          document={{
+            file_name: selectedAnalysis.title,
+            topic: selectedAnalysis.source_table,
+            title: selectedAnalysis.title,
+            author: '',
+          }}
+          analysis={selectedAnalysis.full_data}
+          isOpen={isAnalysisResultDialogOpen}
+          onOpenChange={setIsAnalysisResultDialogOpen}
+        />
+      )}
+
+      {selectedAnalysis && isCollectionAnalysisDialogOpen && (
+        <CollectionAnalysisDialog
+          analysis={selectedAnalysis.full_data}
+          isOpen={isCollectionAnalysisDialogOpen}
+          onOpenChange={setIsCollectionAnalysisDialogOpen}
+          topic={selectedAnalysis.title}
+        />
+      )}
+
+      {selectedAnalysis && isCodeAnalysisResultDialogOpen && (
+        <CodeAnalysisResultDialog
+          repoName={selectedAnalysis.title}
+          analysis={selectedAnalysis.full_data}
+          isOpen={isCodeAnalysisResultDialogOpen}
+          onOpenChange={setIsCodeAnalysisResultDialogOpen}
+        />
+      )}
       
       {/* Diálogo específico para análisis semántico */}
       {selectedAnalysis && (selectedAnalysis.type === 'semantic' || selectedAnalysis.type === 'semantic_summary') && (
