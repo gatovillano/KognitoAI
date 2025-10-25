@@ -1104,6 +1104,11 @@ async def get_full_document_content(
             if processed_workspace_id:
                 clauses.append("workspace_id = :workspace_id")
                 params["workspace_id"] = processed_workspace_id
+            else:
+                # Si no se proporciona un workspace_id específico, buscar documentos sin workspace_id
+                # o con cualquier workspace_id, ya que no se está realizando un filtro específico.
+                # NO AÑADIMOS NINGUNA CLÁUSULA DE WORKSPACE_ID, permitiendo que la búsqueda sea más amplia.
+                pass
 
             # Consulta para obtener todos los chunks del documento
             select_sql = text(f"""

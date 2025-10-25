@@ -9,12 +9,14 @@ import { toast } from 'sonner';
 import { Plus, Notebook, Users, Edit, Trash2, MoreHorizontal, Info, Lightbulb, FileText, Link } from 'lucide-react'; // Añadido Link
 import { motion, AnimatePresence } from 'framer-motion';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { NoteDialog } from './note-dialog';
 import { ViewNoteDialog } from './view-note-dialog';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useDrag, useDrop } from 'react-dnd';
 import { ManageLinkedProfilesDialog } from './ManageLinkedProfilesDialog'; // Nueva importación
+import { AnalysisResultDialog } from './analysis-result-dialog'; // Nueva importación
 import { ContactProfile } from '../profiles/page'; // Nueva importación
 
 export interface Note {
@@ -34,6 +36,9 @@ export default function NotesPage() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [categoryView, setCategoryView] = useState(false);
+  const [workspaceGroupView, setWorkspaceGroupView] = useState(false); // Nuevo estado para la vista agrupada por workspace
+  const [workspaceView, setWorkspaceView] = useState<string | null>(null); // Nuevo estado para el workspace seleccionado
+  const [availableWorkspaces, setAvailableWorkspaces] = useState<{ id: string; name: string; color?: string }[]>([]); // Nuevo estado para workspaces disponibles
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [deletingNote, setDeletingNote] = useState<Note | null>(null);
   const [isNoteDialogOpen, setIsNoteDialogOpen] = useState(false);
@@ -41,6 +46,9 @@ export default function NotesPage() {
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isLinkProfileDialogOpen, setIsLinkProfileDialogOpen] = useState(false);
   const [linkingNote, setLinkingNote] = useState<Note | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const [isAnalysisResultDialogOpen, setIsAnalysisResultDialogOpen] = useState(false);
+  const [currentAnalysisTaskId, setCurrentAnalysisTaskId] = useState<string | null>(null);
 
   // Estados para paginación
   const [skip, setSkip] = useState(0);
@@ -48,14 +56,18 @@ export default function NotesPage() {
   const [hasMore, setHasMore] = useState(true);
   const [isFetchingMore, setIsFetchingMore] = useState(false); // Para evitar cargas múltiples
 
-  const fetchNotes = async (newSkip: number, newLimit: number, append: boolean = false) => {
+  const fetchNotes = async (newSkip: number, newLimit: number, append: boolean = false, selectedWorkspaceId: string | null = null) => {
     if (!append) {
       setIsLoading(true);
     } else {
       setIsFetchingMore(true);
     }
     try {
-      const response = await apiClient.post('/api/notes/list-notes', { skip: newSkip, limit: newLimit });
+      const payload: { skip: number; limit: number; workspace_id?: string } = { skip: newSkip, limit: newLimit };
+      if (selectedWorkspaceId) {
+        payload.workspace_id = selectedWorkspaceId;
+      }
+      const response = await apiClient.post('/api/notes/list-notes', payload);
       console.log("API Response Data:", response.data);
       const fetchedNotes = response.data.notes.sort((a: Note, b: Note) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
@@ -66,6 +78,20 @@ export default function NotesPage() {
       }
       setHasMore(fetchedNotes.length === newLimit);
       setSkip(newSkip + fetchedNotes.length); // Actualizar skip para la próxima carga
+
+      // Extraer workspaces únicos de las notas cargadas
+      const uniqueWorkspaces = Array.from(new Set(fetchedNotes.map((note: Note) => note.workspace_id)))
+        .filter(Boolean) // Eliminar null/undefined
+        .map(id => {
+          const note = fetchedNotes.find((n: Note) => n.workspace_id === id);
+          return { id: id!, name: note?.workspace_name || `Workspace ${id}`, color: note?.workspace_color };
+        });
+      setAvailableWorkspaces(prev => {
+        const existingIds = new Set(prev.map(ws => ws.id));
+        const newWorkspaces = uniqueWorkspaces.filter(ws => !existingIds.has(ws.id));
+        return [...prev, ...newWorkspaces];
+      });
+
     } catch (error) {
       toast.error('Error al cargar las notas.');
     } finally {
@@ -75,8 +101,8 @@ export default function NotesPage() {
   };
 
   useEffect(() => {
-    fetchNotes(0, limit); // Carga inicial
-  }, [limit]);
+    fetchNotes(0, limit, false, workspaceView); // Carga inicial, ahora con workspaceView
+  }, [limit, workspaceView]); // Añadir workspaceView como dependencia
 
   const handleLoadMore = () => {
     if (hasMore && !isFetchingMore) {
@@ -100,6 +126,39 @@ export default function NotesPage() {
     // Opcional: Si quieres recargar para asegurar consistencia con el backend después de la actualización optimista
     // fetchNotes(0, limit);
   };
+
+  const pollAnalysisResult = async (taskId: string) => {
+    const checkStatus = async () => {
+      try {
+        const response = await apiClient.get(`/api/get-analysis-result/${taskId}`);
+        const result = response.data;
+
+        if (result.status === 'completed') {
+          toast.success('Análisis completado. Mostrando resultados.');
+          setAnalysisResult(result.result);
+          setIsAnalysisResultDialogOpen(true);
+          setCurrentAnalysisTaskId(null); // Limpiar el ID de la tarea actual
+        } else if (result.status === 'failed') {
+          toast.error('El análisis ha fallado.');
+          setCurrentAnalysisTaskId(null); // Limpiar el ID de la tarea actual
+        } else {
+          // Si no ha terminado, seguir haciendo polling
+          setTimeout(checkStatus, 3000); // Reintentar en 3 segundos
+        }
+      } catch (error) {
+        console.error('Error al hacer polling del resultado del análisis:', error);
+        toast.error('Error al obtener el resultado del análisis.');
+        setCurrentAnalysisTaskId(null); // Limpiar el ID de la tarea actual
+      }
+    };
+    checkStatus();
+  };
+
+  useEffect(() => {
+    if (currentAnalysisTaskId) {
+      pollAnalysisResult(currentAnalysisTaskId);
+    }
+  }, [currentAnalysisTaskId]);
 
   const handleDeleteConfirm = async () => {
     if (!deletingNote) return;
@@ -133,6 +192,7 @@ export default function NotesPage() {
 
       const response = await apiClient.post('/api/start-notes-collection-analysis', { notes: notesForAnalysis });
       toast.success(`Análisis de notas iniciado. ID de tarea: ${response.data.task_id}`, { id: toastId });
+      setCurrentAnalysisTaskId(response.data.task_id);
     } catch (error) {
       toast.error("Error al iniciar el análisis de notas.", { id: toastId });
       console.error("Error al iniciar el análisis de notas:", error);
@@ -148,6 +208,7 @@ export default function NotesPage() {
         note_id: note.id
       });
       toast.success(`Análisis de nota iniciado. ID de tarea: ${response.data.task_id}`, { id: toastId });
+      setCurrentAnalysisTaskId(response.data.task_id);
     } catch (error) {
       toast.error("Error al iniciar el análisis de la nota.", { id: toastId });
       console.error("Error al iniciar el análisis de la nota:", error);
@@ -174,7 +235,28 @@ export default function NotesPage() {
     }
   };
 
-  
+  const handleAnalyzeGroupedNotes = async (notesToAnalyze: Note[], groupName: string) => {
+    if (notesToAnalyze.length === 0) {
+      toast.info(`No hay notas en ${groupName} para analizar.`);
+      return;
+    }
+
+    const toastId = toast.loading(`Iniciando análisis de notas en ${groupName}...`);
+    try {
+      const notesForAnalysis = notesToAnalyze.map(note => ({
+        id: note.id,
+        title: note.title || "Nota sin título",
+        content: note.content
+      }));
+
+      const response = await apiClient.post('/api/start-notes-collection-analysis', { notes: notesForAnalysis });
+      toast.success(`Análisis de notas en ${groupName} iniciado. ID de tarea: ${response.data.task_id}`, { id: toastId });
+      setCurrentAnalysisTaskId(response.data.task_id);
+    } catch (error) {
+      toast.error(`Error al iniciar el análisis de notas en ${groupName}.`, { id: toastId });
+      console.error(`Error al iniciar el análisis de notas en ${groupName}:`, error);
+    }
+  };
 
   const updateNoteCategory = async (noteId: number, newCategory: string) => {
     try {
@@ -317,7 +399,7 @@ export default function NotesPage() {
     );
   };
 
-  const CategoryDropZone = ({ category, children }: { category: string; children: React.ReactNode }) => {
+  const CategoryDropZone = ({ category, children, onAnalyzeGroup }: { category: string; children: React.ReactNode; onAnalyzeGroup: (notes: Note[], groupName: string) => void }) => {
     const [{ isOver }, drop] = useDrop({
       accept: 'NOTE',
       drop: (item: { id: number; category: string }) => {
@@ -326,13 +408,43 @@ export default function NotesPage() {
         }
       },
       collect: monitor => ({
-        isOver: !!monitor.isOver(),
+        isOver: !!monitor.isDragging(),
       }),
     });
 
+    const categoryNotes = notes.filter(note => (note.category || 'Sin Categoría') === category);
+
     return (
       <div ref={drop as any} className="p-4 rounded-lg" style={{ backgroundColor: isOver ? 'rgba(147, 112, 219, 0.1)' : 'transparent' }}>
-        <h2 className="text-xl font-semibold mb-4 px-2">{category}</h2>
+        <div className="flex justify-between items-center mb-4 px-2">
+          <h2 className="text-xl font-semibold">{category}</h2>
+          <Button variant="outline" size="sm" onClick={() => onAnalyzeGroup(categoryNotes, category)}>
+            <Lightbulb className="mr-2 h-4 w-4" />
+            Analizar Categoría
+          </Button>
+        </div>
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
+          {children}
+        </div>
+      </div>
+    );
+  };
+
+  const WorkspaceDropZone = ({ workspace, children, onAnalyzeGroup }: { workspace: { id: string; name: string; color?: string }; children: React.ReactNode; onAnalyzeGroup: (notes: Note[], groupName: string) => void }) => {
+    const workspaceNotes = notes.filter(note => (note.workspace_id || 'no-workspace') === workspace.id);
+
+    return (
+      <div className="p-4 rounded-lg">
+        <div className="flex justify-between items-center mb-4 px-2">
+          <h2 className="text-xl font-semibold flex items-center gap-2">
+            <span className="h-4 w-4 rounded-full" style={{ backgroundColor: workspace.color || '#888888' }}></span>
+            {workspace.name}
+          </h2>
+          <Button variant="outline" size="sm" onClick={() => onAnalyzeGroup(workspaceNotes, workspace.name)}>
+            <Lightbulb className="mr-2 h-4 w-4" />
+            Analizar Workspace
+          </Button>
+        </div>
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
           {children}
         </div>
@@ -341,12 +453,17 @@ export default function NotesPage() {
   };
 
   const renderNotes = () => {
-    console.log("RenderNotes - notes.length:", notes.length, "isLoading:", isLoading); // Log para depuración
-    if (isLoading && notes.length === 0) { // Solo mostrar "Cargando notas..." si es la carga inicial y no hay notas
+    console.log("RenderNotes - notes.length:", notes.length, "isLoading:", isLoading, "workspaceView:", workspaceView, "workspaceGroupView:", workspaceGroupView); // Log para depuración
+    
+    const filteredNotes = workspaceView
+      ? notes.filter(note => note.workspace_id === workspaceView)
+      : notes;
+
+    if (isLoading && filteredNotes.length === 0) { // Solo mostrar "Cargando notas..." si es la carga inicial y no hay notas
       return <p className="text-center py-10">Cargando notas...</p>;
     }
 
-    if (notes.length === 0) {
+    if (filteredNotes.length === 0) {
       return (
         <div className="text-center py-16">
           <Notebook className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
@@ -362,8 +479,36 @@ export default function NotesPage() {
       );
     }
 
+    if (workspaceGroupView) {
+      const groupedNotes = filteredNotes.reduce((groups, note) => {
+        const key = note.workspace_id || 'no-workspace';
+        if (!groups[key]) {
+          groups[key] = [];
+        }
+        groups[key].push(note);
+        return groups;
+      }, {} as Record<string, Note[]>);
+
+      return (
+        <AnimatePresence>
+          <motion.div layout className="space-y-8">
+            {Object.entries(groupedNotes).map(([workspaceId, workspaceNotes]) => {
+              const workspaceInfo = availableWorkspaces.find(ws => ws.id === workspaceId) || { id: workspaceId, name: 'Sin Workspace', color: '#888888' };
+              return (
+                <WorkspaceDropZone key={workspaceId} workspace={workspaceInfo} onAnalyzeGroup={handleAnalyzeGroupedNotes}>
+                  {workspaceNotes.map((note) => (
+                    <NoteCard key={note.id} note={note} onAnalyzeNote={handleAnalyzeSingleNote} onSummarizeNote={handleSummarizeSingleNote} onLinkProfile={handleLinkProfile} />
+                  ))}
+                </WorkspaceDropZone>
+              );
+            })}
+          </motion.div>
+        </AnimatePresence>
+      );
+    }
+
     if (categoryView) {
-      const groupedNotes = notes.reduce((groups, note) => {
+      const groupedNotes = filteredNotes.reduce((groups, note) => {
         const key = note.category || 'Sin Categoría';
         if (!groups[key]) {
           groups[key] = [];
@@ -376,7 +521,7 @@ export default function NotesPage() {
         <AnimatePresence>
           <motion.div layout className="space-y-8">
             {Object.entries(groupedNotes).map(([category, categoryNotes]) => (
-              <CategoryDropZone key={category} category={category}>
+              <CategoryDropZone key={category} category={category} onAnalyzeGroup={handleAnalyzeGroupedNotes}>
                 {categoryNotes.map((note) => (
                   <NoteCard key={note.id} note={note} onAnalyzeNote={handleAnalyzeSingleNote} onSummarizeNote={handleSummarizeSingleNote} onLinkProfile={handleLinkProfile} />
                 ))}
@@ -390,7 +535,7 @@ export default function NotesPage() {
     return (
       <motion.div layout className="grid gap-6 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-3">
         <AnimatePresence>
-          {notes.map((note) => (
+          {filteredNotes.map((note) => (
             <NoteCard key={note.id} note={note} onAnalyzeNote={handleAnalyzeSingleNote} onSummarizeNote={handleSummarizeSingleNote} onLinkProfile={handleLinkProfile} />
           ))}
         </AnimatePresence>
@@ -420,6 +565,24 @@ export default function NotesPage() {
             </h1>
           </div>
           <div className="flex items-center gap-2">
+            {!workspaceGroupView && (
+              <Select onValueChange={(value) => setWorkspaceView(value === "all" ? null : value)} value={workspaceView || "all"}>
+                <SelectTrigger className="w-[180px] h-8">
+                  <SelectValue placeholder="Filtrar por Workspace" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las Notas</SelectItem>
+                  {availableWorkspaces.map((ws) => (
+                    <SelectItem key={ws.id} value={ws.id}>
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ws.color || '#888888' }}></span>
+                        {ws.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="h-8 px-2 md:px-4">
@@ -432,8 +595,18 @@ export default function NotesPage() {
                   Nueva Nota
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setCategoryView(!categoryView)}>
+                <DropdownMenuItem onClick={() => {
+                  setCategoryView(!categoryView);
+                  if (workspaceGroupView) setWorkspaceGroupView(false); // Desactivar vista por workspace si se activa vista por categoría
+                }}>
                   {categoryView ? "Vista General" : "Vista por Categoría"}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => {
+                  setWorkspaceGroupView(!workspaceGroupView);
+                  if (categoryView) setCategoryView(false); // Desactivar vista por categoría si se activa vista por workspace
+                  setWorkspaceView(null); // Limpiar filtro de workspace al activar vista agrupada
+                }}>
+                  {workspaceGroupView ? "Vista General" : "Vista por Workspace"}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleAnalyzeAllNotes}>
@@ -444,11 +617,6 @@ export default function NotesPage() {
                   <FileText className="mr-2 h-4 w-4" />
                   Resumen Semántico
                 </DropdownMenuItem>
-                {/* <DropdownMenuSeparator /> // No es necesario si no hay más elementos */}
-                {/* <DropdownMenuItem onClick={() => handleLinkProfile(null as any)}> // Este botón no va aquí, va en la tarjeta */}
-                {/*   <Link className="mr-2 h-4 w-4" /> */}
-                {/*   Vincular Nota a Perfil */}
-                {/* </DropdownMenuItem> */}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -522,6 +690,12 @@ export default function NotesPage() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        <AnalysisResultDialog
+          analysis={analysisResult}
+          isOpen={isAnalysisResultDialogOpen}
+          onOpenChange={setIsAnalysisResultDialogOpen}
+        />
       </div>
   );
 }

@@ -8,6 +8,8 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
 
+from core.memory_manager import get_relevant_memories
+
 logger = logging.getLogger(__name__)
 
 class EnhancedMemoryManager:
@@ -85,11 +87,16 @@ class EnhancedMemoryManager:
     ) -> Dict[str, Any]:
         """Obtiene contexto usando el sistema de embeddings tradicional."""
         
-        # Aquí integrarías con tu sistema actual de embeddings
-        # Por ahora, estructura básica
+        traditional_context_output = await get_relevant_memories(
+            account_id=user_id,
+            query=user_query,
+            k=max_results,
+            workspace_id=workspace_id
+        )
+
         return {
             "type": "traditional_embeddings",
-            "results": [],
+            "results": traditional_context_output.sources,
             "query": user_query,
             "user_id": user_id,
             "workspace_id": workspace_id

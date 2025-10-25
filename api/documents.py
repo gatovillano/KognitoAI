@@ -29,6 +29,7 @@ from utils.db_session import DBSession
 from tools.add_web_to_rag_tool import AddWebToRAGTool
 from core.websocket_manager import send_personal_message
 from core.tasks import process_upload_task, extract_titles_and_update_metadata, process_knowledge_graph
+from utils.knowledge_graph_analysis import start_knowledge_graph_analysis
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -612,6 +613,25 @@ async def process_knowledge_graph_endpoint(
     except Exception as e:
         logger.error(f"Error al iniciar el procesamiento de grafo: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error al iniciar el procesamiento del grafo de conocimiento: {str(e)}")
+
+@router.post("/start-knowledge-graph-analysis")
+async def start_knowledge_graph_analysis_endpoint(
+    current_account_id: str = Depends(get_current_account_id),
+    topic: str = Body(..., embed=True),
+    workspace_id: Optional[str] = Body(None, embed=True)
+):
+    """Inicia el análisis de grafo de conocimiento en segundo plano para una colección."""
+    logger.info(f"API: Iniciando análisis de grafo de conocimiento para account '{current_account_id}', topic '{topic}', workspace '{workspace_id}'")
+    try:
+        task_id = await start_knowledge_graph_analysis(
+            account_id=current_account_id,
+            topic=topic,
+            workspace_id=workspace_id
+        )
+        return {"message": "Análisis de grafo de conocimiento iniciado en segundo plano.", "task_id": task_id}
+    except Exception as e:
+        logger.error(f"Error al iniciar el análisis de grafo de conocimiento: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error al iniciar el análisis de grafo de conocimiento: {str(e)}")
 
 
 class DeleteFolderRequest(BaseModel):

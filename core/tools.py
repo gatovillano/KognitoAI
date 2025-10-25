@@ -127,7 +127,7 @@ tool_classes_to_instantiate = [
     ContactProfileTool, # ¡NUEVA HERRAMIENTA!
 ]
 
-def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = None, thread_id: Optional[str] = None) -> List[Tool]:
+async def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = None, thread_id: Optional[str] = None) -> List[Tool]:
     """
     Recoge, instancia y devuelve una lista de todas las herramientas LangChain disponibles.
     Args:
@@ -140,14 +140,51 @@ def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = None, 
     logger.info("⚙️ Ensamblando la caja de herramientas del agente...")
     available_tools: List[Tool] = []
 
+    # --- INICIO: Inicialización centralizada de dependencias compartidas ---
+    graph_db_instance = None
+    cognee_integration_instance = None
+    try:
+        from knowledge_graph.graph_database import GraphDB
+        from knowledge_graph.cognee_integration import CogneeIntegration
+        from core.config import settings
+
+        if settings.neo4j_uri and settings.neo4j_user and settings.neo4j_password:
+            graph_db_instance = GraphDB(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
+            graph_db_instance.connect()
+            cognee_integration_instance = CogneeIntegration(graph_db_instance)
+            await cognee_integration_instance._create_fulltext_indexes()
+            logger.info("✅ Instancias compartidas de GraphDB y CogneeIntegration creadas.")
+        else:
+            logger.warning("⚠️ Faltan credenciales de Neo4j, no se inicializarán las herramientas de grafo.")
+    except Exception as e:
+        logger.error(f"❌ Error al inicializar dependencias compartidas (GraphDB, Cognee): {e}", exc_info=True)
+    # --- FIN: Inicialización centralizada ---
+
+
     # Instanciar herramientas cargadas explícitamente
     for ToolClass in tool_classes_to_instantiate:
         try:
             tool_instance = None
             tool_name = getattr(ToolClass, 'name', ToolClass.__name__) # Default to class name for logging
 
+            # --- INICIO: Inyección de dependencias para herramientas de Cognee ---
+            if ToolClass in [CogneeKnowledgeGraphTool, CogneeConceptualProcessingTool]:
+                if cognee_integration_instance and graph_db_instance:
+                    tool_kwargs = {
+                        'account_id': account_id,
+                        'cognee_integration': cognee_integration_instance,
+                        'graph_db': graph_db_instance
+                    }
+                    if telegram_id is not None:
+                        tool_kwargs['telegram_id'] = str(telegram_id)
+                    tool_instance = ToolClass(**tool_kwargs)
+                else:
+                    logger.warning(f"No se instancia {tool_name} porque faltan las dependencias de grafo.")
+                    continue # Saltar a la siguiente herramienta
+            # --- FIN: Inyección de dependencias ---
+
             # Special handling for GitHubRepoTool (due to optional github_token and required account_id)
-            if ToolClass.__name__ == "GitHubRepoTool":
+            elif ToolClass.__name__ == "GitHubRepoTool":
                 import os
                 token = os.environ.get("GITHUB_TOKEN")
                 github_kwargs = {"account_id": account_id} # account_id is always required for GitHubRepoTool
