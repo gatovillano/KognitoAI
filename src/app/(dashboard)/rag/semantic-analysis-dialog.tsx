@@ -77,24 +77,25 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-full sm:max-w-4xl max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl">
-          <DialogHeader >
-            <DialogTitle className="flex items-center gap-2">
-              <Brain className="h-5 w-5" />
+        <DialogContent className="max-w-full sm:max-w-4xl max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col p-0">
+          <DialogHeader className="p-6 pb-0">
+            <DialogTitle className="flex items-center gap-2 text-2xl font-bold text-foreground">
+              <Brain className="h-6 w-6" />
               Resumen Semántico de &quot;{topic}&quot;
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-muted-foreground">
               Análisis semántico profundo de la colección con agrupación de conceptos y patrones
             </DialogDescription>
           </DialogHeader>
-          <ScrollArea className="h-[75vh] sm:h-[70vh] pr-4">
-            <div className="space-y-6">
+          <div className="p-6 pt-0 flex flex-col flex-grow">
+            <ScrollArea className="flex-1 pr-4">
+              <div className="space-y-6 pb-4"> {/* Añadido pb-4 para espacio al final del scroll */}
               {/* Resumen Semántico Principal */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between gap-2">
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <CardTitle className="flex items-center justify-between gap-2 text-lg font-semibold text-foreground">
                     <div className="flex items-center gap-2">
-                      <Brain className="h-4 w-4" />
+                      <Brain className="h-5 w-5" />
                       Resumen Semántico
                     </div>
                     <Button variant="ghost" size="icon" onClick={handlePlayPause} disabled={isCurrentlyLoading}>
@@ -108,8 +109,8 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                     </Button>
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+                <CardContent className="p-0">
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed p-3 bg-muted rounded-md border border-border/50">
                     {semanticData.resumen_semantico}
                   </p>
                 </CardContent>
@@ -117,19 +118,19 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
 
               {/* Temas Transversales */}
               {semanticData.temas_transversales.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Network className="h-4 w-4" />
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <Network className="h-5 w-5" />
                       Temas Transversales
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     <div className="flex flex-wrap gap-2">
                       {semanticData.temas_transversales.map((tema: any, index: number) => (
                         <Badge
                           key={index}
-                          className="text-xs cursor-pointer bg-purple-800 text-white hover:bg-purple-700 transition-colors"
+                          className="text-xs cursor-pointer bg-purple-800 text-white hover:bg-purple-700 transition-colors border border-border/50"
                           onClick={() => handleThemeClick(tema)}
                         >
                           {typeof tema === 'string' ? tema : tema.tema}
@@ -142,22 +143,22 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
  
               {/* Conceptos Centrales */}
               {semanticData.conceptos_centrales.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Lightbulb className="h-4 w-4" />
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <Lightbulb className="h-5 w-5" />
                       Conceptos Centrales
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {semanticData.conceptos_centrales.map((concepto: string, index: number) => (
                         <div
                           key={index}
-                          className="p-4 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors border border-transparent hover:border-muted-foreground/20"
+                          className="p-3 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors border border-border/50"
                           onClick={() => handleConceptClick(concepto)}
                         >
-                          <div className="text-sm font-medium line-clamp-2">
+                          <div className="text-sm font-medium line-clamp-2 text-foreground">
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>{concepto}</ReactMarkdown>
                           </div>
                           <div className="text-xs text-muted-foreground mt-1">
@@ -172,16 +173,16 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
  
               {/* Patrones Semánticos - Estadísticas */}
               {semanticData.patrones_semanticos && Object.keys(semanticData.patrones_semanticos).length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
                       Estadísticas del Análisis
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 text-center">
                       {semanticData.patrones_semanticos.total_documentos && (
-                        <div className="p-3 bg-muted rounded-md">
+                        <div className="p-3 bg-muted rounded-md border border-border/50">
                           <div className="text-2xl font-bold text-purple-600">
                             {semanticData.patrones_semanticos.total_documentos}
                           </div>
@@ -189,7 +190,7 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                         </div>
                       )}
                       {semanticData.patrones_semanticos.total_chunks_analizados && (
-                        <div className="p-3 bg-muted rounded-md">
+                        <div className="p-3 bg-muted rounded-md border border-border/50">
                           <div className="text-2xl font-bold text-purple-600">
                             {semanticData.patrones_semanticos.total_chunks_analizados}
                           </div>
@@ -197,14 +198,14 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                         </div>
                       )}
                       {semanticData.patrones_semanticos.temas_identificados && (
-                        <div className="p-3 bg-muted rounded-md">
+                        <div className="p-3 bg-muted rounded-md border border-border/50">
                           <div className="text-2xl font-bold text-purple-600">
                             {semanticData.patrones_semanticos.temas_identificados}
                           </div>
                           <div className="text-xs text-purple-400">Temas</div>
                         </div>
                       )}
-                      <div className="p-3 bg-muted rounded-md">
+                      <div className="p-3 bg-muted rounded-md border border-border/50">
                         <div className="text-2xl font-bold text-purple-600">
                           {semanticData.conceptos_centrales.length}
                         </div>
@@ -217,10 +218,10 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
  
               {/* Brechas de Conocimiento */}
               {semanticData.brechas_conocimiento.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <HelpCircle className="h-4 w-4" />
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <HelpCircle className="h-5 w-5" />
                       Brechas de Conocimiento
                       <Button
                         variant="ghost"
@@ -232,16 +233,16 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                       </Button>
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     <div className="space-y-3">
                       {semanticData.brechas_conocimiento.slice(0, 3).map((brecha: string, index: number) => (
-                        <div key={index} className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                        <div key={index} className="p-3 bg-purple-50 border border-purple-200 rounded-lg border-border/50">
                           <p className="text-xs font-medium text-purple-800 mb-1">Brecha Identificada:</p>
                           <div className="text-sm text-purple-700"><ReactMarkdown remarkPlugins={[remarkGfm]}>{brecha}</ReactMarkdown></div>
                         </div>
                       ))}
                       {semanticData.brechas_conocimiento.length > 3 && (
-                        <div className="text-center">
+                        <div className="text-center pt-4">
                           <Button
                             variant="outline"
                             size="sm"
@@ -255,10 +256,10 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                   </CardContent>
                 </Card>
               )}
-            </div>
+            </div> {/* Cierre del div con space-y-6 pb-4 */}
           </ScrollArea>
           {analysis?.analysis_metadata && (
-            <div className="space-y-2 text-xs text-muted-foreground mt-auto pt-3 border-t border-border/50">
+            <div className="space-y-2 text-xs text-muted-foreground mt-auto pt-3 border-t border-border/50 p-6">
               {analysis.analysis_metadata.tool_used && (
                 <div className="mb-2">
                   <Badge variant="outline" className="text-xs font-mono bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700">
@@ -280,7 +281,8 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
               )}
             </div>
           )}
-          <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
+          </div> {/* Cierre del div principal que contiene el contenido del diálogo */}
+          <DialogFooter className="p-6 pt-0">
             <Button variant="outline" onClick={() => onOpenChange(false)} className="w-full sm:w-auto">Cerrar</Button>
           </DialogFooter>
         </DialogContent>
@@ -288,26 +290,26 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
 
       {/* Diálogo secundario para mostrar detalles del tema transversal */}
       <Dialog open={isThemeDialogOpen} onOpenChange={setIsThemeDialogOpen}>
-        <DialogContent className="max-w-lg w-full max-h-[90vh] p-4 sm:p-6">
-          <DialogHeader>
-            <DialogTitle className="text-lg sm:text-xl">Detalles del Tema Transversal</DialogTitle>
+        <DialogContent className="max-w-lg w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col p-0">
+          <DialogHeader className="p-6 pb-0">
+            <DialogTitle className="text-xl font-bold text-foreground">Detalles del Tema Transversal</DialogTitle>
           </DialogHeader>
           {selectedTheme && (
-            <ScrollArea className="max-h-[60vh] pr-4">
-              <div className="space-y-4">
+            <ScrollArea className="flex-1 pr-4">
+              <div className="space-y-4 pb-4">
                 <div>
-                  <h4 className="font-semibold text-lg mb-2">
+                  <h4 className="font-semibold text-lg mb-2 text-foreground">
                     {typeof selectedTheme === 'string' ? selectedTheme : selectedTheme.tema}
                   </h4>
                 </div>
                 {typeof selectedTheme !== 'string' && selectedTheme.citas && selectedTheme.citas.length > 0 && (
                   <div>
-                    <h5 className="font-semibold mb-3">Citas Relacionadas:</h5>
+                    <h5 className="font-semibold mb-3 text-foreground">Citas Relacionadas:</h5>
                     <div className="space-y-3">
                       {selectedTheme.citas.map((cita: any, i: number) => (
-                        <div key={i} className="p-3 bg-muted rounded-md">
-                          <div className="font-medium text-sm mb-1">{cita.documento}</div>
-                          <div className="text-sm text-muted-foreground italic">&quot;{cita.cita}&quot;</div>
+                        <div key={i} className="p-3 bg-muted rounded-md border border-border/50">
+                          <div className="font-medium text-sm mb-1 text-foreground">{cita.documento}</div>
+                          <div className="text-sm text-muted-foreground italic">"{cita.cita}"</div>
                         </div>
                       ))}
                     </div>
@@ -316,7 +318,7 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
               </div>
             </ScrollArea>
           )}
-          <DialogFooter>
+          <DialogFooter className="p-6 pt-0">
             <Button variant="outline" onClick={() => setIsThemeDialogOpen(false)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
@@ -324,18 +326,18 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
 
       {/* Diálogo para mostrar detalles del concepto */}
       <Dialog open={isConceptDialogOpen} onOpenChange={setIsConceptDialogOpen}>
-        <DialogContent className="max-w-lg w-full max-h-[90vh] p-4 sm:p-6">
-          <DialogHeader>
-            <DialogTitle className="text-lg sm:text-xl">Detalles del Concepto</DialogTitle>
+        <DialogContent className="max-w-lg w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col p-0">
+          <DialogHeader className="p-6 pb-0">
+            <DialogTitle className="text-xl font-bold text-foreground">Detalles del Concepto</DialogTitle>
           </DialogHeader>
           {selectedConcept && (
-            <ScrollArea className="max-h-[60vh] pr-4">
-              <div className="space-y-4">
+            <ScrollArea className="flex-1 pr-4">
+              <div className="space-y-4 pb-4">
                 <div>
-                  <h4 className="font-semibold text-lg mb-3">
+                  <h4 className="font-semibold text-lg mb-3 text-foreground">
                     {selectedConcept.split(':')[0]}
                   </h4>
-                  <div className="p-4 bg-muted/50 rounded-lg">
+                  <div className="p-4 bg-muted/50 rounded-lg border border-border/50">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {selectedConcept.split(':').slice(1).join(':').trim()}
                     </ReactMarkdown>
@@ -343,8 +345,8 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                 </div>
 
                 <div className="mt-6">
-                  <h5 className="font-semibold mb-3 text-sm">Definición y contexto:</h5>
-                  <div className="p-4 bg-purple-50/50 border-l-4 border-purple-200 rounded-r-lg">
+                  <h5 className="font-semibold mb-3 text-sm text-foreground">Definición y contexto:</h5>
+                  <div className="p-4 bg-purple-50/50 border-l-4 border-purple-200 rounded-r-lg border border-border/50">
                     {(() => {
                       // Parsear el concepto en formato "CONCEPTO: DEFINICIÓN"
                       const conceptParts = selectedConcept?.split(':');
@@ -387,7 +389,7 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
               </div>
             </ScrollArea>
           )}
-          <DialogFooter>
+          <DialogFooter className="p-6 pt-0">
             <Button variant="outline" onClick={() => setIsConceptDialogOpen(false)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>

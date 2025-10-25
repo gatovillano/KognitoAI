@@ -41,7 +41,7 @@ export function GitHubRepoDialog({ isOpen, onOpenChange, onSuccess }: GitHubRepo
       const fetchData = async () => {
         try {
           const [collectionsResponse, workspacesResponse] = await Promise.all([
-            apiClient.get("/api/collections"),
+            apiClient.get("/api/documents/collections"),
             apiClient.get("/api/workspaces")
           ]);
           setCollections(collectionsResponse.data);

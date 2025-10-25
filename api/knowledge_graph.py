@@ -78,77 +78,7 @@ def get_langchain_cognee_adapter():
     from core.llm_manager import get_main_llm
     return LangChainCogneeAdapter(get_graph_db(), get_main_llm())
 
-@router.post("/process-knowledge-graph", response_model=GraphResponse)
-async def process_knowledge_graph(
-    request: ProcessGraphRequest,
-    background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Procesa documentos para generar un grafo de conocimiento.
-    """
-    try:
-        logger.info(f"🧠 Iniciando procesamiento de grafo para workspace: {request.workspace_id}")
-        
-        # Obtener documentos del workspace
-        async with get_db_session() as session:
-            # Query para obtener documentos únicos del workspace
-            # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
-            query = """
-                SELECT DISTINCT ON (cmetadata->>'document_id')
-                       cmetadata->>'file_name' AS file_name,
-                       topic AS topic,
-                       cmetadata->>'title' AS title,
-                       cmetadata->>'author' AS author,
-                       cmetadata->>'document_id' AS document_id,
-                       workspace_id::text AS workspace_id,
-                       team_id::text AS team_id,
-                       CASE WHEN team_id IS NOT NULL THEN true ELSE false END AS team_shared
-                FROM langchain_pg_embedding
-                WHERE account_id = :account_id
-                  AND cmetadata->>'type' = 'document_chunk'
-                  {f"AND workspace_id::text = '{request.workspace_id}'" if request.workspace_id else "AND workspace_id IS NULL"}
-                ORDER BY cmetadata->>'document_id', id;
-            """
-            
-            result = await session.execute(query, {'account_id': current_user['account_id']})
-            
-            documents = [dict(row) for row in result.fetchall()]
-            
-        if not documents:
-            detail_msg = "No se encontraron documentos en este workspace" if request.workspace_id else "No se encontraron documentos en el contexto general"
-            return GraphResponse(
-                success=False,
-                error=detail_msg
-            )
-        
-        logger.info(f"📄 Encontrados {len(documents)} documentos para procesar en {'workspace ' + request.workspace_id if request.workspace_id else 'contexto general'}")
-        
-        # Procesar con Cognee/Pipeline híbrido
-        integration = get_cognee_integration()
-        dataset_name = f"workspace_{request.workspace_id}" if request.workspace_id else "global_context"
-        graph_data = await integration.process_documents(
-            documents,
-            dataset_name
-        )
-        
-        # Guardar resultado en base de datos (opcional)
-        # Aquí podrías guardar el resultado en una tabla de grafos procesados
-        
-        logger.info(f"✅ Grafo procesado exitosamente para workspace: {request.workspace_id}")
-        
-        return GraphResponse(
-            success=True,
-            data=graph_data,
-            message=f"Grafo procesado exitosamente con {len(graph_data.get('entities', []))} entidades y {len(graph_data.get('relationships', []))} relaciones"
-        )
-        
-    except Exception as e:
-        logger.error(f"❌ Error procesando grafo: {e}")
-        return GraphResponse(
-            success=False,
-            error=str(e)
-        )
+
 
 @router.get("/knowledge-graph/{workspace_id}", response_model=GraphResponse)
 async def get_knowledge_graph(

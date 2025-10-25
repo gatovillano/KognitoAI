@@ -55,13 +55,13 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl w-full max-h-[95vh] sm:max-h-[90vh] p-4 sm:p-6">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
-            <Code className="h-5 w-5" />
+      <DialogContent className="max-w-5xl w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col p-0">
+        <DialogHeader className="p-6 pb-0">
+          <DialogTitle className="flex items-center gap-2 text-2xl font-bold text-foreground">
+            <Code className="h-6 w-6" />
             Análisis de Código - {repoName || 'Repositorio'}
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-muted-foreground">
             {metadata.total_files && metadata.total_chunks ? 
               `Análisis de ${metadata.total_files} archivos en ${metadata.total_chunks} partes` :
               'Análisis completo del repositorio'
@@ -69,61 +69,63 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
           </DialogDescription>
         </DialogHeader>
         
-        <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="grid w-full grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
-            <TabsTrigger value="overview">Resumen</TabsTrigger>
-            <TabsTrigger value="structure">Estructura</TabsTrigger>
-            <TabsTrigger value="patterns">Patrones</TabsTrigger>
-            <TabsTrigger value="dependencies">Dependencias</TabsTrigger>
-            <TabsTrigger value="issues">Problemas</TabsTrigger>
-            <TabsTrigger value="recommendations">Recomendaciones</TabsTrigger>
-          </TabsList>
-          
-          <ScrollArea className="h-[70vh] sm:h-[60vh] mt-4">
-            <TabsContent value="overview" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    Resumen Ejecutivo
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm whitespace-pre-wrap">{executiveSummary}</p>
-                </CardContent>
-              </Card>
-              
-              {formattedResult && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Análisis Detallado</CardTitle>
+        <div className="p-6 pt-0 flex flex-col flex-grow">
+          <Tabs defaultValue="overview" className="w-full flex flex-col flex-grow">
+            <TabsList className="grid w-full grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 bg-transparent border-b border-border/50 mb-4">
+              <TabsTrigger value="overview">Resumen</TabsTrigger>
+              <TabsTrigger value="structure">Estructura</TabsTrigger>
+              <TabsTrigger value="patterns">Patrones</TabsTrigger>
+              <TabsTrigger value="dependencies">Dependencias</TabsTrigger>
+              <TabsTrigger value="issues">Problemas</TabsTrigger>
+              <TabsTrigger value="recommendations">Recomendaciones</TabsTrigger>
+            </TabsList>
+            
+            <ScrollArea className="flex-1 pr-4">
+              <div className="space-y-6 pb-4"> {/* Añadido pb-4 para espacio al final del scroll */}
+              <TabsContent value="overview" className="space-y-4">
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <FileText className="h-5 w-5" />
+                      Resumen Ejecutivo
+                    </CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <div className="prose prose-sm max-w-none">
-                      <InlineMarkdownRenderer content={formattedResult} />
-                    </div>
+                  <CardContent className="p-0">
+                    <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed p-3 bg-muted rounded-md border border-border/50">{executiveSummary}</p>
                   </CardContent>
                 </Card>
-              )}
-            </TabsContent>
+                
+                {formattedResult && (
+                  <Card className="border-none shadow-none bg-transparent p-0">
+                    <CardHeader className="px-0 pt-0 pb-2">
+                      <CardTitle className="text-lg font-semibold text-foreground">Análisis Detallado</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <div className="prose prose-sm dark:prose-invert max-w-none p-3 bg-muted rounded-md border border-border/50">
+                        <InlineMarkdownRenderer content={formattedResult} />
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </TabsContent>
 
             <TabsContent value="structure" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <GitBranch className="h-4 w-4" />
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                    <GitBranch className="h-5 w-5" />
                     Estructura del Código ({codeStructure.length} componentes)
                   </CardTitle>
-                  <CardDescription>
+                  <CardDescription className="text-muted-foreground">
                     Componentes principales identificados en el código
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="p-0">
                   {codeStructure.length > 0 ? (
                     <div className="space-y-3">
                       {codeStructure.map((item, i) => (
-                        <div key={i} className="border-l-4 border-blue-500 pl-4">
-                          <h4 className="font-medium">{item.component}</h4>
+                        <div key={i} className="border-l-4 border-blue-500 pl-4 p-3 bg-muted rounded-md border border-border/50">
+                          <h4 className="font-medium text-foreground">{item.component}</h4>
                           <p className="text-sm text-muted-foreground">{item.description}</p>
                         </div>
                       ))}
@@ -136,22 +138,22 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
             </TabsContent>
 
             <TabsContent value="patterns" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Settings className="h-4 w-4" />
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                    <Settings className="h-5 w-5" />
                     Patrones de Diseño ({designPatterns.length} patrones)
                   </CardTitle>
-                  <CardDescription>
+                  <CardDescription className="text-muted-foreground">
                     Patrones de diseño identificados en el código
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="p-0">
                   {designPatterns.length > 0 ? (
                     <div className="space-y-3">
                       {designPatterns.map((item, i) => (
-                        <div key={i} className="border-l-4 border-green-500 pl-4">
-                          <h4 className="font-medium">{item.pattern}</h4>
+                        <div key={i} className="border-l-4 border-green-500 pl-4 p-3 bg-muted rounded-md border border-border/50">
+                          <h4 className="font-medium text-foreground">{item.pattern}</h4>
                           <p className="text-sm text-muted-foreground">{item.description}</p>
                         </div>
                       ))}
@@ -164,18 +166,18 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
             </TabsContent>
 
             <TabsContent value="dependencies" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Dependencias ({dependencies.length} bibliotecas)</CardTitle>
-                  <CardDescription>
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <CardTitle className="text-lg font-semibold text-foreground">Dependencias ({dependencies.length} bibliotecas)</CardTitle>
+                  <CardDescription className="text-muted-foreground">
                     Bibliotecas y frameworks utilizados
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="p-0">
                   {dependencies.length > 0 ? (
                     <div className="grid gap-3">
                       {dependencies.map((item, i) => (
-                        <div key={i} className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3 p-3 border rounded-lg"> {/* Añadido flex-col y sm:flex-row, gap-2 */}
+                        <div key={i} className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3 p-3 border rounded-lg border-border/50"> {/* Añadido flex-col y sm:flex-row, gap-2 */}
                           <Badge variant="secondary">{item.library}</Badge>
                           <p className="text-sm text-muted-foreground flex-1">{item.description}</p>
                         </div>
@@ -189,21 +191,21 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
             </TabsContent>
 
             <TabsContent value="issues" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 text-orange-500" />
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                    <AlertTriangle className="h-5 w-5 text-orange-500" />
                     Problemas Potenciales ({potentialIssues.length} problemas)
                   </CardTitle>
-                  <CardDescription>
+                  <CardDescription className="text-muted-foreground">
                     Posibles problemas de código, seguridad o arquitectura
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="p-0">
                   {potentialIssues.length > 0 ? (
                     <div className="space-y-3">
                       {potentialIssues.map((item, i) => (
-                        <div key={i} className="border-l-4 border-orange-500 pl-4 p-3 bg-orange-50 dark:bg-orange-950/20 rounded-r-lg">
+                        <div key={i} className="border-l-4 border-orange-500 pl-4 p-3 bg-orange-50 dark:bg-orange-950/20 rounded-r-lg border border-border/50">
                           <h4 className="font-medium text-orange-800 dark:text-orange-200">{item.issue}</h4>
                           <p className="text-sm text-orange-700 dark:text-orange-300">{item.description}</p>
                         </div>
@@ -217,21 +219,21 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
             </TabsContent>
 
             <TabsContent value="recommendations" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Lightbulb className="h-4 w-4 text-blue-500" />
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                    <Lightbulb className="h-5 w-5 text-blue-500" />
                     Recomendaciones ({recommendations.length} sugerencias)
                   </CardTitle>
-                  <CardDescription>
+                  <CardDescription className="text-muted-foreground">
                     Sugerencias para mejorar el código
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="p-0">
                   {recommendations.length > 0 ? (
                     <div className="space-y-4">
                       {recommendations.map((item, i) => (
-                        <div key={i} className="border rounded-lg p-4 space-y-2">
+                        <div key={i} className="border rounded-lg p-4 space-y-2 border-border/50">
                           <h4 className="font-medium text-blue-800 dark:text-blue-200">{item.recommendation}</h4>
                           {item.rationale && (
                             <p className="text-sm text-muted-foreground"><strong>Justificación:</strong> {item.rationale}</p>
@@ -251,10 +253,12 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
                 </CardContent>
               </Card>
             </TabsContent>
-          </ScrollArea>
-        </Tabs>
-
-        <div className="flex flex-col sm:flex-row justify-between mt-4 gap-2"> {/* Añadido flex-col y sm:flex-row, gap-2 */}
+            </div> {/* Cierre del div con space-y-6 pb-4 */}
+            </ScrollArea>
+          </Tabs>
+        </div> {/* Cierre del div que contiene las Tabs */}
+        
+        <div className="flex flex-col sm:flex-row justify-between p-6 pt-0 gap-2"> {/* Añadido flex-col y sm:flex-row, gap-2 */}
           <Button 
             variant="destructive" 
             onClick={async () => {

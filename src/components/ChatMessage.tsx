@@ -128,8 +128,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                   placeholder="Edita tu mensaje aquí..."
                 />
               ) : (
-                <div className="text-base break-words font-sans">
-                  {msg.text}
+                <div className="text-base break-words font-sans [&_p]:my-0 [&_ul]:my-0 [&_ol]:my-0 [&_li]:my-0 [&_h1]:my-0 [&_h2]:my-0 [&_h3]:my-0 [&_h4]:my-0 [&_h5]:my-0 [&_h6]:my-0">
+                  <MarkdownRenderer content={msg.text} />
                 </div>
               )}
 

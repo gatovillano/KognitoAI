@@ -176,18 +176,18 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1, duration: 0.3 }}
           >
-            <Card className="border-slate-200 bg-slate-50/50 dark:border-slate-700 dark:bg-slate-800/30">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-foreground">
+            <Card className="border-none shadow-none bg-transparent p-0">
+              <CardHeader className="px-0 pt-0 pb-2">
+                <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
                   <Lightbulb className="h-5 w-5 text-yellow-500" />
                   Insight Detectado
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground leading-relaxed">{analysis.summary}</p>
+              <CardContent className="p-0">
+                <p className="text-sm text-muted-foreground leading-relaxed p-3 bg-muted rounded-md border border-border/50">{analysis.summary}</p>
                 {analysis.confidence_score && (
                   <div className="mt-4">
-                    <Badge className="bg-yellow-500 text-white font-medium">
+                    <Badge className="bg-yellow-500 text-white font-medium border border-border/50">
                       Confianza: {(analysis.confidence_score * 100).toFixed(0)}%
                     </Badge>
                   </div>
@@ -201,15 +201,15 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2, duration: 0.2 }}
               >
-                <Card className="border-slate-200 bg-slate-50/50 dark:border-slate-700 dark:bg-slate-800/30">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-foreground">
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
                       <Target className="h-5 w-5 text-blue-500" />
                       Sugerencia de Acción
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <p className="text-sm text-muted-foreground leading-relaxed">{analysis.action_suggestion}</p>
+                  <CardContent className="p-0">
+                    <p className="text-sm text-muted-foreground leading-relaxed p-3 bg-muted rounded-md border border-border/50">{analysis.action_suggestion}</p>
                   </CardContent>
                 </Card>
               </motion.div>
@@ -221,14 +221,14 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3, duration: 0.2 }}
               >
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Zap className="h-4 w-4" />
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <Zap className="h-5 w-5" />
                       Elementos Relacionados
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     <div className="space-y-3">
                       {analysis.related_items.map((item, index) => (
                         <motion.div 
@@ -238,7 +238,7 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: 0.4 + index * 0.05, duration: 0.2 }}
                         >
-                          <p className="font-medium">{item.title || item.reference || 'Ítem sin título'}</p>
+                          <p className="font-medium text-foreground">{item.title || item.reference || 'Ítem sin título'}</p>
                           <p className="text-xs text-muted-foreground">Tipo: {item.type || 'N/A'}</p>
                         </motion.div>
                       ))}
@@ -258,8 +258,8 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
         const recommendations = ensureArray(data?.recommendations);
 
         return (
-          <Tabs defaultValue="overview" className="w-full">
-            <TabsList className="grid w-full grid-cols-6">
+          <Tabs defaultValue="overview" className="w-full flex flex-col flex-grow">
+            <TabsList className="grid w-full grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 bg-transparent border-b border-border/50 mb-4">
               <TabsTrigger value="overview">Resumen</TabsTrigger>
               <TabsTrigger value="structure">Estructura</TabsTrigger>
               <TabsTrigger value="patterns">Patrones</TabsTrigger>
@@ -268,27 +268,28 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
               <TabsTrigger value="recommendations">Recomendaciones</TabsTrigger>
             </TabsList>
             
-            <div className="mt-4 space-y-4">
-              <TabsContent value="overview">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <FileText className="h-4 w-4" />
+            <div className="flex-1 pr-4">
+              <div className="space-y-6 pb-4">
+              <TabsContent value="overview" className="space-y-4">
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <FileText className="h-5 w-5" />
                       Resumen Ejecutivo
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <p className="text-sm whitespace-pre-wrap">{data?.executive_summary || analysis.summary}</p>
+                  <CardContent className="p-0">
+                    <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed p-3 bg-muted rounded-md border border-border/50">{data?.executive_summary || analysis.summary}</p>
                   </CardContent>
                 </Card>
                 
                 {data?.formatted_result && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Análisis Detallado</CardTitle>
+                  <Card className="border-none shadow-none bg-transparent p-0">
+                    <CardHeader className="px-0 pt-0 pb-2">
+                      <CardTitle className="text-lg font-semibold text-foreground">Análisis Detallado</CardTitle>
                     </CardHeader>
-                    <CardContent>
-                      <div className="prose prose-sm max-w-none">
+                    <CardContent className="p-0">
+                      <div className="prose prose-sm dark:prose-invert max-w-none p-3 bg-muted rounded-md border border-border/50">
                         <InlineMarkdownRenderer content={data.formatted_result} />
                       </div>
                     </CardContent>
@@ -296,20 +297,20 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
                 )}
               </TabsContent>
 
-              <TabsContent value="structure">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <GitBranch className="h-4 w-4" />
+              <TabsContent value="structure" className="space-y-4">
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <GitBranch className="h-5 w-5" />
                       Estructura del Código ({codeStructure.length} componentes)
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     {codeStructure.length > 0 ? (
                       <div className="space-y-3">
                         {codeStructure.map((item, i) => (
-                          <div key={i} className="border-l-4 border-blue-500 pl-4">
-                            <h4 className="font-medium">{item.component}</h4>
+                          <div key={i} className="border-l-4 border-blue-500 pl-4 p-3 bg-muted rounded-md border border-border/50">
+                            <h4 className="font-medium text-foreground">{item.component}</h4>
                             <p className="text-sm text-muted-foreground">{item.description}</p>
                           </div>
                         ))}
@@ -321,20 +322,20 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
                 </Card>
               </TabsContent>
 
-              <TabsContent value="patterns">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Settings className="h-4 w-4" />
+              <TabsContent value="patterns" className="space-y-4">
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <Settings className="h-5 w-5" />
                       Patrones de Diseño ({designPatterns.length} patrones)
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     {designPatterns.length > 0 ? (
                       <div className="space-y-3">
                         {designPatterns.map((item, i) => (
-                          <div key={i} className="border-l-4 border-green-500 pl-4">
-                            <h4 className="font-medium">{item.pattern}</h4>
+                          <div key={i} className="border-l-4 border-green-500 pl-4 p-3 bg-muted rounded-md border border-border/50">
+                            <h4 className="font-medium text-foreground">{item.pattern}</h4>
                             <p className="text-sm text-muted-foreground">{item.description}</p>
                           </div>
                         ))}
@@ -346,16 +347,16 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
                 </Card>
               </TabsContent>
 
-              <TabsContent value="dependencies">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Dependencias ({dependencies.length} bibliotecas)</CardTitle>
+              <TabsContent value="dependencies" className="space-y-4">
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="text-lg font-semibold text-foreground">Dependencias ({dependencies.length} bibliotecas)</CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     {dependencies.length > 0 ? (
                       <div className="grid gap-3">
                         {dependencies.map((item, i) => (
-                          <div key={i} className="flex items-start gap-3 p-3 border rounded-lg">
+                          <div key={i} className="flex items-start gap-3 p-3 border rounded-lg border-border/50">
                             <Badge variant="secondary">{item.library}</Badge>
                             <p className="text-sm text-muted-foreground flex-1">{item.description}</p>
                           </div>
@@ -368,19 +369,19 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
                 </Card>
               </TabsContent>
 
-              <TabsContent value="issues">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4 text-orange-500" />
+              <TabsContent value="issues" className="space-y-4">
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <AlertTriangle className="h-5 w-5 text-orange-500" />
                       Problemas Potenciales ({potentialIssues.length} problemas)
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     {potentialIssues.length > 0 ? (
                       <div className="space-y-3">
                         {potentialIssues.map((item, i) => (
-                          <div key={i} className="border-l-4 border-orange-500 pl-4 p-3 bg-orange-50 dark:bg-orange-950/20 rounded-r-lg">
+                          <div key={i} className="border-l-4 border-orange-500 pl-4 p-3 bg-orange-50 dark:bg-orange-950/20 rounded-r-lg border border-border/50">
                             <h4 className="font-medium text-orange-800 dark:text-orange-200">{item.issue}</h4>
                             <p className="text-sm text-orange-700 dark:text-orange-300">{item.description}</p>
                           </div>
@@ -393,19 +394,19 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
                 </Card>
               </TabsContent>
 
-              <TabsContent value="recommendations">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Lightbulb className="h-4 w-4 text-blue-500" />
+              <TabsContent value="recommendations" className="space-y-4">
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <Lightbulb className="h-5 w-5 text-blue-500" />
                       Recomendaciones ({recommendations.length} sugerencias)
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-0">
                     {recommendations.length > 0 ? (
                       <div className="space-y-4">
                         {recommendations.map((item, i) => (
-                          <div key={i} className="border rounded-lg p-4 space-y-2">
+                          <div key={i} className="border rounded-lg p-4 space-y-2 border-border/50">
                             <h4 className="font-medium text-blue-800 dark:text-blue-200">{item.recommendation}</h4>
                             {item.rationale && (
                               <p className="text-sm text-muted-foreground"><strong>Justificación:</strong> {item.rationale}</p>
@@ -443,30 +444,30 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1, duration: 0.3 }}
           >
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
+            <Card className="border-none shadow-none bg-transparent p-0">
+              <CardHeader className="px-0 pt-0 pb-2">
+                <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                  <FileText className="h-5 w-5" />
                   Resumen Ejecutivo
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+              <CardContent className="p-0">
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed p-3 bg-muted rounded-md border border-border/50">
                   {data?.executive_summary || data?.resumen_ejecutivo || analysis.summary}
                 </p>
               </CardContent>
             </Card>
 
             {keyThemes.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Temas Clave</CardTitle>
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <CardTitle className="text-lg font-semibold text-foreground">Temas Clave</CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="p-0">
                   <div className="space-y-3">
                     {keyThemes.map((theme: any, i: number) => (
-                      <div key={i} className="border rounded-lg p-3 bg-muted/30">
-                        <Badge className="mb-2">
+                      <div key={i} className="border rounded-lg p-3 bg-muted/30 border-border/50">
+                        <Badge className="mb-2 bg-blue-100 text-blue-800 border border-blue-200">
                           {theme.name || theme.description || 'Tema sin nombre'}
                         </Badge>
                         {theme.quotes && theme.quotes.length > 0 && (
@@ -497,14 +498,14 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
             )}
 
             {centralConcepts.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Conceptos Centrales</CardTitle>
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <CardTitle className="text-lg font-semibold text-foreground">Conceptos Centrales</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                <CardContent className="p-0">
+                  <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground p-3 bg-muted rounded-md border border-border/50">
                     {centralConcepts.map((concept: string, i: number) => (
-                      <li key={i}>{concept}</li>
+                      <li key={i}><InlineMarkdownRenderer content={concept} /></li>
                     ))}
                   </ul>
                 </CardContent>
@@ -512,12 +513,12 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
             )}
 
             {relationships.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Relaciones entre Conceptos</CardTitle>
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <CardTitle className="text-lg font-semibold text-foreground">Relaciones entre Conceptos</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                <CardContent className="p-0">
+                  <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground p-3 bg-muted rounded-md border border-border/50">
                     {relationships.map((relation: string, i: number) => (
                       <li key={i}>
                         <InlineMarkdownRenderer content={relation} />
@@ -529,32 +530,101 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
             )}
 
             {questions.length > 0 && (
-              <Card
-                className="cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-300 border-2 hover:border-primary/20 group"
-                onClick={() => setIsQuestionsDialogOpen(true)}
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <HelpCircle className="h-5 w-5 text-primary" />
-                      <span className="font-medium text-sm">
-                        {questions.length} pregunta{questions.length !== 1 ? 's' : ''} para explorar
-                      </span>
-                    </div>
-                    <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                      <Expand className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                  </div>
-                  <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">
-                    {typeof questions[0] === 'string' ? questions[0] : questions[0]?.issue || questions[0]?.description || 'Ver preguntas'}
-                  </p>
-                  <div className="mt-3 text-xs text-primary/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1">
-                    <Expand className="h-3 w-3" />
-                    Haz clic para ver todas las preguntas
-                  </div>
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                    <HelpCircle className="h-5 w-5 text-primary" />
+                    Preguntas para explorar
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <Card
+                    className="cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-300 border border-border/50 group"
+                    onClick={() => setIsQuestionsDialogOpen(true)}
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <HelpCircle className="h-5 w-5 text-primary" />
+                          <span className="font-medium text-sm">
+                            {questions.length} pregunta{questions.length !== 1 ? 's' : ''} para explorar
+                          </span>
+                        </div>
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                          <Expand className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                      </div>
+                      <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">
+                        {typeof questions[0] === 'string' ? questions[0] : questions[0]?.issue || questions[0]?.description || 'Ver preguntas'}
+                      </p>
+                      <div className="mt-3 text-xs text-primary/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1">
+                        <Expand className="h-3 w-3" />
+                        Haz clic para ver todas las preguntas
+                      </div>
+                    </CardContent>
+                  </Card>
                 </CardContent>
               </Card>
             )}
+
+            {/* Renderizar campos adicionales de full_data como ítems individuales */}
+            {Object.keys(data || {}).length > 0 && (() => {
+              const excludedKeys = [
+                'key_themes', 'temas_clave_avanzados', 'grouped_topics',
+                'central_concepts', 'conceptos_centrales',
+                'concept_relationships', 'relaciones_conceptos',
+                'knowledge_gaps', 'preguntas_para_explorar', 'potential_issues',
+                'executive_summary', 'resumen_ejecutivo',
+                'code_structure', 'design_patterns', 'dependencies', 'recommendations', 'formatted_result'
+              ];
+              const additionalDataKeys = Object.keys(data).filter(key => !excludedKeys.includes(key));
+
+              if (additionalDataKeys.length === 0) return null;
+
+              const renderAdditionalDataValue = (value: any) => {
+                if (typeof value === 'string') {
+                  return <InlineMarkdownRenderer content={value} />;
+                } else if (Array.isArray(value)) {
+                  return (
+                    <ul className="list-disc list-inside space-y-1">
+                      {value.map((item, idx) => (
+                        <li key={idx}>{renderAdditionalDataValue(item)}</li>
+                      ))}
+                    </ul>
+                  );
+                } else if (typeof value === 'object' && value !== null) {
+                  return (
+                    <div className="ml-4 border-l pl-2">
+                      {Object.entries(value).map(([subKey, subValue], idx) => (
+                        <div key={idx}>
+                          <span className="font-medium">{subKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}: </span>
+                          {renderAdditionalDataValue(subValue)}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                } else {
+                  return String(value);
+                }
+              };
+
+              return (
+                <>
+                  {additionalDataKeys.map((key, i) => (
+                    <Card key={i} className="border-none shadow-none bg-transparent p-0">
+                      <CardHeader className="px-0 pt-0 pb-2">
+                        <CardTitle className="text-lg font-semibold text-foreground">{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-0">
+                        <div className="text-sm text-muted-foreground whitespace-pre-wrap p-3 bg-muted rounded-md border border-border/50">
+                          {renderAdditionalDataValue(data[key])}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </>
+              );
+            })()}
           </motion.div>
         );
     }
@@ -564,55 +634,22 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
     <AnimatePresence>
       {isOpen && (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-          <DialogContent className="max-w-4xl max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col">
-            <div
-              className="flex flex-col flex-grow overflow-hidden"
-            >
-              <DialogHeader className="flex-shrink-0">
-                <DialogTitle className="flex items-center gap-3">
-                  {getAnalysisIcon(analysis.type)}
-                  <span>{analysis.title}</span>
-                  <Badge className={`${getAnalysisTypeBadgeColor(analysis.type)} rounded-full`}>
-                    {getAnalysisTypeLabel(analysis.type)}
-                  </Badge>
-                </DialogTitle>
-                <DialogDescription className="space-y-2">
-                  <div className="flex items-center gap-4 text-sm">
-                    <div className="flex items-center gap-1">
-                      <Calendar className="h-3 w-3" />
-                      <span>Creado: {formatDate(analysis.created_at)}</span>
-                    </div>
-                    {analysis.updated_at !== analysis.created_at && (
-                      <div className="flex items-center gap-1">
-                        <Calendar className="h-3 w-3" />
-                        <span>Actualizado: {formatDate(analysis.updated_at)}</span>
-                      </div>
-                    )}
-                  </div>
-                  {analysis.tool_used && (
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="text-xs font-mono bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700">
-                        {analysis.tool_used}
-                      </Badge>
-                      <span className="text-xs text-muted-foreground">Herramienta utilizada</span>
-                    </div>
+          <DialogContent className="max-w-4xl w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col p-0">
+                        <div className="p-6 pt-0 flex flex-col flex-grow">
+                          <ScrollArea className="flex-1 pr-4">
+                            <div className="pb-4"> {/* Añade padding inferior para que el último contenido no quede pegado al borde */}                  {renderTypeSpecificContent()}
+                            </div>
+                          </ScrollArea>
+            
+                          <div className="flex flex-shrink-0 justify-end pt-6">
+                            <Button variant="outline" onClick={() => onOpenChange(false)}>
+                              Cerrar
+                            </Button>
+                          </div>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
                   )}
-                </DialogDescription>
-              </DialogHeader>
-
-              <ScrollArea className="flex-1 min-h-0 pr-4">
-                {renderTypeSpecificContent()}
-              </ScrollArea>
-
-              <div className="flex flex-shrink-0 justify-end mt-6">
-                <Button variant="outline" onClick={() => onOpenChange(false)}>
-                  Cerrar
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
 
       {/* Diálogo para mostrar preguntas */}
       <QuestionSliderDialog

@@ -68,11 +68,11 @@ def decode_access_token(token: str) -> Optional[dict]:
     Returns:
         El payload (dict) si el token es válido, o None si ha expirado o es inválido.
     """
-    logger.info(f"🔑 Intentando decodificar token: {token[:50]}...")
-    logger.info(f"🔑 Usando JWT_SECRET_KEY que empieza con: {settings.jwt_secret_key[:10]}...")
+    logger.debug(f"🔑 DEBUG: Intentando decodificar token: {token[:50]}...")
+    logger.debug(f"🔑 DEBUG: Usando JWT_SECRET_KEY que empieza con: {settings.jwt_secret_key[:10]}...")
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=["HS256"])
-        logger.info("✅ Token decodificado exitosamente.")
+        logger.debug(f"✅ DEBUG: Token decodificado exitosamente. Payload: {payload}")
         return payload
     except jwt.ExpiredSignatureError:
         logger.warning("❌ Token JWT expirado.")
@@ -108,6 +108,30 @@ async def get_current_account_id(token: str = Depends(oauth2_scheme)) -> str:
         raise credentials_exception
     
     logger.info(f"✅ account_id extraído del token: {account_id}")
+    return account_id
+
+def verify_token_ws(token: str) -> str:
+    """
+    Verifica un token JWT para WebSockets y devuelve el account_id.
+    Lanza HTTPException 403 si el token es inválido o no autorizado.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="No se pudieron validar las credenciales WebSocket",
+    )
+    
+    payload = decode_access_token(token)
+    
+    if payload is None:
+        logger.warning("❌ Payload es None después de decodificar el token WebSocket.")
+        raise credentials_exception
+
+    account_id: str = payload.get("sub")
+    if account_id is None:
+        logger.warning("❌ account_id es None en el payload del token WebSocket.")
+        raise credentials_exception
+    
+    logger.debug(f"✅ DEBUG: account_id extraído del token WebSocket: {account_id}")
     return account_id
 
 async def get_current_active_account(
@@ -205,8 +229,12 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    account_id = decode_access_token(token)
+    payload = decode_access_token(token)
 
+    if payload is None:
+        raise credentials_exception
+
+    account_id: str = payload.get("sub")
     if account_id is None:
         raise credentials_exception
 

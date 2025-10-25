@@ -45,46 +45,23 @@ if not any(isinstance(handler, logging.FileHandler) and handler.baseFilename == 
 logger.setLevel(logging.DEBUG) # Asegurar que el nivel sea DEBUG para esta herramienta
 logger.propagate = False # Evitar que los logs se propaguen a loggers superiores y se dupliquen
 
-class DocumentsInput(BaseModel):
-    documents: List[Dict[str, Any]] = Field(
+class CogneeConceptualProcessingSchema(BaseModel):
+    """
+    Schema para la herramienta de procesamiento conceptual con Cognee.
+    Define los parámetros de entrada que la herramienta espera.
+    """
+    documents: Optional[List[Dict[str, Any]]] = Field(
+        None,
         description="Lista de documentos a procesar. Cada documento debe tener 'file_name' y opcionalmente 'content'."
     )
-    dataset_name: str = Field(
-        "default",
-        description="Nombre del dataset para el procesamiento (opcional, por defecto 'default')"
-    )
-
-class DocumentTitlesInput(BaseModel):
-    document_titles: List[str] = Field(
+    document_titles: Optional[List[str]] = Field(
+        None,
         description="Lista de nombres de archivos de documentos a procesar (sin contenido explícito)."
     )
     dataset_name: str = Field(
         "default",
         description="Nombre del dataset para el procesamiento (opcional, por defecto 'default')"
     )
-
-class CogneeConceptualProcessingSchema(RootModel[Union[DocumentsInput, DocumentTitlesInput]]):
-    """
-    Schema para la herramienta de procesamiento conceptual con Cognee.
-    Define los parámetros de entrada que la herramienta espera, permitiendo
-    ya sea una lista de 'documents' o una lista de 'document_titles'.
-    """
-    root: Union[DocumentsInput, DocumentTitlesInput]
-
-    @model_validator(mode='before')
-    def parse_input_string(cls, value):
-        # Si Langchain envuelve la entrada en un diccionario con la clave 'root'
-        if isinstance(value, dict) and 'root' in value:
-            value = value['root'] # Desempaquetar el valor real
-
-        if isinstance(value, str):
-            try:
-                # Intentar parsear la cadena como JSON
-                parsed_value = json.loads(value)
-                return parsed_value
-            except json.JSONDecodeError:
-                raise ValueError("La entrada es una cadena pero no es un JSON válido.")
-        return value
 
 
 

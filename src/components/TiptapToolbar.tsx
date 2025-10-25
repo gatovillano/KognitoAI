@@ -6,16 +6,39 @@ import { Bold, Italic, Strikethrough, Code, Heading1, Heading2, List, ListOrdere
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 
+import { Mic, Loader2 } from 'lucide-react'; // Importar Mic y Loader2
+
 interface TiptapToolbarProps {
   editor: Editor | null;
+  isRecording?: boolean;
+  isProcessingAudio?: boolean;
+  onStartRecording?: () => void;
+  onStopRecording?: () => void;
 }
 
-export const TiptapToolbar = ({ editor }: TiptapToolbarProps) => {
+export const TiptapToolbar = ({ editor, isRecording, isProcessingAudio, onStartRecording, onStopRecording }: TiptapToolbarProps) => {
   if (!editor) return null;
 
   return (
     <TooltipProvider>
-      <div className="p-2 flex flex-wrap gap-1 bg-card/80 backdrop-blur-xl border-b">
+      <div className="p-2 flex flex-wrap gap-1 bg-card/80 backdrop-blur-xl border-b rounded-t-md"> {/* Añadido rounded-t-md */}
+        {/* Botón del micrófono */}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            if (isRecording) {
+              onStopRecording?.();
+            } else {
+              onStartRecording?.();
+            }
+          }}
+          disabled={isProcessingAudio}
+          className={`rounded-md ${isRecording ? 'text-red-500 hover:bg-red-100 dark:hover:bg-red-900/50' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'}`}
+        >
+          {isProcessingAudio ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mic className="h-4 w-4" />}
+        </Button>
         <Button variant={editor.isActive('bold') ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleBold().run()}><Bold className="h-4 w-4" /></Button>
         <Button variant={editor.isActive('italic') ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleItalic().run()}><Italic className="h-4 w-4" /></Button>
         <Button variant={editor.isActive('strike') ? 'secondary' : 'ghost'} size="sm" onClick={() => editor.chain().focus().toggleStrike().run()}><Strikethrough className="h-4 w-4" /></Button>

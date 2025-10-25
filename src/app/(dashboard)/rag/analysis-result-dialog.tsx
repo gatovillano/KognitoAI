@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import { Expand, HelpCircle } from 'lucide-react';
 import { QuestionSliderDialog } from '@/components/QuestionSliderDialog';
@@ -85,82 +85,99 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
   return (
     <>
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl w-full max-h-[90vh]">
+      <DialogContent className="max-w-4xl w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col">
         <DialogHeader>
-          <DialogTitle>Resultados del Análisis</DialogTitle>
-          <DialogDescription className="truncate">
+          <DialogTitle className="text-2xl font-bold text-foreground">Resultados del Análisis</DialogTitle>
+          <DialogDescription className="text-muted-foreground truncate">
             Para el documento: {document?.file_name || 'Nombre no disponible'}
           </DialogDescription>
         </DialogHeader>
-        <ScrollArea className="max-h-[70vh] sm:max-h-[60vh] pr-4">
-          <div className="space-y-6">
-              <div>
-                  <h3 className="font-semibold mb-2">Resumen Ejecutivo por IA</h3>
-                    <p className="text-sm text-muted-foreground p-3 bg-muted rounded-md whitespace-pre-wrap">{mappedAnalysis.resumen_ejecutivo}</p>
-                </div>
-                <div>
-                    <h3 className="font-semibold mb-2">Análisis General</h3>
-                    <div className="text-sm text-muted-foreground p-3 bg-muted border-l-4 border-blue-200 rounded-md">
-                        <InlineMarkdownRenderer content={mappedAnalysis.analisis_general} />
-                    </div>
-                </div>
-                <div>
-                    <h3 className="font-semibold mb-2">Temas Clave</h3>
-                    <div className="space-y-3">
-                    <div className="flex flex-wrap gap-x-1">
-                        {Array.isArray(mappedAnalysis.temas_clave_avanzados) && mappedAnalysis.temas_clave_avanzados.length > 0 ? (
-                            mappedAnalysis.temas_clave_avanzados.map((topic: any, i: number) => (
-                                <div
-                                    key={i}
-                                    className="hover:bg-muted/50 cursor-pointer transition-colors rounded-md"
-                                    onClick={() => handleThemeClick(topic)}
-                                >
-                                    <div className="font-medium mb-1">
-                                        <Badge className="!bg-blue-100 !text-blue-950 !border !border-blue-950">
-                                            {topic.name || topic.description || 'Tema sin nombre'}
-                                        </Badge>
-                                    </div>
-                                    
-                                </div>
-                            ))
-                        ) : (
-                            <p className="text-sm text-muted-foreground">No hay temas clave disponibles.</p>
-                        )}
-                    </div>
-                </div>
-                <div>
-                    <h3 className="font-semibold mb-2">Conceptos Centrales</h3>
-                    <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                        {Array.isArray(mappedAnalysis.conceptos_centrales) && mappedAnalysis.conceptos_centrales.length > 0 ? (
-                            mappedAnalysis.conceptos_centrales.map((concept: string, i: number) => (
-                                <li key={i}>
-                                    <InlineMarkdownRenderer content={concept} />
-                                </li>
-                            ))
-                        ) : (
-                            <li className="text-sm text-muted-foreground">No hay conceptos centrales disponibles.</li>
-                        )}
-                    </ul>
-                </div>
-                <div>
-                    <h3 className="font-semibold mb-2">Relaciones entre Conceptos</h3>
-                    <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                        {Array.isArray(mappedAnalysis.relaciones_conceptos) && mappedAnalysis.relaciones_conceptos.length > 0 ? (
-                            mappedAnalysis.relaciones_conceptos.map((relation: string, i: number) => (
-                                <li key={i}>
-                                    <InlineMarkdownRenderer content={relation} />
-                                </li>
-                            ))
-                        ) : (
-                            <li className="text-sm text-muted-foreground">No hay relaciones entre conceptos disponibles.</li>
-                        )}
-                    </ul>
-                </div>
-                <div>
-                    <h3 className="font-semibold mb-4">Problemas Potenciales o Preguntas para Explorar</h3>
+        <ScrollArea className="flex-1 pr-4">
+          <div className="space-y-6 pb-4"> {/* Añadido pb-4 para espacio al final del scroll */}
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <h3 className="font-semibold text-lg text-foreground">Resumen Ejecutivo por IA</h3>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed p-3 bg-muted rounded-md border border-border/50">{mappedAnalysis.resumen_ejecutivo}</p>
+                </CardContent>
+              </Card>
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <h3 className="font-semibold text-lg text-foreground">Análisis General</h3>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="text-sm text-muted-foreground p-3 bg-muted border-l-4 border-blue-200 rounded-md border border-border/50">
+                      <InlineMarkdownRenderer content={mappedAnalysis.analisis_general} />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <h3 className="font-semibold text-lg text-foreground">Temas Clave</h3>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="flex flex-wrap gap-2">
+                      {Array.isArray(mappedAnalysis.temas_clave_avanzados) && mappedAnalysis.temas_clave_avanzados.length > 0 ? (
+                          mappedAnalysis.temas_clave_avanzados.map((topic: any, i: number) => (
+                              <Badge
+                                  key={i}
+                                  className="text-xs cursor-pointer bg-blue-100 text-blue-800 border border-blue-200 hover:bg-blue-200 transition-colors"
+                                  onClick={() => handleThemeClick(topic)}
+                              >
+                                  {topic.name || topic.description || 'Tema sin nombre'}
+                              </Badge>
+                          ))
+                      ) : (
+                          <p className="text-sm text-muted-foreground">No hay temas clave disponibles.</p>
+                      )}
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <h3 className="font-semibold text-lg text-foreground">Conceptos Centrales</h3>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                      {Array.isArray(mappedAnalysis.conceptos_centrales) && mappedAnalysis.conceptos_centrales.length > 0 ? (
+                          mappedAnalysis.conceptos_centrales.map((concept: string, i: number) => (
+                              <li key={i}>
+                                  <InlineMarkdownRenderer content={concept} />
+                              </li>
+                          ))
+                      ) : (
+                          <li className="text-sm text-muted-foreground">No hay conceptos centrales disponibles.</li>
+                      )}
+                  </ul>
+                </CardContent>
+              </Card>
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <h3 className="font-semibold text-lg text-foreground">Relaciones entre Conceptos</h3>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                      {Array.isArray(mappedAnalysis.relaciones_conceptos) && mappedAnalysis.relaciones_conceptos.length > 0 ? (
+                          mappedAnalysis.relaciones_conceptos.map((relation: string, i: number) => (
+                              <li key={i}>
+                                  <InlineMarkdownRenderer content={relation} />
+                              </li>
+                          ))
+                      ) : (
+                          <li className="text-sm text-muted-foreground">No hay relaciones entre conceptos disponibles.</li>
+                      )}
+                  </ul>
+                </CardContent>
+              </Card>
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <h3 className="font-semibold text-lg text-foreground">Problemas Potenciales o Preguntas para Explorar</h3>
+                </CardHeader>
+                <CardContent className="p-0">
                     {Array.isArray(mappedAnalysis.preguntas_para_explorar) && mappedAnalysis.preguntas_para_explorar.length > 0 ? (
                       <Card
-                        className="cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-300 border border-gray-800 group"
+                        className="cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-300 border border-border/50 group"
                         onClick={() => setIsQuestionsDialogOpen(true)}
                       >
                         <CardContent className="p-4">
@@ -187,33 +204,40 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
                     ) : (
                       <p className="text-sm text-muted-foreground">No hay preguntas para explorar disponibles.</p>
                     )}
-                </div>
-                <div>
-                    <h3 className="font-semibold mb-2">Recomendaciones</h3>
-                    <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                        {Array.isArray(mappedAnalysis.recomendaciones) && mappedAnalysis.recomendaciones.length > 0 ? (
-                            mappedAnalysis.recomendaciones.map((rec: string, i: number) => <li key={i}>{rec}</li>)
-                        ) : (
-                            <li className="text-sm text-muted-foreground">No hay recomendaciones disponibles.</li>
-                        )}
-                    </ul>
-                </div>
-                {mappedAnalysis.reflexiones_finales.length > 0 && (
-                    <div>
-                        <h3 className="font-semibold mb-2">Reflexiones Finales</h3>
-                        <div className="space-y-2">
-                            {mappedAnalysis.reflexiones_finales.map((reflection: string, i: number) => (
-                                <div key={i} className="text-sm text-muted-foreground p-3 bg-muted-50 border-l-4 border-green-200 rounded-md">
-                                    <InlineMarkdownRenderer content={reflection} />
-                                </div>
-                            ))}
-                        </div>
+                </CardContent>
+              </Card>
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <h3 className="font-semibold text-lg text-foreground">Recomendaciones</h3>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                      {Array.isArray(mappedAnalysis.recomendaciones) && mappedAnalysis.recomendaciones.length > 0 ? (
+                          mappedAnalysis.recomendaciones.map((rec: string, i: number) => <li key={i}><InlineMarkdownRenderer content={rec} /></li>)
+                      ) : (
+                          <li className="text-sm text-muted-foreground">No hay recomendaciones disponibles.</li>
+                      )}
+                  </ul>
+                </CardContent>
+              </Card>
+              {mappedAnalysis.reflexiones_finales.length > 0 && (
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <h3 className="font-semibold text-lg text-foreground">Reflexiones Finales</h3>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <div className="space-y-2">
+                        {mappedAnalysis.reflexiones_finales.map((reflection: string, i: number) => (
+                            <div key={i} className="text-sm text-muted-foreground p-3 bg-muted border-l-4 border-green-200 rounded-md border border-border/50">
+                                <InlineMarkdownRenderer content={reflection} />
+                            </div>
+                        ))}
                     </div>
-                )}
-            </div>
-        </div>
-        </ScrollArea>
-        <div className="flex flex-col sm:flex-row justify-between mt-4 gap-2"> {/* Añadido flex-col y sm:flex-row, gap-2 */}
+                  </CardContent>
+                </Card>
+              )}
+                        </div>
+                    </ScrollArea>        <div className="flex flex-col sm:flex-row justify-between mt-4 gap-2"> {/* Añadido flex-col y sm:flex-row, gap-2 */}
           <Button 
             variant="destructive" 
             onClick={async () => {
@@ -241,9 +265,9 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
 
     {/* Diálogo secundario para mostrar citas relacionadas con el tema */}
     <Dialog open={isThemeQuotesDialogOpen} onOpenChange={setIsThemeQuotesDialogOpen}>
-      <DialogContent className="max-w-xl w-full max-h-[90vh]">
+      <DialogContent className="max-w-xl w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col">
         <DialogHeader>
-          <DialogTitle>Detalles del Tema</DialogTitle>
+          <DialogTitle className="text-xl font-bold text-foreground">Detalles del Tema</DialogTitle>
         </DialogHeader>
         {selectedThemeForDialog && (
           <div className="space-y-4">
