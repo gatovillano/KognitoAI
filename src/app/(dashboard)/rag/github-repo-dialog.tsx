@@ -45,11 +45,12 @@ export function GitHubRepoDialog({ isOpen, onOpenChange, onSuccess }: GitHubRepo
             apiClient.get("/api/workspaces")
           ]);
           setCollections(collectionsResponse.data);
-          setWorkspaces(workspacesResponse.data);
-        } catch (error) {
+          setWorkspaces(Array.isArray(workspacesResponse.data) ? workspacesResponse.data : []);
+        } catch (error: any) {
+          console.error("Error al cargar los datos:", error);
           toast({
             title: "Error",
-            description: "No se pudieron cargar los datos.",
+            description: error.response?.data?.detail || "No se pudieron cargar los datos de colecciones o workspaces.",
             variant: "destructive",
           });
         }
