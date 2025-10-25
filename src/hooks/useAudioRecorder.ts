@@ -63,7 +63,7 @@ export const useAudioRecorder = (): AudioRecorderHook => {
       console.log('DEBUG WS Transcribe Frontend: authToken from localStorage:', token ? token.substring(0, 30) + '...' : 'No token');
       // --- FIN DE LOS CONSOLE.LOG AÑADIDOS ---
 
-      const wsUrl = `${wsProtocol}://${wsHost}/ws-transcribe/${user.id}?token=${encodeURIComponent(token)}`; // Añadir el token a la URL
+      const wsUrl = `${wsProtocol}://${wsHost}/ws/transcribe/${user.id}?token=${encodeURIComponent(token)}`; // Añadir el token a la URL
       console.log('DEBUG WS Transcribe Frontend: Constructed WebSocket URL:', wsUrl); // Añadir log de la URL completa
       wsRef.current = new WebSocket(wsUrl);
 

@@ -133,7 +133,7 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-@app.websocket("/ws/chat/{user_id}")
+@app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
     """Endpoint para manejar conexiones WebSocket con autenticación."""
     token = websocket.query_params.get('token')

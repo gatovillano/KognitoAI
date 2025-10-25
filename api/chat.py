@@ -653,7 +653,7 @@ async def create_and_run_agent_streaming(
             "message": str(e)
         })
 
-@router.websocket("/ws-transcribe/{account_id}")
+@router.websocket("/ws/transcribe/{account_id}")
 async def websocket_transcribe(websocket: WebSocket, account_id: str):
     logger.debug(f"DEBUG: Entrando a websocket_transcribe para account_id: {account_id}")
     await websocket.accept() # Aceptar la conexión primero para poder enviar mensajes de error
