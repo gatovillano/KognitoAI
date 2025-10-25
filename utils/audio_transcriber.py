@@ -2,15 +2,17 @@
 
 import logging
 import asyncio
+import functools
 from typing import Optional
 from io import BytesIO
 from pydub import AudioSegment # Importar pydub
+import os # Importar os para manejar archivos temporales
 
 from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
 
-WHISPER_MODEL_SIZE = "medium"
+WHISPER_MODEL_SIZE = "small"
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"
 _whisper_model: Optional[WhisperModel] = None
@@ -84,103 +86,206 @@ async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> Option
         return None
 
 import numpy as np
+
 import collections
 
+import subprocess
+
+import tempfile # Necesario para NamedTemporaryFile si se decide usarlo para debugging o alternativas
+
+from fastapi import WebSocket, WebSocketDisconnect
+
+
+
 class StreamingTranscriber:
-    def __init__(self, model: WhisperModel, language: str = "es", chunk_length_s: float = 1.0):
+
+    """
+
+    Gestiona la transcripción de audio en tiempo real utilizando un proceso ffmpeg persistente
+
+    y un modelo de Whisper, ejecutando las tareas de forma asíncrona.
+
+    """
+
+    def __init__(self, model: WhisperModel, language: str = "es", chunk_length_s: int = 5):
+
         self.model = model
+
         self.language = language
+
         self.chunk_length_s = chunk_length_s
-        self.audio_buffer = collections.deque()
-        self.buffer_duration = 0.0
-        self.sample_rate = 16000 # Whisper models expect 16kHz audio
+
+        self.sample_rate = 16000
+
         self.vad_parameters = dict(min_silence_duration_ms=500)
-        self.current_segments = []
-        self.last_transcript_length = 0
 
-    def _resample_audio(self, audio_data: np.ndarray, original_sample_rate: int) -> np.ndarray:
-        """Resample audio to 16kHz if necessary."""
-        if original_sample_rate == self.sample_rate:
-            return audio_data
+        self.pcm_buffer = bytearray()
+
+
+
+    async def _feed_ffmpeg(self, websocket: WebSocket, ffmpeg_process: asyncio.subprocess.Process):
+
+        """Lee audio del WebSocket y lo escribe en el stdin de ffmpeg."""
+
+        while True:
+
+            try:
+
+                audio_chunk = await websocket.receive_bytes()
+
+                if ffmpeg_process.stdin.is_closing():
+
+                    break
+
+                ffmpeg_process.stdin.write(audio_chunk)
+
+                await ffmpeg_process.stdin.drain()
+
+            except (WebSocketDisconnect, asyncio.CancelledError):
+
+                logger.info("Se detiene la alimentación a ffmpeg por desconexión o cancelación.")
+
+                break
+
+            except Exception as e:
+
+                logger.error(f"Error leyendo desde el websocket: {e}")
+
+                break
+
         
-        # Using a simple resampling for now, a more robust solution might use librosa or torchaudio
-        # For simplicity, we'll just log a warning if not 16kHz and hope for the best or raise an error
-        logger.warning(f"Audio original sample rate {original_sample_rate} != {self.sample_rate}. Resampling might be needed.")
-        # Placeholder for actual resampling logic if needed.
-        # For now, we assume the client sends 16kHz or Whisper handles it.
-        return audio_data
-
-    async def process_audio_chunk(self, audio_chunk_bytes: bytes, file_format: str) -> Optional[str]:
-        """
-        Procesa un fragmento de audio, lo añade al buffer y devuelve una transcripción parcial si hay suficiente audio.
-        """
-        try:
-            # Convertir el chunk a AudioSegment
-            audio_segment = AudioSegment.from_file(BytesIO(audio_chunk_bytes), format=file_format)
-            
-            # Convertir a numpy array y resamplear si es necesario
-            # Whisper espera audio en formato float32 y 16kHz
-            audio_np = np.frombuffer(audio_segment.raw_data, dtype=np.int16).astype(np.float32) / 32768.0
-            audio_np = self._resample_audio(audio_np, audio_segment.frame_rate)
-
-            self.audio_buffer.append(audio_np)
-            self.buffer_duration += audio_segment.duration_seconds
-
-            current_transcript = ""
-            
-            # Si tenemos suficiente audio en el buffer, intentar transcribir
-            if self.buffer_duration >= self.chunk_length_s:
-                # Concatenar el buffer
-                full_audio = np.concatenate(list(self.audio_buffer))
-                
-                # Transcribir el audio acumulado
-                segments, info = self.model.transcribe(
-                    full_audio,
-                    language=self.language,
-                    vad_filter=True,
-                    vad_parameters=self.vad_parameters
-                )
-                
-                new_segments = [s.text for s in segments]
-                
-                # Comparar con la última transcripción para encontrar lo nuevo
-                current_transcript = " ".join(new_segments).strip()
-                
-                if len(current_transcript) > self.last_transcript_length:
-                    new_text = current_transcript[self.last_transcript_length:].strip()
-                    self.last_transcript_length = len(current_transcript)
-                    return new_text
-                
-                # Limpiar el buffer si ya se ha procesado
-                self.audio_buffer.clear()
-                self.buffer_duration = 0.0
-
-            return None
-
-        except Exception as e:
-            logger.error(f"Error procesando chunk de audio en streaming: {e}", exc_info=True)
-            return None
-
-    async def finalize_transcription(self) -> Optional[str]:
-        """
-        Procesa cualquier audio restante en el buffer y devuelve la transcripción final.
-        """
-        if not self.audio_buffer:
-            return None
 
         try:
-            full_audio = np.concatenate(list(self.audio_buffer))
-            segments, info = self.model.transcribe(
-                full_audio,
-                language=self.language,
-                vad_filter=True,
-                vad_parameters=self.vad_parameters
-            )
-            final_text = " ".join([s.text for s in segments]).strip()
-            self.audio_buffer.clear()
-            self.buffer_duration = 0.0
-            self.last_transcript_length = 0
-            return final_text
+
+            if not ffmpeg_process.stdin.is_closing():
+
+                ffmpeg_process.stdin.close()
+
         except Exception as e:
-            logger.error(f"Error finalizando transcripción en streaming: {e}", exc_info=True)
-            return None
+
+            logger.warning(f"Error cerrando stdin de ffmpeg: {e}")
+
+
+
+    async def _process_pcm_and_transcribe(self, websocket: WebSocket, ffmpeg_process: asyncio.subprocess.Process):
+
+        """Lee audio PCM de ffmpeg, lo acumula y lo transcribe en trozos."""
+
+        bytes_per_sample = 2  # 16-bit PCM
+
+        chunk_size_bytes = self.chunk_length_s * self.sample_rate * bytes_per_sample
+
+
+
+        while True:
+
+            try:
+
+                # Leer 1 segundo de audio PCM a la vez para mantener la responsividad
+
+                pcm_chunk = await ffmpeg_process.stdout.read(self.sample_rate * bytes_per_sample)
+
+                if not pcm_chunk:
+
+                    break  # ffmpeg cerró su salida
+
+
+
+                self.pcm_buffer.extend(pcm_chunk)
+
+
+
+                if len(self.pcm_buffer) >= chunk_size_bytes:
+
+                    buffer_to_process = self.pcm_buffer
+
+                    self.pcm_buffer = bytearray()  # Limpiar para el siguiente trozo
+
+
+
+                    audio_np = np.frombuffer(buffer_to_process, dtype=np.int16).astype(np.float32) / 32768.0
+
+
+
+                    loop = asyncio.get_running_loop()
+
+                    transcribe_func = functools.partial(
+
+                        self.model.transcribe,
+
+                        audio_np,
+
+                        language=self.language,
+
+                        vad_filter=True,
+
+                        vad_parameters=self.vad_parameters
+
+                    )
+
+                    segments, _ = await loop.run_in_executor(None, transcribe_func)
+
+                    
+
+                    transcript = " ".join([s.text for s in segments]).strip()
+
+
+
+                    if transcript:
+
+                        await websocket.send_json({"type": "transcript_chunk", "text": transcript + " "})
+
+
+
+            except (asyncio.CancelledError, WebSocketDisconnect):
+
+                logger.info("Se detiene la transcripción por cancelación o desconexión.")
+
+                break
+
+            except Exception as e:
+
+                logger.error(f"Error procesando audio PCM: {e}", exc_info=True)
+
+                break
+
+
+
+    async def start_transcription_session(self, websocket: WebSocket, input_format: str = "webm"):
+        """Inicia y gestiona la sesión completa de transcripción."""
+        command = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            "-f", input_format, "-i", "pipe:0",
+            "-f", "s16le", "-acodec", "pcm_s16le",
+            "-ac", "1", "-ar", str(self.sample_rate),
+            "pipe:1"
+        ]
+
+        ffmpeg_process = await asyncio.create_subprocess_exec(
+            *command,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        logger.info(f"Proceso ffmpeg iniciado con PID: {ffmpeg_process.pid}")
+
+        feed_task = asyncio.create_task(self._feed_ffmpeg(websocket, ffmpeg_process))
+        transcribe_task = asyncio.create_task(self._process_pcm_and_transcribe(websocket, ffmpeg_process))
+
+        done, pending = await asyncio.wait(
+            [feed_task, transcribe_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        for task in pending:
+            task.cancel()
+        
+        if ffmpeg_process.returncode is None:
+            ffmpeg_process.terminate()
+            await ffmpeg_process.wait()
+
+        stderr = await ffmpeg_process.stderr.read()
+        if stderr:
+            logger.error(f"ffmpeg stderr: {stderr.decode(errors='ignore')}")
+            
+        logger.info("Sesión de transcripción finalizada.")
