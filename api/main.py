@@ -160,6 +160,7 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
         return
 
     account_id = user_id
+    await websocket.accept() # Aceptar la conexión WebSocket
     await websocket_manager.connect(websocket, account_id)
     try:
         while True:
