@@ -8,9 +8,9 @@ from langchain_core.tools import BaseTool, Tool # Importar Tool
 from tools.ddg_search_tool import create_ddg_search_tool # Importar la función de fábrica
 from tools.add_web_to_rag_tool import AddWebToRAGTool # Tu herramienta para añadir a RAG
 
-try:
-    from external_agents.open_deep_research.src.open_deep_research.deep_researcher import DeepResearcher
-    from external_agents.open_deep_research.src.open_deep_research.configuration import ResearchConfig
+try: # Importar DeepResearcher y ResearchConfig
+    from external_agents.open_deep_research.src.open_deep_research.deep_researcher import DeepResearcher # Importar DeepResearcher
+    from external_agents.open_deep_research.src.open_deep_research.configuration import ResearchConfig # Importar ResearchConfig
 except ImportError as e:
     logging.error(f"Error importing DeepResearcher: {e}. Make sure the open_deep_research module is correctly placed.")
     traceback.print_exc() # Imprimir el stack trace completo
