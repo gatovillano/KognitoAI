@@ -33,6 +33,30 @@ class CogneeKnowledgeGraphToolInput(BaseModel):
         "default",
         description="Nombre del dataset para el procesamiento o la consulta (opcional, por defecto 'default')."
     )
+    relationship_types: Optional[List[str]] = Field(
+        None,
+        description="Lista de tipos de relaciones a explorar (ej. 'MARCOS_TEORICOS_AFINES', 'FUNDAMENTACION_TEORICA'). Solo para 'search_graph' o 'get_insights'."
+    )
+    source_concept: Optional[str] = Field(
+        None,
+        description="Concepto de inicio para buscar caminos o relaciones específicas. Solo para 'search_graph' o 'get_insights'."
+    )
+    target_concept: Optional[str] = Field(
+        None,
+        description="Concepto de destino para buscar caminos o relaciones específicas. Solo para 'search_graph' o 'get_insights'."
+    )
+    max_hops: Optional[int] = Field(
+        None,
+        description="Número máximo de saltos (relaciones) para buscar caminos entre conceptos. Solo para 'search_graph' o 'get_insights'."
+    )
+    pattern_description: Optional[str] = Field(
+        None,
+        description="Descripción en lenguaje natural de un patrón de grafo a buscar (ej. 'conceptos que fundamentan teóricamente a X'). Solo para 'get_insights'."
+    )
+    return_type: Optional[Literal["nodes", "relationships", "paths", "summary"]] = Field(
+        "summary",
+        description="Formato de los resultados: 'nodes' (solo nodos), 'relaciones' (solo relaciones), 'paths' (caminos entre conceptos), 'summary' (resumen en lenguaje natural)."
+    )
 
 class CogneeKnowledgeGraphTool(BaseTool):
     """Herramienta para crear y consultar grafos de conocimiento usando Cognee."""
@@ -92,6 +116,12 @@ class CogneeKnowledgeGraphTool(BaseTool):
         documents: Optional[List[Dict[str, Any]]] = None,
         query: Optional[str] = None,
         dataset_name: str = "default",
+        relationship_types: Optional[List[str]] = None,
+        source_concept: Optional[str] = None,
+        target_concept: Optional[str] = None,
+        max_hops: Optional[int] = None,
+        pattern_description: Optional[str] = None,
+        return_type: Optional[Literal["nodes", "relationships", "paths", "summary"]] = "summary",
         run_manager: Optional[Any] = None,
         **kwargs # Para capturar cualquier otro kwarg que pueda venir
     ) -> str:
@@ -114,7 +144,7 @@ class CogneeKnowledgeGraphTool(BaseTool):
             })
         
         try:
-            logger.debug(f"CogneeKnowledgeGraphTool._arun - action received: '{action}', documents: {documents}, query: {query}, dataset_name: {dataset_name}")
+            logger.debug(f"CogneeKnowledgeGraphTool._arun - action received: '{action}', documents: {documents}, query: {query}, dataset_name: {dataset_name}, relationship_types: {relationship_types}, source_concept: {source_concept}, target_concept: {target_concept}, max_hops: {max_hops}, pattern_description: {pattern_description}, return_type: {return_type}")
             # Asegurarse de que dataset_name no sea None
             actual_dataset_name = dataset_name if dataset_name is not None else "default"
             
@@ -156,13 +186,18 @@ class CogneeKnowledgeGraphTool(BaseTool):
 Puedes usar 'search_graph' para buscar información específica."""
             
             elif action == "search_graph":
-                if not query:
-                    return "❌ Error: Se requiere una consulta para buscar"
+                if not query and not (source_concept and target_concept):
+                    return "❌ Error: Se requiere una consulta (query) o un concepto de origen y destino para buscar caminos o relaciones específicas en el grafo."
                 
                 logger.info(f"🔍 Buscando en el grafo: {query} en dataset: {dataset_name_with_account}")
                 result = await cognee_integration.search_knowledge_graph(
                     query=query,
-                    dataset_name=dataset_name_with_account
+                    dataset_name=dataset_name_with_account,
+                    relationship_types=relationship_types,
+                    source_concept=source_concept,
+                    target_concept=target_concept,
+                    max_hops=max_hops,
+                    return_type=return_type
                 )
                 
                 results = result.get('results', [])
@@ -186,29 +221,35 @@ Puedes usar 'search_graph' para buscar información específica."""
 ✅ **Resultados encontrados:** {len(results)}
 
 📝 **Información relevante:**
-{self._format_search_results(results)}
+{self._format_search_results(results, return_type)}
 
 🧠 **Estado:** {result.get('status', 'completado')}
 ⚡ **Método:** {result.get('method', 'cognee')}"""
             
             elif action == "get_insights":
-                if not query:
-                    return "❌ Error: Se requiere una consulta para obtener insights"
+                if not query and not pattern_description:
+                    return "❌ Error: Se requiere una consulta (query) o una descripción de patrón para obtener insights."
                 
                 # Para insights, usamos la búsqueda pero con un enfoque más analítico
                 logger.info(f"💡 Obteniendo insights para: {query} en dataset: {dataset_name_with_account}")
                 result = await cognee_integration.search_knowledge_graph(
-                    query=f"insights and patterns about: {query}",
-                    dataset_name=dataset_name_with_account
+                    query=f"insights and patterns about: {query}" if query else None,
+                    dataset_name=dataset_name_with_account,
+                    relationship_types=relationship_types,
+                    source_concept=source_concept,
+                    target_concept=target_concept,
+                    max_hops=max_hops,
+                    pattern_description=pattern_description,
+                    return_type=return_type
                 )
                 
                 return f"""💡 **Insights del grafo de conocimiento**
 
-🎯 **Tema analizado:** {query}
+🎯 **Tema analizado:** {query if query else pattern_description}
 📊 **Dataset:** {dataset_name}
 
 🔗 **Patrones y conexiones encontradas:**
-{self._format_insights(result.get('results', []))}
+{self._format_insights(result.get('results', []), return_type)}
 
 📈 **Estado del análisis:** {result.get('status', 'completado')}"""
             
@@ -219,38 +260,117 @@ Puedes usar 'search_graph' para buscar información específica."""
             logger.error(f"❌ Error en CogneeKnowledgeGraphTool: {e}")
             return f"❌ Error al ejecutar la herramienta: {str(e)}"
     
-    def _run(self, action: Literal["process_documents", "search_graph", "get_insights"], documents: Optional[List[Dict[str, Any]]] = None, query: Optional[str] = None, dataset_name: str = "default", **kwargs) -> str:
+    def _run(
+        self,
+        action: Literal["process_documents", "search_graph", "get_insights"],
+        documents: Optional[List[Dict[str, Any]]] = None,
+        query: Optional[str] = None,
+        dataset_name: str = "default",
+        relationship_types: Optional[List[str]] = None,
+        source_concept: Optional[str] = None,
+        target_concept: Optional[str] = None,
+        max_hops: Optional[int] = None,
+        pattern_description: Optional[str] = None,
+        return_type: Optional[Literal["nodes", "relationships", "paths", "summary"]] = "summary",
+        **kwargs
+    ) -> str:
         """Ejecuta la herramienta de forma síncrona."""
-        return asyncio.run(self._arun(action=action, documents=documents, query=query, dataset_name=dataset_name, **kwargs))
+        return asyncio.run(self._arun(
+            action=action,
+            documents=documents,
+            query=query,
+            dataset_name=dataset_name,
+            relationship_types=relationship_types,
+            source_concept=source_concept,
+            target_concept=target_concept,
+            max_hops=max_hops,
+            pattern_description=pattern_description,
+            return_type=return_type,
+            **kwargs
+        ))
     
-    def _format_search_results(self, results: List[Any]) -> str:
+    def _format_search_results(self, results: List[Any], return_type: str = "summary") -> str:
         """Formatea los resultados de búsqueda."""
         if not results:
             return "No se encontraron resultados específicos."
         
         formatted = []
-        for i, result in enumerate(results[:5], 1):  # Limitar a 5 resultados
-            if isinstance(result, dict):
-                content = result.get('content', str(result))
-                formatted.append(f"{i}. {content}")
-            else:
-                formatted.append(f"{i}. {str(result)}")
+        if return_type == "nodes":
+            for i, result in enumerate(results[:5], 1):
+                if isinstance(result, dict) and "properties" in result:
+                    formatted.append(f"{i}. Nodo: {result.get('labels', [''])[0]} - {result['properties'].get('name', result['properties'].get('text', str(result)))}")
+                else:
+                    formatted.append(f"{i}. {str(result)}")
+        elif return_type == "relationships":
+            for i, result in enumerate(results[:5], 1):
+                if isinstance(result, dict) and "type" in result:
+                    start_node = result.get('start_node', {}).get('properties', {}).get('name', '')
+                    end_node = result.get('end_node', {}).get('properties', {}).get('name', '')
+                    formatted.append(f"{i}. Relación: {start_node} -[{result['type']}]-> {end_node}")
+                else:
+                    formatted.append(f"{i}. {str(result)}")
+        elif return_type == "paths":
+            for i, path in enumerate(results[:3], 1): # Limitar a 3 caminos para no ser demasiado verboso
+                path_str = []
+                for item in path:
+                    if isinstance(item, dict):
+                        if "properties" in item: # Es un nodo
+                            path_str.append(item['properties'].get('name', item['properties'].get('text', '')))
+                        elif "type" in item: # Es una relación
+                            path_str.append(f"-[{item['type']}]->")
+                    else:
+                        path_str.append(str(item))
+                formatted.append(f"{i}. {' '.join(path_str)}")
+        else: # summary o cualquier otro caso
+            for i, result in enumerate(results[:5], 1):  # Limitar a 5 resultados
+                if isinstance(result, dict):
+                    content = result.get('content', str(result))
+                    formatted.append(f"{i}. {content}")
+                else:
+                    formatted.append(f"{i}. {str(result)}")
         
         return "\n".join(formatted)
     
-    def _format_insights(self, results: List[Any]) -> str:
+    def _format_insights(self, results: List[Any], return_type: str = "summary") -> str:
         """Formatea los insights obtenidos."""
         if not results:
             return "No se encontraron patrones específicos en el grafo actual."
         
         # Para insights, intentamos extraer información más estructurada
         insights = []
-        for result in results:
-            if isinstance(result, dict):
-                insight = result.get('insight', result.get('content', str(result)))
-                insights.append(f"• {insight}")
-            else:
-                insights.append(f"• {str(result)}")
+        if return_type == "nodes":
+            for result in results:
+                if isinstance(result, dict) and "properties" in result:
+                    insights.append(f"• Nodo: {result.get('labels', [''])[0]} - {result['properties'].get('name', result['properties'].get('text', str(result)))}")
+                else:
+                    insights.append(f"• {str(result)}")
+        elif return_type == "relationships":
+            for result in results:
+                if isinstance(result, dict) and "type" in result:
+                    start_node = result.get('start_node', {}).get('properties', {}).get('name', '')
+                    end_node = result.get('end_node', {}).get('properties', {}).get('name', '')
+                    insights.append(f"• Relación: {start_node} -[{result['type']}]-> {end_node}")
+                else:
+                    insights.append(f"• {str(result)}")
+        elif return_type == "paths":
+            for path in results[:3]:
+                path_str = []
+                for item in path:
+                    if isinstance(item, dict):
+                        if "properties" in item:
+                            path_str.append(item['properties'].get('name', item['properties'].get('text', '')))
+                        elif "type" in item:
+                            path_str.append(f"-[{item['type']}]->")
+                    else:
+                        path_str.append(str(item))
+                insights.append(f"• {' '.join(path_str)}")
+        else: # summary o cualquier otro caso
+            for result in results:
+                if isinstance(result, dict):
+                    insight = result.get('insight', result.get('content', str(result)))
+                    insights.append(f"• {insight}")
+                else:
+                    insights.append(f"• {str(result)}")
         
         return "\n".join(insights[:10])  # Limitar a 10 insights
     
