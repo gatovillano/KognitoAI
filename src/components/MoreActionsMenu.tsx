@@ -3,16 +3,25 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Plus, Search, Lightbulb, BrainCircuit, Upload, Mic, Loader2, Image as ImageIcon } from 'lucide-react';
+import { ToolSwitch } from './ToolSwitch'; // Importar el nuevo componente ToolSwitch
 
 interface MoreActionsMenuProps {
   isWebSearchActive: boolean;
   isComprehensiveAnalysisActive: boolean;
   isDeepResearchActive: boolean;
+  isKnowledgeAnalysisForced: boolean;
+  isWebSearchForced: boolean;
+  isComprehensiveAnalysisForced: boolean;
+  isDeepResearchForced: boolean;
   isUploadingFile: boolean;
   isUploadingImage?: boolean;
   onToggleWebSearch: () => void;
   onToggleComprehensiveAnalysis: () => void;
   onToggleDeepResearch: () => void;
+  onToggleKnowledgeAnalysisForced: () => void;
+  onToggleWebSearchForced: () => void;
+  onToggleComprehensiveAnalysisForced: () => void;
+  onToggleDeepResearchForced: () => void;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
@@ -21,11 +30,19 @@ export function MoreActionsMenu({
   isWebSearchActive,
   isComprehensiveAnalysisActive,
   isDeepResearchActive,
+  isKnowledgeAnalysisForced,
+  isWebSearchForced,
+  isComprehensiveAnalysisForced,
+  isDeepResearchForced,
   isUploadingFile,
   isUploadingImage,
   onToggleWebSearch,
   onToggleComprehensiveAnalysis,
   onToggleDeepResearch,
+  onToggleKnowledgeAnalysisForced,
+  onToggleWebSearchForced,
+  onToggleComprehensiveAnalysisForced,
+  onToggleDeepResearchForced,
   onFileUpload,
   onImageUpload,
 }: MoreActionsMenuProps) {
@@ -40,14 +57,32 @@ export function MoreActionsMenu({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
           {/* Mode Buttons */}
-          <DropdownMenuItem onClick={onToggleWebSearch}>
-            <Search className="mr-2 h-4 w-4" /> Búsqueda Web {isWebSearchActive && '✅'}
+          <DropdownMenuItem onClick={onToggleWebSearch} className="flex justify-between items-center">
+            <div className="flex items-center">
+              <Search className="mr-2 h-4 w-4" /> Búsqueda Web {isWebSearchActive && '✅'}
+            </div>
+            <ToolSwitch
+              checked={isWebSearchForced}
+              onCheckedChange={onToggleWebSearchForced}
+            />
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={onToggleComprehensiveAnalysis}>
-            <Lightbulb className="mr-2 h-4 w-4" /> Búsqueda Analítica {isComprehensiveAnalysisActive && '✅'}
+          <DropdownMenuItem onClick={onToggleComprehensiveAnalysis} className="flex justify-between items-center">
+            <div className="flex items-center">
+              <Lightbulb className="mr-2 h-4 w-4" /> Búsqueda Analítica {isComprehensiveAnalysisActive && '✅'}
+            </div>
+            <ToolSwitch
+              checked={isComprehensiveAnalysisForced}
+              onCheckedChange={onToggleComprehensiveAnalysisForced}
+            />
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={onToggleDeepResearch}>
-            <BrainCircuit className="mr-2 h-4 w-4" /> Investigación Profunda {isDeepResearchActive && '✅'}
+          <DropdownMenuItem onClick={onToggleDeepResearch} className="flex justify-between items-center">
+            <div className="flex items-center">
+              <BrainCircuit className="mr-2 h-4 w-4" /> Investigación Profunda {isDeepResearchActive && '✅'}
+            </div>
+            <ToolSwitch
+              checked={isDeepResearchForced}
+              onCheckedChange={onToggleDeepResearchForced}
+            />
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {/* Action Buttons */}
