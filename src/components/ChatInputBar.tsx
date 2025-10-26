@@ -35,8 +35,8 @@ interface ChatInputBarProps {
   isKnowledgeAnalysisActive: boolean;
   isWebSearchActive: boolean;
   isComprehensiveAnalysisActive: boolean;
-  isDeepResearchActive: boolean; // Nueva prop
-  selectedToolName?: string; // Nueva prop para forzar la ejecución de una herramienta
+  isDeepResearchActive: boolean;
+  selectedToolName?: string;
   messages?: ChatMessage[];
   onMessageChange: (value: string) => void;
   setNewMessage: (value: string) => void;
@@ -45,7 +45,7 @@ interface ChatInputBarProps {
   onToggleKnowledgeAnalysis?: () => void;
   onToggleWebSearch?: () => void;
   onToggleComprehensiveAnalysis?: () => void;
-  onToggleDeepResearch?: () => void; // Nueva prop
+  onToggleDeepResearch?: () => void;
   onStartRecording?: () => void;
   onStopRecording?: () => void;
   onFileUpload?: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -99,10 +99,30 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const [isNoteSelectorOpen, setIsNoteSelectorOpen] = useState(false);
   const [inputValue, setInputValue] = useState(newMessage);
+  const [isKnowledgeAnalysisForcedState, setIsKnowledgeAnalysisForcedState] = useState(false);
+  const [isWebSearchForcedState, setIsWebSearchForcedState] = useState(false);
+  const [isComprehensiveAnalysisForcedState, setIsComprehensiveAnalysisForcedState] = useState(false);
+  const [isDeepResearchForcedState, setIsDeepResearchForcedState] = useState(false);
 
   useEffect(() => {
     setInputValue(newMessage);
   }, [newMessage]);
+
+  const onToggleKnowledgeAnalysisForced = useCallback(() => {
+    setIsKnowledgeAnalysisForcedState(prev => !prev);
+  }, []);
+
+  const onToggleWebSearchForced = useCallback(() => {
+    setIsWebSearchForcedState(prev => !prev);
+  }, []);
+
+  const onToggleComprehensiveAnalysisForced = useCallback(() => {
+    setIsComprehensiveAnalysisForcedState(prev => !prev);
+  }, []);
+
+  const onToggleDeepResearchForced = useCallback(() => {
+    setIsDeepResearchForcedState(prev => !prev);
+  }, []);
 
   const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(e.target.value);
@@ -112,14 +132,34 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     let messageText = newMessage;
+    let forcedTool = '';
 
-    if (selectedToolName) {
+    if (isWebSearchForcedState) {
+      forcedTool = 'web_search_tool';
+    } else if (isComprehensiveAnalysisForcedState) {
+      forcedTool = 'comprehensive_analysis_tool';
+    } else if (isDeepResearchForcedState) {
+      forcedTool = 'deep_research_tool';
+    }
+
+    if (forcedTool) {
+      messageText = `[USE_TOOL:${forcedTool}] ${newMessage}`;
+    } else if (selectedToolName) {
       messageText = `[USE_TOOL:${selectedToolName}] ${newMessage}`;
     }
 
     onSendMessage(e, messageText);
     onMessageChange('');
-  }, [newMessage, selectedToolName, currentContext, onSendMessage, onMessageChange]);
+  }, [
+    newMessage,
+    selectedToolName,
+    currentContext,
+    onSendMessage,
+    onMessageChange,
+    isWebSearchForcedState,
+    isComprehensiveAnalysisForcedState,
+    isDeepResearchForcedState,
+  ]);
 
   const handleAttachNote = useCallback((note: { title?: string; content: string }) => {
     const noteText = note.title ? `Nota: ${note.title}\n${note.content}` : `Nota: ${note.content}`;
@@ -240,6 +280,14 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                   onToggleWebSearch={onToggleWebSearch}
                   onToggleComprehensiveAnalysis={onToggleComprehensiveAnalysis}
                   onToggleDeepResearch={onToggleDeepResearch}
+                  isKnowledgeAnalysisForced={isKnowledgeAnalysisForcedState}
+                  isWebSearchForced={isWebSearchForcedState}
+                  isComprehensiveAnalysisForced={isComprehensiveAnalysisForcedState}
+                  isDeepResearchForced={isDeepResearchForcedState}
+                  onToggleKnowledgeAnalysisForced={onToggleKnowledgeAnalysisForced}
+                  onToggleWebSearchForced={onToggleWebSearchForced}
+                  onToggleComprehensiveAnalysisForced={onToggleComprehensiveAnalysisForced}
+                  onToggleDeepResearchForced={onToggleDeepResearchForced}
                   onFileUpload={onFileUpload}
                   onImageUpload={onImageUpload}
                 />
