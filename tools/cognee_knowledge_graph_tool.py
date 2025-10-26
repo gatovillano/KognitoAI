@@ -59,22 +59,20 @@ class CogneeKnowledgeGraphToolInput(BaseModel):
     )
 
 class CogneeKnowledgeGraphTool(BaseTool):
-    """Herramienta para crear y consultar grafos de conocimiento usando Cognee."""
-    
     name: str = "cognee_knowledge_graph"
-    description: str = """
-    Crea y consulta grafos de conocimiento usando Cognee. Puede:
-    - Procesar documentos para extraer entidades y relaciones
-    - Buscar información en el grafo de conocimiento
-    - Obtener insights y conexiones semánticas
-    
-    Acciones disponibles:
-    - process_documents: Procesa documentos y crea el grafo
-    - search_graph: Busca información específica en el grafo
-    - get_insights: Obtiene insights y patrones del grafo
-    
-    El 'account_id' se inyecta automáticamente en la herramienta y NO debe ser proporcionado por el LLM en el `tool_input`.
-    """
+    description: str = (
+        "Una herramienta para interactuar con el grafo de conocimiento de Cognee. "
+        "Permite procesar documentos para extraer y almacenar conocimiento, "
+        "buscar información específica en el grafo, y obtener insights o patrones. "
+        "Además de la búsqueda por texto, ahora soporta consultas avanzadas especificando: "
+        "- `relationship_types`: Tipos de relaciones a explorar (ej. 'FUNDAMENTACION_TEORICA'). "
+        "- `source_concept`: Concepto de inicio para búsquedas relacionales. "
+        "- `target_concept`: Concepto de destino para búsquedas relacionales. "
+        "- `max_hops`: Número máximo de saltos entre conceptos para encontrar caminos. "
+        "- `pattern_description`: Descripción en lenguaje natural de un patrón de grafo a buscar. "
+        "- `return_type`: Formato de los resultados ('nodes', 'relationships', 'paths', 'summary'). "
+        "Siempre se debe especificar un `dataset_name` para aislar la información."
+    )
     
     args_schema: Type[BaseModel] = CogneeKnowledgeGraphToolInput
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")

@@ -527,22 +527,10 @@ class CogneeIntegration:
         pattern_description: Optional[str] = None,
         return_type: Optional[Literal["nodes", "relationships", "paths", "summary"]] = "summary"
     ) -> Dict[str, Any]:
-        """
-        Busca en el grafo de conocimiento usando una búsqueda full-text o una búsqueda relacional avanzada.
+        # ... (código de cognee_available y try-except)
 
-        Args:
-            query: Consulta de búsqueda (para full-text).
-            dataset_name: Nombre del dataset.
-            relationship_types: Tipos de relaciones a buscar.
-            source_concept: Concepto de origen para búsqueda de caminos.
-            target_concept: Concepto de destino para búsqueda de caminos.
-            max_hops: Máximo de saltos en la búsqueda de caminos.
-            pattern_description: Descripción en lenguaje natural de un patrón a buscar (futuro uso).
-            return_type: Formato de los resultados ('nodes', 'relationships', 'paths', 'summary').
-
-        Returns:
-            Resultados de la búsqueda.
-        """
+        # 1. Lógica para Búsquedas Relacionales y de Caminos (si se especifican parámetros estructurados)
+        # ESTA ES LA PRIORIDAD MÁS ALTA SI EL LLM YA HA ESTRUCTURADO LA CONSULTA.
         if not self.cognee_available:
             return {
                 "query": query, "dataset_name": dataset_name, "results": [],
@@ -551,12 +539,14 @@ class CogneeIntegration:
             }
 
         try:
-            # Lógica de búsqueda relacional y de caminos
             if source_concept or target_concept or relationship_types or max_hops:
+                logger.info(f"🧠 Ejecutando búsqueda relacional/de caminos con: source={source_concept}, target={target_concept}, rels={relationship_types}, hops={max_hops}")
+                
+                # --- Construcción dinámica de la consulta Cypher para paths ---
+                # (Tu código existente aquí, que está bien)
                 parts = []
                 params = {"dataset_name": dataset_name}
 
-                # Construcción dinámica de la consulta Cypher
                 source_match = f"(s {{name: $source_concept, dataset_name: $dataset_name}})" if source_concept else "(s)"
                 target_match = f"(t {{name: $target_concept, dataset_name: $dataset_name}})" if target_concept else "(t)"
                 
@@ -569,7 +559,8 @@ class CogneeIntegration:
                 if relationship_types:
                     rel_spec = ":" + "|".join(relationship_types)
                 
-                hop_spec = f"*1..{max_hops}" if max_hops else "*"
+                # Ajustar hop_spec para el caso de max_hops=1 o ilimitado si no se da
+                hop_spec = f"*{1 if max_hops == 1 else ''}..{max_hops}" if max_hops else "*"
 
                 cypher_query = f"MATCH path = {source_match}-[{rel_spec}{hop_spec}]-{target_match} "
                 
@@ -585,38 +576,133 @@ class CogneeIntegration:
                     "query": f"Advanced search: source={source_concept}, target={target_concept}, rels={relationship_types}, hops={max_hops}",
                     "dataset_name": dataset_name,
                     "results": formatted_results,
-                    "status": "search_completed",
+                    "status": "search_completed_advanced_graph",
                     "method": "advanced_cypher",
                     "searched_at": datetime.now().isoformat()
                 }
 
-            # Lógica de búsqueda full-text existente
-            if "tematicas" in query.lower() or "insights" in query.lower() or "patrones" in query.lower():
-                search_results = {}
-                # ... (código de insights sin cambios)
-            else:
+            # 2. Lógica para Búsqueda de Patrones Específicos usando pattern_description (NUEVA PRIORIDAD)
+            # Esto intenta ser más inteligente que solo full-text si hay una descripción de patrón.
+            if pattern_description:
+                logger.info(f"🔍 Ejecutando búsqueda de patrón específica con: {pattern_description}")
+                
+                # --- Intento de traducir pattern_description a Cypher (simplificado) ---
+                # Esto es un placeholder y el punto más complejo.
+                # Aquí la idea es que un LLM interno o una lógica de NLP avanzada
+                # convierta "conceptos y relaciones que describen desafíos de la IA"
+                # en un patrón Cypher como:
+                # MATCH (n:CONCEPTUAL_QUOTE)-[r]->(m:CONCEPTUAL_QUOTE)
+                # WHERE n.description CONTAINS 'desafíos' AND r.type = 'DESAFIO_DE'
+                # (Esto es muy difícil de hacer de forma genérica sin un LLM interno)
+                
+                # POR AHORA, usaremos una búsqueda full-text mejorada que devuelva los nodos/rels
+                # directamente, y no solo conteos.
+
+                # La query para full-text ahora incluye el pattern_description para ser más específico
+                search_text_for_pattern = f"{query} {pattern_description}" if query else pattern_description
+
                 cypher_query = """
-                CALL db.index.fulltext.queryNodes('node_fulltext_index', $query) YIELD node AS n, score
+                CALL db.index.fulltext.queryNodes('node_fulltext_index', $search_text_for_pattern) YIELD node AS n, score AS nodeScore
                 WHERE n.dataset_name = $dataset_name
-                WITH n, score
+                WITH n, nodeScore
                 OPTIONAL MATCH (n)-[r]-(m)
-                RETURN DISTINCT n, r, m, score
+                RETURN DISTINCT n, r, m, nodeScore AS score
                 UNION ALL
-                CALL db.index.fulltext.queryRelationships('relationship_fulltext_index', $query) YIELD relationship AS r, score
+                CALL db.index.fulltext.queryRelationships('relationship_fulltext_index', $search_text_for_pattern) YIELD relationship AS r, score AS relScore
                 MATCH (n)-[r]-(m)
                 WHERE n.dataset_name = $dataset_name AND m.dataset_name = $dataset_name
-                RETURN DISTINCT n, r, m, score
-                ORDER BY score DESC LIMIT 20
+                RETURN DISTINCT n, r, m, relScore AS score
+                ORDER BY score DESC LIMIT 10
                 """
-                search_results_raw = await self.graph_db.execute_query(cypher_query, parameters={"query": query, "dataset_name": dataset_name})
+                params = {"search_text_for_pattern": search_text_for_pattern, "dataset_name": dataset_name}
                 
-                search_results = []
-                for record in search_results_raw:
-                    # ... (código de formateo de resultados full-text sin cambios)
-                    pass
+                raw_results = await self.graph_db.execute_query(cypher_query, parameters=params)
+                
+                formatted_results = self._format_advanced_search_results(raw_results, return_type) # Usar el nuevo formateador
+
+                if formatted_results:
+                    return {
+                        "query": query,
+                        "dataset_name": dataset_name,
+                        "results": formatted_results, # Devolver los nodos/rels formateados
+                        "status": "search_completed_pattern",
+                        "method": "pattern_search_fulltext",
+                        "searched_at": datetime.now().isoformat(),
+                        "summary": f"Se encontraron elementos relacionados con el patrón '{pattern_description}'. Estos son algunos de los resultados clave."
+                    }
+                else:
+                    return {
+                        "query": query,
+                        "dataset_name": dataset_name,
+                        "results": [],
+                        "status": "search_completed_no_patterns",
+                        "method": "pattern_search_fulltext",
+                        "searched_at": datetime.now().isoformat(),
+                        "summary": "No se encontraron elementos que coincidan con el patrón descrito."
+                    }
+
+            # 3. Lógica para Insights Generales/Estadísticas (si la query contiene "insights", "patrones", pero no hay pattern_description específica)
+            # Esto es para cuando el LLM pide "insights" pero no especifica un patrón concreto.
+            if "tematicas" in query.lower() or "insights" in query.lower() or "patrones" in query.lower():
+                logger.info(f"📊 Ejecutando búsqueda de insights generales/estadísticas para: {query}")
+                
+                node_stats_query = f"""
+                MATCH (n:CONCEPTUAL_QUOTE {{dataset_name: $dataset_name}})
+                RETURN DISTINCT n.category AS category, COUNT(n) AS count
+                ORDER BY count DESC LIMIT 5
+                """
+                rels_stats_query = f"""
+                MATCH ()-[r]->() WHERE r.dataset_name = $dataset_name
+                RETURN DISTINCT type(r) AS rel_type, COUNT(r) AS count
+                ORDER BY count DESC LIMIT 5
+                """
+                
+                node_stats = await self.graph_db.execute_query(node_stats_query, parameters={"dataset_name": dataset_name})
+                rels_stats = await self.graph_db.execute_query(rels_stats_query, parameters={"dataset_name": dataset_name})
+
+                summary_items = []
+                if node_stats:
+                    summary_items.append({"type": "node_stats", "content": "Categorías de nodos más comunes:\n" + "\n".join([f"- {item['category']}: {item['count']} nodos" for item in node_stats])})
+                if rels_stats:
+                    summary_items.append({"type": "rel_stats", "content": "Tipos de relaciones más comunes:\n" + "\n".join([f"- {item['rel_type']}: {item['count']} relaciones" for item in rels_stats])})
+                
+                if summary_items:
+                    return {
+                        "query": query, "dataset_name": dataset_name, "results": summary_items,
+                        "status": "search_completed_general_insights", "method": "general_insights",
+                        "searched_at": datetime.now().isoformat(),
+                        "summary": "Se encontraron estadísticas generales del grafo."
+                    }
+                else:
+                     return {
+                        "query": query, "dataset_name": dataset_name, "results": [],
+                        "status": "search_completed_no_general_insights", "method": "general_insights",
+                        "searched_at": datetime.now().isoformat(),
+                        "summary": "No se encontraron estadísticas o patrones generales significativos en el grafo."
+                    }
+
+            # 4. Lógica de Búsqueda Full-Text (como última opción si nada más específico aplica)
+            logger.info(f"📝 Ejecutando búsqueda full-text para: {query}")
+            cypher_query = """
+            CALL db.index.fulltext.queryNodes('node_fulltext_index', $query) YIELD node AS n, score AS nodeScore
+            WHERE n.dataset_name = $dataset_name
+            WITH n, nodeScore
+            OPTIONAL MATCH (n)-[r]-(m)
+            RETURN DISTINCT n, r, m, nodeScore AS score
+            UNION ALL
+            CALL db.index.fulltext.queryRelationships('relationship_fulltext_index', $query) YIELD relationship AS r, score AS relScore
+            MATCH (n)-[r]-(m)
+            WHERE n.dataset_name = $dataset_name AND m.dataset_name = $dataset_name
+            RETURN DISTINCT n, r, m, relScore AS score
+            ORDER BY score DESC LIMIT 20
+            """
+            search_results_raw = await self.graph_db.execute_query(cypher_query, parameters={"query": query, "dataset_name": dataset_name})
+            
+            # Formatear resultados full-text (puedes usar _format_advanced_search_results con return_type="summary" si quieres)
+            formatted_results = self._format_advanced_search_results(search_results_raw, return_type="summary")
 
             return {
-                "query": query, "dataset_name": dataset_name, "results": search_results,
+                "query": query, "dataset_name": dataset_name, "results": formatted_results,
                 "status": "search_completed", "method": "fulltext_cypher",
                 "searched_at": datetime.now().isoformat()
             }
