@@ -10,6 +10,7 @@ import numpy as np
 from typing import Dict, Any, List, Optional, Literal
 from datetime import datetime
 import asyncio
+import re
 
 # Importar Cognee real
 try:
@@ -88,7 +89,7 @@ class CogneeIntegration:
             relationship_index_query = """
             CREATE FULLTEXT INDEX relationship_fulltext_index IF NOT EXISTS
             FOR ()-[r:THEMATIC_RELATIONSHIP | CONTAINS_IDEA]-()
-            ON EACH [r.description]
+            ON EACH [r.description, r.full_text]
             """
             await self.graph_db.execute_query(relationship_index_query)
             logger.info("✅ Índice 'relationship_fulltext_index' para relaciones asegurado.")
@@ -525,7 +526,7 @@ class CogneeIntegration:
         target_concept: Optional[str] = None,
         max_hops: Optional[int] = None,
         pattern_description: Optional[str] = None,
-        return_type: Optional[Literal["nodes", "relationships", "paths", "summary"]] = "summary"
+        return_type: Optional[Literal["nodes", "relationships", "paths", "summary", "cypher_query_only", "stats"]] = "summary"
     ) -> Dict[str, Any]:
         # ... (código de cognee_available y try-except)
 
@@ -566,7 +567,16 @@ class CogneeIntegration:
                 
                 # Asegurar que todos los nodos en el camino pertenezcan al dataset
                 cypher_query += "WHERE all(n IN nodes(path) WHERE n.dataset_name = $dataset_name) "
-                cypher_query += "RETURN path"
+                if return_type == "cypher_query_only":
+                    return {
+                        "query": f"Advanced search: source={source_concept}, target={target_concept}, rels={relationship_types}, hops={max_hops}",
+                        "dataset_name": dataset_name,
+                        "cypher_query": cypher_query,
+                        "parameters": params,
+                        "status": "cypher_query_generated",
+                        "method": "advanced_cypher",
+                        "searched_at": datetime.now().isoformat()
+                    }
 
                 raw_results = await self.graph_db.execute_query(cypher_query, parameters=params)
                 
@@ -586,19 +596,6 @@ class CogneeIntegration:
             if pattern_description:
                 logger.info(f"🔍 Ejecutando búsqueda de patrón específica con: {pattern_description}")
                 
-                # --- Intento de traducir pattern_description a Cypher (simplificado) ---
-                # Esto es un placeholder y el punto más complejo.
-                # Aquí la idea es que un LLM interno o una lógica de NLP avanzada
-                # convierta "conceptos y relaciones que describen desafíos de la IA"
-                # en un patrón Cypher como:
-                # MATCH (n:CONCEPTUAL_QUOTE)-[r]->(m:CONCEPTUAL_QUOTE)
-                # WHERE n.description CONTAINS 'desafíos' AND r.type = 'DESAFIO_DE'
-                # (Esto es muy difícil de hacer de forma genérica sin un LLM interno)
-                
-                # POR AHORA, usaremos una búsqueda full-text mejorada que devuelva los nodos/rels
-                # directamente, y no solo conteos.
-
-                # La query para full-text ahora incluye el pattern_description para ser más específico
                 search_text_for_pattern = f"{query} {pattern_description}" if query else pattern_description
 
                 cypher_query = """
@@ -616,15 +613,26 @@ class CogneeIntegration:
                 """
                 params = {"search_text_for_pattern": search_text_for_pattern, "dataset_name": dataset_name}
                 
+                if return_type == "cypher_query_only":
+                    return {
+                        "query": query,
+                        "dataset_name": dataset_name,
+                        "cypher_query": cypher_query,
+                        "parameters": params,
+                        "status": "cypher_query_generated",
+                        "method": "pattern_search_fulltext",
+                        "searched_at": datetime.now().isoformat()
+                    }
+
                 raw_results = await self.graph_db.execute_query(cypher_query, parameters=params)
                 
-                formatted_results = self._format_advanced_search_results(raw_results, return_type) # Usar el nuevo formateador
+                formatted_results = self._format_advanced_search_results(raw_results, return_type)
 
                 if formatted_results:
                     return {
                         "query": query,
                         "dataset_name": dataset_name,
-                        "results": formatted_results, # Devolver los nodos/rels formateados
+                        "results": formatted_results,
                         "status": "search_completed_pattern",
                         "method": "pattern_search_fulltext",
                         "searched_at": datetime.now().isoformat(),
@@ -643,7 +651,7 @@ class CogneeIntegration:
 
             # 3. Lógica para Insights Generales/Estadísticas (si la query contiene "insights", "patrones", pero no hay pattern_description específica)
             # Esto es para cuando el LLM pide "insights" pero no especifica un patrón concreto.
-            if "tematicas" in query.lower() or "insights" in query.lower() or "patrones" in query.lower():
+            if "tematicas" in query.lower() or "insights" in query.lower() or "patrones" in query.lower() or return_type == "stats":
                 logger.info(f"📊 Ejecutando búsqueda de insights generales/estadísticas para: {query}")
                 
                 node_stats_query = f"""
@@ -657,14 +665,17 @@ class CogneeIntegration:
                 ORDER BY count DESC LIMIT 5
                 """
                 
-                node_stats = await self.graph_db.execute_query(node_stats_query, parameters={"dataset_name": dataset_name})
-                rels_stats = await self.graph_db.execute_query(rels_stats_query, parameters={"dataset_name": dataset_name})
+                node_stats_raw = await self.graph_db.execute_query(node_stats_query, parameters={"dataset_name": dataset_name})
+                rels_stats_raw = await self.graph_db.execute_query(rels_stats_query, parameters={"dataset_name": dataset_name})
+
+                node_stats = [self._neo4j_record_to_dict(record) for record in node_stats_raw]
+                rels_stats = [self._neo4j_record_to_dict(record) for record in rels_stats_raw]
 
                 summary_items = []
                 if node_stats:
-                    summary_items.append({"type": "node_stats", "content": "Categorías de nodos más comunes:\n" + "\n".join([f"- {item['category']}: {item['count']} nodos" for item in node_stats])})
+                    summary_items.append({"type": "node_stats", "content": "Categorías de nodos más comunes:", "data": node_stats})
                 if rels_stats:
-                    summary_items.append({"type": "rel_stats", "content": "Tipos de relaciones más comunes:\n" + "\n".join([f"- {item['rel_type']}: {item['count']} relaciones" for item in rels_stats])})
+                    summary_items.append({"type": "rel_stats", "content": "Tipos de relaciones más comunes:", "data": rels_stats})
                 
                 if summary_items:
                     return {
@@ -687,7 +698,7 @@ class CogneeIntegration:
             CALL db.index.fulltext.queryNodes('node_fulltext_index', $query) YIELD node AS n, score AS nodeScore
             WHERE n.dataset_name = $dataset_name
             WITH n, nodeScore
-            OPTIONAL MATCH (n)-[r]-(m)
+            OPTIONAL MATCH (n)-[r]-(m:CONCEPTUAL_QUOTE {dataset_name: $dataset_name})
             RETURN DISTINCT n, r, m, nodeScore AS score
             UNION ALL
             CALL db.index.fulltext.queryRelationships('relationship_fulltext_index', $query) YIELD relationship AS r, score AS relScore
@@ -696,10 +707,22 @@ class CogneeIntegration:
             RETURN DISTINCT n, r, m, relScore AS score
             ORDER BY score DESC LIMIT 20
             """
-            search_results_raw = await self.graph_db.execute_query(cypher_query, parameters={"query": query, "dataset_name": dataset_name})
+            params = {"query": query, "dataset_name": dataset_name}
+
+            if return_type == "cypher_query_only":
+                return {
+                    "query": query,
+                    "dataset_name": dataset_name,
+                    "cypher_query": cypher_query,
+                    "parameters": params,
+                    "status": "cypher_query_generated",
+                    "method": "fulltext_cypher",
+                    "searched_at": datetime.now().isoformat()
+                }
+
+            search_results_raw = await self.graph_db.execute_query(cypher_query, parameters=params)
             
-            # Formatear resultados full-text (puedes usar _format_advanced_search_results con return_type="summary" si quieres)
-            formatted_results = self._format_advanced_search_results(search_results_raw, return_type="summary")
+            formatted_results = self._format_advanced_search_results(search_results_raw, return_type)
 
             return {
                 "query": query, "dataset_name": dataset_name, "results": formatted_results,
@@ -1227,60 +1250,351 @@ class CogneeIntegration:
                 "relationship_count": len(relationships),
                 "path_count": len(raw_results)
             }
-        return []
+        """Formatea los resultados crudos de Cypher según el tipo de retorno solicitado."""
+        formatted_output = []
 
-    def _format_path(self, path_object: Any) -> str:
-        """Convierte un objeto Path de Neo4j en una cadena legible."""
-        nodes_str = [f"({node.get('name', 'Unnamed')}:{list(node.labels)[0]})" for node in path_object.nodes]
-        rels_str = [f"-[{rel.type}]->" for rel in path_object.relationships]
+        if return_type == "cypher_query_only":
+            # En este caso, no hay resultados para formatear, solo se devuelve la consulta.
+            # Esto se manejará en el método search_knowledge_graph.
+            return []
+
+        if not raw_results:
+            return []
+
+        # Extraer todos los nodos y relaciones únicos de los resultados, independientemente del return_type
+        all_nodes = {}
+        all_relationships = {}
+
+        for record in raw_results:
+            # Manejar resultados que son Paths
+            if "path" in record and record["path"] is not None:
+                path_object = record["path"]
+                for node in path_object.nodes:
+                    all_nodes[node.element_id] = self._node_to_dict(node)
+                for rel in path_object.relationships:
+                    all_relationships[rel.element_id] = self._relationship_to_dict(rel)
+            # Manejar resultados que son Nodos directos (ej. RETURN n)
+            elif "n" in record and record["n"] is not None:
+                node = record["n"]
+                all_nodes[node.element_id] = self._node_to_dict(node)
+            # Manejar resultados que son Relaciones directas (ej. RETURN r)
+            elif "r" in record and record["r"] is not None:
+                rel = record["r"]
+                all_relationships[rel.element_id] = self._relationship_to_dict(rel)
+                # También añadir los nodos de inicio y fin de la relación si están disponibles
+                if hasattr(rel, 'start_node') and rel.start_node:
+                    all_nodes[rel.start_node.element_id] = self._node_to_dict(rel.start_node)
+                if hasattr(rel, 'end_node') and rel.end_node:
+                    all_nodes[rel.end_node.element_id] = self._node_to_dict(rel.end_node)
+            # Manejar resultados que son valores agregados o propiedades directas (ej. COUNT(n), n.property)
+            else:
+                # Para otros tipos de retorno, simplemente añadir el registro tal cual
+                # Esto es útil para 'summary' o 'stats' donde el Cypher ya devuelve el formato deseado
+                formatted_output.append(self._neo4j_record_to_dict(record))
+
+        if return_type == "nodes":
+            return list(all_nodes.values())
+        elif return_type == "relationships":
+            return list(all_relationships.values())
+        elif return_type == "paths":
+            # Reconstruir paths si es necesario, o devolver una representación simple
+            for record in raw_results:
+                if "path" in record and record["path"] is not None:
+                    formatted_output.append(self._format_path(record["path"]))
+            return formatted_output
+        elif return_type == "summary" or return_type == "stats":
+            # Si ya se añadieron registros directos, devolverlos. Si no, calcular un resumen.
+            if formatted_output:
+                return formatted_output
+            else:
+                return {
+                    "node_count": len(all_nodes),
+                    "relationship_count": len(all_relationships),
+                    "total_records": len(raw_results)
+                }
         
+        return formatted_output if formatted_output else []
+
+    def _node_to_dict(self, node: Any) -> Dict[str, Any]:
+        """Convierte un objeto Node de Neo4j a un diccionario serializable."""
+        properties = dict(node)
+        properties["labels"] = list(node.labels)
+        properties["element_id"] = node.element_id
+        return {k: self._neo4j_value_to_python(v) for k, v in properties.items()}
+
+    def _relationship_to_dict(self, rel: Any) -> Dict[str, Any]:
+        """Convierte un objeto Relationship de Neo4j a un diccionario serializable."""
+        properties = dict(rel)
+        properties["type"] = rel.type
+        properties["element_id"] = rel.element_id
+        properties["start_node_element_id"] = rel.start_node.element_id
+        properties["end_node_element_id"] = rel.end_node.element_id
+        return {k: self._neo4j_value_to_python(v) for k, v in properties.items()}
+
+    def _neo4j_value_to_python(self, value: Any) -> Any:
+        """Convierte tipos de datos específicos de Neo4j a tipos de Python serializables."""
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, np.integer):
+            return int(value)
+        if isinstance(value, np.floating):
+            return float(value)
+        if isinstance(value, list):
+            return [self._neo4j_value_to_python(item) for item in value]
+        if isinstance(value, dict):
+            return {k: self._neo4j_value_to_python(v) for k, v in value.items()}
+        # Aquí se pueden añadir más conversiones si es necesario para otros tipos de Neo4j
+        return value
+
+    def _neo4j_record_to_dict(self, record: Any) -> Dict[str, Any]:
+        """Convierte un objeto Record de Neo4j a un diccionario serializable."""
+        return {key: self._neo4j_value_to_python(record[key]) for key in record.keys()}
+
+    def _format_path(self, path_object: Any) -> Dict[str, Any]:
+        """Convierte un objeto Path de Neo4j en un diccionario serializable."""
+        nodes = [self._node_to_dict(node) for node in path_object.nodes]
+        relationships = [self._relationship_to_dict(rel) for rel in path_object.relationships]
+        
+        return {
+            "nodes": nodes,
+            "relationships": relationships,
+            "path_string": self._path_to_string(path_object)
+        }
+
+    def _path_to_string(self, path_object: Any) -> str:
+        """Convierte un objeto Path de Neo4j en una cadena legible."""
+        nodes_str = [f"({node.get('name', 'Unnamed')}:{':'.join(node.labels)})" for node in path_object.nodes]
+        rels_str = [f"-[{rel.type}]->" for rel in path_object.relationships]
+
         path_str = nodes_str[0]
         for i, rel_str in enumerate(rels_str):
             path_str += rel_str + nodes_str[i+1]
-            
+
         return path_str
 
-# Ejemplo de uso (puedes mover esto a otro archivo para pruebas):
-if __name__ == '__main__':
-    #  Configura las variables de entorno
-    cognee_api_url = settings.cognee_api_url
-    neo4j_uri = settings.neo4j_uri
-    neo4j_user = settings.neo4j_user
-    neo4j_password = settings.neo4j_password
+    async def get_visualization_data(
+        self,
+        dataset_name: str, # Ya viene con account_id integrado: "MiDataset_UUID"
+        focus_query: Optional[str] = None,
+        max_nodes: int = 50,
+        max_hops: int = 1
+    ) -> Dict[str, Any]:
+        fast_llm = get_fast_llm()
+        nodes_data = []
+        edges_data = []
+        summary = ""
 
-    # Validar que las configuraciones de Neo4j estén presentes
-    if not neo4j_uri or not neo4j_user or not neo4j_password:
-        print("❌ Error: Las configuraciones de Neo4j no están completas.")
-        print("Asegúrate de que NEO4J_URI, NEO4J_USER y NEO4J_PASSWORD estén definidos en tu archivo .env")
-        exit(1)
+        try:
+            cypher_query = ""
+            params = {"dataset_name": dataset_name}
 
-    #  Inicializa la base de datos de grafos
-    graph_db = GraphDB(neo4j_uri, neo4j_user, neo4j_password)
-    try:
+            # --- Generación de Cypher por FAST LLM basado en focus_query ---
+            if focus_query: # Solo generar Cypher con LLM si hay un focus_query
+                logger.info(f"⚡ Generando Cypher para visualización con focus_query: '{focus_query}' en dataset: {dataset_name}")
+                cypher_generation_prompt = f"""
+                Eres un experto en Cypher y en la estructura de grafos de conocimiento.
+                Tu tarea es traducir la siguiente pregunta en lenguaje natural a una consulta Cypher optimizada para Neo4j.
+                El objetivo es extraer un subgrafo relevante para visualización.
+                El grafo contiene nodos de tipo 'CONCEPTUAL_QUOTE' y relaciones de varios tipos.
+                Todos los nodos y relaciones tienen una propiedad 'dataset_name'.
+                Los nodos 'CONCEPTUAL_QUOTE' tienen propiedades como 'name', 'description', 'category', 'concept', 'full_text'.
+                Las relaciones tienen propiedades como 'type' y 'description'.
 
-        graph_db.connect()
-        #  Inicializa la integración con Cognee
-        cognee_integration = CogneeIntegration(graph_db)
 
-        #  Convierte el grafo a PDDL
-        pddl_data = cognee_integration.convert_graph_to_pddl()
-        print(f"Definiciones PDDL: {pddl_data}")
+                **Reglas estrictas para la generación de Cypher para visualización:**
+                1.  **Siempre filtra por el dataset en los NODOS:**
+                    - Para nodos: `MATCH (n:Label {{dataset_name: $dataset_name}})`
+                    - Para relaciones, el filtro de dataset se aplica a los nodos conectados:
+                        - Relaciones simples (ej. `-[r]-(m)`): `MATCH (n {{dataset_name: $dataset_name}})-[r]-(m {{dataset_name: $dataset_name}})`
+                        - Relaciones opcionales (ej. `OPTIONAL MATCH (n)-[r]-(m)`): `OPTIONAL MATCH (n {{dataset_name: $dataset_name}})-[r]-(m:CONCEPTUAL_QUOTE {{dataset_name: $dataset_name}})` (Asegúrate de incluir la etiqueta del nodo `m` si se filtra por `dataset_name`)
+                        - Para rutas de relaciones (ej. `-[r*1..X]-(m)`): `MATCH (n {{dataset_name: $dataset_name}})-[r*1..X]-(m:CONCEPTUAL_QUOTE {{dataset_name: $dataset_name}})` (Asegúrate de incluir la etiqueta del nodo `m` si se filtra por `dataset_name`)
+                            Y si se usa `ALL(rel IN r WHERE ...)` asegúrate de que sea `ALL(node IN nodes(r) WHERE node.dataset_name = $dataset_name)`
+                2.  **Identifica nodos de interés:** Usa `MATCH (n_focus:CONCEPTUAL_QUOTE {{dataset_name: $dataset_name}}) WHERE n_focus.name CONTAINS 'palabra_clave' OR n_focus.description CONTAINS 'palabra_clave'` basado en el `focus_query`. Asegúrate de que `n_focus` también tenga el filtro de `dataset_name`.
+                3.  **Expande las relaciones:** Desde los nodos de interés, expande las relaciones hasta `max_hops`.
+                    - Si `max_hops` es 1: `MATCH (n_focus {{dataset_name: $dataset_name}})-[r]-(m:CONCEPTUAL_QUOTE {{dataset_name: $dataset_name}})`
+                    - Si `max_hops` es mayor que 1: `MATCH (n_focus {{dataset_name: $dataset_name}})-[r*1..{{max_hops}}]-(m:CONCEPTUAL_QUOTE {{dataset_name: $dataset_name}})`
+                    Asegúrate de que todos los nodos en la ruta tengan el filtro de `dataset_name`.
+                4.  **Limita el número de nodos:** Usa `LIMIT {{max_nodes}}` al final de la consulta.
+                5.  **Devuelve todos los nodos y relaciones del subgrafo:** `RETURN DISTINCT n_focus, r, m`.
+                6.  **Asegúrate de que la consulta sea válida y ejecutable en Neo4j.**
+                7.  **Devuelve SOLO la consulta Cypher, sin explicaciones ni texto adicional.**
 
-        #  Ejecuta un plan (simulado)
-        #  En este ejemplo, simplemente mostramos las definiciones PDDL
-        #  En un caso real, enviarías estas definiciones a la API de Cognee
-        # plan_result = cognee_integration.execute_plan(pddl_data['domain'], pddl_data['problem'])
-        # print(f"Resultado del plan: {plan_result}")
+                Pregunta en lenguaje natural (focus_query): "{focus_query}"
+                Max Hops: {max_hops}
+                Max Nodes: {max_nodes}
+                Consulta Cypher para extracción de subgrafo:
+                """
+                generated_cypher_query = fast_llm.invoke(cypher_generation_prompt).content.strip()
+                
+                # Limpiar el resultado para extraer solo la consulta Cypher del bloque de markdown
+                cypher_match = re.search(r"```(?:cypher)?\s*(.*?)\s*```", generated_cypher_query, re.DOTALL)
+                if cypher_match:
+                    cypher_query = cypher_match.group(1).strip()
+                else:
+                    cypher_query = generated_cypher_query.replace("`", "") # Fallback por si no usa bloque de código
+                
+                if not cypher_query.lower().startswith("match"):
+                    raise ValueError(f"Cypher generado inválido para visualización: {generated_cypher_query}")
 
-        #  Integra los resultados de Cognee (simulado)
-        #  En este ejemplo, simplemente mostramos un mensaje
-        #  En un caso real, analizarías el resultado del plan y actualizarías la base de datos de grafos
-        # cognee_integration.integrate_cognee_results(plan_result)
-        print("Integración con Cognee completada (simulada).")
+                # Post-procesamiento: Corregir OPTIONAL MATCH con r.dataset_name
+                cypher_query = self._post_process_cypher_query(cypher_query, dataset_name)
+            else: # Si no hay focus_query, usar una consulta Cypher por defecto
+                logger.info(f"🔍 Usando Cypher por defecto para visualización en dataset: {dataset_name}")
+                cypher_query = f"""
+                MATCH (n)
+                OPTIONAL MATCH (n)-[r]-(m)
+                RETURN DISTINCT n, r, m
+                LIMIT {max_nodes}
+                """
+                logger.info(f"DEBUG: Using very generic Cypher query to check for any nodes.")
+                params = {} # No params for this generic query
+            
+            logger.info(f"Executing Cypher for visualization: {cypher_query} with params: {params}")
+            raw_results = await self.graph_db.execute_query(cypher_query, parameters=params)
+            logger.info(f"Raw results from Neo4j (first 5 records): {[self._neo4j_record_to_dict(r) for r in raw_results[:5]]}")
+            logger.info(f"Total raw results records: {len(raw_results)}")
+            logger.info(f"Dataset name being searched (original): {dataset_name}")
 
-    except Exception as e:
-        print(f"Ocurrió un error durante la ejecución: {e}")
-    finally:
-        graph_db.close()  #  Cierra la conexión a la base de datos de grafos
+            # --- Procesamiento de resultados para el formato de visualización ---
+            unique_nodes = {} # Usar un diccionario para asegurar nodos únicos y acceso rápido
+            unique_edges = {} # Usar un diccionario para asegurar aristas únicas
+
+            for record in raw_results:
+                # Procesar nodos y relaciones
+                for value in record.values():
+                    # Si el valor es un nodo
+                    if hasattr(value, 'labels') and value.labels is not None:
+                        node = value
+                        node_id = node.element_id
+                        if node_id not in unique_nodes:
+                            properties = dict(node)
+                            unique_nodes[node_id] = {
+                                "id": node_id,
+                                "label": properties.get('name', properties.get('concept', f"Node {node_id}")),
+                                "properties": properties,
+                                "type": list(node.labels)[0] if node.labels else 'Unknown'
+                            }
+                    # Si el valor es una relación
+                    elif hasattr(value, 'start_node') and value.start_node is not None and hasattr(value, 'end_node') and value.end_node is not None:
+                        rel = value
+                        edge_id = rel.element_id
+                        if edge_id not in unique_edges:
+                            unique_edges[edge_id] = {
+                                "id": edge_id,
+                                "source": rel.start_node.element_id,
+                                "target": rel.end_node.element_id,
+                                "label": rel.type,
+                                "properties": dict(rel),
+                                "type": rel.type
+                            }
+
+            nodes_data = list(unique_nodes.values())
+            edges_data = list(unique_edges.values())
+
+            # Generar un resumen de la visualización (opcional, con FAST LLM)
+            if focus_query or nodes_data:
+                summary_prompt = f"""
+                Eres un experto en resumir estructuras de grafos de conocimiento.
+                Genera un breve resumen en lenguaje natural de la visualización del grafo obtenida.
+                El grafo contiene {len(nodes_data)} nodos y {len(edges_data)} relaciones.
+                El foco de la consulta fue: '{focus_query}' (si aplica).
+                Describe los conceptos principales y las relaciones más destacadas que se visualizarán.
+
+                Resumen de la visualización:
+                """
+                summary = fast_llm.invoke(summary_prompt).content.strip()
+
+            return {
+                "nodes": nodes_data,
+                "edges": edges_data,
+                "summary": summary
+            }
+
+        except Exception as e:
+            logger.error(f"Error en get_visualization_data para dataset '{dataset_name}': {e}", exc_info=True)
+            raise e # Propagar la excepción para que el endpoint la maneje
+
+    # Ejemplo de uso (puedes mover esto a otro archivo para pruebas):
+    if __name__ == '__main__':
+        #  Configura las variables de entorno
+        cognee_api_url = settings.cognee_api_url
+        neo4j_uri = settings.neo4j_uri
+        neo4j_user = settings.neo4j_user
+        neo4j_password = settings.neo4j_password
+
+        # Validar que las configuraciones de Neo4j estén presentes
+        if not neo4j_uri or not neo4j_user or not neo4j_password:
+            print("❌ Error: Las configuraciones de Neo4j no están completas.")
+            print("Asegúrate de que NEO4J_URI, NEO4J_USER y NEO4J_PASSWORD estén definidos en tu archivo .env")
+            exit(1)
+
+        #  Inicializa la base de datos de grafos
+        graph_db = GraphDB(neo4j_uri, neo4j_user, neo4j_password)
+        try:
+
+            graph_db.connect()
+            #  Inicializa la integración con Cognee
+            cognee_integration = CogneeIntegration(graph_db)
+
+            #  Convierte el grafo a PDDL
+            pddl_data = cognee_integration.convert_graph_to_pddl()
+            print(f"Definiciones PDDL: {pddl_data}")
+
+            #  Ejecuta un plan (simulado)
+            #  En este ejemplo, simplemente mostramos las definiciones PDDL
+            #  En un caso real, enviarías estas definiciones a la API de Cognee
+            # plan_result = cognee_integration.execute_plan(pddl_data['domain'], pddl_data['problem'])
+            # print(f"Resultado del plan: {plan_result}")
+
+            #  Integra los resultados de Cognee (simulado)
+            #  En este ejemplo, simplemente mostramos un mensaje
+            #  En un caso real, analizarías el resultado del plan y actualizarías la base de datos de grafos
+            # cognee_integration.integrate_cognee_results(plan_result)
+            print("Integración con Cognee completada (simulada).")
+
+        except Exception as e:
+            print(f"Ocurrió un error durante la ejecución: {e}")
+        finally:
+            graph_db.close()  #  Cierra la conexión a la base de datos de grafos
+
+    import re
+
+    def _post_process_cypher_query(self, cypher_query: str, dataset_name: str) -> str:
+        """
+        Realiza un post-procesamiento de la consulta Cypher generada para corregir
+        problemas comunes con el filtrado de dataset_name en OPTIONAL MATCH.
+        """
+        # Expresión regular para encontrar OPTIONAL MATCH (n)-[r]-(m) seguido de WHERE m.dataset_name
+        # o donde m no tiene etiqueta pero sí tiene el filtro dataset_name.
+        # Captura el patrón de OPTIONAL MATCH y la cláusula WHERE subsiguiente si existe y es relevante.
+        pattern_where_node_m = r"(OPTIONAL MATCH\s+\((?P<node1>[a-zA-Z0-9_]+)\)-\[(?P<rel>[a-zA-Z0-9_]+)\]-\((?P<node2>[a-zA-Z0-9_]+)\))\s+WHERE\s+(?P<node_var>[a-zA-Z0-9_]+)\.dataset_name\s*=\s*\$dataset_name"
+
+        def replace_func_node_m(match):
+            node_var = match.group('node_var')
+            # Si la variable de nodo en el WHERE coincide con el segundo nodo del OPTIONAL MATCH
+            if node_var == match.group('node2'):
+                # Transforma a OPTIONAL MATCH (n)-[r]-(m:CONCEPTUAL_QUOTE {dataset_name: $dataset_name})
+                # Añadimos la etiqueta CONCEPTUAL_QUOTE por defecto si no está explícita.
+                # Esto es una suposición razonable dado el contexto de los datos.
+                return f"OPTIONAL MATCH ({match.group('node1')})-[{match.group('rel')}]-({match.group('node2')}:CONCEPTUAL_QUOTE {{dataset_name: $dataset_name}})"
+            return match.group(0) # No hay cambio si no coincide
+
+        corrected_query = re.sub(pattern_where_node_m, replace_func_node_m, cypher_query)
+
+        # Segundo patrón: corregir casos donde el LLM podría generar directamente {dataset_name: $dataset_name}
+        # en un nodo sin etiqueta en OPTIONAL MATCH.
+        # Ejemplo: OPTIONAL MATCH (n_focus)-[r]-(m {dataset_name: $dataset_name})
+        pattern_direct_node_filter = r"(OPTIONAL MATCH\s+\((?P<node1>[a-zA-Z0-9_]+)\)-\[(?P<rel>[a-zA-Z0-9_]+)\]-\((?P<node2>[a-zA-Z0-9_]+)\s*\{dataset_name:\s*\$dataset_name\}\))"
+
+        def replace_func_direct_node_filter(match):
+            # Añadir la etiqueta CONCEPTUAL_QUOTE si no está presente en el nodo 'm'
+            node2_part = match.group(4) # Captura "(m {dataset_name: $dataset_name})"
+            if ":CONCEPTUAL_QUOTE" not in node2_part:
+                return f"OPTIONAL MATCH ({match.group('node1')})-[{match.group('rel')}]-({match.group('node2')}:CONCEPTUAL_QUOTE {{dataset_name: $dataset_name}})"
+            return match.group(0) # No hay cambio si ya tiene la etiqueta
+
+        corrected_query = re.sub(pattern_direct_node_filter, replace_func_direct_node_filter, corrected_query)
+
+        return corrected_query
 
 

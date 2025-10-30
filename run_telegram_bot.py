@@ -33,6 +33,7 @@ from telegram_client.handlers.message_handlers import register_message_handlers
 from telegram_client.handlers.callback_query_handler import register_callback_query_handler
 from telegram_client.handlers.document_handlers import register_document_handlers
 from telegram_client.handlers.admin_handlers import register_admin_handlers
+from telegram_client.websocket_client import start_telegram_ws_client, stop_telegram_ws_client
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -121,6 +122,10 @@ async def lifespan(app: FastAPI):
         dispatcher_task.add_done_callback(done_callback)
         logger.info("✅ Tarea del dispatcher de PTB iniciada.")
         
+        # Iniciar cliente WebSocket
+        await start_telegram_ws_client()
+        logger.info("✅ Cliente WebSocket de Telegram iniciado.")
+
         # Guardar las tareas para poder cancelarlas al apagar.
         app.state.background_tasks = [polling_task, dispatcher_task]
         
@@ -146,6 +151,11 @@ async def lifespan(app: FastAPI):
 
     # --- Lógica de Apagado ---
     logger.info("🔌 Apagando el cliente de Telegram...")
+    
+    # Detener cliente WebSocket
+    stop_telegram_ws_client()
+    logger.info("✅ Cliente WebSocket de Telegram detenido.")
+
     ptb_to_shutdown = app.state.ptb_app
     if ptb_to_shutdown:
         if ptb_to_shutdown.running:

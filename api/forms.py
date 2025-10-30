@@ -6,7 +6,8 @@ logger = logging.getLogger(__name__)
 from typing import List, Optional, Any, Literal, Union, Dict
 import uuid
 from datetime import datetime
-from fpdf import FPDF
+import os
+from fpdf import FPDF, fpdf
 import io
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,7 +72,7 @@ class FormInDB(BaseModel):
     description: Optional[str] = None
     created_at: datetime
     updated_at: datetime
-    schema: List[Dict[str, Any]] # Añadido para evitar conflicto con el método schema() de Pydantic
+    form_schema: List[Dict[str, Any]] = Field(..., alias='schema')
     is_public: bool
 
     @computed_field
@@ -83,7 +84,7 @@ class FormInDB(BaseModel):
     @property
     def elements(self) -> List[FormElement]:
         # Asumiendo que self.schema contiene los datos serializados del DBForm
-        return _deserialize_form_elements_recursively(self.schema)
+        return _deserialize_form_elements_recursively(self.form_schema)
 
     @computed_field
     @property
@@ -150,7 +151,7 @@ async def create_form(
         name=form_create.name, # Usar name como el nombre del formulario
         description=form_create.description,
         is_public=form_create.is_public,
-        schema=_serialize_form_elements_recursively(form_create.elements) # Serializar recursivamente
+        schema=_serialize_form_elements_recursively(form_create.elements)
     )
     db.add(db_form)
     await db.commit()
@@ -216,7 +217,7 @@ async def update_form(
     form.name = form_update.name
     form.description = form_update.description
     form.is_public = form_update.is_public
-    form.schema = _serialize_form_elements_recursively(form_update.elements) # Serializar recursivamente
+    form.schema = _serialize_form_elements_recursively(form_update.elements)
     # The updated_at column is automatically updated by the database trigger (onupdate=text("CURRENT_TIMESTAMP"))
     # No need to manually set form.updated_at = datetime.utcnow()
 
@@ -432,11 +433,14 @@ async def get_form_response_pdf(
     if not form or str(form.account_id) != str(current_user.id):
         raise HTTPException(status_code=404, detail="Form not found or unauthorized")
 
-    pdf = FPDF()
+    pdf = FPDF(font_cache_dir=".")
     pdf.add_page()
-    pdf.set_font("Arial", size=16)
+    # Add a Unicode font (e.g., DejaVuSans)
+    # FPDF will download it if not present in the cache directory
+    pdf.add_font("DejaVu", "", os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSansCondensed.ttf"), uni=True)
+    pdf.set_font("DejaVu", size=16)
     pdf.cell(200, 10, txt=f"Respuesta del Formulario: {form.name}", ln=True, align="C")
-    pdf.set_font("Arial", size=12)
+    pdf.set_font("DejaVu", size=12)
     pdf.cell(200, 10, txt=f"Enviado el: {form_response.submitted_at.strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align="L")
     pdf.ln(10)
 
@@ -452,16 +456,16 @@ async def get_form_response_pdf(
 
     for answer in form_response.answers:
         field_label = field_map.get(answer["field_id"], answer["field_id"])
-        pdf.set_font("Arial", "B", size=12)
-        pdf.multi_cell(0, 10, txt=f"Pregunta: {field_label}")
-        pdf.set_font("Arial", size=12)
+        pdf.set_font("DejaVu", "B", size=12)
+        pdf.multi_cell(pdf.w - 2 * pdf.l_margin, 10, txt=f"Pregunta: {field_label}")
+        pdf.set_font("DejaVu", size=12)
         answer_value = answer["value"]
         if isinstance(answer_value, list):
             answer_value = ", ".join(map(str, answer_value))
-        pdf.multi_cell(0, 10, txt=f"Respuesta: {answer_value}")
+        pdf.multi_cell(pdf.w - 2 * pdf.l_margin, 10, txt=f"Respuesta: {answer_value}")
         pdf.ln(5)
 
-    pdf_output = pdf.output(dest='S').encode('latin-1') # Output as string, then encode to bytes
+    pdf_output = pdf.output(dest='S').encode('utf-8') # Output as string, then encode to bytes
     return Response(content=pdf_output, media_type="application/pdf", headers={
         "Content-Disposition": f"attachment; filename='form_response_{response_id}.pdf'"
     })
@@ -484,9 +488,10 @@ async def get_form_responses_pdf_report(
     )
     form_responses = result.scalars().all()
 
-    pdf = FPDF()
+    pdf = FPDF(font_cache_dir=".")
     pdf.add_page()
-    pdf.set_font("Arial", size=16)
+    pdf.add_font("DejaVu", "", os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSansCondensed.ttf"), uni=True)
+    pdf.set_font("DejaVu", size=16)
     pdf.cell(200, 10, txt=f"Reporte de Respuestas para: {form.name}", ln=True, align="C")
     pdf.ln(10)
 
@@ -500,31 +505,31 @@ async def get_form_responses_pdf_report(
     extract_fields(form.schema)
 
     if not form_responses:
-        pdf.set_font("Arial", size=12)
+        pdf.set_font("DejaVu", size=12)
         pdf.cell(200, 10, txt="No hay respuestas para este formulario.", ln=True, align="C")
     else:
         for i, form_response in enumerate(form_responses):
             if i > 0:
                 pdf.add_page() # New page for each response in the report
-            pdf.set_font("Arial", "B", size=14)
+            pdf.set_font("DejaVu", "B", size=14)
             pdf.cell(200, 10, txt=f"Respuesta #{i+1} (ID: {str(form_response.id)[:8]}...)", ln=True, align="L")
-            pdf.set_font("Arial", size=12)
+            pdf.set_font("DejaVu", size=12)
             pdf.cell(200, 10, txt=f"Enviado el: {form_response.submitted_at.strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align="L")
             pdf.ln(5)
 
             for answer in form_response.answers:
                 field_label = field_map.get(answer["field_id"], answer["field_id"])
-                pdf.set_font("Arial", "B", size=12)
-                pdf.multi_cell(0, 10, txt=f"Pregunta: {field_label}")
-                pdf.set_font("Arial", size=12)
+                pdf.set_font("DejaVu", "B", size=12)
+                pdf.multi_cell(pdf.w - 2 * pdf.l_margin, 10, txt=f"Pregunta: {field_label}")
+                pdf.set_font("DejaVu", size=12)
                 answer_value = answer["value"]
                 if isinstance(answer_value, list):
                     answer_value = ", ".join(map(str, answer_value))
-                pdf.multi_cell(0, 10, txt=f"Respuesta: {answer_value}")
+                pdf.multi_cell(pdf.w - 2 * pdf.l_margin, 10, txt=f"Respuesta: {answer_value}")
                 pdf.ln(5)
             pdf.ln(10) # Add some space between responses if on the same page
 
-    pdf_output = pdf.output(dest='S').encode('latin-1')
+    pdf_output = pdf.output(dest='S').encode('utf-8')
     return Response(content=pdf_output, media_type="application/pdf", headers={
         "Content-Disposition": f"attachment; filename='form_responses_report_{form_id}.pdf'"
     })

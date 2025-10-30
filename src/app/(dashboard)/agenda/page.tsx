@@ -21,6 +21,7 @@ import { Checkbox } from '@/components/ui/checkbox'; // Importar Checkbox para l
 import { WeeklyScheduleView } from './WeeklyScheduleView'; // Importar WeeklyScheduleView
 import { MonthlyScheduleView } from './MonthlyScheduleView'; // Importar MonthlyScheduleView
 
+
 export interface AgendaEvent {
   id: number;
   summary: string;
@@ -162,6 +163,54 @@ export default function AgendaPage() {
     }
   };
 
+  const handleCreateEvent = (date: Date) => {
+    setSelectedEvent({ // Prellenar el evento con la fecha seleccionada
+      id: 0, // ID temporal
+      summary: '',
+      description: '',
+      event_datetime_utc: date.toISOString(),
+      event_datetime_local: date.toISOString(),
+      user_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+    setInitialEventDate(date); // Establecer la fecha inicial para el diálogo
+    setIsEventDialogOpen(true);
+  };
+
+  const [initialEventDate, setInitialEventDate] = useState<Date | undefined>(undefined); // Nuevo estado para la fecha inicial del evento
+
+  const handleMoveEvent = async (eventId: number, newDate: Date) => {
+    const eventToMove = allEvents.find(event => event.id === eventId);
+    if (!eventToMove) return;
+
+    const originalEventDateTime = new Date(eventToMove.event_datetime_local);
+    const updatedDateTime = new Date(
+      newDate.getFullYear(),
+      newDate.getMonth(),
+      newDate.getDate(),
+      originalEventDateTime.getHours(),
+      originalEventDateTime.getMinutes(),
+      originalEventDateTime.getSeconds()
+    );
+
+    const toastId = toast.loading('Moviendo evento...');
+    try {
+      // Actualizar el evento en el backend
+      await apiClient.put(`/api/agenda/events/${eventId}`, {
+        event_date: format(updatedDateTime, 'yyyy-MM-dd'),
+        event_time: format(updatedDateTime, 'HH:mm'),
+      });
+
+      // Actualizar el estado local
+      setAllEvents(prev => prev.map(event => 
+        event.id === eventId ? { ...event, event_datetime_local: updatedDateTime.toISOString() } : event
+      ));
+      toast.success('Evento movido exitosamente.', { id: toastId });
+    } catch (error) {
+      toast.error('Error al mover el evento.', { id: toastId });
+      console.error('Error moving event:', error);
+    }
+  };
+
   // Filtrado de eventos y tareas para la vista diaria
   const eventsForSelectedPeriod = allEvents.filter(event => {
     if (!selectedDate) return false;
@@ -217,291 +266,293 @@ export default function AgendaPage() {
   const periodText = viewType === 'week' ? "esta semana" : viewType === 'month' ? "este mes" : "este día";
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
-      <div className="p-6 h-full flex flex-col">
-        <div className="flex items-center justify-between mb-6 shrink-0">
-          <div>
-            <h1 className="text-3xl font-bold flex items-center">
-                <CalendarIcon className="mr-2 h-8 w-8 text-primary" />
-                Agenda
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground">
-                        <Info className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Tus próximos eventos y tareas.</p> {/* Texto actualizado */}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-            </h1>
+      <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
+        <div className="p-6 h-full flex flex-col">
+          <div className="flex items-center justify-between mb-6 shrink-0">
+            <div>
+              <h1 className="text-3xl font-bold flex items-center">
+                  <CalendarIcon className="mr-2 h-8 w-8 text-primary" />
+                  Agenda
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground">
+                          <Info className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Tus próximos eventos y tareas.</p> {/* Texto actualizado */}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+              </h1>
+            </div>
+            <div className="flex gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 px-2 md:px-4">
+                    <span className="hidden md:inline">Acciones</span> <MoreHorizontal className="md:ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-[180px]"> {/* Ancho ajustado */}
+                  <DropdownMenuItem onClick={() => setIsEventDialogOpen(true)}>
+                    <PlusCircle className="mr-2 h-4 w-4" /> Agendar Evento
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setIsTaskDialogOpen(true)}> {/* Nuevo botón para tarea */}
+                    <CheckCircle2 className="mr-2 h-4 w-4" /> Añadir Tarea
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setViewType('week')} className={viewType === 'week' ? "font-bold" : ""}>
+                    Vista Semanal
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setViewType('day')} className={viewType === 'day' ? "font-bold" : ""}>
+                    Vista Diaria
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setViewType('month')} className={viewType === 'month' ? "font-bold" : ""}>
+                    Vista Mensual
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8 px-2 md:px-4">
-                  <span className="hidden md:inline">Acciones</span> <MoreHorizontal className="md:ml-2 h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[180px]"> {/* Ancho ajustado */}
-                <DropdownMenuItem onClick={() => setIsEventDialogOpen(true)}>
-                  <PlusCircle className="mr-2 h-4 w-4" /> Agendar Evento
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setIsTaskDialogOpen(true)}> {/* Nuevo botón para tarea */}
-                  <CheckCircle2 className="mr-2 h-4 w-4" /> Añadir Tarea
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setViewType('week')} className={viewType === 'week' ? "font-bold" : ""}>
-                  Vista Semanal
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setViewType('day')} className={viewType === 'day' ? "font-bold" : ""}>
-                  Vista Diaria
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setViewType('month')} className={viewType === 'month' ? "font-bold" : ""}>
-                  Vista Mensual
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-        
-        {/* ---- ESTRUCTURA DE LAYOUT CORREGIDA ---- */}
-        <div className={`flex-grow grid gap-6 min-h-0 ${viewType === 'week' || viewType === 'month' ? 'md:grid-cols-1' : 'md:grid-cols-3'}`}>
-          <div className={`${viewType === 'week' || viewType === 'month' ? 'hidden' : 'md:col-span-1'} flex justify-center md:justify-start`}>
-              <Calendar
-                  mode="single"
-                  selected={selectedDate}
-                  onSelect={setSelectedDate}
-                  className="rounded-md border p-0"
-                  classNames={{
-                    month: "space-y-4 p-3",
-                    caption_label: "text-sm font-medium",
-                  }}
-              />
-          </div>
+          
+          {/* ---- ESTRUCTURA DE LAYOUT CORREGIDA ---- */}
+          <div className={`flex-grow grid gap-6 min-h-0 ${viewType === 'week' || viewType === 'month' ? 'md:grid-cols-1' : 'md:grid-cols-3'}`}>
+            <div className={`${viewType === 'week' || viewType === 'month' ? 'hidden' : 'md:col-span-1'} flex justify-center md:justify-start`}>
+                <Calendar
+                    mode="single"
+                    selected={selectedDate}
+                    onSelect={setSelectedDate}
+                    className="rounded-md border p-0"
+                    classNames={{
+                      month: "space-y-4 p-3",
+                      caption_label: "text-sm font-medium",
+                    }}
+                />
+            </div>
 
-          <div className={`${viewType === 'week' || viewType === 'month' ? 'md:col-span-1' : 'md:col-span-2'} flex flex-col min-h-0`}>
-              {viewType === 'week' ? (
-                <WeeklyScheduleView
-                  currentDate={selectedDate || new Date()}
-                  events={allEvents}
-                  tasks={allTasks}
-                  onDateChange={setSelectedDate}
-                  onEditEvent={(event) => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}
-                  onDeleteEvent={(event) => setDeletingEvent(event)}
-                  onEditTask={(task) => { setSelectedTask(task); setIsTaskDialogOpen(true); }}
-                  onDeleteTask={(task) => setDeletingTask(task)}
-                  onToggleTaskCompleted={handleToggleTaskCompleted}
-                />
-              ) : viewType === 'month' ? (
-                <MonthlyScheduleView
-                  currentDate={selectedDate || new Date()}
-                  events={allEvents}
-                  tasks={allTasks}
-                  onDateChange={setSelectedDate}
-                  onEditEvent={(event) => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}
-                  onEditTask={(task) => { setSelectedTask(task); setIsTaskDialogOpen(true); }}
-                  onToggleTaskCompleted={handleToggleTaskCompleted}
-                />
-              ) : (
-                <>
-                  <h2 className="text-xl font-semibold mb-4 shrink-0">
-                      Agenda para {selectedDate ? format(selectedDate, "PPP", { locale: es }) : "..."}
-                  </h2>
-                  <div className="flex-grow overflow-y-auto pr-2">
-                    {isLoading ? <p>Cargando agenda...</p> : (
-                        <div className="space-y-4">
-                            {/* Sección de Tareas */}
-                            {tasksForSelectedPeriod.length > 0 && (
-                              <>
-                                <h3 className="text-lg font-semibold mt-4 mb-2">Tareas</h3>
-                                {tasksForSelectedPeriod.map((task) => (
-                                  <div key={task.id} className="p-4 border rounded-lg flex items-center justify-between hover:border-primary/50">
-                                    <div className="flex items-center gap-3">
-                                      <Checkbox
-                                        checked={task.is_completed}
-                                        onCheckedChange={() => handleToggleTaskCompleted(task)}
-                                        className="h-5 w-5"
-                                      />
-                                      <div className={task.is_completed ? "line-through text-muted-foreground" : ""}>
-                                        <p className="font-semibold">{task.description}</p>
-                                        {task.due_date && (
-                                          <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
-                                            <Clock className="h-4 w-4" />
-                                            {format(new Date(task.due_date), "PPP", { locale: es })}
-                                          </div>
+            <div className={`${viewType === 'week' || viewType === 'month' ? 'md:col-span-1' : 'md:col-span-2'} flex flex-col min-h-0`}>
+                {viewType === 'week' ? (
+                  <WeeklyScheduleView
+                    currentDate={selectedDate || new Date()}
+                    events={allEvents}
+                    tasks={allTasks}
+                    onDateChange={setSelectedDate}
+                    onEditEvent={(event) => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}
+                    onDeleteEvent={(event) => setDeletingEvent(event)}
+                    onEditTask={(task) => { setSelectedTask(task); setIsTaskDialogOpen(true); }}
+                    onDeleteTask={(task) => setDeletingTask(task)}
+                    onToggleTaskCompleted={handleToggleTaskCompleted}
+                  />
+                ) : viewType === 'month' ? (
+                  <MonthlyScheduleView
+                    currentDate={selectedDate || new Date()}
+                    events={allEvents}
+                    tasks={allTasks}
+                    onDateChange={setSelectedDate}
+                    onEditEvent={(event) => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}
+                    onEditTask={(task) => { setSelectedTask(task); setIsTaskDialogOpen(true); }}
+                    onToggleTaskCompleted={handleToggleTaskCompleted}
+                    onCreateEvent={handleCreateEvent} // Pasar la función para crear eventos
+                    onMoveEvent={handleMoveEvent} // Pasar la función para mover eventos
+                  />
+                ) : (
+                  <>
+                    <h2 className="text-xl font-semibold mb-4 shrink-0">
+                        Agenda para {selectedDate ? format(selectedDate, "PPP", { locale: es }) : "..."}
+                    </h2>
+                    <div className="flex-grow overflow-y-auto pr-2">
+                      {isLoading ? <p>Cargando agenda...</p> : (
+                          <div className="space-y-4">
+                              {/* Sección de Tareas */}
+                              {tasksForSelectedPeriod.length > 0 && (
+                                <>
+                                  <h3 className="text-lg font-semibold mt-4 mb-2">Tareas</h3>
+                                  {tasksForSelectedPeriod.map((task) => (
+                                    <div key={task.id} className="p-4 border rounded-lg flex items-center justify-between hover:border-primary/50">
+                                      <div className="flex items-center gap-3">
+                                        <Checkbox
+                                          checked={task.is_completed}
+                                          onCheckedChange={() => handleToggleTaskCompleted(task)}
+                                          className="h-5 w-5"
+                                        />
+                                        <div className={task.is_completed ? "line-through text-muted-foreground" : ""}>
+                                          <p className="font-semibold">{task.description}</p>
+                                          {task.due_date && (
+                                            <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
+                                              <Clock className="h-4 w-4" />
+                                              {format(new Date(task.due_date), "PPP", { locale: es })}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <Button variant="ghost" size="icon" onClick={() => { setSelectedTask(task); setIsTaskDialogOpen(true); }}>
+                                          <MoreHorizontal className="h-4 w-4" />
+                                        </Button>
+                                        <Button variant="ghost" size="icon" onClick={() => setDeletingTask(task)}>
+                                          <Trash2 className="h-4 w-4 text-destructive" />
+                                        </Button>
+                                        {task.linked_profiles && task.linked_profiles.length > 0 && (
+                                          <TooltipProvider>
+                                            <Tooltip>
+                                              <TooltipTrigger asChild>
+                                                <Button variant="ghost" size="icon" className="text-primary">
+                                                  <LinkIcon className="h-4 w-4" />
+                                                </Button>
+                                              </TooltipTrigger>
+                                              <TooltipContent>
+                                                <p>Vinculado a: {task.linked_profiles.map(p => p.name).join(', ')}</p>
+                                              </TooltipContent>
+                                            </Tooltip>
+                                          </TooltipProvider>
                                         )}
+                                        <Button variant="ghost" size="icon" onClick={() => { setSelectedTask(task); setIsTaskDialogOpen(true); }}>
+                                          <LinkIcon className="h-4 w-4" />
+                                        </Button>
                                       </div>
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                      <Button variant="ghost" size="icon" onClick={() => { setSelectedTask(task); setIsTaskDialogOpen(true); }}>
-                                        <MoreHorizontal className="h-4 w-4" />
-                                      </Button>
-                                      <Button variant="ghost" size="icon" onClick={() => setDeletingTask(task)}>
-                                        <Trash2 className="h-4 w-4 text-destructive" />
-                                      </Button>
-                                      {task.linked_profiles && task.linked_profiles.length > 0 && (
-                                        <TooltipProvider>
-                                          <Tooltip>
-                                            <TooltipTrigger asChild>
-                                              <Button variant="ghost" size="icon" className="text-primary">
-                                                <LinkIcon className="h-4 w-4" />
-                                              </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent>
-                                              <p>Vinculado a: {task.linked_profiles.map(p => p.name).join(', ')}</p>
-                                            </TooltipContent>
-                                          </Tooltip>
-                                        </TooltipProvider>
-                                      )}
-                                      <Button variant="ghost" size="icon" onClick={() => { setSelectedTask(task); setIsTaskDialogOpen(true); }}>
-                                        <LinkIcon className="h-4 w-4" />
-                                      </Button>
-                                    </div>
+                                  ))}
+                                </>
+                              )}
+
+                              {/* Sección de Eventos */}
+                              {eventsForSelectedPeriod.length > 0 && (
+                                <>
+                                  <h3 className="text-lg font-semibold mt-4 mb-2">Eventos</h3>
+                                  {eventsForSelectedPeriod.map((event) => (
+                                  <div key={event.id} className="p-4 border rounded-lg flex items-center justify-between hover:border-primary/50 cursor-pointer" onClick={() => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}>
+                                      <div>
+                                          <p className="font-semibold flex items-center">
+                                              {event.summary}
+                                              {event.team_shared && (
+                                                  <span title="Compartido con equipo">
+                                                      <Users className="ml-2 h-4 w-4 text-blue-500" />
+                                                  </span>
+                                              )}
+                                          </p>
+                                          {event.workspace_name && (
+                                              <div 
+                                                  className="inline-flex items-center gap-1.5 mt-2 text-xs font-medium px-2 py-0.5 rounded-full"
+                                                  style={{
+                                                      backgroundColor: event.workspace_color ? `${event.workspace_color}20` : '#f3f4f6', // bg-gray-100
+                                                  }}
+                                              >
+                                                  <span
+                                                      className="h-2 w-2 rounded-full"
+                                                      style={{ backgroundColor: event.workspace_color || '#888888' }}
+                                                  ></span>
+                                                  <span style={{ color: event.workspace_color || '#374151' }}>
+                                                      {event.workspace_name}
+                                                  </span>
+                                              </div>
+                                          )}
+                                          <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
+                                              <Clock className="h-4 w-4" /> 
+                                              {new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                                          </div>
+                                      </div>
+                                      <div onClick={(e) => e.stopPropagation()}>
+                                          {event.linked_profiles && event.linked_profiles.length > 0 && (
+                                              <TooltipProvider>
+                                                  <Tooltip>
+                                                      <TooltipTrigger asChild>
+                                                          <Button variant="ghost" size="icon" className="text-primary">
+                                                              <LinkIcon className="h-4 w-4" />
+                                                          </Button>
+                                                      </TooltipTrigger>
+                                                      <TooltipContent>
+                                                          <p>Vinculado a: {event.linked_profiles.map(p => p.name).join(', ')}</p>
+                                                      </TooltipContent>
+                                                  </Tooltip>
+                                              </TooltipProvider>
+                                          )}
+                                          <Button variant="ghost" size="icon" onClick={() => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}>
+                                              <LinkIcon className="h-4 w-4" />
+                                          </Button>
+                                          <Button variant="ghost" size="icon" onClick={() => setDeletingEvent(event)}>
+                                              <Trash2 className="h-4 w-4 text-destructive" />
+                                          </Button>
+                                      </div>
                                   </div>
-                                ))}
-                              </>
-                            )}
+                                  ))}
+                                </>
+                              )}
 
-                            {/* Sección de Eventos */}
-                            {eventsForSelectedPeriod.length > 0 && (
-                              <>
-                                <h3 className="text-lg font-semibold mt-4 mb-2">Eventos</h3>
-                                {eventsForSelectedPeriod.map((event) => (
-                                <div key={event.id} className="p-4 border rounded-lg flex items-center justify-between hover:border-primary/50 cursor-pointer" onClick={() => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}>
-                                    <div>
-                                        <p className="font-semibold flex items-center">
-                                            {event.summary}
-                                            {event.team_shared && (
-                                                <span title="Compartido con equipo">
-                                                    <Users className="ml-2 h-4 w-4 text-blue-500" />
-                                                </span>
-                                            )}
-                                        </p>
-                                        {event.workspace_name && (
-                                            <div 
-                                                className="inline-flex items-center gap-1.5 mt-2 text-xs font-medium px-2 py-0.5 rounded-full"
-                                                style={{
-                                                    backgroundColor: event.workspace_color ? `${event.workspace_color}20` : '#f3f4f6', // bg-gray-100
-                                                }}
-                                            >
-                                                <span
-                                                    className="h-2 w-2 rounded-full"
-                                                    style={{ backgroundColor: event.workspace_color || '#888888' }}
-                                                ></span>
-                                                <span style={{ color: event.workspace_color || '#374151' }}>
-                                                    {event.workspace_name}
-                                                </span>
-                                            </div>
-                                        )}
-                                        <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
-                                            <Clock className="h-4 w-4" /> 
-                                            {new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                                        </div>
-                                    </div>
-                                    <div onClick={(e) => e.stopPropagation()}>
-                                        {event.linked_profiles && event.linked_profiles.length > 0 && (
-                                            <TooltipProvider>
-                                                <Tooltip>
-                                                    <TooltipTrigger asChild>
-                                                        <Button variant="ghost" size="icon" className="text-primary">
-                                                            <LinkIcon className="h-4 w-4" />
-                                                        </Button>
-                                                    </TooltipTrigger>
-                                                    <TooltipContent>
-                                                        <p>Vinculado a: {event.linked_profiles.map(p => p.name).join(', ')}</p>
-                                                    </TooltipContent>
-                                                </Tooltip>
-                                            </TooltipProvider>
-                                        )}
-                                        <Button variant="ghost" size="icon" onClick={() => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}>
-                                            <LinkIcon className="h-4 w-4" />
-                                        </Button>
-                                        <Button variant="ghost" size="icon" onClick={() => setDeletingEvent(event)}>
-                                            <Trash2 className="h-4 w-4 text-destructive" />
-                                        </Button>
-                                    </div>
-                                </div>
-                                ))}
-                              </>
-                            )}
-
-                            {tasksForSelectedPeriod.length === 0 && eventsForSelectedPeriod.length === 0 && (
-                                <p className="text-center text-muted-foreground pt-10">No tienes eventos ni tareas para {periodText}.</p>
-                            )}
-                        </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
+                              {tasksForSelectedPeriod.length === 0 && eventsForSelectedPeriod.length === 0 && (
+                                  <p className="text-center text-muted-foreground pt-10">No tienes eventos ni tareas para {periodText}.</p>
+                              )}
+                          </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+          </div>
         </div>
+
+              <EventDialog
+                isOpen={isEventDialogOpen}
+                onOpenChange={setIsEventDialogOpen}
+                onSaveSuccess={handleSaveSuccess}
+                initialDate={initialEventDate} // Pasar la fecha inicial
+              />        <TaskDialog
+          isOpen={isTaskDialogOpen}
+          onOpenChange={setIsTaskDialogOpen}
+          onSaveSuccess={handleTaskSaveSuccess}
+          task={selectedTask} // Pasar la tarea seleccionada para edición
+        />
+        {selectedEvent && (
+          <EventDetailsDialog
+            isOpen={isDetailsDialogOpen}
+            onOpenChange={setIsDetailsDialogOpen}
+            onEditClick={(eventToEdit) => { // Manejar el clic en editar desde EventDetailsDialog
+              setSelectedEvent(eventToEdit);
+              setIsDetailsDialogOpen(false); // Cerrar el diálogo de detalles
+              setIsEventEditDialogOpen(true); // Abrir el diálogo de edición
+            }}
+            event={selectedEvent}
+          />
+        )}
+        {selectedEvent && (
+          <EventEditDialog
+            isOpen={isEventEditDialogOpen}
+            onOpenChange={setIsEventEditDialogOpen}
+            onSaveSuccess={handleSaveSuccess}
+            onCloseDetails={() => setIsDetailsDialogOpen(false)} // Pasar función para cerrar detalles
+            event={selectedEvent}
+          />
+        )}
+        
+        <AlertDialog open={!!deletingEvent} onOpenChange={(open) => !open && setDeletingEvent(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Cancelar este evento?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Esta acción es irreversible y cancelará el recordatorio para &quot;{deletingEvent?.description}&quot;.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteConfirm}>Sí, cancelar evento</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={!!deletingTask} onOpenChange={(open) => !open && setDeletingTask(null)}> {/* Nuevo AlertDialog para tareas */}
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Eliminar esta tarea?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Esta acción es irreversible y eliminará la tarea &quot;{deletingTask?.description}&quot; permanentemente.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={handleTaskDeleteConfirm} className="bg-destructive hover:bg-destructive/90">Sí, eliminar tarea</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
-
-      <EventDialog
-        isOpen={isEventDialogOpen}
-        onOpenChange={setIsEventDialogOpen}
-        onSaveSuccess={handleSaveSuccess}
-      />
-      <TaskDialog
-        isOpen={isTaskDialogOpen}
-        onOpenChange={setIsTaskDialogOpen}
-        onSaveSuccess={handleTaskSaveSuccess}
-        task={selectedTask} // Pasar la tarea seleccionada para edición
-      />
-      {selectedEvent && (
-        <EventDetailsDialog
-          isOpen={isDetailsDialogOpen}
-          onOpenChange={setIsDetailsDialogOpen}
-          onEditClick={(eventToEdit) => { // Manejar el clic en editar desde EventDetailsDialog
-            setSelectedEvent(eventToEdit);
-            setIsDetailsDialogOpen(false); // Cerrar el diálogo de detalles
-            setIsEventEditDialogOpen(true); // Abrir el diálogo de edición
-          }}
-          event={selectedEvent}
-        />
-      )}
-      {selectedEvent && (
-        <EventEditDialog
-          isOpen={isEventEditDialogOpen}
-          onOpenChange={setIsEventEditDialogOpen}
-          onSaveSuccess={handleSaveSuccess}
-          onCloseDetails={() => setIsDetailsDialogOpen(false)} // Pasar función para cerrar detalles
-          event={selectedEvent}
-        />
-      )}
-      
-      <AlertDialog open={!!deletingEvent} onOpenChange={(open) => !open && setDeletingEvent(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Cancelar este evento?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta acción es irreversible y cancelará el recordatorio para &quot;{deletingEvent?.description}&quot;.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteConfirm}>Sí, cancelar evento</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={!!deletingTask} onOpenChange={(open) => !open && setDeletingTask(null)}> {/* Nuevo AlertDialog para tareas */}
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar esta tarea?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta acción es irreversible y eliminará la tarea &quot;{deletingTask?.description}&quot; permanentemente.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleTaskDeleteConfirm} className="bg-destructive hover:bg-destructive/90">Sí, eliminar tarea</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
   );
 }

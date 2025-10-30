@@ -4,16 +4,15 @@ import React from 'react';
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ArrowLeft, Edit, Share2, Loader2, FileText, Table as TableIcon, Link, Download } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import ResponseCard from '@/components/forms/ResponseCard';
 import { useToast } from '@/hooks/use-toast';
 import apiClient from '@/lib/api';
 import { toast as sonnerToast } from 'sonner';
 import { Form as BaseForm, FormFieldData, FormSectionData, FormElement, FormResponse, FormResponseAnswer } from '@/types/form';
-import { ContactProfile } from '../../profiles/page';
 import { ManageLinkedProfilesDialog } from '@/app/(dashboard)/notes/ManageLinkedProfilesDialog';
-
+import { FormViewerHeader } from '@/components/forms/FormViewerHeader'; // Importar el nuevo componente
+import { motion, AnimatePresence } from 'framer-motion'; // Importar para animaciones de tarjetas
 
 
 interface Form extends BaseForm {
@@ -156,6 +155,27 @@ export default function FormViewPage() {
     }
   };
 
+  const handleDownloadSingleResponseReport = async (responseId: string) => {
+    try {
+      const response = await apiClient.get(`/api/form-responses/${responseId}/pdf`, {
+        responseType: 'blob', // Important: receive as a blob
+      });
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `respuesta_formulario_${responseId.substring(0, 8)}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      sonnerToast.success('Reporte PDF de la respuesta descargado exitosamente.');
+    } catch (error) {
+      console.error('Error al descargar el reporte PDF de la respuesta:', error);
+      sonnerToast.error('Error al descargar el reporte PDF de la respuesta.');
+    }
+  };
+
   const handleDeleteResponse = async (responseId: string) => {
     try {
       await apiClient.delete(`/api/form-responses/${responseId}`);
@@ -196,53 +216,46 @@ export default function FormViewPage() {
   const allFormFields = extractAllFormFields(form.elements);
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-4">
-          <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-            <FileText className="h-6 w-6 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-3xl font-bold">{form.title}</h1>
-            <p className="text-muted-foreground">{form.description || 'Visualización del formulario y sus respuestas'}</p>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => router.push('/forms')}><ArrowLeft className="mr-2 h-4 w-4" />Volver</Button>
-          <Button variant="outline" onClick={handleShare}><Share2 className="mr-2 h-4 w-4" />Compartir</Button>
-          <Button variant="outline" onClick={handleDownloadReport}><Download className="mr-2 h-4 w-4" />Descargar Reporte PDF</Button>
-          <Button variant="outline" onClick={() => router.push(`/forms/${formId}/responses`)}><TableIcon className="mr-2 h-4 w-4" />Ver Respuestas</Button>
-          <Button onClick={() => router.push(`/forms/${formId}/edit`)}><Edit className="mr-2 h-4 w-4" />Editar</Button>
-        </div>
-      </div>
+    <div className="max-w-7xl mx-auto p-4 sm:p-8"> {/* Ajustado para que el padding lo maneje el contenedor principal */}
+      <FormViewerHeader
+        form={form}
+        renderFormElement={renderFormElement}
+        onShare={handleShare}
+        onDownloadReport={handleDownloadReport}
+        onViewResponses={() => router.push(`/forms/${formId}/responses`)}
+        onEditForm={() => router.push(`/forms/${formId}/edit`)}
+      />
 
-      <div className="grid gap-8 lg:grid-cols-12">
-        <div className="lg:col-span-5">
-          <Card className="bg-card/50 border-dashed">
-            <CardHeader>
-              <CardTitle>Estructura del Formulario</CardTitle>
-              <CardDescription>Así es como se ven las preguntas y secciones.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {form.elements.map(element => renderFormElement(element))}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="lg:col-span-7">
-            <h2 className="text-2xl font-semibold mb-4">Respuestas ({form.responses.length})</h2>
-            <div className="space-y-4">
-                {form.responses.length > 0 ? (
-                    form.responses.map((response) => (
-                    <ResponseCard key={response.id} response={response} formFields={allFormFields} onOpenLinkProfileDialog={handleOpenLinkProfileDialog} onDelete={handleDeleteResponse} />
-                    ))
-                ) : (
-                    <div className="text-center py-16 border-2 border-dashed border-border rounded-xl">
-                        <p className="text-muted-foreground">Aún no hay respuestas para este formulario.</p>
-                    </div>
-                )}
-            </div>
-        </div>
+      <div className="mt-8"> {/* Añadido margen superior para separar del header */}
+          <h2 className="text-2xl font-semibold mb-4">Respuestas ({form.responses.length})</h2>
+          <motion.div layout className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
+              <AnimatePresence>
+                  {form.responses.length > 0 ? (
+                      form.responses.map((response) => (
+                          <motion.div
+                              key={response.id}
+                              layout
+                              initial={{ opacity: 0, scale: 0.8 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.8 }}
+                              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                          >
+                              <ResponseCard
+                                  response={response}
+                                  formFields={allFormFields}
+                                  onOpenLinkProfileDialog={handleOpenLinkProfileDialog}
+                                  onDelete={handleDeleteResponse}
+                                  onDownloadResponsePdf={handleDownloadSingleResponseReport} // Nueva prop
+                              />
+                          </motion.div>
+                      ))
+                  ) : (
+                      <div className="text-center py-16 col-span-full border-2 border-dashed border-border rounded-xl">
+                          <p className="text-muted-foreground">Aún no hay respuestas para este formulario.</p>
+                      </div>
+                  )}
+              </AnimatePresence>
+          </motion.div>
       </div>
 
       {currentResponseToLink && (

@@ -43,7 +43,7 @@ interface ChatMessageType {
   text: string;
   sender: 'user' | 'ai';
   created_at: string;
-  image?: string;
+  image_base64?: string;
   document_url?: string;
   ragContext?: SelectedContextItem[];
   sources?: Source[];
@@ -407,7 +407,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         sender: 'user',
         created_at: new Date().toISOString(),
         ragContext: selectedContext.length > 0 ? selectedContext : undefined,
-        image: uploadedImage?.base64,
+        image_base64: uploadedImage?.base64,
       };
       setMessages((prev) => [...prev, userMessage]);
       requestAnimationFrame(() => scrollToBottom(true));
@@ -849,7 +849,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                     msg={{
                       text: msg.text,
                       sender: msg.sender,
-                      image: msg.image_base64 || '',
+                      image_base64: msg.image_base64 || '',
                       document_url: msg.document_url || '',
                       ragContext: msg.ragContext,
                       sources: msg.sources,
@@ -935,7 +935,7 @@ interface ChatMessageType {
   text: string;
   sender: 'user' | 'ai';
   created_at: string;
-  image?: string;
+  image_base64?: string;
   document_url?: string;
   ragContext?: SelectedContextItem[];
   sources?: Source[];

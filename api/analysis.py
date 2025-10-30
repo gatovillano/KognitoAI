@@ -444,9 +444,15 @@ async def get_analysis_result_endpoint(
     db: AsyncSession = Depends(get_db)
 ):
     """Consulta el estado y el resultado de una tarea de análisis."""
+    logger.info(f"Consulta de estado de tarea: task_id={task_id}, account_id={current_account_id}")
     task = await db.get(AnalysisTask, uuid.UUID(task_id))
-    if not task or str(task.account_id) != current_account_id:
+    if not task:
+        logger.warning(f"Tarea {task_id} no encontrada en la base de datos.")
         raise HTTPException(status_code=404, detail="Tarea no encontrada.")
+    if str(task.account_id) != current_account_id:
+        logger.warning(f"Tarea {task_id} encontrada, pero account_id no coincide. Task account: {task.account_id}, Current account: {current_account_id}")
+        raise HTTPException(status_code=404, detail="Tarea no pertenece al usuario.")
+    logger.info(f"Tarea {task_id} encontrada. Estado: {task.status}")
     return {"status": task.status, "result": task.result_payload, "error": task.error_message}
 
 @router.get("/get-mindmap-result/{task_id}")

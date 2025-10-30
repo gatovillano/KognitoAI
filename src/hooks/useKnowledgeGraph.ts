@@ -4,28 +4,27 @@ import { useState, useEffect, useCallback } from 'react';
 import apiClient from '@/lib/api';
 
 // Interfaces para tipar los datos
-interface Entity {
+interface GraphNode {
   id: string;
-  name: string;
-  type: string;
-  description?: string;
-  confidence?: number;
-  source_document?: string;
+  label: string;
+  title?: string;
+  color?: string;
+  size?: number;
 }
 
-interface Relationship {
+interface GraphEdge {
   id: string;
-  source_entity_id: string;
-  target_entity_id: string;
-  relationship_type: string;
-  description?: string;
-  confidence?: number;
+  from: string;
+  to: string;
+  label?: string;
+  title?: string;
+  arrows?: string;
 }
 
 interface GraphData {
-  entities: Entity[];
-  relationships: Relationship[];
-  metadata?: any;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  metadata?: any; // Mantener metadata por si se usa para otras cosas
 }
 
 interface GraphStats {
@@ -54,22 +53,25 @@ export const useKnowledgeGraph = (workspaceId: string | null) => {
         workspace_id: workspaceId,
         force_reprocess: false
       });
+      console.log('🔵 Respuesta de la API (processKnowledgeGraph):', response.data);
 
-      if (response.data) {
-        setGraphData(response.data);
+      if (response.data && response.data.nodes && response.data.edges) {
+        setGraphData({ nodes: response.data.nodes, edges: response.data.edges, metadata: response.data.metadata });
         setProcessingStatus('completed');
         if (response.data.metadata) {
           console.log('📊 Grafo procesado:', {
-            entidades: response.data.entities?.length || 0,
-            relaciones: response.data.relationships?.length || 0,
+            nodos: response.data.nodes.length || 0,
+            aristas: response.data.edges.length || 0,
             método: response.data.metadata.processing_method || 'unknown'
           });
         }
+        console.log('🟢 Datos del grafo establecidos (processKnowledgeGraph):', { nodes: response.data.nodes.length, edges: response.data.edges.length });
       } else {
-        throw new Error('Error procesando el grafo');
+        console.error('🔴 Error: Datos del grafo incompletos o ausentes en la respuesta (processKnowledgeGraph):', response.data);
+        throw new Error('Error procesando el grafo o datos incompletos');
       }
     } catch (err: any) {
-      console.error('Error procesando grafo:', err);
+      console.error('🔴 Error procesando grafo:', err);
       setError(err.message || 'Error procesando el grafo de conocimiento');
       setProcessingStatus('error');
     } finally {
@@ -85,22 +87,30 @@ export const useKnowledgeGraph = (workspaceId: string | null) => {
 
     try {
       const response = await apiClient.get(`/api/knowledge-graph/${workspaceId}`);
+      console.log('🔵 Respuesta de la API (loadGraphData):', response.data);
 
-      if (response.data) {
-        setGraphData(response.data);
+      if (response.data && response.data.nodes && response.data.edges) {
+        setGraphData({ nodes: response.data.nodes, edges: response.data.edges, metadata: response.data.metadata });
         setProcessingStatus('completed');
+        console.log('🟢 Datos del grafo establecidos (loadGraphData):', { nodes: response.data.nodes.length, edges: response.data.edges.length });
+      } else if (response.data && response.data.error === "Grafo vacío. Procesa los documentos primero para generar el grafo.") {
+          setError("Grafo vacío. Procesa los documentos primero para generar el grafo.");
+          setProcessingStatus('not_processed');
+          setGraphData(null); // Limpiar datos si el grafo está vacío
       } else {
+        console.warn('🟡 Datos del grafo incompletos o ausentes, o error inesperado. Comprobando estado del procesamiento...');
         const statusResponse = await apiClient.get(`/api/knowledge-graph/${workspaceId}/status`);
 
         if (statusResponse.data) {
           setProcessingStatus(statusResponse.data.status);
+          console.log('🟡 Estado de procesamiento del grafo:', statusResponse.data.status);
           if (statusResponse.data.status === 'not_processed') {
             await processKnowledgeGraph();
           }
         }
       }
     } catch (err: any) {
-      console.error('Error cargando datos del grafo:', err);
+      console.error('🔴 Error cargando datos del grafo:', err);
       setError(err.message || 'Error cargando el grafo de conocimiento');
     } finally {
       setIsLoading(false);
@@ -159,14 +169,17 @@ export const useKnowledgeGraph = (workspaceId: string | null) => {
 
   useEffect(() => {
     if (workspaceId) {
+      console.log('🟡 useEffect en useKnowledgeGraph: workspaceId detectado, cargando datos del grafo.', workspaceId);
       loadGraphData();
+    } else {
+      console.log('🟡 useEffect en useKnowledgeGraph: workspaceId no disponible.');
     }
   }, [workspaceId, loadGraphData]);
 
   const stats: GraphStats | null = graphData ? {
-    totalEntities: graphData.entities?.length || 0,
-    totalRelationships: graphData.relationships?.length || 0,
-    entityTypes: [...new Set(graphData.entities?.map(e => e.type) || [])],
+    totalEntities: graphData.nodes?.length || 0,
+    totalRelationships: graphData.edges?.length || 0,
+    entityTypes: [...new Set(graphData.nodes?.map(n => n.type) || [])], // Usar 'type' de los nodos
     processingMethod: graphData.metadata?.processing_method || 'unknown',
     lastProcessed: graphData.metadata?.processing_time || null
   } : null;

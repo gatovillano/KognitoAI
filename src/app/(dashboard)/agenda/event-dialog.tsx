@@ -33,9 +33,10 @@ interface EventDialogProps {
   onSaveSuccess: (event: any) => void;
   workspaceId?: string;
   event?: AgendaEvent | null;
+  initialDate?: Date; // Nueva prop para la fecha inicial
 }
 
-export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, event }: EventDialogProps) {
+export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, event, initialDate }: EventDialogProps) {
   const [teams, setTeams] = useState<any[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(false);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
@@ -100,18 +101,21 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
         });
         console.log("Formulario reseteado para edición (sin workspace_id inicial).");
       } else {
+        // Para nuevo evento, usar initialDate si está disponible
+        const defaultDate = initialDate ? initialDate.toLocaleDateString('en-CA') : '';
+        const defaultTime = initialDate ? initialDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
         form.reset({
           summary: '',
           description: '',
-          date: '',
-          time: '',
+          date: defaultDate,
+          time: defaultTime,
           team_id: '',
           workspace_id: workspaceId || '',
         });
-        console.log("Formulario reseteado para nuevo evento.");
+        console.log("Formulario reseteado para nuevo evento con fecha inicial:", defaultDate, defaultTime);
       }
     }
-  }, [isOpen, event, form, workspaceId]);
+  }, [isOpen, event, form, workspaceId, initialDate]); // Añadir initialDate como dependencia
 
   // Efecto para establecer el workspace_id una vez que los workspaces estén cargados
   useEffect(() => {

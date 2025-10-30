@@ -41,32 +41,35 @@ const KnowledgeGraphViewerInner = ({ graphData, onNodeSelect, selectedWorkspace 
 
   // Colores por tipo de entidad
   const nodeColors = useMemo(() => ({
-    'PERSON': '#FF6B6B',
-    'ORG': '#4ECDC4',
-    'LOC': '#45B7D1',
-    'CONCEPT': '#96CEB4',
-    'MISC': '#FFEAA7',
-    'default': '#DDA0DD'
+    'CONCEPTUAL_QUOTE': '#FF6B6B', // Color para nodos de citas conceptuales
+    'IDEA_PROFILE': '#4ECDC4',     // Color para nodos de perfiles de ideas
+    'default': '#DDA0DD'           // Color por defecto para otros tipos de nodos
   }), []);
 
   const convertGraphData = useCallback((data: any) => {
-    if (!data || !data.entities) return { nodes: [], edges: [] };
+    console.log("🔵 convertGraphData: Datos de entrada:", data);
+    // Asegurarse de que data.nodes y data.edges existan
+    if (!data || !data.nodes || !data.edges) {
+      console.warn("🟡 convertGraphData: Datos de grafo incompletos o ausentes.");
+      return { nodes: [], edges: [] };
+    }
 
-    const flowNodes: Node[] = data.entities.map((entity: any, index: number) => {
-      const entityType = entity.type || 'default';
+    // Convertir nodos del backend a formato ReactFlow
+    const flowNodes: Node[] = data.nodes.map((node: any, index: number) => {
+      const nodeType = node.type || 'default'; // Usar 'type' del nodo
       return {
-        id: entity.id || `entity_${index}`,
-        type: 'default',
-        position: { x: Math.random() * 800, y: Math.random() * 600 },
+        id: node.id || `node_${index}`,
+        type: 'default', // Tipo de nodo de ReactFlow (puede ser 'input', 'output', 'default')
+        position: { x: Math.random() * 800, y: Math.random() * 600 }, // Posición aleatoria inicial
         data: {
-          label: entity.name || 'Sin nombre',
-          type: entityType,
-          description: entity.description || '',
-          confidence: entity.confidence || 0,
-          source: entity.source_document || 'Desconocido'
+          label: node.label || node.properties?.name || node.properties?.concept || 'Sin nombre',
+          type: nodeType,
+          description: node.properties?.description || '',
+          confidence: node.properties?.confidence || 0,
+          source: node.properties?.source_document || 'Desconocido'
         },
         style: {
-          background: nodeColors[entityType as keyof typeof nodeColors] || nodeColors.default,
+          background: nodeColors[nodeType as keyof typeof nodeColors] || nodeColors.default,
           color: '#333',
           border: '2px solid #222',
           borderRadius: '8px',
@@ -78,43 +81,56 @@ const KnowledgeGraphViewerInner = ({ graphData, onNodeSelect, selectedWorkspace 
         }
       };
     });
+    console.log("🟢 convertGraphData: Nodos convertidos:", flowNodes.length, flowNodes);
 
-    const maxEdges = 1000;
-    const flowEdges: Edge[] = (data.relationships || [])
+    const maxEdges = 1000; // Limitar el número de aristas para evitar sobrecarga
+    // Convertir aristas del backend a formato ReactFlow
+    const flowEdges: Edge[] = (data.edges || [])
       .slice(0, maxEdges)
-      .map((rel: any, index: number) => ({
-        id: rel.id || `edge_${index}`,
-        source: rel.source_entity_id || rel.source_entity,
-        target: rel.target_entity_id || rel.target_entity,
-        type: 'smoothstep',
-        animated: rel.confidence > 0.8,
+      .map((edge: any, index: number) => ({
+        id: edge.id || `edge_${index}`,
+        source: edge.source,
+        target: edge.target,
+        type: 'smoothstep', // Tipo de arista de ReactFlow
+        animated: edge.properties?.confidence > 0.8, // Animar aristas con alta confianza
         style: {
-          stroke: rel.confidence > 0.8 ? '#FF6B6B' : '#999',
-          strokeWidth: Math.max(1, (rel.confidence || 0.5) * 3)
+          stroke: edge.properties?.confidence > 0.8 ? '#FF6B6B' : '#999',
+          strokeWidth: Math.max(1, (edge.properties?.confidence || 0.5) * 3)
         },
-        label: rel.relationship_type || 'RELACIONADO',
+        label: edge.label || edge.type || 'RELACIONADO',
         labelStyle: { fontSize: '10px', fontWeight: 'bold', fill: '#666' },
         data: {
-          type: rel.relationship_type || 'RELACIONADO',
-          description: rel.description || '',
-          confidence: rel.confidence || 0
+          type: edge.type || 'RELACIONADO',
+          description: edge.properties?.description || '',
+          confidence: edge.properties?.confidence || 0
         }
       }))
-      .filter((edge: Edge) => edge.source && edge.target);
+      .filter((edge: Edge) => edge.source && edge.target); // Filtrar aristas inválidas
+    console.log("🟢 convertGraphData: Aristas convertidas:", flowEdges.length, flowEdges);
 
-    return { nodes: flowNodes, edges: flowEdges };
-  }, [nodeColors]);
+  return { nodes: flowNodes, edges: flowEdges };
+}, [nodeColors]);
 
-  useEffect(() => {
-    if (graphData) {
-      setIsLoading(true);
-      const { nodes: newNodes, edges: newEdges } = convertGraphData(graphData);
-      setNodes(newNodes);
-      setEdges(newEdges);
-      setIsLoading(false);
-      setTimeout(() => fitView(), 100);
-    }
-  }, [graphData, convertGraphData, setNodes, setEdges, fitView]);
+useEffect(() => {
+  if (graphData) {
+    console.log("🔵 KnowledgeGraphViewer: graphData recibido en useEffect:", graphData);
+    setIsLoading(true);
+    const { nodes: newNodes, edges: newEdges } = convertGraphData(graphData);
+    console.log("🟢 KnowledgeGraphViewer: Nodos ReactFlow listos para setear:", newNodes.length);
+    console.log("🟢 KnowledgeGraphViewer: Aristas ReactFlow listas para setear:", newEdges.length);
+    setNodes(newNodes);
+    setEdges(newEdges);
+    setIsLoading(false);
+    setTimeout(() => {
+      fitView();
+      console.log("🟢 KnowledgeGraphViewer: fitView ejecutado.");
+    }, 100);
+  } else {
+    console.log("🟡 KnowledgeGraphViewer: graphData es nulo o indefinido en useEffect.");
+    setNodes([]);
+    setEdges([]);
+  }
+}, [graphData, convertGraphData, setNodes, setEdges, fitView]);
 
   const filteredNodes = useMemo(() => {
     return nodes.filter((node: Node) => {

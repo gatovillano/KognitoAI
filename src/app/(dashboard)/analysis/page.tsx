@@ -1,64 +1,24 @@
+// src/app/(dashboard)/analysis/page.tsx
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Loader2, Info, Filter, ChevronDown, Search, BarChart3, FileText, FolderKanban, Lightbulb, Code, Calendar, Eye } from 'lucide-react'; // Asumiendo que usas lucide-react para iconos
+import { toast } from 'sonner'; // Para notificaciones
+import apiClient from '@/lib/api'; // Tu cliente HTTP
+import { useAuth } from '@/contexts/AuthContext'; // Tu hook de autenticación
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { AnalysisDetailDialog } from './analysis-detail-dialog';
 import { AnalysisResultDialog } from '../rag/analysis-result-dialog';
 import { CollectionAnalysisDialog } from '../rag/collection-analysis-dialog';
-import { CodeAnalysisResultDialog } from '../rag/code-analysis-result-dialog';
+import { CodeAnalysisResultDialog } from './../rag/code-analysis-result-dialog';
 import { SemanticAnalysisDialog } from '../rag/semantic-analysis-dialog';
-import apiClient from '@/lib/api';
-import { toast } from 'sonner';
-import { 
-  BarChart3, 
-  FileText, 
-  FolderKanban, 
-  Brain, 
-  Lightbulb, 
-  Code, 
-  Search, 
-  Filter, 
-  ChevronDown,
-  Calendar,
-  Eye,
-  Loader2,
-  Info
-} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const GraphVisualization = dynamic(
-  () => import('@/components/KnowledgeGraph/GraphVisualization').then(mod => mod.GraphVisualization),
-  { ssr: false }
-);
 
-interface Analysis {
-  id: string;
-  type: string;
-  title: string;
-  summary: string;
-  created_at: string;
-  updated_at: string;
-  source_table: string;
-  tool_used?: string;
-  confidence_score?: number;
-  action_suggestion?: string;
-  related_items?: any[];
-  full_data: any;
-}
-
-interface AnalysisResponse {
-  analysis: Analysis[];
-  total: number;
-  limit: number;
-  offset: number;
-  has_more: boolean;
-}
 
 const getAnalysisIcon = (type: string) => {
   switch (type) {
@@ -66,8 +26,6 @@ const getAnalysisIcon = (type: string) => {
       return <FileText className="h-5 w-5 text-blue-500" />;
     case 'collection':
       return <FolderKanban className="h-5 w-5 text-green-500" />;
-    case 'mindmap':
-      return <Brain className="h-5 w-5 text-purple-500" />;
     case 'insight':
       return <Lightbulb className="h-5 w-5 text-yellow-500" />;
     case 'code':
@@ -86,8 +44,6 @@ const getAnalysisTypeLabel = (type: string) => {
       return 'Documento';
     case 'collection':
       return 'Colección';
-    case 'mindmap':
-      return 'Mapa Mental';
     case 'insight':
       return 'Insight';
     case 'code':
@@ -102,50 +58,49 @@ const getAnalysisTypeLabel = (type: string) => {
 };
 
 const getAnalysisTypeBadgeColor = (type: string) => {
-  switch (type) {
-    case 'document':
-      return 'bg-blue-100 text-blue-800 border-blue-200';
-    case 'collection':
-      return 'bg-green-100 text-green-800 border-green-200';
-    case 'mindmap':
-      return 'bg-purple-100 text-purple-800 border-purple-200';
-    case 'insight':
-      return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-    case 'code':
-      return 'bg-orange-100 text-orange-800 border-orange-200';
-    case 'semantic':
-    case 'semantic_summary':
-      return 'bg-indigo-100 text-indigo-800 border-indigo-200';
-    default:
-      return 'bg-gray-100 text-gray-800 border-gray-200';
-  }
-};
+    switch (type) {
+      case 'document':
+        return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'collection':
+        return 'bg-green-100 text-green-800 border-green-200';
+      case 'insight':
+        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      case 'code':
+        return 'bg-orange-100 text-orange-800 border-orange-200';
+      case 'semantic':
+      case 'semantic_summary':
+        return 'bg-indigo-100 text-indigo-800 border-indigo-200';
+      default:
+        return 'bg-gray-100 text-gray-800 border-gray-200';
+    }
+  };
 
 export default function AnalysisPage() {
+  const { user, token } = useAuth();
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
-  const [isAnalysisResultDialogOpen, setIsAnalysisResultDialogOpen] = useState(false); // Para AnalysisResultDialog
-  const [isCollectionAnalysisDialogOpen, setIsCollectionAnalysisDialogOpen] = useState(false); // Para CollectionAnalysisDialog
-  const [isCodeAnalysisResultDialogOpen, setIsCodeAnalysisResultDialogOpen] = useState(false); // Para CodeAnalysisResultDialog
+  const [isAnalysisResultDialogOpen, setIsAnalysisResultDialogOpen] = useState(false);
+  const [isCollectionAnalysisDialogOpen, setIsCollectionAnalysisDialogOpen] = useState(false);
+  const [isCodeAnalysisResultDialogOpen, setIsCodeAnalysisResultDialogOpen] = useState(false);
   const [isSemanticDialogOpen, setIsSemanticDialogOpen] = useState(false);
-  const offsetRef = useRef(0); // Use useRef for offset
+  const offsetRef = useRef(0);
   const [hasMore, setHasMore] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   const fetchAnalyses = useCallback(async (reset = false) => {
     if (reset) {
       setIsLoading(true);
-      offsetRef.current = 0; // Update ref directly
-      setAnalyses([]); // Clear analyses when resetting
+      offsetRef.current = 0;
+      setAnalyses([]);
     } else {
       setIsLoadingMore(true);
     }
 
     try {
-      const currentOffset = offsetRef.current; // Read from ref
+      const currentOffset = offsetRef.current;
       const response = await apiClient.post('/api/get-all-analysis', {
         limit: 20,
         offset: currentOffset,
@@ -161,28 +116,28 @@ export default function AnalysisPage() {
         setAnalyses(prev => [...prev, ...data.analysis]);
       }
 
-      // Crucial change: If hasMore is true but no new data was received, set hasMore to false
       if (data.has_more && data.analysis.length === 0) {
         setHasMore(false);
       } else {
         setHasMore(data.has_more);
       }
 
-      offsetRef.current = currentOffset + data.analysis.length; // Update ref directly
+      offsetRef.current = currentOffset + data.analysis.length;
     } catch (error) {
       toast.error('Error al cargar los análisis');
       console.error('Error fetching analyses:', error);
-      // Also set hasMore to false on error to prevent infinite retries if the error is persistent
       setHasMore(false);
     } finally {
       setIsLoading(false);
       setIsLoadingMore(false);
     }
-  }, [selectedType, searchQuery]); // Removed offset from dependencies
+  }, [selectedType, searchQuery]);
 
   useEffect(() => {
-    fetchAnalyses(true);
-  }, [selectedType, searchQuery, fetchAnalyses]);
+    if (user && token) {
+      fetchAnalyses(true);
+    }
+  }, [user, token, selectedType, searchQuery, fetchAnalyses]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -193,7 +148,6 @@ export default function AnalysisPage() {
     setSelectedAnalysis(analysis);
     switch (analysis.type) {
       case 'document':
-      case 'mindmap':
         setIsAnalysisResultDialogOpen(true);
         break;
       case 'collection':
@@ -232,7 +186,6 @@ export default function AnalysisPage() {
     { value: null, label: 'Todos los tipos' },
     { value: 'document', label: 'Documentos' },
     { value: 'collection', label: 'Colecciones' },
-    { value: 'mindmap', label: 'Mapas Mentales' },
     { value: 'insight', label: 'Insights' },
     { value: 'code', label: 'Código' },
     { value: 'semantic', label: 'Semántico' },
@@ -252,7 +205,7 @@ export default function AnalysisPage() {
 
   return (
     <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden space-y-8">
-      {/* Header */}
+      {/* Header y título */}
       <div className="spacing-component">
         <div className="flex items-center gap-2">
           <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
@@ -266,231 +219,190 @@ export default function AnalysisPage() {
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Explora todos tus análisis de documentos, colecciones, mapas mentales e insights proactivos en un solo lugar.</p>
+                <p>Explora todos tus análisis de documentos, colecciones e insights proactivos en un solo lugar.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
       </div>
 
-      
-
-      {/* Filtros y búsqueda */}
-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-        <form onSubmit={handleSearch} className="flex gap-2 flex-1">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Buscar en análisis..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
+        {/* --- SECCIÓN DE LISTA DE ANÁLISIS EXISTENTE --- */}
+        <>
+          {/* Filtros y búsqueda */}
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+            <form onSubmit={handleSearch} className="flex gap-2 flex-1">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar en análisis..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              <Button type="submit" variant="outline">
+                Buscar
+              </Button>
+            </form>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="gap-2">
+                  <Filter className="h-4 w-4" />
+                  {selectedType ? getAnalysisTypeLabel(selectedType) : 'Filtrar por tipo'}
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {analysisTypes.map((type) => (
+                  <DropdownMenuItem
+                    key={type.value || 'all'}
+                    onClick={() => setSelectedType(type.value)}
+                  >
+                    {type.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-          <Button type="submit" variant="outline">
-            Buscar
-          </Button>
-        </form>
-        
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" className="gap-2">
-              <Filter className="h-4 w-4" />
-              {selectedType ? getAnalysisTypeLabel(selectedType) : 'Filtrar por tipo'}
-              <ChevronDown className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {analysisTypes.map((type) => (
-              <DropdownMenuItem
-                key={type.value || 'all'}
-                onClick={() => setSelectedType(type.value)}
-              >
-                {type.label}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
 
-      {/* Lista de análisis */}
-      {analyses.length === 0 ? (
-        <div className="text-center py-20 px-8">
-          <BarChart3 className="mx-auto h-16 w-16 text-muted-foreground/50 mb-6" />
-          <h3 className="text-xl font-semibold mb-4">No se encontraron análisis</h3>
-          <p className="text-muted-foreground mb-8 max-w-md mx-auto">
-            {searchQuery || selectedType 
-              ? 'No hay análisis que coincidan con tus filtros. Intenta ajustar la búsqueda.'
-              : 'Aún no tienes análisis. ¡Comienza analizando documentos o colecciones para ver resultados aquí!'
-            }
-          </p>
-        </div>
-      ) : (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          <AnimatePresence>
-            {analyses.map((analysis, index) => (
-              <motion.div
-                key={analysis.id}
-                layout
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.8 }}
-                transition={{ type: "spring", stiffness: 300, damping: 30, delay: index * 0.05 }}
-                className="h-full"
-              >
-                <Card className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full">
-                  <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                        {getAnalysisIcon(analysis.type)}
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleViewDetails(analysis)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity gap-1 h-8 px-2"
-                      >
-                        <Eye className="h-3 w-3" />
-                        <span className="text-xs">Ver</span>
-                      </Button>
-                    </div>
-                    <div className="space-y-3">
-                      <CardTitle className="text-lg leading-tight line-clamp-2">{analysis.title}</CardTitle>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge className={`text-xs ${getAnalysisTypeBadgeColor(analysis.type)}`}>
-                          {getAnalysisTypeLabel(analysis.type)}
-                        </Badge>
-                        {analysis.confidence_score && (
-                          <Badge variant="outline" className="text-xs">
-                            Confianza: {(analysis.confidence_score * 100).toFixed(0)}%
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="pt-0 flex-grow flex flex-col">
-                    <p className="text-sm text-muted-foreground line-clamp-6 mb-4 flex-grow leading-relaxed">
-                      {analysis.summary}
-                    </p>
-
-                    {analysis.action_suggestion && (
-                      <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                        <p className="text-xs font-medium text-yellow-800 mb-1">Sugerencia:</p>
-                        <p className="text-xs text-yellow-700 line-clamp-2">{analysis.action_suggestion}</p>
-                      </div>
-                    )}
-
-                    {analysis.related_items && analysis.related_items.length > 0 && (
-                      <div className="mb-4">
-                        <p className="text-xs font-medium text-muted-foreground mb-2">
-                          Elementos relacionados ({analysis.related_items.length})
+          {/* Lista de análisis */}
+          {analyses.length === 0 ? (
+            <div className="text-center py-20 px-8">
+              <BarChart3 className="mx-auto h-16 w-16 text-muted-foreground/50 mb-6" />
+              <h3 className="text-xl font-semibold mb-4">No se encontraron análisis</h3>
+              <p className="text-muted-foreground mb-8 max-w-md mx-auto">
+                {searchQuery || selectedType
+                  ? 'No hay análisis que coincidan con tus filtros. Intenta ajustar la búsqueda.'
+                  : 'Aún no tienes análisis. ¡Comienza analizando documentos o colecciones para ver resultados aquí!'
+                }
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              <AnimatePresence>
+                {analyses.map((analysis, index) => (
+                  <motion.div
+                    key={analysis.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 30, delay: index * 0.05 }}
+                    className="h-full"
+                  >
+                    <Card className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                            {getAnalysisIcon(analysis.type)}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleViewDetails(analysis)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity gap-1 h-8 px-2"
+                          >
+                            <Eye className="h-3 w-3" />
+                            <span className="text-xs">Ver</span>
+                          </Button>
+                        </div>
+                        <div className="space-y-3">
+                          <CardTitle className="text-lg leading-tight line-clamp-2">{analysis.title}</CardTitle>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge className={`text-xs ${getAnalysisTypeBadgeColor(analysis.type)}`}>
+                              {getAnalysisTypeLabel(analysis.type)}
+                            </Badge>
+                            {analysis.confidence_score && (
+                              <Badge variant="outline" className="text-xs">
+                                Confianza: {(analysis.confidence_score * 100).toFixed(0)}%
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="pt-0 flex-grow flex flex-col">
+                        <p className="text-sm text-muted-foreground line-clamp-6 mb-4 flex-grow leading-relaxed">
+                          {analysis.summary}
                         </p>
-                        <div className="flex flex-wrap gap-1">
-                          {analysis.related_items.slice(0, 3).map((item, idx) => (
-                            <Badge key={idx} variant="secondary" className="text-xs">
-                              {item.title || item.name || `Item ${idx + 1}`}
-                            </Badge>
-                          ))}
-                          {analysis.related_items.length > 3 && (
-                            <Badge variant="outline" className="text-xs">
-                              +{analysis.related_items.length - 3} más
-                            </Badge>
+    
+                        {analysis.action_suggestion && (
+                          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                            <p className="text-xs font-medium text-yellow-800 mb-1">Sugerencia:</p>
+                            <p className="text-xs text-yellow-700 line-clamp-2">{analysis.action_suggestion}</p>
+                          </div>
+                        )}
+    
+                        {analysis.related_items && analysis.related_items.length > 0 && (
+                          <div className="mb-4">
+                            <p className="text-xs font-medium text-muted-foreground mb-2">
+                              Elementos relacionados ({analysis.related_items.length})
+                            </p>
+                            <div className="flex flex-wrap gap-1">
+                              {analysis.related_items.slice(0, 3).map((item, idx) => (
+                                <Badge key={idx} variant="secondary" className="text-xs">
+                                  {item.title || item.name || `Item ${idx + 1}`}
+                                </Badge>
+                              ))}
+                              {analysis.related_items.length > 3 && (
+                                <Badge variant="outline" className="text-xs">
+                                  +{analysis.related_items.length - 3} más
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        <div className="space-y-2 text-xs text-muted-foreground mt-auto pt-3 border-t border-border/50">
+                          {analysis.tool_used && (
+                            <div className="mb-2">
+                              <Badge variant="outline" className="text-xs font-mono bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700">
+                                {analysis.tool_used}
+                              </Badge>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1">
+                              <Calendar className="h-3 w-3" />
+                              <span className="truncate">Creado: {formatDate(analysis.created_at)}</span>
+                            </div>
+                          </div>
+                          {analysis.updated_at !== analysis.created_at && (
+                            <div className="flex items-center gap-1">
+                              <Calendar className="h-3 w-3" />
+                              <span className="truncate">Actualizado: {formatDate(analysis.updated_at)}</span>
+                            </div>
                           )}
                         </div>
-                      </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+    
+              {/* Botón cargar más */}
+              {hasMore && (
+                <div className="text-center pt-6">
+                  <Button
+                    onClick={handleLoadMore}
+                    disabled={isLoadingMore}
+                    variant="outline"
+                    className="gap-2"
+                  >
+                    {isLoadingMore ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Cargando...
+                      </>
+                    ) : (
+                      'Cargar más análisis'
                     )}
-                    <div className="space-y-2 text-xs text-muted-foreground mt-auto pt-3 border-t border-border/50">
-                      {analysis.tool_used && (
-                        <div className="mb-2">
-                          <Badge variant="outline" className="text-xs font-mono bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700">
-                            {analysis.tool_used}
-                          </Badge>
-                        </div>
-                      )}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1">
-                          <Calendar className="h-3 w-3" />
-                          <span className="truncate">Creado: {formatDate(analysis.created_at)}</span>
-                        </div>
-                      </div>
-                      {analysis.updated_at !== analysis.created_at && (
-                        <div className="flex items-center gap-1">
-                          <Calendar className="h-3 w-3" />
-                          <span className="truncate">Actualizado: {formatDate(analysis.updated_at)}</span>
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-
-          {/* Botón cargar más */}
-          {hasMore && (
-            <div className="text-center pt-6">
-              <Button
-                onClick={handleLoadMore}
-                disabled={isLoadingMore}
-                variant="outline"
-                className="gap-2"
-              >
-                {isLoadingMore ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Cargando...
-                  </>
-                ) : (
-                  'Cargar más análisis'
-                )}
-              </Button>
+                  </Button>
+                </div>
+              )}
             </div>
           )}
-        </div>
-      )}
-
-      {/* Dialog de detalles especializado */}
-      {selectedAnalysis && isAnalysisResultDialogOpen && (
-        <AnalysisResultDialog
-          document={{
-            file_name: selectedAnalysis.title,
-            topic: selectedAnalysis.source_table,
-            title: selectedAnalysis.title,
-            author: '',
-          }}
-          analysis={selectedAnalysis.full_data}
-          isOpen={isAnalysisResultDialogOpen}
-          onOpenChange={setIsAnalysisResultDialogOpen}
-        />
-      )}
-
-      {selectedAnalysis && isCollectionAnalysisDialogOpen && (
-        <CollectionAnalysisDialog
-          analysis={selectedAnalysis.full_data}
-          isOpen={isCollectionAnalysisDialogOpen}
-          onOpenChange={setIsCollectionAnalysisDialogOpen}
-          topic={selectedAnalysis.title}
-        />
-      )}
-
-      {selectedAnalysis && isCodeAnalysisResultDialogOpen && (
-        <CodeAnalysisResultDialog
-          repoName={selectedAnalysis.title}
-          analysis={selectedAnalysis.full_data}
-          isOpen={isCodeAnalysisResultDialogOpen}
-          onOpenChange={setIsCodeAnalysisResultDialogOpen}
-        />
-      )}
+        </>
       
-      {/* Diálogo específico para análisis semántico */}
-      {selectedAnalysis && (selectedAnalysis.type === 'semantic' || selectedAnalysis.type === 'semantic_summary') && (
-        <SemanticAnalysisDialog
-          analysis={selectedAnalysis.full_data}
-          isOpen={isSemanticDialogOpen}
-          onOpenChange={setIsSemanticDialogOpen}
-          topic={selectedAnalysis.title}
-        />
-      )}
     </div>
   );
 }

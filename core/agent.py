@@ -446,12 +446,14 @@ async def call_model_node(state: AgentState):
             
             # Enviar el chunk al WebSocket
             logger.debug(f"DEBUG (agent.py): Enviando stream_chunk para taskId {state.get('task_id')}: {chunk.content}")
-            await send_personal_message(state['account_id'], {
+            target_account_id = "telegram_bot_service" if state.get('telegram_id') else state['account_id']
+            conn_type = "chat" if state.get('telegram_id') else None
+            await send_personal_message(target_account_id, {
                 "type": "stream_chunk",
                 "thread_id": state['thread_id'],
                 "taskId": state.get("task_id"),
                 "chunk": str(chunk.content or "") # Ensure chunk is always a string
-            })
+            }, connection_type=conn_type)
             
             final_response_message = chunk # Guardar el último chunk para construir el mensaje final
 
@@ -510,6 +512,10 @@ async def tool_node(state: AgentState):
     )
     tool_map = {tool.name: tool for tool in tools}
 
+    target_account_id = "telegram_bot_service" if state.get('telegram_id') else state['account_id']
+    conn_type = "chat" if state.get('telegram_id') else None
+    target_account_id = "telegram_bot_service" if state.get('telegram_id') else state['account_id']
+    conn_type = "chat" if state.get('telegram_id') else None
     tool_messages = []
     # Cargar las fuentes existentes del estado para poder añadir nuevas
     current_sources = state.get("sources") or []
@@ -524,11 +530,11 @@ async def tool_node(state: AgentState):
         # Enviar evento tool_start
         from core.websocket_manager import send_personal_message
         logger.debug(f"DEBUG (agent.py): Enviando tool_start para taskId {state.get('task_id')}, tool {tool_name}")
-        await send_personal_message(state['account_id'], {
+        await send_personal_message(target_account_id, {
             "type": "tool_start",
             "taskId": state.get("task_id"),
             "toolName": tool_name,
-        })
+        }, connection_type=conn_type)
 
         if tool_name not in tool_map:
             logger.error(f"Herramienta '{tool_name}' no encontrada.")
@@ -596,13 +602,13 @@ async def tool_node(state: AgentState):
             
             # Enviar evento tool_end con éxito
             logger.debug(f"DEBUG (agent.py): Enviando tool_end (success) para taskId {state.get('task_id')}, tool {tool_name}")
-            await send_personal_message(state['account_id'], {
+            await send_personal_message(target_account_id, {
                 "type": "tool_end",
                 "taskId": state.get("task_id"),
                 "toolName": tool_name,
                 "result": tool_content_for_llm,
                 "sources": [s for s in current_sources if s['url'] in [src.url for src in getattr(output, 'sources', [])]] # Enviar solo las fuentes de esta herramienta
-            })
+            }, connection_type=conn_type)
 
         except Exception as e:
             logger.error(f"Error al ejecutar la herramienta {tool_name}: {e}", exc_info=True)
@@ -612,13 +618,13 @@ async def tool_node(state: AgentState):
             ))
             # Enviar evento tool_end con error
             logger.debug(f"DEBUG (agent.py): Enviando tool_end (error) para taskId {state.get('task_id')}, tool {tool_name}")
-            await send_personal_message(state['account_id'], {
+            await send_personal_message(target_account_id, {
                 "type": "tool_end",
                 "taskId": state.get("task_id"),
                 "toolName": tool_name,
                 "result": f"Error: {e}",
                 "error": True
-            })
+            }, connection_type=conn_type)
             
     # Devolver los mensajes de la herramienta Y las fuentes actualizadas al estado del grafo
     return {"messages": state["messages"] + tool_messages, "sources": current_sources}

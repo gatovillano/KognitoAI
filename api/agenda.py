@@ -330,8 +330,7 @@ class EventCancelRequest(BaseModel):
     event_id: int
     workspace_id: Optional[str] = None
 
-class ProfileLinkRequest(BaseModel):
-    profile_id: uuid.UUID
+from api.schemas import ProfileLinkRequest
 
 @router.post("/cancel-event")
 async def cancel_event_endpoint(event: EventCancelRequest, current_account_id: str = Depends(get_current_account_id)):
