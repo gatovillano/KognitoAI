@@ -288,6 +288,7 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
                 logger.info(f"Nuevo hilo {current_thread_id} creado para la cuenta {account_id_str}.")
             except httpx.HTTPStatusError as e:
                 try:
+                    await e.response.aread() # Leer el contenido de la respuesta de error
                     error_detail = e.response.json().get("detail", "Error del servidor al crear hilo.")
                 except Exception:
                     error_detail = e.response.text if e.response.text else "Error del servidor al crear hilo."
@@ -337,6 +338,7 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
                     logger.info(f"Nuevo hilo {current_thread_id} creado por inactividad para la cuenta {account_id_str}.")
                 except httpx.HTTPStatusError as e:
                     try:
+                        await e.response.aread() # Leer el contenido de la respuesta de error
                         error_detail = e.response.json().get("detail", "Error del servidor al crear hilo por inactividad.")
                     except Exception:
                         error_detail = e.response.text if e.response.text else "Error del servidor al crear hilo por inactividad."
@@ -347,6 +349,9 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
                     logger.error(f"Error inesperado al crear hilo por inactividad para la cuenta {account_id_str}: {e}", exc_info=True)
                     await update.message.reply_text("Ocurrió un error inesperado al iniciar la conversación por inactividad.")
                     return None
+
+        if current_thread_id:
+            bot_manager.thread_id_to_chat_id_map[current_thread_id] = chat_id
 
         # 3. Construir el payload para la API central de chat.
         api_payload = {
@@ -371,7 +376,7 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
             api_payload["thread_id"] = str(uuid.uuid4())
         
         # 4. Realizar la llamada a la API del agente.
-        chat_api_url = f"{API_BASE_URL}/api/chat/stream" # Cambiado a endpoint de streaming
+        chat_api_url = f"{API_BASE_URL}/api/chat" # Cambiado a endpoint no-streaming
         # Obtener token JWT para el usuario (si no existe en chat_data, solicitarlo)
         jwt_token = context.chat_data.get("jwt_token")
         if not jwt_token:
@@ -400,81 +405,29 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
                 return None
         headers = {"Authorization": f"Bearer {jwt_token}"}
         
-        full_response_content = ""
-        buffer = b"" # Initialize a buffer to accumulate bytes
-        async with httpx.AsyncClient(timeout=None) as client: # Timeout ilimitado para streaming
-            async with client.stream("POST", chat_api_url, json=api_payload, headers=headers) as response:
-                response.raise_for_status()
-                async for chunk_bytes in response.aiter_bytes():
-                    buffer += chunk_bytes
-                    # Process buffer line by line
-                    while b"\n" in buffer:
-                        line, buffer = buffer.split(b"\n", 1)
-                        chunk_str = line.decode("utf-8").strip() # Decode and strip whitespace
+        # Realizar la llamada POST al endpoint /api/chat
+        async with httpx.AsyncClient(timeout=None) as client:
+            response = await client.post(chat_api_url, json=api_payload, headers=headers)
+            response.raise_for_status() # Esto lanzará una excepción para 4xx/5xx respuestas
+            
+            # El endpoint /api/chat devuelve un 202 Accepted y un taskId
+            response_data = response.json()
+            task_id = response_data.get("taskId")
+            thread_id_from_api = response_data.get("thread_id")
 
-                        if not chunk_str: # Skip empty lines
-                            continue
-
-                        # Remove 'data: ' prefix if present (for SSE compatibility)
-                        if chunk_str.startswith("data: "):
-                            chunk_str = chunk_str[len("data: "):].strip()
-
-                        try:
-                            chunk_data = json.loads(chunk_str)
-                            if chunk_data.get("type") == "llm_chunk": # Changed from "chunk" to "llm_chunk"
-                                content = chunk_data.get("chunk", "") # Changed from "content" to "chunk"
-                                full_response_content += content
-                                # You can send partial chunks to Telegram here if you want a "typing" effect
-                                # For now, accumulate and send at the end.
-                                # await handle_chat_response(update, context, content) # If you want streaming in Telegram
-                            elif chunk_data.get("type") == "llm_end": # Changed from "done" to "llm_end"
-                                logger.info("Stream de respuesta completado por el agente.")
-                                break # Exit the streaming loop
-                            elif chunk_data.get("type") == "llm_error": # Changed from "error" to "llm_error"
-                                error_message = chunk_data.get("message", "Error desconocido en el stream.")
-                                logger.error(f"Error en el stream del agente: {error_message}")
-                                await update.message.reply_text(f"Hubo un error en la respuesta del agente: {error_message}")
-                                return None
-                        except json.JSONDecodeError as de:
-                            logger.warning(f"Error decodificando chunk JSON: {de}. Chunk: {chunk_str}")
-                            # This can occur if chunks are not well-formed or fragments are received.
-                            # We can accumulate and retry parsing if necessary.
-                            continue
-                        except Exception as e:
-                            logger.error(f"Error inesperado procesando chunk de stream: {e}", exc_info=True)
-                            await update.message.reply_text("Ocurrió un error inesperado al procesar la respuesta.")
-                            return None
-                # After the loop, if there's any remaining data in the buffer, try to process it
-                if buffer:
-                    chunk_str = buffer.decode("utf-8").strip()
-                    if chunk_str:
-                        try:
-                            chunk_data = json.loads(chunk_str)
-                            if chunk_data.get("type") == "llm_chunk":
-                                content = chunk_data.get("chunk", "")
-                                full_response_content += content
-                            elif chunk_data.get("type") == "llm_end":
-                                logger.info("Stream de respuesta completado por el agente.")
-                            elif chunk_data.get("type") == "llm_error":
-                                error_message = chunk_data.get("message", "Error desconocido en el stream.")
-                                logger.error(f"Error en el stream del agente: {error_message}")
-                                await update.message.reply_text(f"Hubo un error en la respuesta del agente: {error_message}")
-                                return None
-                        except json.JSONDecodeError as de:
-                            logger.warning(f"Error decodificando chunk JSON (final del stream): {de}. Chunk: {chunk_str}")
-                        except Exception as e:
-                            logger.error(f"Error inesperado procesando chunk final de stream: {e}", exc_info=True)
-                            await update.message.reply_text("Ocurrió un error inesperado al procesar la respuesta final.")
-                            return None
-        
-        # 5. Pasar la respuesta acumulada a la función que la envía al usuario.
-        # Ya no necesitamos esperar 2 segundos aquí, ya que el stream ya terminó.
-        await handle_chat_response(update, context, full_response_content)
+            logger.info(f"Solicitud de chat enviada. Thread ID: {thread_id_from_api}, Task ID: {task_id}. Esperando respuesta vía WebSocket.")
+            logger.debug(f"Respuesta completa de /api/chat: {response_data}")
+            
+            # No hay más procesamiento aquí, la respuesta vendrá por WebSocket.
+            # La función handle_chat_response ya no se llama directamente aquí.
+            # El cliente de Telegram esperará la respuesta a través de su conexión WebSocket.
 
     except httpx.HTTPStatusError as e:
         account_id_log = str(account.id) if account else "Desconocida"
         error_detail = "Error del servidor."
         try:
+            # Intenta leer el contenido de la respuesta de error
+            await e.response.aread()
             error_detail = e.response.json().get("detail", e.response.text)
         except Exception:
             error_detail = e.response.text if e.response.text else "Error desconocido del servidor."
@@ -621,28 +574,30 @@ def register_message_handlers(application: Application) -> None:
     application.add_handler(MessageHandler(filters.PHOTO, photo_message_handler), group=0)
 
     # Handler genérico (comodín) para mensajes que no son de los tipos anteriores o comandos.
-    # Este debe tener una PRIORIDAD MÁS BAJA (group=1) para que solo se active si los
-    # handlers específicos NO procesaron el mensaje.
-    # Su filtro es para 'todo' lo que no es TEXTO, VOZ, FOTO o COMANDO.
-    application.add_handler(MessageHandler(filters.ALL & ~filters.TEXT & ~filters.VOICE & ~filters.PHOTO & ~filters.COMMAND, generic_message_handler_for_unsupported_types), group=1)
-    logger.info("✅ Handlers de mensajes (texto, voz, foto y genérico) registrados.")
+    # Este debe tener una PRIORIDAD M
 
 def calculate_telegram_login_hash(user, bot_token, auth_date):
     import hashlib
     import hmac
-    data_check_arr = [
-        f"auth_date={auth_date}",
-        f"first_name={user.first_name}",
-        f"id={user.id}"
-    ]
-    if getattr(user, "last_name", None):
-        data_check_arr.append(f"last_name={user.last_name}")
-    if getattr(user, "username", None):
-        data_check_arr.append(f"username={user.username}")
-    # photo_url no es obligatorio
+
+    data_check_string = []
+    if user.id:
+        data_check_string.append(f"id={user.id}")
+    if user.first_name:
+        data_check_string.append(f"first_name={user.first_name}")
+    if user.last_name:
+        data_check_string.append(f"last_name={user.last_name}")
+    if user.username:
+        data_check_string.append(f"username={user.username}")
     if getattr(user, "photo_url", None):
-        data_check_arr.append(f"photo_url={user.photo_url}")
-    data_check_arr.sort()
-    data_check_string = '\n'.join(data_check_arr)
-    secret_key = hashlib.sha256(bot_token.encode()).digest()
-    return hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+        data_check_string.append(f"photo_url={user.photo_url}")
+    
+    data_check_string.append(f"auth_date={auth_date}")
+    
+    data_check_string_sorted = sorted(data_check_string)
+    data_check_string_joined = "\n".join(data_check_string_sorted)
+
+    secret_key = hashlib.sha256(bot_token.encode('utf-8')).digest()
+    hmac_hash = hmac.new(secret_key, data_check_string_joined.encode('utf-8'), hashlib.sha256).hexdigest()
+    
+    return hmac_hash

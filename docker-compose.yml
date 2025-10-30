@@ -50,12 +50,14 @@ services:
       - ./core:/app/core
       - ./utils:/app/utils
       - ./tools:/app/tools
+      - ./external_agents:/app/external_agents
       - ./knowledge_graph:/app/knowledge_graph
       - ./run_api.py:/app/run_api.py
       - ./credentials:/app/credentials:ro
       - "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums:/app/media"
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
+      - ./scripts:/app/scripts
     env_file:
       - ./.env
     networks:

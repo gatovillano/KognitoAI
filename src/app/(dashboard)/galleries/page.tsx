@@ -126,7 +126,7 @@ const AlbumCard = ({ album, onEditClick, onDeleteClick, onLinkProfileClick }: { 
             </p>
           </CardContent>
           <CardFooter className="flex justify-between items-center text-xs text-muted-foreground pt-3 mt-auto border-t border-border/50">
-            <span>{album.photos.length} foto(s)</span>
+            <span>{album.total_photos} foto(s)</span>
             <span>{new Date(album.created_at).toLocaleDateString()}</span>
           </CardFooter>
         </Card>

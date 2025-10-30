@@ -16,10 +16,10 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
-from external_agents.open_deep_research.src.open_deep_research.configuration import (
+from .configuration import (
     Configuration,
 )
-from external_agents.open_deep_research.src.open_deep_research.prompts import (
+from .prompts import (
     clarify_with_user_instructions,
     compress_research_simple_human_message,
     compress_research_system_prompt,
@@ -28,7 +28,7 @@ from external_agents.open_deep_research.src.open_deep_research.prompts import (
     research_system_prompt,
     transform_messages_into_research_topic_prompt,
 )
-from external_agents.open_deep_research.src.open_deep_research.state import (
+from .state import (
     AgentInputState,
     AgentState,
     ClarifyWithUser,
@@ -39,7 +39,7 @@ from external_agents.open_deep_research.src.open_deep_research.state import (
     ResearchQuestion,
     SupervisorState,
 )
-from external_agents.open_deep_research.src.open_deep_research.utils import (
+from .utils import (
     anthropic_websearch_called,
     get_all_tools,
     get_api_key_for_model,

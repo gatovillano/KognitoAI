@@ -42,6 +42,7 @@ class SingleTextAnalysis(BaseModel):
     discipline: List[str] = Field(description="El area, disciplina o campo al que refiere el documento. Por ejemplo si es un documémico y de qué área, o si es un documento técnico, etc.').")
     authorial_tone: str = Field(description="El tono o la voz del autor (ej. 'Formal y Académico', 'Informal y Conversacional', 'Urgente y Directo', 'Escéptico y Crítico').")
     knowledge_gaps: List[str] = Field(description="Una lista de 5 a 8 preguntas inteligentes y abiertas que el texto inspira pero no responde. Deben ser preguntas, no afirmaciones.")
+    problematic_areas: List[str] = Field(description="Una lista de 3 a 5 áreas problemáticas, desafíos o puntos de controversia identificados en el texto.")
     final_reflections: List[str] = Field (description="Una lista de 3 a 5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
 
 class CollectionAnalysis(BaseModel):
@@ -52,6 +53,7 @@ class CollectionAnalysis(BaseModel):
     concept_relationships: List[str] = Field(description="Una lista de hasta 8 descripciones detalladas de cómo los conceptos centrales se relacionan entre sí en la colección.")
     identified_connections: List[CollectionConnection] = Field(description="Lista de insights específicos que conectan dos o más documentos. Incluye sinergias, evoluciones, contradicciones o complementariedades.")
     emergent_knowledge_gaps: List[str] = Field(description="Lista de 5-8 preguntas inteligentes o áreas que la colección en su conjunto no responde o deja abiertas.")
+    problematic_areas: List[str] = Field(description="Una lista de 3 a 5 áreas problemáticas o desafíos comunes/emergentes identificados a través de la colección de documentos.")
     final_reflections: List[str] = Field(description="3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
     collection_insights: List[str] = Field(description="3-5 insights únicos que emergen del análisis conjunto de todos los documentos, que no serían evidentes analizando documentos individuales")
     methodological_notes: List[str] = Field(description="2-3 observaciones sobre la metodología, enfoque o perspectiva común en los documentos analizados")
@@ -165,7 +167,9 @@ class AdvancedTextAnalyzer:
 
         7. **Brechas de conocimiento**: 5-8 preguntas inteligentes y abiertas que el texto inspira
 
-        8. **Reflexiones finales**: 3-5 reflexiones sobre importancia, aportes y proyecciones
+        8. **Problemáticas**: 3-5 áreas problemáticas, desafíos o puntos de controversia identificados en el texto.
+
+        9. **Reflexiones finales**: 3-5 reflexiones sobre importancia, aportes y proyecciones
 
         Para los temas clave y conceptos centrales, utiliza nombres precisos y relevantes al contexto del texto, priorizando términos específicos del dominio o categorías reconocibles por el usuario.
 
@@ -216,7 +220,8 @@ class AdvancedTextAnalyzer:
         4.  **concept_relationships**: Una lista de hasta 8 descripciones detalladas de cómo los conceptos centrales se relacionan entre sí dentro de la colección.
         5.  **identified_connections**: Una lista de insights específicos que conectan dos o más documentos. Incluye sinergias, evoluciones, contradicciones o complementariedades. Cada conexión debe especificar los títulos de los documentos involucrados y una descripción del insight.
         6.  **emergent_knowledge_gaps**: Una lista de 5-8 preguntas inteligentes o áreas que la colección en su conjunto no responde o deja abiertas.
-        7.  **final_reflections**: 3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales, puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión.
+        7.  **problematic_areas**: Una lista de 3 a 5 áreas problemáticas o desafíos comunes/emergentes identificados a través de la colección de documentos.
+        8.  **final_reflections**: 3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales, puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión.
         8.  **collection_insights**: 3-5 insights únicos que emergen del análisis conjunto de todos los documentos, que no serían evidentes analizando documentos individuales.
         9.  **methodological_notes**: 2-3 observaciones sobre la metodología, enfoque o perspectiva común en los documentos analizados.
 

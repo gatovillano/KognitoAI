@@ -1,283 +1,232 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import { Box, Typography, Paper } from '@mui/material';
-import { Settings as SettingsIcon } from '@mui/icons-material';
+import { useEffect, useState, useCallback } from 'react';
+import { useParams } from 'next/navigation';
+import dynamic from 'next/dynamic';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import KnowledgeGraphViewer from '@/components/KnowledgeGraph/KnowledgeGraphViewer';
+import { Input } from '@/components/ui/input';
+import { Loader2, Info, RefreshCcw, Search, ExternalLink, Brain, Network, GitGraph } from 'lucide-react';
+import { toast } from 'sonner';
 import { useKnowledgeGraph } from '@/hooks/useKnowledgeGraph';
-import { useWorkspaces } from '@/hooks/useWorkspaces';
-import { type Node } from 'reactflow';
-import './KnowledgeGraphPage.css';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+// import { Slider } from '@/components/ui/slider'; // Temporalmente comentado
+import { Label } from '@/components/ui/label';
 
-interface CustomNodeData {
-  label: string;
-  type: string;
-}
+// Componente de visualización del grafo cargado dinámicamente
+const GraphVisualization = dynamic(() => import('@/components/KnowledgeGraph/GraphVisualization'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex justify-center items-center h-full min-h-[500px]">
+      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+    </div>
+  ),
+});
 
-const KnowledgeGraphPage = () => {
+export default function KnowledgeGraphPage() {
   const params = useParams();
-  const workspaceId = params?.id as string;
-  const router = useRouter();
-  const [selectedNode, setSelectedNode] = useState<Node<CustomNodeData> | null>(null);
-  const [showProcessingModal, setShowProcessingModal] = useState(false);
+  const workspaceId = params.workspaceId as string;
 
-  // Hooks
-  const { workspaces, currentWorkspace, isLoading: workspacesLoading } = useWorkspaces();
   const {
     graphData,
-    stats,
     isLoading,
     error,
     processingStatus,
+    loadGraphData,
     processKnowledgeGraph,
     refreshGraphData,
     searchGraph,
-    clearError
+    getEntityConnections,
+    clearError,
+    stats
   } = useKnowledgeGraph(workspaceId);
 
-  // Obtener información del workspace actual
-  const workspace = workspaces.find(w => w.id === workspaceId) || currentWorkspace;
+  const [graphQuery, setGraphQuery] = useState('');
+  const [maxNodes, setMaxNodes] = useState(50);
+  const [maxHops, setMaxHops] = useState(2);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
 
-  // Manejar selección de nodo
-  const handleNodeSelect = (node: Node<CustomNodeData>) => {
-    setSelectedNode(node);
-  };
+  useEffect(() => {
+    if (error) {
+      toast.error(error);
+      clearError();
+    }
+  }, [error, clearError]);
 
-  // Manejar procesamiento del grafo
-  const handleProcessGraph = async () => {
-    setShowProcessingModal(true);
+  const handleSearchGraph = useCallback(async () => {
+    if (!graphQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    const results = await searchGraph(graphQuery);
+    setSearchResults(results);
+  }, [graphQuery, searchGraph]);
+
+  const handleProcessGraph = useCallback(async () => {
     await processKnowledgeGraph();
-    setShowProcessingModal(false);
+  }, [processKnowledgeGraph]);
+
+  const renderGraphContent = () => {
+    if (isLoading && !graphData) {
+      return (
+        <div className="flex flex-col items-center justify-center p-8">
+          <Loader2 className="h-10 w-10 animate-spin text-primary mb-4" />
+          <p className="text-muted-foreground text-lg">Cargando grafo de conocimiento...</p>
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <div className="flex flex-col items-center justify-center p-8 text-center">
+          <Info className="h-10 w-10 text-destructive mb-4" />
+          <h3 className="text-xl font-semibold text-destructive mb-2">Error al cargar el grafo</h3>
+          <p className="text-muted-foreground mb-4">{error}</p>
+          {processingStatus === 'not_processed' && (
+            <Button onClick={handleProcessGraph}>
+              <Brain className="h-4 w-4 mr-2" /> Procesar Grafo Ahora
+            </Button>
+          )}
+        </div>
+      );
+    }
+
+    if (graphData && graphData.nodes.length > 0) {
+      return (
+        <div className="h-[70vh] min-h-[500px] w-full">
+          <GraphVisualization graphData={graphData} />
+        </div>
+      );
+    }
+
+    if (!isLoading && (!graphData || graphData.nodes.length === 0)) {
+      return (
+        <div className="flex flex-col items-center justify-center p-8 text-center">
+          <GitGraph className="h-16 w-16 text-muted-foreground/50 mb-6" />
+          <h3 className="text-xl font-semibold mb-4">Grafo de Conocimiento Vacío</h3>
+          <p className="text-muted-foreground mb-8 max-w-md mx-auto">
+            Aún no se ha generado un grafo de conocimiento para este espacio de trabajo.
+            Procesa tus documentos para comenzar a visualizar las conexiones.
+          </p>
+          <Button onClick={handleProcessGraph} disabled={processingStatus === 'processing'}>
+            {processingStatus === 'processing' ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Brain className="h-4 w-4 mr-2" />
+            )}
+            Procesar Grafo Ahora
+          </Button>
+        </div>
+      );
+    }
+
+    return null;
   };
 
-  // Renderizar estado de carga inicial
-  if (workspacesLoading || (isLoading && !graphData)) {
-    return (
-      <div className="knowledge-graph-page">
-        <div className="loading-container">
-          <div className="loading-spinner"></div>
-          <h2>Cargando grafo de conocimiento...</h2>
-          <p>Preparando la visualización de datos</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Renderizar error
-  if (error) {
-    return (
-      <div className="knowledge-graph-page">
-        <div className="error-container">
-          <div className="error-icon">⚠️</div>
-          <h2>Error cargando el grafo</h2>
-          <p>{error}</p>
-          <div className="error-actions">
-            <Button onClick={clearError} variant="secondary">
-              Reintentar
-            </Button>
-            <Button onClick={() => router.push('/workspaces')}>
-              Volver a Workspaces
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Renderizar estado sin datos
-  if (!graphData && processingStatus === 'not_processed') {
-    return (
-      <div className="knowledge-graph-page">
-        <div className="no-data-container">
-          <div className="no-data-icon">🧠</div>
-          <h2>Grafo de conocimiento no generado</h2>
-          <p>
-            Este workspace aún no tiene un grafo de conocimiento generado.
-            Procesa los documentos para crear visualizaciones interactivas.
-          </p>
-          <div className="no-data-stats">
-            <div className="stat-card">
-              <span className="stat-number">{workspace?.document_count || 0}</span>
-              <span className="stat-label">Documentos disponibles</span>
-            </div>
-          </div>
-          <Button onClick={handleProcessGraph} size="lg">
-            🚀 Generar grafo de conocimiento
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  // Renderizar estado de procesamiento
-  if (processingStatus === 'processing' || showProcessingModal) {
-    return (
-      <div className="knowledge-graph-page">
-        <div className="processing-container">
-          <div className="processing-animation">
-            <div className="processing-spinner"></div>
-            <div className="processing-nodes">
-              <div className="node node-1"></div>
-              <div className="node node-2"></div>
-              <div className="node node-3"></div>
-            </div>
-          </div>
-          <h2>Procesando grafo de conocimiento</h2>
-          <p>Analizando documentos y extrayendo relaciones semánticas...</p>
-          <div className="processing-steps">
-            <div className="step active">
-              <span className="step-icon">📄</span>
-              <span>Reconstruyendo documentos</span>
-            </div>
-            <div className="step active">
-              <span className="step-icon">🔍</span>
-              <span>Extrayendo entidades</span>
-            </div>
-            <div className="step processing">
-              <span className="step-icon">🔗</span>
-              <span>Analizando relaciones</span>
-            </div>
-            <div className="step">
-              <span className="step-icon">🧠</span>
-              <span>Generando grafo</span>
-            </div>
-          </div>
-          <p className="processing-note">
-            Este proceso puede tomar varios minutos dependiendo del número de documentos.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // Renderizar grafo principal
   return (
-    <div className="knowledge-graph-page">
-      {/* Header */}
-      <div className="graph-header">
-        <div className="header-left">
-          <Button
-            onClick={() => router.push('/workspaces')}
-            variant="outline"
-          >
-            ← Volver
-          </Button>
-          <div className="header-info">
-            <h1>Grafo de Conocimiento</h1>
-            {workspace && (
-              <span className="workspace-info">
-                📁 {workspace.name} • {workspace.document_count} documentos
-              </span>
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-8">
+      <div className="flex items-center gap-2">
+        <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
+          Grafo de Conocimiento
+        </h1>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
+                <Info className="h-5 w-5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Visualiza las relaciones entre tus datos en un grafo interactivo.</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Network className="h-6 w-6" />
+            Visualización del Grafo
+            <Button variant="ghost" size="sm" onClick={refreshGraphData} disabled={isLoading}>
+              <RefreshCcw className="h-4 w-4 mr-2" /> Actualizar
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="mb-6">
+            <div className="flex items-center space-x-2 mb-4">
+              <Input
+                placeholder="Buscar entidades en el grafo..."
+                value={graphQuery}
+                onChange={(e) => setGraphQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearchGraph()}
+                className="flex-grow"
+              />
+              <Button onClick={handleSearchGraph}>
+                <Search className="h-4 w-4 mr-2" /> Buscar
+              </Button>
+            </div>
+            {searchResults.length > 0 && (
+              <div className="bg-muted p-3 rounded-md max-h-40 overflow-y-auto">
+                <p className="text-sm font-semibold mb-2">Resultados de la búsqueda:</p>
+                {searchResults.map((result) => (
+                  <div key={result.id} className="flex items-center justify-between text-sm py-1">
+                    <span>{result.label} ({result.type})</span>
+                    <Button variant="link" size="sm" className="h-auto p-0">
+                      <ExternalLink className="h-3 w-3 mr-1" /> Ver
+                    </Button>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
-        </div>
-        <div className="header-right">
-          <Button
-            variant="outline"
-            onClick={() => router.push('/admin/knowledge-graph')}
-          >
-            <SettingsIcon className="mr-2 h-4 w-4" />
-            Administración
-          </Button>
-        </div>
-        
-        <div className="header-actions">
-          {stats && (
-            <div className="header-stats">
-              <div className="stat-item">
-                <span className="stat-value">{stats.totalEntities.toLocaleString()}</span>
-                <span className="stat-label">Entidades</span>
-              </div>
-              <div className="stat-item">
-                <span className="stat-value">{stats.totalRelationships.toLocaleString()}</span>
-                <span className="stat-label">Relaciones</span>
-              </div>
-              <div className="stat-item">
-                <span className="stat-value">{stats.entityTypes.length}</span>
-                <span className="stat-label">Tipos</span>
-              </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div>
+              <Label htmlFor="max-nodes" className="mb-2 block">Máximo de Nodos: {maxNodes}</Label>
+              <Input
+                id="max-nodes"
+                type="number"
+                min={10}
+                max={200}
+                value={maxNodes}
+                onChange={(e) => setMaxNodes(parseInt(e.target.value))}
+                className="w-full"
+              />
             </div>
-          )}
-          
-          <Button 
-            onClick={refreshGraphData} 
-            variant="secondary"
-            disabled={isLoading}
-          >
-            🔄 Actualizar
-          </Button>
-          
-          <Button 
-            onClick={handleProcessGraph} 
-            disabled={isLoading}
-          >
-            ⚡ Reprocesar
-          </Button>
-        </div>
-      </div>
-
-      {/* Visualizador principal */}
-      <div className="graph-container">
-        <KnowledgeGraphViewer
-          graphData={graphData}
-          onNodeSelect={handleNodeSelect}
-          selectedWorkspace={workspace?.name || ''}
-        />
-      </div>
-
-      {/* Panel lateral de información adicional */}
-      {selectedNode && (
-        <div className="side-panel">
-          <div className="panel-header">
-            <h3>🔍 Explorar conexiones</h3>
-            <Button 
-              onClick={() => setSelectedNode(null)}
-              variant="destructive"
-              size="icon"
-              className="close-panel-btn"
-            >
-              ✕
-            </Button>
-          </div>
-          
-          <div className="panel-content">
-            <div className="selected-entity">
-              <h4>{selectedNode.data.label}</h4>
-              <span className="entity-type">{selectedNode.data.type}</span>
-            </div>
-            
-            <div className="connection-actions">
-              <Button className="action-btn">
-                🔗 Ver conexiones directas
-              </Button>
-              <Button className="action-btn">
-                📄 Documentos relacionados
-              </Button>
-              <Button className="action-btn">
-                🎯 Centrar en esta entidad
-              </Button>
+            <div>
+              <Label htmlFor="max-hops" className="mb-2 block">Saltos Máximos: {maxHops}</Label>
+              <Input
+                id="max-hops"
+                type="number"
+                min={1}
+                max={5}
+                value={maxHops}
+                onChange={(e) => setMaxHops(parseInt(e.target.value))}
+                className="w-full"
+              />
             </div>
           </div>
-        </div>
-      )}
+          
+          {renderGraphContent()}
+        </CardContent>
+      </Card>
 
-      {/* Información del método de procesamiento */}
       {stats && (
-        <div className="processing-info">
-          <span className="processing-method">
-            Procesado con: {stats.processingMethod === 'hybrid_pipeline' ? '🚀 Pipeline Híbrido' : '🧠 Cognee'}
-          </span>
-          {stats.lastProcessed && (
-            <span className="last-processed">
-              Última actualización: {new Date(stats.lastProcessed).toLocaleString()}
-            </span>
-          )}
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Estadísticas del Grafo</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p><strong>Total de Entidades:</strong> {stats.totalEntities}</p>
+            <p><strong>Total de Relaciones:</strong> {stats.totalRelationships}</p>
+            <p><strong>Tipos de Entidades:</strong> {stats.entityTypes.join(', ')}</p>
+            <p><strong>Método de Procesamiento:</strong> {stats.processingMethod}</p>
+            <p><strong>Último Procesamiento:</strong> {stats.lastProcessed ? new Date(stats.lastProcessed).toLocaleString() : 'N/A'}</p>
+          </CardContent>
+        </Card>
       )}
     </div>
   );
-};
-
-export default KnowledgeGraphPage;
+}

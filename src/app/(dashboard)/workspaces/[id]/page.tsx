@@ -204,7 +204,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
     : collections;
 
   const filteredAgendaEvents = searchTerm
-    ? agendaEvents.filter(event => event.description.toLowerCase().includes(searchTerm.toLowerCase()))
+    ? agendaEvents.filter(event => event.summary.toLowerCase().includes(searchTerm.toLowerCase()))
     : agendaEvents;
 
   const filteredTasks = searchTerm

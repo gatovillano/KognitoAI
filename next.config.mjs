@@ -12,7 +12,9 @@ const nextConfig = {
     ],
     minimumCacheTTL: 600,
   },
-  experimental: {},
+  experimental: {
+    transpilePackages: ['react-dnd', 'react-dnd-html5-backend'],
+  },
   async rewrites() {
     return [
       {

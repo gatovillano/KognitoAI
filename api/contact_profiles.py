@@ -48,6 +48,7 @@ class LinkedNoteResponse(BaseModel):
 
 class LinkedAgendaEventResponse(BaseModel):
     id: int
+    summary: Optional[str] # Añadido para el título del evento
     description: Optional[str]
     event_datetime_utc: datetime
     event_datetime_local: Optional[datetime] = None
@@ -311,7 +312,8 @@ async def get_linked_objects(
         select(ContactProfile)
         .options(
             selectinload(ContactProfile.notas),
-            selectinload(ContactProfile.agenda_events),
+            selectinload(ContactProfile.agenda_events).selectinload(AgendaEvent.attendees), # Aquí cargamos los asistentes
+            selectinload(ContactProfile.agenda_events).selectinload(AgendaEvent.workspace), # Y aquí cargamos el workspace para evitar el lazy loading
             selectinload(ContactProfile.tasks),
             selectinload(ContactProfile.user_document_topics),
             selectinload(ContactProfile.albums),
@@ -354,9 +356,20 @@ async def get_linked_objects(
                 )
             )
 
+    # Procesar eventos de agenda para incluir event_datetime_local calculado
+    processed_agenda_events = []
+    if profile.agenda_events:
+        # Necesitamos la zona horaria del usuario para calcular event_datetime_local
+        account = await db.get(Account, current_account.id)
+        user_timezone = account.timezone if account and account.timezone else "UTC"
+
+        for event in profile.agenda_events:
+            event_dict = event.to_dict(user_timezone)
+            processed_agenda_events.append(LinkedAgendaEventResponse(**event_dict))
+
     return LinkedObjectsResponse(
         notes=profile.notas,
-        agenda_events=profile.agenda_events,
+        agenda_events=processed_agenda_events,
         tasks=profile.tasks,
         user_document_topics=profile.user_document_topics,
         albums=enhanced_albums,

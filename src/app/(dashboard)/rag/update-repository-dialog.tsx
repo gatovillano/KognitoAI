@@ -35,7 +35,20 @@ export function UpdateRepositoryDialog({
 
     const pollInterval = setInterval(async () => {
       try {
-        const response = await apiClient.get(`/api/analysis/get-analysis-result/${taskId}`);
+        const response = await apiClient.get(`/api/github/get-repository-update-result/${taskId}`);
+        // MODIFICACIÓN AQUI: Manejar errores HTTP directamente para detener el polling si el taskId ya no es válido
+        if (response.status >= 400) { // Si hay un error HTTP (ej. 404)
+          clearInterval(pollInterval);
+          setTaskStatus('failed'); // Marcar como fallido para detener el polling
+          setTaskError("El estado de la tarea no pudo ser recuperado. Es posible que haya expirado o ya no sea válido.");
+          toast({
+            title: "Error de conexión",
+            description: "No se pudo obtener el estado de la actualización del repositorio.",
+            variant: "destructive",
+          });
+          return;
+        }
+
         const { status, result, error } = response.data;
 
         setTaskStatus(status);

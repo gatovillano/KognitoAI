@@ -42,6 +42,7 @@ class BotManager:
     """
     _instance = None
     _application: Optional[Application] = None
+    thread_id_to_chat_id_map: Dict[str, int] = {}
 
     def __new__(cls):
         if cls._instance is None:

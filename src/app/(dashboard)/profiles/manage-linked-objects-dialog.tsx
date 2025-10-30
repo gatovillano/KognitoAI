@@ -62,10 +62,10 @@ export function ManageLinkedObjectsDialog({ isOpen, onOpenChange, profile, onLin
       setAvailableNotes(allNotes);
 
       // Fetch all events
-      const eventsResponse = await apiClient.post('/api/list-events');
+      const eventsResponse = await apiClient.post('/api/list-events', {});
       const allEvents: LinkedObjectDisplay[] = eventsResponse.data.map((event: any) => ({
         id: event.id,
-        title: event.description,
+        title: event.summary,
         type: 'event',
         linked: linkedData.agenda_events.some((linkedEvent: any) => linkedEvent.id === event.id),
       }));
@@ -139,7 +139,16 @@ export function ManageLinkedObjectsDialog({ isOpen, onOpenChange, profile, onLin
       ? currentEndpoint.unlink.replace('{profile_id}', profile.id).replace('{id}', String(item.id))
       : currentEndpoint.link.replace('{profile_id}', profile.id).replace('{id}', String(item.id));
 
-    const payload = item.type === 'album' ? { album_id: item.id } : { note_id: item.id, event_id: item.id, task_id: item.id, collection_id: item.id }; // Adjust payload based on type
+        let payload;
+    // Determine payload based on which ID is in the URL
+    if (url.includes(profile.id)) {
+      // Profile ID is in the URL, so payload needs the object ID
+      const objectIdKey = `${item.type}_id`;
+      payload = { [objectIdKey]: item.id };
+    } else {
+      // Object ID is in the URL, so payload needs the profile ID
+      payload = { profile_id: profile.id };
+    }
 
     try {
       await apiClient.post(url, payload);
@@ -154,7 +163,7 @@ export function ManageLinkedObjectsDialog({ isOpen, onOpenChange, profile, onLin
 
   const filterItems = (items: LinkedObjectDisplay[]) => {
     return items.filter(item =>
-      item.title.toLowerCase().includes(searchTerm.toLowerCase())
+      item.title && item.title.toLowerCase().includes(searchTerm.toLowerCase())
     );
   };
 

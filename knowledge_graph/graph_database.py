@@ -78,7 +78,9 @@ class GraphDB:
 
         def _execute_sync():
             with self._driver.session() as session:
-                result = session.run(query, parameters or {})  # type: ignore[arg-type]
+                logger.info(f"[_execute_sync] Query: {query}")
+                logger.info(f"[_execute_sync] Params: {parameters}")
+                result = session.run(query, parameters)
                 return [record.data() for record in result]
 
         loop = asyncio.get_event_loop()

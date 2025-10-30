@@ -264,7 +264,7 @@ class GitHubRepoTool(BaseTool):
             from tools.document_rag_tool import DocumentRAGTool
             
             if self.session is None:
-                self.session = requests.Session()
+                selfsession = requests.Session()
             
             # Obtener información del repositorio
             api_url = self._get_api_url(repo_url)
@@ -296,6 +296,16 @@ class GitHubRepoTool(BaseTool):
                 for item in tree:
                     if item['type'] == 'blob':
                         file_path = item['path']
+
+                        # Check if document already exists
+                        existing_doc_query = select(GitHubDocument).where(
+                            GitHubDocument.repo_url == repo_url,
+                            GitHubDocument.file_path == file_path,
+                            GitHubDocument.account_id == self.account_id
+                        )
+                        existing_doc_result = await db_session.execute(existing_doc_query)
+                        existing_doc = existing_doc_result.scalars().first()
+
                         content_response = self.session.get(f"{api_url}/contents/{file_path}")
                         content_response.raise_for_status()
                         content_data = content_response.json()
@@ -317,20 +327,28 @@ class GitHubRepoTool(BaseTool):
                         clean_content = decoded_content.replace('\x00', '')
 
                         content_sha = hashlib.sha256(clean_content.encode('utf-8')).hexdigest()
-                        
-                        github_doc = GitHubDocument(
-                            repo_url=repo_url,
-                            file_path=file_path,
-                            sha=content_sha,
-                            content=clean_content, # Guardar contenido limpio
-                            account_id=self.account_id,
-                            workspace_id=self.workspace_id if self.workspace_id else None,
-                            topic=collection_topic,
-                            created_at=datetime.now(),
-                            updated_at=datetime.now()
-                        )
-                        db_session.add(github_doc)
-                        file_count += 1
+
+                        if existing_doc:
+                            if existing_doc.sha != content_sha:
+                                existing_doc.content = clean_content
+                                existing_doc.sha = content_sha
+                                existing_doc.topic = collection_topic
+                                existing_doc.updated_at = datetime.now()
+                                file_count += 1
+                        else:
+                            github_doc = GitHubDocument(
+                                repo_url=repo_url,
+                                file_path=file_path,
+                                sha=content_sha,
+                                content=clean_content, # Guardar contenido limpio
+                                account_id=self.account_id,
+                                workspace_id=self.workspace_id if self.workspace_id else None,
+                                topic=collection_topic,
+                                created_at=datetime.now(),
+                                updated_at=datetime.now()
+                            )
+                            db_session.add(github_doc)
+                            file_count += 1
                         
                         if vectorize:
                             try:
@@ -360,10 +378,10 @@ class GitHubRepoTool(BaseTool):
                         else:
                             logger.info(f"⏩ Archivo {file_path} no vectorizado (vectorize=False).")
                 
-                logger.info(f"DEBUG: Antes del commit en _add_as_knowledge_collection. Archivos a añadir: {file_count}")
+                logger.info(f"DEBUG: Antes del commit en _add_as_knowledge_collection. Archivos a añadir/actualizar: {file_count}")
                 await db_session.commit()
                 logger.info(f"DEBUG: Después del commit en _add_as_knowledge_collection.")
-                return f"Repositorio {repo_name} añadido con {file_count} archivos. {vectorized_count} archivos vectorizados correctamente para la cuenta {self.account_id} con tema '{collection_topic if collection_topic else 'repositorio'}'."
+                return f"Repositorio {repo_name} añadido/actualizado con {file_count} archivos. {vectorized_count} archivos vectorizados correctamente para la cuenta {self.account_id} con tema '{collection_topic if collection_topic else 'repositorio'}'."
             finally:
                 logger.info(f"DEBUG: Cerrando db_session en _add_as_knowledge_collection.")
                 await db_session.close()
@@ -371,11 +389,9 @@ class GitHubRepoTool(BaseTool):
             logger.error(f"Error al añadir el repositorio {repo_url} como colección de conocimientos: {e}", exc_info=True)
             return f"Error al añadir el repositorio como colección de conocimientos: {e}"
 
-    async def _update_repository_documents(self, repo_url: str, account_id: str, workspace_id: Optional[str] = None) -> str:
+    async def _update_repository_documents(self, repo_url: str, account_id: str, workspace_id: Optional[str] = None, collection_topic: Optional[str] = "repositorio", vectorize: bool = False) -> str:
         """
-        Actualiza solo los documentos textuales de un repositorio de GitHub sin vectorizar.
-        Esta función es específica para la sección de repositorios donde solo queremos
-        mantener los archivos actualizados como documentos, no como embeddings RAG.
+        Actualiza los documentos textuales de un repositorio de GitHub, con opción a vectorizar los cambios.
         """
         try:
             from core.database import SessionLocal, GitHubDocument
@@ -383,8 +399,10 @@ class GitHubRepoTool(BaseTool):
             import uuid
             import base64
             from datetime import datetime
-            from tools.document_rag_tool import DocumentRAGTool # Importar DocumentRAGTool
-
+            # Eliminar imports relacionados con RAG que no se usarán
+            # from tools.document_rag_tool import DocumentRAGTool
+            # from core.memory_manager import remove_document_from_rag
+            
             if self.session is None:
                 self.session = requests.Session()
 
@@ -403,6 +421,12 @@ class GitHubRepoTool(BaseTool):
                 updated_files = 0
                 new_files = 0
                 deleted_files = 0
+                # vectorized_count = 0 # Ya no es necesario
+
+                if account_id is None:
+                    return "Error: Account ID must be provided to update repository documents."
+
+                # rag_tool = DocumentRAGTool(account_id=account_id, workspace_id=self.workspace_id, telegram_id=self.telegram_id, thread_id=self.thread_id) # Ya no es necesario
 
                 # Obtener el árbol actual del repositorio de GitHub
                 tree_url = f"{api_url}/git/trees/{default_branch}?recursive=1"
@@ -413,20 +437,10 @@ class GitHubRepoTool(BaseTool):
                 # Mapear archivos de GitHub por path y SHA
                 github_files = {item['path']: item['sha'] for item in github_tree if item['type'] == 'blob'}
 
-                if account_id is None:
-                    return "Error: Account ID must be provided to update repository documents."
-
-                # Instanciar DocumentRAGTool solo si account_id no es None
-                rag_tool = DocumentRAGTool(account_id=account_id, workspace_id=self.workspace_id, telegram_id=self.telegram_id, thread_id=self.thread_id)
-
-                # La segunda instanciación duplicada se elimina, ya que no es necesaria
-
                 # Obtener los documentos de GitHub existentes en la base de datos para este repositorio y cuenta
-                # Para repositorios de documentos, usamos topic=None (sin tema específico)
                 existing_github_docs_query = select(GitHubDocument).where(
                     GitHubDocument.repo_url == repo_url,
-                    GitHubDocument.account_id == account_id,
-                    GitHubDocument.topic == None  # Repositorios de documentos no tienen tema específico
+                    GitHubDocument.account_id == account_id
                 )
                 result = await db_session.execute(existing_github_docs_query)
                 existing_db_docs = {doc.file_path: doc for doc in result.scalars().all()}
@@ -434,6 +448,17 @@ class GitHubRepoTool(BaseTool):
                 # 1. Eliminar archivos que ya no existen en GitHub
                 for file_path, db_doc in existing_db_docs.items():
                     if file_path not in github_files:
+                        # if vectorize: # Ya no es necesario
+                        #     try:
+                        #         await remove_document_from_rag(
+                        #             account_id=account_id,
+                        #             file_name=file_path,
+                        #             topic=collection_topic
+                        #         )
+                        #         logger.info(f"🗑️ Embeddings eliminados para {file_path}")
+                        #     except Exception as del_error:
+                        #         logger.error(f"❌ Error eliminando embeddings de {file_path}: {del_error}")
+                        
                         await db_session.delete(db_doc) # type: ignore
                         deleted_files += 1
                         logger.info(f"🗑️ Documento eliminado: {file_path}")
@@ -454,36 +479,85 @@ class GitHubRepoTool(BaseTool):
                     # Limpiar NUL bytes
                     clean_content = decoded_content.replace('\x00', '')
 
+                    # Preparar metadatos para vectorización (ya no es necesario aquí)
+                    # repo_metadata = {
+                    #     "repo_url": repo_url,
+                    #     "repo_name": repo_name,
+                    #     "file_extension": file_path.split('.')[-1] if '.' in file_path else '',
+                    #     "directory": '/'.join(file_path.split('/')[:-1]) if '/' in file_path else ''
+                    # }
+
                     if file_path in existing_db_docs:
                         db_doc = existing_db_docs[file_path]
                         if db_doc.sha != github_sha:
-                            # Contenido modificado, actualizar solo el documento
+                            # Contenido modificado, actualizar
                             db_doc.content = clean_content
                             db_doc.sha = github_sha
+                            db_doc.topic = collection_topic
                             db_doc.updated_at = datetime.now()
                             updated_files += 1
                             logger.info(f"📝 Documento actualizado: {file_path}")
+
+                            # if vectorize: # Ya no es necesario
+                            #     try:
+                            #         await remove_document_from_rag(
+                            #             account_id=account_id,
+                            #             file_name=file_path,
+                            #             topic=collection_topic
+                            #         )
+                            #         logger.info(f"🗑️ Embeddings antiguos eliminados para {file_path}")
+                                    
+                            #         result = await rag_tool._arun(
+                            #             extracted_text=clean_content,
+                            #             file_name=file_path,
+                            #             topic=collection_topic,
+                            #             workspace_id=self.workspace_id,
+                            #             metadata=repo_metadata
+                            #         )
+                            #         if "chunks added" in result.context_for_llm:
+                            #             vectorized_count += 1
+                            #             logger.info(f"✅ Archivo {file_path} re-vectorizado correctamente")
+                            #     except Exception as vec_error:
+                            #         logger.error(f"❌ Error re-vectorizando {file_path}: {vec_error}", exc_info=True)
+                        else:
+                            logger.info(f"⏩ Archivo {file_path} sin cambios.")
                     else:
-                        # Nuevo archivo, añadir solo como documento
+                        # Nuevo archivo, añadir
                         github_doc = GitHubDocument(
                             repo_url=repo_url,
                             file_path=file_path,
                             sha=github_sha,
-                            content=clean_content, # Limpiar NUL bytes
+                            content=clean_content,
                             account_id=account_id,
                             workspace_id=workspace_id if workspace_id else None,
-                            topic=None,  # Aseguramos que el topic sea None para documentos no vectorizados
+                            topic=collection_topic,
                             created_at=datetime.now(),
                             updated_at=datetime.now()
                         )
                         db_session.add(github_doc)
                         new_files += 1
                         logger.info(f"📄 Nuevo documento añadido: {file_path} con topic: {github_doc.topic}")
+                        
+                        # if vectorize: # Ya no es necesario
+                        #     try:
+                        #         result = await rag_tool._arun(
+                        #             extracted_text=clean_content,
+                        #             file_name=file_path,
+                        #             topic=collection_topic,
+                        #             workspace_id=self.workspace_id,
+                        #             metadata=repo_metadata
+                        #         )
+                        #         if "chunks added" in result.context_for_llm:
+                        #             vectorized_count += 1
+                        #             logger.info(f"✅ Nuevo archivo {file_path} vectorizado correctamente")
+                        #     except Exception as vec_error:
+                        #         logger.error(f"❌ Error vectorizando nuevo archivo {file_path}: {vec_error}", exc_info=True)
 
                 logger.info(f"DEBUG: Antes del commit en _update_repository_documents. Nuevos: {new_files}, Actualizados: {updated_files}, Eliminados: {deleted_files}")
                 await db_session.commit()
                 logger.info(f"DEBUG: Después del commit en _update_repository_documents.")
-                return f"Repositorio {repo_name} actualizado. Archivos nuevos: {new_files}, Archivos actualizados: {updated_files}, Archivos eliminados: {deleted_files}."
+                
+                return f"Repositorio {repo_name} actualizado. Archivos nuevos: {new_files}, Archivos actualizados: {updated_files}, Archivos eliminados: {deleted_files}." # Eliminar referencia a archivos vectorizados
 
             finally:
                 logger.info(f"DEBUG: Cerrando db_session en _update_repository_documents.")

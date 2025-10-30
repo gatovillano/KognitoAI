@@ -1,5 +1,3 @@
-// src/app/(dashboard)/agenda/MonthlyScheduleView.tsx
-
 import React from 'react';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, isSameMonth, isToday } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -7,6 +5,7 @@ import { ChevronLeft, ChevronRight, Clock, CheckCircle2 } from 'lucide-react';
 import { Checkbox } from '../../../components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { AgendaEvent, TaskResponse } from './page'; // Importar los tipos
+import { useDrag, useDrop } from 'react-dnd';
 
 interface MonthlyScheduleViewProps {
   currentDate: Date;
@@ -16,7 +15,133 @@ interface MonthlyScheduleViewProps {
   onEditEvent: (event: AgendaEvent) => void;
   onEditTask: (task: TaskResponse) => void;
   onToggleTaskCompleted: (task: TaskResponse) => void;
+  onCreateEvent: (date: Date) => void; // Nueva prop para crear eventos
+  onMoveEvent: (eventId: number, newDate: Date) => void; // Nueva prop para mover eventos
 }
+
+// Tipo para el elemento arrastrable
+interface DraggedEvent {
+  id: number;
+  type: 'event';
+}
+
+interface EventCardProps {
+  event: AgendaEvent;
+  onEditEvent: (event: AgendaEvent) => void;
+}
+
+const EventCard: React.FC<EventCardProps> = ({ event, onEditEvent }) => {
+  const [{ isDragging }, drag] = useDrag(() => ({
+    type: 'event',
+    item: { id: event.id, type: 'event' },
+    collect: (monitor) => ({
+      isDragging: monitor.isDragging()
+    })
+  }));
+
+  return (
+    <div
+      key={event.id}
+      ref={drag}
+      className="p-1 rounded-md cursor-pointer hover:opacity-80 text-blue-900"
+      style={{ backgroundColor: event.workspace_color || '#DBEAFE', opacity: isDragging ? 0.5 : 1 }}
+      onClick={(e) => { e.stopPropagation(); onEditEvent(event as AgendaEvent); }} // Evitar que el clic se propague al día
+    >
+      <p className="font-semibold truncate">{event.summary}</p>
+      {'event_datetime_local' in event && (
+        <div className="flex items-center mt-1">
+          <Clock className="h-3 w-3 mr-1" />
+          {new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface DayCellProps {
+  day: Date;
+  dayEvents: AgendaEvent[];
+  dayTasks: TaskResponse[];
+  isCurrentMonth: boolean;
+  isTodayDay: boolean;
+  onCreateEvent: (date: Date) => void;
+  onEditEvent: (event: AgendaEvent) => void;
+  onEditTask: (task: TaskResponse) => void;
+  onToggleTaskCompleted: (task: TaskResponse) => void;
+  onMoveEvent: (eventId: number, newDate: Date) => void;
+}
+
+const DayCell: React.FC<DayCellProps> = ({
+  day,
+  dayEvents,
+  dayTasks,
+  isCurrentMonth,
+  isTodayDay,
+  onCreateEvent,
+  onEditEvent,
+  onEditTask,
+  onToggleTaskCompleted,
+  onMoveEvent,
+}) => {
+  const [{ isOver }, drop] = useDrop<DraggedEvent>({
+    accept: 'event',
+    drop: (item, monitor) => {
+      if (monitor.didDrop()) {
+        return;
+      }
+      onMoveEvent(item.id, day);
+    },
+    collect: (monitor) => ({
+      isOver: monitor.isOver(),
+    }),
+  });
+
+  return (
+    <div
+      key={day.toISOString()}
+      ref={drop}
+      className={`flex flex-col border rounded-lg p-2 min-h-[100px] ${!isCurrentMonth ? 'text-gray-400' : ''} ${isTodayDay ? 'border-blue-500 ring-2 ring-blue-500' : ''} ${isOver ? 'bg-blue-50' : ''}`}
+      onClick={() => onCreateEvent(day)} // Manejador de clic para crear evento
+    >
+      <div className={`text-right font-medium mb-2 ${isTodayDay ? 'text-blue-600' : ''}`}>
+        {format(day, 'd')}
+      </div>
+      <div className="flex-grow space-y-1 overflow-y-auto text-xs">
+        {dayEvents.map(event => (
+          <EventCard key={event.id} event={event} onEditEvent={onEditEvent} />
+        ))}
+        {dayTasks.map(task => {
+          const isPastDue = !task.is_completed && new Date(task.due_date!) < new Date();
+          return (
+            <div
+              key={task.id}
+              className={`p-1 rounded-md ${task.is_completed ? 'bg-green-100 text-green-800 line-through' : 'bg-yellow-100 text-yellow-800'} ${isPastDue ? 'bg-red-200 text-red-800' : ''} cursor-pointer hover:opacity-80`}
+              onClick={(e) => { e.stopPropagation(); onEditTask(task as TaskResponse); }} // Evitar que el clic se propague al día
+            >
+              <div className="flex items-center gap-1">
+                <Checkbox
+                  checked={task.is_completed}
+                  onCheckedChange={() => onToggleTaskCompleted(task as TaskResponse)}
+                  className="h-3 w-3"
+                />
+                <p className="font-semibold flex-grow truncate">{(task as TaskResponse).description}</p>
+              </div>
+              {(task as TaskResponse).due_date && (
+                <div className="flex items-center mt-1">
+                  <Clock className="h-3 w-3 mr-1" />
+                  {format(new Date((task as TaskResponse).due_date!), 'HH:mm', { locale: es })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {dayEvents.length === 0 && dayTasks.length === 0 && (
+          <p className="text-center text-muted-foreground py-4">Sin elementos</p>
+        )}
+      </div>
+    </div>
+  );
+};
 
 export function MonthlyScheduleView({
   currentDate,
@@ -26,6 +151,8 @@ export function MonthlyScheduleView({
   onEditEvent,
   onEditTask,
   onToggleTaskCompleted,
+  onCreateEvent,
+  onMoveEvent,
 }: MonthlyScheduleViewProps) {
   const startOfCurrentMonth = startOfMonth(currentDate);
   const endOfCurrentMonth = endOfMonth(currentDate);
@@ -93,58 +220,19 @@ export function MonthlyScheduleView({
           const isTodayDay = isToday(day);
 
           return (
-            <div
+            <DayCell
               key={day.toISOString()}
-              className={`flex flex-col border rounded-lg p-2 min-h-[100px] ${!isCurrentMonth ? 'text-gray-400' : ''} ${isTodayDay ? 'border-blue-500 ring-2 ring-blue-500' : ''}`}>
-              <div className={`text-right font-medium mb-2 ${isTodayDay ? 'text-blue-600' : ''}`}>
-                {format(day, 'd')}
-              </div>
-              <div className="flex-grow space-y-1 overflow-y-auto text-xs">
-                {dayEvents.map(event => (
-                  <div
-                    key={event.id}
-                    className="p-1 rounded-md cursor-pointer hover:opacity-80 text-blue-900"
-                    style={{ backgroundColor: event.workspace_color || '#DBEAFE' }} // bg-blue-100
-                    onClick={() => onEditEvent(event as AgendaEvent)}
-                  >
-                    <p className="font-semibold truncate">{event.summary}</p>
-                    {'event_datetime_local' in event && (
-                      <div className="flex items-center mt-1">
-                        <Clock className="h-3 w-3 mr-1" />
-                        {new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {dayTasks.map(task => {
-                  const isPastDue = !task.is_completed && new Date(task.due_date!) < new Date();
-                  return (
-                    <div
-                      key={task.id}
-                      className={`p-1 rounded-md ${task.is_completed ? 'bg-green-100 text-green-800 line-through' : 'bg-yellow-100 text-yellow-800'} ${isPastDue ? 'bg-red-200 text-red-800' : ''} cursor-pointer hover:opacity-80`}
-                    >
-                      <div className="flex items-center gap-1">
-                        <Checkbox
-                          checked={task.is_completed}
-                          onCheckedChange={() => onToggleTaskCompleted(task as TaskResponse)}
-                          className="h-3 w-3"
-                        />
-                        <p className="font-semibold flex-grow truncate" onClick={() => onEditTask(task as TaskResponse)}>{(task as TaskResponse).description}</p>
-                      </div>
-                      {(task as TaskResponse).due_date && (
-                        <div className="flex items-center mt-1">
-                          <Clock className="h-3 w-3 mr-1" />
-                          {format(new Date((task as TaskResponse).due_date!), 'HH:mm', { locale: es })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {dayEvents.length === 0 && dayTasks.length === 0 && (
-                  <p className="text-center text-muted-foreground py-4">Sin elementos</p>
-                )}
-              </div>
-            </div>
+              day={day}
+              dayEvents={dayEvents}
+              dayTasks={dayTasks}
+              isCurrentMonth={isCurrentMonth}
+              isTodayDay={isTodayDay}
+              onCreateEvent={onCreateEvent}
+              onEditEvent={onEditEvent}
+              onEditTask={onEditTask}
+              onToggleTaskCompleted={onToggleTaskCompleted}
+              onMoveEvent={onMoveEvent}
+            />
           );
         })}
       </div>

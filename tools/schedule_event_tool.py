@@ -10,6 +10,7 @@ from typing import Type, Any, Optional
 
 from pydantic.v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
+import dateparser
 
 from core.agenda_manager import schedule_event
 # ¡NUEVO! Importamos el bot_manager para acceder al user_data
@@ -23,10 +24,11 @@ EVENT_ID_FOR_SCHEDULING_KEY = "event_id_to_schedule"
 
 class ScheduleEventInput(BaseModel):
     """
-    Define el esquema de entrada para la herramienta. Ya no necesita telegram_id.
+    Define el esquema de entrada para la herramienta.
     """
-    description: str = Field(...)
-    natural_language_datetime: str = Field(...)
+    summary: str = Field(..., description="El título o resumen del evento.")
+    natural_language_datetime: str = Field(..., description="La fecha y hora del evento en lenguaje natural (e.g., 'mañana a las 10am').")
+    description: Optional[str] = Field(None, description="La descripción detallada del evento.")
 
 
 class ScheduleEventTool(BaseTool):
@@ -42,17 +44,26 @@ class ScheduleEventTool(BaseTool):
     telegram_id: Optional[str] = Field(None, description="ID de Telegram del usuario que programa el evento.")
     thread_id: Optional[str] = Field(None, description="ID del hilo de conversación en el que se programa el evento.")
 
-    async def _arun(self, description: str, natural_language_datetime: str, **kwargs: Any) -> str:
+    async def _arun(self, summary: str, natural_language_datetime: str, description: Optional[str] = None, **kwargs: Any) -> str:
         """
         Ejecuta la lógica: llama al core para crear el evento y luego guarda el
         ID del evento para que el handler programe la notificación.
         """
         logger.info(f"Ejecutando ScheduleEventTool para la cuenta '{self.account_id}'...")
         try:
+            parsed_datetime = dateparser.parse(natural_language_datetime)
+            if not parsed_datetime:
+                return "No pude entender la fecha y hora. Por favor, intenta de nuevo con un formato más claro."
+
+            event_date = parsed_datetime.strftime("%Y-%m-%d")
+            event_time = parsed_datetime.strftime("%H:%M")
+
             success, message, new_event = await schedule_event(
                 account_id=self.account_id,
+                summary=summary,
                 description=description,
-                natural_language_datetime=natural_language_datetime,
+                event_date=event_date,
+                event_time=event_time,
                 workspace_id=self.workspace_id
             )
 

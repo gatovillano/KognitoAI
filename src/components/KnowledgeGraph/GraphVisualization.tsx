@@ -1,102 +1,75 @@
+// src/components/KnowledgeGraph/GraphVisualization.tsx
 'use client';
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Network, DataSet } from 'vis-network/standalone';
-import apiClient from '@/lib/api';
-import { toast } from 'sonner';
+import { GraphNode, GraphEdge } from '@/types/graph'; // Asegúrate de que '@/types/graph' sea la ruta correcta
 
-interface GraphNode {
-  id: string | number;
-  label: string;
-  title?: string;
+// Adaptar las interfaces para vis.js si es necesario (vis.js usa 'from'/'to' para aristas)
+interface VisGraphNode extends GraphNode {
+  title?: string; // Para tooltips de vis.js
 }
 
-interface GraphEdge {
-  id?: string | number;
-  from: string | number;
-  to: string | number;
+interface VisGraphEdge {
+  id?: string | number; // ID de vis.js puede ser numérico
+  from: string | number; // ID del nodo de origen (vis.js)
+  to: string | number;   // ID del nodo de destino (vis.js)
   arrows?: string;
   label?: string;
+  title?: string; // Para tooltips de vis.js
+  properties?: any;
+  type?: string;
 }
 
 interface GraphVisualizationProps {
-  workspaceId?: string | null;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  isLoading?: boolean;
+  error?: string | null;
+  onNodeClick?: (node: GraphNode) => void;
+  // onEdgeClick?: (edge: GraphEdge) => void; // Puedes añadir si necesitas interactividad con aristas
 }
 
-export const GraphVisualization: React.FC<GraphVisualizationProps> = ({ workspaceId }) => {
+export const GraphVisualization: React.FC<GraphVisualizationProps> = ({
+  nodes,
+  edges,
+  isLoading = false,
+  error = null,
+  onNodeClick,
+}) => {
   const visJsContainer = useRef<HTMLDivElement>(null);
   const networkRef = useRef<Network | null>(null);
-  const [nodes, setNodes] = useState<GraphNode[]>([]);
-  const [edges, setEdges] = useState<GraphEdge[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchGraphData = async (forceRefresh = false) => {
-      setIsLoading(true);
-      setError(null);
-
-      const cacheKey = `graph-data-${workspaceId || 'global'}`;
-      if (!forceRefresh) {
-        const cachedData = localStorage.getItem(cacheKey);
-        if (cachedData) {
-          const { nodes, edges, timestamp } = JSON.parse(cachedData);
-          // Opcional: invalidar caché después de un tiempo (ej. 1 hora)
-          if (Date.now() - timestamp < 3600000) {
-            setNodes(nodes);
-            setEdges(edges);
-            setIsLoading(false);
-            toast.info("Datos del grafo cargados desde caché.");
-            return;
-          }
-        }
-      }
-
-      try {
-        const params: { workspace_id?: string } = {};
-        if (workspaceId !== undefined && workspaceId !== null) {
-          params.workspace_id = workspaceId;
-        }
-        const response = await apiClient.get('/api/knowledge-graph/data', { params });
-        const data = response.data.data;
-        if (data && data.nodes && data.edges) {
-          setNodes(data.nodes);
-          setEdges(data.edges);
-          // Guardar en caché
-          const cachePayload = {
-            nodes: data.nodes,
-            edges: data.edges,
-            timestamp: Date.now(),
-          };
-          localStorage.setItem(cacheKey, JSON.stringify(cachePayload));
-        } else {
-          setNodes([]);
-          setEdges([]);
-          toast.info("No se encontraron datos de grafo para este workspace.");
-        }
-      } catch (err) {
-        console.error("Error fetching graph data:", err);
-        setError("Error al cargar los datos del grafo.");
-        toast.error("Error al cargar los datos del grafo.");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchGraphData();
-  }, [workspaceId]);
 
   useEffect(() => {
     if (!visJsContainer.current || isLoading || error) return;
 
-    // Destruye la instancia de la red existente antes de crear una nueva
     if (networkRef.current) {
       networkRef.current.destroy();
       networkRef.current = null;
     }
 
-    const visNodes = new DataSet<GraphNode>(nodes);
-    const visEdges = new DataSet<GraphEdge>(edges);
+    // Adaptar los datos del backend al formato de vis.js
+    const visNodes = new DataSet<VisGraphNode>(nodes.map(node => ({
+        id: node.id,
+        label: node.label,
+        title: node.properties?.description || node.label, // Tooltip
+        properties: node.properties,
+        type: node.type,
+        // Puedes añadir aquí lógica de coloración/forma basada en node.properties.type o node.properties.category
+        color: node.properties?.category === 'Desafío' ? '#EF4444' : (node.type === 'CONCEPTUAL_QUOTE' ? '#22C55E' : '#3B82F6')
+    })));
+    
+    const visEdges = new DataSet<VisGraphEdge>(edges.map(edge => ({
+        id: edge.id,
+        from: edge.source,
+        to: edge.target,
+        label: edge.label,
+        title: edge.properties?.description || edge.label, // Tooltip
+        properties: edge.properties,
+        type: edge.type,
+        arrows: 'to', // Flecha hacia el destino
+        color: '#cccccc' // Color por defecto
+    })));
 
     const data = { nodes: visNodes, edges: visEdges };
 
@@ -104,44 +77,15 @@ export const GraphVisualization: React.FC<GraphVisualizationProps> = ({ workspac
       nodes: {
         shape: 'dot',
         size: 15,
-        font: {
-          size: 14,
-          color: '#ffffff'
-        },
+        font: { size: 14, color: '#000000' }, // Color de fuente oscuro para contraste
         borderWidth: 2,
-        color: {
-          background: '#6a0dad', // Púrpura
-          border: '#4a0080',
-          highlight: {
-            background: '#8a2be2',
-            border: '#6a0dad'
-          },
-          hover: {
-            background: '#8a2be2',
-            border: '#6a0dad'
-          }
-        }
+        // Los colores se pueden definir en el mapeo de nodos o aquí con una función
       },
       edges: {
         width: 2,
-        color: {
-          color: '#cccccc',
-          highlight: '#999999',
-          hover: '#999999',
-          inherit: false,
-          opacity: 1.0
-        },
-        arrows: {
-          to: {
-            enabled: true,
-            scaleFactor: 0.5
-          }
-        },
-        font: {
-          size: 10,
-          color: '#ffffff',
-          align: 'middle'
-        }
+        color: { color: '#cccccc', highlight: '#999999', hover: '#999999', inherit: false, opacity: 1.0 },
+        arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+        font: { size: 10, color: '#000000', align: 'middle' }
       },
       physics: {
         enabled: true,
@@ -155,31 +99,38 @@ export const GraphVisualization: React.FC<GraphVisualizationProps> = ({ workspac
         },
         solver: 'barnesHut'
       },
-      interaction: {
-        navigationButtons: true,
-        keyboard: true
-      }
+      interaction: { navigationButtons: true, keyboard: true, hover: true },
+      // Añadir una animación inicial para que los nodos no se superpongan al cargar
+      layout: { improvedLayout: true }
     };
 
     networkRef.current = new Network(visJsContainer.current, data, options);
 
-    // Desactivar físicas después de la estabilización
+    // Evento de clic en nodo
+    if (onNodeClick) {
+      networkRef.current.on("click", (properties) => {
+        if (properties.nodes.length > 0) {
+          const nodeId = properties.nodes[0];
+          const clickedNode = nodes.find(n => n.id === nodeId);
+          if (clickedNode) onNodeClick(clickedNode);
+        }
+      });
+    }
+
+    // Deshabilitar la física una vez que la red se estabilice
     networkRef.current.on("stabilizationIterationsDone", function () {
       if (networkRef.current) {
-        networkRef.current.setOptions({
-          physics: false
-        });
+        networkRef.current.setOptions({ physics: false });
       }
     });
 
-    // Limpia la instancia de la red cuando el componente se desmonta
     return () => {
       if (networkRef.current) {
         networkRef.current.destroy();
         networkRef.current = null;
       }
     };
-  }, [nodes, edges, isLoading, error]); // Vuelve a renderizar si los datos cambian
+  }, [nodes, edges, isLoading, error, onNodeClick]); // Dependencias ahora son las props
 
   if (isLoading) {
     return <div className="flex justify-center items-center h-full">Cargando grafo...</div>;
@@ -189,65 +140,8 @@ export const GraphVisualization: React.FC<GraphVisualizationProps> = ({ workspac
     return <div className="flex justify-center items-center h-full text-red-500">{error}</div>;
   }
 
-  const handleRefresh = () => {
-    const fetchGraphData = async (forceRefresh = true) => {
-        setIsLoading(true);
-        setError(null);
-
-        const cacheKey = `graph-data-${workspaceId || 'global'}`;
-        if (!forceRefresh) {
-            const cachedData = localStorage.getItem(cacheKey);
-            if (cachedData) {
-                const { nodes, edges, timestamp } = JSON.parse(cachedData);
-                // Opcional: invalidar caché después de un tiempo (ej. 1 hora)
-                if (Date.now() - timestamp < 3600000) {
-                    setNodes(nodes);
-                    setEdges(edges);
-                    setIsLoading(false);
-                    toast.info("Datos del grafo cargados desde caché.");
-                    return;
-                }
-            }
-        }
-
-        try {
-            const params: { workspace_id?: string } = {};
-            if (workspaceId !== undefined && workspaceId !== null) {
-                params.workspace_id = workspaceId;
-            }
-            const response = await apiClient.get('/api/knowledge-graph/data', { params });
-            const data = response.data.data;
-            if (data && data.nodes && data.edges) {
-                setNodes(data.nodes);
-                setEdges(data.edges);
-                // Guardar en caché
-                const cachePayload = {
-                    nodes: data.nodes,
-                    edges: data.edges,
-                    timestamp: Date.now(),
-                };
-                localStorage.setItem(cacheKey, JSON.stringify(cachePayload));
-            } else {
-                setNodes([]);
-                setEdges([]);
-                toast.info("No se encontraron datos de grafo para este workspace.");
-            }
-        } catch (err) {
-            console.error("Error fetching graph data:", err);
-            setError("Error al cargar los datos del grafo.");
-            toast.error("Error al cargar los datos del grafo.");
-        } finally {
-            setIsLoading(false);
-        }
-    };
-    fetchGraphData(true);
-  };
-
   return (
     <div className="w-full h-full">
-      <button onClick={handleRefresh} className="absolute top-4 right-4 z-10 bg-primary text-primary-foreground px-4 py-2 rounded">
-        Refrescar Grafo
-      </button>
       <div ref={visJsContainer} style={{ height: '600px', width: '100%' }} />
     </div>
   );
