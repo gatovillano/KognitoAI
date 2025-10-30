@@ -7,7 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Expand, HelpCircle, Brain, Network, Lightbulb, Volume2, Loader2, Pause, Calendar } from 'lucide-react';
+import { Expand, HelpCircle, Brain, Network, Lightbulb, Volume2, Loader2, Pause, Calendar, AlertTriangle } from 'lucide-react';
 import { QuestionSliderDialog } from '@/components/QuestionSliderDialog';
 import { useTextToSpeech } from '@/hooks/useTextToSpeech';
 import ReactMarkdown from 'react-markdown';
@@ -18,6 +18,7 @@ interface SemanticAnalysisProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   topic: string;
+  problematic_areas?: string[];
 }
 
 export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }: SemanticAnalysisProps) {
@@ -44,7 +45,8 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
       temas_transversales: analysis.temas_transversales || [],
       conceptos_centrales: analysis.conceptos_centrales || [],
       brechas_conocimiento: analysis.brechas_conocimiento || [],
-      patrones_semanticos: analysis.patrones_semanticos || {}
+      patrones_semanticos: analysis.patrones_semanticos || {},
+      problematic_areas: analysis.problematic_areas || [] // Añadir problematic_areas aquí
     };
   }, [analysis]);
 
@@ -78,19 +80,17 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
     <>
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-full sm:max-w-4xl max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col p-0">
-          <DialogHeader className="p-6 pb-0">
+          <DialogHeader className="p-6 pb-4 border-b">
             <DialogTitle className="flex items-center gap-2 text-2xl font-bold text-foreground">
               <Brain className="h-6 w-6" />
               Resumen Semántico de &quot;{topic}&quot;
             </DialogTitle>
             <DialogDescription className="text-muted-foreground">
-              Análisis semántico profundo de la colección con agrupación de conceptos y patrones
+              Análisis semántico profundo de la colección con agrupación de conceptos y patrones.
             </DialogDescription>
           </DialogHeader>
-          <div className="p-6 pt-0 flex flex-col flex-grow">
-            <ScrollArea className="flex-1 pr-4">
-              <div className="space-y-6 pb-4"> {/* Añadido pb-4 para espacio al final del scroll */}
-              {/* Resumen Semántico Principal */}
+          <ScrollArea className="flex-1 p-6">
+            <div className="space-y-6 pb-4">
               <Card className="border-none shadow-none bg-transparent p-0">
                 <CardHeader className="px-0 pt-0 pb-2">
                   <CardTitle className="flex items-center justify-between gap-2 text-lg font-semibold text-foreground">
@@ -115,8 +115,6 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                   </p>
                 </CardContent>
               </Card>
-
-              {/* Temas Transversales */}
               {semanticData.temas_transversales.length > 0 && (
                 <Card className="border-none shadow-none bg-transparent p-0">
                   <CardHeader className="px-0 pt-0 pb-2">
@@ -140,8 +138,6 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                   </CardContent>
                 </Card>
               )}
- 
-              {/* Conceptos Centrales */}
               {semanticData.conceptos_centrales.length > 0 && (
                 <Card className="border-none shadow-none bg-transparent p-0">
                   <CardHeader className="px-0 pt-0 pb-2">
@@ -170,8 +166,6 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                   </CardContent>
                 </Card>
               )}
- 
-              {/* Patrones Semánticos - Estadísticas */}
               {semanticData.patrones_semanticos && Object.keys(semanticData.patrones_semanticos).length > 0 && (
                 <Card className="border-none shadow-none bg-transparent p-0">
                   <CardHeader className="px-0 pt-0 pb-2">
@@ -215,8 +209,6 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                   </CardContent>
                 </Card>
               )}
- 
-              {/* Brechas de Conocimiento */}
               {semanticData.brechas_conocimiento.length > 0 && (
                 <Card className="border-none shadow-none bg-transparent p-0">
                   <CardHeader className="px-0 pt-0 pb-2">
@@ -256,7 +248,40 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                   </CardContent>
                 </Card>
               )}
-            </div> {/* Cierre del div con space-y-6 pb-4 */}
+
+              {/* Sección de Problemáticas */}
+              {semanticData.problematic_areas.length > 0 && (
+                <Card className="border-none shadow-none bg-transparent p-0">
+                  <CardHeader className="px-0 pt-0 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <AlertTriangle className="h-5 w-5 text-red-500" />
+                      Problemáticas
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <div className="space-y-3">
+                      {semanticData.problematic_areas.slice(0, 3).map((problem: string, index: number) => (
+                        <div key={index} className="p-3 bg-red-50 border border-red-200 rounded-lg border-border/50">
+                          <p className="text-xs font-medium text-red-800 mb-1">Problemática Identificada:</p>
+                          <div className="text-sm text-red-700"><ReactMarkdown remarkPlugins={[remarkGfm]}>{problem}</ReactMarkdown></div>
+                        </div>
+                      ))}
+                      {semanticData.problematic_areas.length > 3 && (
+                        <div className="text-center pt-4">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsKnowledgeGapsDialogOpen(true)} // Reutilizamos el diálogo de brechas para esto
+                          >
+                            Ver todas las {semanticData.problematic_areas.length} problemáticas
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           </ScrollArea>
           {analysis?.analysis_metadata && (
             <div className="space-y-2 text-xs text-muted-foreground mt-auto pt-3 border-t border-border/50 p-6">
@@ -281,8 +306,7 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
               )}
             </div>
           )}
-          </div> {/* Cierre del div principal que contiene el contenido del diálogo */}
-          <DialogFooter className="p-6 pt-0">
+          <DialogFooter className="p-6 pt-4 border-t">
             <Button variant="outline" onClick={() => onOpenChange(false)} className="w-full sm:w-auto">Cerrar</Button>
           </DialogFooter>
         </DialogContent>

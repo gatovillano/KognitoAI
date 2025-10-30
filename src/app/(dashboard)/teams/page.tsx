@@ -67,7 +67,7 @@ export default function TeamsPage() {
     const fetchEvents = async () => {
       setLoadingEvents(true);
       try {
-        const response = await apiClient.post('/api/list-events');
+        const response = await apiClient.post('/api/list-events', {});
         setEvents(response.data);
       } catch (error) {
         console.error("Error fetching events:", error);

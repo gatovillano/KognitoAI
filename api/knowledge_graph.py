@@ -89,13 +89,27 @@ async def get_knowledge_graph(
     Obtiene el grafo de conocimiento existente para un workspace.
     """
     try:
-        # Aquí podrías implementar la lógica para recuperar un grafo guardado
-        # Por ahora, devolvemos que no hay datos guardados
+        # Reutilizar la lógica de get_knowledge_graph_data para obtener los datos del grafo
+        graph_data_response = await get_knowledge_graph_data(workspace_id, current_user)
         
-        return GraphResponse(
-            success=False,
-            error="Grafo no encontrado. Procesa los documentos primero."
-        )
+        if graph_data_response.success:
+            if graph_data_response.data and (graph_data_response.data.get("nodes") or graph_data_response.data.get("edges")):
+                return GraphResponse(
+                    success=True,
+                    data=graph_data_response.data,
+                    message=f"Grafo obtenido: {len(graph_data_response.data.get('nodes', []))} nodos y {len(graph_data_response.data.get('edges', []))} aristas."
+                )
+            else:
+                return GraphResponse(
+                    success=False,
+                    error="Grafo vacío. Procesa los documentos primero para generar el grafo."
+                )
+        else:
+            return GraphResponse(
+                success=False,
+                error=graph_data_response.error,
+                message="Error al obtener los datos del grafo."
+            )
         
     except Exception as e:
         logger.error(f"❌ Error obteniendo grafo: {e}")
@@ -988,7 +1002,7 @@ async def get_knowledge_graph_data(
 
         # Consulta Cypher base para obtener nodos y relaciones
         query = """
-        MATCH (n)-[r]-(m)
+        MATCH (n)
         """
         
         # Modificar cláusula WHERE para manejar workspace_id opcional
@@ -999,20 +1013,21 @@ async def get_knowledge_graph_data(
             elif workspace_id.lower() == "global_context":
                 # Si es "global_context", incluir solo nodos sin workspace_id
                 query += """
-                WHERE n.workspace_id IS NULL AND m.workspace_id IS NULL
+                WHERE n.workspace_id IS NULL
                 """
             else:
-                # Para un workspace_id específico, ambos nodos deben pertenecer a ese workspace.
+                # Para un workspace_id específico, los nodos deben pertenecer a ese workspace.
                 query += f"""
-                WHERE n.workspace_id = '{workspace_id}' AND m.workspace_id = '{workspace_id}'
+                WHERE n.workspace_id = '{workspace_id}'
                 """
         else:
             # Por defecto, si no se especifica workspace_id, mostrar solo el contexto global
             query += """
-            WHERE n.workspace_id IS NULL AND m.workspace_id IS NULL
+            WHERE n.workspace_id IS NULL
             """
         
         query += """
+        OPTIONAL MATCH (n)-[r]-(m)
         RETURN n, r, m
         """
         
@@ -1025,8 +1040,8 @@ async def get_knowledge_graph_data(
 
         for record in result:
             n = record["n"]
-            m = record["m"]
             r = record["r"]
+            m = record["m"]
 
             # Función auxiliar para obtener propiedades de forma segura
             def get_node_properties(node):
@@ -1045,20 +1060,21 @@ async def get_knowledge_graph_data(
             if str(n.id) not in nodes_map:
                 nodes_map[str(n.id)] = get_node_properties(n)
             
-            # Añadir nodo 'm'
-            if str(m.id) not in nodes_map:
+            # Añadir nodo 'm' si existe (para relaciones)
+            if m and str(m.id) not in nodes_map:
                 nodes_map[str(m.id)] = get_node_properties(m)
             
-            # Asegurarse de que el ID de la relación sea único
-            edge_id = f"{str(n.id)}-{r.type}-{str(m.id)}"
-            edges_list.append({
-                "id": edge_id,
-                "from": str(n.id),
-                "to": str(m.id),
-                "label": r.type,
-                "arrows": "to", # Asumimos flechas direccionales para visualización
-                "title": f"Tipo de relación: {r.type}\nDesde: {nodes_map[str(n.id)]['label']}\nHacia: {nodes_map[str(m.id)]['label']}"
-            })
+            # Añadir relación si existe
+            if r:
+                edge_id = f"{str(n.id)}-{r.type}-{str(m.id)}"
+                edges_list.append({
+                    "id": edge_id,
+                    "from": str(n.id),
+                    "to": str(m.id),
+                    "label": r.type,
+                    "arrows": "to", # Asumimos flechas direccionales para visualización
+                    "title": f"Tipo de relación: {r.type}\nDesde: {nodes_map[str(n.id)]['label']}\nHacia: {nodes_map[str(m.id)]['label']}"
+                })
         
         nodes_list = list(nodes_map.values())
 

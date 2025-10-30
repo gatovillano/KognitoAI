@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -41,6 +41,7 @@ interface Analysis {
   action_suggestion?: string;
   related_items?: any[];
   full_data: any;
+  problematic_areas?: string[];
 }
 
 interface AnalysisDetailDialogProps {
@@ -55,8 +56,6 @@ const getAnalysisIcon = (type: string) => {
       return <FileText className="h-5 w-5 text-blue-500" />;
     case 'collection':
       return <FolderKanban className="h-5 w-5 text-green-500" />;
-    case 'mindmap':
-      return <Brain className="h-5 w-5 text-purple-500" />;
     case 'insight':
       return <Lightbulb className="h-5 w-5 text-yellow-500" />;
     case 'code':
@@ -74,8 +73,6 @@ const getAnalysisTypeLabel = (type: string) => {
       return 'Análisis de Documento';
     case 'collection':
       return 'Análisis de Colección';
-    case 'mindmap':
-      return 'Mapa Mental';
     case 'insight':
       return 'Insight Proactivo';
     case 'code':
@@ -93,8 +90,6 @@ const getAnalysisTypeBadgeColor = (type: string) => {
       return 'bg-blue-100 text-blue-800 border-blue-200';
     case 'collection':
       return 'bg-green-100 text-green-800 border-green-200';
-    case 'mindmap':
-      return 'bg-purple-100 text-purple-800 border-purple-200';
     case 'insight':
       return 'bg-yellow-100 text-yellow-800 border-yellow-200';
     case 'code':
@@ -170,84 +165,86 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
     switch (analysis.type) {
       case 'insight':
         return (
-          <motion.div 
-            className="space-y-6"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1, duration: 0.3 }}
-          >
-            <Card className="border-none shadow-none bg-transparent p-0">
-              <CardHeader className="px-0 pt-0 pb-2">
-                <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
-                  <Lightbulb className="h-5 w-5 text-yellow-500" />
-                  Insight Detectado
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <p className="text-sm text-muted-foreground leading-relaxed p-3 bg-muted rounded-md border border-border/50">{analysis.summary}</p>
-                {analysis.confidence_score && (
-                  <div className="mt-4">
-                    <Badge className="bg-yellow-500 text-white font-medium border border-border/50">
-                      Confianza: {(analysis.confidence_score * 100).toFixed(0)}%
-                    </Badge>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {analysis.action_suggestion && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2, duration: 0.2 }}
-              >
-                <Card className="border-none shadow-none bg-transparent p-0">
-                  <CardHeader className="px-0 pt-0 pb-2">
-                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
-                      <Target className="h-5 w-5 text-blue-500" />
-                      Sugerencia de Acción
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <p className="text-sm text-muted-foreground leading-relaxed p-3 bg-muted rounded-md border border-border/50">{analysis.action_suggestion}</p>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            )}
-
-            {analysis.related_items && analysis.related_items.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3, duration: 0.2 }}
-              >
-                <Card className="border-none shadow-none bg-transparent p-0">
-                  <CardHeader className="px-0 pt-0 pb-2">
-                    <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
-                      <Zap className="h-5 w-5" />
-                      Elementos Relacionados
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <div className="space-y-3">
-                      {analysis.related_items.map((item, index) => (
-                        <motion.div 
-                          key={index} 
-                          className="p-3 bg-muted/30 rounded-2xl border border-border/50"
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: 0.4 + index * 0.05, duration: 0.2 }}
-                        >
-                          <p className="font-medium text-foreground">{item.title || item.reference || 'Ítem sin título'}</p>
-                          <p className="text-xs text-muted-foreground">Tipo: {item.type || 'N/A'}</p>
-                        </motion.div>
-                      ))}
+          <ScrollArea className="h-full pr-4">
+            <motion.div
+              className="space-y-6"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1, duration: 0.3 }}
+            >
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                    <Lightbulb className="h-5 w-5 text-yellow-500" />
+                    Insight Detectado
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <p className="text-sm text-muted-foreground leading-relaxed p-3 bg-muted rounded-md border border-border/50">{analysis.summary}</p>
+                  {analysis.confidence_score && (
+                    <div className="mt-4">
+                      <Badge className="bg-yellow-500 text-white font-medium border border-border/50">
+                        Confianza: {(analysis.confidence_score * 100).toFixed(0)}%
+                      </Badge>
                     </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            )}
-          </motion.div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {analysis.action_suggestion && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2, duration: 0.2 }}
+                >
+                  <Card className="border-none shadow-none bg-transparent p-0">
+                    <CardHeader className="px-0 pt-0 pb-2">
+                      <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                        <Target className="h-5 w-5 text-blue-500" />
+                        Sugerencia de Acción
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <p className="text-sm text-muted-foreground leading-relaxed p-3 bg-muted rounded-md border border-border/50">{analysis.action_suggestion}</p>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              )}
+
+              {analysis.related_items && analysis.related_items.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3, duration: 0.2 }}
+                >
+                  <Card className="border-none shadow-none bg-transparent p-0">
+                    <CardHeader className="px-0 pt-0 pb-2">
+                      <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                        <Zap className="h-5 w-5" />
+                        Elementos Relacionados
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <div className="space-y-3">
+                        {analysis.related_items.map((item, index) => (
+                          <motion.div
+                            key={index}
+                            className="p-3 bg-muted/30 rounded-2xl border border-border/50"
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: 0.4 + index * 0.05, duration: 0.2 }}
+                          >
+                            <p className="font-medium text-foreground">{item.title || item.reference || 'Ítem sin título'}</p>
+                            <p className="text-xs text-muted-foreground">Tipo: {item.type || 'N/A'}</p>
+                          </motion.div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              )}
+            </motion.div>
+          </ScrollArea>
         );
 
       case 'code':
@@ -258,7 +255,8 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
         const recommendations = ensureArray(data?.recommendations);
 
         return (
-          <Tabs defaultValue="overview" className="w-full flex flex-col flex-grow">
+          <div className="flex flex-col">
+          <Tabs defaultValue="overview" className="w-full flex flex-col">
             <TabsList className="grid w-full grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 bg-transparent border-b border-border/50 mb-4">
               <TabsTrigger value="overview">Resumen</TabsTrigger>
               <TabsTrigger value="structure">Estructura</TabsTrigger>
@@ -268,7 +266,7 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
               <TabsTrigger value="recommendations">Recomendaciones</TabsTrigger>
             </TabsList>
             
-            <div className="flex-1 pr-4">
+            <ScrollArea className="pr-4">
               <div className="space-y-6 pb-4">
               <TabsContent value="overview" className="space-y-4">
                 <Card className="border-none shadow-none bg-transparent p-0">
@@ -427,7 +425,9 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
                 </Card>
               </TabsContent>
             </div>
+            </ScrollArea>
           </Tabs>
+        </div>
         );
 
       default:
@@ -438,12 +438,13 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
         const questions = getQuestions();
 
         return (
-          <motion.div 
-            className="space-y-6"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1, duration: 0.3 }}
-          >
+          <ScrollArea className="h-full pr-4">
+            <motion.div 
+              className="space-y-6"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1, duration: 0.3 }}
+            >
             <Card className="border-none shadow-none bg-transparent p-0">
               <CardHeader className="px-0 pt-0 pb-2">
                 <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
@@ -567,6 +568,25 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
               </Card>
             )}
 
+            {/* Sección de Problemáticas */}
+            {ensureArray(data?.problematic_areas).length > 0 && (
+              <Card className="border-none shadow-none bg-transparent p-0">
+                <CardHeader className="px-0 pt-0 pb-2">
+                  <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                    <AlertTriangle className="h-5 w-5 text-red-500" />
+                    Problemáticas
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground p-3 bg-muted rounded-md border border-border/50">
+                    {ensureArray(data?.problematic_areas).map((problem: string, i: number) => (
+                      <li key={i}><InlineMarkdownRenderer content={problem} /></li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Renderizar campos adicionales de full_data como ítems individuales */}
             {Object.keys(data || {}).length > 0 && (() => {
               const excludedKeys = [
@@ -575,7 +595,8 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
                 'concept_relationships', 'relaciones_conceptos',
                 'knowledge_gaps', 'preguntas_para_explorar', 'potential_issues',
                 'executive_summary', 'resumen_ejecutivo',
-                'code_structure', 'design_patterns', 'dependencies', 'recommendations', 'formatted_result'
+                'code_structure', 'design_patterns', 'dependencies', 'recommendations', 'formatted_result',
+                'problematic_areas' // Añadir problematic_areas a las claves excluidas
               ];
               const additionalDataKeys = Object.keys(data).filter(key => !excludedKeys.includes(key));
 
@@ -625,31 +646,36 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
                 </>
               );
             })()}
-          </motion.div>
+            </motion.div>
+          </ScrollArea>
         );
-    }
   };
 
   return (
-    <AnimatePresence>
+    <>
       {isOpen && (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-          <DialogContent className="max-w-4xl w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col p-0">
-                        <div className="p-6 pt-0 flex flex-col flex-grow">
-                          <ScrollArea className="flex-1 pr-4">
-                            <div className="pb-4"> {/* Añade padding inferior para que el último contenido no quede pegado al borde */}                  {renderTypeSpecificContent()}
-                            </div>
-                          </ScrollArea>
-            
-                          <div className="flex flex-shrink-0 justify-end pt-6">
-                            <Button variant="outline" onClick={() => onOpenChange(false)}>
-                              Cerrar
-                            </Button>
-                          </div>
-                        </div>
-                      </DialogContent>
-                    </Dialog>
-                  )}
+          <DialogContent className="max-w-4xl w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col p-0 overflow-y-auto">
+            <DialogHeader className="p-6 pb-4 border-b">
+              <DialogTitle className="flex items-center gap-3 text-2xl font-bold">
+                {getAnalysisIcon(analysis.type)}
+                {getAnalysisTypeLabel(analysis.type)}
+              </DialogTitle>
+              <DialogDescription>
+                {analysis.title}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="p-6 pb-4">
+              {renderTypeSpecificContent()}
+            </div>
+            <DialogFooter className="p-6 pt-4 border-t">
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Cerrar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Diálogo para mostrar preguntas */}
       <QuestionSliderDialog
@@ -658,6 +684,6 @@ export function AnalysisDetailDialog({ analysis, isOpen, onOpenChange }: Analysi
         questions={getQuestions().map(q => typeof q === 'string' ? q : q?.issue || q?.description || 'Pregunta sin contenido')}
         title="Preguntas para Explorar"
       />
-    </AnimatePresence>
+    </>
   );
 }

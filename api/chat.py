@@ -540,12 +540,16 @@ async def create_and_run_agent_streaming(
     logger.info(f"--- Iniciando agente LangGraph para account_id: {account_id}, thread_id: {thread_id} ---")
 
     try:
+        # Determinar el destinatario y el tipo de conexión
+        target_account_id = "telegram_bot_service" if telegram_id else account_id
+        conn_type = "chat" if telegram_id else None # El cliente de Telegram se conecta como 'chat'
+
         # Enviar mensaje de inicio de stream
-        await send_personal_message(account_id, {
+        await send_personal_message(target_account_id, {
             "type": "stream_start",
             "thread_id": thread_id,
             "taskId": task_id,
-        })
+        }, connection_type=conn_type)
 
         # --- Preparación Inicial ---
         agent_app = create_langgraph_agent()
@@ -638,17 +642,17 @@ async def create_and_run_agent_streaming(
                 logger.info(f"[AUTO-TÍTULO] Hilo {thread_id} cumple condición para nombrar/renombrar con {message_count} mensajes. Título actual: '{current_title}'")
                 background_tasks.add_task(force_update_thread_title, thread_id)
         
-        await send_personal_message(account_id, {
+        await send_personal_message(target_account_id, {
             "type": "stream_end",
             "thread_id": thread_id,
             "taskId": task_id,
-        })
+        }, connection_type=conn_type)
 
     except Exception as e:
         logger.error(f"Error en streaming agent LangGraph: {e}", exc_info=True)
-        await send_personal_message(account_id, {
+        await send_personal_message(target_account_id, {
             "type": "error",
             "thread_id": thread_id,
             "taskId": task_id,
             "message": str(e)
-        })
+        }, connection_type=conn_type)

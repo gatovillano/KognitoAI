@@ -88,6 +88,13 @@ export default function RepositoriesPage() {
         setSavedAnalyses(repoAnalyses);
         console.log('Análisis guardados:', repoAnalyses.length);
         toast.info(`Análisis guardados: ${repoAnalyses.length}`);
+        
+        // MODIFICACIÓN AQUI: Resetear los IDs de polling si no hay una tarea de análisis activa
+        // Esto evita que los useEffect de polling intenten consultar IDs antiguos o irrelevantes
+        // si no hay un análisis en curso que deba ser monitoreado.
+        setDocPollingId(null);
+        setCollectionPollingId(null);
+
     } catch (error) {
       toast.error('Error al cargar los datos de los repositorios.');
     } finally {
@@ -136,6 +143,14 @@ export default function RepositoriesPage() {
     const poller = setInterval(async () => {
       try {
         const response = await apiClient.get(`/api/get-analysis-result/${docPollingId}`);
+        // MODIFICACIÓN AQUI: Manejar errores HTTP directamente
+        if (response.status >= 400) { // Si hay un error HTTP (ej. 404)
+          clearInterval(poller);
+          setDocPollingId(null);
+          toast.error("Error al obtener el resultado del análisis: " + response.statusText);
+          return;
+        }
+
         const { status, result, error } = response.data;
         if (status === 'completed') {
           clearInterval(poller); setDocPollingId(null); setDocAnalysisResult(result);
@@ -154,6 +169,14 @@ export default function RepositoriesPage() {
     const poller = setInterval(async () => {
       try {
         const response = await apiClient.get(`/api/get-analysis-result/${collectionPollingId}`);
+        // MODIFICACIÓN AQUI: Manejar errores HTTP directamente
+        if (response.status >= 400) { // Si hay un error HTTP (ej. 404)
+          clearInterval(poller);
+          setCollectionPollingId(null);
+          toast.error("Error al obtener el resultado del análisis de colección: " + response.statusText);
+          return;
+        }
+
         const { status, result, error } = response.data;
         if (status === 'completed') {
           clearInterval(poller); setCollectionPollingId(null); setCollectionAnalysisResult(result);
