@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from core.llm_manager import get_main_llm
 from langchain_core.language_models.base import BaseLanguageModel
 from tools.deep_research_tool import DeepResearchTool
-from tools.ddg_search_tool import create_ddg_search_tool # Importar la función de fábrica
+from tools.web_search_tool import get_web_search_tool # Importar la función de fábrica
 from tools.add_web_to_rag_tool import AddWebToRAGTool
 
 logger = logging.getLogger(__name__)
@@ -32,15 +32,13 @@ async def run_deep_research(
     """
     logger.info(f"Recibida solicitud de investigación profunda para: {request.query}")
     try:
-        # Instanciar las herramientas necesarias
-        # Para DDGSearchTool, usamos la función de fábrica
-        ddg_search_tool_instance = create_ddg_search_tool(account_id="deep_research_agent") # Asignar un account_id para la herramienta
-        add_web_to_rag_tool_instance = AddWebToRAGTool()
+        web_search_tool_instance = get_web_search_tool(account_id="deep_research_agent") # Asignar un account_id para la herramienta
+        add_web_to_rag_tool_instance = AddWebToRAGTool(account_id="deep_research_agent")
 
         # Instanciar DeepResearchTool, pasando la instancia del LLM directamente
         deep_research_tool = DeepResearchTool(
             llm_instance=llm_instance, # Pasar la instancia del LLM
-            ddg_search_tool=ddg_search_tool_instance,
+            web_search_tool=web_search_tool_instance,
             add_web_to_rag_tool=add_web_to_rag_tool_instance
         )
 

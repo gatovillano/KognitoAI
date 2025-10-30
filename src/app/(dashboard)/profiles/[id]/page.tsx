@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Loader2, ArrowLeft, Edit, Mail, Phone, Tag, Calendar, ListTodo, FileText, Image, Info, MoreHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,8 @@ import { EventDialog } from '@/app/(dashboard)/agenda/event-dialog';
 import { TaskDialog } from '@/app/(dashboard)/agenda/task-dialog';
 import { ManageLinkedObjectsDialog } from '@/app/(dashboard)/profiles/manage-linked-objects-dialog';
 import { FormResponseDialog } from '@/components/forms/FormResponseDialog';
+import { format } from 'date-fns'; // Importar format
+import { es } from 'date-fns/locale'; // Importar locale español
 
 // Interfaces para los objetos vinculados (de api/contact_profiles.py)
 interface LinkedNoteResponse {
@@ -25,6 +27,7 @@ interface LinkedNoteResponse {
 
 interface LinkedAgendaEventResponse {
   id: number;
+  summary: string; // Añadido para el título del evento
   description: string;
   event_datetime_utc: string;
   event_datetime_local: string;
@@ -310,7 +313,7 @@ export default function ProfileDetailsPage() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold text-sm line-clamp-2">
-                          {event.description}
+                          {event.summary}
                         </div>
                       </div>
                     </div>
@@ -322,7 +325,7 @@ export default function ProfileDetailsPage() {
                       Evento
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      {new Date(event.event_datetime_local).toLocaleString()}
+                      {format(new Date(event.event_datetime_local), 'dd/MM/yyyy HH:mm', { locale: es })}
                     </span>
                   </div>
                 </CardContent>

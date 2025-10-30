@@ -137,6 +137,7 @@ class GitHubVectorizationRequest(BaseModel):
 class GitHubUpdateRequest(BaseModel):
     repo_url: str
     collection_topic: Optional[str] = "repositorio"
+    vectorize: Optional[bool] = True # Añadido para controlar la vectorización
 
 @router.post("/start-vectorization", status_code=status.HTTP_202_ACCEPTED)
 async def start_vectorization_endpoint(
@@ -211,7 +212,8 @@ async def update_repository_endpoint(
         new_task = AnalysisTask(
             account_id=uuid.UUID(current_account_id),
             file_name=f"Actualización: {req.repo_url}",
-            status="pending"
+            status="pending",
+            analysis_type="repository_update" # Añadido para categorizar la tarea
         )
         db.add(new_task)
         await db.commit()
@@ -223,7 +225,8 @@ async def update_repository_endpoint(
             str(new_task.id),
             current_account_id,
             req.repo_url,
-            req.collection_topic or "repositorio"
+            req.collection_topic or "repositorio",
+            req.vectorize # Pasar el parámetro vectorize
         )
 
         return {"task_id": str(new_task.id), "message": f"Actualización del repositorio iniciada en segundo plano."}
@@ -234,7 +237,7 @@ async def update_repository_endpoint(
             detail=f"Error al iniciar actualización: {str(e)}"
         )
 
-async def update_repository_task(task_id: str, account_id: str, repo_url: str, collection_topic: str):
+async def update_repository_task(task_id: str, account_id: str, repo_url: str, collection_topic: str, vectorize: bool):
     """
     Tarea en segundo plano para actualizar un repositorio de GitHub.
     """
@@ -255,7 +258,9 @@ async def update_repository_task(task_id: str, account_id: str, repo_url: str, c
             github_tool = GitHubRepoTool(account_id=account_id)
             result = await github_tool._update_repository_documents(
                 repo_url=repo_url,
-                account_id=account_id
+                account_id=account_id,
+                collection_topic=collection_topic, # Pasar el collection_topic
+                vectorize=vectorize # Pasar el parámetro vectorize
             )
 
             # Marcar la tarea como completada con el resultado
@@ -277,6 +282,30 @@ async def update_repository_task(task_id: str, account_id: str, repo_url: str, c
             )
             await db.execute(stmt_failed)
             await db.commit()
+
+@router.get("/get-repository-update-result/{task_id}")
+async def get_repository_update_result_endpoint(
+    task_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Consulta el estado y el resultado de una tarea de actualización de repositorio.
+    """
+    from core.database import AnalysisTask
+    try:
+        task = await db.get(AnalysisTask, uuid.UUID(task_id))
+        if not task or str(task.account_id) != current_account_id or task.analysis_type != "repository_update":
+            raise HTTPException(status_code=404, detail="Tarea de actualización de repositorio no encontrada o no pertenece al usuario.")
+        return {"status": task.status, "result": task.result_payload, "error": task.error_message}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al obtener resultado de actualización de repositorio para task_id: {task_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al obtener resultado de actualización de repositorio: {str(e)}"
+        )
 
 @router.get("/get-vectorization-result/{task_id}")
 async def get_vectorization_result_endpoint(

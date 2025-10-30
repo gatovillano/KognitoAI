@@ -1,7 +1,6 @@
 // webapp/script.js - Versión FINAL Completa con Gestor de Notas
 
 document.addEventListener('DOMContentLoaded', function () {
-    tg.showAlert("Script iniciado."); // Alerta para verificar la ejecución del script
     // --- 1. INICIALIZACIÓN Y VERIFICACIÓN ---
     if (!window.Telegram || !window.Telegram.WebApp) {
         console.error("SDK de Telegram no encontrado.");
@@ -9,7 +8,6 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
     }
     const tg = window.Telegram.WebApp;
-    tg.showAlert("SDK de Telegram cargado.");
 
     // --- 2. REFERENCIAS A ELEMENTOS ---
     const elements = {
@@ -59,7 +57,6 @@ document.addEventListener('DOMContentLoaded', function () {
         noteCategoryInput: document.getElementById('note-category-input'),
         llmOutput: document.getElementById('llm-output'), // Nuevo elemento para la respuesta del LLM
     };
-    tg.showAlert("Elementos referenciados cargados.");
 
     // --- 3. GESTIÓN DE WEBSOCKETS ---
     let websocket;
@@ -136,22 +133,38 @@ document.addEventListener('DOMContentLoaded', function () {
     let initialPrompt = '';
 
     // --- 4. FUNCIÓN CENTRAL PARA LLAMADAS A LA API ---
-    async function apiPost(endpoint, formData) {
+    async function apiFetch(endpoint, method = 'GET', body = null) {
         if (!tg.initData) throw new Error("Datos de usuario de Telegram no disponibles.");
-        formData.append('initData', tg.initData);
-        
-        const response = await fetch(endpoint, { method: 'POST', body: formData });
+
+        const headers = {
+            'X-Telegram-Init-Data': tg.initData,
+        };
+
+        let fetchOptions = { method, headers };
+        if (body instanceof FormData) {
+            fetchOptions.body = body;
+        } else if (body) {
+            headers['Content-Type'] = 'application/json';
+            fetchOptions.body = JSON.stringify(body);
+        }
+
+        const response = await fetch(endpoint, fetchOptions);
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || 'Error en el servidor.');
         return data;
     }
 
+    // Adaptar apiPost a la nueva apiFetch para compatibilidad con llamadas existentes
+    async function apiPost(endpoint, formData) {
+        return apiFetch(endpoint, 'POST', formData);
+    }
+
     // --- 5. LÓGICA DE NAVEGACIÓN ---
     function showView(viewId) {
-        tg.showAlert("Mostrando vista: " + viewId);
+        // tg.showAlert("Mostrando vista: " + viewId); // Comentado para reducir alertas
         elements.views.forEach(view => {
             view.classList.toggle('active', view.id === viewId);
-            tg.showAlert("Vista " + view.id + " activa: " + view.classList.contains('active'));
+            // tg.showAlert("Vista " + view.id + " activa: " + view.classList.contains('active')); // Comentado para reducir alertas
         });
         updateMainButton(viewId);
 
@@ -162,12 +175,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     console.log("Adjuntando eventListeners a iconButtons");
     elements.iconButtons.forEach(button => {
-        tg.showAlert("Icono: " + button.dataset.targetView + " listener adjuntado.");
         button.addEventListener('click', () => showView(button.dataset.targetView));
     });
-    console.log("Adjuntando eventListeners a backButtons");
     elements.backButtons.forEach(button => {
-        tg.showAlert("Botón de retroceso listener adjuntado.");
         button.addEventListener('click', () => showView('home-screen'));
     });
 
@@ -193,10 +203,8 @@ document.addEventListener('DOMContentLoaded', function () {
         elements.personalizationLoader.classList.remove('hidden');
         elements.restoreButton.classList.add('hidden');
         try {
-            const endpoint = `/api/get-system-prompt?initData=${encodeURIComponent(tg.initData)}`;
-            const response = await fetch(endpoint);
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.detail || 'Error del servidor');
+            // Usar apiFetch para GET
+            const data = await apiFetch('/api/get-system-prompt', 'POST'); // Cambiado a POST según api/auth.py
             elements.promptInput.value = data.prompt;
             initialPrompt = data.prompt;
             elements.restoreButton.classList.toggle('hidden', !data.is_custom);
@@ -209,6 +217,7 @@ document.addEventListener('DOMContentLoaded', function () {
         try {
             const formData = new FormData();
             formData.append('system_prompt', elements.promptInput.value);
+            // Usar apiPost para POST
             await apiPost('/api/save-system-prompt', formData);
             await loadPrompt();
             tg.showAlert('Prompt guardado.');
@@ -247,7 +256,7 @@ document.addEventListener('DOMContentLoaded', function () {
             const formData = new FormData();
             Array.from(elements.fileInput.files).forEach(file => formData.append('files', file));
             formData.append('topic', elements.topicInput.value);
-            const data = await apiPost('/api/upload-document', formData);
+            const data = await apiPost('/api/documents/upload-document', formData); // Actualizado el endpoint
             tg.showAlert(data.message, async () => {
                 elements.uploadForm.reset();
                 updateFileListUI();
@@ -265,7 +274,8 @@ document.addEventListener('DOMContentLoaded', function () {
         elements.docListContainer.innerHTML = '';
         elements.noDocsMessage.classList.add('hidden');
         try {
-            const documents = await apiPost('/api/list-documents', new FormData());
+            // Usar apiFetch para GET, ya que list-documents en api/documents.py es GET
+            const documents = await apiFetch('/api/documents/list-documents'); // Actualizado el endpoint
             if (documents.length === 0) {
                 elements.noDocsMessage.classList.remove('hidden');
             } else {
@@ -296,9 +306,8 @@ document.addEventListener('DOMContentLoaded', function () {
         tg.showConfirm(`¿Eliminar '${fileName}'? Esta acción es irreversible.`, async (confirmed) => {
             if (confirmed) {
                 try {
-                    const formData = new FormData();
-                    formData.append('file_name', fileName);
-                    const result = await apiPost('/api/delete-document', formData);
+                    // delete-document en api/documents.py es POST y espera un JSON en el body
+                    const result = await apiFetch('/api/documents/delete-document', 'POST', { file_name: fileName }); // Actualizado el endpoint y el body
                     tg.showAlert(result.message);
                     await loadDocuments();
                 } catch (e) { tg.showAlert('Error al eliminar: ' + e.message); }
@@ -318,11 +327,11 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!newTopic || newTopic === doc.topic) return;
         }
         try {
-            const formData = new FormData();
-            formData.append('file_name', doc.file_name);
-            if (newTitle && newTitle !== doc.title) formData.append('new_title', newTitle);
-            if (newTopic && newTopic !== doc.topic) formData.append('new_topic', newTopic);
-            await apiPost('/api/update-document-metadata', formData);
+            // update-document-metadata en api/documents.py es POST y espera un JSON en el body
+            const body = { file_name: doc.file_name };
+            if (newTitle && newTitle !== doc.title) body.new_title = newTitle;
+            if (newTopic && newTopic !== doc.topic) body.new_topic = newTopic;
+            await apiFetch('/api/documents/update-document-metadata', 'POST', body); // Actualizado el endpoint y el body
             tg.showAlert('Metadatos actualizados.');
             await loadDocuments();
         } catch (e) {
@@ -339,7 +348,8 @@ document.addEventListener('DOMContentLoaded', function () {
         elements.eventListContainer.innerHTML = '';
         elements.noEventsMessage.classList.add('hidden');
         try {
-            const events = await apiPost('/api/list-events', new FormData());
+            // list-events en api/agenda.py es POST y espera un JSON en el body
+            const events = await apiFetch('/api/list-events', 'POST', {}); // Actualizado el endpoint y el body
             if (events.length === 0) {
                 elements.noEventsMessage.classList.remove('hidden');
             } else {
@@ -371,9 +381,8 @@ document.addEventListener('DOMContentLoaded', function () {
         tg.showConfirm(`¿Estás seguro de que quieres cancelar este evento?`, async (confirmed) => {
             if (confirmed) {
                 try {
-                    const formData = new FormData();
-                    formData.append('event_id', eventId);
-                    const result = await apiPost('/api/cancel-event', formData);
+                    // cancel-event en api/agenda.py es POST y espera un JSON en el body
+                    const result = await apiFetch('/api/cancel-event', 'POST', { event_id: eventId }); // Actualizado el endpoint y el body
                     tg.showAlert(result.message);
                     await loadEvents();
                 } catch (e) { tg.showAlert('Error al cancelar: ' + e.message); }
@@ -406,11 +415,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
         tg.MainButton.showProgress();
         try {
-            const formData = new FormData();
-            formData.append('description', description);
-            formData.append('event_datetime', eventISODatetime);
-            formData.append('reminder_offset_minutes', reminderOffset);
-            const result = await apiPost('/api/add-event', formData);
+            // add-event en api/agenda.py es POST y espera un JSON en el body
+            const result = await apiFetch('/api/add-event', 'POST', {
+                summary: description, // Asumo que la descripción es el summary
+                description: description,
+                event_date: eventDate.toISOString().slice(0, 10), // Extraer solo la fecha
+                event_time: eventDate.toISOString().slice(11, 16), // Extraer solo la hora
+                reminder_offset_minutes: parseInt(reminderOffset),
+            }); // Actualizado el endpoint y el body
             tg.showAlert(result.message, async () => {
                 closeAddEventModal();
                 await loadEvents();
@@ -430,11 +442,12 @@ document.addEventListener('DOMContentLoaded', function () {
         elements.noteListContainer.innerHTML = '';
         elements.noNotesMessage.classList.add('hidden');
         try {
-            const notes = await apiPost('/api/notes/list-notes', new FormData());
+            // list-notes en api/notes.py es POST y espera un JSON en el body
+            const notes = await apiFetch('/api/notes/list-notes', 'POST', {}); // Actualizado el endpoint y el body
             if (notes.length === 0) {
                 elements.noNotesMessage.classList.remove('hidden');
             } else {
-                notes.forEach(note => {
+                notes.notes.forEach(note => { // Acceder a notes.notes por la paginación
                     const noteEl = document.createElement('div');
                     noteEl.className = 'note-item';
                     noteEl.innerHTML = `
@@ -481,19 +494,22 @@ document.addEventListener('DOMContentLoaded', function () {
     async function handleNoteFormSubmit(event) {
         event.preventDefault();
         const noteId = elements.noteIdInput.value;
-        const formData = new FormData();
-        formData.append('title', elements.noteTitleInput.value);
-        formData.append('content', elements.noteContentInput.value);
-        formData.append('category', elements.noteCategoryInput.value);
         
+        // add-note y update-note en api/notes.py son POST y esperan un JSON en el body
+        const body = {
+            title: elements.noteTitleInput.value,
+            content: elements.noteContentInput.value,
+            category: elements.noteCategoryInput.value,
+        };
+
         const endpoint = noteId ? '/api/update-note' : '/api/add-note';
         if (noteId) {
-            formData.append('note_id', noteId);
+            body.note_id = parseInt(noteId); // Convertir a entero
         }
 
         tg.MainButton.showProgress();
         try {
-            const result = await apiPost(endpoint, formData);
+            const result = await apiFetch(endpoint, 'POST', body); // Actualizado el endpoint y el body
             tg.showAlert(result.message, async () => {
                 closeNoteModal();
                 await loadNotes();
@@ -509,9 +525,8 @@ document.addEventListener('DOMContentLoaded', function () {
         tg.showConfirm('¿Estás seguro de que quieres eliminar esta nota?', async (confirmed) => {
             if (confirmed) {
                 try {
-                    const formData = new FormData();
-                    formData.append('note_id', noteId);
-                    const result = await apiPost('/api/delete-note', formData);
+                    // delete-note en api/notes.py es POST y espera un JSON en el body
+                    const result = await apiFetch('/api/delete-note', 'POST', { note_id: noteId }); // Actualizado el endpoint y el body
                     tg.showAlert(result.message);
                     await loadNotes();
                 } catch (e) {

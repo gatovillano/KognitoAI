@@ -19,13 +19,15 @@ pydantic[email]>=2.0.0
 email-validator>=2.0.0
 
 # === LANGCHAIN Y LÓGICA DE IA ===
-langchain>=0.1.0
-langchain-core>=0.1.0
-langchain-community>=0.0.30
+langchain
+langchain-core
+langchain-community
 langchain-google-genai>=1.0.0
 langgraph>=0.0.40
 langchain-postgres>=0.0.6
 langchain-google-vertexai>=1.0.0
+langchain-mcp-adapters>=0.1.9
+
 
 # === AUTENTICACIÓN Y CREDENCIALES ===
 google-auth>=2.20.0
@@ -67,8 +69,8 @@ rembg>=2.0.0
 Pillow>=10.0.0
 
 # === INTEGRACIÓN CON COGNEE ===
-cognee>=0.1.0
-langchain-cognee>=0.1.0
+cognee
+langchain-cognee
 neo4j>=5.15.0
 
 # === CIENTÍFICAS Y ML ===
@@ -84,3 +86,8 @@ reportlab>=4.0.0
 markdown>=3.4.0
 WeasyPrint>=59.0
 fpdf2
+psutil
+pydub
+playwright
+protego
+ddgs

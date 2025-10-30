@@ -29,7 +29,7 @@ interface ChatMessageProps {
   msg: {
     text: string;
     sender: 'user' | 'ai';
-    image?: string;
+    image_base64?: string;
     document_url?: string;
     artifact?: Artifact;
     ragContext?: any[];
@@ -147,20 +147,20 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                   </div>
                 </div>
               )}
-
-              {msg.image && (
-                <div className="mt-3">
-                  <Image
-                    src={msg.image}
-                    alt="Imagen adjunta"
-                    className="max-w-full h-auto rounded-2xl cursor-pointer shadow-sm"
-                    onClick={() => window.open(msg.image, '_blank')}
-                    width={500} // Asumiendo un ancho razonable
-                    height={500} // Asumiendo una altura razonable
-                  />
-                </div>
-              )}
-              {msg.document_url && (
+ 
+               {msg.image_base64 && (
+                 <div className="mt-3">
+                   <Image
+                     src={msg.image_base64}
+                     alt="Imagen adjunta"
+                     className="max-w-full h-auto rounded-2xl cursor-pointer shadow-sm"
+                     onClick={() => window.open(msg.image_base64, '_blank')}
+                     width={500} // Asumiendo un ancho razonable
+                     height={500} // Asumiendo una altura razonable
+                   />
+                 </div>
+               )}
+               {msg.document_url && (
                 <div className="mt-3 flex items-center gap-2 text-white/80 hover:text-white cursor-pointer" onClick={() => window.open(msg.document_url, '_blank')}>
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />

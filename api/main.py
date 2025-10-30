@@ -20,6 +20,7 @@ from api.teams import router as teams_router
 from api.knowledge_graph import router as knowledge_graph_router
 from api.search import router as search_router
 from api.forms import router as forms_router
+from api.collections import router as collections_router # Importar el router de collections
 from core.config import settings
 from core.database import create_tables
 from core.llm_manager import initialize_llms
@@ -251,6 +252,7 @@ from api.scheduled_tools import router as scheduled_tools_router
 from api.tasks import router as tasks_router # Importar el router de tasks
 
 from api.galleries import router as galleries_router, MEDIA_ROOT
+from api.graph import router as graph_router
 
 app.include_router(github_router, prefix="/api/github", tags=["github"])
 app.include_router(telegram_router, prefix="", tags=["telegram"])
@@ -258,9 +260,11 @@ app.include_router(logs_router, prefix="/api", tags=["logs"])
 app.include_router(scheduled_tools_router, prefix="/api", tags=["scheduled-tools"])
 app.include_router(tasks_router, prefix="/api", tags=["tasks"]) # Incluir el router de tasks
 app.include_router(knowledge_graph_router, prefix="/api", tags=["knowledge-graph"])
+app.include_router(graph_router, prefix="/api", tags=["graph"])
 app.include_router(search_router, prefix="/api", tags=["search"])
 app.include_router(galleries_router, prefix="/api/galleries", tags=["galleries"])
 app.include_router(forms_router, prefix="/api", tags=["forms"])
+app.include_router(collections_router, prefix="/api", tags=["collections"])
 
 @app.get("/test-connection")
 async def test_connection():
