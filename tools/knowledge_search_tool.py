@@ -14,13 +14,16 @@ class KnowledgeSearchInput(BaseModel):
     k: Optional[int] = Field(10, description="Número máximo de resultados a devolver")
     hybrid_search: bool = Field(True, description="Usar búsqueda híbrida (semántica + texto completo)")
     reranking: bool = Field(True, description="Usar reranking para mejorar la relevancia")
+    document_name: Optional[str] = Field(None, description="El nombre exacto de un documento específico (ej: 'Reporte Anual 2023.pdf') para buscar solo en él.")
+    document_id: Optional[str] = Field(None, description="El ID único de un documento específico (UUID) para buscar solo en él.")
 
 class KnowledgeSearchTool(BaseTool):
     name: str = "knowledge_search"
     description: str = (
         "🧠 BÚSQUEDA AVANZADA EN BASE DE CONOCIMIENTO - Úsala para responder preguntas buscando en notas, documentos y conversaciones del usuario. "
         "Es ideal para consultas complejas que requieren encontrar información específica y relevante. "
-        "Permite filtrar por tipo de contenido, temas y categorías para resultados más precisos."
+        "Permite filtrar por tipo de contenido, temas y categorías para resultados más precisos. "
+        "Puedes especificar un documento por su nombre exacto (ej. 'Reporte Anual 2023.pdf') o por su ID único si lo conoces para focalizar la búsqueda."
     )
     args_schema: Type[BaseModel] = KnowledgeSearchInput
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
@@ -37,6 +40,8 @@ class KnowledgeSearchTool(BaseTool):
         k: int = 10,
         hybrid_search: bool = True,
         reranking: bool = True,
+        document_name: Optional[str] = None,
+        document_id: Optional[str] = None,
     ) -> str:
         return asyncio.run(self._arun(
             query=query,
@@ -46,6 +51,8 @@ class KnowledgeSearchTool(BaseTool):
             k=k,
             hybrid_search=hybrid_search,
             reranking=reranking,
+            document_name=document_name,
+            document_id=document_id,
         ))
 
     async def _arun(
@@ -57,19 +64,40 @@ class KnowledgeSearchTool(BaseTool):
         k: int = 10,
         hybrid_search: bool = True,
         reranking: bool = True,
+        document_name: Optional[str] = None,
+        document_id: Optional[str] = None,
     ) -> str:
         """Versión asíncrona de la búsqueda de conocimiento."""
         try:
+            explicit_document_ids = None
+
+            if document_name:
+                from core.memory_manager import list_user_documents
+                docs = await list_user_documents(
+                    account_id=self.account_id,
+                    workspace_id=self.workspace_id,
+                )
+                found_doc = next((d for d in docs if d.get("file_name") == document_name), None)
+                if found_doc and found_doc.get("document_id"):
+                    explicit_document_ids = [found_doc["document_id"]]
+                    logger.info(f"🔍 Documento '{document_name}' encontrado con ID: {explicit_document_ids[0]}")
+                else:
+                    logger.warning(f"Documento '{document_name}' no encontrado para la cuenta {self.account_id} en workspace {self.workspace_id}.")
+                    return f"No se encontró el documento '{document_name}' en tu base de conocimiento."
+            elif document_id:
+                explicit_document_ids = [document_id]
+                logger.info(f"🔍 Buscando directamente con document_id: {document_id}")
+
             results = await get_relevant_memories(
                 account_id=self.account_id,
                 query=query,
                 content_type=category,
                 filter_topics=filter_topics,
                 workspace_id=self.workspace_id,
-                team_id=self.team_id,
                 k=k,
                 hybrid_search=hybrid_search,
                 reranking=reranking,
+                explicit_document_ids=explicit_document_ids,
             )
             
             formatted_results = []
@@ -99,6 +127,8 @@ class KnowledgeSearchTool(BaseTool):
                     "team_id": self.team_id,
                     "hybrid_search": hybrid_search,
                     "reranking": reranking,
+                    "document_name": document_name,
+                    "document_id": document_id,
                 },
                 "results": formatted_results
             }, ensure_ascii=False, indent=2)

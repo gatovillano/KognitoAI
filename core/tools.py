@@ -57,12 +57,12 @@ from tools.get_analysis_results_tool import GetAnalysisResultsTool
 from tools.get_document_content_tool import GetDocumentContentTool
 from tools.get_document_list_tool import GetDocumentListTool
 from tools.get_notes_tool import GetNotesTool
+from tools.get_form_responses_tool import GetFormResponsesTool # NUEVA HERRAMIENTA
 from tools.get_proactive_insights_tool import GetProactiveInsightsTool
 from tools.github_repo_tool import GitHubRepoTool
 from tools.image_background_eraser_tool import ImageBackgroundEraserTool
 from tools.image_generation_tool import ImageGenerationTool
 from tools.internal_knowledge_search_tool import InternalKnowledgeSearchTool
-from tools.knowledge_analysis_tool import KnowledgeAnalysisTool
 from tools.memory_add_tool import MemoryAddTool
 from tools.knowledge_search_tool import KnowledgeSearchTool
 from tools.mindmap_generator_tool import MindmapGeneratorTool
@@ -103,12 +103,12 @@ tool_classes_to_instantiate = [
     GetDocumentContentTool,
     GetDocumentListTool,
     GetNotesTool,
+    GetFormResponsesTool, # NUEVA HERRAMIENTA
     GetProactiveInsightsTool,
     GitHubRepoTool,
     ImageBackgroundEraserTool,
     ImageGenerationTool,
     InternalKnowledgeSearchTool,
-    KnowledgeAnalysisTool,
     MemoryAddTool,
     KnowledgeSearchTool,
     MindmapGeneratorTool,
@@ -233,7 +233,6 @@ async def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = 
                     "AddWebToRAGTool",
                     "AnalyzeTextForInsightsTool",
                     "AnalyzeCodeForInsightsTool",
-                    "KnowledgeAnalysisTool",
                     "ComprehensiveWebAnalysisTool",
                     "GetAnalysisResultsTool",
                     "ScopedRagAnalysisTool",
@@ -249,7 +248,8 @@ async def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = 
                     "ConversationHistoryAnalyzerTool",
                     "ConversationContextAnalyzerTool",
                     "DocumentRAGTool",
-                    "ContactProfileTool", # NUEVA HERRAMIENTA
+                    "ContactProfileTool",
+                    "GetFormResponsesTool", # NUEVA HERRAMIENTA
                 ]
 
                 # Add thread_id ONLY if the tool explicitly has the field AND is NOT in the exclusion list

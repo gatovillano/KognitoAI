@@ -34,13 +34,30 @@ class NotesManager:
             except Exception as e:
                 logger.error(f"Error generando embedding para la nota: {e}", exc_info=True)
 
+        account_uuid: uuid.UUID
+        workspace_uuid: Optional[uuid.UUID] = None
+
+        try:
+            account_uuid = uuid.UUID(account_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"El ID de cuenta '{account_id}' proporcionado no es un UUID válido.")
+        
+        if workspace_id:
+            if workspace_id.lower() == 'none' or workspace_id == '':
+                workspace_uuid = None
+            else:
+                try:
+                    workspace_uuid = uuid.UUID(workspace_id)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail=f"El ID de workspace '{workspace_id}' proporcionado no es un UUID válido.")
+
         new_note = Nota(
-            account_id=uuid.UUID(account_id),
+            account_id=account_uuid,
             title=title,
             content=content,
             category=effective_category,
             embedding=note_embedding,
-            workspace_id=uuid.UUID(workspace_id) if workspace_id else None
+            workspace_id=workspace_uuid
         )
         self.db.add(new_note)
         await self.db.commit()
@@ -61,22 +78,34 @@ class NotesManager:
         Recupera notas como una lista de diccionarios, incluyendo perfiles vinculados, con paginación.
         Devuelve una tupla (total_notas, lista_de_notas_paginadas).
         """
-        logger.info(f"get_notes_as_dicts called for account_id: {account_id}, workspace_id: {workspace_id}, skip: {skip}, limit: {limit}")
-        
-        base_stmt = select(Nota).where(Nota.account_id == uuid.UUID(account_id))
+        account_uuid: uuid.UUID
+        workspace_uuid: Optional[uuid.UUID] = None
+
+        try:
+            account_uuid = uuid.UUID(account_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"El ID de cuenta '{account_id}' proporcionado no es un UUID válido.")
         
         if workspace_id:
-            # Si se especifica un workspace, verificar permisos
+            if workspace_id.lower() == 'none' or workspace_id == '':
+                workspace_uuid = None
+            else:
+                try:
+                    workspace_uuid = uuid.UUID(workspace_id)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail=f"El ID de workspace '{workspace_id}' proporcionado no es un UUID válido.")
+
+        base_stmt = select(Nota).where(Nota.account_id == account_uuid)
+
+        if workspace_uuid:
             try:
-                await check_workspace_permission(account_id, workspace_id, self.db, required_roles=['admin', 'owner', 'member', 'viewer'])
+                await check_workspace_permission(str(account_uuid), str(workspace_uuid), self.db, required_roles=['admin', 'owner', 'member', 'viewer'])
             except Exception as e:
                 logger.warning(f"Permission denied for account {account_id} on workspace {workspace_id}: {e}")
-                # Si no tiene permiso, no devolver ninguna nota de ese workspace
                 return 0, []
-            base_stmt = base_stmt.where(Nota.workspace_id == uuid.UUID(workspace_id))
+            base_stmt = base_stmt.where(Nota.workspace_id == workspace_uuid)
         else:
-            # Si no se especifica un workspace, obtener notas personales y de todos los workspaces a los que tiene acceso
-            accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == uuid.UUID(account_id))
+            accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == account_uuid)
             result = await self.db.execute(accessible_workspaces_stmt)
             accessible_workspace_ids = [row[0] for row in result.fetchall()]
             
@@ -213,6 +242,95 @@ class NotesManager:
         await self.db.commit()
         logger.info(f"Nota {note_id} eliminada para la cuenta {account_id}.")
         return True
+
+    async def unshare_note_from_workspace(self, account_id: str, note_id: int) -> bool:
+        """
+        Desvincula una nota de su workspace, estableciendo su workspace_id a None.
+        """
+        logger.info(f"Intentando desvincular la nota {note_id} de su workspace para la cuenta {account_id}")
+
+        stmt = select(Nota).where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
+        note_to_unshare = (await self.db.execute(stmt)).scalars().first()
+
+        if not note_to_unshare:
+            logger.warning(f"Nota {note_id} no encontrada o no pertenece a la cuenta {account_id} para desvincular.")
+            return False
+        
+        # Si la nota ya no está en un workspace, no hay nada que hacer.
+        if note_to_unshare.workspace_id is None:
+            logger.info(f"La nota {note_id} ya no está vinculada a un workspace.")
+            return True
+
+        # Verificar permisos de workspace si la nota pertenece a uno
+        # Solo se requiere permiso de 'member' para desvincular.
+        if note_to_unshare.workspace_id:
+            if not await check_workspace_permission(account_id, str(note_to_unshare.workspace_id), self.db, required_roles=['admin', 'owner', 'member']):
+                logger.warning(f"Acceso denegado para desvincular la nota {note_id} del workspace {note_to_unshare.workspace_id} para la cuenta {account_id}.")
+                return False
+
+        update_stmt = (
+            update(Nota)
+            .where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
+            .values(workspace_id=None)
+        )
+        await self.db.execute(update_stmt)
+        await self.db.commit()
+        logger.info(f"Nota {note_id} desvinculada exitosamente del workspace para la cuenta {account_id}.")
+        return True
+    async def delete_all_note_embeddings(self, account_id: str) -> int:
+        """
+        Deletes all embeddings for all notes of a user.
+        """
+        logger.info(f"Deleting all note embeddings for account {account_id}")
+        
+        update_stmt = (
+            update(Nota)
+            .where(Nota.account_id == uuid.UUID(account_id))
+            .values(embedding=None)
+        )
+        
+        result = await self.db.execute(update_stmt)
+        await self.db.commit()
+        
+        deleted_count = result.rowcount
+        logger.info(f"Deleted {deleted_count} note embeddings for account {account_id}")
+        
+        return deleted_count
+
+    async def revectorize_all_notes(self, account_id: str) -> int:
+        """
+        Re-vectorizes all notes for a user.
+        """
+        logger.info(f"Re-vectorizing all notes for account {account_id}")
+        
+        select_stmt = select(Nota).where(Nota.account_id == uuid.UUID(account_id))
+        result = await self.db.execute(select_stmt)
+        notes_to_revectorize = result.scalars().all()
+        
+        embeddings_model = get_embedding_model()
+        if not embeddings_model:
+            logger.error("Embeddings model not initialized. Cannot re-vectorize notes.")
+            return 0
+            
+        updated_count = 0
+        for note in notes_to_revectorize:
+            try:
+                note_embedding = await embeddings_model.aembed_query(note.content)
+                
+                update_stmt = (
+                    update(Nota)
+                    .where(Nota.id == note.id)
+                    .values(embedding=note_embedding)
+                )
+                await self.db.execute(update_stmt)
+                updated_count += 1
+            except Exception as e:
+                logger.error(f"Error re-vectorizing note {note.id}: {e}", exc_info=True)
+                
+        await self.db.commit()
+        logger.info(f"Re-vectorized {updated_count} notes for account {account_id}")
+        
+        return updated_count
 
     async def link_profile_to_note(self, account_id: str, note_id: int, profile_id: uuid.UUID) -> bool: # CAMBIO: profile_id ahora es uuid.UUID
         """

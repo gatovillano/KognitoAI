@@ -36,15 +36,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-from typing import AsyncGenerator
-# ...
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+
 
 def decoded_topic(topic: str = Path(..., description="El tema de la colección, codificado en la URL")) -> str:
     return unquote(topic)
@@ -113,7 +105,7 @@ async def upload_document_endpoint(
     files: List[UploadFile] = File(...),
     topic: str = Form(...),
     workspace_id: Optional[str] = Form(None),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Inicia una tarea de subida de documentos y devuelve un ID de tarea."""
     account_id_uuid = uuid.UUID(current_account_id)
@@ -238,7 +230,7 @@ async def upload_chat_document_endpoint(
 @router.get("/list-documents")
 async def list_documents_endpoint(
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_session),
     topic: Optional[str] = Query(None), # Recibe el topic directamente
     workspace_id: Optional[str] = Query(None)
 ):
@@ -271,7 +263,7 @@ async def list_documents_endpoint(
 @router.post("/list-all-user-documents")
 async def list_all_user_documents_endpoint(
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Lista TODOS los documentos subidos por el usuario, ignorando el workspace_id y el topic.
     Protegido por JWT."""
@@ -287,7 +279,7 @@ async def list_all_user_documents_endpoint(
 async def delete_document_endpoint(
     request: DeleteDocumentRequest, # Cambiado a Request Body
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Elimina documentos de la base de conocimiento del usuario. Protegido por JWT."""
     logger.info(f"Received delete request for file_name: '{request.file_name}', topic: '{request.topic}', workspace_id: '{request.workspace_id}' from account: {current_account_id}")
@@ -322,7 +314,7 @@ class UpdateMetadataRequest(BaseModel):
 async def update_document_metadata_endpoint(
     request: UpdateMetadataRequest,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Actualiza el título y/o la categoría de un documento del usuario."""
     account_id_uuid = uuid.UUID(current_account_id)
@@ -349,14 +341,11 @@ async def update_document_metadata_endpoint(
         raise HTTPException(status_code=404, detail="Documento no encontrado o no actualizado.")
     return {"message": "Metadatos actualizados correctamente."}
 
-class DocumentContentRequest(BaseModel):
-    file_name: str
-
-@router.post("/get-document-content", summary="Obtener el contenido de un documento")
+@router.get("/get-document-content", summary="Obtener el contenido de un documento")
 async def get_document_content_endpoint(
-    request: DocumentContentRequest,
+    file_name: str = Query(..., description="El nombre del archivo a recuperar"),
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db_session) # Añadido db dependency
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Recupera el contenido textual completo de un documento específico.
@@ -365,22 +354,22 @@ async def get_document_content_endpoint(
     try:
         query = select(GitHubDocument).where(
             GitHubDocument.account_id == uuid.UUID(current_account_id),
-            GitHubDocument.file_path == request.file_name
+            GitHubDocument.file_path == file_name
         )
         result = await db.execute(query)
         github_doc = result.scalars().first()
 
         if github_doc:
-            logger.info(f"Contenido de GitHubDocument encontrado para {request.file_name}.")
+            logger.info(f"Contenido de GitHubDocument encontrado para {file_name}.")
             return {"content": github_doc.content}
     except Exception as e:
-        logger.error(f"Error al buscar en GitHubDocument para {request.file_name}: {e}", exc_info=True)
+        logger.error(f"Error al buscar en GitHubDocument para {file_name}: {e}", exc_info=True)
         # Continuar buscando en la base de datos vectorial si hay un error aquí
 
     # 2. Si no es un documento de GitHub o no se encontró, intentar recuperar de la base de datos vectorial
     content = await get_full_document_content(
         account_id=current_account_id,
-        file_name=request.file_name
+        file_name=file_name
     )
     if content is None:
         raise HTTPException(status_code=404, detail="Documento no encontrado o sin contenido.")
@@ -407,7 +396,7 @@ class CollectionDeleteRequest(BaseModel):
 async def delete_collection_endpoint(
     request: CollectionDeleteRequest,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     logger.info(f"API: delete_collection_endpoint - Petición para eliminar colección: {request.topic}, workspace_id: {request.workspace_id}, account: {current_account_id}")
     from core.memory_manager import delete_collection
@@ -422,20 +411,6 @@ async def delete_collection_endpoint(
     logger.info(f"API: delete_collection_endpoint - Colección '{request.topic}' eliminada con éxito del workspace {request.workspace_id if request.workspace_id else 'global'}.")
     return {"message": f"Colección '{request.topic}' eliminada con éxito."}
 
-# --- Modelos Pydantic para Colecciones ---
-class CollectionResponse(BaseModel):
-    topic: str
-    document_count: int
-    description: Optional[str] = None
-    workspace_id: Optional[str] = None
-    workspace_name: Optional[str] = None
-    workspace_color: Optional[str] = None # Nuevo campo
-    has_knowledge_graph: Optional[bool] = None
-
-class CollectionCreateRequest(BaseModel):
-    topic: str
-    description: Optional[str] = None
-    workspaceId: Optional[str] = None # Añadido para recibir el workspaceId del frontend
 
 class DocumentToCollectionRequest(BaseModel):
     document_id: str
@@ -476,7 +451,7 @@ async def get_collection_details_by_name(
     return collection_details
 
 @router.get("/collections/{collection_id}/documents", response_model=List[DocumentResponse], summary="Listar documentos de una colección")
-async def list_collection_documents(collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
+async def list_collection_documents(collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session), workspace_id: Optional[str] = Query(None)):
     logger.info(f"API: list_collection_documents - collection_id: {collection_id}, account_id: {current_account_id}, workspace_id: {workspace_id}")
     try:
         decoded_collection_id = unquote(collection_id)
@@ -491,43 +466,8 @@ async def list_collection_documents(collection_id: str, current_account_id: str 
         logger.error(f"API: list_collection_documents - Error al listar documentos de la colección '{decoded_collection_id}': {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error al listar documentos de la colección.")
 
-@router.get("/collections", response_model=List[CollectionResponse], summary="Listar colecciones del usuario")
-async def list_collections(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
-    logger.info(f"API: list_collections - Listando colecciones para account_id: {current_account_id}, workspace_id recibido: {workspace_id}")
-    try:
-        collections = await list_user_collections(account_id=current_account_id, workspace_id=workspace_id)
-        logger.info(f"API: list_collections - Collections retrieved from memory_manager: {len(collections)} collections")
-        return [CollectionResponse(
-            topic=c['topic'],
-            document_count=c['document_count'],
-            description=c.get('description'),
-            workspace_id=c.get('workspace_id'),
-            workspace_name=c.get('workspace_name'),
-            workspace_color=c.get('workspace_color'),
-            has_knowledge_graph=c.get('has_knowledge_graph')
-        ) for c in collections]
-    except Exception as e:
-        logger.error(f"API: list_collections - Error al listar colecciones para account_id: {current_account_id}, error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Error interno del servidor al listar colecciones.")
- 
-@router.post("/collections", status_code=status.HTTP_201_CREATED, summary="Crear una nueva colección")
-async def create_collection(request: CollectionCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
-    logger.info(f"API: create_collection - Petición para crear colección: {request.topic}, description: {request.description}, workspaceId: {request.workspaceId}, account: {current_account_id}")
-    from core.memory_manager import create_empty_collection
-    success = await create_empty_collection(
-        account_id=current_account_id,
-        topic_name=request.topic,
-        description=request.description,
-        workspace_id=request.workspaceId
-    )
-    if not success:
-        logger.error(f"API: create_collection - No se pudo crear la colección o ya existe: {request.topic}")
-        raise HTTPException(status_code=400, detail="No se pudo crear la colección o ya existe.")
-    logger.info(f"API: create_collection - Colección '{request.topic}' creada y asociada al workspace {request.workspaceId if request.workspaceId else 'global'} con éxito.")
-    return {"message": f"Colección '{request.topic}' creada y lista para ser usada en el workspace {request.workspaceId if request.workspaceId else 'global'}."}
- 
 @router.post("/collections/{collection_id}/associate", status_code=status.HTTP_200_OK, summary="Asociar una colección existente a un workspace")
-async def associate_collection_to_workspace(collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db), workspace_id: Optional[str] = Query(None)):
+async def associate_collection_to_workspace(collection_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session), workspace_id: Optional[str] = Query(None)):
     logger.info(f"API: associate_collection_to_workspace - collection_id: {collection_id}, account_id: {current_account_id}, workspace_id: {workspace_id}")
     from core.memory_manager import update_collection_workspace
     
@@ -550,7 +490,7 @@ async def add_document_to_collection(
     file: UploadFile = File(...),
     topic: str = Depends(decoded_topic),
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_session),
     workspace_id: Optional[str] = Query(None)
 ):
     if not file.filename:
@@ -599,7 +539,9 @@ async def process_knowledge_graph_endpoint(
     current_account_id: str = Depends(get_current_account_id),
     topic: Optional[str] = None
 ):
-    """Inicia el procesamiento de grafos de conocimiento en segundo plano."""
+    """
+    Inicia el procesamiento de grafos de conocimiento en segundo plano.
+    """
     try:
         background_tasks.add_task(
             process_knowledge_graph,
@@ -620,7 +562,9 @@ async def start_knowledge_graph_analysis_endpoint(
     topic: str = Body(..., embed=True),
     workspace_id: Optional[str] = Body(None, embed=True)
 ):
-    """Inicia el análisis de grafo de conocimiento en segundo plano para una colección."""
+    """
+    Inicia el análisis de grafo de conocimiento en segundo plano para una colección.
+    """
     logger.info(f"API: Iniciando análisis de grafo de conocimiento para account '{current_account_id}', topic '{topic}', workspace '{workspace_id}'")
     try:
         task_id = await start_knowledge_graph_analysis(
@@ -644,7 +588,7 @@ class DeleteFolderRequest(BaseModel):
 async def delete_folder_endpoint(
     request: DeleteFolderRequest,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     logger.info(f"Received delete folder request for repo: '{request.repo_name}', folder: '{request.folder_path}', workspace: '{request.workspace_id}' from account: {current_account_id}")
 
@@ -666,4 +610,4 @@ async def delete_folder_endpoint(
 
     if not success:
         raise HTTPException(status_code=404, detail="Carpeta no encontrada o ya eliminada.")
-    return {"message": f"La carpeta '{request.folder_path}' y sus contenidos han sido eliminados."}
+    return {"message": f"La carpeta '{request.repo_name}' y sus contenidos han sido eliminados."}

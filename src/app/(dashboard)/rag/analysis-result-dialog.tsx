@@ -27,7 +27,6 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
   const [selectedThemeForDialog, setSelectedThemeForDialog] = useState<any>(null);
   const [isThemeQuotesDialogOpen, setIsThemeQuotesDialogOpen] = useState(false);
 
-
   if (!analysis) return null;
 
   // Log the analysis object for debugging
@@ -85,6 +84,7 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
   return (
     <>
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
+
       <DialogContent className="max-w-4xl w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col p-0">
         <DialogHeader className="p-6 pb-4 border-b">
           <DialogTitle className="text-2xl font-bold text-foreground">Resultados del Análisis</DialogTitle>

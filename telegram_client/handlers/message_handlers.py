@@ -123,37 +123,21 @@ def _should_respond_in_group(message: Message, bot_id: int, bot_username: Option
     logger.debug(f"Mensaje en grupo de {message.from_user.id} ignorado (no mención/privado).")
     return False
 
-async def handle_chat_response(update: Update, context: CallbackContext, response_text: str) -> None:
+async def send_agent_response(bot, chat_id, user_id, text, user_data):
     """
-    Función de ayuda para enviar la respuesta final al usuario.
-
-    Ahora incluye la lógica para:
-    1. Enviar imágenes generadas.
-    2. Paginar contenido de documentos.
-    3. Programar los jobs de recordatorio de eventos.
-    4. Enviar respuestas de texto simples.
+    Función de ayuda para enviar la respuesta final del agente al usuario,
+    sin depender de Update o CallbackContext.
     """
-    if not update or not update.effective_chat or not update.effective_user:
-        logger.warning("handle_chat_response fue llamada sin un contexto de usuario/chat válido.")
-        return None
-
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-
-    # Asegurarse de que context.user_data es un diccionario
-    user_data: Dict[str, Any] = context.user_data if context.user_data is not None else {}
-
     # 1. Comprobar si hay una imagen generada para enviar (desde BytesIO)
     if GENERATED_IMAGE_KEY in user_data:
         image_bytesio = user_data.pop(GENERATED_IMAGE_KEY)
         logger.info(f"Enviando imagen generada al usuario {user_id} desde BytesIO...")
         image_bytesio.seek(0)
         try:
-            await context.bot.send_photo(chat_id=chat_id, photo=image_bytesio, caption=response_text)
-            return None # Importante: Retornar None para detener la propagación.
+            await bot.send_photo(chat_id=chat_id, photo=image_bytesio, caption=text)
+            return
         except Exception as e:
             logger.error(f"Error al enviar la imagen generada desde BytesIO: {e}", exc_info=True)
-            # Si falla el envío de la imagen, enviamos el texto de todas formas (caerá al caso 4).
 
     # 2. Comprobar si hay una ruta de imagen generada para enviar (desde archivo temporal)
     if 'generated_image_path' in user_data:
@@ -161,42 +145,40 @@ async def handle_chat_response(update: Update, context: CallbackContext, respons
         logger.info(f"Enviando imagen generada al usuario {user_id} desde archivo {image_path}...")
         try:
             with open(image_path, 'rb') as image_file:
-                await context.bot.send_photo(chat_id=chat_id, photo=image_file, caption=response_text)
-            return None # Importante: Retornar None para detener la propagación.
+                await bot.send_photo(chat_id=chat_id, photo=image_file, caption=text)
+            return
         except Exception as e:
             logger.error(f"Error al enviar la imagen generada desde archivo {image_path}: {e}", exc_info=True)
-            # Si falla el envío de la imagen, enviamos el texto de todas formas (caerá al caso 5).
 
-    # 2. Comprobar si hay un documento para paginar
+    # 3. Comprobar si hay un documento para paginar
     document_title = user_data.pop(DOCUMENT_NAME_KEY, None)
     if document_title:
         logger.info(f"Paginando el documento '{document_title}' para el usuario {user_id}...")
-        chunks = split_text_into_pages(response_text, 3500) # Límite de caracteres para asegurar espacio de encabezado/pie.
+        chunks = split_text_into_pages(text, 3500)
         paginator = Paginator(
             chunks=chunks,
             title=document_title,
             parse_mode=ParseMode.HTML,
-            prefix=f"doc_{uuid.uuid4().hex[:6]}" # Prefijo único para la sesión del paginador
+            prefix=f"doc_{uuid.uuid4().hex[:6]}"
         )
         if PAGINATOR_SESSIONS_KEY not in user_data:
             user_data[PAGINATOR_SESSIONS_KEY] = {}
         user_data[PAGINATOR_SESSIONS_KEY][paginator.session_id] = paginator
         first_page, markup = paginator.get_page()
         try:
-            await context.bot.send_message(
+            await bot.send_message(
                 chat_id=chat_id,
                 text=first_page,
                 reply_markup=markup,
                 parse_mode=paginator.parse_mode,
                 disable_web_page_preview=True
             )
-            return None # Importante: Retornar None para detener la propagación.
+            return
         except Exception as e:
             logger.error(f"Error al enviar la primera página del documento paginado: {e}", exc_info=True)
-            # Si falla el envío paginado, intentamos enviar como texto simple (caerá al caso 4).
 
-    # 3. Comprobar si hay un evento para programar su notificación
-    event_id_to_schedule = context.user_data.pop(EVENT_ID_FOR_SCHEDULING_KEY, None)
+    # 4. Comprobar si hay un evento para programar su notificación
+    event_id_to_schedule = user_data.pop(EVENT_ID_FOR_SCHEDULING_KEY, None)
     if event_id_to_schedule:
         logger.info(f"Se ha detectado el evento ID {event_id_to_schedule} para programar su notificación al usuario {user_id}.")
         async with DBSession(SessionLocal) as db:
@@ -205,21 +187,32 @@ async def handle_chat_response(update: Update, context: CallbackContext, respons
                 await schedule_telegram_job(event, telegram_id=user_id)
             else:
                 logger.warning(f"Se intentó programar un job para el evento {event_id_to_schedule}, pero no se encontró o está inactivo.")
-        # No se retorna None aquí, porque la programación del job no impide enviar la respuesta de texto del agente.
 
-    # 4. Si no hay nada de lo anterior o falló, enviar como texto simple con formato HTML.
-    formatted_text = markdown_to_telegram_html(response_text)
-    pages = split_text_into_pages(formatted_text, 4096) # Telegram tiene un límite de 4096 caracteres.
+    # 5. Si no hay nada de lo anterior o falló, enviar como texto simple con formato HTML.
+    formatted_text = markdown_to_telegram_html(text)
+    pages = split_text_into_pages(formatted_text, 4096)
     for i, page in enumerate(pages):
         try:
-            logger.info(f"[DEBUG TELEGRAM OUT] Texto enviado a Telegram (página {i+1}):\n{page}")
-            await context.bot.send_message(chat_id=chat_id, text=page, parse_mode='HTML', disable_web_page_preview=True)
+            await bot.send_message(chat_id=chat_id, text=page, parse_mode='HTML', disable_web_page_preview=True)
             if i < len(pages) - 1:
-                await asyncio.sleep(0.5) # Pequeña pausa entre mensajes si hay múltiples páginas.
+                await asyncio.sleep(0.5)
         except telegram_error.BadRequest as e:
             logger.warning(f"Error al enviar mensaje de texto con HTML: {e}")
-            # Si falla, no reintentamos con otro formato.
-    return None # Importante: Retornar None para detener la propagación después de enviar la respuesta final.
+
+async def handle_chat_response(update: Update, context: CallbackContext, response_text: str) -> None:
+    """
+    Función de ayuda para enviar la respuesta final al usuario.
+    Ahora delega en send_agent_response.
+    """
+    if not update or not update.effective_chat or not update.effective_user:
+        logger.warning("handle_chat_response fue llamada sin un contexto de usuario/chat válido.")
+        return
+
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    user_data: Dict[str, Any] = context.user_data if context.user_data is not None else {}
+
+    await send_agent_response(context.bot, chat_id, user_id, response_text, user_data)
 
 async def process_and_get_response(update: Update, context: CallbackContext, user_message: str, image_base64: Optional[str] = None) -> None:
     """

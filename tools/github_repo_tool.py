@@ -297,6 +297,11 @@ class GitHubRepoTool(BaseTool):
                     if item['type'] == 'blob':
                         file_path = item['path']
 
+                        # Omitir archivos temporales
+                        if self._is_temporary_file(file_path):
+                            logger.info(f"⏩ Omitiendo archivo temporal: {file_path}")
+                            continue
+
                         # Check if document already exists
                         existing_doc_query = select(GitHubDocument).where(
                             GitHubDocument.repo_url == repo_url,
@@ -465,6 +470,11 @@ class GitHubRepoTool(BaseTool):
 
                 # 2. Añadir nuevos archivos o actualizar modificados
                 for file_path, github_sha in github_files.items():
+                    # Omitir archivos temporales
+                    if self._is_temporary_file(file_path):
+                        logger.info(f"⏩ Omitiendo archivo temporal: {file_path}")
+                        continue
+
                     content_response = self.session.get(f"{api_url}/contents/{file_path}")
                     content_response.raise_for_status()
                     content_data = content_response.json()
@@ -651,6 +661,11 @@ class GitHubRepoTool(BaseTool):
                 
                 # 2. Añadir nuevos archivos o actualizar modificados
                 for file_path, github_sha in github_files.items():
+                    # Omitir archivos temporales
+                    if self._is_temporary_file(file_path):
+                        logger.info(f"⏩ Omitiendo archivo temporal: {file_path}")
+                        continue
+
                     content_response = self.session.get(f"{api_url}/contents/{file_path}")
                     content_response.raise_for_status()
                     content_data = content_response.json()
@@ -756,6 +771,37 @@ class GitHubRepoTool(BaseTool):
             logger.error(f"Error al actualizar la colección de conocimientos para el repositorio {repo_url}: {e}", exc_info=True)
             return f"Error al actualizar la colección de conocimientos: {e}"
     
+    def _is_temporary_file(self, file_path: str) -> bool:
+        """
+        Determina si un archivo es temporal y debería ser omitido del procesamiento.
+        """
+        import os
+
+        # Obtener solo el nombre del archivo (sin directorios)
+        file_name = os.path.basename(file_path)
+
+        # Patrones de archivos temporales comunes
+        temp_patterns = [
+            # LibreOffice lock files
+            file_name.startswith('.~lock.'),
+            # Microsoft Office temporary files
+            file_name.startswith('~$'),
+            # Common temporary file extensions
+            file_name.endswith(('.tmp', '.temp', '.bak', '.swp', '.swo')),
+            # Hidden files that are typically temporary
+            file_name.startswith('._'),
+            # Auto-save files
+            file_name.startswith('auto-save'),
+            # Vim swap files
+            file_name.endswith('.swp') or file_name.endswith('.swo'),
+            # Emacs lock files
+            file_name.startswith('#') and file_name.endswith('#'),
+            # System temporary files
+            file_name.startswith('~$') or file_name.lower().startswith('temp'),
+        ]
+
+        return any(temp_patterns)
+
     def _get_api_url(self, repo_url: str) -> str:
         """
         Convierte la URL del repositorio a la URL de la API de GitHub.

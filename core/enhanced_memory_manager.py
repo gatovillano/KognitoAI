@@ -37,7 +37,8 @@ class EnhancedMemoryManager:
         user_query: str,
         user_id: str,
         workspace_id: Optional[str] = None,
-        max_results: int = 10
+        max_results: int = 10,
+        explicit_document_ids: Optional[List[str]] = None # Nuevo parámetro
     ) -> Dict[str, Any]:
         """
         Obtiene contexto enriquecido combinando embeddings y grafo de conocimiento.
@@ -47,43 +48,55 @@ class EnhancedMemoryManager:
             user_id: ID del usuario
             workspace_id: ID del workspace (opcional)
             max_results: Máximo número de resultados
+            explicit_document_ids: Lista de IDs de documentos para priorizar/filtrar (opcional)
             
         Returns:
             Dict con contexto enriquecido
         """
         try:
-            logger.info(f"🔍 Obteniendo contexto enriquecido para: '{user_query}'")
+            logger.info(f"🔍 Obteniendo contexto enriquecido para: '{user_query[:150]}...'")
             
+            # Por defecto, la búsqueda en el grafo está habilitada
+            enable_graph_search = True
+            # Si la consulta es muy larga, desactivar la búsqueda en el grafo para evitar latencia.
+            # Esto es útil para respuestas de herramientas (ej. búsquedas web) que son extensas.
+            if len(user_query.split()) > 100:
+                logger.warning("⚠️ La consulta es muy larga (+100 palabras), se omitirá la búsqueda en el grafo de conocimiento para evitar latencia.")
+                enable_graph_search = False
+
             # 1. Obtener contexto tradicional (embeddings)
             traditional_context = await self._get_traditional_context(
-                user_query, user_id, workspace_id, max_results
+                user_query, user_id, workspace_id, max_results, explicit_document_ids # Pasar el nuevo parámetro
             )
             
-            # 2. Obtener contexto del grafo de conocimiento
-            graph_context = await self._get_graph_context(
-                user_query, workspace_id, max_results
-            )
+            # 2. Obtener contexto del grafo de conocimiento (si está habilitado)
+            graph_context = {"type": "graph", "results": [], "reason": "Disabled"}
+            if enable_graph_search:
+                graph_context = await self._get_graph_context(
+                    user_query, workspace_id, max_results
+                )
             
             # 3. Combinar y enriquecer contextos
             enhanced_context = await self._combine_contexts(
                 traditional_context, graph_context, user_query
             )
             
-            logger.info(f"✅ Contexto enriquecido generado: {len(enhanced_context.get('results', []))} elementos")
+            logger.info(f"✅ Contexto enriquecido generado con {len(enhanced_context.get('enhanced_insights', []))} insights.")
             
             return enhanced_context
             
         except Exception as e:
             logger.error(f"❌ Error obteniendo contexto enriquecido: {e}")
             # Fallback al contexto tradicional
-            return await self._get_traditional_context(user_query, user_id, workspace_id, max_results)
+            return await self._get_traditional_context(user_query, user_id, workspace_id, max_results, explicit_document_ids)
     
     async def _get_traditional_context(
         self,
         user_query: str,
         user_id: str,
         workspace_id: Optional[str] = None,
-        max_results: int = 10
+        max_results: int = 10,
+        explicit_document_ids: Optional[List[str]] = None # Nuevo parámetro
     ) -> Dict[str, Any]:
         """Obtiene contexto usando el sistema de embeddings tradicional."""
         
@@ -91,7 +104,9 @@ class EnhancedMemoryManager:
             account_id=user_id,
             query=user_query,
             k=max_results,
-            workspace_id=workspace_id
+            workspace_id=workspace_id,
+
+            explicit_document_ids=explicit_document_ids # Pasar el nuevo parámetro
         )
 
         return {
@@ -136,32 +151,35 @@ class EnhancedMemoryManager:
             return {"type": "graph", "results": []}
     
     async def _find_relevant_entities(self, user_query: str, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Encuentra entidades relevantes en el grafo basadas en la consulta."""
+        """Encuentra entidades relevantes en el grafo basadas en la consulta de forma más eficiente."""
         
         try:
-            # Query para buscar entidades por nombre o descripción
+            # Extraer términos clave de la consulta, filtrar por longitud y limitar su número
+            query_terms = [term for term in user_query.lower().split() if len(term) > 3]
+            if not query_terms:
+                return []
+
+            # Limitar a los primeros 15 términos significativos para evitar sobrecarga
+            if len(query_terms) > 15:
+                logger.debug(f"Limitando la búsqueda en el grafo a los primeros 15 de {len(query_terms)} términos.")
+                query_terms = query_terms[:15]
+
+            # Query para buscar entidades usando una lista de términos con ANY
+            # Se busca en una lista de terminos para reducir las llamadas a la base de datos
             query = """
             MATCH (n)
-            WHERE toLower(n.name) CONTAINS toLower($query_term)
-               OR toLower(n.description) CONTAINS toLower($query_term)
+            WHERE ANY(term IN $query_terms WHERE toLower(n.name) CONTAINS term OR toLower(n.description) CONTAINS term)
             RETURN n.id as id, n.name as name, n.type as type, 
                    n.description as description, n.confidence as confidence
             ORDER BY n.confidence DESC
             LIMIT 20
             """
             
-            # Extraer términos clave de la consulta
-            query_terms = user_query.lower().split()
-            relevant_entities = []
+            result = await self.graph_db.execute_query(query, {"query_terms": query_terms})
             
-            for term in query_terms:
-                if len(term) > 3:  # Solo términos significativos
-                    result = await self.graph_db.execute_query(query, {"query_term": term})
-                    relevant_entities.extend(result)
-            
-            # Eliminar duplicados y ordenar por relevancia
+            # Eliminar duplicados si los hubiera, manteniendo el orden de la base de datos
             unique_entities = {}
-            for entity in relevant_entities:
+            for entity in result:
                 entity_id = entity.get("id")
                 if entity_id not in unique_entities:
                     unique_entities[entity_id] = entity

@@ -42,6 +42,7 @@ class SingleTextAnalysis(BaseModel):
     discipline: List[str] = Field(description="El area, disciplina o campo al que refiere el documento. Por ejemplo si es un documémico y de qué área, o si es un documento técnico, etc.').")
     authorial_tone: str = Field(description="El tono o la voz del autor (ej. 'Formal y Académico', 'Informal y Conversacional', 'Urgente y Directo', 'Escéptico y Crítico').")
     knowledge_gaps: List[str] = Field(description="Una lista de 5 a 8 preguntas inteligentes y abiertas que el texto inspira pero no responde. Deben ser preguntas, no afirmaciones.")
+    exploration_questions: List[str] = Field(description="Una lista de 5 a 8 preguntas adicionales para explorar a partir del texto, que el texto inspira pero no responde directamente.")
     problematic_areas: List[str] = Field(description="Una lista de 3 a 5 áreas problemáticas, desafíos o puntos de controversia identificados en el texto.")
     final_reflections: List[str] = Field (description="Una lista de 3 a 5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
 
@@ -53,6 +54,7 @@ class CollectionAnalysis(BaseModel):
     concept_relationships: List[str] = Field(description="Una lista de hasta 8 descripciones detalladas de cómo los conceptos centrales se relacionan entre sí en la colección.")
     identified_connections: List[CollectionConnection] = Field(description="Lista de insights específicos que conectan dos o más documentos. Incluye sinergias, evoluciones, contradicciones o complementariedades.")
     emergent_knowledge_gaps: List[str] = Field(description="Lista de 5-8 preguntas inteligentes o áreas que la colección en su conjunto no responde o deja abiertas.")
+    exploration_questions: List[str] = Field(description="Lista de 5-8 preguntas adicionales para explorar a partir de la colección, que el texto inspira pero no responde directamente.")
     problematic_areas: List[str] = Field(description="Una lista de 3 a 5 áreas problemáticas o desafíos comunes/emergentes identificados a través de la colección de documentos.")
     final_reflections: List[str] = Field(description="3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
     collection_insights: List[str] = Field(description="3-5 insights únicos que emergen del análisis conjunto de todos los documentos, que no serían evidentes analizando documentos individuales")
@@ -127,10 +129,10 @@ class AdvancedTextAnalyzer:
             )
 
         prompt = f"""
-        Eres un analista experto en análisis textual de conocimientos. Realiza un análisis exhaustivo y detallado del siguiente texto.
-
+        Eres un analista experto en análisis textual de conocimientos. Realiza un análisis exhaustivo y detallado del siguiente texto. Asegúrate de que todo el contenido generado esté en español.
+ 
         INSTRUCCIONES ESPECÍFICAS:
-        1. **Resumen ejecutivo**: Conciso pero completo (50-80 palabras)
+        1. **Resumen ejecutivo**: Conciso pero completo (50-80 palabras) en español.
 
         2. **Análisis general**: EXTENSO y profundo (500-1000 palabras) redactado en varios párrafos separados para facilitar la lectura, que incluya:
            - Contexto histórico, teórico o práctico del documento
@@ -166,6 +168,8 @@ class AdvancedTextAnalyzer:
         6. **Tono del autor**: Descripción precisa del estilo y enfoque
 
         7. **Brechas de conocimiento**: 5-8 preguntas inteligentes y abiertas que el texto inspira
+
+        8. **Preguntas para explorar**: 5-8 preguntas adicionales para explorar a partir del texto, que el texto inspira pero no responde directamente.
 
         8. **Problemáticas**: 3-5 áreas problemáticas, desafíos o puntos de controversia identificados en el texto.
 
@@ -209,10 +213,10 @@ class AdvancedTextAnalyzer:
 
         output_parser = PydanticOutputParser(pydantic_object=CollectionAnalysis)
         prompt = f"""
-        Eres un analista de investigación experto en síntesis de conocimiento. Analiza esta colección de documentos.
-
+        Eres un analista de investigación experto en síntesis de conocimiento. Analiza esta colección de documentos. Asegúrate de que todo el contenido generado esté en español.
+ 
         INSTRUCCIONES ESPECÍFICAS PARA EL ANÁLISIS DE COLECCIÓN:
-        Tu tarea es generar un análisis exhaustivo de la colección de documentos, asegurándote de incluir TODOS los siguientes campos en tu respuesta JSON, siguiendo las descripciones y formatos indicados:
+        Tu tarea es generar un análisis exhaustivo de la colección de documentos, asegurándote de incluir TODOS los siguientes campos en tu respuesta JSON, siguiendo las descripciones y formatos indicados. Todo el contenido generado debe estar en español:
 
         1.  **collection_summary**: Un resumen analítico que sintetiza la información de TODOS los documentos como un todo. Debe ser comprehensivo y detallado (200-300 palabras).
         2.  **cross_cutting_themes**: Una lista de hasta 10 temas recurrentes que identificas entre los documentos. Cada tema debe incluir citas relevantes de los documentos que lo ilustren. Agrupa conceptos similares semánticamente.
@@ -220,6 +224,7 @@ class AdvancedTextAnalyzer:
         4.  **concept_relationships**: Una lista de hasta 8 descripciones detalladas de cómo los conceptos centrales se relacionan entre sí dentro de la colección.
         5.  **identified_connections**: Una lista de insights específicos que conectan dos o más documentos. Incluye sinergias, evoluciones, contradicciones o complementariedades. Cada conexión debe especificar los títulos de los documentos involucrados y una descripción del insight.
         6.  **emergent_knowledge_gaps**: Una lista de 5-8 preguntas inteligentes o áreas que la colección en su conjunto no responde o deja abiertas.
+        7.  **exploration_questions**: Una lista de 5-8 preguntas adicionales para explorar a partir de la colección, que el texto inspira pero no responde directamente.
         7.  **problematic_areas**: Una lista de 3 a 5 áreas problemáticas o desafíos comunes/emergentes identificados a través de la colección de documentos.
         8.  **final_reflections**: 3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales, puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión.
         8.  **collection_insights**: 3-5 insights únicos que emergen del análisis conjunto de todos los documentos, que no serían evidentes analizando documentos individuales.

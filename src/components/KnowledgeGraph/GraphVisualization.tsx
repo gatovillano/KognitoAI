@@ -3,27 +3,35 @@
 
 import React, { useRef, useEffect } from 'react';
 import { Network, DataSet } from 'vis-network/standalone';
-import { GraphNode, GraphEdge } from '@/types/graph'; // Asegúrate de que '@/types/graph' sea la ruta correcta
 
-// Adaptar las interfaces para vis.js si es necesario (vis.js usa 'from'/'to' para aristas)
-interface VisGraphNode extends GraphNode {
-  title?: string; // Para tooltips de vis.js
+// Interfaces locales para mayor claridad y control
+interface VisGraphNode {
+  id: string | number;
+  label: string;
+  title?: string;
+  color?: string;
+  size?: number;
+  type?: string;
+  properties?: any; // Mantenemos properties por si acaso
 }
 
 interface VisGraphEdge {
-  id?: string | number; // ID de vis.js puede ser numérico
-  from: string | number; // ID del nodo de origen (vis.js)
-  to: string | number;   // ID del nodo de destino (vis.js)
+  id?: string | number;
+  from: string | number;
+  to: string | number;
   arrows?: string;
   label?: string;
-  title?: string; // Para tooltips de vis.js
+  title?: string;
   properties?: any;
   type?: string;
 }
 
 interface GraphVisualizationProps {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
+  graphData: {
+    nodes: VisGraphNode[];
+    edges: VisGraphEdge[];
+    metadata?: any;
+  } | null;
   isLoading?: boolean;
   error?: string | null;
   onNodeClick?: (node: GraphNode) => void;
@@ -31,12 +39,13 @@ interface GraphVisualizationProps {
 }
 
 export const GraphVisualization: React.FC<GraphVisualizationProps> = ({
-  nodes,
-  edges,
+  graphData,
   isLoading = false,
   error = null,
   onNodeClick,
 }) => {
+  const nodes = graphData?.nodes || [];
+  const edges = graphData?.edges || [];
   const visJsContainer = useRef<HTMLDivElement>(null);
   const networkRef = useRef<Network | null>(null);
 

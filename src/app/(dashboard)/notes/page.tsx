@@ -14,6 +14,7 @@ import { NoteDialog } from './note-dialog';
 import { ViewNoteDialog } from './view-note-dialog';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'; // Importar Sheet
 import { useDrag, useDrop } from 'react-dnd';
 import { ManageLinkedProfilesDialog } from './ManageLinkedProfilesDialog'; // Nueva importación
 import { AnalysisResultDialog } from './analysis-result-dialog'; // Nueva importación
@@ -49,6 +50,7 @@ export default function NotesPage() {
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [isAnalysisResultDialogOpen, setIsAnalysisResultDialogOpen] = useState(false);
   const [currentAnalysisTaskId, setCurrentAnalysisTaskId] = useState<string | null>(null);
+  const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
 
   // Estados para paginación
   const [skip, setSkip] = useState(0);
@@ -84,7 +86,7 @@ export default function NotesPage() {
         .filter(Boolean) // Eliminar null/undefined
         .map(id => {
           const note = fetchedNotes.find((n: Note) => n.workspace_id === id);
-          return { id: id!, name: note?.workspace_name || `Workspace ${id}`, color: note?.workspace_color };
+          return { id: id as string, name: note?.workspace_name || `Workspace ${id}`, color: note?.workspace_color };
         });
       setAvailableWorkspaces(prev => {
         const existingIds = new Set(prev.map(ws => ws.id));
@@ -408,7 +410,7 @@ export default function NotesPage() {
         }
       },
       collect: monitor => ({
-        isOver: !!monitor.isDragging(),
+        isOver: !!monitor.isOver(),
       }),
     });
 
@@ -550,18 +552,9 @@ export default function NotesPage() {
             <h1 className="text-3xl font-bold flex items-center">
               <Notebook className="mr-3 h-8 w-8 text-primary" />
               Mis Notas
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground">
-                      <Info className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Captura y organiza tus ideas, pensamientos y recordatorios.</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+                <Info className="h-4 w-4" />
+              </Button>
             </h1>
           </div>
           <div className="flex items-center gap-2">
@@ -696,6 +689,47 @@ export default function NotesPage() {
           isOpen={isAnalysisResultDialogOpen}
           onOpenChange={setIsAnalysisResultDialogOpen}
         />
+
+        <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
+          <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+            <SheetHeader>
+              <SheetTitle className="text-xl font-bold text-primary">Módulo de Notas</SheetTitle>
+              <SheetDescription className="text-sm text-muted-foreground">
+                Captura, organiza y gestiona tus ideas, pensamientos y recordatorios de forma eficiente.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
+              <p><strong>¿Qué puedes hacer en tus Notas?</strong></p>
+              <ul className="list-disc pl-5 space-y-2">
+                <li><strong>Crear y Editar Notas:</strong> Escribe y organiza tus ideas con títulos y contenido.</li>
+                <li><strong>Categorizar Notas:</strong> Agrupa tus notas por categorías para una mejor organización.</li>
+                <li><strong>Organizar por Workspaces:</strong> Asocia notas a diferentes workspaces para mantener la información segmentada.</li>
+                <li><strong>Análisis de Notas:</strong> Obtén insights y resúmenes semánticos de tus notas, individualmente o en grupos.</li>
+                <li><strong>Vincular a Perfiles:</strong> Conecta tus notas a perfiles de contacto para contextualizar la información.</li>
+                <li><strong>Gestión de Notas:</strong> Edita, elimina y visualiza tus notas fácilmente.</li>
+              </ul>
+
+              <p><strong>Interacción con IA:</strong></p>
+              <p>Además de la gestión manual, puedes interactuar con tus notas a través del chat de IA. Las notas se integran a la "memoria" de Kognito, enriqueciendo sus respuestas por relevancia con la consulta. La IA dispone de herramientas especializadas para:</p>
+              <ul className="list-disc pl-5 space-y-2">
+                <li>Buscar y recuperar información específica de tus notas.</li>
+                <li>Generar resúmenes y extraer ideas clave de tus notas.</li>
+                <li>Responder preguntas utilizando el contenido de tus notas.</li>
+                <li>Crear nuevas notas o expandir las existentes basándose en conversaciones.</li>
+              </ul>
+
+              <p><strong>Beneficios Clave:</strong></p>
+              <ul className="list-disc pl-5 space-y-2">
+                <li><strong>Captura Rápida de Ideas:</strong> No pierdas ningún pensamiento importante.</li>
+                <li><strong>Organización Flexible:</strong> Adapta la estructura de tus notas a tus necesidades.</li>
+                <li><strong>Conocimiento Contextualizado:</strong> Conecta ideas y personas para una comprensión más profunda.</li>
+                <li><strong>Potenciado por IA:</strong> Aprovecha la inteligencia artificial para analizar y gestionar tu conocimiento.</li>
+              </ul>
+
+              <p>¡Convierte tus ideas en conocimiento accionable con el Módulo de Notas!</p>
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
   );
 }

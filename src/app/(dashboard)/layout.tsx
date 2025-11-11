@@ -5,6 +5,7 @@ import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { WorkspaceProvider } from '@/contexts/WorkspaceContext';
 import { AppShell } from '@/components/AppShell';
 import { WorkspaceTitleProvider } from '@/contexts/WorkspaceTitleContext';
 import { Toaster } from '@/components/ui/sonner';
@@ -39,15 +40,17 @@ export default function DashboardLayout({
 
   return (
     <>
-      <WebSocketProvider>
-        <DndProvider backend={HTML5Backend}>
-          <WorkspaceTitleProvider>
-            <AppShell>
-              {React.isValidElement(children) ? children : null}
-            </AppShell>
-          </WorkspaceTitleProvider>
-        </DndProvider>
-      </WebSocketProvider>
+      <WorkspaceProvider>
+        <WebSocketProvider>
+          <DndProvider backend={HTML5Backend}>
+            <WorkspaceTitleProvider>
+              <AppShell>
+                {React.isValidElement(children) ? children : null}
+              </AppShell>
+            </WorkspaceTitleProvider>
+          </DndProvider>
+        </WebSocketProvider>
+      </WorkspaceProvider>
       <Toaster richColors position="top-right" />
     </>
   );
