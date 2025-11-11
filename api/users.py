@@ -36,6 +36,7 @@ async def get_current_admin_account(current_account_id: str = Depends(get_curren
 class UserProfileResponse(BaseModel):
     """Define la estructura de datos para la respuesta del perfil de usuario."""
     id: str
+    account_id: str # Añadido account_id
     name: Optional[str]
     email: Optional[EmailStr]
     username: Optional[str]
@@ -71,6 +72,7 @@ async def read_users_me(current_account_id: str = Depends(get_current_account_id
 
     return UserProfileResponse(
         id=str(account.id),
+        account_id=str(account.id), # Asignamos el account_id
         name=account.name,  # type: ignore
         email=account.email,  # type: ignore
         username=account.username,  # type: ignore
@@ -110,6 +112,7 @@ async def list_all_users(
 
         users_data.append(UserProfileResponse(
             id=str(account.id),
+            account_id=str(account.id),
             name=account.name,  # type: ignore
             email=account.email,  # type: ignore
             username=account.username,  # type: ignore
@@ -146,6 +149,7 @@ async def list_all_users_public(db: AsyncSession = Depends(get_db)):
 
         users_data.append(UserProfileResponse(
             id=str(account.id),
+            account_id=str(account.id),
             name=account.name,  # type: ignore
             email=account.email,  # type: ignore
             username=account.username,  # type: ignore

@@ -197,14 +197,16 @@ export default function ChatLandingPage() {
 
     setIsUploadingFile(true);
     try {
-      const response = await apiClient.post('/api/threads'); // Crea el hilo solo si hay archivos
+      const response = await apiClient.post('/api/threads', {}); // Crea el hilo solo si hay archivos
       const newThread = response.data;
       const formData = new FormData();
-      formData.append('thread_id', newThread.id);
+      
       for (let i = 0; i < e.target.files.length; i++) {
         formData.append('files', e.target.files[i]);
       }
-      await apiClient.post('/api/upload-chat-file', formData, {
+      formData.append('topic', 'General');
+      console.log('FormData contents:', Object.fromEntries(formData.entries()));
+      await apiClient.post('/api/documents/upload-document', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -250,6 +252,10 @@ export default function ChatLandingPage() {
       onFileUpload={handleFileUpload}
       onRemoveContextItem={onRemoveContextItem}
       onPaste={onPaste}
+      isUploadingImage={false}
+      uploadedImagePreview={null}
+      onRemoveImage={() => {}}
+      onImageUpload={() => {}}
       workspaceId={workspaceId}
       selectedContext={selectedContext}
       onContextSelected={setSelectedContext}

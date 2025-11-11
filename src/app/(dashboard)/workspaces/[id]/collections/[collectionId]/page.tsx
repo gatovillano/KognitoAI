@@ -34,7 +34,7 @@ export default function WorkspaceCollectionDetailPage({ params }: PageProps) {
     if (!workspaceId || !collectionId) return;
     setIsLoadingCollection(true);
     try {
-      const collectionRes = await apiClient.get(`/api/documents/collections/${collectionId}/details?workspace_id=${workspaceId}`);
+      const collectionRes = await apiClient.get(`/api/collections/${collectionId}/details?workspace_id=${workspaceId}`);
       setCollectionData(collectionRes.data);
     } catch (error) {
       toast.error('Error al cargar los datos de la colección.');

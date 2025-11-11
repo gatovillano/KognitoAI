@@ -10,15 +10,20 @@ interface GraphNode {
   title?: string;
   color?: string;
   size?: number;
+  type?: string; // Added type property
 }
 
 interface GraphEdge {
   id: string;
-  from: string;
-  to: string;
-  label?: string;
-  title?: string;
-  arrows?: string;
+  source: string; // ID del nodo de origen
+  target: string; // ID del nodo de destino
+  label: string;  // Etiqueta principal de la relación (e.g., r.type)
+  properties?: { // Hacer properties opcional
+    type?: string; // e.g., 'FUNDAMENTACION_TEORICA'
+    description?: string;
+    [key: string]: any; // Para otras propiedades dinámicas
+  };
+  type?: string; // Para el tipo de relación
 }
 
 interface GraphData {
@@ -49,7 +54,7 @@ export const useKnowledgeGraph = (workspaceId: string | null) => {
     setProcessingStatus('processing');
 
     try {
-      const response = await apiClient.post('/api/process-knowledge-graph', {
+      const response = await apiClient.post('/api/process-knowledge-graph-optimized', {
         workspace_id: workspaceId,
         force_reprocess: false
       });
@@ -166,6 +171,20 @@ export const useKnowledgeGraph = (workspaceId: string | null) => {
       return null;
     }
   }, [workspaceId]);
+  const clearGraph = useCallback(async () => {
+    try {
+      const response = await apiClient.post('/api/clear-neo4j');
+      console.log('🔵 Respuesta de la API (clearGraph):', response.data);
+      if (response.data.success) {
+        setGraphData(null);
+        setProcessingStatus('not_processed');
+      }
+      return response.data;
+    } catch (err) {
+      console.error('Error limpiando el grafo:', err);
+      return null;
+    }
+  }, []);
 
   useEffect(() => {
     if (workspaceId) {
@@ -179,7 +198,7 @@ export const useKnowledgeGraph = (workspaceId: string | null) => {
   const stats: GraphStats | null = graphData ? {
     totalEntities: graphData.nodes?.length || 0,
     totalRelationships: graphData.edges?.length || 0,
-    entityTypes: [...new Set(graphData.nodes?.map(n => n.type) || [])], // Usar 'type' de los nodos
+    entityTypes: [...new Set(graphData.nodes?.map(n => n.type).filter((type): type is string => type !== undefined) || [])], // Usar 'type' de los nodos
     processingMethod: graphData.metadata?.processing_method || 'unknown',
     lastProcessed: graphData.metadata?.processing_time || null
   } : null;
@@ -196,6 +215,7 @@ export const useKnowledgeGraph = (workspaceId: string | null) => {
     searchGraph,
     getEntityConnections,
     getGraphStats,
-    clearError: () => setError(null)
+    clearError: () => setError(null),
+    clearGraph
   };
 };

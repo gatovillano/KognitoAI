@@ -60,13 +60,12 @@ const KnowledgeGraphViewerInner = ({ graphData, onNodeSelect, selectedWorkspace 
       return {
         id: node.id || `node_${index}`,
         type: 'default', // Tipo de nodo de ReactFlow (puede ser 'input', 'output', 'default')
-        position: { x: Math.random() * 800, y: Math.random() * 600 }, // Posición aleatoria inicial
+        position: { x: Math.random() * 800, y: Math.random() * 600 },
         data: {
-          label: node.label || node.properties?.name || node.properties?.concept || 'Sin nombre',
-          type: nodeType,
-          description: node.properties?.description || '',
-          confidence: node.properties?.confidence || 0,
-          source: node.properties?.source_document || 'Desconocido'
+          label: node.label || 'Sin nombre',
+          type: node.type || 'default',
+          description: node.title || '',
+          // Puedes añadir más propiedades directamente si las necesitas
         },
         style: {
           background: nodeColors[nodeType as keyof typeof nodeColors] || nodeColors.default,
@@ -92,17 +91,16 @@ const KnowledgeGraphViewerInner = ({ graphData, onNodeSelect, selectedWorkspace 
         source: edge.source,
         target: edge.target,
         type: 'smoothstep', // Tipo de arista de ReactFlow
-        animated: edge.properties?.confidence > 0.8, // Animar aristas con alta confianza
+        animated: edge.properties?.confidence > 0.8,
         style: {
           stroke: edge.properties?.confidence > 0.8 ? '#FF6B6B' : '#999',
-          strokeWidth: Math.max(1, (edge.properties?.confidence || 0.5) * 3)
+          strokeWidth: Math.max(1, (edge.properties?.confidence || 0.5) * 3),
         },
-        label: edge.label || edge.type || 'RELACIONADO',
+        label: edge.label || 'RELACIONADO',
         labelStyle: { fontSize: '10px', fontWeight: 'bold', fill: '#666' },
         data: {
           type: edge.type || 'RELACIONADO',
-          description: edge.properties?.description || '',
-          confidence: edge.properties?.confidence || 0
+          description: edge.title || '',
         }
       }))
       .filter((edge: Edge) => edge.source && edge.target); // Filtrar aristas inválidas

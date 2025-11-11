@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -9,7 +9,6 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -17,54 +16,52 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import { User, Mail, KeyRound, Edit, Trash2 } from "lucide-react";
-import apiClient from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
+import apiClient from "@/lib/api";
+import { Trash2, Loader2 } from "lucide-react";
 
-interface ShareWorkspaceDialogProps {
-  isOpen: boolean;
-  onClose: () => void;
-  workspaceId: string;
-  workspaceName: string;
-  onPermissionsUpdated: () => void; // Callback para notificar a page.tsx
-}
-
-type Role = "owner" | "editor" | "viewer";
-
-interface PermissionResponse {
+interface Permission {
   account_id: string;
   email: string;
-  role: Role;
+  role: "owner" | "editor" | "viewer";
 }
 
-interface ShareWorkspaceRequest {
-  email: string;
-  role: Role;
+interface ShareWorkspaceDialogProps {
+  workspaceId: string;
+  workspaceName: string;
+  isOpen: boolean;
+  onClose: () => void;
+  onPermissionsUpdated: () => void;
 }
 
-const ShareWorkspaceDialog: React.FC<ShareWorkspaceDialogProps> = ({
-  isOpen,
-  onClose,
+export function ShareWorkspaceDialog({
   workspaceId,
   workspaceName,
+  isOpen,
+  onClose,
   onPermissionsUpdated,
-}) => {
+}: ShareWorkspaceDialogProps) {
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<Role>("viewer");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [permissions, setPermissions] = useState<PermissionResponse[]>([]);
-  const [loadingPermissions, setLoadingPermissions] = useState(true);
+  const [role, setRole] = useState<"editor" | "viewer">("editor");
+  const [permissions, setPermissions] = useState<Permission[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isInviting, setIsInviting] = useState(false);
   const { toast } = useToast();
 
-  const fetchPermissions = async () => {
+  const fetchPermissions = useCallback(async () => {
     if (!workspaceId) return;
-    setLoadingPermissions(true);
+    setIsLoading(true);
     try {
-      const response = await apiClient.get<PermissionResponse[]>(
-        `/api/workspaces/${workspaceId}/permissions`
-      );
+      const response = await apiClient.get(`/api/workspaces/${workspaceId}/permissions`);
       setPermissions(response.data);
     } catch (error) {
       console.error("Error fetching permissions:", error);
@@ -74,209 +71,184 @@ const ShareWorkspaceDialog: React.FC<ShareWorkspaceDialogProps> = ({
         variant: "destructive",
       });
     } finally {
-      setLoadingPermissions(false);
+      setIsLoading(false);
     }
-  };
+  }, [workspaceId, toast]);
 
   useEffect(() => {
-    if (isOpen && workspaceId) {
+    if (isOpen) {
       fetchPermissions();
     }
-  }, [isOpen, workspaceId]);
+  }, [isOpen, fetchPermissions]);
 
   const handleInvite = async () => {
-    setIsSubmitting(true);
+    if (!email) {
+      toast({ title: "Error", description: "Por favor, introduce un email.", variant: "destructive" });
+      return;
+    }
+    setIsInviting(true);
     try {
-      // Asumimos que el backend resuelve account_id a partir del email
-      await apiClient.post(`/api/workspaces/${workspaceId}/share`, {
-        email,
-        role,
-      } as ShareWorkspaceRequest);
+      // Asumimos que la API puede encontrar el account_id por el email.
+      // En un caso real, podríamos necesitar un endpoint /api/users/find-by-email
+      await apiClient.post(`/api/workspaces/${workspaceId}/share`, { email, role });
       toast({
-        title: "Éxito",
-        description: `Usuario ${email} invitado como ${role}.`,
+        title: "¡Éxito!",
+        description: `Se ha invitado a ${email} como ${role}.`,
       });
       setEmail("");
-      setRole("viewer");
-      fetchPermissions(); // Recargar permisos
-      onPermissionsUpdated();
+      fetchPermissions(); // Recargar la lista de miembros
+      onPermissionsUpdated(); // Notificar a la página principal para que se actualice si es necesario
     } catch (error: any) {
       console.error("Error inviting user:", error);
       toast({
-        title: "Error",
-        description:
-          error.response?.data?.detail || "No se pudo invitar al usuario.",
+        title: "Error al invitar",
+        description: error.response?.data?.detail || "No se pudo invitar al usuario.",
         variant: "destructive",
       });
     } finally {
-      setIsSubmitting(false);
+      setIsInviting(false);
     }
   };
 
-  const handleEditPermission = async (
-    accountId: string,
-    newRole: Role
-  ) => {
-    setIsSubmitting(true);
+  const handleRoleChange = async (accountId: string, newRole: "editor" | "viewer") => {
     try {
-      await apiClient.put(
-        `/api/workspaces/${workspaceId}/permissions/${accountId}`,
-        { role: newRole }
-      );
+      await apiClient.put(`/api/workspaces/${workspaceId}/permissions/${accountId}`, { role: newRole });
       toast({
-        title: "Éxito",
-        description: `Permiso de usuario actualizado a ${newRole}.`,
+        title: "Rol actualizado",
+        description: "El rol del usuario ha sido actualizado.",
       });
-      fetchPermissions(); // Recargar permisos
+      fetchPermissions();
       onPermissionsUpdated();
     } catch (error: any) {
-      console.error("Error updating permission:", error);
+      console.error("Error updating role:", error);
       toast({
-        title: "Error",
-        description:
-          error.response?.data?.detail ||
-          "No se pudo actualizar el permiso del usuario.",
+        title: "Error al actualizar",
+        description: error.response?.data?.detail || "No se pudo cambiar el rol.",
         variant: "destructive",
       });
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
-  const handleRevokePermission = async (accountId: string) => {
-    setIsSubmitting(true);
+  const handleRevokeAccess = async (accountId: string) => {
     try {
-      await apiClient.delete(
-        `/api/workspaces/${workspaceId}/permissions/${accountId}`
-      );
+      await apiClient.delete(`/api/workspaces/${workspaceId}/permissions/${accountId}`);
       toast({
-        title: "Éxito",
-        description: "Acceso de usuario revocado.",
+        title: "Acceso revocado",
+        description: "Se ha eliminado al usuario del workspace.",
       });
-      fetchPermissions(); // Recargar permisos
+      fetchPermissions();
       onPermissionsUpdated();
     } catch (error: any) {
-      console.error("Error revoking permission:", error);
+      console.error("Error revoking access:", error);
       toast({
-        title: "Error",
-        description:
-          error.response?.data?.detail ||
-          "No se pudo revocar el acceso del usuario.",
+        title: "Error al revocar",
+        description: error.response?.data?.detail || "No se pudo revocar el acceso.",
         variant: "destructive",
       });
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>Compartir Workspace: {workspaceName}</DialogTitle>
+          <DialogTitle>Compartir: {workspaceName}</DialogTitle>
           <DialogDescription>
-            Gestiona el acceso y los permisos para este workspace.
+            Invita a otros usuarios y gestiona los permisos de acceso.
           </DialogDescription>
         </DialogHeader>
-
-        <div className="grid gap-4 py-4">
-          <h3 className="text-lg font-medium">Invitar usuario</h3>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="email" className="text-right">
-              Email
-            </Label>
+        <div className="grid gap-6 py-4">
+          <div className="flex items-center space-x-2">
             <Input
               id="email"
-              type="email"
+              placeholder="Email del usuario a invitar"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="col-span-3"
-              placeholder="email@example.com"
+              className="flex-1"
+              disabled={isInviting}
             />
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="role" className="text-right">
-              Rol
-            </Label>
-            <Select
-              value={role}
-              onValueChange={(value: Role) =>
-                setRole(value)
-              }
-            >
-              <SelectTrigger className="col-span-3">
-                <SelectValue placeholder="Selecciona un rol" />
+            <Select value={role} onValueChange={(value) => setRole(value as "editor" | "viewer")} disabled={isInviting}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue placeholder="Rol" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="owner">Owner</SelectItem>
                 <SelectItem value="editor">Editor</SelectItem>
                 <SelectItem value="viewer">Viewer</SelectItem>
               </SelectContent>
             </Select>
+            <Button onClick={handleInvite} disabled={isInviting}>
+              {isInviting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Invitar
+            </Button>
           </div>
-          <Button onClick={handleInvite} disabled={isSubmitting || !email}>
-            {isSubmitting ? "Invitando..." : "Invitar"}
-          </Button>
-        </div>
-
-        <Separator className="my-4" />
-
-        <div className="grid gap-4 py-4">
-          <h3 className="text-lg font-medium">Permisos existentes</h3>
-          {loadingPermissions ? (
-            <p className="text-center text-gray-500">Cargando permisos...</p>
-          ) : permissions.length === 0 ? (
-            <p className="text-center text-gray-500">
-              No hay usuarios con acceso a este workspace.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {permissions.map((permission) => (
-                <div
-                  key={permission.account_id}
-                  className="flex items-center justify-between rounded-md border p-3"
-                >
-                  <div className="flex items-center space-x-2">
-                    <Mail className="h-4 w-4 text-gray-500" />
-                    <span className="font-medium">{permission.email}</span>
-                    <KeyRound className="h-4 w-4 text-gray-500" />
-                    <Select
-                      value={permission.role}
-                      onValueChange={(newRole: Role) =>
-                        handleEditPermission(permission.account_id, newRole)
-                      }
-                      disabled={isSubmitting}
-                    >
-                      <SelectTrigger className="w-[120px] h-8 text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="owner">Owner</SelectItem>
-                        <SelectItem value="editor">Editor</SelectItem>
-                        <SelectItem value="viewer">Viewer</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex space-x-2">
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() =>
-                        handleRevokePermission(permission.account_id)
-                      }
-                      disabled={isSubmitting}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
+          <div className="space-y-2">
+            <h4 className="font-medium">Miembros Actuales</h4>
+            <div className="rounded-md border max-h-60 overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Usuario</TableHead>
+                    <TableHead className="w-[150px]">Rol</TableHead>
+                    <TableHead className="text-right w-[50px]">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-center">
+                        <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
+                      </TableCell>
+                    </TableRow>
+                  ) : permissions.length > 0 ? (
+                    permissions.map((p) => (
+                      <TableRow key={p.account_id}>
+                        <TableCell className="font-medium">{p.email}</TableCell>
+                        <TableCell>
+                          {p.role === 'owner' ? (
+                            <span className="font-semibold">Propietario</span>
+                          ) : (
+                            <Select
+                              value={p.role}
+                              onValueChange={(newRole) => handleRoleChange(p.account_id, newRole as "editor" | "viewer")}
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="editor">Editor</SelectItem>
+                                <SelectItem value="viewer">Viewer</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {p.role !== 'owner' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              onClick={() => handleRevokeAccess(p.account_id)}
+                              title="Revocar acceso"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-center text-muted-foreground">
+                        Solo tú tienes acceso a este workspace.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
             </div>
-          )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
   );
-};
-
-export default ShareWorkspaceDialog;
+}

@@ -26,6 +26,7 @@ import uuid # Importar uuid
 from typing import List # Importar List
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG) # AÑADIR ESTA LÍNEA
 
 # 1. Contexto de Hasheo de Contraseña
 # Usamos bcrypt, que es el estándar recomendado.
@@ -99,6 +100,8 @@ async def get_current_account_id(token: str = Depends(oauth2_scheme)) -> str:
         detail="No se pudieron validar las credenciales",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    
+    logger.info(f"🔑 DEBUG: Token recibido en get_current_account_id: {token[:50]}...")
     
     payload = decode_access_token(token)
     

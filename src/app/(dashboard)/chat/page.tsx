@@ -1,11 +1,14 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react'; // Importar useEffect
 import { useRouter } from 'next/navigation';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { EmptyChat } from '@/components/EmptyChat';
+import dynamic from 'next/dynamic'; // Importar dynamic
+
+const WelcomeDialog = dynamic(() => import('@/components/WelcomeDialog').then(mod => mod.WelcomeDialog), { ssr: false });
 
 interface SelectedContextItem {
   id: string;
@@ -20,6 +23,16 @@ export default function NewChatPage() {
   const [newMessage, setNewMessage] = useState('');
   const [isResponding, setIsResponding] = useState(false);
   const [selectedContext, setSelectedContext] = useState<SelectedContextItem[]>([]);
+  const [isWelcomeDialogOpen, setIsWelcomeDialogOpen] = useState(false); // Nuevo estado para el diálogo de bienvenida
+
+  // Efecto para mostrar el diálogo de bienvenida solo una vez
+  useEffect(() => {
+    const hasVisitedChat = localStorage.getItem('hasVisitedChat');
+    if (!hasVisitedChat) {
+      setIsWelcomeDialogOpen(true);
+      localStorage.setItem('hasVisitedChat', 'true');
+    }
+  }, []);
 
   const handleSendMessage = useCallback(async (e?: React.FormEvent, messageTextFromInput?: string) => {
     if (e) e.preventDefault();
@@ -56,30 +69,37 @@ export default function NewChatPage() {
   }, [user, newMessage, selectedContext, router]);
 
   return (
-    <EmptyChat
-      onSendMessage={handleSendMessage}
-      newMessage={newMessage}
-      setNewMessage={setNewMessage}
-      isResponding={isResponding}
-      isRecording={false}
-      isProcessingAudio={false}
-      isUploadingFile={false}
-      isKnowledgeAnalysisActive={false}
-      isWebSearchActive={false}
-      isComprehensiveAnalysisActive={false}
-      isDeepResearchActive={false}
-      onKeyDown={() => {}}
-      onToggleKnowledgeAnalysis={() => {}}
-      onToggleWebSearch={() => {}}
-      onToggleComprehensiveAnalysis={() => {}}
-      onToggleDeepResearch={() => {}}
-      onStartRecording={() => {}}
-      onStopRecording={() => {}}
-      onFileUpload={() => {}}
-      onRemoveContextItem={() => {}}
-      onPaste={() => {}}
-      selectedContext={selectedContext}
-      onContextSelected={setSelectedContext}
-    />
+    <>
+      <EmptyChat
+        onSendMessage={handleSendMessage}
+        newMessage={newMessage}
+        setNewMessage={setNewMessage}
+        isResponding={isResponding}
+        isRecording={false}
+        isProcessingAudio={false}
+        isUploadingFile={false}
+        isKnowledgeAnalysisActive={false}
+        isWebSearchActive={false}
+        isComprehensiveAnalysisActive={false}
+        isDeepResearchActive={false}
+        onKeyDown={() => {}}
+        onToggleKnowledgeAnalysis={() => {}}
+        onToggleWebSearch={() => {}}
+        onToggleComprehensiveAnalysis={() => {}}
+        onToggleDeepResearch={() => {}}
+        onStartRecording={() => {}}
+        onStopRecording={() => {}}
+        onFileUpload={() => {}}
+        onRemoveContextItem={() => {}}
+        onPaste={() => {}}
+        isUploadingImage={false}
+        uploadedImagePreview={null}
+        onRemoveImage={() => {}}
+        onImageUpload={() => {}}
+        selectedContext={selectedContext}
+        onContextSelected={setSelectedContext}
+      />
+      <WelcomeDialog isOpen={isWelcomeDialogOpen} onOpenChange={setIsWelcomeDialogOpen} />
+    </>
   );
 }

@@ -292,7 +292,17 @@ async def get_agenda_for_period(account_id: str, period_type: str, target_date: 
         if workspace_id:
             stmt = stmt.where(AgendaEvent.workspace_id == uuid.UUID(workspace_id))
         else:
-            stmt = stmt.where(AgendaEvent.workspace_id.is_(None))
+            # Si no se especifica un workspace, obtener eventos personales y de todos los workspaces a los que tiene acceso
+            accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == str(account_id))
+            result = await db.execute(accessible_workspaces_stmt)
+            accessible_workspace_ids = [row[0] for row in result.fetchall()]
+            
+            stmt = stmt.where(
+                or_(
+                    AgendaEvent.workspace_id.is_(None),
+                    AgendaEvent.workspace_id.in_(accessible_workspace_ids)
+                )
+            )
         stmt = stmt.order_by(AgendaEvent.event_datetime_utc)
         result = await db.execute(stmt)
         events = result.scalars().all()
@@ -303,7 +313,7 @@ async def get_agenda_for_period(account_id: str, period_type: str, target_date: 
         event_list = [f"Tu agenda para {period_description}:"]
         for event in events:
             local_time = event.event_datetime_utc.astimezone(user_tz)
-            event_list.append(f"- ID {event.id}: {event.description} a las {local_time.strftime('%H:%M del %d-%m-%Y')}")
+            event_list.append(f"- ID {event.id}: {event.summary} a las {local_time.strftime('%H:%M del %d-%m-%Y')}")
         
         return "\n".join(event_list)
 
@@ -351,7 +361,7 @@ async def get_events_as_dicts(account_id: str, workspace_id: Optional[str] = Non
             stmt = stmt.where(AgendaEvent.workspace_id == uuid.UUID(workspace_id))
         else:
             # Si no se especifica un workspace, obtener eventos personales y de todos los workspaces a los que tiene acceso
-            accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == uuid.UUID(account_id))
+            accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == str(account_id))
             result = await db.execute(accessible_workspaces_stmt)
             accessible_workspace_ids = [row[0] for row in result.fetchall()]
             

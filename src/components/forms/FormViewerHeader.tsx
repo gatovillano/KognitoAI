@@ -25,6 +25,7 @@ export function FormViewerHeader({
   onViewResponses,
   onEditForm,
 }: FormViewerHeaderProps) {
+  const router = useRouter(); // Initialize useRouter
   const [isOpen, setIsOpen] = React.useState(false);
 
   return (

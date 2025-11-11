@@ -22,6 +22,7 @@ from core.llm_manager import get_fast_llm
 from utils.embeddings import get_embedding_model
 from core.config import settings
 from langchain.schema.messages import HumanMessage, SystemMessage
+from core.memory_manager import get_relevant_memories # Añadir esta importación aquí
 
 logger = logging.getLogger(__name__)
 
@@ -189,9 +190,6 @@ async def run_scoped_rag_analysis(
 
     try:
         # NUEVO: Intentar usar búsquedas optimizadas primero
-        from core.memory_manager import create_memory_context
-
-        context = await create_memory_context(account_id=account_id)
 
         # Construir consulta de búsqueda
         search_query = query
@@ -203,34 +201,38 @@ async def run_scoped_rag_analysis(
         # Usar búsquedas optimizadas por tipo de contenido
         if "notes" in content_types or "memories" in content_types:
             logger.info("🔍 Buscando memorias/notas con búsqueda optimizada")
-            memories_results = await context.search_memories(
+            memories_results = await get_relevant_memories(
+                account_id=account_id,
                 query=search_query,
-                topic=topic if topic else None,
-                k=15
+                filter_topics=[topic] if topic else None,
+                k=15,
+                content_type="user_memories"
             )
 
-            if memories_results:
+            if memories_results and memories_results.sources:
                 formatted_memories = []
-                for result in memories_results:
-                    content = result.get("content", "")
-                    topic_info = result.get("topic", "N/A")
+                for source in memories_results.sources:
+                    content = source.snippet
+                    topic_info = source.metadata.get("topic", "N/A")
                     formatted_memories.append(f"- [Tema: {topic_info}]: {content[:500]}...")
 
                 context_parts.append("--- INICIO DE MEMORIAS RELEVANTES ---\n" + "\n".join(formatted_memories) + "\n--- FIN DE MEMORIAS RELEVANTES ---")
 
         if "documents" in content_types:
             logger.info("📄 Buscando documentos con búsqueda optimizada")
-            docs_results = await context.search_documents(
+            docs_results = await get_relevant_memories(
+                account_id=account_id,
                 query=search_query,
-                topic=topic if topic else None,
-                k=15
+                filter_topics=[topic] if topic else None,
+                k=15,
+                content_type="user_documents"
             )
 
-            if docs_results:
+            if docs_results and docs_results.sources:
                 formatted_docs = []
-                for result in docs_results:
-                    content = result.get("content", "")
-                    topic_info = result.get("topic", "N/A")
+                for source in docs_results.sources:
+                    content = source.snippet
+                    topic_info = source.metadata.get("topic", "N/A")
                     formatted_docs.append(f"- [Tema: {topic_info}]: {content[:500]}...")
 
                 context_parts.append("--- INICIO DE DOCUMENTOS RELEVANTES ---\n" + "\n".join(formatted_docs) + "\n--- FIN DE DOCUMENTOS RELEVANTES ---")

@@ -14,7 +14,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Label } from '@/components/ui/label';
 
 // Componente de visualización del grafo cargado dinámicamente
-const GraphVisualization = dynamic(() => import('@/components/KnowledgeGraph/GraphVisualization'), {
+const GraphVisualization = dynamic(() => import('@/components/KnowledgeGraph/GraphVisualization').then(mod => mod.GraphVisualization), {
   ssr: false,
   loading: () => (
     <div className="flex justify-center items-center h-full min-h-[500px]">
@@ -25,7 +25,7 @@ const GraphVisualization = dynamic(() => import('@/components/KnowledgeGraph/Gra
 
 export default function KnowledgeGraphPage() {
   const params = useParams();
-  const workspaceId = params.workspaceId as string;
+  const workspaceId = params?.workspaceId as string;
 
   const {
     graphData,

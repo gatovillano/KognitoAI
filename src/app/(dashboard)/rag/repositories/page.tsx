@@ -193,7 +193,7 @@ export default function RepositoriesPage() {
   const handleExtractTitles = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     try {
-      const response = await apiClient.post('/api/extract-title', { topic: 'Repositories' });
+      const response = await apiClient.post('/api/documents/extract-title', { topic: 'Repositories' });
       toast.info(`Extracción de títulos para la colección de repositorios iniciada.`);
       fetchPageData();
     } catch (error) { toast.error("No se pudo iniciar la extracción de títulos."); }
@@ -203,7 +203,7 @@ export default function RepositoriesPage() {
   const handleExtractTitleForDocument = useCallback(async (doc: Document) => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     try {
-      const response = await apiClient.post('/api/extract-title', { file_name: doc.file_name });
+      const response = await apiClient.post('/api/documents/extract-title', { file_name: doc.file_name });
       toast.info(`Extracción de título para "${doc.file_name}" iniciada.`);
       fetchPageData();
     } catch (error) { toast.error(`No se pudo iniciar la extracción de título para "${doc.file_name}".`); }

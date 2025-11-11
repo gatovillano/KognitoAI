@@ -1,6 +1,6 @@
 import logging
 import asyncio # Added
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, status
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, status, Depends
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
@@ -21,14 +21,22 @@ from api.knowledge_graph import router as knowledge_graph_router
 from api.search import router as search_router
 from api.forms import router as forms_router
 from api.collections import router as collections_router # Importar el router de collections
+from api.universal_search import router as universal_search_router # Importar el router de búsqueda universal
 from core.config import settings
-from core.database import create_tables
+from core.database import create_tables, Account
 from core.llm_manager import initialize_llms
 from core.websocket_manager import manager as websocket_manager, startup_event as ws_startup, shutdown_event as ws_shutdown
 from utils.security import decode_access_token
 from utils.embeddings import initialize_embeddings
 from utils.audio_transcriber import load_whisper_model
 from utils.ascii_logo import print_startup_logo
+from api.users import get_current_admin_account, get_db # Importar dependencias de users
+from utils.tool_scheduler import tool_scheduler # Importar tool_scheduler
+from utils.scheduled_tools_manager import scheduled_tools_manager # Importar scheduled_tools_manager
+from telegram_client.bot_manager import bot_manager # Importar bot_manager
+from pydantic import BaseModel
+from sqlalchemy import select, func # Importar func
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -114,6 +122,11 @@ async def startup_event():
         logger.info("Modelo de embeddings inicializado.")
         load_whisper_model()
         await ws_startup()
+        # La inicialización de bot_manager y su JobQueue debe ocurrir en el proceso del bot de Telegram.
+        # Si el bot de Telegram no está corriendo y no inicializa bot_manager, job_queue será None.
+        # Se asume que el bot de Telegram se ejecuta como un proceso separado y se encarga de esto.
+        await scheduled_tools_manager.initialize_scheduled_tools() # Inicializar el programador de herramientas
+        tool_scheduler.start() # Iniciar el nuevo scheduler de APScheduler
         logger.info("Servidor listo para aceptar peticiones.")
     except Exception as e:
         logger.error(f"ERROR FATAL DURANTE EL ARRANQUE: {e}", exc_info=True)
@@ -123,6 +136,7 @@ async def startup_event():
 async def shutdown_event():
     """Se ejecuta al apagar el servidor."""
     await ws_shutdown()
+    tool_scheduler.shutdown() # Detener el scheduler de APScheduler
 
 # Middleware para registrar solicitudes que resultan en error 405
 @app.middleware("http")
@@ -265,6 +279,37 @@ app.include_router(search_router, prefix="/api", tags=["search"])
 app.include_router(galleries_router, prefix="/api/galleries", tags=["galleries"])
 app.include_router(forms_router, prefix="/api", tags=["forms"])
 app.include_router(collections_router, prefix="/api", tags=["collections"])
+app.include_router(universal_search_router, prefix="/api", tags=["universal-search"])
+
+class AdminMetricsResponse(BaseModel):
+    total_users: int
+    total_scheduled_tools: int
+    active_scheduled_tools: int
+
+@app.get("/api/admin/metrics", response_model=AdminMetricsResponse, summary="Obtener métricas del sistema (solo admin)")
+async def get_admin_metrics(
+    admin_account: Account = Depends(get_current_admin_account),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Obtiene métricas clave del sistema para el panel de administración.
+    Requiere privilegios de administrador.
+    """
+    logger.info(f"Admin {admin_account.id} solicitando métricas del sistema.")
+
+    # Total de usuarios
+    total_users_count = await db.scalar(select(func.count(Account.id)))
+
+    # Total y activas herramientas programadas
+    total_scheduled = len(tool_scheduler.scheduled_jobs)
+    active_jobs = sum(1 for job in tool_scheduler.scheduled_jobs.values()
+                         if getattr(job, 'enabled', True))
+
+    return AdminMetricsResponse(
+        total_users=total_users_count,
+        total_scheduled_tools=total_scheduled,
+        active_scheduled_tools=active_jobs
+    )
 
 @app.get("/test-connection")
 async def test_connection():

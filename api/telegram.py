@@ -31,13 +31,30 @@ async def send_message(request: SendMessageRequest):
     Endpoint interno para enviar un mensaje a un chat de Telegram.
     """
     try:
-        # Aquí se implementaría la lógica para enviar un mensaje a través del cliente de Telegram
-        # Por ahora, solo registramos la solicitud y devolvemos un estado de éxito simulado
-        logger.info(f"Enviando mensaje a chat {request.chat_id}: {request.text}")
-        return {"status": "ok"}
+        telegram_bot_token = settings.TELEGRAM_BOT_TOKEN
+        if not telegram_bot_token:
+            logger.error("TELEGRAM_BOT_TOKEN no está configurado.")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Token de bot de Telegram no configurado.")
+
+        telegram_api_url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+        
+        payload = {
+            "chat_id": request.chat_id,
+            "text": request.text,
+            "parse_mode": "MarkdownV2" # Opcional: para permitir formato Markdown en el mensaje
+        }
+
+        response = requests.post(telegram_api_url, json=payload)
+        response.raise_for_status() # Lanza una excepción para códigos de estado HTTP erróneos (4xx o 5xx)
+
+        logger.info(f"Mensaje enviado exitosamente a chat {request.chat_id}: {request.text}")
+        return {"status": "ok", "telegram_response": response.json()}
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error al enviar mensaje a Telegram API: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error al comunicarse con la API de Telegram: {e}")
     except Exception as e:
-        logger.error(f"Error al enviar mensaje: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al enviar mensaje")
+        logger.error(f"Error inesperado al enviar mensaje: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor al enviar mensaje")
 
 @router.post("/internal/store-user-data", status_code=status.HTTP_200_OK)
 async def store_user_data(request: StoreUserDataRequest):

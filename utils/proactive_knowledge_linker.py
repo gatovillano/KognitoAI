@@ -18,9 +18,9 @@ import numpy as np
 from scipy.spatial.distance import cosine
 
 # Importaciones de la base de datos y la configuración
-from core.database import ProactiveInsight, SessionLocal, Nota, Account
+from core.database import ProactiveInsight, SessionLocal, Nota, Account, AnalyzedPair
 from utils.db_session import DBSession
-from sqlalchemy import select
+from sqlalchemy import select, or_, and_
 
 from langchain_core.embeddings import Embeddings
 
@@ -147,6 +147,30 @@ def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
         return 0.0
     
     return 1 - cosine(np_vec1, np_vec2)
+
+async def has_been_analyzed(db_session: Any, account_id: str, item1_id: str, item2_id: str) -> bool:
+    """Verifica si un par de ítems ya ha sido analizado."""
+    # Asegurar orden lexicográfico para la unicidad
+    doc_id_a, doc_id_b = sorted([item1_id, item2_id])
+    stmt = select(AnalyzedPair).where(
+        AnalyzedPair.account_id == uuid.UUID(account_id),
+        AnalyzedPair.document_id_a == doc_id_a,
+        AnalyzedPair.document_id_b == doc_id_b
+    )
+    result = await db_session.execute(stmt)
+    return result.scalar_one_or_none() is not None
+
+async def mark_as_analyzed(db_session: Any, account_id: str, item1_id: str, item2_id: str):
+    """Marca un par de ítems como analizado."""
+    doc_id_a, doc_id_b = sorted([item1_id, item2_id])
+    analyzed_pair = AnalyzedPair(
+        account_id=uuid.UUID(account_id),
+        document_id_a=doc_id_a,
+        document_id_b=doc_id_b,
+        last_analyzed_at=datetime.datetime.now(datetime.timezone.utc)
+    )
+    db_session.add(analyzed_pair)
+    await db_session.commit()
 
 async def extract_entities(text: str) -> List[Dict[str, str]]:
     """Extrae entidades nombradas de un texto usando spaCy."""
@@ -425,42 +449,57 @@ async def store_proactive_insight(insight_data: Dict[str, Any]):
         logger.error(f"Error guardando insight en BBDD: {e}", exc_info=True)
 
 # --- LÓGICA DE ANÁLISIS REFACTORIZADA ---
-async def analyze_entry(entry_to_analyze: Dict[str, Any], knowledge_pool: List[Dict[str, Any]]):
-    """Analiza una sola entrada contra todo el pool de conocimiento."""
+async def analyze_entry(entry_to_analyze: Dict[str, Any], knowledge_pool: List[Dict[str, Any]], top_k_candidates: int = 10):
+    """
+    Analiza una sola entrada contra el pool de conocimiento, evitando re-análisis de pares ya procesados.
+    """
     account_id = entry_to_analyze.get('account_id')
-    if not account_id:
-        logger.warning("No se proporcionó account_id para el análisis de la entrada. No se guardarán insights.")
+    entry_id = entry_to_analyze.get('id')
+    if not account_id or not entry_id:
+        logger.warning("No se proporcionó account_id o ID de entrada para el análisis. No se guardarán insights.")
         return
 
     entry_embedding = await get_text_embedding(entry_to_analyze.get('content', ''))
-    if not entry_embedding: 
+    if not entry_embedding:
         return
 
     # Filtra el pool para no compararse a sí mismo
-    candidate_pool = [item for item in knowledge_pool if item.get('id') != entry_to_analyze.get('id')]
+    candidate_pool = [item for item in knowledge_pool if item.get('id') != entry_id]
     
     # Encuentra los N mejores candidatos por similitud vectorial
-    top_candidates = await find_top_k_similar_items(entry_embedding, candidate_pool, k=5)
+    top_candidates = await find_top_k_similar_items(entry_embedding, candidate_pool, k=top_k_candidates)
 
-    for candidate in top_candidates:
-        analysis = await analyze_relationship_with_llm(entry_to_analyze, candidate)
-        if analysis and analysis.get("relationship_type") != "Sin Relación Significativa":
-            relationship_type = analysis.get("relationship_type")
-            insight_data = {
-                'account_id': account_id,
-                'type': relationship_type.lower() if relationship_type else "unknown",
-                'insight_message': analysis.get('explanation', ''),
-                'confidence_score': analysis.get('confidence_score', 0.0),
-                'action_suggestion': analysis.get('action_suggestion', ''),
-                'related_items': [entry_to_analyze, candidate]
-            }
-            await store_proactive_insight(insight_data)
+    async with DBSession(SessionLocal) as db:
+        for candidate in top_candidates:
+            candidate_id = candidate.get('id')
+            if not candidate_id:
+                continue
+
+            # Verificar si el par ya ha sido analizado
+            if await has_been_analyzed(db, account_id, entry_id, candidate_id):
+                logger.info(f"Par ({entry_id}, {candidate_id}) ya analizado. Saltando.")
+                continue
+
+            analysis = await analyze_relationship_with_llm(entry_to_analyze, candidate)
+            if analysis and analysis.get("relationship_type") != "Sin Relación Significativa":
+                relationship_type = analysis.get("relationship_type")
+                insight_data = {
+                    'account_id': account_id,
+                    'type': relationship_type.lower() if relationship_type else "unknown",
+                    'insight_message': analysis.get('explanation', ''),
+                    'confidence_score': analysis.get('confidence_score', 0.0),
+                    'action_suggestion': analysis.get('action_suggestion', ''),
+                    'related_items': [entry_to_analyze, candidate]
+                }
+                await store_proactive_insight(insight_data)
+                await mark_as_analyzed(db, account_id, entry_id, candidate_id) # Marcar como analizado
 
 # --- FUNCIÓN PRINCIPAL DEL JOB REFACTORIZADA ---
 async def run_batch_analysis_job(
     account_id_filter: Optional[str] = None,
     since_timestamp: Optional[datetime.datetime] = None,
     topic_keywords: Optional[List[str]] = None,
+    top_k: Optional[int] = None, # Nuevo parámetro para top_k
     thread_id: Optional[str] = None # Nuevo parámetro
 ):
     """
@@ -491,19 +530,34 @@ async def run_batch_analysis_job(
             account_id = str(account_id_uuid)
             logger.info(f"==> Procesando cuenta: {account_id} <==")
 
-            knowledge_pool = await get_all_knowledge(account_id)
-            if not knowledge_pool:
+            # Obtener el pool de conocimiento completo del usuario
+            full_knowledge_pool = await get_all_knowledge(account_id)
+            if not full_knowledge_pool:
                 logger.info(f"La cuenta {account_id} no tiene conocimiento para analizar. Saltando.")
+                continue
+
+            # Si hay palabras clave, filtrar el knowledge_pool por ellas
+            if topic_keywords:
+                knowledge_pool_filtered = [
+                    item for item in full_knowledge_pool
+                    if any(keyword.lower() in item.get('content', '').lower() for keyword in topic_keywords)
+                ]
+                logger.info(f"Knowledge pool filtrado por palabras clave. Original: {len(full_knowledge_pool)}, Filtrado: {len(knowledge_pool_filtered)}")
+            else:
+                knowledge_pool_filtered = full_knowledge_pool
+            
+            if not knowledge_pool_filtered:
+                logger.info(f"El pool de conocimiento filtrado por palabras clave está vacío para la cuenta {account_id}. Saltando.")
                 continue
 
             # Identificar qué ítems analizar (nuevos o todos)
             items_to_analyze = []
             if since_timestamp:
-                items_to_analyze = [item for item in knowledge_pool if item.get('timestamp') and item['timestamp'] > since_timestamp]
+                items_to_analyze = [item for item in knowledge_pool_filtered if item.get('timestamp') and item['timestamp'] > since_timestamp]
             elif topic_keywords:
-                items_to_analyze = [item for item in knowledge_pool if any(keyword.lower() in item.get('content', '').lower() for keyword in topic_keywords)]
+                items_to_analyze = [item for item in knowledge_pool_filtered if any(keyword.lower() in item.get('content', '').lower() for keyword in topic_keywords)]
             else:
-                items_to_analyze = knowledge_pool
+                items_to_analyze = knowledge_pool_filtered
 
             if not items_to_analyze:
                 logger.info(f"No se encontraron ítems que cumplan los criterios de análisis para la cuenta {account_id}.")
@@ -512,7 +566,7 @@ async def run_batch_analysis_job(
             logger.info(f"Encontrados {len(items_to_analyze)} ítems para analizar en profundidad en la cuenta {account_id}.")
 
             for item in items_to_analyze:
-                await analyze_entry(item, knowledge_pool)
+                await analyze_entry(item, knowledge_pool_filtered, top_k_candidates=top_k if top_k is not None else 10)
     
     logger.info("--- [ANALYSIS JOB] Trabajo de vinculación de conocimiento completado. ---")
     
@@ -535,13 +589,17 @@ async def run_batch_analysis_job(
 
 # --- TRIGGER REFACTORIZADO ---
 async def proactive_knowledge_linker_trigger(new_entry: Dict[str, Any]):
-    """Trigger que se llama cuando se añade algo nuevo. Solo se activa para notas, no para documentos."""
-    if new_entry.get('type') == 'note':
-        async def run_analysis():
-            knowledge_pool = await get_all_knowledge(new_entry['account_id'])
-            await analyze_entry(new_entry, knowledge_pool)
-        asyncio.create_task(run_analysis())
-        logger.info("[Proactive Linker] Tarea de análisis proactivo programada en segundo plano para una nota.")
-    else:
-        logger.info("[Proactive Linker] Análisis proactivo no programado para documentos. Se analizará en el job nocturno.")
-        # TODO: Implementar job nocturno para análisis de documentos una vez al día.
+    """Trigger que se llama cuando se añade algo nuevo. Ahora se activa para todos los tipos de contenido."""
+    # Eliminar la condición `if new_entry.get('type') == 'note':` para analizar todos los tipos
+    async def run_analysis():
+        account_id = new_entry.get('account_id')
+        if not account_id:
+            logger.warning("[Proactive Linker] Entrada sin account_id. No se puede programar el análisis proactivo.")
+            return
+
+        knowledge_pool = await get_all_knowledge(account_id)
+        # Usar 10 como límite por defecto para el análisis proactivo, como se acordó
+        await analyze_entry(new_entry, knowledge_pool, top_k_candidates=10)
+    
+    asyncio.create_task(run_analysis())
+    logger.info("[Proactive Linker] Tarea de análisis proactivo programada en segundo plano para una nueva entrada.")

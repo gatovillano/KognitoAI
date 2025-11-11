@@ -18,6 +18,7 @@ import { InlineMarkdownRenderer } from './InlineMarkdownRenderer';
 import { toast } from 'sonner';
 import { useDrag, useDrop } from 'react-dnd';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
+import { WebSocketMessage } from '@/hooks/useWebSocket';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -47,7 +48,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [platformFilter, setPlatformFilter] = useState<'all' | 'web' | 'telegram'>('all');
 
-  const { latestMessage } = useWebSocketContext();
+  const { registerMessageHandler } = useWebSocketContext();
 
   useEffect(() => {
     const updateActiveWorkspace = async () => {
@@ -99,33 +100,38 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
   }, [user, activeWorkspaceId]);
 
   useEffect(() => {
-    if (!latestMessage) return;
+    const handleWebSocketMessage = (message: WebSocketMessage) => {
+      if (!message) return;
 
-    const { type, ...data } = latestMessage;
+      const { type, ...data } = message;
 
-    if (type === 'thread_title_updated') {
-      toast.info(`Conversación renombrada: "${data.new_title}"`);
-      const { thread_id, new_title } = data;
-      const updateThreadTitle = (thread: ChatThread) =>
-        thread.id === thread_id ? { ...thread, title: new_title } : thread;
+      if (type === 'thread_title_updated') {
+        toast.info(`Conversación renombrada: "${data.new_title}"`);
+        const { thread_id, new_title } = data;
+        const updateThreadTitle = (thread: ChatThread) =>
+          thread.id === thread_id ? { ...thread, title: new_title } : thread;
 
-      setThreads(prev => prev.map(updateThreadTitle));
-      setPinnedThreads(prev => prev.map(updateThreadTitle));
-    } else if (type === 'thread_created') {
-      const newThread: ChatThread = data.thread;
-      const shouldAdd = (activeWorkspaceId && newThread.workspace_id === activeWorkspaceId) || (!activeWorkspaceId && !newThread.workspace_id);
-      if (shouldAdd) {
-        setThreads(prev => {
-          const exists = prev.some(t => t.id === newThread.id);
-          if (!exists) {
-            return [newThread, ...prev].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-          }
-          return prev;
-        });
-        toast.success(`Nueva conversación creada: "${newThread.title || 'Sin título'}"`);
+        setThreads(prev => prev.map(updateThreadTitle));
+        setPinnedThreads(prev => prev.map(updateThreadTitle));
+      } else if (type === 'thread_created') {
+        const newThread: ChatThread = data.thread;
+        const shouldAdd = (activeWorkspaceId && newThread.workspace_id === activeWorkspaceId) || (!activeWorkspaceId && !newThread.workspace_id);
+        if (shouldAdd) {
+          setThreads(prev => {
+            const exists = prev.some(t => t.id === newThread.id);
+            if (!exists) {
+              return [newThread, ...prev].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+            }
+            return prev;
+          });
+          toast.success(`Nueva conversación creada: "${newThread.title || 'Sin título'}"`);
+        }
       }
-    }
-  }, [latestMessage, activeWorkspaceId]);
+    };
+
+    const unregister = registerMessageHandler(handleWebSocketMessage);
+    return unregister;
+  }, [registerMessageHandler, activeWorkspaceId]);
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(e.target.value);

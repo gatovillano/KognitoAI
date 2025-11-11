@@ -406,7 +406,7 @@ class CogneeIntegration:
 
         for i, doc in enumerate(documents):
             # Obtener el nombre del archivo
-            file_name = doc.get("title") or doc.get("metadata", {}).get("file_name")
+            file_name = doc.get("title") or doc.get("metadata", {}).get("file_name") or doc.get("file_name")
 
             if not file_name:
                 logger.warning(f"⚠️ Documento {i} sin nombre de archivo: {doc}")

@@ -3,7 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/components/ThemeProvider";
-import { Toaster } from "@/components/ui/toaster"; // Import Toaster
+import { Toaster } from "@/components/ui/sonner"; // Importar Toaster de sonner
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -28,7 +28,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           >
             {children}
           </ThemeProvider>
-          <Toaster /> {/* Add Toaster component here */}
+          <Toaster richColors position="top-right" /> {/* Configurar Toaster de sonner */}
         </AuthProvider>
       </body>
     </html>

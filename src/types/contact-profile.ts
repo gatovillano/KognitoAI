@@ -1,7 +1,11 @@
 export interface ContactProfile {
   id: string;
-  name: string;
-  email: string;
-  phone?: string;
-  // Agrega aquí cualquier otra propiedad que un perfil de contacto deba tener
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  tags: string[] | null;
+  category: string | null;
+  custom_fields: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
 }

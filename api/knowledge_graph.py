@@ -338,7 +338,8 @@ async def process_knowledge_graph_optimized(
         await adapter.add_cognee_results_to_graph(
             graph_data.get('entities', []),
             graph_data.get('relationships', []),
-            workspace_id=request.workspace_id # Pasar workspace_id
+            workspace_id=request.workspace_id, # Pasar workspace_id
+            account_id=current_user['account_id']
         )
  
         logger.info(f"✅ Procesamiento optimizado completado para {'workspace ' + request.workspace_id if request.workspace_id else 'contexto general'}")
@@ -424,8 +425,13 @@ async def process_knowledge_graph_with_cooccurrence(
  
         async def save_after_phase2(entities, relationships):
             logger.info("💾 Guardando después de Fase 2...")
-            # Aquí también debemos pasar el workspace_id al adapter si queremos que los nodos se asocien al workspace
-            await adapter.add_cognee_results_to_graph(entities, relationships, workspace_id=request.workspace_id)
+            # Aquí también debemos pasar el workspace_id y account_id al adapter
+            await adapter.add_cognee_results_to_graph(
+                entities,
+                relationships,
+                workspace_id=request.workspace_id,
+                account_id=current_user['account_id']
+            )
             logger.info(f"✅ Guardado Fase 2: {len(entities)} entidades, {len(relationships)} relaciones")
  
         processor.set_save_callback(save_after_phase2)
@@ -441,7 +447,8 @@ async def process_knowledge_graph_with_cooccurrence(
         await adapter.add_cognee_results_to_graph(
             graph_data.get('entities', []),
             graph_data.get('relationships', []),
-            workspace_id=request.workspace_id # Pasar workspace_id
+            workspace_id=request.workspace_id,
+            account_id=current_user['account_id']
         )
  
         logger.info(f"✅ Procesamiento con co-ocurrencias completado para {'workspace ' + request.workspace_id if request.workspace_id else 'contexto general'}")
@@ -999,40 +1006,35 @@ async def get_knowledge_graph_data(
     """
     try:
         db = get_graph_db()
+        
+        # Parámetros iniciales siempre incluyen el account_id
+        params = {'account_id': current_user['account_id']}
 
-        # Consulta Cypher base para obtener nodos y relaciones
-        query = """
-        MATCH (n)
-        """
+        # Construir la cláusula WHERE dinámicamente
+        where_clauses = ["n.account_id = $account_id"]
         
-        # Modificar cláusula WHERE para manejar workspace_id opcional
-        if workspace_id:
-            if workspace_id.lower() == "all":
-                # Si es "all", no se añade ninguna cláusula WHERE de workspace_id
-                pass
-            elif workspace_id.lower() == "global_context":
-                # Si es "global_context", incluir solo nodos sin workspace_id
-                query += """
-                WHERE n.workspace_id IS NULL
-                """
+        if workspace_id and workspace_id.lower() != "all":
+            if workspace_id.lower() == "global_context":
+                where_clauses.append("n.workspace_id IS NULL")
             else:
-                # Para un workspace_id específico, los nodos deben pertenecer a ese workspace.
-                query += f"""
-                WHERE n.workspace_id = '{workspace_id}'
-                """
-        else:
-            # Por defecto, si no se especifica workspace_id, mostrar solo el contexto global
-            query += """
-            WHERE n.workspace_id IS NULL
-            """
+                where_clauses.append("n.workspace_id = $workspace_id")
+                params['workspace_id'] = workspace_id
+
+        # Unir cláusulas
+        where_statement = " WHERE " + " AND ".join(where_clauses)
         
-        query += """
+        # Consulta Cypher para obtener nodos y relaciones del usuario
+        query = f"""
+        MATCH (n)
+        {where_statement}
         OPTIONAL MATCH (n)-[r]-(m)
+        WHERE m.account_id = $account_id OR m IS NULL
         RETURN n, r, m
+        LIMIT 100
         """
         
         logger.info(f"Executing Cypher Query: {query}")
-        result = await db.execute_query(query)
+        result = await db.execute_query(query, params)
         logger.info(f"Cypher Query Result (first 5 records): {result[:5]}")
  
         nodes_map = {}

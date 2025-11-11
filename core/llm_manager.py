@@ -99,7 +99,9 @@ async def get_enhanced_llm_response(
         if not llm:
             raise ValueError("LLM no inicializado")
 
+        logger.info(f"📝 Prompt enviado al LLM: {enriched_prompt[:1000]}...") # Log del prompt
         response = await _invoke_llm_cached(llm, enriched_prompt)
+        logger.info(f"🗣️ Respuesta cruda del LLM: {response.content[:1000]}...") # Log de la respuesta cruda del LLM
 
         # 4. Procesar y enriquecer la respuesta
         enhanced_response = {

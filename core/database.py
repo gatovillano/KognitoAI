@@ -28,6 +28,7 @@ Telegram, una aplicación web u otra futura integración.
 import logging
 import asyncio
 import uuid
+import json
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple, List
 import pytz
@@ -52,6 +53,11 @@ from pgvector.sqlalchemy import Vector
 from core.config import settings
 from utils.db_session import DBSession
 
+import json
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+
+# ... (other imports)
+
 # --- Configuración del Logger e Instancias de SQLAlchemy ---
 logger = logging.getLogger(__name__)
 
@@ -62,7 +68,10 @@ if database_url is None:
 engine = create_async_engine(
     database_url,
     echo=False,  # Poner en True para depurar las queries SQL
-    pool_pre_ping=True
+    pool_pre_ping=True,
+    pool_recycle=3600,  # Recicla conexiones cada hora
+    json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
+    json_deserializer=json.loads
 )
 
 # Fábrica de sesiones asíncronas
@@ -190,7 +199,7 @@ class Team(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False, comment="Nombre del equipo.")
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
-    admin_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, comment="ID del administrador del equipo.")
+    admin_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete='CASCADE'), nullable=False, comment="ID del administrador del equipo.")
 
 class Workspace(Base):
     """
@@ -404,7 +413,7 @@ class Perfil(Base):
     __tablename__ = "profiles"
 
     id = Column(Integer, primary_key=True)
-    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, unique=True)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete='CASCADE'), nullable=False, unique=True)
     
     nombre = Column(String(255), nullable=True)
     gustos = Column(String, nullable=True)
@@ -555,7 +564,8 @@ class Nota(Base):
     category = Column(String, default="General")
     created_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
-    embedding = Column(Vector(384), nullable=True)
+    embedding = Column(Vector(768), nullable=True)
+    text_search_vector = Column(TSVECTOR, nullable=True)
 
     contact_profiles = relationship(
         "ContactProfile",
@@ -565,6 +575,10 @@ class Nota(Base):
 
     account = relationship("Account", back_populates="notas")
     workspace = relationship("Workspace", backref="notas")
+
+    __table_args__ = (
+        Index('ix_notas_text_search_vector', text_search_vector, postgresql_using='gin'),
+    )
 
     def __repr__(self):
         return f"<Nota(id={self.id}, title='{self.title}', account_id={self.account_id})>"
@@ -935,9 +949,32 @@ class GitHubDocument(Base):
         return f"<GitHubDocument(repo_url='{self.repo_url}', file_path='{self.file_path}')>"
 
 
+class AnalyzedPair(Base):
+    """
+    Almacena pares de IDs de documentos que ya han sido analizados para evitar re-análisis redundantes.
+    Los document_id_a y document_id_b se almacenan en orden lexicográfico para asegurar unicidad.
+    """
+    __tablename__ = "analyzed_pairs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    document_id_a = Column(String, nullable=False, index=True)
+    document_id_b = Column(String, nullable=False, index=True)
+    last_analyzed_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+    
+    __table_args__ = (
+        UniqueConstraint('account_id', 'document_id_a', 'document_id_b', name='_account_document_pair_uc'),
+    )
+
+    def __repr__(self):
+        return f"<AnalyzedPair(account_id={self.account_id}, doc_a={self.document_id_a}, doc_b={self.document_id_b})>"
+
+
 # ==============================================================================
 # SECCIÓN 2: FUNCIONES AUXILIARES DE LA BASE DE DATOS
 # ==============================================================================
+from contextlib import asynccontextmanager
+
 
 async def create_tables():
     """
@@ -957,6 +994,12 @@ async def create_tables():
                 # Crea todas las tablas que heredan de Base
                 await conn.run_sync(Base.metadata.create_all)
                 logger.info("✅ Tablas de la base de datos verificadas/creadas exitosamente.")
+
+                # Crear índices manualmente para AnalyzedPair con IF NOT EXISTS
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_analyzed_pairs_account_id ON analyzed_pairs (account_id)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_analyzed_pairs_document_ids ON analyzed_pairs (document_id_a, document_id_b)"))
+                logger.info("✅ Índices de 'analyzed_pairs' verificados/creados exitosamente.")
+
                 return  # Salir de la función si tiene éxito
         except Exception as e:
             logger.error(f"❌ Error al crear tablas en el intento {attempt + 1}: {e}")
@@ -967,12 +1010,16 @@ async def create_tables():
                 logger.error("❌ ERROR CRÍTICO: No se pudieron crear las tablas de la base de datos después de varios reintentos.")
                 raise
 
-async def get_db_session():
+async def get_db_session() -> AsyncSession:
     """
     Dependencia de FastAPI para obtener una sesión de base de datos asíncrona.
+    Este es el patrón estándar para la inyección de dependencias de sesiones en FastAPI.
     """
-    async with DBSession(SessionLocal) as session:
+    session = SessionLocal()
+    try:
         yield session
+    finally:
+        await session.close()
 
 
 
@@ -980,28 +1027,62 @@ from sqlalchemy import delete
 
 async def delete_accounts_by_ids(db_session: AsyncSession, account_ids: list[uuid.UUID]) -> int:
     """
-    Elimina cuentas de la base de datos por sus IDs.
-    Retorna el número de filas eliminadas.
+    Elimina cuentas de la base de datos por sus IDs, asegurando que todas las
+    dependencias se eliminen primero para evitar errores de ForeignKeyViolation.
     """
     try:
-        # Eliminar las identidades de plataforma asociadas primero
-        # Aunque cascade="all, delete-orphan" debería manejar esto,
-        # una eliminación explícita puede ser útil para claridad o si hay problemas de cascada.
-        delete_platform_identities_stmt = (
-            delete(PlatformIdentity)
-            .where(PlatformIdentity.account_id.in_(account_ids))
-        )
-        await db_session.execute(delete_platform_identities_stmt)
+        logger.info(f"Iniciando eliminación completa de cuentas y dependencias para IDs: {account_ids}")
+
+        # --- Fase 1: Eliminar dependencias complejas y de asociación ---
         
-        # Eliminar las cuentas
-        delete_accounts_stmt = (
-            delete(Account)
-            .where(Account.id.in_(account_ids))
-        )
+        # Eliminar de tablas de asociación
+        await db_session.execute(delete(agenda_event_attendees_association).where(agenda_event_attendees_association.c.account_id.in_(account_ids)))
+        
+        # Eliminar WorkspacePermissions antes que Workspaces
+        await db_session.execute(delete(WorkspacePermission).where(WorkspacePermission.account_id.in_(account_ids)))
+        
+        # Eliminar TeamMembers antes que Teams
+        await db_session.execute(delete(TeamMember).where(TeamMember.account_id.in_(account_ids)))
+
+        # Eliminar FormResponses (que pueden depender de la cuenta o del formulario)
+        form_ids_stmt = select(Form.id).where(Form.account_id.in_(account_ids))
+        form_ids_result = await db_session.execute(form_ids_stmt)
+        form_ids = form_ids_result.scalars().all()
+        if form_ids:
+            await db_session.execute(delete(FormResponse).where(FormResponse.form_id.in_(form_ids)))
+        await db_session.execute(delete(FormResponse).where(FormResponse.account_id.in_(account_ids)))
+            
+        # Eliminar Photos y SharedAlbumLinks antes que Albums
+        album_ids_stmt = select(Album.id).where(Album.account_id.in_(account_ids))
+        album_ids_result = await db_session.execute(album_ids_stmt)
+        album_ids = album_ids_result.scalars().all()
+        if album_ids:
+            await db_session.execute(delete(SharedAlbumLink).where(SharedAlbumLink.album_id.in_(album_ids)))
+            await db_session.execute(delete(Photo).where(Photo.album_id.in_(album_ids)))
+
+        # --- Fase 2: Eliminar entidades que dependen directamente de Account ---
+        
+        direct_dependents = [
+            PlatformIdentity, Perfil, ContactProfile, Form, Nota, Album,
+            AgendaEvent, Recordatorio, ProactiveInsight, VerificationCode,
+            AnalysisTask, MindmapTask, UploadTask, Task, GitHubDocument,
+            UserDocumentTopic, ChatThread, LangchainPgEmbedding, Workspace,
+            AnalyzedPair
+        ]
+        for model in direct_dependents:
+            if hasattr(model, 'account_id'):
+                await db_session.execute(delete(model).where(model.account_id.in_(account_ids)))
+
+        # Caso especial para Team (usa admin_id)
+        await db_session.execute(delete(Team).where(Team.admin_id.in_(account_ids)))
+
+        # --- Fase 3: Eliminar la cuenta principal ---
+        logger.info("Eliminando las cuentas principales...")
+        delete_accounts_stmt = delete(Account).where(Account.id.in_(account_ids))
         result = await db_session.execute(delete_accounts_stmt)
         
         await db_session.commit()
-        logger.info(f"✅ Eliminadas {result.rowcount} cuentas con IDs: {account_ids}")
+        logger.info(f"✅ Eliminadas {result.rowcount} cuentas y todas sus dependencias con IDs: {account_ids}")
         return result.rowcount
     except Exception as e:
         logger.error(f"❌ Error al eliminar cuentas con IDs {account_ids}: {e}", exc_info=True)

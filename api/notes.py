@@ -8,6 +8,7 @@ import io # Para manejar el PDF en memoria
 import markdown # Para convertir Markdown a HTML
 from weasyprint import HTML, CSS # Para generar PDF desde HTML
 
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse # Para devolver el PDF
 from pydantic import BaseModel
@@ -24,6 +25,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import SessionLocal
 from core.notes_manager import NotesManager
 from utils.security import get_current_account_id, check_workspace_permission
+import os
+import shutil
+from pathlib import Path
 from api.contact_profiles import ContactProfileResponse # Importar ContactProfileResponse
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -113,8 +117,8 @@ async def generate_note_pdf_endpoint(
 
     buffer = io.BytesIO()
 
-    # Convertir Markdown a HTML
-    html_content = markdown.markdown(note_data["content"])
+    # Convertir Markdown a HTML, asegurando el soporte para tablas
+    html_content = markdown.markdown(note_data["content"], extensions=['tables'])
 
     # Convertir created_at a datetime si es una cadena y asegurar que siempre esté definida
     created_at_dt = note_data['created_at']
@@ -133,11 +137,24 @@ async def generate_note_pdf_endpoint(
     <head>
         <title>{note_data.get("title", "Nota sin título")}</title>
         <style>
-            body {{ font-family: sans-serif; margin: 1in; }}
-            h1 {{ color: #333; border-bottom: 1px solid #eee; padding-bottom: 0.2em; }}
-            p {{ line-height: 1.5; }}
+            body {{ font-family: sans-serif; margin: 0.3in; font-size: 10pt; text-align: justify; }}
+            h1 {{ color: #333; border-bottom: 1px solid #eee; padding-bottom: 0.2em; font-size: 16pt; }}
+            p {{ line-height: 1.4; text-align: justify; }}
             pre {{ background-color: #f4f4f4; padding: 1em; border-radius: 5px; overflow-x: auto; }}
             code {{ font-family: monospace; }}
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 1em;
+            }}
+            th, td {{
+                border: 1px solid #ccc;
+                padding: 0.5em;
+                text-align: left;
+            }}
+            th {{
+                background-color: #f0f0f0;
+            }}
             .note-meta {{ font-size: 0.9em; color: #666; margin-top: 1em; border-top: 1px solid #eee; padding-top: 0.5em; }}
         </style>
     </head>
@@ -285,6 +302,23 @@ async def unlink_profile_from_note_endpoint(
         raise HTTPException(status_code=404, detail="Vínculo no encontrado, o nota/perfil no autorizado.")
     return {"message": f"Perfil {profile_link_request.profile_id} desvinculado de la nota {note_id} correctamente."}
 
+@router.post("/notes/{note_id}/unshare", summary="Descompartir una nota de su workspace")
+async def unshare_note_endpoint(
+    note_id: int,
+    current_account_id: str = Depends(get_current_account_id),
+    notes_manager: NotesManager = Depends(get_notes_manager)
+):
+    """
+    Desvincula una nota de su workspace, estableciendo su workspace_id a None.
+    """
+    success = await notes_manager.unshare_note_from_workspace(
+        account_id=current_account_id,
+        note_id=note_id
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Nota no encontrada o no autorizada para descompartir.")
+    return {"message": f"Nota con ID {note_id} descompartida de su workspace correctamente."}
+
 @router.post("/add-note")
 async def add_note_endpoint(
     note: NoteRequest,
@@ -351,3 +385,64 @@ async def delete_note_endpoint(
     if not success:
         raise HTTPException(status_code=404, detail="Nota no encontrada o no pertenece al usuario.")
     return {"message": f"Nota con ID {note.note_id} eliminada."}
+
+
+@router.post("/notes/delete-all-embeddings", summary="Delete all note embeddings")
+async def delete_all_note_embeddings_endpoint(
+    current_account_id: str = Depends(get_current_account_id),
+    notes_manager: NotesManager = Depends(get_notes_manager)
+):
+    """
+    Deletes all embeddings for all notes of the current user.
+    """
+    deleted_count = await notes_manager.delete_all_note_embeddings(current_account_id)
+    return {"message": f"Deleted {deleted_count} note embeddings."}
+
+
+@router.post("/notes/revectorize-all", summary="Re-vectorize all notes")
+async def revectorize_all_notes_endpoint(
+    current_account_id: str = Depends(get_current_account_id),
+    notes_manager: NotesManager = Depends(get_notes_manager)
+):
+    """
+    Re-vectorizes all notes for the current user.
+    """
+    revectorized_count = await notes_manager.revectorize_all_notes(current_account_id)
+    return {"message": f"Re-vectorized {revectorized_count} notes."}
+
+
+@router.post("/upload-image", summary="Subir imagen para notas")
+async def upload_image(
+    file: UploadFile = File(...),
+    current_account_id: str = Depends(get_current_account_id)
+):
+    """
+    Sube una imagen y devuelve la URL para usarla en las notas.
+    """
+    # Validar tipo de archivo
+    allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Tipo de archivo no permitido. Solo imágenes JPEG, PNG, GIF y WebP.")
+
+    # Validar tamaño del archivo (máximo 5MB)
+    max_size = 5 * 1024 * 1024  # 5MB
+    file_content = await file.read()
+    if len(file_content) > max_size:
+        raise HTTPException(status_code=400, detail="El archivo es demasiado grande. Máximo 5MB.")
+
+    # Crear directorio si no existe
+    upload_dir = Path("media/uploads/notes")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generar nombre único para el archivo
+    file_extension = Path(file.filename).suffix.lower()
+    unique_filename = f"{current_account_id}_{uuid.uuid4()}{file_extension}"
+    file_path = upload_dir / unique_filename
+
+    # Guardar el archivo
+    with open(file_path, "wb") as buffer:
+        buffer.write(file_content)
+
+    # Devolver la URL relativa
+    image_url = f"/media/uploads/notes/{unique_filename}"
+    return {"url": image_url}

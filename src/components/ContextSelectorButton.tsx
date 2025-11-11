@@ -43,12 +43,12 @@ export function ContextSelectorButton({ onContextSelected, currentContext, works
   const fetchDocuments = useCallback(async () => {
     setIsLoading(true);
     try {
-      const apiParams = workspaceId ? { workspace_id: workspaceId } : {};
+      const apiParams = { workspace_id: workspaceId || null };
       console.log('DEBUG ContextSelectorButton: workspaceId before API call:', workspaceId);
       
       const [collectionsRes, documentsRes] = await Promise.all([
-        apiClient.get('/api/documents/collections', { params: apiParams }),
-        apiClient.get('/api/documents/list-documents', { params: apiParams }),
+        apiClient.get('/api/collections', { params: { ...apiParams } }),
+        apiClient.get('/api/documents/list-documents', { params: { ...apiParams } }),
       ]);
 
 

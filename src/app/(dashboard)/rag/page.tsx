@@ -8,9 +8,10 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2, Upload, CheckCircle, XCircle, Clock, Network, ChevronDown, Settings } from 'lucide-react';
+import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2, Upload, CheckCircle, XCircle, Clock, Network, ChevronDown, Settings, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Info } from 'lucide-react';
 
 import { UploadDocumentDialog } from './upload-document-dialog';
@@ -42,6 +43,7 @@ export default function RagCollectionsPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isGitHubRepoOpen, setIsGitHubRepoOpen] = useState(false);
   const [deletingTopic, setDeletingTopic] = useState<string | null>(null);
+  const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Estado para controlar la visibilidad del Sheet
 
   // Estados para el seguimiento de tareas de subida
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
@@ -64,7 +66,7 @@ export default function RagCollectionsPage() {
   const fetchCollections = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await apiClient.get('/api/documents/collections');
+      const response = await apiClient.get('/api/collections');
       console.log('API raw response data:', response.data); // Nuevo log para la data cruda
       setCollections(response.data);
       console.log('Collections state after update:', response.data); // Nuevo log para el estado actualizado
@@ -150,7 +152,7 @@ export default function RagCollectionsPage() {
     if (!deletingTopic) return;
     const toastId = toast.loading(`Eliminando colección...`);
     try {
-      await apiClient.post('/api/documents/collections/delete', { topic: deletingTopic });
+      await apiClient.post('/api/collections/delete', { topic: deletingTopic });
       toast.success(`Colección "${deletingTopic}" eliminada.`, { id: toastId });
       // Actualización optimista: eliminar la colección del estado inmediatamente
       setCollections(prevCollections => prevCollections.filter(col => col.topic !== deletingTopic));
@@ -201,12 +203,17 @@ export default function RagCollectionsPage() {
     );
 
     try {
-      const response = await apiClient.post('/api/documents/process-knowledge-graph',
-        topic ? { topic } : {}
-      );
+      const payload = {
+          tool_name: "cognee_knowledge_graph",
+          action: "process_documents",
+          dataset_name: topic,
+          documents: [] // Se podría añadir lógica para obtener documentos si es necesario
+      };
+
+      const response = await apiClient.post('/api/tools/run', payload);
 
       toast.success(
-        `¡Procesamiento iniciado! ${response.data.documents_count} documentos serán procesados.`,
+        `¡Creación de grafo iniciada!`,
         { id: toastId }
       );
     } catch (error) {
@@ -301,6 +308,19 @@ export default function RagCollectionsPage() {
     );
   };
 
+  const handleClearKnowledgeGraph = async () => {
+    if (window.confirm('¿Estás seguro de que quieres borrar TODO el grafo de conocimiento? Esta acción es irreversible y afectará a todos los usuarios.')) {
+      const toastId = toast.loading("Limpiando el grafo de conocimiento...");
+      try {
+        await apiClient.post('/api/clear-neo4j');
+        toast.success("El grafo de conocimiento ha sido limpiado.", { id: toastId });
+        fetchCollections(); // Recargar para reflejar cambios (e.g., has_knowledge_graph)
+      } catch (error) {
+        toast.error("Error al limpiar el grafo de conocimiento.", { id: toastId });
+      }
+    }
+  };
+
   return (
     <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 sm:mb-12 gap-4">
@@ -308,18 +328,9 @@ export default function RagCollectionsPage() {
           <h1 className="text-2xl sm:text-3xl font-bold flex items-center">
             <BookMarked className="mr-2 sm:mr-3 h-6 w-6 sm:h-8 sm:w-8 text-primary" />
             Colecciones de Conocimientos
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="ml-1 sm:ml-2 h-5 w-5 sm:h-6 sm:w-6 text-muted-foreground">
-                    <Info className="h-3 w-3 sm:h-4 sm:w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs text-center">
-                  <p>Organiza tus documentos en colecciones temáticas de conocimientos. En cada colección encontrarás herramientas de análisis tanto de cada documento como de todos los textos contenidos. También puedes extraer los tìtulos, y eliminar documentos. Todo desde el menú de Acciones.</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Button variant="ghost" size="icon" className="ml-1 sm:ml-2 h-5 w-5 sm:h-6 sm:w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+              <Info className="h-3 w-3 sm:h-4 sm:w-4" />
+            </Button>
           </h1>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
@@ -343,6 +354,13 @@ export default function RagCollectionsPage() {
               >
                 <Network className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="text-xs sm:text-sm">{isProcessingKnowledgeGraph ? "Procesando Grafos..." : "Crear Grafos de Conocimiento"}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={handleClearKnowledgeGraph}
+                className="text-red-600 focus:text-red-600 focus:bg-red-50"
+              >
+                <AlertTriangle className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                <span className="text-xs sm:text-sm">Limpiar Grafo Global</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -411,6 +429,52 @@ export default function RagCollectionsPage() {
           onLinkedObjectsUpdated={fetchCollections}
         />
       )} */}
+
+      <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="text-xl font-bold text-primary">Colecciones de Conocimientos (RAG)</SheetTitle>
+            <SheetDescription className="text-sm text-muted-foreground">
+              Este módulo te permite organizar y gestionar tus documentos de forma eficiente, extrayendo y conectando información clave para un acceso rápido y contextualizado.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
+            <p><strong>¿Qué son las Colecciones de Conocimientos?</strong></p>
+            <p>Son agrupaciones temáticas de documentos que te permiten mantener tu información organizada y relevante. Puedes crear colecciones para diferentes proyectos, temas o áreas de interés.</p>
+            
+            <p><strong>Características Principales:</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Memoria de Kognito:</strong> Los documentos que subes se integran a la "memoria" de Kognito, enriqueciendo sus respuestas por relevancia con la consulta en el chat.</li>
+              <li><strong>Organización Temática:</strong> Agrupa documentos por temas específicos para una mejor gestión.</li>
+              <li><strong>Análisis Detallado:</strong> Accede a herramientas de análisis para cada documento y para el conjunto de textos de una colección.</li>
+              <li><strong>Extracción de Títulos:</strong> Genera automáticamente títulos relevantes para tus documentos.</li>
+              <li><strong>Gestión de Documentos:</strong> Sube, edita, comparte y elimina documentos fácilmente.</li>
+              <li><strong>Grafos de Conocimiento:</strong> Convierte la información de tus documentos en grafos de conocimiento interactivos para visualizar relaciones y extraer insights.</li>
+              <li><strong>Integración con GitHub:</strong> Añade repositorios de GitHub directamente a tus colecciones para analizar código y documentación.</li>
+              <li><strong>Colaboración:</strong> Comparte colecciones con tu equipo para trabajar de forma conjunta.</li>
+            </ul>
+            
+            <p><strong>Interacción con IA:</strong></p>
+            <p>Además de la gestión manual, puedes interactuar con tus colecciones a través del chat de IA. La IA dispone de herramientas especializadas para:</p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li>Realizar búsquedas semánticas dentro de tus documentos.</li>
+              <li>Generar resúmenes y extraer información clave de colecciones específicas.</li>
+              <li>Responder preguntas utilizando el conocimiento de tus documentos.</li>
+              <li>Crear nuevos documentos o contenido basado en la información de tus colecciones.</li>
+            </ul>
+
+            <p><strong>Flujo de Trabajo Sugerido:</strong></p>
+            <ol className="list-decimal pl-5 space-y-2">
+              <li><strong>Crear Colección:</strong> Inicia creando una nueva colección para tu tema.</li>
+              <li><strong>Subir Documentos:</strong> Añade tus archivos (PDFs, textos, etc.) o repositorios de GitHub a la colección.</li>
+              <li><strong>Analizar:</strong> Utiliza las herramientas de análisis para obtener resúmenes, palabras clave y otros insights.</li>
+              <li><strong>Generar Grafos:</strong> Si tu colección es rica en datos, genera un grafo de conocimiento para una exploración visual.</li>
+              <li><strong>Interactuar:</strong> Usa la colección para responder preguntas, generar contenido o apoyar tus procesos de toma de decisiones.</li>
+            </ol>
+            <p>¡Explora y potencia tu conocimiento con las Colecciones de Conocimientos!</p>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

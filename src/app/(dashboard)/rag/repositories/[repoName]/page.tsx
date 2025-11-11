@@ -245,6 +245,10 @@ export default function RepositoryDetailPage() {
     return () => clearInterval(poller);
   }, [vectorizationPollingId]);
 
+  const isAnyAnalysisInProgress = useMemo(() => {
+    return !!docPollingId || !!collectionPollingId || !!vectorizationPollingId;
+  }, [docPollingId, collectionPollingId, vectorizationPollingId]);
+
   // Organizar documentos en una estructura de árbol de carpetas
   interface FolderNode {
     name: string;
@@ -397,6 +401,15 @@ export default function RepositoryDetailPage() {
   };
 
   return (
+    <React.Fragment>
+      {isAnyAnalysisInProgress && (
+        <div className="sticky top-0 left-0 right-0 p-2 bg-primary/10 border-b border-primary/20 text-center z-50">
+          <div className="flex items-center justify-center gap-2">
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            <span className="text-sm font-medium text-primary">Análisis en curso... Por favor, espere.</span>
+          </div>
+        </div>
+      )}
     <div className="h-full flex flex-col p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 flex-wrap gap-2">
         <div>
@@ -517,5 +530,6 @@ export default function RepositoryDetailPage() {
         repositoryName={repoName}
       />
     </div>
+    </React.Fragment>
   );
 }

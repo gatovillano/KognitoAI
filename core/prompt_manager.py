@@ -72,7 +72,9 @@ class PromptManager:
         account_id: str,
         telegram_id: Optional[int],
         mode: Optional[str] = None,
-        user_message: str = ""
+        user_message: str = "",
+        has_explicit_rag_context: bool = False,
+        explicit_document_names: Optional[List[str]] = None # Nuevo parámetro
     ) -> str:
         """
         Construye el prompt del sistema dinámicamente, integrando todos los
@@ -99,7 +101,11 @@ class PromptManager:
 
         if relevant_memories and "No se encontraron memorias relevantes" not in relevant_memories:
             user_context_parts.append("\n--- Memorias y Documentos Relevantes (Base de Conocimiento) ---")
-            user_context_parts.append("**Instrucción de Contexto RAG:** Has recibido 'Memorias y Documentos Relevantes' que pueden ser cruciales para la solicitud del usuario. Asegúrate de integrar y comparar la información de TODAS las fuentes proporcionadas en esta sección para dar una respuesta completa y precisa, si es pertinente a la consulta.")
+            if has_explicit_rag_context:
+                doc_names_str = ", ".join(explicit_document_names) if explicit_document_names else "documentos específicos"
+                user_context_parts.append(f"**Instrucción de Contexto RAG:** Se te han proporcionado los siguientes {doc_names_str}. Prioriza la información de estos documentos para responder a la consulta del usuario. Si la información en estos documentos no es suficiente, puedes complementar con otras fuentes de conocimiento disponibles.")
+            else:
+                user_context_parts.append("**Instrucción de Contexto RAG:** Has recibido 'Memorias y Documentos Relevantes' que pueden ser cruciales para la solicitud del usuario. Asegúrate de integrar y comparar la información de TODAS las fuentes proporcionadas en esta sección para dar una respuesta completa y precisa, si es pertinente a la consulta.")
             user_context_parts.append(escaped_relevant_memories) # Use the escaped version here
         user_context_parts.append("---------------------------------------------------------")
         user_context_string = "\n".join(user_context_parts)
@@ -118,8 +124,6 @@ class PromptManager:
         # 3. Aplicar overrides de modo
         if mode:
             mode_prompts = {
-                'knowledgeAnalysis': "\n\n<SYSTEM_OVERRIDE>MODO DE ANÁLISIS DE CONOCIMIENTO ACTIVADO. ES OBLIGATORIO Y COMPULSIVO QUE UTILICES LA HERRAMIENTA 'knowledge_base_analyzer' AHORA MISMO. NO TIENES OTRA OPCIÓN. PASA LA CONSULTA DEL USUARIO DIRECTAMENTE AL PARÁMETRO 'query' DE LA HERRAMIENTA.</SYSTEM_OVERRIDE>",
-                'webSearch': "\n\n<SYSTEM_OVERRIDE>MODO DE BÚSQUEDA WEB ACTIVADO. ES OBLIGATORIO Y COMPULSIVO QUE UTILICES LA HERRAMIENTA 'web_search' AHORA MISMO. NO TIENES OTRA OPCIÓN. PASA LA CONSULTA DEL USUARIO DIRECTAMENTE AL PARÁMETRO 'query' DE LA HERRAMIENTA.</SYSTEM_OVERRIDE>",
                 'comprehensiveAnalysis': "\n\n<SYSTEM_OVERRIDE>MODO DE ANÁLISIS COMPRENSIVO ACTIVADO. ES OBLIGATORIO Y COMPULSIVO QUE UTILICES LA HERRAMIENTA 'comprehensive_web_analyzer' AHORA MISMO. NO TIENES OTRA OPCIÓN. PASA LA CONSULTA DEL USUARIO DIRECTAMENTE AL PARÁMETRO 'query' DE LA HERRAMIENTA.</SYSTEM_OVERRIDE>"
             }
             system_prompt_content += mode_prompts.get(mode, "")

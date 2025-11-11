@@ -16,6 +16,7 @@ import { es } from 'date-fns/locale';
 import { EventDetailsDialog } from './EventDetailsDialog';
 import { EventEditDialog } from './EventEditDialog'; // Importar EventEditDialog
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'; // Importar Sheet
 import { TaskDialog } from './task-dialog'; // Importar TaskDialog
 import { Checkbox } from '@/components/ui/checkbox'; // Importar Checkbox para las tareas
 import { WeeklyScheduleView } from './WeeklyScheduleView'; // Importar WeeklyScheduleView
@@ -68,6 +69,7 @@ export default function AgendaPage() {
   const [selectedTask, setSelectedTask] = useState<TaskResponse | null>(null); // Nuevo estado para editar tarea
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
   const [isEventEditDialogOpen, setIsEventEditDialogOpen] = useState(false); // Nuevo estado para el diálogo de edición
+  const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
 
   const fetchEvents = async () => {
     setIsLoading(true);
@@ -273,18 +275,9 @@ export default function AgendaPage() {
               <h1 className="text-3xl font-bold flex items-center">
                   <CalendarIcon className="mr-2 h-8 w-8 text-primary" />
                   Agenda
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground">
-                          <Info className="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Tus próximos eventos y tareas.</p> {/* Texto actualizado */}
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                  <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+                    <Info className="h-4 w-4" />
+                  </Button>
               </h1>
             </div>
             <div className="flex gap-2">
@@ -553,6 +546,47 @@ export default function AgendaPage() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
+          <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+            <SheetHeader>
+              <SheetTitle className="text-xl font-bold text-primary">Módulo de Agenda</SheetTitle>
+              <SheetDescription className="text-sm text-muted-foreground">
+                Gestiona tus eventos, reuniones y tareas de forma centralizada y eficiente.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
+              <p><strong>¿Qué puedes hacer en tu Agenda?</strong></p>
+              <ul className="list-disc pl-5 space-y-2">
+                <li><strong>Agendar Eventos:</strong> Crea eventos con detalles como resumen, descripción, ubicación y participantes.</li>
+                <li><strong>Añadir Tareas:</strong> Registra tus tareas pendientes, márcalas como completadas y establece fechas de vencimiento.</li>
+                <li><strong>Vistas Personalizadas:</strong> Visualiza tu agenda por día, semana o mes para una mejor organización.</li>
+                <li><strong>Integración con Contactos:</strong> Vincula eventos y tareas a perfiles de contacto para tener toda la información contextualizada.</li>
+                <li><strong>Compartir con Equipos:</strong> Comparte eventos con tu equipo para una colaboración fluida.</li>
+                <li><strong>Edición y Eliminación:</strong> Modifica o cancela eventos y tareas de forma sencilla.</li>
+              </ul>
+
+              <p><strong>Interacción con IA:</strong></p>
+              <p>Además de la gestión manual, puedes interactuar con tu agenda a través del chat de IA. La IA dispone de herramientas especializadas para:</p>
+              <ul className="list-disc pl-5 space-y-2">
+                <li>Crear, modificar y cancelar eventos.</li>
+                <li>Añadir, completar y eliminar tareas.</li>
+                <li>Consultar tu disponibilidad y próximos compromisos.</li>
+                <li>Generar resúmenes de tus actividades y recordatorios.</li>
+              </ul>
+
+              <p><strong>Beneficios Clave:</strong></p>
+              <ul className="list-disc pl-5 space-y-2">
+                <li><strong>Organización Centralizada:</strong> Ten un control total sobre tus compromisos y responsabilidades.</li>
+                <li><strong>Productividad Mejorada:</strong> Prioriza tus tareas y eventos importantes para optimizar tu tiempo.</li>
+                <li><strong>Colaboración Efectiva:</strong> Facilita la coordinación con tu equipo en proyectos y reuniones.</li>
+                <li><strong>Recordatorios Inteligentes:</strong> Mantente al tanto de tus próximos eventos y plazos.</li>
+              </ul>
+
+              <p>¡Organiza tu día a día y optimiza tu productividad con el Módulo de Agenda!</p>
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
   );
 }

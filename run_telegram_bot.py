@@ -123,7 +123,7 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Tarea del dispatcher de PTB iniciada.")
         
         # Iniciar cliente WebSocket
-        await start_telegram_ws_client()
+        await start_telegram_ws_client(ptb_app) # Pasar la instancia de ptb_app
         logger.info("✅ Cliente WebSocket de Telegram iniciado.")
 
         # Guardar las tareas para poder cancelarlas al apagar.

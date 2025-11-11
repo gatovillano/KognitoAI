@@ -315,69 +315,38 @@ async def call_model_node(state: AgentState):
     user_message = extract_text_content(state["messages"][-1].content)
     user_profile = await get_user_profile(state['account_id'])
 
-    # --- INICIO DE LA LÓGICA DE RAG EXPLÍCITO ---
     rag_context = state.get("rag_context")
-    sources_for_prompt = []
-    relevant_memories_text = ""
-    messages_for_this_turn = list(state["messages"])
+    document_ids_for_rag = None
+    document_names_for_rag = None # Nuevo
+    has_explicit_rag_context = False
 
     if rag_context:
-        logger.info(f"Aplicando RAG explícito con {len(rag_context)} item(s) de contexto. Se inyectará el contenido completo en el mensaje del usuario.")
-        
-        from core.memory_manager import get_full_document_content
-        
-        all_content = []
-        document_ids_to_fetch = [item['id'] for item in rag_context if item.get('type') == 'document']
-        
-        for doc_id in document_ids_to_fetch:
-            content = await get_full_document_content(
-                account_id=state['account_id'],
-                document_id=doc_id,
-                workspace_id=state.get('workspace_id')
-            )
-            if content:
-                all_content.append(f"--- INICIO DEL DOCUMENTO ADJUNTO (ID: {doc_id}) ---\n{content}\n--- FIN DEL DOCUMENTO ADJUNTO ---")
+        logger.info(f"Aplicando RAG explícito con {len(rag_context)} item(s) de contexto. Se priorizará la búsqueda en estos documentos.")
+        document_ids_for_rag = [item['id'] for item in rag_context if item.get('type') == 'document']
+        document_names_for_rag = [item.get('name') for item in rag_context if item.get('type') == 'document' and item.get('name')] # Manejar 'name' de forma segura
+        has_explicit_rag_context = True
+    # --- INICIO DE LA LÓGICA DE MEMORIA MEJORADA (siempre se ejecuta ahora) ---
+    graph_db = GraphDB(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
+    graph_db.connect()
+    enhanced_memory_manager = EnhancedMemoryManager(graph_db=graph_db)
 
-        if all_content:
-            full_context_text = "\n\n".join(all_content)
-            
-            # Modificar el último mensaje (del usuario) para incluir el contexto
-            original_user_message_obj = messages_for_this_turn.pop()
-            original_user_message_text = extract_text_content(original_user_message_obj.content)
-            
-            new_message_content = (
-                f"He adjuntado uno o más documentos. Debes basar tu respuesta prioritaria y exclusivamente en su contenido. "
-                f"Aquí están los documentos:\n\n"
-                f"{full_context_text}\n\n"
-                f"Considerando la información de los documentos adjuntos, esta es mi pregunta: {original_user_message_text}"
-            )
-            
-            messages_for_this_turn.append(HumanMessage(content=new_message_content))
+    enhanced_context = await enhanced_memory_manager.get_enhanced_context(
+        user_query=user_message,
+        user_id=state['account_id'],
+        workspace_id=state.get('workspace_id'),
+        explicit_document_ids=document_ids_for_rag # Pasar los IDs de documentos explícitos
+    )
+
+    # Convert Source objects to dicts for JSON serialization
+    if enhanced_context and 'sources' in enhanced_context:
+        traditional_sources = enhanced_context['sources'].get('traditional_embeddings', {}).get('results', [])
+        enhanced_context['sources']['traditional_embeddings']['results'] = [source.dict() for source in traditional_sources]
+
+    relevant_memories_text = json.dumps(enhanced_context, indent=2, ensure_ascii=False)
+    sources_for_prompt = enhanced_context.get('sources', {}).get('traditional_embeddings', {}).get('results', [])
+    # --- FIN DE LA LÓGICA DE MEMORIA MEJORADA ---
         
-        # relevant_memories_text se deja vacío porque el contexto ya está en el mensaje del usuario
-        relevant_memories_text = ""
-    else:
-        # --- INICIO DE LA LÓGICA DE MEMORIA MEJORADA (si no hay RAG explícito) ---
-        graph_db = GraphDB(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
-        graph_db.connect()
-        enhanced_memory_manager = EnhancedMemoryManager(graph_db=graph_db)
-
-        enhanced_context = await enhanced_memory_manager.get_enhanced_context(
-            user_query=user_message,
-            user_id=state['account_id'],
-            workspace_id=state.get('workspace_id')
-        )
-
-        # Convert Source objects to dicts for JSON serialization
-        if enhanced_context and 'sources' in enhanced_context:
-            traditional_sources = enhanced_context['sources'].get('traditional_embeddings', {}).get('results', [])
-            enhanced_context['sources']['traditional_embeddings']['results'] = [source.dict() for source in traditional_sources]
-
-        relevant_memories_text = json.dumps(enhanced_context, indent=2, ensure_ascii=False)
-        sources_for_prompt = enhanced_context.get('sources', {}).get('traditional_embeddings', {}).get('results', [])
-        # --- FIN DE LA LÓGICA DE MEMORIA MEJORADA ---
-            
-    # --- FIN DE LA LÓGICA DE RAG EXPLÍCITO ---
+# --- FIN DE LA LÓGICA DE RAG EXPLÍCITO ---
     state['sources'] = sources_for_prompt
     
     from core.prompt_manager import PromptManager
@@ -389,25 +358,40 @@ async def call_model_node(state: AgentState):
     )
     
     workspace_prompt = None
+    # Inicializar system_prompt_content aquí para evitar UnboundLocalError
+    system_prompt_content = prompt_manager.build_system_prompt(
+        user_profile=user_profile,
+        relevant_memories=relevant_memories_text,
+        summary_string="",
+        custom_prompt_from_profile=str(user_profile.system_prompt) if user_profile and user_profile.system_prompt else None,
+        workspace_prompt=None, # Se establecerá más abajo si existe
+        tools=tools,
+        account_id=state['account_id'],
+        telegram_id=state.get('telegram_id'),
+        user_message=user_message,
+        has_explicit_rag_context=has_explicit_rag_context,
+        explicit_document_names=document_names_for_rag
+    )
+
     if state.get('workspace_id'):
         async with DBSession(SessionLocal) as db:
             workspace = await db.get(Workspace, uuid.UUID(state.get('workspace_id')))
             if workspace and workspace.system_prompt:
                 workspace_prompt = str(workspace.system_prompt)
 
-    system_prompt_content = prompt_manager.build_system_prompt(
-        user_profile=user_profile,
-        relevant_memories=relevant_memories_text,
-        summary_string="",
-        custom_prompt_from_profile=str(user_profile.system_prompt) if user_profile and user_profile.system_prompt else None,
-        workspace_prompt=workspace_prompt,
-        tools=tools,
-        account_id=state['account_id'],
-        telegram_id=state.get('telegram_id'),
-        user_message=user_message
-    )
-    
-    # 2. Preparar el LLM con herramientas
+            system_prompt_content = prompt_manager.build_system_prompt(
+                user_profile=user_profile,
+                relevant_memories=relevant_memories_text,
+                summary_string="",
+                custom_prompt_from_profile=str(user_profile.system_prompt) if user_profile and user_profile.system_prompt else None,
+                workspace_prompt=workspace_prompt,
+                tools=tools,
+                account_id=state['account_id'],
+                telegram_id=state.get('telegram_id'),
+                user_message=user_message,
+                has_explicit_rag_context=has_explicit_rag_context,
+                explicit_document_names=document_names_for_rag # Pasar el nuevo parámetro
+            )    # 2. Preparar el LLM con herramientas
     llm = get_main_llm()
     if not llm:
         raise ValueError("El LLM principal no está disponible.")
@@ -430,7 +414,7 @@ async def call_model_node(state: AgentState):
 
     from core.websocket_manager import send_personal_message # Importar aquí para evitar circular imports
 
-    async for chunk in chain.astream({"messages": messages_for_this_turn}):
+    async for chunk in chain.astream({"messages": state["messages"]}):
         if isinstance(chunk, AIMessage):
             # Acumular contenido
             if isinstance(chunk.content, str):

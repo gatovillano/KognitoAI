@@ -272,7 +272,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                 >
                   {isAudioLoading && playingMessageIndex === index ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : playingMessageIndex === index && !isAudioPaused ? (
+                  ) : playingMessageIndex === index && isAudioPaused ? (
+                    <Play className="h-3 w-3" />
+                  ) : playingMessageIndex === index ? (
                     <Pause className="h-3 w-3" />
                   ) : (
                     <Play className="h-3 w-3" />

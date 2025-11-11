@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, isSameMonth, isToday } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, Clock, CheckCircle2 } from 'lucide-react';
@@ -31,6 +31,7 @@ interface EventCardProps {
 }
 
 const EventCard: React.FC<EventCardProps> = ({ event, onEditEvent }) => {
+  const ref = useRef<HTMLDivElement>(null);
   const [{ isDragging }, drag] = useDrag(() => ({
     type: 'event',
     item: { id: event.id, type: 'event' },
@@ -38,11 +39,12 @@ const EventCard: React.FC<EventCardProps> = ({ event, onEditEvent }) => {
       isDragging: monitor.isDragging()
     })
   }));
+  drag(ref);
 
   return (
     <div
       key={event.id}
-      ref={drag}
+      ref={ref}
       className="p-1 rounded-md cursor-pointer hover:opacity-80 text-blue-900"
       style={{ backgroundColor: event.workspace_color || '#DBEAFE', opacity: isDragging ? 0.5 : 1 }}
       onClick={(e) => { e.stopPropagation(); onEditEvent(event as AgendaEvent); }} // Evitar que el clic se propague al día
@@ -83,23 +85,27 @@ const DayCell: React.FC<DayCellProps> = ({
   onToggleTaskCompleted,
   onMoveEvent,
 }) => {
-  const [{ isOver }, drop] = useDrop<DraggedEvent>({
-    accept: 'event',
-    drop: (item, monitor) => {
-      if (monitor.didDrop()) {
-        return;
-      }
-      onMoveEvent(item.id, day);
-    },
-    collect: (monitor) => ({
-      isOver: monitor.isOver(),
-    }),
-  });
+  const dropRef = useRef<HTMLDivElement>(null);
+  const [{ isOver }, drop] = useDrop<DraggedEvent, unknown, { isOver: boolean }>(
+    () => ({
+      accept: 'event',
+      drop: (item, monitor) => {
+        if (monitor.didDrop()) {
+          return;
+        }
+        onMoveEvent(item.id, day);
+      },
+      collect: (monitor) => ({
+        isOver: monitor.isOver(),
+      }),
+    })
+  );
+  drop(dropRef);
 
   return (
     <div
       key={day.toISOString()}
-      ref={drop}
+      ref={dropRef}
       className={`flex flex-col border rounded-lg p-2 min-h-[100px] ${!isCurrentMonth ? 'text-gray-400' : ''} ${isTodayDay ? 'border-blue-500 ring-2 ring-blue-500' : ''} ${isOver ? 'bg-blue-50' : ''}`}
       onClick={() => onCreateEvent(day)} // Manejador de clic para crear evento
     >

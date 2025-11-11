@@ -47,11 +47,13 @@ async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> Option
     Returns:
         El texto transcrito, o None si ocurre un error.
     """
+    logger.critical("--- RUNNING NEW VERSION OF TRANSCRIBE AUDIO FILE ---")
     model = await get_whisper_model()
     if not model:
         logger.error("El modelo de transcripción no está disponible.")
         return None
 
+    temp_file_path = None
     try:
         # Log para verificar el tamaño del audio antes de transcribir
         audio_file.seek(0, 2)
@@ -59,8 +61,15 @@ async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> Option
         audio_file.seek(0)
         logger.info(f"Transcribiendo archivo de audio con tamaño: {file_size} bytes y formato: {file_format}.")
 
-        # Convertir el audio a formato WAV usando pydub
-        audio_segment = AudioSegment.from_file(audio_file, format=file_format)
+        # Usar un archivo temporal para evitar problemas con pipes y formatos como webm
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_format}") as temp_file:
+            temp_file.write(audio_file.read())
+            temp_file_path = temp_file.name
+        
+        audio_file.seek(0) # Resetear el puntero del BytesIO por si se necesita en otro lado
+
+        # Convertir el audio a formato WAV usando pydub desde el archivo temporal
+        audio_segment = AudioSegment.from_file(temp_file_path, format=file_format)
         wav_file = BytesIO()
         audio_segment.export(wav_file, format="wav")
         wav_file.seek(0)
@@ -84,6 +93,10 @@ async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> Option
     except Exception as e:
         logger.error(f"Error durante la transcripción: {e}", exc_info=True)
         return None
+    finally:
+        # Asegurarse de que el archivo temporal se elimine
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
 
 import numpy as np
 
