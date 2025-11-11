@@ -18,4 +18,5 @@ export interface AlbumResponse {
   cover_photo_id: string | null;
   cover_photo?: PhotoResponse; // Add this line
   photos: PhotoResponse[];
+  total_photos?: number;
 }

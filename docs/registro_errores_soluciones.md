@@ -4,6 +4,33 @@ Este documento sirve como una bitácora para registrar los errores encontrados d
 
 ---
 
+## 10-11-2025 - `CouldntDecodeError` al transcribir archivos de audio `.webm`
+
+-   **Error**: Se produjo un `pydub.exceptions.CouldntDecodeError: Decoding failed. ffmpeg returned error code: 183` en `utils/audio_transcriber.py` al intentar transcribir un archivo de audio en formato `.webm`. El log de `ffmpeg` mostraba el error `[matroska,webm @ ...] EBML header parsing failed`.
+-   **Causa**: La librería `pydub` utiliza `ffmpeg` internamente para procesar los archivos de audio. Al pasar el contenido del audio como un objeto en memoria (`BytesIO`), `ffmpeg` recibe los datos a través de una tubería (pipe). Para formatos como WebM, que pueden requerir la capacidad de buscar (seeking) hacia adelante y atrás en el archivo para leer correctamente la cabecera y los metadatos, una tubería no seekable puede causar errores de decodificación como el fallo en el parseo de la cabecera EBML.
+-   **Solución**: Se modificó la función `transcribe_audio_file` en `utils/audio_transcriber.py`. En lugar de pasar el objeto `BytesIO` directamente a `AudioSegment.from_file`, la solución consiste en:
+    1.  Crear un archivo temporal en disco con el contenido del audio.
+    2.  Pasar la ruta de este archivo temporal a `pydub`. Esto proporciona a `ffmpeg` una fuente de archivo seekable, permitiéndole leer el formato WebM sin problemas.
+    3.  Asegurarse de que el archivo temporal se elimine de forma segura después de la operación utilizando un bloque `try...finally`.
+
+---
+
+## 07-11-2025 - `ValidationError` en `UserProfileResponse` por falta del campo `account_id`
+
+-   **Error**: Se produjo un `pydantic_core._pydantic_core.ValidationError` en la ruta `/api/admin/users` indicando que el campo `account_id` era requerido para el modelo `UserProfileResponse`.
+-   **Causa**: Las funciones `list_all_users` y `list_all_users_public` en `api/users.py` iteraban sobre una lista de cuentas de usuario para construir una lista de objetos `UserProfileResponse`. Sin embargo, al instanciar `UserProfileResponse`, no se estaba incluyendo el campo `account_id`, que es requerido por la definición del modelo Pydantic.
+-   **Solución**: Se modificaron las funciones `list_all_users` y `list_all_users_public` en `api/users.py`. En el bucle donde se construye la lista de usuarios, se añadió el campo `account_id=str(account.id)` a la instanciación de `UserProfileResponse`. Esto asegura que el objeto `UserProfileResponse` reciba todos los datos requeridos durante su creación, resolviendo así el error de validación.
+
+---
+
+## 01-11-2025 - `AttributeError: 'NoneType' object has no attribute 'get'` en `api/analysis.py`
+
+-   **Error**: Se produjo un `AttributeError: 'NoneType' object has no attribute 'get'` en la función `run_code_analysis_and_save` de `api/analysis.py`.
+-   **Causa**: El error ocurría al generar un resumen combinado de los resultados del análisis de código por chunks. Si uno de los chunks no producía un resultado (es decir, el valor de `res['result']` era `None`), el código intentaba acceder al método `.get()` de este objeto `None`, lo que provocaba el `AttributeError`.
+-   **Solución**: Se refactorizó la sección de código que genera el `combined_summary`. En lugar de una list comprehension compleja y propensa a errores, se implementó un bucle `for` explícito. Dentro del bucle, se verifica si `res['result']` existe y es válido antes de intentar acceder a su contenido. Si el resultado es `None` o está vacío, se utiliza un mensaje predeterminado ("Análisis no disponible o fallido para este chunk."). Esto hace que el código sea más robusto y legible, evitando el error cuando un chunk de análisis falla o no devuelve nada.
+
+---
+
 ## 12-09-2025 - `ValueError` por tipo de dato incorrecto en `Reranker`
 
 -   **Error**: Se produjo un `ValueError: text input must be of type 'str' (single example), 'list[str]' (batch or single pretokenized example) or 'list[list[str]]' (batch of pretokenized examples)` en `core/memory_manager.py` al llamar a la función `reranker.rerank`.
@@ -23,6 +50,7 @@ Este documento sirve como una bitácora para registrar los errores encontrados d
     1.  La variable `similarity_threshold` se utilizaba en la instanciación de `KognitoPGVectorRetriever` sin haber sido definida como parámetro en la función `get_relevant_memories`.
     2.  El modelo `ToolOutputWithSources` requiere el campo `context_for_llm`, pero en el bloque `except` se estaba intentando instanciar con un campo `content` que no existe en el modelo.
 -   **Solución**:
+
     1.  Se añadió el parámetro `similarity_threshold: float = 0.7` a la firma de la función `get_relevant_memories` y se utilizó en la instanciación del `KognitoPGVectorRetriever`.
     2.  Se corrigió la instanciación de `ToolOutputWithSources` en el bloque `except` para que utilice el campo `context_for_llm` en lugar de `content`.
 
@@ -248,3 +276,36 @@ Se solucionaron tres errores críticos que afectaban la experiencia del usuario 
 -   **Error**: Se produjo un `(psycopg.errors.UndefinedFunction) operator does not exist: text = smallint` en la función `get_full_document_content` de `core/memory_manager.py`.
 -   **Causa**: La consulta SQL intentaba comparar el campo `cmetadata->>'document_id'` (que es de tipo `text`) con el parámetro `document_id` (que se pasaba como un número, `smallint`). PostgreSQL no permite la comparación directa entre estos dos tipos de datos sin una conversión explícita.
 -   **Solución**: Se modificó la función `get_full_document_content` en `core/memory_manager.py`. Antes de añadir el parámetro `document_id` a los parámetros de la consulta, se convierte explícitamente a una cadena de texto usando `str(document_id)`. Esto asegura que la comparación en la base de datos se realice entre dos valores de tipo `text`, resolviendo el error de operador indefinido.
+
+---
+
+## 05-11-2025 - `404 Not Found` al subir documentos desde el frontend
+
+-   **Error**: Se produjo un error `404 Not Found` al intentar subir documentos desde el frontend, específicamente desde el diálogo de subida de documentos y desde el chat.
+-   **Causa**: Los componentes del frontend estaban llamando a endpoints incorrectos o inconsistentes para la subida de documentos.
+    -   `src/app/(dashboard)/rag/upload-document-dialog.tsx` estaba llamando a `/api/upload-document`.
+    -   `src/components/CommonChat.tsx` (a través de `onFileUpload` prop) estaba llamando a `/api/documents/upload-chat-document`.
+    El endpoint correcto en el backend es `/api/documents/upload-document`.
+-   **Solución**: Se actualizaron las llamadas a la API en los componentes del frontend para que apunten al endpoint correcto:
+    -   En `src/app/(dashboard)/rag/upload-document-dialog.tsx`, la llamada a `apiClient.post('/api/upload-document', ...)` se cambió a `apiClient.post('/api/documents/upload-document', ...)`.
+    -   En `src/components/CommonChat.tsx`, dentro de la función `handleFileUpload`, la llamada a `apiClient.post('/api/documents/upload-chat-document', ...)` se cambió a `apiClient.post('/api/documents/upload-document', ...)`.
+    Además, se corrigió una importación faltante de `useState` en `src/components/EmptyChat.tsx` que, aunque no directamente relacionada con el 404, era un error de compilación.
+---
+
+## 09-11-2025 - `AttributeError: 'Application' object has no attribute 'dispatcher'` en `telegram_client/websocket_client.py`
+
+-   **Error**: Se produjo un `AttributeError: 'Application' object has no attribute 'dispatcher'` al intentar crear un `CallbackContext` simulado en el cliente WebSocket de Telegram.
+-   **Causa**: El código intentaba acceder a `self.application.dispatcher` para crear una instancia de `CallbackContext` manualmente. Sin embargo, en la versión de `python-telegram-bot` utilizada, `dispatcher` no es un atributo público accesible de la instancia de `Application` de esa manera, o no estaba disponible en el momento de la llamada, lo que provocaba el error.
+-   **Solución**: Se refactorizó la creación del `CallbackContext` en el método `send_message_to_telegram` de `telegram_client/websocket_client.py`. En lugar de instanciar `CallbackContext` manualmente, se utilizó el método `self.application.create_context(mock_update)`. Este método, proporcionado por la propia librería, se encarga de crear un contexto correctamente inicializado con todos los componentes necesarios, incluyendo el `dispatcher`. Después de crear el contexto, se le asignaron los diccionarios `user_data` y `chat_data` recuperados de la capa de persistencia. Este enfoque es más robusto y se alinea mejor con las prácticas recomendadas de la librería, resolviendo el `AttributeError`.
+---
+## 10-11-2025 - La herramienta `get_agenda_tool` no muestra eventos de workspaces
+
+-   **Error**: La herramienta `get_agenda_tool` no mostraba los eventos programados que pertenecían a un workspace, solo mostraba los eventos personales del usuario.
+-   **Causa**: La función `get_agenda_for_period` en `core/agenda_manager.py`, cuando se llamaba sin un `workspace_id` específico, tenía una consulta a la base de datos que filtraba explícitamente solo los eventos donde `workspace_id` era `NULL`. Esto excluía todos los eventos asociados a cualquier workspace.
+-   **Solución**: Se modificó la lógica de la consulta en `get_agenda_for_period`. Ahora, si no se proporciona un `workspace_id`, la función primero obtiene una lista de todos los `workspace_id` a los que el usuario tiene acceso (consultando la tabla `WorkspacePermission`). Luego, la consulta principal de eventos se modifica para que devuelva los eventos donde el `workspace_id` es `NULL` (eventos personales) **O** donde el `workspace_id` está en la lista de workspaces accesibles. Esto asegura que el usuario vea una agenda completa con todos sus eventos relevantes.
+---
+## 10-11-2025 - La herramienta `get_agenda_tool` muestra la descripción en lugar del título
+
+-   **Error**: Al mostrar los eventos de la agenda, la herramienta `get_agenda_tool` mostraba la descripción completa del evento en lugar de su título o resumen.
+-   **Causa**: En la función `get_agenda_for_period` de `core/agenda_manager.py`, la línea de código que formatea la cadena de texto para cada evento estaba usando `event.description` en lugar de `event.summary`.
+-   **Solución**: Se modificó la línea de formato en `get_agenda_for_period` para que utilice `event.summary`. El cambio fue de `f"- ID {event.id}: {event.description} ..."` a `f"- ID {event.id}: {event.summary} ..."`. Esto asegura que se muestre el título del evento, que es más conciso y adecuado para una vista de agenda.

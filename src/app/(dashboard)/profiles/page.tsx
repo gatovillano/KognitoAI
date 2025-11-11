@@ -3,14 +3,16 @@
 
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input'; // Importar Input
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, User, Edit, Trash2, MoreHorizontal, Info, Mail, Phone } from 'lucide-react';
+import { Plus, User, Edit, Trash2, MoreHorizontal, Info, Mail, Phone, Search } from 'lucide-react'; // Importar Search
 import { motion, AnimatePresence } from 'framer-motion';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'; // Importar Sheet
 import { useDrag, useDrop } from 'react-dnd';
 
 import { useRouter } from 'next/navigation';
@@ -36,6 +38,8 @@ export default function ProfilesPage() {
   const [editingProfile, setEditingProfile] = useState<ContactProfile | null>(null);
   const [deletingProfile, setDeletingProfile] = useState<ContactProfile | null>(null);
   const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false);
+  const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
+  const [searchTerm, setSearchTerm] = useState(''); // Estado para el término de búsqueda
 
   const fetchProfiles = async () => {
     setIsLoading(true);
@@ -206,7 +210,14 @@ export default function ProfilesPage() {
     }
 
     if (categoryView) {
-      const groupedProfiles = profiles.reduce((groups, profile) => {
+      const filteredProfiles = profiles.filter(profile =>
+        profile.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        profile.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        profile.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        profile.tags?.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))
+      );
+
+      const groupedProfiles = filteredProfiles.reduce((groups, profile) => {
         const key = profile.category || 'Sin Categoría';
         if (!groups[key]) {
           groups[key] = [];
@@ -230,10 +241,17 @@ export default function ProfilesPage() {
       );
     }
 
+    const filteredProfiles = profiles.filter(profile =>
+      profile.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      profile.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      profile.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      profile.tags?.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+
     return (
       <motion.div layout className="grid gap-6 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-3">
         <AnimatePresence>
-          {profiles.map((profile) => (
+          {filteredProfiles.map((profile) => (
             <ProfileCard key={profile.id} profile={profile} />
           ))}
         </AnimatePresence>
@@ -242,24 +260,16 @@ export default function ProfilesPage() {
   };
 
   return (
+    <>
       <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-3xl font-bold flex items-center">
               <User className="mr-3 h-8 w-8 text-primary" />
               Mis Perfiles
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground">
-                      <Info className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Gestiona y organiza la información de tus contactos.</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+                <Info className="h-4 w-4" />
+              </Button>
             </h1>
           </div>
           <div className="flex items-center gap-2">
@@ -282,6 +292,16 @@ export default function ProfilesPage() {
             </DropdownMenu>
           </div>
         </div>
+        <div className="mb-8 relative">
+          <Input
+            type="text"
+            placeholder="Buscar perfiles por nombre, email, teléfono o etiquetas..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 pr-4 py-2 border rounded-md w-full"
+          />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+        </div>
 
         {renderProfiles()}
 
@@ -291,9 +311,7 @@ export default function ProfilesPage() {
           profile={editingProfile}
           onSaveSuccess={handleSaveSuccess}
         />
-
         
-
         <AlertDialog open={!!deletingProfile} onOpenChange={(open) => !open && setDeletingProfile(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>
@@ -309,6 +327,46 @@ export default function ProfilesPage() {
           </AlertDialogContent>
         </AlertDialog>
       </div>
+
+      <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="text-xl font-bold text-primary">Módulo de Perfiles</SheetTitle>
+            <SheetDescription className="text-sm text-muted-foreground">
+              Gestiona y organiza la información de tus contactos y las interacciones que tienes con ellos.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
+            <p><strong>¿Qué puedes hacer en tus Perfiles?</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Crear y Editar Perfiles:</strong> Registra y actualiza la información de tus contactos, incluyendo nombre, email, teléfono, etiquetas y campos personalizados.</li>
+              <li><strong>Categorizar Perfiles:</strong> Organiza tus contactos por categorías para una gestión más sencilla.</li>
+              <li><strong>Vinculación Inteligente:</strong> Conecta perfiles con notas, eventos y otros elementos para tener una visión 360 de tus interacciones.</li>
+              <li><strong>Gestión de Perfiles:</strong> Edita, elimina y visualiza tus perfiles de contacto fácilmente.</li>
+            </ul>
+
+            <p><strong>Interacción con IA:</strong></p>
+            <p>Además de la gestión manual, puedes interactuar con tus perfiles a través del chat de IA. Los perfiles se integran a la "memoria" de Kognito, enriqueciendo sus respuestas por relevancia con la consulta. La IA dispone de herramientas especializadas para:</p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li>Buscar y recuperar información de contactos.</li>
+              <li>Crear y actualizar perfiles de contacto.</li>
+              <li>Vincular eventos y notas a perfiles específicos.</li>
+              <li>Generar resúmenes de interacciones con un contacto.</li>
+            </ul>
+
+            <p><strong>Beneficios Clave:</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Centralización de Contactos:</strong> Toda la información de tus contactos en un solo lugar.</li>
+              <li><strong>Contexto Completo:</strong> Accede rápidamente a notas, eventos y otras interacciones relacionadas con cada perfil.</li>
+              <li><strong>Organización Eficiente:</strong> Categoriza y filtra tus contactos para una búsqueda rápida.</li>
+              <li><strong>Potenciado por IA:</strong> Utiliza la IA para gestionar y analizar tus relaciones de forma proactiva.</li>
+            </ul>
+
+            <p>¡Optimiza tus relaciones y la gestión de tus contactos con el Módulo de Perfiles!</p>
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }
 

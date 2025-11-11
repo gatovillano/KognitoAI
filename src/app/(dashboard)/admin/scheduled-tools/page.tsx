@@ -25,6 +25,11 @@ interface ScheduledTool {
   is_active: boolean;
 }
 
+interface User {
+  id: string;
+  name: string;
+}
+
 interface ScheduledToolsStatus {
   total_scheduled: number;
   active_jobs: number;
@@ -60,6 +65,7 @@ const DAYS_OF_WEEK = [
 
 export default function ScheduledToolsAdminPage() {
   const [scheduledTools, setScheduledTools] = useState<ScheduledTool[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [status, setStatus] = useState<ScheduledToolsStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -71,17 +77,25 @@ export default function ScheduledToolsAdminPage() {
     hour: 8,
     minute: 0
   });
+  const [editForm, setEditForm] = useState<CreateToolForm>({
+    tool_name: '',
+    schedule_type: '',
+    hour: 8,
+    minute: 0
+  });
   const { toast } = useToast();
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const [toolsResponse, statusResponse] = await Promise.all([
+      const [toolsResponse, statusResponse, usersResponse] = await Promise.all([
         apiClient.get('/api/admin/scheduled-tools'),
-        apiClient.get('/api/admin/scheduled-tools/status')
+        apiClient.get('/api/admin/scheduled-tools/status'),
+        apiClient.get('/api/admin/users')
       ]);
       setScheduledTools(toolsResponse.data);
       setStatus(statusResponse.data);
+      setUsers(usersResponse.data);
     } catch (error: any) {
       console.error('Error fetching scheduled tools:', error);
       toast({
@@ -122,8 +136,26 @@ export default function ScheduledToolsAdminPage() {
     }
   };
 
+  const handleToggleActive = async (jobName: string, currentStatus: boolean) => {
+    try {
+      await apiClient.put(`/api/admin/scheduled-tools/${jobName}`, { is_active: !currentStatus });
+      toast({
+        title: 'Éxito',
+        description: `Herramienta programada ${currentStatus ? 'desactivada' : 'activada'} exitosamente.`,
+      });
+      fetchData();
+    } catch (error: any) {
+      console.error('Error toggling scheduled tool status:', error);
+      toast({
+        title: 'Error',
+        description: error.response?.data?.detail || 'Error al cambiar el estado de la herramienta programada',
+        variant: 'destructive',
+      });
+    }
+  };
+
   const handleDeleteTool = async (jobName: string) => {
-    if (!confirm('¿Estás seguro de que quieres eliminar esta herramienta programada?')) {
+    if (!confirm('¿Estás seguro de que quieres eliminar esta herramienta programada? Esta acción es irreversible.')) {
       return;
     }
 
@@ -144,6 +176,69 @@ export default function ScheduledToolsAdminPage() {
     }
   };
 
+  const handleUpdateTool = async () => {
+    if (!selectedTool) return;
+
+    try {
+      await apiClient.put(`/api/admin/scheduled-tools/${selectedTool.job_name}`, editForm);
+      toast({
+        title: 'Éxito',
+        description: 'Herramienta programada actualizada exitosamente',
+      });
+      setIsEditDialogOpen(false);
+      fetchData();
+    } catch (error: any) {
+      console.error('Error updating scheduled tool:', error);
+      toast({
+        title: 'Error',
+        description: error.response?.data?.detail || 'Error al actualizar la herramienta programada',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleEditTool = (tool: ScheduledTool) => {
+    setSelectedTool(tool);
+    // Parse schedule_info to populate editForm. This is a simplified example.
+    // A more robust solution would involve receiving structured schedule data from the API.
+    let hour = 0;
+    let minute = 0;
+    let day_of_week: number | undefined = undefined;
+    let interval_hours: number | undefined = undefined;
+
+    // Regex para extraer la hora y el minuto
+    const timeMatch = tool.schedule_info.match(/(\d{2}):(\d{2})/);
+    if (timeMatch) {
+      hour = parseInt(timeMatch[1]);
+      minute = parseInt(timeMatch[2]);
+    }
+
+    if (tool.schedule_type === 'weekly') {
+      // Regex para extraer el día de la semana
+      const dayMatch = tool.schedule_info.match(/\(([^)]+)\)/);
+      if (dayMatch && dayMatch[1]) {
+        day_of_week = DAYS_OF_WEEK.indexOf(dayMatch[1]);
+      }
+    } else if (tool.schedule_type === 'interval') {
+      // Regex para extraer el intervalo en horas
+      const intervalMatch = tool.schedule_info.match(/cada (\d+) horas/);
+      if (intervalMatch && intervalMatch[1]) {
+        interval_hours = parseInt(intervalMatch[1]);
+      }
+    }
+
+    setEditForm({
+      tool_name: tool.tool_name,
+      schedule_type: tool.schedule_type,
+      hour: hour,
+      minute: minute,
+      day_of_week: day_of_week,
+      interval_hours: interval_hours,
+      account_id: tool.account_id,
+    });
+    setIsEditDialogOpen(true);
+  };
+
   const formatNextRun = (nextRun?: string) => {
     if (!nextRun) return 'No disponible';
     try {
@@ -160,6 +255,12 @@ export default function ScheduledToolsAdminPage() {
 
   const getScheduleTypeDisplayName = (scheduleType: string) => {
     return SCHEDULE_TYPES[scheduleType as keyof typeof SCHEDULE_TYPES] || scheduleType;
+  };
+
+  const getUserName = (accountId?: string) => {
+    if (!accountId) return 'Global';
+    const user = users.find(u => u.id === accountId);
+    return user ? user.name : accountId;
   };
 
   if (loading) {
@@ -389,7 +490,7 @@ export default function ScheduledToolsAdminPage() {
                   <TableHead>Herramienta</TableHead>
                   <TableHead>Tipo</TableHead>
                   <TableHead>Programación</TableHead>
-                  <TableHead>Cuenta</TableHead>
+                  <TableHead>Usuario</TableHead>
                   <TableHead>Próxima Ejecución</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead>Acciones</TableHead>
@@ -408,11 +509,7 @@ export default function ScheduledToolsAdminPage() {
                     </TableCell>
                     <TableCell>{tool.schedule_info}</TableCell>
                     <TableCell>
-                      {tool.account_id ? (
-                        <span className="font-mono text-xs">{tool.account_id}</span>
-                      ) : (
-                        <Badge variant="secondary">Global</Badge>
-                      )}
+                      {getUserName(tool.account_id)}
                     </TableCell>
                     <TableCell>{formatNextRun(tool.next_run)}</TableCell>
                     <TableCell>
@@ -427,9 +524,30 @@ export default function ScheduledToolsAdminPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleDeleteTool(tool.job_name)}
+                          onClick={() => handleToggleActive(tool.job_name, tool.is_active)}
+                          title={tool.is_active ? 'Desactivar' : 'Activar'}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          {tool.is_active ? (
+                            <Pause className="h-4 w-4 text-orange-500" />
+                          ) : (
+                            <Play className="h-4 w-4 text-green-500" />
+                          )}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleEditTool(tool)}
+                          title="Editar"
+                        >
+                          <Edit className="h-4 w-4 text-blue-500" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDeleteTool(tool.job_name)}
+                          title="Eliminar"
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
                         </Button>
                       </div>
                     </TableCell>
@@ -445,6 +563,129 @@ export default function ScheduledToolsAdminPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Edit Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Editar Herramienta Programada</DialogTitle>
+            <DialogDescription>
+              Modifica la configuración de la herramienta programada "{selectedTool?.job_name}"
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="edit_tool_name">Herramienta</Label>
+              <Select value={editForm.tool_name} onValueChange={(value) =>
+                setEditForm(prev => ({ ...prev, tool_name: value }))
+              } disabled> {/* Tool name usually not editable */}
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecciona una herramienta" />
+                </SelectTrigger>
+                <SelectContent>
+                  {status?.available_tools.map(tool => (
+                    <SelectItem key={tool} value={tool}>
+                      {getToolDisplayName(tool)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="edit_schedule_type">Tipo de Programación</Label>
+              <Select value={editForm.schedule_type} onValueChange={(value) =>
+                setEditForm(prev => ({ ...prev, schedule_type: value }))
+              }>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecciona el tipo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daily">Diario</SelectItem>
+                  <SelectItem value="weekly">Semanal</SelectItem>
+                  <SelectItem value="interval">Por Intervalo</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="edit_hour">Hora</Label>
+                <Input
+                  id="edit_hour"
+                  type="number"
+                  min="0"
+                  max="23"
+                  value={editForm.hour}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, hour: parseInt(e.target.value) || 0 }))}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit_minute">Minuto</Label>
+                <Input
+                  id="edit_minute"
+                  type="number"
+                  min="0"
+                  max="59"
+                  value={editForm.minute}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, minute: parseInt(e.target.value) || 0 }))}
+                />
+              </div>
+            </div>
+
+            {editForm.schedule_type === 'weekly' && (
+              <div className="grid gap-2">
+                <Label htmlFor="edit_day_of_week">Día de la Semana</Label>
+                <Select value={editForm.day_of_week?.toString()} onValueChange={(value) =>
+                  setEditForm(prev => ({ ...prev, day_of_week: parseInt(value) }))
+                }>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecciona el día" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DAYS_OF_WEEK.map((day, index) => (
+                      <SelectItem key={index} value={index.toString()}>
+                        {day}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {editForm.schedule_type === 'interval' && (
+              <div className="grid gap-2">
+                <Label htmlFor="edit_interval_hours">Intervalo (horas)</Label>
+                <Input
+                  id="edit_interval_hours"
+                  type="number"
+                  min="1"
+                  value={editForm.interval_hours || ''}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, interval_hours: parseInt(e.target.value) || undefined }))}
+                />
+              </div>
+            )}
+
+            <div className="grid gap-2">
+              <Label htmlFor="edit_account_id">ID de Cuenta (opcional)</Label>
+              <Input
+                id="edit_account_id"
+                placeholder="Dejar vacío para aplicar globalmente"
+                value={editForm.account_id || ''}
+                onChange={(e) => setEditForm(prev => ({ ...prev, account_id: e.target.value || undefined }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={() => handleUpdateTool()} disabled={!editForm.tool_name || !editForm.schedule_type}>
+              Guardar Cambios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

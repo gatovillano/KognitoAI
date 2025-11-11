@@ -27,4 +27,9 @@ if __name__ == "__main__":
     tools_logger.setLevel(logging.DEBUG)
     logger.info(f"Nivel de logging para core.tools: {logging.getLevelName(tools_logger.level)}")
 
+    # AÑADIR ESTA LÍNEA: Asegurarse de que los logs de utils.security se muestren
+    security_logger = logging.getLogger("utils.security")
+    security_logger.setLevel(logging.DEBUG)
+    logger.info(f"Nivel de logging para utils.security: {logging.getLevelName(security_logger.level)}")
+
     uvicorn.run("api.main:app", host="0.0.0.0", port=8000, reload=True)

@@ -11,6 +11,12 @@ interface WebSocketContextType {
   reconnect: () => void;
   disconnect: () => void;
   registerMessageHandler: (handler: MessageHandler) => () => void; // Takes a handler, returns an unregister function
+  diagnostics?: {
+    readyState?: number;
+    url?: string;
+    reconnectAttempts?: number;
+    lastError?: string | null;
+  };
 }
 
 const WebSocketContext = createContext<WebSocketContextType | undefined>(undefined);
@@ -28,7 +34,8 @@ export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
     isConnected,
     connectionError,
     reconnect,
-    disconnect
+    disconnect,
+    diagnostics
   } = useWebSocket({ userId: user?.id, onMessage: handleMessage });
 
   const registerMessageHandler = useCallback((handler: MessageHandler) => {
@@ -45,9 +52,10 @@ export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
       connectionError,
       reconnect,
       disconnect,
-      registerMessageHandler
+      registerMessageHandler,
+      diagnostics
     };
-  }, [isConnected, connectionError, reconnect, disconnect, registerMessageHandler]);
+  }, [isConnected, connectionError, reconnect, disconnect, registerMessageHandler, diagnostics]);
 
   return (
     <WebSocketContext.Provider value={contextValue}>

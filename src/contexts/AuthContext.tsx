@@ -10,6 +10,7 @@ interface User {
   email: string | null;
   username: string | null;
   is_admin: boolean;
+  account_id: string; // Añadido account_id
 }
 
 interface AuthContextType {
@@ -41,6 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await apiClient.get('/api/users/me', {
         headers: { Authorization: `Bearer ${newToken}` },
       });
+      console.log('AuthContext: API /api/users/me response', response.data);
       setUser(response.data);
     } catch (error) {
       console.error('Failed to fetch user', error);

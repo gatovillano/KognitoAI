@@ -27,6 +27,9 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
   const [isThemeDialogOpen, setIsThemeDialogOpen] = useState(false);
   const [isKnowledgeGapsDialogOpen, setIsKnowledgeGapsDialogOpen] = useState(false);
 
+  console.log("🔍 CollectionAnalysisDialog - Component mounted/updated");
+  console.log('🔍 CollectionAnalysisDialog - Props received:', { analysis, isOpen, onOpenChange, topic });
+
   if (!analysis) {
     console.log("❌ CollectionAnalysisDialog: No analysis data provided");
     return null;
@@ -68,6 +71,7 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
+
         <DialogContent className="max-w-5xl w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col p-0">
           <DialogHeader className="p-6 pb-4 border-b">
             <DialogTitle className="flex items-center gap-2 text-2xl font-bold text-foreground">
@@ -373,7 +377,7 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
                       {selectedTheme.related_quotes.map((quote: any, i: number) => (
                         <div key={i} className="p-3 bg-muted rounded-md border border-border/50">
                           <div className="font-medium text-sm mb-1 text-foreground">{quote.document_title}</div>
-                          <div className="text-sm text-muted-foreground italic">"{quote.quote}"</div>
+                          <div className="text-sm text-muted-foreground italic">&quot;{quote.quote}&quot;</div>
                         </div>
                       ))}
                     </div>
@@ -383,9 +387,9 @@ export function CollectionAnalysisDialog({ analysis, isOpen, onOpenChange, topic
             </ScrollArea>
           )}
           <DialogFooter className="p-6 pt-0">
-                             <Button variant="outline" onClick={() => setIsThemeDialogOpen(false)}>Cerrar</Button>
-                           </DialogFooter>
-                       </DialogContent>
+                              <Button variant="outline" onClick={() => setIsThemeDialogOpen(false)}>Cerrar</Button>
+                            </DialogFooter>
+                        </DialogContent>
       </Dialog>
       {/* Diálogo para mostrar las brechas de conocimiento en grande */}
       <QuestionSliderDialog

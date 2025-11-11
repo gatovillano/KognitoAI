@@ -41,7 +41,7 @@ export function DeleteConfirmationDialog({ document, isOpen, onOpenChange, onDel
     }
 
     try {
-      await apiClient.post('/api/delete-document', requestBody);
+      await apiClient.post('/api/documents/delete-document', requestBody);
       toast.success('Documento eliminado con éxito.');
       onDeleteSuccess();
       onOpenChange(false);

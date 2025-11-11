@@ -3,10 +3,13 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { PlusCircle, FileText } from 'lucide-react';
-import FormCard from '@/components/forms/FormCard';
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
+import { PlusCircle, FileText, Info } from 'lucide-react'; // Importar Info
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'; // Importar Sheet
+import FormCard from '@/components/forms/FormCard';
 import { Form as BaseForm } from '@/types/form';
 
 interface Form extends BaseForm {
@@ -18,6 +21,7 @@ export default function FormsPage() {
   const [forms, setForms] = useState<Form[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
 
   useEffect(() => {
     const fetchForms = async () => {
@@ -98,6 +102,9 @@ export default function FormsPage() {
           <h1 className="text-3xl font-bold flex items-center">
             <FileText className="mr-3 h-8 w-8 text-primary" />
             Mis Formularios
+            <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+              <Info className="h-4 w-4" />
+            </Button>
           </h1>
           <p className="text-muted-foreground mt-1">Crea y gestiona tus formularios para recopilar información.</p>
         </div>
@@ -107,6 +114,44 @@ export default function FormsPage() {
         </Button>
       </div>
       {renderContent()}
+
+      <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="text-xl font-bold text-primary">Módulo de Formularios</SheetTitle>
+            <SheetDescription className="text-sm text-muted-foreground">
+              Crea, gestiona y recopila respuestas a formularios personalizados para diversas necesidades.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
+            <p><strong>¿Qué puedes hacer en tus Formularios?</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Crear Formularios Personalizados:</strong> Diseña formularios con diferentes tipos de campos (texto, selección, etc.) para recopilar la información que necesites.</li>
+              <li><strong>Gestionar Formularios:</strong> Edita, visualiza y elimina tus formularios de forma sencilla.</li>
+              <li><strong>Recopilar Respuestas:</strong> Recibe y organiza las respuestas de tus usuarios directamente en el sistema.</li>
+              <li><strong>Compartir Formularios:</strong> Comparte enlaces públicos para que otros puedan responder a tus formularios.</li>
+            </ul>
+
+            <p><strong>Interacción con IA:</strong></p>
+            <p>Además de la gestión manual, puedes interactuar con tus formularios y sus respuestas a través del chat de IA. La IA dispone de herramientas especializadas para:</p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li>Generar nuevos formularios o sugerir campos basados en una descripción.</li>
+              <li>Analizar las respuestas de los formularios para extraer tendencias, resúmenes y estadísticas.</li>
+              <li>Responder preguntas sobre el contenido de las respuestas de los formularios.</li>
+              <li>Resumir el propósito y uso de un formulario específico.</li>
+            </ul>
+
+            <p><strong>Beneficios Clave:</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Recopilación de Datos Eficiente:</strong> Obtén la información que necesitas de manera estructurada.</li>
+              <li><strong>Análisis Automatizado:</strong> Deja que la IA te ayude a entender tus datos.</li>
+              <li><strong>Versatilidad:</strong> Utiliza formularios para encuestas, registros, feedback y más.</li>
+            </ul>
+
+            <p>¡Simplifica la recopilación y análisis de información con el Módulo de Formularios!</p>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

@@ -19,6 +19,7 @@ import { NoteDialog } from '../../notes/note-dialog'; // Import NoteDialog
 import { ViewNoteDialog } from '../../notes/view-note-dialog'; // Import ViewNoteDialog
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { WeeklyScheduleView } from '../../agenda/WeeklyScheduleView'; // Import WeeklyScheduleView
+import { ShareWorkspaceDialog } from '../ShareWorkspaceDialog'; // Import ShareWorkspaceDialog
 
 interface ChatThread {
   id: string;
@@ -85,6 +86,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const [selectedNoteCategory, setSelectedNoteCategory] = useState<string>('Todas'); // New state for note category filter
   const [currentDate, setCurrentDate] = useState(new Date()); // New state for current date in weekly view
   const [selectedEvent, setSelectedEvent] = useState<AgendaEvent | null>(null); // New state for selected event
+  const [isShareWorkspaceDialogOpen, setIsShareWorkspaceDialogOpen] = useState(false); // New state for ShareWorkspaceDialog
   const [selectedTask, setSelectedTask] = useState<TaskResponse | null>(null); // New state for selected task
 
   const handleEditEvent = (event: AgendaEvent) => {
@@ -112,7 +114,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const handleDeleteTask = async (task: TaskResponse) => {
     if (confirm('¿Estás seguro de que deseas eliminar esta tarea?')) {
       try {
-        await apiClient.delete(`/api/tasks/${task.id}`, { params: { workspace_id: workspaceId } });
+        await apiClient.delete(`/api/tasks/${task.id}`, { params: { ...{ workspace_id: workspaceId } } });
         setTasks(prev => prev.filter(t => t.id !== task.id));
       } catch (error) {
         console.error('Error deleting task:', error);
@@ -157,9 +159,9 @@ export default function WorkspaceDashboard({ params }: PageProps) {
       console.log('DEBUG: Fetching collections with workspace_id:', workspaceId);
       const [wsResponse, collectionsResponse, eventsResponse, tasksResponse, notesResponse] = await Promise.all([
         apiClient.get(`/api/workspaces/${workspaceId}`),
-        apiClient.get(`/api/documents/collections`, { params: { workspace_id: workspaceId } }),
+        apiClient.get(`/api/collections`, { params: { ...{ workspace_id: workspaceId } } }),
         apiClient.post('/api/list-events', { workspace_id: workspaceId }),
-        apiClient.get('/api/tasks', { params: { workspace_id: workspaceId } }),
+        apiClient.get('/api/tasks', { params: { ...{ workspace_id: workspaceId } } }),
         apiClient.post('/api/notes/list-notes', { workspace_id: workspaceId })
       ]);
       console.log('DEBUG: collectionsResponse from API:', collectionsResponse);
@@ -316,7 +318,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
     // Actualizar la lista de colecciones después de crear una nueva
     const fetchCollections = async () => {
       try {
-        const collectionsResponse = await apiClient.get(`/api/documents/collections?workspace_id=${workspaceId}`);
+        const collectionsResponse = await apiClient.get(`/api/collections?workspace_id=${workspaceId}`);
         console.log('Fetched collections after creation:', collectionsResponse.data);
         setCollections(collectionsResponse.data);
       } catch (error) {
@@ -351,7 +353,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const handleOpenAddExistingCollectionDialog = async () => {
       setLoadingCollections(true);
       try {
-        const response = await apiClient.get('/api/documents/collections');
+        const response = await apiClient.get('/api/collections');
         const allCollections = response.data.map((col: any) => ({
           id: col.topic || col.id || col.title || `collection-${Math.random().toString(36).substring(2, 11)}`,
           title: col.topic || col.title || 'Sin título',
@@ -499,7 +501,7 @@ const handleDeleteCollection = async (collectionId: string) => {
           alert('No se pudo identificar la colección para eliminar.');
           return;
         }
-        const url = `/api/documents/collections/delete`; // Cambiar a la ruta POST para eliminar
+        const url = `/api/collections/delete`; // Cambiar a la ruta POST para eliminar
         const data = {
           topic: collectionIdentifier,
           workspace_id: workspaceId // Asegurarse de pasar el workspace_id
@@ -581,10 +583,18 @@ const handleDeleteCollection = async (collectionId: string) => {
             <p className="text-muted-foreground">Espacio de trabajo especializado</p>
           </div>
         </div>
-        <Button variant="outline" onClick={() => router.push('/workspaces')}>
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Volver a Workspaces
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setIsShareWorkspaceDialogOpen(true)}>
+            <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+            </svg>
+            Compartir Workspace
+          </Button>
+          <Button variant="outline" onClick={() => router.push('/workspaces')}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Volver a Workspaces
+          </Button>
+        </div>
       </div>
 
       <div className="mb-8">
@@ -752,7 +762,7 @@ const handleDeleteCollection = async (collectionId: string) => {
               <p className="text-xs text-muted-foreground">Nuevo tema de documentos</p>
             </Card>
             {filteredCollections.map((collection) => (
-              <Card key={collection.topic} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleCollectionClick(collection.topic)}>
+                            <Card key={collection.topic || collection.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleCollectionClick(collection.topic || collection.id)}>
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -761,7 +771,7 @@ const handleDeleteCollection = async (collectionId: string) => {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold text-sm line-clamp-2">
-                          <InlineMarkdownRenderer content={collection.topic} />
+                          <InlineMarkdownRenderer content={collection.topic || ''} />
                         </div>
                       </div>
                     </div>
@@ -1106,6 +1116,13 @@ const handleDeleteCollection = async (collectionId: string) => {
         onSaveSuccess={handleNoteSaveSuccess}
         workspaceId={workspaceId}
         note={null}
+      />
+      <ShareWorkspaceDialog
+        workspaceId={workspaceId}
+        workspaceName={workspace?.name || "Workspace"}
+        isOpen={isShareWorkspaceDialogOpen}
+        onClose={() => setIsShareWorkspaceDialogOpen(false)}
+        onPermissionsUpdated={fetchInitialData}
       />
 
       <ViewNoteDialog

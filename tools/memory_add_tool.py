@@ -111,7 +111,7 @@ class MemoryAddTool(BaseTool):
                 workspace_id=self.workspace_id,
                 telegram_id=self.telegram_id,
                 thread_id=self.thread_id,
-                topic=category if category else "general"
+                # topic=category if category else "general" # Se elimina el topic para memorias
             )
             logger.info(f"Memoria añadida exitosamente para la cuenta '{self.account_id}'.")
 
@@ -120,6 +120,7 @@ class MemoryAddTool(BaseTool):
                 'content': content,
                 'type': final_type,
                 'category': category if category else "general"
+                # 'topic': category if category else "general" # Se elimina el topic para memorias
             }
             asyncio.create_task(proactive_knowledge_linker_trigger(new_entry))
             

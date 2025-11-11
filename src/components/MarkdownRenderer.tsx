@@ -96,16 +96,16 @@ const MarkdownRendererComponent = ({ content, fontSize, sources = [], isStreamin
       let processedContent = content;
 
       // 1. Reemplazar citas con componentes de React renderizados a string
-      if (sources && sources.length > 0) {
-        processedContent = processedContent.replace(/\[(\d+)\]/g, (match, citationIdStr) => {
-          const citationId = parseInt(citationIdStr, 10);
-          const source = sources.find(s => s.id === citationId);
-          if (source) {
-            return ReactDOMServer.renderToString(<Citation source={source} />);
-          }
-          return match; // Si no se encuentra la fuente, dejar la cita como texto plano
-        });
-      }
+      // if (sources && sources.length > 0) {
+      //   processedContent = processedContent.replace(/\[(\d+)\]/g, (match, citationIdStr) => {
+      //     const citationId = parseInt(citationIdStr, 10);
+      //     const source = sources.find(s => s.id === citationId);
+      //     if (source) {
+      //       return ReactDOMServer.renderToString(<Citation source={source} />);
+      //     }
+      //     return match; // Si no se encuentra la fuente, dejar la cita como texto plano
+      //   });
+      // }
 
       // Configure marked with a custom highlighter
       const renderer = new marked.Renderer();
@@ -175,22 +175,6 @@ const MarkdownRendererComponent = ({ content, fontSize, sources = [], isStreamin
         breaks: true,
         renderer: renderer
       });
-
-      // Custom processing to handle base64 image strings
-      processedContent = processedContent.replace(
-        /!\[([^\]]*)\]\((data:image\/[a-zA-Z]+;base64,[^\)]+)\)/g,
-        (match, altText, src) => {
-          return `![${altText}](${src})`;
-        }
-      ).replace(
-        /!\[([^\]]*)\]\(([^)]+)\)/g,
-        (match, altText, src) => {
-          if (src.startsWith('data:image') || src.startsWith('http')) {
-            return match;
-          }
-          return `![${altText}](${sentImage(src)})`;
-        }
-      );
 
       return marked.parse(processedContent) as string;
     } catch (error) {
@@ -308,7 +292,7 @@ const MarkdownRendererComponent = ({ content, fontSize, sources = [], isStreamin
             staticMermaidSvg = svg;
           } catch (e) {
             console.error('Error rendering static mermaid diagram:', e);
-            staticMermaidSvg = '<p>Error al renderizar el diagrama.</p>';
+            staticMermaidSvg = '<div class="text-red-500">Error al renderizar el diagrama Mermaid. Por favor, revisa la sintaxis.</div>';
           }
 
           // Crear un contenedor temporal para el trigger
@@ -334,10 +318,13 @@ const MarkdownRendererComponent = ({ content, fontSize, sources = [], isStreamin
   // Configurar Mermaid al inicio
   useEffect(() => {
     mermaid.initialize({
-      startOnLoad: true,
+      startOnLoad: false, // Controlamos el renderizado manualmente en MermaidViewer
       theme: 'dark', // Puedes cambiar a 'default', 'forest', 'neutral', etc.
       flowchart: { curve: 'basis' },
       securityLevel: 'loose', // Permite más flexibilidad en los diagramas
+      maxTextSize: 50000, // Aumentar el tamaño máximo de texto para diagramas grandes
+      // Otras configuraciones que pueden ayudar a la tolerancia de errores:
+      // errorLevel: 'warn', // Cambiar a 'warn' para ser menos estricto con los errores
     });
   }, []);
 

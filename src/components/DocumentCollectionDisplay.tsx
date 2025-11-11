@@ -7,7 +7,8 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Sparkles, ChevronDown, MoreHorizontal, Network, Brain, ArrowLeft, Info } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { useWebSocket } from '@/hooks/useWebSocket';
+import { useWebSocketContext } from '@/contexts/WebSocketContext';
+import { WebSocketMessage } from '@/hooks/useWebSocket';
 import { toast } from 'sonner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
@@ -38,17 +39,18 @@ interface DocumentCollectionDisplayProps {
 }
 
 export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, backButtonText = "Volver a Colecciones", backButtonHref = "/rag/all" }: DocumentCollectionDisplayProps) {
-  console.log("DocumentCollectionDisplay - Received props ->", { topic, workspaceId, collectionName }); // DEBUG
+
   const { user } = useAuth(); // Obtener el usuario del contexto de autenticación
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
   const [collectionDescription, setCollectionDescription] = useState<string | null>(null);
   const isMobile = useMediaQuery('(max-width: 768px)'); // md breakpoint
+  const { registerMessageHandler } = useWebSocketContext();
 
   useEffect(() => {
     if (user?.id) {
-      console.log("DocumentCollectionDisplay: Account ID para WebSocket:", user.id);
+
     }
   }, [user?.id]);
 
@@ -108,11 +110,11 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
       const [docsRes, analysesRes, collectionRes] = await Promise.all([
         apiClient.get('/api/documents/list-documents', { params: commonParams }),
         apiClient.post('/api/get-saved-analyses', commonParams),
-        apiClient.get(`/api/documents/collections/${topic}/details`, { params: workspaceId ? { workspace_id: workspaceId } : {} })
+        apiClient.get(`/api/collections/${topic}/details`, { params: workspaceId ? { workspace_id: workspaceId } : {} })
       ]);
       
       const serverDocuments = docsRes.data;
-      console.log('DEBUG (Frontend): Documentos recibidos de /api/list-documents:', serverDocuments);
+
       const savedAnalysesData = analysesRes.data;
       const collectionData = collectionRes.data;
 
@@ -143,7 +145,6 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         doc.file_name === data.file_name ? { ...doc, title: data.new_title } : doc
       )
     );
-    toast.success(`Título actualizado para: ${data.file_name}`);
   };
 
   const onTitleUpdatedRef = useRef(onTitleUpdated);
@@ -153,11 +154,15 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
 
   const onTitleExtractionCompleted = useCallback((data: { updated_count: number; total_processed: number; message: string }) => {
     toast.success(data.message || `Extracción de títulos completada.`);
-    fetchPageData(); // Recargar para asegurar consistencia
-  }, [fetchPageData]);
+  }, []);
 
-  const onUploadStarted = useCallback((data: { task_id: string; file_names: string[]; topic: string; created_at: string; }) => {
-    setUploadTasks(prev => [...prev, { id: data.task_id, status: 'processing', ...data }]);
+  const onUploadStarted = useCallback((message: WebSocketMessage) => {
+    console.log("onUploadStarted received message:", message); // Log para depuración
+    if (!message || !message.task_id) {
+      console.error("Received undefined message or task_id in onUploadStarted", message);
+      return;
+    }
+    setUploadTasks(prev => [...prev, { id: message.task_id, status: 'processing', file_names: message.file_names, topic: message.topic, created_at: message.created_at }]);
   }, []);
 
   const onUploadProgress = useCallback((data: { task_id: string; progress: number; message: string; }) => {
@@ -176,9 +181,9 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     fetchPageData(); // Recargar para limpiar
   }, [fetchPageData]);
 
-  const onDocumentProcessingStarted = useCallback((data: { file_name: string; task_id: string; }) => {
+  const onDocumentProcessingStarted = useCallback((message: WebSocketMessage) => {
     setDocuments(prevDocs => {
-      const docIndex = prevDocs.findIndex(d => d.file_name === data.file_name && d.document_type === 'placeholder');
+      const docIndex = prevDocs.findIndex(d => d.file_name === message.file_name && d.document_type === 'placeholder');
 
       if (docIndex !== -1) {
         // Si ya existe un placeholder, actualízalo a "Procesando"
@@ -188,8 +193,8 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
       } else {
         // Si no existe (por una condición de carrera), créalo ahora
         const newPlaceholder: Document = {
-          id: `placeholder-${data.file_name}-${Date.now()}`,
-          file_name: data.file_name,
+          id: `placeholder-${message.file_name}-${Date.now()}`,
+          file_name: message.file_name,
           topic: topic,
           status: 'processing' as const,
           title: 'Procesando...',
@@ -202,58 +207,74 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     });
   }, [topic]);
 
-  const onDocumentProcessingCompleted = useCallback((data: { file_name: string; task_id: string; document_id: string; }) => {
-    toast.success(`"${data.file_name}" procesado con éxito.`);
+  const onDocumentProcessingCompleted = useCallback((message: WebSocketMessage) => {
+    toast.success(`"${message.file_name}" procesado con éxito.`);
     // Simplemente recargamos los datos. La nueva lógica en fetchPageData se encargará
     // de reemplazar el placeholder con el documento real sin afectar a los demás.
     fetchPageData();
   }, [fetchPageData]);
 
-  const onDocumentProcessingFailed = useCallback((data: { file_name: string; task_id: string; error: string; }) => {
-    toast.error(`Error procesando "${data.file_name}"`, { description: data.error });
+  const onDocumentProcessingFailed = useCallback((message: WebSocketMessage) => {
+    toast.error(`Error procesando "${message.file_name}"`, { description: message.error });
     // Actualizamos el placeholder a un estado de error
     setDocuments(prevDocs => prevDocs.map(doc => 
-      doc.file_name === data.file_name ? { ...doc, status: 'failed', title: 'Error de procesamiento' } : doc
+      doc.file_name === message.file_name ? { ...doc, status: 'failed', title: 'Error de procesamiento' } : doc
     ));
   }, []);
 
 
 
-  const { isConnected, latestMessage } = useWebSocket({ userId: user?.id });
+
 
   useEffect(() => {
-    if (latestMessage) {
-      switch (latestMessage.type) {
+    const handleWebSocketMessage = (message: WebSocketMessage) => {
+      console.log("WebSocket message received:", message); // Log para depuración
+      if (!message) return;
+
+      switch (message.type) {
         case 'title_updated':
-          onTitleUpdated(latestMessage.data);
+          onTitleUpdatedRef.current(message.data);
           break;
         case 'title_extraction_completed':
-          onTitleExtractionCompleted(latestMessage.data);
+          onTitleExtractionCompleted(message.data);
           break;
         case 'upload_started':
-          onUploadStarted(latestMessage.data);
+          onUploadStarted(message);
           break;
         case 'upload_progress':
-          onUploadProgress(latestMessage.data);
+          onUploadProgress(message.data);
           break;
         case 'upload_completed':
-          onUploadCompleted(latestMessage.data);
+          onUploadCompleted(message.data);
           break;
         case 'upload_failed':
-          onUploadFailed(latestMessage.data);
+          onUploadFailed(message.data);
           break;
         case 'document_processing_started':
-          onDocumentProcessingStarted(latestMessage.data);
+          onDocumentProcessingStarted(message);
           break;
         case 'document_processing_completed':
-          onDocumentProcessingCompleted(latestMessage.data);
+          onDocumentProcessingCompleted(message);
           break;
         case 'document_processing_failed':
-          onDocumentProcessingFailed(latestMessage.data);
+          onDocumentProcessingFailed(message);
           break;
       }
-    }
-  }, [latestMessage]);
+    };
+
+    const unregister = registerMessageHandler(handleWebSocketMessage);
+    return unregister;
+  }, [
+    registerMessageHandler,
+    onDocumentProcessingCompleted,
+    onDocumentProcessingFailed,
+    onDocumentProcessingStarted,
+    onTitleExtractionCompleted,
+    onUploadCompleted,
+    onUploadFailed,
+    onUploadProgress,
+    onUploadStarted,
+  ]);
 
   useEffect(() => {
     fetchPageData();
@@ -334,7 +355,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   const handleExtractTitles = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     try {
-      const response = await apiClient.post('/api/extract-title', { topic, ...(workspaceId && { workspace_id: workspaceId }) });
+      const response = await apiClient.post('/api/documents/extract-title', { topic, ...(workspaceId && { workspace_id: workspaceId }) });
       toast.info(`Extracción de títulos para la colección "${collectionName || topic}" iniciada.`);
     } catch (error) { toast.error("No se pudo iniciar la extracción de títulos."); }
   };
@@ -343,7 +364,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   const handleExtractTitleForDocument = useCallback(async (doc: Document) => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     try {
-      const response = await apiClient.post('/api/extract-title', { file_name: doc.file_name, ...(workspaceId && { workspace_id: workspaceId }) });
+      const response = await apiClient.post('/api/documents/extract-title', { file_name: doc.file_name, ...(workspaceId && { workspace_id: workspaceId }) });
       toast.info(`Extracción de título para "${doc.file_name}" iniciada.`);
     } catch (error) { toast.error(`No se pudo iniciar la extracción de título para "${doc.file_name}".`); }
   }, [docPollingId, collectionPollingId, workspaceId]);
@@ -369,9 +390,18 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     const toastId = toast.loading(`Procesando grafo de conocimiento para "${collectionName || topic}"...`);
 
     try {
-      const response = await apiClient.post('/api/process-knowledge-graph', { topic, ...(workspaceId && { workspace_id: workspaceId }) });
+      const payload = {
+        tool_name: "cognee_knowledge_graph",
+        action: "process_documents",
+        dataset_name: topic,
+        documents: [], // Se podría añadir lógica para obtener documentos si es necesario
+        ...(workspaceId && { workspace_id: workspaceId })
+      };
+
+      const response = await apiClient.post('/api/tools/run', payload);
+
       toast.success(
-        `¡Procesamiento iniciado! ${response.data.documents_count} documentos serán procesados.`,
+        `¡Creación de grafo iniciada!`,
         { id: toastId }
       );
     } catch (error) {
@@ -404,6 +434,17 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   ), [handleAnalyzeDocument, handleExtractTitleForDocument]);
   
   const router = useRouter();
+
+  if (isLoading) {
+    return (
+      <div className="flex h-[calc(100vh-200px)] w-full items-center justify-center">
+        <div className="flex flex-col items-center gap-2">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-muted-foreground">Cargando datos de la colección...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -604,19 +645,15 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                             setSemanticAnalysisResult(analysis.result_payload);
                             setIsSemanticAnalysisOpen(true);
                           } else if (analysis.file_name.startsWith('Colección:')) {
-                            console.log('📁 Abriendo análisis de colección');
                             setCollectionAnalysisResult(analysis.result_payload);
                             setIsCollectionAnalysisOpen(true);
                           } else if (analysis.file_name.startsWith('Análisis Personalizado:')) {
-                            console.log('✨ Abriendo análisis personalizado');
                             setDocAnalysisResult(analysis.result_payload);
                             setIsDocAnalysisOpen(true);
                           } else if (analysis.file_name.startsWith('Análisis de Grafo de Conocimiento:')) {
-                            console.log('🧠 Abriendo análisis de grafo de conocimiento');
                             setKnowledgeGraphAnalysisResult(analysis.result_payload);
                             setIsKnowledgeGraphAnalysisOpen(true);
                           } else {
-                            console.log('📄 Abriendo análisis de documento');
                             setDocAnalysisResult(analysis.result_payload);
                             setDocumentToAnalyze({ file_name: analysis.file_name, topic, title: '', author: '' });
                             setIsDocAnalysisOpen(true);

@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Loader2, ArrowLeft, Edit, Mail, Phone, Tag, Calendar, ListTodo, FileText, Image, Info, MoreHorizontal } from 'lucide-react';
+import { Loader2, ArrowLeft, Edit, Mail, Phone, Tag, Calendar, ListTodo, FileText, Image as LucideImage, Info, MoreHorizontal } from 'lucide-react';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import apiClient from '@/lib/api';
+import { FormResponse, FormResponseAnswer, LinkedFormResponse } from '@/types/form';
 import { toast } from 'sonner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ViewNoteDialog } from '@/app/(dashboard)/notes/view-note-dialog';
@@ -62,7 +64,6 @@ interface LinkedAlbumResponse {
   cover_photo: PhotoResponseForContactProfile | null;
 }
 
-import { LinkedFormResponse } from '@/types/form';
 
 interface LinkedObjectsResponse {
   notes: LinkedNoteResponse[];
@@ -73,17 +74,7 @@ interface LinkedObjectsResponse {
   form_responses: LinkedFormResponse[]; // Añadido
 }
 
-interface ContactProfile {
-  id: string;
-  name: string | null;
-  email: string | null;
-  phone: string | null;
-  tags: string[] | null;
-  category: string | null;
-  custom_fields: Record<string, any> | null;
-  created_at: string;
-  updated_at: string;
-}
+import { ContactProfile } from '@/types/contact-profile';
 
 export default function ProfileDetailsPage() {
   const router = useRouter();
@@ -109,7 +100,7 @@ export default function ProfileDetailsPage() {
   const [showFormResponseDialog, setShowFormResponseDialog] = useState(false);
   const [selectedFormResponse, setSelectedFormResponse] = useState<LinkedFormResponse | null>(null);
 
-  const fetchProfileDetails = async () => {
+  const fetchProfileDetails = useCallback(async () => {
     if (!profileId) return;
     setLoading(true);
     setError(null);
@@ -126,11 +117,11 @@ export default function ProfileDetailsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [profileId]);
 
   useEffect(() => {
     fetchProfileDetails();
-  }, [profileId]);
+  }, [fetchProfileDetails]);
 
   if (loading) {
     return (
@@ -163,6 +154,20 @@ export default function ProfileDetailsPage() {
       </div>
     );
   }
+
+  const convertLinkedFormResponseToFormResponse = (linkedResponse: LinkedFormResponse): FormResponse => {
+    const answers: FormResponseAnswer[] = Object.entries(linkedResponse.answers).map(([field_id, value]) => ({
+      field_id,
+      value,
+    }));
+
+    return {
+      id: linkedResponse.id,
+      form_id: linkedResponse.form_id,
+      submitted_at: linkedResponse.submitted_at,
+      answers: answers,
+    };
+  };
 
   return (
     <div className="p-4 sm:p-8 max-w-7xl mx-auto">
@@ -400,7 +405,7 @@ export default function ProfileDetailsPage() {
                   <CardTitle className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <div className="h-10 w-10 rounded-lg bg-orange-500/10 flex items-center justify-center flex-shrink-0">
-                        <Image className="h-5 w-5 text-orange-600" />
+                        <Image src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'%3E%3C/circle%3E%3C/svg%3E" className="h-5 w-5 text-orange-600" alt="Icono de álbum" />
                       </div>
                       <span className="font-semibold text-lg truncate">{album.name}</span>
                     </div>
@@ -409,14 +414,16 @@ export default function ProfileDetailsPage() {
                 <CardContent className="pt-0 flex-grow flex flex-col">
                   <div className="relative w-full aspect-square bg-muted rounded-md overflow-hidden mb-3">
                     {album.cover_photo?.file_path ? (
-                      <img
+                      <Image
                         src={`${process.env.NEXT_PUBLIC_API_URL}/media/${album.cover_photo.file_path}`}
-                        alt={album.name}
-                        className="w-full h-full object-cover"
+                        alt={album.name || 'Cover photo'}
+                        fill
+                        style={{ objectFit: 'cover' }}
+                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                        <Image className="h-10 w-10 opacity-50" />
+                        <LucideImage className="h-10 w-10 opacity-50" />
                       </div>
                     )}
                   </div>
@@ -442,7 +449,7 @@ export default function ProfileDetailsPage() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold text-sm line-clamp-2">
-                          Respuesta al formulario: {response.form_name || 'Sin nombre'}
+                          Respuesta al formulario: {response.form_title || 'Sin nombre'}
                         </div>
                       </div>
                     </div>
@@ -531,7 +538,7 @@ export default function ProfileDetailsPage() {
       <FormResponseDialog
         isOpen={showFormResponseDialog}
         onOpenChange={setShowFormResponseDialog}
-        response={selectedFormResponse}
+        response={selectedFormResponse ? convertLinkedFormResponseToFormResponse(selectedFormResponse) : null}
       />
     </div>
   );

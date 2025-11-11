@@ -169,7 +169,7 @@ Responde SOLO en formato JSON válido:
             results = await get_relevant_memories(
                 account_id=self.account_id,
                 query=search_terms,
-                content_type=content_type,
+                content_types=[content_type] if content_type else None,
                 filter_topics=[topic] if topic else None,
                 category=category,
                 workspace_id=self.workspace_id,

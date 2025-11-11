@@ -376,7 +376,6 @@ async def get_linked_profiles_for_form_response(
     Obtiene la lista de perfiles de contacto vinculados a una respuesta de formulario.
     """
     form_response = await db.get(DBFormResponse, form_response_id)
-
     if not form_response or str(form_response.account_id) != str(current_user.id):
         raise HTTPException(status_code=404, detail="Respuesta de formulario no encontrada o no autorizada.")
 
@@ -435,12 +434,11 @@ async def get_form_response_pdf(
 
     pdf = FPDF(font_cache_dir=".")
     pdf.add_page()
-    # Add a Unicode font (e.g., DejaVuSans)
-    # FPDF will download it if not present in the cache directory
-    pdf.add_font("DejaVu", "", os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSansCondensed.ttf"), uni=True)
-    pdf.set_font("DejaVu", size=16)
+    # Usar fuente DejaVuSans que soporta Unicode completo incluyendo emojis
+    pdf.add_font("DejaVuSans", "", "api/fonts/DejaVuSans.ttf", uni=True)
+    pdf.set_font("DejaVuSans", size=16)
     pdf.cell(200, 10, txt=f"Respuesta del Formulario: {form.name}", ln=True, align="C")
-    pdf.set_font("DejaVu", size=12)
+    pdf.set_font("DejaVuSans", size=12)
     pdf.cell(200, 10, txt=f"Enviado el: {form_response.submitted_at.strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align="L")
     pdf.ln(10)
 
@@ -456,16 +454,18 @@ async def get_form_response_pdf(
 
     for answer in form_response.answers:
         field_label = field_map.get(answer["field_id"], answer["field_id"])
-        pdf.set_font("DejaVu", "B", size=12)
+        pdf.set_font("DejaVuSans", "B", size=12)
         pdf.multi_cell(pdf.w - 2 * pdf.l_margin, 10, txt=f"Pregunta: {field_label}")
-        pdf.set_font("DejaVu", size=12)
+        pdf.set_font("DejaVuSans", size=12)
         answer_value = answer["value"]
         if isinstance(answer_value, list):
             answer_value = ", ".join(map(str, answer_value))
         pdf.multi_cell(pdf.w - 2 * pdf.l_margin, 10, txt=f"Respuesta: {answer_value}")
         pdf.ln(5)
 
-    pdf_output = pdf.output(dest='S').encode('utf-8') # Output as string, then encode to bytes
+    pdf_output = pdf.output(dest='S') # Output as bytes
+    if isinstance(pdf_output, str):
+        pdf_output = pdf_output.encode('utf-8')
     return Response(content=pdf_output, media_type="application/pdf", headers={
         "Content-Disposition": f"attachment; filename='form_response_{response_id}.pdf'"
     })
@@ -490,8 +490,9 @@ async def get_form_responses_pdf_report(
 
     pdf = FPDF(font_cache_dir=".")
     pdf.add_page()
-    pdf.add_font("DejaVu", "", os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSansCondensed.ttf"), uni=True)
-    pdf.set_font("DejaVu", size=16)
+    # Usar fuente DejaVuSans que soporta Unicode completo incluyendo emojis
+    pdf.add_font("DejaVuSans", "", "api/fonts/DejaVuSans.ttf", uni=True)
+    pdf.set_font("DejaVuSans", size=16)
     pdf.cell(200, 10, txt=f"Reporte de Respuestas para: {form.name}", ln=True, align="C")
     pdf.ln(10)
 
@@ -505,23 +506,23 @@ async def get_form_responses_pdf_report(
     extract_fields(form.schema)
 
     if not form_responses:
-        pdf.set_font("DejaVu", size=12)
+        pdf.set_font("DejaVuSans", size=12)
         pdf.cell(200, 10, txt="No hay respuestas para este formulario.", ln=True, align="C")
     else:
         for i, form_response in enumerate(form_responses):
             if i > 0:
                 pdf.add_page() # New page for each response in the report
-            pdf.set_font("DejaVu", "B", size=14)
+            pdf.set_font("DejaVuSans", "B", size=14)
             pdf.cell(200, 10, txt=f"Respuesta #{i+1} (ID: {str(form_response.id)[:8]}...)", ln=True, align="L")
-            pdf.set_font("DejaVu", size=12)
+            pdf.set_font("DejaVuSans", size=12)
             pdf.cell(200, 10, txt=f"Enviado el: {form_response.submitted_at.strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align="L")
             pdf.ln(5)
 
             for answer in form_response.answers:
                 field_label = field_map.get(answer["field_id"], answer["field_id"])
-                pdf.set_font("DejaVu", "B", size=12)
+                pdf.set_font("DejaVuSans", "B", size=12)
                 pdf.multi_cell(pdf.w - 2 * pdf.l_margin, 10, txt=f"Pregunta: {field_label}")
-                pdf.set_font("DejaVu", size=12)
+                pdf.set_font("DejaVuSans", size=12)
                 answer_value = answer["value"]
                 if isinstance(answer_value, list):
                     answer_value = ", ".join(map(str, answer_value))
@@ -529,7 +530,9 @@ async def get_form_responses_pdf_report(
                 pdf.ln(5)
             pdf.ln(10) # Add some space between responses if on the same page
 
-    pdf_output = pdf.output(dest='S').encode('utf-8')
+    pdf_output = pdf.output(dest='S') # Output as bytes
+    if isinstance(pdf_output, str):
+        pdf_output = pdf_output.encode('utf-8')
     return Response(content=pdf_output, media_type="application/pdf", headers={
         "Content-Disposition": f"attachment; filename='form_responses_report_{form_id}.pdf'"
     })

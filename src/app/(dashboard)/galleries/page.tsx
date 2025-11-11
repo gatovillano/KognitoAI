@@ -36,6 +36,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'; // Importar Sheet
 import { PhotoResponse, AlbumResponse } from '@/types/gallery';
 import { EditAlbumModal } from '@/components/EditAlbumModal';
 import { ManageLinkedProfilesDialog } from '@/app/(dashboard)/notes/ManageLinkedProfilesDialog'; // Import the generic dialog
@@ -145,6 +146,7 @@ const GalleriesPage = () => {
   const [editingAlbum, setEditingAlbum] = useState<AlbumResponse | null>(null);
   const [showManageProfilesDialog, setShowManageProfilesDialog] = useState(false); // New state for generic dialog
   const [itemToManageProfiles, setItemToManageProfiles] = useState<{ id: string; name?: string; title?: string; } | null>(null); // New state for item to link/unlink profiles
+  const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
   const fetchAlbums = async () => {
     setLoading(true);
     setError(null);
@@ -239,18 +241,9 @@ const GalleriesPage = () => {
           <h1 className="text-3xl font-bold flex items-center">
             <ImageIcon className="mr-3 h-8 w-8 text-primary" />
             Galería de Álbumes
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground">
-                    <Info className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Organiza tus imágenes en álbumes visuales.</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+              <Info className="h-4 w-4" />
+            </Button>
           </h1>
         </div>
         <div className="flex items-center gap-2">
@@ -315,6 +308,49 @@ const GalleriesPage = () => {
         }}
 
       />
+
+      <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="text-xl font-bold text-primary">Módulo de Galería</SheetTitle>
+            <SheetDescription className="text-sm text-muted-foreground">
+              Organiza, gestiona y visualiza tus imágenes en álbumes personalizados.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
+            <p><strong>¿Qué puedes hacer en tu Galería?</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Crear y Editar Álbumes:</strong> Organiza tus imágenes en álbumes temáticos con nombres y descripciones personalizadas.</li>
+              <li><strong>Subir y Gestionar Fotos:</strong> Añade nuevas fotos a tus álbumes, edita sus detalles y elimínalas cuando sea necesario.</li>
+              <li><strong>Vincular a Perfiles:</strong> Conecta tus álbumes o fotos a perfiles de contacto para contextualizar tus recuerdos visuales.</li>
+              <li><strong>Previsualización de Imágenes:</strong> Disfruta de una experiencia visual fluida con la previsualización de tus fotos.</li>
+            </ul>
+
+            <p><strong>Interacción con IA:</strong></p>
+            <p>Además de la gestión manual, puedes interactuar con tu galería a través del chat de IA. La IA dispone de herramientas especializadas para:</p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li>Buscar imágenes y álbumes por descripción, etiquetas o contenido.</li>
+              <li>Generar descripciones automáticas o etiquetas para tus fotos.</li>
+              <li>Crear álbumes basados en temas o eventos a partir de tus fotos existentes.</li>
+              <li>Realizar análisis de imágenes para extraer información relevante.</li>
+            </ul>
+
+            <p>
+              Esta interacción se potencia con la <strong>memoria de Kognito</strong>, que utiliza tus imágenes y álbumes para enriquecer el contexto de tus conversaciones y análisis, permitiendo a la IA comprender y recordar mejor tus experiencias visuales.
+            </p>
+
+            <p><strong>Beneficios Clave:</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Organización Visual:</strong> Mantén tus recuerdos organizados y accesibles.</li>
+              <li><strong>Búsqueda Inteligente:</strong> Encuentra rápidamente las imágenes que necesitas con la ayuda de la IA.</li>
+              <li><strong>Contexto Enriquecido:</strong> Conecta tus imágenes con personas y eventos relevantes.</li>
+              <li><strong>Potenciado por IA:</strong> Aprovecha la inteligencia artificial para gestionar y analizar tu contenido visual.</li>
+            </ul>
+
+            <p>¡Revive tus recuerdos y organiza tu contenido visual con el Módulo de Galería!</p>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 };

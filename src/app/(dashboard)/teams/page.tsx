@@ -10,6 +10,7 @@ import { MoreVertical } from "lucide-react";
 import { TeamDialog } from "./team-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'; // Importar Sheet
 import apiClient from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
@@ -31,6 +32,7 @@ export default function TeamsPage() {
   const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
   const [selectedEvents, setSelectedEvents] = useState<number[]>([]);
   const [selectedNotes, setSelectedNotes] = useState<number[]>([]);
+  const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
 
   useEffect(() => {
     const fetchTeams = async () => {
@@ -207,18 +209,9 @@ export default function TeamsPage() {
             <h1 className="text-3xl font-bold flex items-center">
                 <Users className="mr-2 h-8 w-8 text-primary" />
                 Equipos
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground">
-                        <Info className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Gestiona tus equipos y colaboradores.</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+                  <Info className="h-4 w-4" />
+                </Button>
             </h1>
         </div>
         <Button onClick={() => setOpen(true)} className="mt-4">
@@ -446,6 +439,45 @@ export default function TeamsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="text-xl font-bold text-primary">Módulo de Equipos</SheetTitle>
+            <SheetDescription className="text-sm text-muted-foreground">
+              Colabora con tu equipo, comparte recursos y gestiona proyectos de forma conjunta.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
+            <p><strong>¿Qué puedes hacer en el Módulo de Equipos?</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Crear y Gestionar Equipos:</strong> Organiza tus colaboradores en equipos para proyectos específicos o áreas de trabajo.</li>
+              <li><strong>Gestionar Miembros:</strong> Invita, elimina y asigna roles a los miembros de tu equipo.</li>
+              <li><strong>Compartir Recursos:</strong> Comparte documentos, eventos y notas con tu equipo para facilitar la colaboración.</li>
+              <li><strong>Tableros de Equipo:</strong> Accede a dashboards específicos por equipo para ver la actividad y el progreso.</li>
+            </ul>
+
+            <p><strong>Interacción con IA:</strong></p>
+            <p>Puedes integrar la IA en tu flujo de trabajo colaborativo. La IA dispone de herramientas especializadas para:</p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li>Facilitar la búsqueda y recuperación de información compartida por el equipo.</li>
+              <li>Generar resúmenes de discusiones o documentos relevantes para el equipo.</li>
+              <li>Asistir en la creación de contenido colaborativo o la planificación de proyectos.</li>
+              <li>Analizar la actividad del equipo para identificar tendencias o posibles mejoras.</li>
+            </ul>
+
+            <p><strong>Beneficios Clave:</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Colaboración Eficiente:</strong> Trabaja de forma más fluida y organizada con tus compañeros.</li>
+              <li><strong>Centralización de Recursos:</strong> Accede a la información relevante del equipo en un solo lugar.</li>
+              <li><strong>Comunicación Mejorada:</strong> Facilita la interacción y el intercambio de conocimientos.</li>
+              <li><strong>Potenciado por IA:</strong> Optimiza la productividad del equipo con herramientas inteligentes.</li>
+            </ul>
+
+            <p>¡Potencia la colaboración y el trabajo en equipo con el Módulo de Equipos!</p>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

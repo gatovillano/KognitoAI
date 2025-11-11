@@ -12,8 +12,11 @@ import apiClient from '@/lib/api';
 import { ThemeToggle } from './ThemeToggle';
 import { LoadingProvider } from '@/contexts/LoadingContext';
 import { SearchProvider, useSearch } from '@/contexts/SearchContext';
-import { ChatSearchDialog } from './ChatSearchDialog';
 import { PanelRightOpen, PanelRightClose } from 'lucide-react';
+import { UniversalSearchInput } from './UniversalSearchInput';
+import { useWebSocketContext } from '@/contexts/WebSocketContext';
+import { Badge } from '@/components/ui/badge';
+import { Wifi, WifiOff, AlertTriangle } from 'lucide-react';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -29,6 +32,9 @@ export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const isChatContext = pathname?.includes('/chat/');
+
+  // Estado de conexión WebSocket
+  const { isConnected, connectionError, reconnect } = useWebSocketContext();
   
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -78,7 +84,7 @@ export function AppShell({ children }: AppShellProps) {
         <div className="flex h-screen bg-background overflow-x-hidden">
             {/* Sidebar para desktop (visible en md y superior) */}
             <div
-              className={`hidden md:block bg-card/80 backdrop-blur-xl transition-all duration-500 ease-in-out ${isSidebarCollapsed ? 'w-16' : 'w-72'} h-full overflow-y-auto shadow-medium border-border/20`}
+              className={`hidden md:block bg-card/80 backdrop-blur-xl transition-all duration-500 ease-in-out ${isSidebarCollapsed ? 'w-16' : 'w-80'} h-full overflow-y-auto shadow-medium border-border/20`}
             >
               <Sidebar isCollapsed={isSidebarCollapsed} />
             </div>
@@ -135,11 +141,44 @@ export function AppShell({ children }: AppShellProps) {
                 
                 {/* Controles del header a la derecha */}
                 <div className="ml-auto flex gap-3 items-center">
-                  {isChatContext && (
-                    <div className="relative">
-                      <SearchInput />
-                    </div>
-                  )}
+                  <div className="relative">
+                    <UniversalSearchInput />
+                  </div>
+
+                  {/* Indicador de estado de conexión WebSocket */}
+                  <div className="flex items-center gap-2">
+                    {connectionError ? (
+                      <Badge
+                        variant="destructive"
+                        className="flex items-center gap-1 cursor-pointer hover:bg-destructive/80 transition-colors"
+                        onClick={reconnect}
+                        title={`Error de conexión: ${connectionError}. Haz clic para reconectar.`}
+                      >
+                        <AlertTriangle className="h-3 w-3" />
+                        <span className="hidden sm:inline">Error WS</span>
+                      </Badge>
+                    ) : isConnected ? (
+                      <Badge
+                        variant="secondary"
+                        className="flex items-center gap-1 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                        title="Conexión WebSocket activa"
+                      >
+                        <Wifi className="h-3 w-3" />
+                        <span className="hidden sm:inline">Conectado</span>
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="flex items-center gap-1 cursor-pointer hover:bg-primary/10 transition-colors"
+                        onClick={reconnect}
+                        title="Conectando WebSocket... Haz clic para reconectar."
+                      >
+                        <WifiOff className="h-3 w-3" />
+                        <span className="hidden sm:inline">Conectando</span>
+                      </Badge>
+                    )}
+                  </div>
+
                   <ThemeToggle />
                   {/* New button for right panel */}
                   {/* Botón de despliegue del menú de la derecha eliminado */}
@@ -156,35 +195,3 @@ export function AppShell({ children }: AppShellProps) {
   );
 }
 
-function SearchInput() {
-  const { searchTerm, setSearchTerm } = useSearch();
-  const [isChatSearchDialogOpen, setIsChatSearchDialogOpen] = useState(false);
-
-  useEffect(() => {
-    if (searchTerm) {
-      setIsChatSearchDialogOpen(true);
-    } else {
-      setIsChatSearchDialogOpen(false);
-    }
-  }, [searchTerm]);
-
-  return (
-    <div className="relative">
-      <input
-        type="text"
-        placeholder="Buscar en chats y mensajes..."
-        value={searchTerm}
-        onChange={(e) => setSearchTerm(e.target.value)}
-        className="pl-8 pr-4 py-2 border border-border rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 w-64 bg-background text-foreground placeholder:text-muted-foreground transition-all"
-      />
-      <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
-
-      <ChatSearchDialog
-        isOpen={isChatSearchDialogOpen}
-        onOpenChange={setIsChatSearchDialogOpen}
-        searchTerm={searchTerm}
-        setSearchTerm={setSearchTerm}
-      />
-    </div>
-  );
-}

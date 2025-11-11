@@ -4,10 +4,10 @@ from typing import List, Dict, Any, Optional
 import uuid
 
 # Importaciones necesarias para las tareas
-from core.database import SessionLocal, UploadTask, DBSession
+from core.database import SessionLocal, UploadTask, DBSession, AnalysisTask
 from sqlalchemy import update
 from utils.document_parser import extract_text_and_metadata_from_document
-from core.memory_manager import process_document_for_rag, list_user_documents, update_document_metadata
+from core.memory_manager import process_document_for_rag, process_multiple_documents_for_rag, list_user_documents, update_document_metadata
 from core.websocket_manager import send_personal_message # Importar send_personal_message
 from tools.cognee_knowledge_graph_tool import CogneeKnowledgeGraphTool
 from sqlalchemy import text
@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 async def process_upload_task(task_id: str, account_id: str, file_data_list: List[Dict], topic: str, workspace_id: Optional[str] = None):
     """
-    Procesa la subida de documentos en segundo plano de forma asíncrona.
+    Procesa la subida de documentos en segundo plano de forma asíncrona y simultánea.
     """
-    logger.info(f"Iniciando procesamiento de subida para tarea {task_id}...")
+    logger.info(f"Iniciando procesamiento de subida para tarea {task_id} con {len(file_data_list)} archivos...")
     
     async with DBSession(SessionLocal) as db_session:
         try:
@@ -32,59 +32,67 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
             logger.info(f"Marcada tarea {task_id} como 'processing'.")
 
             total_files = len(file_data_list)
-            processed_files_count = 0
+            documents_to_process = []
 
-            async def _process_single_file(file_data: Dict) -> bool:
-                try:
-                    file_name_str = file_data.get('filename', "unknown_file")
-                    
-                    loop = asyncio.get_running_loop()
-                    extracted_text, metadata = await loop.run_in_executor(
-                        None,
-                        extract_text_and_metadata_from_document,
-                        file_name_str,
-                        file_data['content']
+            # Extraer texto y metadatos para todos los archivos en paralelo
+            # Usamos run_in_executor para tareas CPU-bound como la extracción de texto
+            loop = asyncio.get_running_loop()
+            extraction_tasks = []
+            for file_data in file_data_list:
+                file_name_str = file_data.get('filename', 'unknown_file')
+                extraction_tasks.append(loop.run_in_executor(
+                    None,
+                    extract_text_and_metadata_from_document,
+                    file_name_str,
+                    file_data['content']
+                ))
+            
+            extracted_results = await asyncio.gather(*extraction_tasks, return_exceptions=True)
+
+            for i, result in enumerate(extracted_results):
+                file_name_str = file_data_list[i].get('filename', 'unknown_file')
+                if isinstance(result, Exception):
+                    logger.error(f"Error al extraer texto del archivo '{file_name_str}': {result}", exc_info=True)
+                    await send_personal_message(
+                        account_id,
+                        {
+                            "type": "upload_progress",
+                            "task_id": task_id,
+                            "progress": 5 + int(((i + 1) / total_files) * 90),
+                            "message": f"Error al procesar {file_name_str}: {str(result)}"
+                        }
                     )
-
-                    if not extracted_text:
-                        logger.warning(f"No se pudo extraer texto del archivo '{file_name_str}'. Omitiendo.")
-                        return False
-
-                    await process_document_for_rag(
-                        account_id=account_id,
-                        file_name=file_name_str,
-                        extracted_text=extracted_text,
-                        topic=topic,
-                        metadata={"original_filename": file_name_str},
-                        workspace_id=workspace_id
-                    )
-                    return True
-                except Exception as e:
-                    logger.error(f"Error al procesar archivo {file_data.get('filename', 'unknown')}: {e}", exc_info=True)
-                    return False
-
-            for i, file_data in enumerate(file_data_list):
-                result = await _process_single_file(file_data)
-                if result:
-                    processed_files_count += 1
+                    continue
                 
-                progress = 5 + int(((i + 1) / total_files) * 90)
-                async with DBSession(SessionLocal) as progress_session:
-                    stmt_progress = update(UploadTask).where(UploadTask.id == uuid.UUID(task_id)).values(
-                        progress=progress
+                extracted_text, metadata = result
+                if not extracted_text:
+                    logger.warning(f"No se pudo extraer texto del archivo '{file_name_str}'. Omitiendo.")
+                    await send_personal_message(
+                        account_id,
+                        {
+                            "type": "upload_progress",
+                            "task_id": task_id,
+                            "progress": 5 + int(((i + 1) / total_files) * 90),
+                            "message": f"Archivo {file_name_str} vacío o sin texto extraíble."
+                        }
                     )
-                    await progress_session.execute(stmt_progress)
-                    await progress_session.commit()
+                    continue
 
-                await send_personal_message(
-                    account_id,
-                    {
-                        "type": "upload_progress",
-                        "task_id": task_id,
-                        "progress": progress,
-                        "message": f"Procesando archivo {i + 1}/{total_files}..."
-                    }
-                )
+                documents_to_process.append({
+                    "file_name": file_name_str,
+                    "extracted_text": extracted_text,
+                    "topic": topic,
+                    "account_id": account_id,
+                    "metadata": {"original_filename": file_name_str, "task_id": task_id}, # Pasar task_id para notificaciones individuales
+                    "workspace_id": workspace_id
+                })
+            
+            if not documents_to_process:
+                raise Exception("No se pudieron extraer textos de ningún archivo para procesar.")
+
+            # Procesar todos los documentos extraídos simultáneamente
+            processed_chunks_counts = await process_multiple_documents_for_rag(documents_to_process)
+            processed_files_count = sum(1 for count in processed_chunks_counts if count > 0)
 
             result_message = f"{processed_files_count}/{total_files} archivo(s) procesado(s) y añadido(s) a la colección '{topic}'."
             result_payload = {
@@ -196,7 +204,7 @@ async def extract_titles_and_update_metadata(account_id: str, topic: Optional[st
 
                 if new_title and new_title != doc_chunks[0]['cmetadata'].get('title'):
                     if file_name: # Asegurarse de que file_name no sea None
-                        success = await update_document_metadata(account_id, file_name, new_title=new_title, new_topic=None, team_id=team_id, workspace_id=workspace_id)
+                        success = await update_document_metadata(account_id, file_name, new_title=new_title, new_topic=None, workspace_id=workspace_id)
                         if success:
                             updated_count += 1
                     else:
@@ -254,3 +262,61 @@ async def process_knowledge_graph(account_id: str, topic: Optional[str] = None):
     except Exception as e:
         logger.error(f"Error en procesamiento de grafo para {account_id}: {e}", exc_info=True)
         return {"message": f"Error al procesar el grafo de conocimiento: {str(e)}", "error": str(e)}
+
+async def start_knowledge_graph_analysis(account_id: str, topic: str, workspace_id: Optional[str] = None) -> str:
+    """
+    Inicia una tarea de análisis de grafo de conocimiento en segundo plano.
+    """
+    task_id = uuid.uuid4()
+    async with DBSession(SessionLocal) as db_session:
+        new_task = AnalysisTask(
+            id=task_id,
+            account_id=uuid.UUID(account_id),
+            file_name=topic,  # Usamos el topic como referencia
+            analysis_type='knowledge_graph',
+            status='pending'
+        )
+        db_session.add(new_task)
+        await db_session.commit()
+
+    # Iniciar el procesamiento real en segundo plano
+    loop = asyncio.get_running_loop()
+    loop.create_task(run_knowledge_graph_analysis(task_id, account_id, topic, workspace_id))
+
+    return str(task_id)
+
+async def run_knowledge_graph_analysis(task_id: uuid.UUID, account_id: str, topic: str, workspace_id: Optional[str] = None):
+    """
+    Ejecuta el análisis de grafo de conocimiento y actualiza el estado de la tarea.
+    """
+    async with DBSession(SessionLocal) as db_session:
+        try:
+            # 1. Marcar la tarea como 'processing'
+            await db_session.execute(
+                update(AnalysisTask)
+                .where(AnalysisTask.id == task_id)
+                .values(status='processing')
+            )
+            await db_session.commit()
+
+            # 2. Ejecutar el procesamiento del grafo
+            result = await process_knowledge_graph(account_id=account_id, topic=topic)
+
+            # 3. Marcar la tarea como 'completed'
+            await db_session.execute(
+                update(AnalysisTask)
+                .where(AnalysisTask.id == task_id)
+                .values(status='completed', result_payload=result)
+            )
+            await db_session.commit()
+            logger.info(f"Tarea de análisis de grafo de conocimiento {task_id} completada.")
+
+        except Exception as e:
+            error_message = str(e)
+            logger.error(f"Error en la tarea de análisis de grafo de conocimiento {task_id}: {error_message}", exc_info=True)
+            await db_session.execute(
+                update(AnalysisTask)
+                .where(AnalysisTask.id == task_id)
+                .values(status='failed', error_message=error_message)
+            )
+            await db_session.commit()

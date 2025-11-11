@@ -64,9 +64,38 @@ interface UploadDocumentDialogProps {
   workspaceId?: string;
 }
 
+interface DropzoneProps {
+  children: React.ReactNode;
+  onDrop: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDragLeave: (event: React.DragEvent<HTMLDivElement>) => void;
+  isDragging: boolean;
+}
+
+function Dropzone({ children, onDrop, onDragOver, onDragLeave, isDragging }: DropzoneProps) {
+  return (
+    <div
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      className={`relative border-2 rounded-lg transition-colors ${
+        isDragging ? 'border-primary bg-primary/10' : 'border-dashed border-gray-300 dark:border-gray-700'
+      }`}
+    >
+      {children}
+      {isDragging && (
+        <div className="absolute inset-0 bg-primary/20 flex items-center justify-center text-primary-foreground text-lg font-semibold pointer-events-none">
+          Suelta tus archivos aquí
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, onUploadStart, defaultTopic, workspaceId }: UploadDocumentDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState('files'); // 'files' o 'text'
+  const [isDragging, setIsDragging] = useState(false); // Nuevo estado para drag and drop
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -91,6 +120,26 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
       setActiveTab('files'); // Resetear a la pestaña de archivos al abrir
     }
   }, [isOpen, defaultTopic, form]);
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragging(false);
+    const droppedFiles = event.dataTransfer.files;
+    if (droppedFiles && droppedFiles.length > 0) {
+      form.setValue('files', droppedFiles);
+      form.clearErrors('files'); // Limpiar errores si se sueltan archivos
+    }
+  };
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     setIsSubmitting(true);
@@ -138,7 +187,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
 
       // La subida ahora ocurre en segundo plano. El componente padre
       // escuchará los eventos de WebSocket para actualizar el estado.
-      apiClient.post('/api/upload-document', formData, {
+      apiClient.post('/api/documents/upload-document', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -209,25 +258,38 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
                 <TabsTrigger value="text">Añadir Texto</TabsTrigger>
               </TabsList>
               <TabsContent value="files">
-                <FormField
-                  control={form.control}
-                  name="files"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Archivos</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="file"
-                          multiple
-                          accept=".pdf,.docx,.txt,.md,.html"
-                          onChange={(e) => field.onChange(e.target.files)}
-                          disabled={isSubmitting}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <Dropzone onDrop={handleDrop} isDragging={isDragging} onDragOver={handleDragOver} onDragLeave={handleDragLeave}>
+                  <FormField
+                    control={form.control}
+                    name="files"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Archivos</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="file"
+                            multiple
+                            accept=".pdf,.docx,.txt,.md,.html"
+                            onChange={(e) => field.onChange(e.target.files)}
+                            disabled={isSubmitting}
+                            className="hidden" // Ocultar el input de archivo original
+                            id="file-upload-input"
+                          />
+                        </FormControl>
+                        <label htmlFor="file-upload-input" className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer bg-muted hover:bg-muted/80 transition-colors">
+                          <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                            <svg className="w-8 h-8 mb-4 text-muted-foreground" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
+                              <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L7 9m3-3 3 3"/>
+                            </svg>
+                            <p className="mb-2 text-sm text-muted-foreground"><span className="font-semibold">Haz clic para subir</span> o arrastra y suelta</p>
+                            <p className="text-xs text-muted-foreground">PDF, DOCX, TXT, MD, HTML (MAX. 5MB)</p>
+                          </div>
+                        </label>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </Dropzone>
                 {files && files.length > 0 && (
                   <div className="mt-4 space-y-2 text-sm">
                     <p className="font-medium">Archivos seleccionados:</p>

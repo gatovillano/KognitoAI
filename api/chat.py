@@ -110,8 +110,8 @@ class PinThreadRequest(BaseModel):
 
 class CreateThreadRequest(BaseModel):
     """Define la estructura de datos para crear un nuevo hilo de chat."""
-    title: Optional[str] = "Nuevo Chat"
-    platform: Optional[str] = "web"
+    title: str = "Nuevo Chat"
+    platform: str = "web"
     workspace_id: Optional[str] = None
 
 
@@ -181,10 +181,10 @@ async def get_threads(
         
         # Filter by workspace_id if provided
         if workspace_id:
-            if workspace_id.lower() == "none":
+            if str(workspace_id).lower() == "none": # Acceder al valor y luego a .lower()
                 base_query = base_query.where(ChatThread.workspace_id == None)
             else:
-                base_query = base_query.where(ChatThread.workspace_id == uuid.UUID(workspace_id))
+                base_query = base_query.where(ChatThread.workspace_id == uuid.UUID(str(workspace_id))) # Acceder al valor y luego a UUID
 
         # Consulta para el total de hilos
         total_stmt = select(func.count()).select_from(base_query.alias())
@@ -284,6 +284,73 @@ async def get_messages_for_thread(
     except Exception as e:
         logger.error(f"Error al obtener mensajes para el hilo {thread_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Ocurrió un error al obtener los mensajes del chat.")
+
+async def search_chat_messages(
+    query: str,
+    account_id: str,
+    db: AsyncSession,
+    workspace_id: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 50
+) -> List[Dict[str, Any]]:
+    """
+    Busca en los títulos de los hilos y en los mensajes de chat de un usuario.
+    """
+    logger.info(f"Buscando '{query}' en chats para la cuenta {account_id} y workspace {workspace_id}")
+    results = []
+    
+    # Obtener hilos filtrados por workspace si se proporciona
+    threads_response = await get_threads(
+        current_account_id=account_id, 
+        db=db, 
+        workspace_id=workspace_id,
+        skip=0, 
+        limit=1000  # Límite alto para obtener todos los hilos relevantes
+    )
+    
+    processed_threads = set()
+
+    for thread in threads_response.threads:
+        # Buscar en el título del hilo
+        if query.lower() in thread.title.lower() and thread.id not in processed_threads:
+            results.append({
+                "type": "chat_thread",
+                "id": str(thread.id),
+                "title": thread.title,
+                "created_at": thread.created_at.isoformat() if thread.created_at else None
+            })
+            processed_threads.add(thread.id)
+
+        # Buscar en los mensajes del hilo
+        db_sync_url = settings.database_url.replace("+psycopg", "")
+        chat_message_history = PostgresChatMessageHistory(
+            connection_string=db_sync_url,
+            session_id=str(thread.id),
+            table_name="langchain_chat_history",
+        )
+        all_messages = await chat_message_history.aget_messages()
+        
+        for msg in all_messages:
+            text_content = ""
+            if isinstance(msg.content, list):
+                for part in msg.content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text_content += part.get("text", "")
+            else:
+                text_content = str(msg.content)
+            
+            if query.lower() in text_content.lower():
+                results.append({
+                    "type": "chat_message",
+                    "thread_id": str(thread.id),
+                    "thread_title": thread.title,
+                    "content": text_content,
+                    "sender": "user" if isinstance(msg, HumanMessage) else "ai",
+                    "created_at": msg.additional_kwargs.get("created_at", datetime.now(timezone.utc)).isoformat()
+                })
+
+    # Aplicar paginación a los resultados finales
+    return results[skip : skip + limit]
 
 @router.get("/threads/{thread_id}", summary="Obtener detalles de un hilo de chat")
 async def get_thread(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
@@ -453,6 +520,51 @@ async def transcribe_audio(file: UploadFile = File(...)):
         logger.error(f"Error en la transcripción de audio: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error interno del servidor: {e}")
 
+class SystemMessageRequest(BaseModel):
+    text: str
+    created_at: Optional[datetime] = None
+
+@router.post("/threads/{thread_id}/messages/system", status_code=status.HTTP_201_CREATED, summary="Guardar un mensaje de sistema/AI en el historial de chat")
+async def save_system_message(
+    thread_id: str,
+    request: SystemMessageRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Endpoint para guardar un mensaje de sistema o de la IA en el historial de chat.
+    Esto permite que mensajes generados por el frontend (como notificaciones de vectorización)
+    sean persistidos y considerados por el LLM en futuras interacciones.
+    """
+    try:
+        thread = await db.scalar(select(ChatThread).where(
+            ChatThread.id == uuid.UUID(thread_id),
+            ChatThread.account_id == uuid.UUID(current_account_id)
+        ))
+        if not thread:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Hilo de chat no encontrado.")
+
+        db_sync_url = settings.database_url.replace("+psycopg", "")
+        chat_message_history = PostgresChatMessageHistory(
+            connection_string=db_sync_url,
+            session_id=thread_id,
+            table_name="langchain_chat_history",
+        )
+
+        # Crear un AIMessage para guardar en el historial
+        ai_message = AIMessage(
+            content=request.text,
+            additional_kwargs={"created_at": request.created_at or datetime.now(timezone.utc)}
+        )
+        await chat_message_history.aadd_messages([ai_message])
+        logger.info(f"Mensaje de sistema guardado en el hilo {thread_id}: {request.text}")
+        return {"message": "Mensaje de sistema guardado exitosamente."}
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El thread_id proporcionado no es un UUID válido.")
+    except Exception as e:
+        logger.error(f"Error al guardar mensaje de sistema en el hilo {thread_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Ocurrió un error al guardar el mensaje de sistema.")
+
 @router.post("/chat", status_code=status.HTTP_202_ACCEPTED, summary="Procesar Mensaje de Chat en Segundo Plano")
 async def handle_chat(
     background_tasks: BackgroundTasks,
@@ -528,7 +640,7 @@ async def create_and_run_agent_streaming(
     """
     Ejecuta el agente LangGraph y transmite los resultados a través de WebSockets.
     """
-    from core.agent import create_langgraph_agent
+    from core.agent import AgentState, create_langgraph_agent # Importar AgentState
     from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
     from langchain_community.chat_message_histories import PostgresChatMessageHistory
     from core.config import settings

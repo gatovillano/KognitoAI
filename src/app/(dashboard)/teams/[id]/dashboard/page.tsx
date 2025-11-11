@@ -95,7 +95,7 @@ export default function TeamDashboardPage() {
         setIsLoadingContent(true);
         setDocumentContent('');
         try {
-          const response = await apiClient.post('/api/get-document-content', { file_name: selectedDocument.file_name });
+          const response = await apiClient.get(`/api/documents/get-document-content?file_name=${encodeURIComponent(selectedDocument.file_name)}`);
           setDocumentContent(response.data.content || 'No se pudo cargar el contenido de este documento.');
         } catch (error) {
           toast.error("Error al cargar el contenido del documento.");

@@ -27,23 +27,25 @@ export default function RegisterPage() {
         password,
       });
 
-      if (response.data.token) {
-        // No almacenamos el token aquí, el usuario debe iniciar sesión
-        toast.success('Cuenta creada con éxito', {
+      // El backend ahora devuelve 'access_token' y 'message'
+      if (response.data.access_token) { // Cambiado de response.data.message a response.data.access_token
+        console.log("Intentando mostrar toast de éxito:", response.data.message); // DEBUG
+        toast.success(response.data.message || 'Cuenta creada con éxito', { // Usar el mensaje del backend o uno por defecto
           description: 'Ahora puedes iniciar sesión.',
           action: {
             label: 'Iniciar Sesión',
             onClick: () => router.push('/login'),
           },
-          duration: 5000, // Duración para que el usuario pueda leer el mensaje y hacer clic
+          duration: 5000,
         });
-        // No redirigimos automáticamente, el usuario debe iniciar sesión
       } else {
+        console.log("Intentando mostrar toast de error (sin access_token):", response.data.message); // DEBUG
         toast.error('Error en el registro', {
-          description: 'No se recibió un token de autenticación.',
+          description: response.data.message || 'No se recibió un token de autenticación.', // Usar mensaje del backend o uno por defecto
         });
       }
     } catch (error: any) {
+      console.error('Registration error:', error); // DEBUG
       console.error('Registration error:', error);
       if (error.response?.status === 409) {
         toast.error('Correo ya registrado', {
@@ -55,7 +57,7 @@ export default function RegisterPage() {
         });
       } else {
         toast.error('Error en el registro', {
-          description: error.response?.data?.error || 'Hubo un problema al crear tu cuenta.',
+          description: error.response?.data?.detail || 'Hubo un problema al crear tu cuenta.',
         });
       }
     } finally {

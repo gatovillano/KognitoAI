@@ -23,9 +23,7 @@ export function PreviewDocumentDialog({ document, isOpen, onOpenChange }: Previe
         setIsLoading(true);
         setContent('');
         try {
-          const response = await apiClient.post('/api/get-document-content', {
-            file_name: document.file_name,
-          });
+          const response = await apiClient.get(`/api/documents/get-document-content?file_name=${encodeURIComponent(document.file_name)}`);
           setContent(response.data.content);
         } catch (error) {
           setContent('No se pudo cargar el contenido de este documento.');

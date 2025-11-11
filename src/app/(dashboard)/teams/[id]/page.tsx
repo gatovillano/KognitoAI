@@ -75,7 +75,7 @@ export default function TeamDetailPage() {
     try {
       setSearching(true);
       // Search for user by username or email to get account_id
-      const searchResponse = await apiClient.get(`/api/users/search`, { params: { identifier: memberIdentifier } });
+      const searchResponse = await apiClient.get(`/api/users/search`, { params: { ...{ identifier: memberIdentifier } } });
       if (searchResponse.data && searchResponse.data.account_id) {
         const accountId = searchResponse.data.account_id;
         await apiClient.post(`/api/teams/${teamId}/members`, { account_id: accountId });

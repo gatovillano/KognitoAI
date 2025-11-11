@@ -7,8 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Plus, Bot, Info, Share2 } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { WorkspaceDialog } from './workspace-dialog';
-import ShareWorkspaceDialog from './ShareWorkspaceDialog'; // Importar el nuevo componente
+import { ShareWorkspaceDialog } from './ShareWorkspaceDialog'; // Importar el nuevo componente
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'; // Importar Sheet
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 
 interface Workspace {
@@ -34,6 +35,7 @@ export default function WorkspacesPage() {
   const [itemsPerPage] = useState(9); // Puedes ajustar esto según tus necesidades
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true); // Añadir estado de carga
+  const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
   const router = useRouter();
 
   const fetchWorkspaces = useCallback(async () => {
@@ -85,18 +87,9 @@ export default function WorkspacesPage() {
           <h1 className="text-3xl font-bold flex items-center">
             <Bot className="mr-3 h-8 w-8 text-primary" />
             Workspaces
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground">
-                    <Info className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs">
-                  <p>Organiza y gestiona tus espacios de trabajo especializados. Crea un espacio con un asistente con sus propias indicaciones de sistema. Dentro podrás gestionar colecciones de conocimiento a las que tendrá acceso tu asistente de forma aislada del resto del contexto personal.</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+              <Info className="h-4 w-4" />
+            </Button>
           </h1>
         </div>
         <Button size="lg" onClick={() => {
@@ -244,6 +237,47 @@ export default function WorkspacesPage() {
           onPermissionsUpdated={fetchWorkspaces} // Recargar la lista de workspaces después de actualizar permisos
         />
       )}
+
+      <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="text-xl font-bold text-primary">Módulo de Workspaces</SheetTitle>
+            <SheetDescription className="text-sm text-muted-foreground">
+              Organiza y gestiona tus espacios de trabajo personalizados con asistentes de IA.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
+            <p><strong>¿Qué son los Workspaces?</strong></p>
+            <p>Los workspaces son entornos aislados donde puedes configurar asistentes de IA con indicaciones de sistema específicas y gestionar colecciones de conocimientos exclusivas. Esto permite tener diferentes "personalidades" de IA y bases de conocimiento para distintas tareas o proyectos.</p>
+            
+            <p><strong>Características Principales:</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Asistentes Personalizados:</strong> Configura asistentes de IA con prompts de sistema únicos para cada workspace.</li>
+              <li><strong>Conocimiento Aislado:</strong> Gestiona colecciones de conocimientos (documentos, notas, etc.) que son accesibles solo dentro de ese workspace.</li>
+              <li><strong>Colaboración Segura:</strong> Comparte workspaces con equipos específicos, controlando el acceso a la información y las configuraciones.</li>
+              <li><strong>Roles de Usuario:</strong> Asigna diferentes roles (propietario, editor, lector) a los miembros del equipo dentro de cada workspace.</li>
+            </ul>
+
+            <p><strong>Interacción con IA:</strong></p>
+            <p>Los workspaces potencian la interacción con la IA al permitirte tener asistentes altamente especializados. Puedes:</p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li>Interactuar con un asistente de IA que tiene un contexto y un propósito definidos por el workspace.</li>
+              <li>Realizar búsquedas y análisis que solo utilizan la base de conocimiento de ese workspace.</li>
+              <li>Generar contenido o resolver problemas con la IA, basándose en la información y la configuración específica del entorno.</li>
+            </ul>
+
+            <p><strong>Beneficios Clave:</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Contexto Controlado:</strong> Asegura que la IA opere con la información y el propósito correctos para cada tarea.</li>
+              <li><strong>Flexibilidad:</strong> Adapta tus asistentes de IA a una amplia gama de necesidades y proyectos.</li>
+              <li><strong>Privacidad y Seguridad:</strong> Mantén la información de diferentes proyectos o equipos separada y segura.</li>
+              <li><strong>Productividad Aumentada:</strong> Mejora la eficiencia al tener asistentes de IA especializados a tu disposición.</li>
+            </ul>
+
+            <p>¡Crea workspaces para cada aspecto de tu vida profesional o personal y potencia tu experiencia con Kognito AI!</p>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

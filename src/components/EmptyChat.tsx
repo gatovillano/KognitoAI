@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { motion, Variants, Transition } from 'framer-motion';
 import ChatInputBar from '@/components/ChatInputBar';
@@ -21,6 +21,7 @@ interface EmptyChatProps {
   isRecording: boolean;
   isProcessingAudio: boolean;
   isUploadingFile: boolean;
+  isVectorizingFile: boolean; // Nueva prop
   isKnowledgeAnalysisActive: boolean;
   isWebSearchActive: boolean;
   isComprehensiveAnalysisActive: boolean;
@@ -38,6 +39,10 @@ interface EmptyChatProps {
   workspaceId?: string;
   selectedContext: SelectedContextItem[]; // Added
   onContextSelected: (context: SelectedContextItem[]) => void; // Added
+  isUploadingImage: boolean;
+  uploadedImagePreview?: string | null;
+  onRemoveImage: () => void;
+  onImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
 export function EmptyChat({
@@ -48,6 +53,7 @@ export function EmptyChat({
   isRecording,
   isProcessingAudio,
   isUploadingFile,
+  isVectorizingFile, // Nueva prop
   isKnowledgeAnalysisActive,
   isWebSearchActive,
   isComprehensiveAnalysisActive,
@@ -65,6 +71,10 @@ export function EmptyChat({
   workspaceId,
   selectedContext, // Added
   onContextSelected, // Added
+  isUploadingImage,
+  uploadedImagePreview,
+  onRemoveImage,
+  onImageUpload,
 }: EmptyChatProps) {
   const examplePrompts = [
     "Analiza los documentos recientes y genera un resumen ejecutivo.",
@@ -112,7 +122,7 @@ export function EmptyChat({
       <div className="w-full max-w-4xl px-4">
         <ChatInputBar
           newMessage={newMessage}
-          onMessageChange={setNewMessage}
+          setNewMessage={setNewMessage}
           onSendMessage={onSendMessage}
           isResponding={isResponding}
           inputPlaceholder="¿En que puedo colaborar hoy?"
@@ -123,6 +133,11 @@ export function EmptyChat({
           isRecording={isRecording}
           isProcessingAudio={isProcessingAudio}
           isUploadingFile={isUploadingFile}
+          isVectorizingFile={isVectorizingFile} // Pasar el nuevo estado
+          isUploadingImage={isUploadingImage}
+          uploadedImagePreview={uploadedImagePreview}
+          onRemoveImage={onRemoveImage}
+          onImageUpload={onImageUpload}
           onKeyDown={onKeyDown}
           onToggleKnowledgeAnalysis={onToggleKnowledgeAnalysis}
           onToggleWebSearch={onToggleWebSearch}

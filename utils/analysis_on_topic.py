@@ -209,12 +209,13 @@ async def perform_llm_analysis(documents: List[Dict[str, Any]], topic: str, dept
     content_text = "\n\n".join(doc_summaries)
     prompt = f"""Realiza un análisis profundo sobre el tema '{topic}' basado en los siguientes documentos extraídos de mi base de conocimientos.
     La profundidad del análisis debe ser '{depth}', lo que significa que debes identificar conceptos clave, conexiones y patrones según el nivel de detalle solicitado.
+    Asegúrate de que todo el informe esté en español.
     Devuelve un informe detallado con secciones claras para conceptos clave, conexiones y patrones (si aplica).
-
+ 
     Documentos:
     {content_text}
-
-    Informe de análisis sobre '{topic}':
+ 
+    Informe de análisis sobre '{topic}' (en español):
     """
     
     try:

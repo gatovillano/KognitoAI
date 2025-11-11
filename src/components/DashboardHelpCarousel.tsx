@@ -3,41 +3,70 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import {
-  Bot,
-  Library,
-  Notebook,
-  Calendar,
   BrainCircuit,
-  MessageSquare,
+  BookOpen,
+  Calendar,
+  StickyNote,
+  Users,
+  ImageIcon,
+  ClipboardList,
+  BarChart,
+  Library,
+  Sparkles,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
 } from 'lucide-react';
 
 const slideContent = [
     {
       icon: <BrainCircuit size={28} className="text-primary" />,
-      title: "¿Qué es KAI? Tu Exocerebro Digital y Memoria Colectiva",
-      content: "KAI (Knowledge & Augmented Intelligence) no es solo una inteligencia artificial; es tu exocerebro digital y la memoria colectiva viviente de tu equipo. Nuestra misión fundamental es aumentar la inteligencia colectiva, actuando como un co-piloto inteligente que conecta ideas, personas y conocimiento. Beneficios clave: Acelera la colaboración, facilita la toma de decisiones informadas y potencia las capacidades humanas al centralizar y contextualizar toda tu información."
-    },
-    {
-      icon: <MessageSquare size={28} className="text-primary" />,
-      title: "El Chat Inteligente: Tu Interfaz Principal con KAI",
-      content: "Conversaciones Dinámicas: Interactúa con KAI en lenguaje natural para obtener respuestas instantáneas, resumir documentos extensos, generar borradores de texto o explorar nuevas ideas. Contexto Persistente: KAI recuerda tus conversaciones anteriores y tu base de conocimiento personal para ofrecer respuestas más relevantes y personalizadas. Asistencia Proactiva: Recibe sugerencias inteligentes basadas en el contexto de tus chats y las necesidades de tu equipo. Integración: Utiliza el chat para acceder y gestionar todas las demás funcionalidades de KAI, desde programar eventos hasta buscar documentos."
+      title: "¿Qué es KognitoAI?",
+      content: "KognitoAI es tu exocerebro digital, un copiloto inteligente diseñado para aumentar tu inteligencia y la de tu equipo. Centraliza tu información, la conecta de formas inesperadas y te ayuda a tomar decisiones más informadas, actuando como la memoria colectiva viviente de tu organización."
     },
     {
       icon: <Library size={28} className="text-primary" />,
-      title: "Gestión de Conocimiento (RAG): Construye tu Base de Datos Inteligente",
-      content: "Recuperación Aumentada por Generación (RAG): Sube y organiza tus documentos (PDFs, TXT, DOCX, etc.) para que KAI los procese, los entienda y los utilice como fuente de verdad. Colecciones de Conocimiento: Agrupa documentos por temas, proyectos o equipos para crear bases de conocimiento especializadas y facilitar la búsqueda. Extracción Inteligente: KAI extrae automáticamente información clave, conceptos y relaciones de tus documentos, haciéndolos accesibles y consultables al instante. Respuestas Contextualizadas: Cuando preguntas a KAI, no solo busca en la web; prioriza y utiliza la información de tus documentos para darte respuestas precisas y directamente aplicables a tu contexto."
-    },
-    {
-      icon: <Notebook size={28} className="text-primary" />,
-      title: "Notas y Memorias: Captura y Organiza Cada Idea",
-      content: "Notas Rápidas: Guarda ideas, apuntes de reuniones, listas de tareas o cualquier información relevante que necesites recordar. Puedes categorizarlas para una mejor organización. Memoria a Largo Plazo: KAI almacena hechos, preferencias, hábitos e intereses que declares en tus conversaciones, construyendo un perfil más completo de ti y tus necesidades. Conexión Inteligente: Tanto tus notas como tus memorias se integran en la base de conocimiento de KAI, permitiendo que la IA encuentre conexiones inesperadas y te ofrezca insights proactivos. Acceso Fácil: Recupera tus notas y memorias en cualquier momento, ya sea buscando por palabras clave o pidiéndole a KAI que te las resuma."
+      title: "Módulo de Conocimientos (RAG)",
+      content: "Tu biblioteca personal y de equipo. Sube documentos (PDFs, webs, repositorios de GitHub) y organízalos en 'Colecciones'. Kognito los procesa para que puedas conversar con ellos, obtener resúmenes y recibir respuestas basadas en tu propia información."
     },
     {
       icon: <Calendar size={28} className="text-primary" />,
-      title: "Agenda y Recordatorios: Optimiza tu Tiempo y Compromisos",
-      content: "Programación de Eventos: Crea y gestiona tus eventos, reuniones y citas directamente desde KAI. Simplemente dile \"agenda una reunión para mañana a las 10 AM\" y KAI se encargará. Recordatorios Personalizados: Establece recordatorios para cualquier tarea o compromiso, desde \"recuérdame llamar a Juan en 30 minutos\" hasta \"avísame el lunes sobre el informe\". Sincronización: Mantén tu agenda personal y de equipo organizada, asegurando que nunca pierdas una fecha límite o un compromiso importante. Visión General: Consulta tu agenda para el día, la semana o cualquier fecha específica para tener siempre una visión clara de tus próximos pasos."
+      title: "Módulo de Agenda",
+      content: "Tu centro de organización temporal. Programa eventos, crea recordatorios y gestiona tus tareas directamente desde el chat. Vincula eventos a notas o perfiles de contacto para tener una visión 360° de tus compromisos."
+    },
+    {
+      icon: <StickyNote size={28} className="text-primary" />,
+      title: "Módulo de Notas",
+      content: "Tu bloc de notas inteligente. Captura ideas, apuntes de reuniones o cualquier información al instante. Kognito integra tus notas en su base de conocimiento, permitiendo encontrar conexiones entre tus pensamientos y los documentos que has subido."
+    },
+    {
+      icon: <Users size={28} className="text-primary" />,
+      title: "Módulo de Perfiles de Contacto",
+      content: "Crea un CRM personal. Registra perfiles para las personas con las que interactúas y vincula notas, eventos o documentos relacionados. Ten toda la información relevante sobre un contacto a un solo clic de distancia."
+    },
+    {
+      icon: <ImageIcon size={28} className="text-primary" />,
+      title: "Módulo de Galerías",
+      content: "Tu archivo visual. Organiza imágenes en 'Galerías' o álbumes temáticos. Kognito genera miniaturas y te permite gestionar y visualizar tus recursos gráficos de forma ordenada y accesible."
+    },
+    {
+      icon: <ClipboardList size={28} className="text-primary" />,
+      title: "Módulo de Formularios",
+      content: "Recolecta información de manera estructurada. Diseña formularios dinámicos para encuestas, feedback o cualquier tipo de recolección de datos. Las respuestas se almacenan y pueden ser analizadas por Kognito."
+    },
+    {
+      icon: <BarChart size={28} className="text-primary" />,
+      title: "Módulo de Análisis e Insights",
+      content: "El poder predictivo de Kognito. Pide análisis profundos de tus datos para encontrar tendencias, temas clave y brechas de conocimiento. Además, el sistema genera 'Insights Proactivos' automáticamente, revelando conexiones que no habías visto."
+    },
+    {
+      icon: <BookOpen size={28} className="text-primary" />,
+      title: "Workspaces y Equipos",
+      content: "Colaboración sin caos. Usa 'Workspaces' para separar contextos (ej. Personal, Trabajo) y crea 'Equipos' para compartir conocimiento y colaborar con otros usuarios en un entorno seguro y organizado."
+    },
+    {
+      icon: <Sparkles size={28} className="text-primary" />,
+      title: "¡Explora tu Nuevo Potencial!",
+      content: "Esto es solo el comienzo. Kognito tiene muchas más funcionalidades esperando a ser descubiertas. Te invitamos a explorar, experimentar y conversar con tu nuevo copiloto de conocimiento. ¡El límite es tu curiosidad!"
     }
   ];
 

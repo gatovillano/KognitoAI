@@ -1,23 +1,48 @@
 // src/app/(dashboard)/analysis/page.tsx
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Loader2, Info, Filter, ChevronDown, Search, BarChart3, FileText, FolderKanban, Lightbulb, Code, Calendar, Eye } from 'lucide-react'; // Asumiendo que usas lucide-react para iconos
-import { toast } from 'sonner'; // Para notificaciones
-import apiClient from '@/lib/api'; // Tu cliente HTTP
+import { useRouter } from 'next/navigation';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+
 import { useAuth } from '@/contexts/AuthContext'; // Tu hook de autenticación
+
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+
+import { Button } from '@/components/ui/button';
+
+import { Input } from '@/components/ui/input';
+
+import { Network } from 'lucide-react';
+import { Loader2, Info, Filter, ChevronDown, Search, BarChart3, FileText, FolderKanban, Lightbulb, Code, Calendar, Eye, Plus, TrendingUp, AlertTriangle, HelpCircle, CheckCircle, Clock, XCircle } from 'lucide-react'; // Añadidos iconos para el dashboard
+
+import { toast } from 'sonner';
+
+import apiClient from '@/lib/api';
+
+import { Analysis, AnalysisType, Insight, Question, AnalysisResponse, DashboardInsightsResponse, AnalysisStats, KeyTopic } from '@/lib/models'; // Importar nuevos modelos
+
 import { Badge } from '@/components/ui/badge';
+
+import { Bar, BarChart, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { AnalysisResultDialog } from '../rag/analysis-result-dialog';
-import { CollectionAnalysisDialog } from '../rag/collection-analysis-dialog';
-import { CodeAnalysisResultDialog } from './../rag/code-analysis-result-dialog';
-import { SemanticAnalysisDialog } from '../rag/semantic-analysis-dialog';
+
+import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription as SheetDescriptionComp } from '@/components/ui/sheet'; // Importar Sheet y renombrar SheetDescription para evitar conflicto
+
 import { motion, AnimatePresence } from 'framer-motion';
 
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'; // Importar componentes de Dialog
+
+import InsightGeneratorForm from '@/components/InsightGeneratorForm'; // Importar el nuevo componente
+
+import { QuestionSlider } from '@/components/QuestionSlider'; // Importar QuestionSlider
+
+import { KeyTopicSlider } from '@/components/KeyTopicSlider'; // Importar KeyTopicSlider
+
+import { KeyTopicDetailDialog } from '@/components/KeyTopicDetailDialog'; // Importar KeyTopicDetailDialog
+
+import { AnalysisDetailDialog } from './analysis-detail-dialog'; // Importar AnalysisDetailDialog
 
 
 const getAnalysisIcon = (type: string) => {
@@ -27,6 +52,7 @@ const getAnalysisIcon = (type: string) => {
     case 'collection':
       return <FolderKanban className="h-5 w-5 text-green-500" />;
     case 'insight':
+    case 'proactive_insight_manual': // Añadido el nuevo tipo
       return <Lightbulb className="h-5 w-5 text-yellow-500" />;
     case 'code':
       return <Code className="h-5 w-5 text-orange-500" />;
@@ -45,6 +71,7 @@ const getAnalysisTypeLabel = (type: string) => {
     case 'collection':
       return 'Colección';
     case 'insight':
+    case 'proactive_insight_manual': // Añadido el nuevo tipo
       return 'Insight';
     case 'code':
       return 'Código';
@@ -52,218 +79,885 @@ const getAnalysisTypeLabel = (type: string) => {
       return 'Semántico';
     case 'semantic_summary':
       return 'Resumen Semántico';
+    case 'custom':
+      return 'Personalizado';
+    case 'knowledge_graph':
+      return 'Grafo de Conocimiento';
     default:
       return 'Análisis';
   }
 };
 
 const getAnalysisTypeBadgeColor = (type: string) => {
-    switch (type) {
-      case 'document':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'collection':
-        return 'bg-green-100 text-green-800 border-green-200';
-      case 'insight':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'code':
-        return 'bg-orange-100 text-orange-800 border-orange-200';
-      case 'semantic':
-      case 'semantic_summary':
-        return 'bg-indigo-100 text-indigo-800 border-indigo-200';
-      default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
-    }
-  };
+  switch (type) {
+    case 'document':
+      return 'bg-blue-100 text-blue-800 border-blue-200';
+    case 'collection':
+      return 'bg-green-100 text-green-800 border-green-200';
+    case 'insight':
+    case 'proactive_insight_manual': // Añadido el nuevo tipo
+      return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+    case 'code':
+      return 'bg-orange-100 text-orange-800 border-orange-200';
+    case 'semantic':
+    case 'semantic_summary':
+      return 'bg-indigo-100 text-indigo-800 border-indigo-200';
+    default:
+      return 'bg-gray-100 text-gray-800 border-gray-200';
+  }
+};
 
 export default function AnalysisPage() {
+  const router = useRouter();
+  
   const { user, token } = useAuth();
+
+  console.log('AnalysisPage: user', user);
+
+  console.log('AnalysisPage: token', token);
+
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedType, setSelectedType] = useState<string | null>(null);
+ 
+   const [isLoading, setIsLoading] = useState(true);
+ const [searchQuery, setSearchQuery] = useState('');
+ const [topicKeywords, setTopicKeywords] = useState<string>(''); // Nuevo estado para palabras clave
+ const [selectedType, setSelectedType] = useState<string | null>(null);
   const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
-  const [isAnalysisResultDialogOpen, setIsAnalysisResultDialogOpen] = useState(false);
-  const [isCollectionAnalysisDialogOpen, setIsCollectionAnalysisDialogOpen] = useState(false);
-  const [isCodeAnalysisResultDialogOpen, setIsCodeAnalysisResultDialogOpen] = useState(false);
-  const [isSemanticDialogOpen, setIsSemanticDialogOpen] = useState(false);
-  const offsetRef = useRef(0);
-  const [hasMore, setHasMore] = useState(false);
+
+  const [showInsightFormModal, setShowInsightFormModal] = useState(false);
+
+  const [dashboardData, setDashboardData] = useState<DashboardInsightsResponse | null>(null); // Nuevo estado para datos del dashboard
+
+  const [isLoadingDashboard, setIsLoadingDashboard] = useState(true); // Nuevo estado de carga para el dashboard
+
+const [isKeyTopicDetailDialogOpen, setIsKeyTopicDetailDialogOpen] = useState(false); // Nuevo estado para el diálogo de detalles de tema clave
+
+const [selectedKeyTopic, setSelectedKeyTopic] = useState<KeyTopic | null>(null); // Nuevo estado para el tema clave seleccionado
+
+const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
+
+const offsetRef = useRef(0);
+
+const [hasMore, setHasMore] = useState(false);
+
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
+
+
   const fetchAnalyses = useCallback(async (reset = false) => {
+
+    console.log('fetchAnalyses: Iniciando', { reset, selectedType, searchQuery, topicKeywords }); // Añadir topicKeywords al log
+
     if (reset) {
+
       setIsLoading(true);
+
       offsetRef.current = 0;
+
       setAnalyses([]);
+
     } else {
+
       setIsLoadingMore(true);
+
     }
+
+
 
     try {
+
       const currentOffset = offsetRef.current;
+      const keywordsArray = topicKeywords ? topicKeywords.split(',').map(keyword => keyword.trim()) : undefined; // Convertir string a array
+
       const response = await apiClient.post('/api/get-all-analysis', {
+
         limit: 20,
+
         offset: currentOffset,
+
         analysis_type: selectedType,
-        search_query: searchQuery || undefined
+
+        search_query: searchQuery || undefined,
+        topic_keywords: keywordsArray // Enviar las palabras clave
+
       });
 
+
+
       const data: AnalysisResponse = response.data;
+
+      console.log('fetchAnalyses: Datos recibidos', data);
+
       
+
       if (reset) {
+
         setAnalyses(data.analysis);
+
       } else {
+
         setAnalyses(prev => [...prev, ...data.analysis]);
+
       }
+
+
 
       if (data.has_more && data.analysis.length === 0) {
+
         setHasMore(false);
-      } else {
-        setHasMore(data.has_more);
+
       }
 
-      offsetRef.current = currentOffset + data.analysis.length;
-    } catch (error) {
-      toast.error('Error al cargar los análisis');
-      console.error('Error fetching analyses:', error);
-      setHasMore(false);
-    } finally {
-      setIsLoading(false);
-      setIsLoadingMore(false);
-    }
-  }, [selectedType, searchQuery]);
+      else {
 
-  useEffect(() => {
-    if (user && token) {
-      fetchAnalyses(true);
-    }
-  }, [user, token, selectedType, searchQuery, fetchAnalyses]);
+        setHasMore(!!data.has_more);
+
+      }
+
+
+
+      offsetRef.current = currentOffset + data.analysis.length;
+
+        } catch (error) {
+
+          toast.error('Error al cargar los análisis');
+
+          console.error('fetchAnalyses: Error al cargar análisis', error);
+
+          setHasMore(false);
+
+        } finally {
+
+          setIsLoading(false);
+
+          setIsLoadingMore(false);
+
+          console.log('fetchAnalyses: Finalizado', { isLoading: false, isLoadingMore: false });
+
+        }
+
+      }, [selectedType, searchQuery, topicKeywords]); // Añadir topicKeywords a las dependencias de useCallback
+
+
+
+
+
+               const fetchDashboardData = useCallback(async () => {
+
+                console.log('fetchDashboardData: Iniciando');
+
+  
+
+                console.log('fetchDashboardData: user?.account_id', user?.account_id);
+
+  
+
+                if (!user?.account_id) {
+
+                  console.log('fetchDashboardData: No user account ID, returning early but setting loading to false');
+
+                  setIsLoadingDashboard(false); // Asegurarse de que el estado de carga se desactive
+
+                  return;
+
+                }
+
+  
+
+                setIsLoadingDashboard(true);
+
+  
+
+                try {
+
+                  const response = await apiClient.post<DashboardInsightsResponse>('/api/dashboard-insights', {});
+
+  
+
+                  console.log('fetchDashboardData: Datos recibidos', response.data);
+
+  
+
+                  setDashboardData(response.data);
+
+  
+
+                } catch (error) {
+
+                  toast.error('Error al cargar los datos del dashboard');
+
+                  console.error('fetchDashboardData: Error al cargar datos del dashboard', error);
+
+                } finally {
+
+                  setIsLoadingDashboard(false);
+
+                  console.log('fetchDashboardData: Finalizado', { isLoadingDashboard: false });
+
+                }
+
+              }, [user?.account_id]);
+
+  
+
+  
+
+  
+
+  
+
+          useEffect(() => {
+
+            console.log('useEffect: user, token, selectedType, searchQuery changed', { user: !!user, token: !!token, selectedType, searchQuery });
+
+            if (user && token) {
+
+              fetchAnalyses(true);
+
+              fetchDashboardData(); // Cargar datos del dashboard al inicio
+
+            }
+
+          }, [user, token, selectedType, searchQuery, topicKeywords, fetchAnalyses, fetchDashboardData]);
+
+  
 
   const handleSearch = (e: React.FormEvent) => {
+
     e.preventDefault();
+
     fetchAnalyses(true);
+
   };
 
-  const handleViewDetails = (analysis: Analysis) => {
-    setSelectedAnalysis(analysis);
-    switch (analysis.type) {
-      case 'document':
-        setIsAnalysisResultDialogOpen(true);
-        break;
-      case 'collection':
-        setIsCollectionAnalysisDialogOpen(true);
-        break;
-      case 'code':
-        setIsCodeAnalysisResultDialogOpen(true);
-        break;
-      case 'semantic':
-      case 'semantic_summary':
-        setIsSemanticDialogOpen(true);
-        break;
-      default:
-        setIsAnalysisResultDialogOpen(true); // Fallback
-        break;
-    }
-  };
+  
+
+    const handleViewDetails = (analysis: Analysis) => {
+
+      console.log('handleViewDetails: Abriendo diálogo para tipo de análisis:', analysis.type, analysis);
+
+      setSelectedAnalysis(analysis);
+
+    };
+
+  
 
   const handleLoadMore = () => {
+
     if (!isLoadingMore && hasMore) {
+
       fetchAnalyses(false);
+
     }
+
   };
+
+  
 
   const formatDate = (dateString: string) => {
+
     return new Date(dateString).toLocaleDateString('es-ES', {
+
       year: 'numeric',
+
       month: 'short',
+
       day: 'numeric',
+
       hour: '2-digit',
+
       minute: '2-digit'
+
     });
+
   };
 
+  
+
   const analysisTypes = [
+
     { value: null, label: 'Todos los tipos' },
+
     { value: 'document', label: 'Documentos' },
+
     { value: 'collection', label: 'Colecciones' },
-    { value: 'insight', label: 'Insights' },
+
+    { value: 'insight', label: 'Insights Proactivos' }, // Cambiado el label
+
+    { value: 'proactive_insight_manual', label: 'Insights Manuales' }, // Nuevo tipo
+
     { value: 'code', label: 'Código' },
+
     { value: 'semantic', label: 'Semántico' },
+
     { value: 'semantic_summary', label: 'Resumen Semántico' }
+
   ];
 
-  if (isLoading) {
+  
+
+  const chartData = useMemo(() => {
+
+    if (!dashboardData?.analysis_stats_by_type) return [];
+
+    return dashboardData.analysis_stats_by_type.map(stat => ({
+
+      name: getAnalysisTypeLabel(stat.type),
+
+      Completados: stat.completed,
+
+      Fallidos: stat.failed,
+
+    }));
+
+  }, [dashboardData]);
+
+  
+
+  if (isLoading || isLoadingDashboard) {
+
     return (
+
       <div className="flex h-screen w-full items-center justify-center">
+
         <div className="flex flex-col items-center gap-2">
+
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
+
           <p className="text-muted-foreground">Cargando análisis...</p>
+
         </div>
+
       </div>
+
     );
+
   }
 
-  return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden space-y-8">
-      {/* Header y título */}
-      <div className="spacing-component">
-        <div className="flex items-center gap-2">
-          <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
-            Centro de Análisis
-          </h1>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
-                  <Info className="h-5 w-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Explora todos tus análisis de documentos, colecciones e insights proactivos en un solo lugar.</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
-      </div>
+  
 
-        {/* --- SECCIÓN DE LISTA DE ANÁLISIS EXISTENTE --- */}
-        <>
-          {/* Filtros y búsqueda */}
-          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-            <form onSubmit={handleSearch} className="flex gap-2 flex-1">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar en análisis..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
+  return (
+
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden space-y-8">
+
+            {/* Header y título */}
+
+            <div className="spacing-component">
+
+              <div className="flex items-center justify-between gap-2">
+
+                <div className="flex items-center gap-2">
+
+                  <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
+
+                    Centro de Análisis
+
+                  </h1>
+
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+                    <Info className="h-5 w-5" />
+                  </Button>
+
+                </div>
+
+                 <div className="flex gap-2">
+                   <Button onClick={() => setShowInsightFormModal(true)} className="gap-2">
+                     <Plus className="h-4 w-4" />
+                     Generar Insight Manual
+                   </Button>
+                   <Button onClick={() => router.push('/analysis/graph')} className="gap-2">
+                     <Network className="h-4 w-4" />
+                     Grafos de Conocimiento
+                   </Button>
+                 </div>
+
               </div>
+
+            </div>
+
+      
+                        {/* Sección de Dashboard/Resumen */}
+
+      
+            
+      
+                        {dashboardData && (
+
+
+                          <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-3">
+
+  
+                {/* Tarjeta 1: Resumen General de Análisis */}
+
+                <Card>
+
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+
+                    <CardTitle className="text-sm font-medium">Total de Análisis</CardTitle>
+
+                    <BarChart3 className="h-4 w-4 text-muted-foreground" />
+
+                  </CardHeader>
+
+                  <CardContent>
+
+                    <div className="text-2xl font-bold">{dashboardData.total_analysis_tasks}</div>
+
+                    <p className="text-xs text-muted-foreground">
+
+                      {dashboardData.total_proactive_insights} insights proactivos
+
+                    </p>
+
+                                    </CardContent>
+
+                                  </Card>
+
+                  
+                                                                  {/* Tarjeta 2: Brechas de Conocimiento */}
+
+                                                  
+
+                                                                  {dashboardData.emergent_knowledge_gaps && dashboardData.emergent_knowledge_gaps.length > 0 ? (
+
+                                                                    <QuestionSlider
+
+                                                                      title="Brechas de Conocimiento"
+
+                                                                      questions={dashboardData.emergent_knowledge_gaps}
+
+                                                                      icon={<AlertTriangle className="h-5 w-5 text-muted-foreground" />}
+
+                                                                      emptyMessage="No se detectaron brechas recientes."
+
+                                                                      autoSlide={true}
+
+                                                                      slideInterval={5000}
+
+                                                                    />
+
+                                                                  ) : (
+
+                                                                    <Card>
+
+                                                                      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+
+                                                                        <CardTitle className="text-sm font-medium">Brechas de Conocimiento</CardTitle>
+
+                                                                        <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+
+                                                                      </CardHeader>
+
+                                                                      <CardContent>
+
+                                                                        <p className="text-sm text-muted-foreground">No se detectaron brechas recientes.</p>
+
+                                                                      </CardContent>
+
+                                                                                                                                                                      </Card>
+
+                                                                                                                                                                    )}
+
+                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                      {/* Tarjeta 4: Temas Clave */}      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                            {dashboardData.key_topics && dashboardData.key_topics.length > 0 ? (
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                              <KeyTopicSlider
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                                title="Temas Clave"
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                                keyTopics={dashboardData.key_topics}
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                                icon={<TrendingUp className="h-5 w-5 text-muted-foreground" />}
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                                emptyMessage="No hay temas clave recientes."
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                                autoSlide={true}
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                                slideInterval={7000}
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                                onKeyTopicClick={(topic) => {
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                                  setSelectedKeyTopic(topic);
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                                  setIsKeyTopicDetailDialogOpen(true);
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                                  }}
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                              />
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                      ) : (
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                        <Card>
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                            <CardTitle className="text-sm font-medium">Temas Clave</CardTitle>
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                          </CardHeader>
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                          <CardContent>
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                            <p className="text-sm text-muted-foreground">No hay temas clave recientes.</p>
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                          </CardContent>
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                        </Card>
+
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                      
+                                                                                                                                      
+                                                                                                                                            
+                                                                                                                                      
+                                                                                                                                                                      )}
+                                                                      
+                                                                      
+                                                                      
+                                                                      
+                                                
+                
+                
+                
+                
+                                  
+                
+                
+                
+                
+                
+                      
+                
+                
+                
+                
+                
+                
+                                                
+                
+                
+                
+                
+                
+              </div>
+
+            )}
+
+      
+            {/* Estadísticas por tipo de análisis */}
+
+            {dashboardData && dashboardData.analysis_stats_by_type.length > 0 && (
+
+              <Card>
+
+                <CardHeader>
+
+                  <CardTitle>Estadísticas por Tipo de Análisis</CardTitle>
+
+                  <CardDescription>Resumen de la actividad de análisis por categoría.</CardDescription>
+
+                </CardHeader>
+
+                <CardContent>
+
+                  <ResponsiveContainer width="100%" height={300}>
+
+                    <BarChart
+
+                      data={chartData}
+
+                      margin={{
+
+                        top: 20, right: 30, left: 20, bottom: 5,
+
+                      }}
+
+                    >
+
+                      <XAxis dataKey="name" />
+
+                      <YAxis />
+
+                      <Tooltip />
+
+                      <Legend />
+
+                      <Bar dataKey="Completados" stackId="a" fill="#82ca9d" />
+
+                      <Bar dataKey="Fallidos" stackId="a" fill="#fa8072" />
+
+                    </BarChart>
+
+                  </ResponsiveContainer>
+
+                </CardContent>
+
+              </Card>
+
+            )}
+
+      
+            {/* --- SECCIÓN DE LISTA DE ANÁLISIS EXISTENTE --- */}
+
+        <>
+
+          {/* Filtros y búsqueda */}
+
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+
+            <form onSubmit={handleSearch} className="flex gap-2 flex-1">
+
+              <div className="relative flex-1">
+
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+
+                <Input
+
+                  placeholder="Buscar en análisis..."
+
+                  value={searchQuery}
+
+                  onChange={(e) => setSearchQuery(e.target.value)}
+
+                  className="pl-10"
+
+                />
+
+              </div>
+
+              <Input
+                placeholder="Palabras clave (separadas por comas)"
+                value={topicKeywords}
+                onChange={(e) => setTopicKeywords(e.target.value)}
+                className="flex-1"
+              />
+
               <Button type="submit" variant="outline">
+
                 Buscar
+
               </Button>
+
             </form>
             
+
             <DropdownMenu>
+
               <DropdownMenuTrigger asChild>
+
                 <Button variant="outline" className="gap-2">
+
                   <Filter className="h-4 w-4" />
+
                   {selectedType ? getAnalysisTypeLabel(selectedType) : 'Filtrar por tipo'}
+
                   <ChevronDown className="h-4 w-4" />
+
                 </Button>
+
               </DropdownMenuTrigger>
+
               <DropdownMenuContent align="end">
+
                 {analysisTypes.map((type) => (
+
                   <DropdownMenuItem
+
                     key={type.value || 'all'}
+
                     onClick={() => setSelectedType(type.value)}
+
                   >
+
                     {type.label}
+
                   </DropdownMenuItem>
+
                 ))}
+
               </DropdownMenuContent>
+
             </DropdownMenu>
+
           </div>
 
           {/* Lista de análisis */}
@@ -273,7 +967,7 @@ export default function AnalysisPage() {
               <h3 className="text-xl font-semibold mb-4">No se encontraron análisis</h3>
               <p className="text-muted-foreground mb-8 max-w-md mx-auto">
                 {searchQuery || selectedType
-                  ? 'No hay análisis que coincidan con tus filtros. Intenta ajustar la búsqueda.'
+                  ? 'No hay análisis que coincidan con tus filtros o búsqueda. Intenta ajustar la consulta.'
                   : 'Aún no tienes análisis. ¡Comienza analizando documentos o colecciones para ver resultados aquí!'
                 }
               </p>
@@ -360,18 +1054,65 @@ export default function AnalysisPage() {
                               </Badge>
                             </div>
                           )}
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1">
-                              <Calendar className="h-3 w-3" />
-                              <span className="truncate">Creado: {formatDate(analysis.created_at)}</span>
-                            </div>
-                          </div>
-                          {analysis.updated_at !== analysis.created_at && (
-                            <div className="flex items-center gap-1">
-                              <Calendar className="h-3 w-3" />
-                              <span className="truncate">Actualizado: {formatDate(analysis.updated_at)}</span>
-                            </div>
-                          )}
+                                                      <div className="flex items-center justify-between">
+                          
+                                                      <div className="flex items-center gap-1">
+                          
+                                                        <Calendar className="h-3 w-3" />
+                          
+                                                        <TooltipProvider>
+                          
+                                                          <UITooltip>
+                          
+                                                            <TooltipTrigger asChild>
+                          
+                                                              <span className="truncate">Creado: {analysis.created_at ? formatDate(analysis.created_at) : 'N/A'}</span>
+                          
+                                                            </TooltipTrigger>
+                          
+                                                            <TooltipContent>
+                          
+                                                              <p>Fecha de creación del análisis.</p>
+                          
+                                                            </TooltipContent>
+                          
+                                                          </UITooltip>
+                          
+                                                        </TooltipProvider>
+                          
+                                                      </div>
+                          
+                                                    </div>
+                          
+                                                    {analysis.updated_at !== analysis.created_at && (
+                          
+                                                      <div className="flex items-center gap-1">
+                          
+                                                        <Calendar className="h-3 w-3" />
+                          
+                                                        <TooltipProvider>
+                          
+                                                          <UITooltip>
+                          
+                                                            <TooltipTrigger asChild>
+                          
+                                                              <span className="truncate">Actualizado: {analysis.updated_at ? formatDate(analysis.updated_at) : 'N/A'}</span>
+                          
+                                                            </TooltipTrigger>
+                          
+                                                            <TooltipContent>
+                          
+                                                              <p>Última actualización del análisis.</p>
+                          
+                                                            </TooltipContent>
+                          
+                                                          </UITooltip>
+                          
+                                                        </TooltipProvider>
+                          
+                                                      </div>
+                          
+                                                    )}
                         </div>
                       </CardContent>
                     </Card>
@@ -403,6 +1144,81 @@ export default function AnalysisPage() {
           )}
         </>
       
+            {/* DIÁLOGOS DE RESULTADOS DE ANÁLISIS */}
+      
+            {selectedAnalysis && (
+              <AnalysisDetailDialog
+                analysis={selectedAnalysis}
+                isOpen={!!selectedAnalysis}
+                onOpenChange={(open) => !open && setSelectedAnalysis(null)}
+              />
+            )}
+
+      {/* Modal para generar insights */}
+      <Dialog open={showInsightFormModal} onOpenChange={setShowInsightFormModal}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Generar Insights Proactivos</DialogTitle>
+            <DialogDescription>
+              Configura los parámetros para iniciar un análisis manual de insights.
+            </DialogDescription>
+          </DialogHeader>
+          {user?.account_id ? (
+            <InsightGeneratorForm accountId={user.account_id} />
+          ) : (
+            <p className="text-center text-red-500">Error: No se pudo obtener el ID de la cuenta.</p>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo de detalles del Tema Clave */}
+      <KeyTopicDetailDialog
+        isOpen={isKeyTopicDetailDialogOpen}
+        onOpenChange={setIsKeyTopicDetailDialogOpen}
+        keyTopic={selectedKeyTopic}
+      />
+
+      <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="text-xl font-bold text-primary">Centro de Análisis</SheetTitle>
+            <SheetDescriptionComp className="text-sm text-muted-foreground">
+              Gestiona y visualiza todos los análisis generados por Kognito AI de tus documentos, colecciones e interacciones.
+            </SheetDescriptionComp>
+          </SheetHeader>
+          <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
+            <p><strong>¿Qué puedes hacer en el Centro de Análisis?</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Visualizar Análisis:</strong> Accede a informes detallados de documentos, colecciones, código e insights semánticos.</li>
+              <li><strong>Generar Insights Manuales:</strong> Inicia análisis específicos sobre tus datos para descubrir conexiones y brechas de conocimiento.</li>
+              <li><strong>Estadísticas Generales:</strong> Obtén un resumen visual de la actividad de análisis, incluyendo el total de tareas y la distribución por tipo.</li>
+              <li><strong>Brechas de Conocimiento:</strong> Identifica automáticamente áreas donde tu información es incompleta o requiere mayor exploración.</li>
+              <li><strong>Temas Clave:</strong> Descubre los temas más relevantes y recurrentes en tu base de conocimiento.</li>
+            </ul>
+
+            <p><strong>Interacción con IA:</strong></p>
+            <p>El Centro de Análisis es el corazón de la inteligencia de Kognito. Puedes interactuar con él a través del chat de IA para:</p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li>Solicitar análisis de documentos o colecciones específicas.</li>
+              <li>Pedir resúmenes de análisis existentes o profundizar en un tema.</li>
+              <li>Generar nuevos insights proactivos o manuales sobre tu información.</li>
+              <li>Consultar estadísticas de tus análisis o el estado de tareas pendientes.</li>
+            </ul>
+
+            <p><strong>Beneficios Clave:</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Visión Unificada:</strong> Todos tus análisis en un solo lugar para una gestión centralizada.</li>
+              <li><strong>Descubrimiento de Conocimiento:</strong> Transforma tus datos brutos en insights accionables.</li>
+              <li><strong>Toma de Decisiones Mejorada:</strong> Fundamenta tus decisiones en análisis profundos y objetivos.</li>
+              <li><strong>Potenciado por IA:</strong> Aprovecha el poder de la IA para un análisis automático y proactivo.</li>
+            </ul>
+
+            <p>¡Convierte tus datos en conocimiento estratégico con el Centro de Análisis!</p>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
+
   );
+
 }

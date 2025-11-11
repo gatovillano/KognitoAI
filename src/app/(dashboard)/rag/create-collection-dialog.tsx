@@ -1,7 +1,7 @@
-// En: src/app/(dashboard)/rag/create-collection-dialog.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useParams } from 'next/navigation';
 import { toast } from 'sonner';
 import apiClient from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,9 @@ interface CreateCollectionDialogProps {
 }
 
 export function CreateCollectionDialog({ isOpen, onOpenChange, onCreateSuccess }: CreateCollectionDialogProps) {
+  const params = useParams();
+  const workspaceId = params.id as string | undefined;
+
   const [topicName, setTopicName] = useState('');
   const [description, setDescription] = useState('');
   const [teamId, setTeamId] = useState('');
@@ -49,11 +52,10 @@ export function CreateCollectionDialog({ isOpen, onOpenChange, onCreateSuccess }
     }
     setIsLoading(true);
     try {
-      await apiClient.post('/api/create-collection', { 
-        topic: topicName, 
-        description: description || undefined,
-        teamId: teamId || undefined 
-      });
+      await apiClient.post('/api/collections', { 
+                topic: topicName,
+                description: description,
+                workspaceId: workspaceId,      });
       toast.success(`Colección "${topicName}" creada.`);
       onCreateSuccess(topicName);
       onOpenChange(false);

@@ -33,7 +33,13 @@ interface CodeAnalysisResultDialogProps {
 }
 
 export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenChange }: CodeAnalysisResultDialogProps) {
-  if (!analysis) return null;
+  console.log("🔍 CodeAnalysisResultDialog - Component mounted/updated");
+  console.log("🔍 CodeAnalysisResultDialog - Props received:", { repoName, analysis, isOpen, onOpenChange });
+
+  if (!analysis) {
+    console.log("🔍 CodeAnalysisResultDialog - No analysis data, returning null");
+    return null;
+  }
 
   console.log("Code Analysis object:", analysis);
 
@@ -55,6 +61,7 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
+
       <DialogContent className="max-w-5xl w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col p-0">
         <DialogHeader className="p-6 pb-4 border-b">
           <DialogTitle className="flex items-center gap-2 text-2xl font-bold text-foreground">

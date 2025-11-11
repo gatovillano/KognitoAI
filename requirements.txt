@@ -36,6 +36,7 @@ google-api-python-client>=2.90.0
 PyJWT>=2.8.0
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.0
+bcrypt==3.2.2
 
 # === UTILIDADES Y HERRAMIENTAS ===
 tiktoken>=0.5.0
@@ -91,3 +92,4 @@ pydub
 playwright
 protego
 ddgs
+APScheduler>=3.11.0

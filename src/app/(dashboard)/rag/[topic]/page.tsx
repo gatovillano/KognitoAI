@@ -8,7 +8,7 @@ export default function CollectionDetailPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const topic = params ? decodeURIComponent(params.topic as string) : '';
-  const workspaceId = searchParams.get('workspace_id');
+  const workspaceId = searchParams ? searchParams.get('workspace_id') : null;
 
   console.log("[topic] page - workspaceId from URL:", workspaceId); // DEBUG
 

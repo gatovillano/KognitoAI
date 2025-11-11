@@ -7,30 +7,29 @@ import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Mention from '@tiptap/extension-mention';
 import { Markdown } from 'tiptap-markdown';
-import { Bold, Italic, Strikethrough, Code, Heading1, Heading2, List, ListOrdered, Quote, CheckSquare, Table as TableIcon } from 'lucide-react';
 import { Button } from './ui/button';
-import Table from '@tiptap/extension-table';
+import { Table } from '@tiptap/extension-table';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import TableRow from '@tiptap/extension-table-row';
 import { createMentionSuggestion } from './mention-suggestion';
 import { TiptapToolbar as Toolbar } from './TiptapToolbar';
-
+import Image from '@tiptap/extension-image';
 
 interface TiptapEditorProps {
   content: string;
   onChange: (html: string) => void;
-  fromTeam?: string; // Cambiado a string | undefined
-  containerClassName?: string; // Nueva propiedad
+  fromTeam?: string;
+  containerClassName?: string;
   isRecording?: boolean;
   isProcessingAudio?: boolean;
   onStartRecording?: () => void;
   onStopRecording?: () => void;
-  onInsertContent?: (text: string) => void; // Nueva prop para insertar contenido
+  onImageUpload?: () => void;
+  onInsertContent?: (insertFn: (text: string) => void) => void;
 }
 
-// --- El Editor Principal ---
-export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName, isRecording, isProcessingAudio, onStartRecording, onStopRecording, onInsertContent }: TiptapEditorProps) => {
+export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName, isRecording, isProcessingAudio, onStartRecording, onStopRecording, onImageUpload, onInsertContent }: TiptapEditorProps) => {
   const debounceTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
   const editor = useEditor({
@@ -46,6 +45,10 @@ export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName, 
       TableRow,
       TableHeader,
       TableCell,
+      Image.configure({
+        inline: true,
+        allowBase64: false,
+      }),
       Mention.configure({
         HTMLAttributes: {
           class: 'mention',
@@ -72,12 +75,11 @@ export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName, 
       },
     },
     onUpdate({ editor }) {
-      // Debounce the onChange call to prevent performance issues on frequent updates
       if (debounceTimeoutRef.current) {
         clearTimeout(debounceTimeoutRef.current);
       }
       debounceTimeoutRef.current = setTimeout(() => {
-        onChange(editor.storage.markdown.getMarkdown()); // Tiptap ahora trabaja con Markdown
+        onChange((editor.storage as any).markdown.getMarkdown());
       }, 250);
     },
     onDestroy() {
@@ -85,9 +87,48 @@ export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName, 
         clearTimeout(debounceTimeoutRef.current);
       }
     },
+    immediatelyRender: false,
   });
 
-  // Exponer la función de inserción de contenido
+  const handleImageUpload = React.useCallback(async (file: File) => {
+    if (!editor) return;
+
+    const toastId = "upload-image";
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/notes/upload-image', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Error al subir la imagen');
+      }
+
+      const data = await response.json();
+      editor.chain().focus().setImage({ src: data.url }).run();
+    } catch (error) {
+      console.error('Error uploading image:', error);
+    }
+  }, [editor]);
+
+  const handleImageButtonClick = React.useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) {
+        handleImageUpload(file);
+      }
+    };
+    input.click();
+  }, [handleImageUpload]);
+
+
   React.useEffect(() => {
     if (editor && onInsertContent) {
       onInsertContent((text: string) => {
@@ -97,19 +138,20 @@ export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName, 
   }, [editor, onInsertContent]);
 
   return (
-    <div className={containerClassName}> {/* Aplicar containerClassName aquí */}
-      <div className="flex flex-col flex-grow rounded-lg border border-border/20"> {/* Contenedor principal del editor con bordes curvos */}
-        <div className="sticky top-0 z-10 p-2 flex flex-wrap gap-1 bg-card/80 backdrop-blur-xl border-b rounded-t-lg"> {/* Contenedor de la barra de herramientas sticky */}
+    <div className={containerClassName}>
+      <div className="flex flex-col flex-grow rounded-lg border border-border/20">
+        <div className="sticky top-0 z-10 p-2 flex flex-wrap gap-1 bg-card/80 backdrop-blur-xl border-b rounded-t-lg">
           <Toolbar
             editor={editor}
             isRecording={isRecording}
             isProcessingAudio={isProcessingAudio}
             onStartRecording={onStartRecording}
             onStopRecording={onStopRecording}
+            onImageUpload={handleImageButtonClick}
           />
         </div>
-        <div className="flex-1 overflow-y-auto rounded-b-lg"> {/* Contenedor del contenido con scroll y bordes curvos */}
-          <EditorContent editor={editor} className="p-4" /> {/* Añadido padding */} 
+        <div className="flex-1 overflow-y-auto rounded-b-lg">
+          <EditorContent editor={editor} className="p-4" />
         </div>
       </div>
     </div>

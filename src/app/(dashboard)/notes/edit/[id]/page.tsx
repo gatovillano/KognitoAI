@@ -1,4 +1,3 @@
-// En: src/app/(dashboard)/notes/edit/[id]/page.tsx
 'use client';
 
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
@@ -7,12 +6,13 @@ import { Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
-import { TiptapEditor } from '@/components/TiptapEditor'; // Importamos el editor
+import dynamic from 'next/dynamic';
+
+const TiptapEditor = dynamic(() => import('@/components/TiptapEditor').then(mod => mod.TiptapEditor), { ssr: false });
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { ArrowLeft, Save, Mic, Loader2 } from 'lucide-react';
-import { marked } from 'marked'; // Librería para convertir Markdown a HTML
-import { useAudioRecorder } from '@/hooks/useAudioRecorder'; // Importar el hook de grabación de audio
+import { useAudioRecorder } from '@/hooks/useAudioRecorder';
 
 export default function EditNotePage() {
   const params = useParams();
@@ -23,77 +23,97 @@ export default function EditNotePage() {
 
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('');
-  const [content, setContent] = useState(''); // El contenido será Markdown
+  const [content, setContent] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isShared, setIsShared] = useState(false);
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
-          const [teams, setTeams] = useState<any[]>([]);
-          const { isRecording, isProcessingAudio, transcript, startRecording, stopRecording, clearTranscript } = useAudioRecorder();
-          const insertContentRef = useRef<((text: string) => void) | null>(null); // Ref para la función de inserción de contenido del editor
-        
-          useEffect(() => {
-            const fetchNote = async () => {
-              setIsLoading(true);
-              if (noteId && noteId !== 'new') {
-                try {
-                  let note;
-                  if (fromTeam) {
-                    const response = await apiClient.get(`/api/teams/${fromTeam}/shared-items`);
-                    note = response.data.find((n: { id: number, type: string }) => n.id === parseInt(noteId) && n.type === 'note');
-                  } else {
-                    try {
-                      const directResponse = await apiClient.get(`/api/notes/${noteId}`);
-                      note = directResponse.data;
-                    } catch (error) {
-                      const fallbackResponse = await apiClient.post('/api/notes/list-notes', { search_term: '' });
-                      note = fallbackResponse.data.notes.find((n: { id: number }) => n.id === parseInt(noteId));
-                    }
-                    }
-                  if (note) {
-                    setTitle(note.title || '');
-                    setCategory(note.category || 'General');
-                    setIsShared(note.team_shared || false);
-                    setContent(note.content || '');
-                  } else {
-                    toast.error("Nota no encontrada.");
-                    setContent('');
-                  }
-                } catch (error) {
-                  toast.error("No se pudo cargar la nota.");
-                  setContent('');
-                } finally {
-                  setIsLoading(false);
-                }
-              }
-              else {
-                // Para notas nuevas, inicializar con contenido vacío
-                setTitle('');
-                setCategory('General');
-                setContent('');
-                setIsShared(false);
-                setIsLoading(false);
-              }
-            };
-            fetchNote();
-          }, [noteId, fromTeam]);
-        
-          // Efecto para insertar la transcripción en el editor
-          useEffect(() => {
-            if (transcript && insertContentRef.current) {
-              insertContentRef.current(transcript + ' '); // Insertar el transcript y un espacio
-              clearTranscript(); // Limpiar el transcript después de usarlo
+  const [teams, setTeams] = useState<any[]>([]);
+  const { isRecording, isProcessingAudio, transcript, startRecording, stopRecording, clearTranscript } = useAudioRecorder();
+  const insertContentRef = useRef<((text: string) => void) | null>(null);
+
+  const handleImageUpload = async (file: File) => {
+    const toastId = "upload-image";
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await apiClient.post('/api/notes/upload-image', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      if (insertContentRef.current) {
+        insertContentRef.current(`\n![${file.name}](${response.data.url})\n`);
+      }
+    } catch (error) {
+      console.error('Error uploading image:', error);
+    }
+  };
+  
+  useEffect(() => {
+    const fetchNote = async () => {
+      setIsLoading(true);
+      if (noteId && noteId !== 'new') {
+        try {
+          let note;
+          if (fromTeam) {
+            const response = await apiClient.get(`/api/teams/${fromTeam}/shared-items`);
+            note = response.data.find((n: { id: number, type: string }) => n.id === parseInt(noteId) && n.type === 'note');
+          } else {
+            try {
+              const directResponse = await apiClient.get(`/api/notes/${noteId}`);
+              note = directResponse.data;
+            } catch (error) {
+              const fallbackResponse = await apiClient.post('/api/notes/list-notes', { search_term: '' });
+              note = fallbackResponse.data.notes.find((n: { id: number }) => n.id === parseInt(noteId));
             }
-          }, [transcript, clearTranscript]);  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+          }
+          if (note) {
+            setTitle(note.title || '');
+            setCategory(note.category || 'General');
+            setIsShared(note.team_shared || false);
+            setContent(note.content || '');
+          } else {
+            toast.error("Nota no encontrada.");
+            setContent('');
+          }
+        } catch (error) {
+          toast.error("No se pudo cargar la nota.");
+          setContent('');
+        } finally {
+          setIsLoading(false);
+        }
+      }
+      else {
+        setTitle('');
+        setCategory('General');
+        setContent('');
+        setIsShared(false);
+        setIsLoading(false);
+      }
+    };
+    fetchNote();
+  }, [noteId, fromTeam]);
+
+  useEffect(() => {
+    if (transcript && insertContentRef.current) {
+      insertContentRef.current(transcript + ' ');
+      clearTranscript();
+    }
+  }, [transcript, clearTranscript]);
+  
+  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const autoSaveNote = useCallback(async (currentTitle: string, currentCategory: string, currentContent: string, isNewNote: boolean) => {
-    if (isNewNote) return; // No auto-guardar notas nuevas hasta que se guarden manualmente por primera vez
+    if (isNewNote) return;
 
     const payload = {
       note_id: parseInt(noteId),
       title: currentTitle,
       category: currentCategory,
-      content: currentContent, // El contenido ya es Markdown
+      content: currentContent,
     };
 
     let endpoint = '/api/update-note';
@@ -104,7 +124,7 @@ export default function EditNotePage() {
         type: 'note',
         itemId: noteId,
         title: currentTitle,
-        content: currentContent, // El contenido ya es Markdown
+        content: currentContent,
       };
     } else {
       requestPayload = payload;
@@ -115,7 +135,6 @@ export default function EditNotePage() {
       console.log("Nota auto-guardada.");
     } catch (error) {
       console.error("Error al auto-guardar la nota:", error);
-      // Opcional: toast.error("Error al auto-guardar la nota.");
     }
   }, [noteId, fromTeam]);
 
@@ -124,7 +143,7 @@ export default function EditNotePage() {
         note_id: noteId !== 'new' ? parseInt(noteId) : undefined,
         title,
         category,
-        content: content, // El contenido ya es Markdown
+        content: content,
     };
     
     let endpoint = noteId === 'new' ? '/api/add-note' : '/api/update-note';
@@ -135,7 +154,7 @@ export default function EditNotePage() {
         type: 'note',
         itemId: noteId,
         title,
-        content: content, // El contenido ya es Markdown
+        content: content,
       };
     } else {
       requestPayload = payload;
@@ -146,7 +165,7 @@ export default function EditNotePage() {
         const response = await apiClient.post(endpoint, requestPayload);
         toast.success("¡Nota guardada!", { id: toastId });
         if (noteId === 'new' && response.data?.id) {
-          router.replace(`/notes/edit/${response.data.id}`); // Reemplazar la URL para que el auto-guardado funcione con el nuevo ID
+          router.replace(`/notes/edit/${response.data.id}`);
         } else {
           router.push(fromTeam ? `/teams/${fromTeam}/dashboard` : '/notes');
         }
@@ -156,7 +175,7 @@ export default function EditNotePage() {
   };
 
   useEffect(() => {
-    if (noteId === 'new') return; // No auto-guardar si es una nota nueva sin guardar
+    if (noteId === 'new') return;
 
     if (autoSaveTimeoutRef.current) {
       clearTimeout(autoSaveTimeoutRef.current);
@@ -164,7 +183,7 @@ export default function EditNotePage() {
 
     autoSaveTimeoutRef.current = setTimeout(() => {
       autoSaveNote(title, category, content, noteId === 'new');
-    }, 3000); // Auto-guardar después de 3 segundos de inactividad
+    }, 3000);
 
     return () => {
       if (autoSaveTimeoutRef.current) {
@@ -246,23 +265,37 @@ export default function EditNotePage() {
         <Input placeholder="Título de la nota..." value={title} onChange={(e) => setTitle(e.target.value)} className="!text-4xl font-bold h-auto border-none focus-visible:ring-0 shadow-none p-0" />
         <Input placeholder="Categoría" value={category} onChange={(e) => setCategory(e.target.value)} className="w-fit border-none focus-visible:ring-0 shadow-none p-0 text-sm text-muted-foreground" />
       </div>
-            <div className="flex-grow overflow-y-auto px-8 pb-8">
-            {isLoading ? (
-              <div>Cargando editor...</div>
-            ) : (
-                      <TiptapEditor
-                        content={content}
-                        onChange={setContent}
-                        fromTeam={fromTeam ?? undefined}
-                        isRecording={isRecording}
-                        isProcessingAudio={isProcessingAudio}
-                        onStartRecording={startRecording}
-                        onStopRecording={stopRecording}
-                        onInsertContent={(insertFn) => {
-                          insertContentRef.current = insertFn; // Almacenar la función de inserción del editor
-                        }}
-                      />            )}
-            </div>      <AlertDialog open={isShareDialogOpen} onOpenChange={(open) => !open && setIsShareDialogOpen(false)}>
+      <div className="flex-grow overflow-y-auto px-8 pb-8">
+        {isLoading ? (
+          <div>Cargando editor...</div>
+        ) : (
+          <TiptapEditor
+            content={content}
+            onChange={setContent}
+            fromTeam={fromTeam ?? undefined}
+            isRecording={isRecording}
+            isProcessingAudio={isProcessingAudio}
+            onStartRecording={startRecording}
+            onStopRecording={stopRecording}
+            onInsertContent={(insertFn) => {
+              insertContentRef.current = insertFn;
+            }}
+            onImageUpload={() => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.accept = 'image/*';
+              input.onchange = (e) => {
+                const file = (e.target as HTMLInputElement).files?.[0];
+                if (file) {
+                  handleImageUpload(file);
+                }
+              };
+              input.click();
+            }}
+          />
+        )}
+      </div>
+      <AlertDialog open={isShareDialogOpen} onOpenChange={(open) => !open && setIsShareDialogOpen(false)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Compartir con Equipo</AlertDialogTitle>

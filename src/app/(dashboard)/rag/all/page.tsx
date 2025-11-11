@@ -167,7 +167,7 @@ export default function AllDocumentsPage() {
   const handleExtractTitles = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     try {
-      const response = await apiClient.post('/api/extract-title', { topic: 'all_documents' }); // Usamos 'all_documents' como topic
+      const response = await apiClient.post('/api/documents/extract-title', { topic: 'all_documents' }); // Usamos 'all_documents' como topic
       toast.info(`Extracción de títulos para la colección "Todos los Documentos" iniciada.`);
       fetchPageData();
     } catch (error) { toast.error("No se pudo iniciar la extracción de títulos."); }
@@ -183,7 +183,7 @@ export default function AllDocumentsPage() {
     const toastId = toast.loading(`Procesando grafo de conocimiento para "Todos los Documentos"...`);
 
     try {
-      const response = await apiClient.post('/api/process-knowledge-graph', { topic: 'all_documents' }); // Usamos 'all_documents' como topic
+      const response = await apiClient.post('/api/process-knowledge-graph-optimized', { topic: 'all_documents' }); // Usamos 'all_documents' como topic
       toast.success(
         `¡Procesamiento iniciado! ${response.data.documents_count} documentos serán procesados.`,
         { id: toastId }

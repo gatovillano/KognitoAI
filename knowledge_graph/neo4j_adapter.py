@@ -22,13 +22,15 @@ class Neo4jAdapter:
         self.graph_db = graph_db
         logger.info("✅ Neo4jAdapter inicializado")
     
-    async def add_cognee_results_to_graph(self, entities: List[Dict], relationships: List[Dict], workspace_id: Optional[str] = None) -> Dict[str, Any]:
+    async def add_cognee_results_to_graph(self, entities: List[Dict], relationships: List[Dict], workspace_id: Optional[str] = None, account_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Agrega entidades y relaciones del pipeline híbrido a Neo4j.
         
         Args:
             entities: Lista de entidades extraídas
             relationships: Lista de relaciones extraídas
+            workspace_id: ID del workspace actual
+            account_id: ID de la cuenta del usuario
             
         Returns:
             Dict con estadísticas del proceso
@@ -52,10 +54,10 @@ class Neo4jAdapter:
             }
             
             # Agregar entidades
-            stats["entities_added"] = await self._add_entities_to_neo4j(entities, workspace_id)
+            stats["entities_added"] = await self._add_entities_to_neo4j(entities, workspace_id, account_id)
             
             # Agregar relaciones
-            stats["relationships_added"] = await self._add_relationships_to_neo4j(relationships, workspace_id)
+            stats["relationships_added"] = await self._add_relationships_to_neo4j(relationships, workspace_id, account_id)
             
             logger.info(f"✅ Integración completada: {stats}")
             return stats
@@ -82,12 +84,14 @@ class Neo4jAdapter:
         except Exception as e:
             logger.warning(f"⚠️ Error limpiando grafo: {e}")
     
-    async def _add_entities_to_neo4j(self, entities: List[Dict], workspace_id: Optional[str]) -> int:
+    async def _add_entities_to_neo4j(self, entities: List[Dict], workspace_id: Optional[str], account_id: Optional[str]) -> int:
         """
         Agrega entidades a Neo4j.
         
         Args:
             entities: Lista de entidades
+            workspace_id: ID del workspace
+            account_id: ID de la cuenta
             
         Returns:
             Número de entidades agregadas
@@ -133,6 +137,8 @@ class Neo4jAdapter:
                     }
                     if workspace_id:
                         entity_data["workspace_id"] = workspace_id
+                    if account_id:
+                        entity_data["account_id"] = account_id
 
                     if j < 3:
                         logger.info(f"📝 DATOS MAPEADOS {j+1}:")
@@ -169,6 +175,8 @@ class Neo4jAdapter:
                     """
                     if "workspace_id" in entity:
                         type_query += """, n.workspace_id = entity.workspace_id"""
+                    if "account_id" in entity:
+                        type_query += """, n.account_id = entity.account_id"""
                     type_query += """
                     RETURN count(n) as created
                     """
@@ -191,12 +199,14 @@ class Neo4jAdapter:
             logger.error(f"❌ Error agregando entidades: {e}")
             raise
     
-    async def _add_relationships_to_neo4j(self, relationships: List[Dict], workspace_id: Optional[str]) -> int:
+    async def _add_relationships_to_neo4j(self, relationships: List[Dict], workspace_id: Optional[str], account_id: Optional[str]) -> int:
         """
         Agrega relaciones a Neo4j.
         
         Args:
             relationships: Lista de relaciones
+            workspace_id: ID del workspace
+            account_id: ID de la cuenta
             
         Returns:
             Número de relaciones agregadas
@@ -245,6 +255,8 @@ class Neo4jAdapter:
                         }
                         if workspace_id:
                             rel_data["workspace_id"] = workspace_id
+                        if account_id:
+                            rel_data["account_id"] = account_id
                         batch_data.append(rel_data)
 
                         if j < 3:
@@ -278,6 +290,8 @@ class Neo4jAdapter:
                     """
                     if "workspace_id" in rel_data:
                         type_query += """, r.workspace_id = rel.workspace_id"""
+                    if "account_id" in rel_data:
+                        type_query += """, r.account_id = rel.account_id"""
                     type_query += """
                     RETURN count(r) as created
                     """
