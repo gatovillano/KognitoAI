@@ -30,10 +30,10 @@ class MultiQuerySearchInput(BaseModel):
         description="Tipo de contenido a buscar (user_memories, user_documents, etc.)",
         json_schema_extra={"type": "string"}
     )
-    topic: Optional[str] = Field(
+    topic: Optional[List[str]] = Field(
         None,
-        description="Tema específico para filtrar resultados",
-        json_schema_extra={"type": "string"}
+        description="Tema(s) específico(s) para filtrar resultados",
+        json_schema_extra={"type": "array", "items": {"type": "string"}}
     )
     category: Optional[str] = Field(
         None,
@@ -60,6 +60,14 @@ class MultiQuerySearchInput(BaseModel):
         description="Incluir contenido compartido del equipo",
         json_schema_extra={"type": "boolean"}
     )
+    document_name: Optional[str] = Field(
+        None,
+        description="El nombre exacto de un documento específico (ej: 'Reporte Anual 2023.pdf') para buscar solo en él."
+    )
+    document_id: Optional[str] = Field(
+        None,
+        description="El ID único de un documento específico (UUID) para buscar solo en él."
+    )
 
 
 class MultiQuerySearchTool(BaseTool):
@@ -79,6 +87,7 @@ class MultiQuerySearchTool(BaseTool):
         "• Capturar diferentes aspectos de un tema complejo "
         "• Mejorar la recuperación de información relevante "
         "• Consultas donde una sola reformulación podría ser insuficiente "
+        "• Especificar un documento por su nombre exacto (ej. 'Reporte Anual 2023.pdf') o por su ID único si lo conoces para focalizar la búsqueda. "
         "\n✨ CARACTERÍSTICAS: "
         "• Genera automáticamente consultas alternativas con LLM "
         "• Ejecuta búsquedas paralelas para mayor eficiencia "
@@ -97,33 +106,60 @@ class MultiQuerySearchTool(BaseTool):
             self,
             query: str,
             content_type: Union[str, None] = None,
-            topic: Union[str, None] = None,
+            topic: Union[List[str], None] = None,
             category: Union[str, None] = None,
             k: Union[int, None] = 5,
             num_queries: Union[int, None] = 3,
             fusion_method: Union[str, None] = "rrf",
             include_shared: Union[bool, None] = True,
+            document_name: Optional[str] = None,
+            document_id: Optional[str] = None,
     ) -> ToolOutputWithSources:
         """
         Ejecuta la búsqueda multi-consulta de forma asíncrona.
         """
         try:
+            explicit_document_ids = None
+
+            if document_name:
+                from core.memory_manager import list_user_documents
+                docs = await list_user_documents(
+                    account_id=self.account_id,
+                    workspace_id=self.workspace_id,
+                )
+                found_doc = next((d for d in docs if d.get("file_name") == document_name), None)
+                if found_doc and found_doc.get("document_id"):
+                    explicit_document_ids = [found_doc["document_id"]]
+                    logger.info(f"🔍 Documento '{document_name}' encontrado con ID: {explicit_document_ids[0]}")
+                else:
+                    logger.warning(f"Documento '{document_name}' no encontrado para la cuenta {self.account_id} en workspace {self.workspace_id}.")
+                    return ToolOutputWithSources(
+                        context_for_llm=json.dumps({
+                            "status": "error",
+                            "message": f"No se encontró el documento '{document_name}' en tu base de conocimiento.",
+                            "results": []
+                        }, ensure_ascii=False, indent=2),
+                        sources=[]
+                    )
+            elif document_id:
+                explicit_document_ids = [document_id]
+                logger.info(f"🔍 Buscando directamente con document_id: {document_id}")
+
             # Determinar visibility_teams basado en include_shared
             visibility_teams = None if include_shared else []
             results = await multi_query_search(
                 account_id=self.account_id,
                 query=query,
                 content_type=content_type,
-                topic=topic,
+                topics=topic, # Aquí topic ya es List[str] o None
                 category=category,
                 workspace_id=self.workspace_id,
                 team_id=self.team_id,
-                telegram_id=self.telegram_id,
-                thread_id=self.thread_id,
                 visibility_teams=visibility_teams,
                 k=k or 5,
                 num_queries=num_queries or 3,
-                fusion_method=fusion_method or "rrf"
+                fusion_method=fusion_method or "rrf",
+                explicit_document_ids=explicit_document_ids,
             )
             if not results:
                 return ToolOutputWithSources(
@@ -166,7 +202,9 @@ class MultiQuerySearchTool(BaseTool):
                 "fusion_method": fusion_method or "rrf",
                 "num_queries_generated": num_queries or 3,
                 "total_results": len(formatted_results),
-                "results": formatted_results
+                "results": formatted_results,
+                "document_name": document_name,
+                "document_id": document_id,
             }, ensure_ascii=False, indent=2)
 
             return ToolOutputWithSources(context_for_llm=context_for_llm, sources=sources)
@@ -186,33 +224,57 @@ class MultiQuerySearchTool(BaseTool):
             self,
             query: str,
             content_type: Union[str, None] = None,
-            topic: Union[str, None] = None,
+            topic: Union[List[str], None] = None,
             category: Union[str, None] = None,
             k: Union[int, None] = 5,
             num_queries: Union[int, None] = 3,
             fusion_method: Union[str, None] = "rrf",
             include_shared: Union[bool, None] = True,
+            document_name: Optional[str] = None,
+            document_id: Optional[str] = None,
     ) -> str:
         """
         Ejecuta la búsqueda multi-consulta de forma síncrona.
         """
         try:
+            explicit_document_ids = None
+
+            if document_name:
+                from core.memory_manager import list_user_documents
+                docs = asyncio.run(list_user_documents(
+                    account_id=self.account_id,
+                    workspace_id=self.workspace_id,
+                ))
+                found_doc = next((d for d in docs if d.get("file_name") == document_name), None)
+                if found_doc and found_doc.get("document_id"):
+                    explicit_document_ids = [found_doc["document_id"]]
+                    logger.info(f"🔍 Documento '{document_name}' encontrado con ID: {explicit_document_ids[0]}")
+                else:
+                    logger.warning(f"Documento '{document_name}' no encontrado para la cuenta {self.account_id} en workspace {self.workspace_id}.")
+                    return json.dumps({
+                        "status": "error",
+                        "message": f"No se encontró el documento '{document_name}' en tu base de conocimiento.",
+                        "results": []
+                    }, ensure_ascii=False, indent=2)
+            elif document_id:
+                explicit_document_ids = [document_id]
+                logger.info(f"🔍 Buscando directamente con document_id: {document_id}")
+
             # Determinar visibility_teams basado en include_shared
             visibility_teams = None if include_shared else []
             results = asyncio.run(multi_query_search(
                 account_id=self.account_id,
                 query=query,
                 content_type=content_type,
-                topic=topic,
+                topics=topic, # Aquí topic ya es List[str] o None
                 category=category,
                 workspace_id=self.workspace_id,
                 team_id=self.team_id,
-                telegram_id=self.telegram_id,
-                thread_id=self.thread_id,
                 visibility_teams=visibility_teams,
                 k=k or 5,
                 num_queries=num_queries or 3,
-                fusion_method=fusion_method or "rrf"
+                fusion_method=fusion_method or "rrf",
+                explicit_document_ids=explicit_document_ids,
             ))
             if not results:
                 return json.dumps({
@@ -240,7 +302,9 @@ class MultiQuerySearchTool(BaseTool):
                 "fusion_method": fusion_method or "rrf",
                 "num_queries_generated": num_queries or 3,
                 "total_results": len(formatted_results),
-                "results": formatted_results
+                "results": formatted_results,
+                "document_name": document_name,
+                "document_id": document_id,
             }, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"❌ Error en MultiQuerySearchTool: {e}", exc_info=True)

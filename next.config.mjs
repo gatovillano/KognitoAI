@@ -1,4 +1,10 @@
 /** @type {import('next').NextConfig} */
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 const nextConfig = {
   images: {
     unoptimized: true,
@@ -12,9 +18,7 @@ const nextConfig = {
     ],
     minimumCacheTTL: 600,
   },
-  experimental: {
-    transpilePackages: ['react-dnd', 'react-dnd-html5-backend'],
-  },
+  transpilePackages: ['react-dnd', 'react-dnd-html5-backend'],
   async rewrites() {
     return [
       {

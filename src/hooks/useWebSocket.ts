@@ -8,6 +8,7 @@ export interface WebSocketMessage {
 
 interface UseWebSocketOptions {
   userId?: string;
+  onMessage?: (message: WebSocketMessage) => void;
 }
 
 export const useWebSocket = (options: UseWebSocketOptions = {}) => {
@@ -26,6 +27,13 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       if (!token || !userId) {
         console.error('WS: No hay token de acceso o ID de usuario disponible. No se puede conectar.');
         setConnectionError('No hay token de acceso o ID de usuario disponible');
+        return;
+      }
+
+      // Verificar conectividad básica antes de intentar WebSocket
+      if (!navigator.onLine) {
+        console.error('WS: No hay conexión a internet disponible.');
+        setConnectionError('No hay conexión a internet. Verifica tu conexión y vuelve a intentar.');
         return;
       }
 
@@ -85,11 +93,20 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       wsRef.current.onclose = (event) => {
         console.log(`WS: 🔌 WebSocket desconectado. Código: ${event.code}, Razón: "${event.reason}", Limpio: ${event.wasClean}.`);
         setIsConnected(false);
-        
+
+        // Log detallado del evento de cierre
+        console.warn('WS: Detalles del cierre:', {
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean,
+          timestamp: new Date().toISOString(),
+          attempts: reconnectAttempts.current
+        });
+
         if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
           console.log(`WS: 🔄 Reintentando conexión en ${delay}ms (intento ${reconnectAttempts.current + 1}/${maxReconnectAttempts}).`);
-          
+
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectAttempts.current++;
             connect();
@@ -102,8 +119,24 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       };
 
       wsRef.current.onerror = (event) => {
-        console.error('WS: ❌ Se ha producido un error en la conexión WebSocket.', event);
-        setConnectionError('Error en la conexión WebSocket. Revisa la consola para más detalles.');
+        console.error('WS: ❌ Se ha producido un error en la conexión WebSocket.', {
+          event,
+          readyState: wsRef.current?.readyState,
+          url: wsRef.current?.url,
+          timestamp: new Date().toISOString()
+        });
+
+        // Determinar tipo de error basado en readyState
+        let errorMessage = 'Error en la conexión WebSocket.';
+        if (wsRef.current?.readyState === WebSocket.CLOSED) {
+          errorMessage = 'La conexión WebSocket se cerró inesperadamente. Verifica tu conexión a internet.';
+        } else if (wsRef.current?.readyState === WebSocket.CONNECTING) {
+          errorMessage = 'Error durante la conexión inicial. Verifica la URL del servidor.';
+        } else {
+          errorMessage = 'Error desconocido en WebSocket. Revisa la consola para más detalles.';
+        }
+
+        setConnectionError(errorMessage);
       };
 
     } catch (error) {
@@ -156,6 +189,13 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
     isConnected,
     connectionError,
     reconnect: connect,
-    disconnect
+    disconnect,
+    // Información de diagnóstico
+    diagnostics: {
+      readyState: wsRef.current?.readyState,
+      url: wsRef.current?.url,
+      reconnectAttempts: reconnectAttempts.current,
+      lastError: connectionError
+    }
   };
 }

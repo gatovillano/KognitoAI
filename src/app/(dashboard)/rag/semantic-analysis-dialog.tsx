@@ -29,6 +29,9 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
   const [isConceptDialogOpen, setIsConceptDialogOpen] = useState(false);
   const { play, stop, isLoading, isPlaying, activeText } = useTextToSpeech();
 
+  console.log("🔍 SemanticAnalysisDialog - Component mounted/updated");
+  console.log('🔍 SemanticAnalysisDialog - Props received:', { analysis, isOpen, onOpenChange, topic });
+
   // Mueve los hooks que dependen de `analysis` aquí, pero maneja el caso de que `analysis` sea null
   const semanticData = useMemo(() => {
     if (!analysis) {
@@ -79,6 +82,7 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
+
         <DialogContent className="max-w-full sm:max-w-4xl max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col p-0">
           <DialogHeader className="p-6 pb-4 border-b">
             <DialogTitle className="flex items-center gap-2 text-2xl font-bold text-foreground">
@@ -89,7 +93,7 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
               Análisis semántico profundo de la colección con agrupación de conceptos y patrones.
             </DialogDescription>
           </DialogHeader>
-          <ScrollArea className="flex-1 p-6">
+          <div className="flex-1 overflow-y-auto p-6">
             <div className="space-y-6 pb-4">
               <Card className="border-none shadow-none bg-transparent p-0">
                 <CardHeader className="px-0 pt-0 pb-2">
@@ -282,7 +286,7 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                 </Card>
               )}
             </div>
-          </ScrollArea>
+          </div>
           {analysis?.analysis_metadata && (
             <div className="space-y-2 text-xs text-muted-foreground mt-auto pt-3 border-t border-border/50 p-6">
               {analysis.analysis_metadata.tool_used && (
@@ -319,7 +323,7 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
             <DialogTitle className="text-xl font-bold text-foreground">Detalles del Tema Transversal</DialogTitle>
           </DialogHeader>
           {selectedTheme && (
-            <ScrollArea className="flex-1 pr-4">
+            <div className="flex-1 overflow-y-auto pr-4">
               <div className="space-y-4 pb-4">
                 <div>
                   <h4 className="font-semibold text-lg mb-2 text-foreground">
@@ -333,14 +337,14 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                       {selectedTheme.citas.map((cita: any, i: number) => (
                         <div key={i} className="p-3 bg-muted rounded-md border border-border/50">
                           <div className="font-medium text-sm mb-1 text-foreground">{cita.documento}</div>
-                          <div className="text-sm text-muted-foreground italic">"{cita.cita}"</div>
+                          <div className="text-sm text-muted-foreground italic">&quot;{cita.cita}&quot;</div>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
               </div>
-            </ScrollArea>
+            </div>
           )}
           <DialogFooter className="p-6 pt-0">
             <Button variant="outline" onClick={() => setIsThemeDialogOpen(false)}>Cerrar</Button>
@@ -355,7 +359,7 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
             <DialogTitle className="text-xl font-bold text-foreground">Detalles del Concepto</DialogTitle>
           </DialogHeader>
           {selectedConcept && (
-            <ScrollArea className="flex-1 pr-4">
+            <div className="flex-1 overflow-y-auto pr-4">
               <div className="space-y-4 pb-4">
                 <div>
                   <h4 className="font-semibold text-lg mb-3 text-foreground">
@@ -387,23 +391,15 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                               <h6 className="font-medium text-sm text-purple-800 mb-1">Definición:</h6>
                               <ReactMarkdown remarkPlugins={[remarkGfm]}>{conceptDefinition}</ReactMarkdown>
                             </div>
-                            <div className="mt-4 pt-3 border-t border-purple-200">
-                              <p className="text-xs text-purple-600">
-                                💡 Este concepto fue identificado como central en el análisis semántico de la colección.
-                                Para profundizar, puedes realizar una búsqueda dirigida en la colección.
-                              </p>
-                            </div>
+                                                        <p className="text-xs text-purple-600 mt-4 pt-3 border-t border-purple-200">
+                                Para profundizar, puedes realizar una búsqueda dirigida en la colección.                                                        </p>
                           </div>
                         );
                       } else {
                         return (
-                          <div className="space-y-3">
+                          <div>
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedConcept}</ReactMarkdown>
-                            <div className="mt-4 pt-3 border-t border-purple-200">
-                              <p className="text-xs text-purple-600">
-                                💡 Este concepto fue identificado como central en el análisis semántico de la colección.
-                              </p>
-                            </div>
+                            <p>Concepto no parseado</p>
                           </div>
                         );
                       }
@@ -411,7 +407,7 @@ export function SemanticAnalysisDialog({ analysis, isOpen, onOpenChange, topic }
                   </div>
                 </div>
               </div>
-            </ScrollArea>
+            </div>
           )}
           <DialogFooter className="p-6 pt-0">
             <Button variant="outline" onClick={() => setIsConceptDialogOpen(false)}>Cerrar</Button>

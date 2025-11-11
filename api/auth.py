@@ -101,6 +101,10 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
 
+class RegisterResponse(TokenResponse):
+    """Define la estructura de datos para la respuesta de registro, incluyendo un mensaje."""
+    message: str
+
 class TelegramLoginRequest(BaseModel):
     """Define la estructura de datos para una solicitud de login de Telegram."""
     id: int
@@ -112,7 +116,7 @@ class TelegramLoginRequest(BaseModel):
     hash: str
 
 # --- Endpoints de Email/Pass y Social Login ---
-@router.post("/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED, summary="Registrar con email/pass")
+@router.post("/auth/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED, summary="Registrar con email/pass")
 async def register_user(request: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Registra una nueva cuenta de usuario con email y contraseña."""
     existing_account_result = await db.execute(select(Account).where(Account.email == request.email))
@@ -122,13 +126,14 @@ async def register_user(request: RegisterRequest, db: AsyncSession = Depends(get
     new_account = Account(
         email=request.email,
         hashed_password=get_password_hash(request.password),
-        name=request.name or request.email.split('@')[0]
+        name=request.name or request.email.split('@')[0],
+        username=request.name or request.email.split('@')[0] # Usar el nombre proporcionado o parte del email como username
     )
     db.add(new_account)
     await db.commit()
     await db.refresh(new_account)
     access_token = create_access_token(data={"sub": str(new_account.id)})
-    return TokenResponse(access_token=access_token)
+    return RegisterResponse(access_token=access_token, message="¡Registro exitoso! Ya puedes iniciar sesión.")
 
 @router.post("/auth/login", response_model=TokenResponse, summary="Iniciar sesión con email/pass")
 async def login_for_access_token(request: LoginRequest, db: AsyncSession = Depends(get_db)):
@@ -319,18 +324,19 @@ async def emergency_token(telegram_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Endpoint no disponible")
 
     try:
-        # Buscar la identidad de Telegram
+        # Buscar la cuenta de Telegram
         repo = AccountRepository(db)
-        identity = await repo.find_telegram_identity(telegram_id)
-        if not identity:
-            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        account = await repo.get_account_by_telegram_id(int(telegram_id)) # Se necesita Account, no PlatformIdentity
+
+        if not account:
+            raise HTTPException(status_code=404, detail="Usuario de Telegram no encontrado")
 
         # Generar nuevo token
-        access_token = create_access_token(data={"sub": str(identity.account_id)})
+        access_token = create_access_token(data={"sub": str(account.id)})
         return TokenResponse(access_token=access_token)
 
     except Exception as e:
-        logger.error(f"Error generando token de emergencia: {e}")
+        logger.error(f"Error generando token de emergencia: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error generando token")
 
 @router.get("/auth/clear-tokens", summary="Limpiar tokens del frontend (solo debug)")

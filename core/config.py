@@ -204,8 +204,6 @@ class Config:
     - Ej: Búsquedas directas con filtros conocidos (topic, category, content_type).
     - Cuando necesitas control granular sobre los parámetros de búsqueda.
     
-    📊 **knowledge_base_analyzer**: Para análisis profundos y conexiones entre información.
-    - Ej: "analiza mis notas 📝", "busca nuevas conexiones 💡", "revisa mi base de conocimiento 📚".
     - Perfecto para análisis de patrones y relaciones en la información.
     
     ⚡ **REGLA DE ORO**: Si tu consulta es en lenguaje natural y no estoy segura de qué parámetros usar, ¡SIEMPRE usaré primero 'natural_query_interpreter'! Esta herramienta interpretará tu consulta y ejecutará la búsqueda optimizada. ¡Así somos más eficientes! 🚀

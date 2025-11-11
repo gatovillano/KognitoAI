@@ -181,7 +181,7 @@ class CogneeConceptualProcessingTool(BaseTool):
                     prepared_documents.append({
                         "file_name": file_name, # Usar file_name consistentemente
                         "content": content.strip(),
-                        "metadata": {"account_id": account_id, "file_name": file_name}
+                        "metadata": {"account_id": account_id, "file_name": file_name, "dataset_name": dataset_name}
                     })
                     logger.info(f"✅ Documento '{file_name}' preparado con contenido proporcionado.")
                     continue
@@ -197,7 +197,7 @@ class CogneeConceptualProcessingTool(BaseTool):
                     prepared_documents.append({
                         "file_name": file_name,
                         "content": full_content.strip(),
-                        "metadata": {"account_id": account_id, "file_name": file_name}
+                        "metadata": {"account_id": account_id, "file_name": file_name, "dataset_name": dataset_name}
                     })
                     logger.info(f"✅ Contenido reconstruido exitosamente para: {file_name}. Longitud: {len(full_content.strip())} chars.")
                 else:

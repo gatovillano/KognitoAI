@@ -34,7 +34,7 @@ export function CreateWorkspaceCollectionDialog({ isOpen, onOpenChange, onCreate
     setIsLoading(true);
     try {
       console.log('DEBUG: Creating collection with workspaceId:', workspaceId, 'name:', topicName, 'description:', description);
-      const response = await apiClient.post(`/api/documents/collections`, {
+      const response = await apiClient.post(`/api/collections`, {
         topic: topicName,
         description: description,
         workspaceId: workspaceId,

@@ -16,6 +16,7 @@ import { BackgroundTaskIndicator } from '@/components/BackgroundTaskIndicator';
 import { EmptyChat } from '@/components/EmptyChat';
 import { ContextSelectorButton } from '@/components/ContextSelectorButton';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
+import { WebSocketMessage } from '@/hooks/useWebSocket'; // Importar WebSocketMessage
 
 // ... (interfaces remain the same) ...
 interface ToolStatusMessage {
@@ -49,6 +50,7 @@ interface ChatMessageType {
   sources?: Source[];
   chunks?: string[];
   tool_code?: string;
+  taskId?: string; // Añadir taskId aquí
 }
 
 interface SelectedContextItem {
@@ -146,6 +148,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [uploadedImage, setUploadedImage] = useState<{ preview: string; base64: string } | null>(null);
   const [backgroundTasks, setBackgroundTasks] = useState<{ taskId: string; type: string }[]>([]);
   const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+  const [isVectorizingFile, setIsVectorizingFile] = useState(false); // Added isVectorizingFile
   const [isLoading, setIsLoading] = useState(true);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -232,10 +235,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
               case 'stream_chunk': {
                   setIsThinking(false);
-                  if (toolNameRef.current) {
-                      setToolName(undefined);
-                      setReactState(undefined);
-                  }
 
                   console.log("[CommonChat DEBUG] Received stream_chunk:", data);
 
@@ -276,6 +275,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                   console.log(`Stream finalizado. thread_id="${data.thread_id}", task_id="${taskId}"`);
                   setIsResponding(false);
                   setIsThinking(false);
+                  setToolName(undefined); // Reset toolName on stream end
+                  setReactState(undefined); // Reset reactState on stream end
                   if (taskId && messageIndex !== -1) {
                       const finalMessage = updatedMessages[messageIndex];
                       updatedMessages[messageIndex] = {
@@ -288,47 +289,48 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
               case 'tool_start': {
                   const toolStartMessage = data as ToolStatusMessage;
-                  setToolName(toolStartMessage.tool_name);
-                  setReactState('ejecutando');
-                  if (toolStartMessage.task_id && messageIndex === -1) {
-                      setBackgroundTasks((prev) => {
-                          const currentTaskId = toolStartMessage.task_id as string;
-                          return prev.some((task) => task.taskId === currentTaskId) ? prev : [...prev, { taskId: currentTaskId, type: toolStartMessage.tool_name }];
-                      });
-                      toast.info(`Iniciando ${toolStartMessage.tool_name || 'una herramienta'}...`, {
-                          description: toolStartMessage.message || "La tarea ha comenzado en segundo plano.",
-                          duration: 3000,
-                      });
-                      updatedMessages.push({
-                          text: `Usando herramienta: ${toolStartMessage.tool_name || 'desconocida'}...`,
-                          sender: 'ai',
-                          created_at: new Date().toISOString(),
-                          sources: [],
-                          tool_code: undefined,
-                          taskId: toolStartMessage.task_id, // Añadir taskId al mensaje de herramienta
-                      });
-                  }
+                   setToolName(toolStartMessage.tool_name);
+                   setReactState('ejecutando');
+                   setIsThinking(true); // Keep thinking indicator active while tool is running
+                   if (toolStartMessage.task_id && messageIndex === -1) {
+                       setBackgroundTasks((prev) => {
+                           const currentTaskId = toolStartMessage.task_id as string;
+                           return prev.some((task) => task.taskId === currentTaskId) ? prev : [...prev, { taskId: currentTaskId, type: toolStartMessage.tool_name }];
+                       });
+                       toast.info(`Iniciando ${toolStartMessage.tool_name || 'una herramienta'}...`, {
+                           description: toolStartMessage.message || "La tarea ha comenzado en segundo plano.",
+                           duration: 3000,
+                       });
+                       updatedMessages.push({
+                           text: `Usando herramienta: ${toolStartMessage.tool_name || 'desconocida'}...`,
+                           sender: 'ai',
+                           created_at: new Date().toISOString(),
+                           sources: [],
+                           tool_code: undefined,
+                           taskId: toolStartMessage.task_id, // Añadir taskId al mensaje de herramienta
+                       });
+                   }
                   break;
               }
 
               case 'tool_end': {
                   const toolEndMessage = data as ToolStatusMessage;
-                  setToolName(undefined);
-                  setReactState(undefined);
-                  if (toolEndMessage.task_id) {
-                      setBackgroundTasks((prev) => prev.filter((t) => t.taskId !== toolEndMessage.task_id));
-                      const toolMessageIndex = updatedMessages.findIndex(msg => msg.taskId === toolEndMessage.task_id);
-                      if (toolMessageIndex !== -1) {
-                          const finalToolMessage = updatedMessages[toolMessageIndex];
-                          updatedMessages[toolMessageIndex] = {
-                              ...finalToolMessage,
-                              text: toolEndMessage.status === 'end' ? toolEndMessage.result || `Herramienta ${toolEndMessage.tool_name} finalizada.` : `Error en herramienta ${toolEndMessage.tool_name}: ${toolEndMessage.error || "Error desconocido."}`,
-                              sources: toolEndMessage.sources || [],
-                              taskId: undefined, // Eliminar taskId una vez finalizado
-                          };
-                      }
-                  }
-                  toast[toolEndMessage.status === 'end' ? 'success' : 'error'](`Herramienta ${toolEndMessage.tool_name || 'una herramienta'} ${toolEndMessage.status === 'end' ? 'completada' : 'falló'}.`);
+                   setToolName(undefined);
+                   setReactState(undefined); // Reset reactState on tool end
+                   if (toolEndMessage.task_id) {
+                       setBackgroundTasks((prev) => prev.filter((t) => t.taskId !== toolEndMessage.task_id));
+                       const toolMessageIndex = updatedMessages.findIndex(msg => msg.taskId === toolEndMessage.task_id);
+                       if (toolMessageIndex !== -1) {
+                           const finalToolMessage = updatedMessages[toolMessageIndex];
+                           updatedMessages[toolMessageIndex] = {
+                               ...finalToolMessage,
+                               text: toolEndMessage.status === 'end' ? toolEndMessage.result || `Herramienta ${toolEndMessage.tool_name} finalizada.` : `Error en herramienta ${toolEndMessage.tool_name}: ${toolEndMessage.error || "Error desconocido."}`,
+                               sources: toolEndMessage.sources || [],
+                               taskId: undefined, // Eliminar taskId una vez finalizado
+                           };
+                       }
+                   }
+                   toast[toolEndMessage.status === 'end' ? 'success' : 'error'](`Herramienta ${toolEndMessage.tool_name || 'una herramienta'} ${toolEndMessage.status === 'end' ? 'completada' : 'falló'}.`);
                   break;
               }
 
@@ -741,19 +743,16 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         setIsLoading(true);
         setMessages([]);
         try {
-          // Primero, obtenemos el total de mensajes para calcular la paginación correcta.
-          const initialRes = await apiClient.get(`/api/threads/${threadId}/messages`, { params: { limit: 1 } });
-          const total = initialRes.data.total;
-          const limit = 100;
-          const skip = Math.max(0, total - limit);
-
-          // Ahora, traemos la última página de mensajes.
-          const messagesRes = await apiClient.get(`/api/threads/${threadId}/messages`, { params: { skip, limit } });
+          // Cargamos los últimos 100 mensajes por defecto.
+          // La API ahora maneja la lógica de paginación de forma más robusta.
+          const limit = 100; // O el valor que consideremos adecuado para la carga inicial
+          const messagesRes = await apiClient.get(`/api/threads/${threadId}/messages`, { params: { skip: 0, limit: limit } });
           
-          const { messages: newMessages } = messagesRes.data;
+          const { messages: newMessages, total } = messagesRes.data;
 
           setMessages(newMessages);
-          setHasMoreMessages(skip > 0);
+          // Si el total es mayor que el límite, significa que hay más mensajes para cargar.
+          setHasMoreMessages(total > limit);
         } catch (error) {
           console.error('Error fetching chat data:', error);
           setMessages([{ text: 'No se pudo cargar esta conversación.', sender: 'ai', created_at: new Date().toISOString() }]);
@@ -829,6 +828,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           workspaceId={workspaceId}
           selectedContext={selectedContext}
           onContextSelected={setSelectedContext}
+          isVectorizingFile={isVectorizingFile} // Added isVectorizingFile
       />;
   }
 
@@ -866,7 +866,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                   />
                 </div>
               ))}
-              {isThinking && ( // Mostrar si está pensando, ya que los mensajes en streaming ahora están en `messages`
+              {(isResponding || toolName) && (
                 <div>
                   <LoadingIndicator
                     isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
@@ -899,7 +899,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 isWebSearchActive={isWebSearchActive}
                 isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
                 isDeepResearchActive={isDeepResearchActive}
-                onMessageChange={setNewMessage}
                 setNewMessage={setNewMessage}
                 onSendMessage={handleSendMessage}
                 onKeyDown={() => {}}

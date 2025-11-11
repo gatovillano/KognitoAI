@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, memo, useCallback } from 'react';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
@@ -30,6 +31,7 @@ interface ChatInputBarProps {
   isRecording?: boolean;
   isProcessingAudio?: boolean;
   isUploadingFile?: boolean;
+  isVectorizingFile?: boolean; // Nueva prop para indicar la vectorización
   isUploadingImage?: boolean;
   uploadedImagePreview?: string | null;
   isKnowledgeAnalysisActive: boolean;
@@ -38,7 +40,7 @@ interface ChatInputBarProps {
   isDeepResearchActive: boolean;
   selectedToolName?: string;
   messages?: ChatMessage[];
-  onMessageChange: (value: string) => void;
+
   setNewMessage: (value: string) => void;
   onSendMessage: (e?: React.FormEvent, message?: string) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -67,6 +69,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   isRecording = false,
   isProcessingAudio = false,
   isUploadingFile = false,
+  isVectorizingFile = false, // Nueva prop
   isUploadingImage = false,
   uploadedImagePreview = null,
   isKnowledgeAnalysisActive,
@@ -74,7 +77,6 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   isComprehensiveAnalysisActive,
   isDeepResearchActive,
   selectedToolName,
-  onMessageChange,
   setNewMessage,
   onSendMessage,
   onKeyDown = () => {},
@@ -126,8 +128,8 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
 
   const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(e.target.value);
-    onMessageChange(e.target.value);
-  }, [onMessageChange]);
+    setNewMessage(e.target.value);
+  }, [setNewMessage]);
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -149,13 +151,11 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     }
 
     onSendMessage(e, messageText);
-    onMessageChange('');
+    setNewMessage('');
   }, [
     newMessage,
     selectedToolName,
-    currentContext,
     onSendMessage,
-    onMessageChange,
     isWebSearchForcedState,
     isComprehensiveAnalysisForcedState,
     isDeepResearchForcedState,
@@ -163,9 +163,9 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
 
   const handleAttachNote = useCallback((note: { title?: string; content: string }) => {
     const noteText = note.title ? `Nota: ${note.title}\n${note.content}` : `Nota: ${note.content}`;
-    onMessageChange(newMessage + '\n' + noteText);
+    setNewMessage(newMessage + '\n' + noteText);
     setIsNoteSelectorOpen(false);
-  }, [onMessageChange, newMessage]);
+  }, [setNewMessage, newMessage]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -248,7 +248,13 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
             )}
             {uploadedImagePreview && (
               <div className="relative w-24 h-24 mb-2">
-                <img src={uploadedImagePreview} alt="Image preview" className="w-full h-full object-cover rounded-md" />
+                <Image
+                  src={uploadedImagePreview}
+                  alt="Previsualización de imagen"
+                  layout="fill"
+                  objectFit="cover"
+                  className="rounded-md"
+                />
                 <button
                   type="button"
                   onClick={onRemoveImage}
@@ -275,7 +281,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                   isWebSearchActive={isWebSearchActive}
                   isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
                   isDeepResearchActive={isDeepResearchActive}
-                  isUploadingFile={isUploadingFile}
+                  isUploadingFile={isUploadingFile || isVectorizingFile}
                   isUploadingImage={isUploadingImage}
                   onToggleWebSearch={onToggleWebSearch}
                   onToggleComprehensiveAnalysis={onToggleComprehensiveAnalysis}
@@ -321,10 +327,10 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                 <Button
                   type="submit"
                   size="icon"
-                  disabled={isResponding || (!newMessage.trim() && currentContext.length === 0 && !uploadedImagePreview)}
+                  disabled={isResponding || isUploadingFile || isVectorizingFile || (!newMessage.trim() && currentContext.length === 0 && !uploadedImagePreview)}
                   className="rounded-full"
                 >
-                  {isResponding ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+                  {(isResponding || isUploadingFile || isVectorizingFile) ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
                 </Button>
               </div>
             </div>
