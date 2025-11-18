@@ -1,28 +1,39 @@
 // ChatMessage.tsx
 import React, { useState } from 'react';
+import ReactDOMServer from 'react-dom/server';
 import Image from 'next/image';
 import { motion } from 'framer-motion'; // Importar motion
+import { v4 as uuidv4 } from 'uuid'; // Importar uuid
 
 import { ChatAvatar } from './ChatAvatar';
 import { Button } from '@/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
+import { ExternalLink } from 'lucide-react';
 import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 
-interface Source {
-  id: number;
+export interface Source {
+  id: number | string;
   title: string;
   url: string;
   snippet: string;
   type: 'web' | 'document' | 'memory' | 'code' | 'database';
   metadata?: Record<string, any>;
+  name?: string; // Añadir esta línea para el nombre del documento/memoria
 }
 
-interface Artifact {
+export interface Artifact {
   id: number;
   content: string;
   type: 'html' | 'css' | 'js' | 'svg' | 'webpage';
   version: number;
+}
+
+export interface ContentPart {
+  type: 'text' | 'citation';
+  content?: string;
+  source?: Source;
+  citationNumber?: number;
 }
 
 interface ChatMessageProps {
@@ -47,27 +58,124 @@ interface ChatMessageProps {
   children?: React.ReactNode; // Añadir la propiedad children
 }
 
-const Citation: React.FC<{ source: Source }> = ({ source }) => {
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button className="inline-block align-super text-xs bg-primary/10 text-primary font-bold rounded-full w-4 h-4 mx-0.5 focus:outline-none focus:ring-2 focus:ring-primary/50">
-          {source.id}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-80 text-sm">
-        <div className="font-bold mb-2">{source.title}</div>
-        <p className="text-muted-foreground">
-          {source.snippet}
-        </p>
-        {source.metadata?.similarity_score && (
-          <div className="text-xs text-primary/80 mt-2">
-            Relevancia: {Math.round(source.metadata.similarity_score * 100)}%
+export const SourceButton: React.FC<{ source: Source; citationNumber: number }> = ({ source, citationNumber }) => {
+  const getIcon = () => {
+    switch (source.type) {
+      case 'web':
+        return <ExternalLink className="h-3 w-3 mr-1" />;
+      case 'document':
+        return <FileIcon className="h-3 w-3 mr-1" />;
+      case 'memory':
+        return <svg className="h-3 w-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>;
+      case 'code':
+        return <svg className="h-3 w-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+          <path fillRule="evenodd" d="M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 11-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z" clipRule="evenodd" />
+        </svg>;
+      case 'database':
+        return <svg className="h-3 w-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z" />
+        </svg>;
+      default:
+        return <FileIcon className="h-3 w-3 mr-1" />;
+    }
+  };
+
+  const getButtonContent = () => {
+    if (source.type === 'web') {
+      return (
+        <a
+          href={source.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center text-xl bg-primary/10 text-primary font-bold rounded-full px-2 mx-0.5 focus:outline-none focus:ring-2 focus:ring-primary/50 leading-normal flex-shrink-0 hover:bg-primary/20 transition-colors"
+        >
+          {getIcon()}
+          {citationNumber}
+        </a>
+      );
+    }
+
+    return (
+      <Dialog>
+        <DialogTrigger asChild>
+          <button className="inline-flex items-center text-xl bg-primary/10 text-primary font-bold rounded-full px-2 mx-0.5 focus:outline-none focus:ring-2 focus:ring-primary/50 leading-normal flex-shrink-0 hover:bg-primary/20 transition-colors">
+            {getIcon()}
+            {citationNumber}
+          </button>
+        </DialogTrigger>
+        <DialogContent className="w-80 text-sm">
+          <div className="flex items-center gap-2 mb-2">
+            {getIcon()}
+            <div className="font-bold whitespace-normal break-words">{source.title}</div>
           </div>
-        )}
-      </PopoverContent>
-    </Popover>
-  );
+          <div className="text-xs text-muted-foreground mb-2 capitalize">
+            Tipo: {source.type}
+          </div>
+          <p className="text-muted-foreground">
+            {source.snippet}
+          </p>
+          {source.metadata?.similarity_score && (
+            <div className="text-xs text-primary/80 mt-2">
+              Relevancia: {Math.round(source.metadata.similarity_score * 100)}%
+            </div>
+          )}
+          {source.url && (source.type === 'document' || source.type === 'memory' || source.type === 'code' || source.type === 'database') && (
+            <div className="text-xs text-muted-foreground mt-2 break-all">
+              Fuente: {source.url}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
+  return getButtonContent();
+};
+
+const processMessageWithCitations = (text: string, allSources: Source[] | undefined): { contentParts: ContentPart[]; uncitedSources: Source[] } => {
+  if (!allSources || allSources.length === 0) {
+    return { contentParts: [{ type: 'text', content: text }], uncitedSources: [] };
+  }
+
+  const contentParts: ContentPart[] = [];
+  let lastIndex = 0;
+  const citedSourceIds = new Set<string | number>();
+
+  // Expresión regular para buscar citas individuales como [1], [2], etc.
+  const citationRegex = /\[(\d+)\]/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = citationRegex.exec(text)) !== null) {
+    const citationNumber = parseInt(match[1], 10);
+    const fullMatch = match[0];
+    const index = match.index!;
+
+    const source = allSources.find(s => s.id == citationNumber); // Usar == para comparar string | number
+
+    if (source) {
+      // Añadir el texto antes de la cita
+      if (index > lastIndex) {
+        contentParts.push({ type: 'text', content: text.substring(lastIndex, index) });
+      }
+
+      // Añadir la cita como un componente
+      contentParts.push({ type: 'citation', source: source, citationNumber: citationNumber });
+      citedSourceIds.add(source.id);
+
+      lastIndex = index + fullMatch.length;
+    }
+  }
+
+  // Añadir cualquier texto restante después de la última cita
+  if (lastIndex < text.length) {
+    contentParts.push({ type: 'text', content: text.substring(lastIndex) });
+  }
+
+  const uncitedSources = allSources.filter(s => !citedSourceIds.has(s.id));
+
+  return { contentParts, uncitedSources };
 };
 
 export const ChatMessage: React.FC<ChatMessageProps> = ({
@@ -84,8 +192,45 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(msg.text);
 
+  const additionalSourcesToDisplay: Source[] = [];
+  const seenSourceIdentifiers = new Set<string | number>(); // Para deduplicación
 
+  // Helper para añadir fuentes y evitar duplicados
+  const addSourceToDisplay = (source: Source) => {
+    const identifier = source.url ? source.url : `${source.type}-${source.name || source.title}-${source.id}`;
+    if (!seenSourceIdentifiers.has(identifier)) {
+      additionalSourcesToDisplay.push(source);
+      seenSourceIdentifiers.add(identifier);
+    }
+  };
 
+  // Procesar msg.ragContext
+  msg.ragContext?.forEach((ragItem) => {
+    let ragId: number | string;
+    if (typeof ragItem.id === 'number') {
+      ragId = ragItem.id;
+    } else {
+      ragId = uuidv4(); // Generar un ID de cadena único si no es numérico
+    }
+
+    const newSource: Source = {
+      id: ragId,
+      title: ragItem.name || ragItem.title || 'Contexto RAG',
+      url: ragItem.url || '',
+      snippet: ragItem.snippet || ragItem.content || '',
+      type: ragItem.type || 'document',
+      metadata: ragItem.metadata || {},
+      name: ragItem.name || ragItem.title || 'Contexto RAG',
+    };
+    addSourceToDisplay(newSource);
+  });
+
+  // Procesar msg.sources (las que serán citadas por el LLM)
+  // Las citas numéricas se gestionarán en processMessageWithCitations.
+  // Aquí, solo las añadimos a additionalSourcesToDisplay para mostrarlas si no están ya.
+  msg.sources?.forEach((source) => {
+    addSourceToDisplay(source);
+  });
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -101,6 +246,17 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     setEditedText(msg.text);
     setIsEditing(false);
   };
+
+  // Procesar el mensaje con las citas y las fuentes de msg.sources
+  const allSources = [...(msg.sources || []), ...additionalSourcesToDisplay];
+  // The backend is now responsible for sending the final, unique list of sources.
+  // The frontend should not perform its own de-duplication.
+  const uniqueSources = allSources;
+
+  const { contentParts, uncitedSources } = processMessageWithCitations(
+    msg.chunks?.join('') || msg.text,
+    uniqueSources
+  );
 
   return (
     <motion.div
@@ -207,7 +363,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
       ) : (
         // Mensaje de la IA
         <div
-          className="flex flex-col mb-8"
+          className="flex flex-col mb-4"
         >
           <div className="flex items-start gap-3">
             <div className="flex-1 min-w-0">
@@ -234,8 +390,24 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                     placeholder="Edita tu mensaje aquí..."
                   />
                 ) : (
-                  <div className="text-foreground break-words font-sans text-xl p-4">
-                    <MarkdownRenderer content={msg.chunks?.join('') || msg.text} fontSize="text-xl" isStreaming={msg.chunks !== undefined} />
+                  <div className="text-foreground break-words font-sans p-4 font-normal">
+                    {msg.sender === 'ai' && (msg.sources?.length > 0 || additionalSourcesToDisplay.length > 0) && /\[(\d+)\]/.test(msg.chunks?.join('') || msg.text) ? (
+                      (() => {
+                        // processMessageWithCitations ahora devuelve contentParts
+                        const { contentParts, uncitedSources } = processMessageWithCitations(msg.chunks?.join('') || msg.text, uniqueSources);
+
+                        // Combina las fuentes no citadas de msg.sources con las fuentes RAG adicionales
+                        const allAdditionalSources = [...uncitedSources, ...additionalSourcesToDisplay];
+
+                        return (
+                          <>
+                            <MarkdownRenderer contentParts={contentParts} fontSize="text-xl" isStreaming={msg.chunks !== undefined} />
+                          </>
+                        );
+                      })()
+                    ) : (
+                      <MarkdownRenderer content={msg.chunks?.join('') || msg.text} fontSize="text-xl" isStreaming={msg.chunks !== undefined} />
+                    )}
                   </div>
                 )}
                
@@ -256,6 +428,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                     <span className="text-base">Ver Artefacto</span>
                   </div>
                 )}
+
               </div>
               
               {/* Botones de acción */}

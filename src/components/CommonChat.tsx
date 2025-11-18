@@ -198,13 +198,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     const handleMessage = (message: WebSocketMessage) => {
       if (!message) return;
 
-      console.log('[CommonChat] Received message from WebSocket context:', message);
-      console.log('[CommonChat] Message type:', message.type);
-
       const { type, taskId, ...data } = message;
 
-      if (data.thread_id !== threadIdRef.current) {
-        console.log('[CommonChat] Thread ID mismatch, ignoring message.');
+      if (data.thread_id && data.thread_id !== threadIdRef.current) {
         return;
       }
 
@@ -272,7 +268,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               }
 
               case 'stream_end':
-                  console.log(`Stream finalizado. thread_id="${data.thread_id}", task_id="${taskId}"`);
                   setIsResponding(false);
                   setIsThinking(false);
                   setToolName(undefined); // Reset toolName on stream end
@@ -283,6 +278,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                           ...finalMessage,
                           chunks: undefined, // Eliminar chunks una vez finalizado
                           taskId: undefined, // Eliminar taskId una vez finalizado
+                          sources: (data as any).sources || finalMessage.sources || [], // Asegurar que las fuentes se persistan
                       };
                   }
                   break;
@@ -651,6 +647,14 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       const audio = new Audio(audioUrl);
 
       currentAudioRef.current = audio; // Guardar la referencia al objeto Audio
+      // Agregar event listeners para sincronizar el estado de pausa
+      audio.onpause = () => {
+        setIsAudioPaused(true);
+      };
+
+      audio.onplay = () => {
+        setIsAudioPaused(false);
+      };
 
       audio.onended = () => {
         setPlayingMessageIndex(null);
@@ -708,6 +712,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         formData.append('file', file);
         if (workspaceId) {
           formData.append('workspace_id', workspaceId);
+        formData.append('topic', 'General'); // Usar un topic genérico para documentos de chat
         }
 
         const response = await apiClient.post('/api/documents/upload-chat-document', formData, {
@@ -867,7 +872,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 </div>
               ))}
               {(isResponding || toolName) && (
-                <div>
+                <div className="-mt-4">
                   <LoadingIndicator
                     isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
                     isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}

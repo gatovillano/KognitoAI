@@ -51,7 +51,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
 
     def _extract_urls(self, search_results: List[Source]) -> List[str]:
         """Extracts URLs from a list of Source objects."""
-        urls = [source.url for source in search_results if source.url]
+        urls = [source['url'] for source in search_results if 'url' in source and source['url']]
         logger.info(f"Extracted {len(urls)} URLs from search results: {urls}")
         return urls
 
@@ -95,7 +95,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
             
             # Solicitamos 80 resultados como se pidió
             search_results_obj = cast(ToolOutputWithSources, await web_search_tool_instance._arun(query, max_results=80))
-            search_context = search_results_obj.context_for_llm
+            search_context = search_results_obj.get('context_for_llm', '')
             if "Error" in search_context or "No se encontraron" in search_context:
                 logger.warning("Web search did not yield results or failed. Returning raw search results.")
                 # Si no hay resultados de búsqueda, no tiene sentido continuar el bucle.
@@ -104,10 +104,10 @@ class ComprehensiveWebAnalysisTool(BaseTool):
                 else:
                     break # Si ya hay contenido acumulado, intentar finalizar con lo que se tiene.
 
-            urls_to_scrape = self._extract_urls(search_results_obj.sources)
+            urls_to_scrape = self._extract_urls(search_results_obj.get('sources', []))
             if not urls_to_scrape:
                 logger.warning("No URLs could be extracted from the search results.")
-                soup = BeautifulSoup(search_results_obj.context_for_llm, "html.parser")
+                soup = BeautifulSoup(search_results_obj.get('context_for_llm', ''), "html.parser")
                 # Si no hay URLs pero sí contenido de búsqueda, acumular el texto plano de la búsqueda.
                 if soup.get_text().strip():
                     combined_web_content_accumulated += f"--- Resumen de Búsqueda (Iteración {iteration_count}) ---\n{soup.get_text()}\n\n"

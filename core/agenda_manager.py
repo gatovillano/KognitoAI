@@ -6,12 +6,14 @@ from datetime import datetime, timedelta # Importar timedelta
 import pytz
 import dateparser
 from typing import Tuple, List, Dict, Any, Optional
+import logging # Importar logging si no está ya
 
 from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Importaciones del proyecto
-from core.database import SessionLocal, Account, AgendaEvent, ContactProfile, Workspace, WorkspacePermission
+from core.database import SessionLocal, Account, AgendaEvent, ContactProfile, Workspace, WorkspacePermission, Task
 from utils.db_session import DBSession
 from fastapi import HTTPException
 from utils.security import check_workspace_permission # Importar check_workspace_permission
@@ -29,7 +31,8 @@ async def schedule_event(
     description: Optional[str] = None,
     location: Optional[str] = None,
     attendee_ids: Optional[List[str]] = None,
-    external_attendees: Optional[List[str]] = None
+    external_attendees: Optional[List[str]] = None,
+    event_id: Optional[int] = None
 ) -> Tuple[bool, str, AgendaEvent | None]:
     """
     Crea un nuevo evento y lo guarda en la base de datos para un usuario o workspace.
@@ -89,6 +92,7 @@ async def schedule_event(
                 return False, "No puedo programar eventos en el pasado. Por favor, elige una fecha y hora futura.", None
 
             new_event = AgendaEvent(
+                id=event_id, # Usar el ID proporcionado o dejar que la base de datos lo genere
                 account_id=account_id,
                 workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
                 summary=summary,
@@ -324,6 +328,89 @@ async def get_agenda_for_day(account_id: str, target_day: str, workspace_id: Opt
     """
     return await get_agenda_for_period(account_id, "day", target_day, workspace_id)
 
+async def get_event_by_id_db(account_id: str, event_id: int) -> Optional[AgendaEvent]:
+    """
+    Recupera un evento específico por su ID directamente de la base de datos como objeto AgendaEvent.
+    No realiza verificaciones de permiso de workspace aquí, se asume que el llamador lo hará.
+    """
+    async with DBSession(SessionLocal) as db:
+        stmt = select(AgendaEvent).options(
+            selectinload(AgendaEvent.contact_profiles),
+            selectinload(AgendaEvent.workspace),
+            selectinload(AgendaEvent.attendees)
+        ).where(
+            AgendaEvent.id == event_id,
+            AgendaEvent.account_id == uuid.UUID(account_id)
+        )
+        result = await db.execute(stmt)
+        event = result.scalars().first()
+        return event
+
+async def update_event_db(
+    db_session: AsyncSession,
+    account_id: str,
+    event_id: int,
+    summary: Optional[str] = None,
+    description: Optional[str] = None,
+    location: Optional[str] = None,
+    event_datetime_utc: Optional[datetime] = None,
+    attendee_ids: Optional[List[str]] = None,
+    external_attendees: Optional[List[str]] = None,
+    workspace_id: Optional[str] = None,
+) -> Optional[AgendaEvent]:
+    """
+    Actualiza un evento existente en la base de datos.
+    """
+    async with db_session as db: # Asegurarse de que db_session se maneje correctamente
+        event_stmt = select(AgendaEvent).options(selectinload(AgendaEvent.attendees)).where(
+            AgendaEvent.id == event_id,
+            AgendaEvent.account_id == uuid.UUID(account_id)
+        )
+        event = (await db.execute(event_stmt)).scalars().first()
+
+        if not event:
+            return None
+
+        # Actualizar campos básicos
+        if summary is not None:
+            event.summary = summary
+        if description is not None:
+            event.description = description
+        if location is not None:
+            event.location = location
+        if event_datetime_utc is not None:
+            event.event_datetime_utc = event_datetime_utc
+        if workspace_id is not None:
+            event.workspace_id = uuid.UUID(workspace_id) if workspace_id else None
+        
+        # Lógica para attendee_ids
+        if attendee_ids is not None:
+            current_attendee_uuids = {att.id for att in event.attendees}
+            new_attendee_uuids = {uuid.UUID(aid) for aid in attendee_ids}
+
+            to_add_uuids = new_attendee_uuids - current_attendee_uuids
+            to_remove_uuids = current_attendee_uuids - new_attendee_uuids
+
+            if to_add_uuids:
+                new_attendees = await db.execute(select(Account).where(Account.id.in_(list(to_add_uuids))))
+                event.attendees.extend(new_attendees.scalars().all())
+            
+            if to_remove_uuids:
+                event.attendees = [att for att in event.attendees if att.id not in to_remove_uuids]
+
+        # Lógica para external_attendees
+        if external_attendees is not None:
+            event.external_attendees = external_attendees
+        
+        try:
+            await db.commit()
+            await db.refresh(event)
+            return event
+        except Exception as e:
+            logger.error(f"Error al actualizar el evento {event_id}: {e}", exc_info=True)
+            await db.rollback()
+            return None
+
 
 async def get_events_as_dicts(account_id: str, workspace_id: Optional[str] = None, include_past: bool = False) -> List[Dict[str, Any]]:
     """
@@ -392,6 +479,80 @@ async def get_events_as_dicts(account_id: str, workspace_id: Optional[str] = Non
             event_dict["linked_profiles"] = linked_profiles_data
             event_dicts.append(event_dict)
         return event_dicts
+
+
+async def get_task_by_id_db(account_id: str, task_id: int) -> Optional[Task]:
+    """
+    Recupera una tarea específica por su ID directamente de la base de datos como objeto Task.
+    """
+    async with DBSession(SessionLocal) as db:
+        stmt = select(Task).where(
+            Task.id == task_id,
+            Task.account_id == uuid.UUID(account_id)
+        )
+        result = await db.execute(stmt)
+        task = result.scalars().first()
+        return task
+
+async def update_task_db(
+    db_session: AsyncSession,
+    account_id: str,
+    task_id: int,
+    summary: Optional[str] = None,
+    description: Optional[str] = None,
+    due_date: Optional[datetime] = None,
+    is_completed: Optional[bool] = None,
+    workspace_id: Optional[str] = None,
+    linked_profiles: Optional[List[str]] = None, # Añadir linked_profiles
+) -> Optional[Task]:
+    """
+    Actualiza una tarea existente en la base de datos.
+    """
+    async with db_session as db:
+        task_stmt = select(Task).options(selectinload(Task.linked_profiles)).where( # Cargar ansiosamente los perfiles vinculados
+            Task.id == task_id,
+            Task.account_id == uuid.UUID(account_id)
+        )
+        task = (await db.execute(task_stmt)).scalars().first()
+
+        if not task:
+            return None
+
+        # Actualizar campos básicos si no son None
+        if summary is not None:
+            task.summary = summary
+        if description is not None:
+            task.description = description
+        if due_date is not None:
+            task.due_date = due_date
+        if is_completed is not None:
+            task.is_completed = is_completed
+        if workspace_id is not None:
+            task.workspace_id = uuid.UUID(workspace_id) if workspace_id else None
+        
+        # Lógica para linked_profiles
+        if linked_profiles is not None:
+            current_profile_uuids = {cp.id for cp in task.linked_profiles}
+            new_profile_uuids = {uuid.UUID(pid) for pid in linked_profiles}
+
+            to_add_uuids = new_profile_uuids - current_profile_uuids
+            to_remove_uuids = current_profile_uuids - new_profile_uuids
+
+            if to_add_uuids:
+                new_profiles = await db.execute(select(ContactProfile).where(ContactProfile.id.in_(list(to_add_uuids))))
+                task.linked_profiles.extend(new_profiles.scalars().all())
+            
+            if to_remove_uuids:
+                task.linked_profiles = [cp for cp in task.linked_profiles if cp.id not in to_remove_uuids]
+        
+        try:
+            await db.commit()
+            await db.refresh(task)
+            return task
+        except Exception as e:
+            logger.error(f"Error al actualizar la tarea {task_id}: {e}", exc_info=True)
+            await db.rollback()
+            return None
 
 
 async def cancel_event(account_id: str, event_id: int, workspace_id: Optional[str] = None) -> Tuple[bool, str]:

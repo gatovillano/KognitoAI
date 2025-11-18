@@ -33,17 +33,20 @@ def get_tasks_manager(db: AsyncSession = Depends(get_db)) -> TasksManager:
 
 class TaskResponse(BaseModel):
     """Define la estructura de datos para la respuesta de una tarea."""
-    id: str
+    id: uuid.UUID
     description: str
     is_completed: bool
     due_date: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
-    account_id: str
-    workspace_id: Optional[str] = None
+    account_id: uuid.UUID
+    workspace_id: Optional[uuid.UUID] = None
 
     class Config:
         from_attributes = True
+        json_encoders = {
+            uuid.UUID: lambda v: str(v)
+        }
 
 class TaskCreateRequest(BaseModel):
     """Define la estructura de datos para crear una nueva tarea."""

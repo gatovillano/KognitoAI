@@ -85,15 +85,15 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
     <>
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
 
-      <DialogContent className="max-w-4xl w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col p-0">
-        <DialogHeader className="p-6 pb-4 border-b">
+      <DialogContent className="max-w-4xl w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col overflow-hidden p-6">
+        <DialogHeader className="pb-4 border-b">
           <DialogTitle className="text-2xl font-bold text-foreground">Resultados del Análisis</DialogTitle>
           <DialogDescription className="text-muted-foreground truncate">
             Para el documento: {document?.file_name || 'Nombre no disponible'}
           </DialogDescription>
         </DialogHeader>
-        <ScrollArea className="flex-1 p-6">
-          <div className="space-y-6 pb-4">
+        <ScrollArea className="flex-1 min-h-0 -mx-6 px-6">
+          <div className="space-y-6 pt-4 pb-4">
             <Card className="border-none shadow-none bg-transparent p-0">
               <CardHeader className="px-0 pt-0 pb-2">
                 <h3 className="font-semibold text-lg text-foreground">Resumen Ejecutivo por IA</h3>

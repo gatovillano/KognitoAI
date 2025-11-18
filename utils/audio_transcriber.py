@@ -7,33 +7,53 @@ from typing import Optional
 from io import BytesIO
 from pydub import AudioSegment # Importar pydub
 import os # Importar os para manejar archivos temporales
+import torch # Importar torch para verificar la disponibilidad de CUDA
 
 from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
 
 WHISPER_MODEL_SIZE = "small"
-WHISPER_DEVICE = "cpu"
+# WHISPER_DEVICE = "gpu" # Comentamos esta línea ya que la determinaremos dinámicamente
 WHISPER_COMPUTE_TYPE = "int8"
 _whisper_model: Optional[WhisperModel] = None
 
 def load_whisper_model():
-    """Carga el modelo de transcripción de forma síncrona al inicio de la aplicación."""
+    """Carga el modelo de transcripción de forma síncrona al inicio de la aplicación, con fallback a CPU."""
     global _whisper_model
     if _whisper_model is None:
-        logger.info(f"Cargando modelo Faster Whisper: {WHISPER_MODEL_SIZE}...")
+        # Determinar el dispositivo a usar
+        device_to_use = "cuda" if torch.cuda.is_available() else "cpu"
+        compute_type_to_use = WHISPER_COMPUTE_TYPE
+        
+        if device_to_use == "cpu" and compute_type_to_use == "int8":
+            logger.warning("int8 compute_type no es compatible con CPU. Usando float32 en CPU.")
+            compute_type_to_use = "float32" # int8 no es compatible con CPU en ctranslate2
+
+        logger.info(f"Cargando modelo Faster Whisper: {WHISPER_MODEL_SIZE} en dispositivo: {device_to_use} con compute_type: {compute_type_to_use}...")
         try:
-            _whisper_model = WhisperModel(WHISPER_MODEL_SIZE, device=WHISPER_DEVICE, compute_type=WHISPER_COMPUTE_TYPE)
-            logger.info("Modelo Faster Whisper cargado y listo.")
+            _whisper_model = WhisperModel(WHISPER_MODEL_SIZE, device=device_to_use, compute_type=compute_type_to_use)
+            logger.info(f"Modelo Faster Whisper cargado y listo en {device_to_use}.")
         except Exception as e:
-            logger.error(f"Error cargando el modelo Faster Whisper: {e}", exc_info=True)
-            _whisper_model = None
+            logger.error(f"Error cargando el modelo Faster Whisper en {device_to_use}: {e}", exc_info=True)
+            if device_to_use == "cuda":
+                logger.warning("Intentando cargar el modelo en CPU como fallback...")
+                try:
+                    _whisper_model = WhisperModel(WHISPER_MODEL_SIZE, device="cpu", compute_type="float32") # Forzar float32 para CPU
+                    logger.info("Modelo Faster Whisper cargado y listo en CPU (fallback).")
+                except Exception as e_cpu:
+                    logger.error(f"Error cargando el modelo Faster Whisper en CPU: {e_cpu}", exc_info=True)
+                    _whisper_model = None
+            else:
+                _whisper_model = None
 
 async def get_whisper_model() -> Optional[WhisperModel]:
     """Devuelve el modelo de transcripción previamente cargado."""
     if _whisper_model is None:
         logger.warning("El modelo de Whisper no ha sido cargado. Intentando cargar ahora...")
-        load_whisper_model()
+        # Ejecutar la carga del modelo en un executor para no bloquear el loop de eventos
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, load_whisper_model)
     return _whisper_model
 
 async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> Optional[str]:
