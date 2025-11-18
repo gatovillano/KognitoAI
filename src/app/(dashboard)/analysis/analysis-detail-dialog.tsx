@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Analysis, AnalysisType, Insight, Question, CollectionAnalysis, DocumentAnalysisResult as SingleTextAnalysis, CollectionConnection, ThemeReference, ThemeQuote, CodeAnalysisResultFrontend } from '@/lib/models';
-import { Lightbulb, Workflow, ScrollText, Megaphone, Target, BarChart3, TrendingUp, FlaskConical, Puzzle, Goal, LibraryBig, Bot, CircleCheck, Info, Sparkles, XCircle, FileWarning, HelpCircle, Brain, Network, Volume2, Loader2, Pause, Calendar, AlertTriangle, Expand, Atom } from 'lucide-react';
+import { Lightbulb, Workflow, ScrollText, Megaphone, Target, BarChart3, TrendingUp, FlaskConical, Puzzle, Goal, LibraryBig, Bot, CircleCheck, Info, Sparkles, XCircle, FileWarning, HelpCircle, Brain, Network, Volume2, Loader2, Pause, Calendar, AlertTriangle, Expand, Atom, FileText, Settings, GitBranch } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,6 +13,10 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { QuestionSliderDialog } from '@/components/QuestionSliderDialog';
 import { useTextToSpeech } from '@/hooks/useTextToSpeech';
+
+const cleanAsterisks = (text: string) => {
+  return text.replace(/^\*+|\*+$/g, '');
+};
 
 // import { processContentWithCitations } // Importa la función de procesamiento
 
@@ -249,12 +253,12 @@ const ThemeQuotesDialog: React.FC<ThemeQuotesDialogProps> = ({ isOpen, onOpenCha
           </DialogDescription>
         </DialogHeader>
         <div className="py-4 flex-1 overflow-y-auto max-h-[70vh]">
-          {theme.citas && theme.citas.length > 0 ? (
+          {theme.related_quotes && theme.related_quotes.length > 0 ? (
             <ul className="list-disc pl-5 space-y-3 text-sm text-muted-foreground">
-              {theme.citas.map((cita: any, qIdx: number) => (
+              {theme.related_quotes.map((quote: ThemeQuote, qIdx: number) => (
                 <li key={qIdx} className="border-l-2 pl-3">
-                  <div className="italic mb-1"><ReactMarkdown remarkPlugins={[remarkGfm]} children={`"${cita.cita}"`}/></div>
-                  <p className="text-xs font-semibold text-gray-500">— {cita.documento}</p>
+                  <div className="italic mb-1"><ReactMarkdown remarkPlugins={[remarkGfm]} children={`"${quote.quote}"`}/></div>
+                  <p className="text-xs font-semibold text-gray-500">— {quote.document_title}</p>
                 </li>
               ))}
             </ul>
@@ -281,7 +285,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
 
   const { play, stop, isLoading, isPlaying, activeText } = useTextToSpeech();
 
-  const handleThemeClick = useCallback((theme: any) => { // Ajustado para aceptar 'any' temporalmente
+  const handleThemeClick = useCallback((theme: ThemeReference) => {
     setSelectedThemeForQuotes(theme);
     setIsThemeQuotesDialogOpen(true);
   }, []);
@@ -417,29 +421,10 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                   {analysis.full_data.temas_transversales?.map((theme: ThemeReference, idx: number) => (
                     <Badge
                       key={idx}
-                      variant="secondary"
-                      className="cursor-pointer text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                      className="cursor-pointer text-sm hover:bg-accent hover:text-accent-foreground transition-colors bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100"
                       onClick={() => handleThemeClick(theme)}
                     >
                       {theme.theme}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {analysis.full_data?.conceptos_centrales && analysis.full_data.conceptos_centrales.length > 0 && (
-              <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Conceptos Centrales:</h4>
-                <div className="flex flex-wrap gap-2">
-                  {analysis.full_data.conceptos_centrales?.map((concept: string, idx: number) => (
-                    <Badge
-                      key={idx}
-                      variant="outline"
-                      className="cursor-pointer text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
-                      onClick={() => handleConceptClick(concept)}
-                    >
-                      {concept.split(':')[0]}
                     </Badge>
                   ))}
                 </div>
@@ -598,8 +583,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                   {collectionData.cross_cutting_themes.map((theme: ThemeReference, idx: number) => (
                     <Badge
                       key={idx}
-                      variant="secondary"
-                      className="cursor-pointer text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                      className="cursor-pointer text-sm hover:bg-accent hover:text-accent-foreground transition-colors bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100"
                       onClick={() => handleThemeClick(theme)}
                     >
                       {theme.theme}
@@ -616,10 +600,10 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                     <Badge
                       key={idx}
                       variant="outline"
-                      className="cursor-pointer text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                      className="cursor-pointer text-sm hover:bg-accent hover:text-accent-foreground transition-colors bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100"
                       onClick={() => handleConceptClick(concept)}
                     >
-                      {concept.split(':')[0]}
+                      {cleanAsterisks(concept.split(':')[0])}
                     </Badge>
                   ))}
                 </div>
@@ -903,7 +887,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                 <h4 className="font-semibold text-lg mb-2">Conceptos Centrales:</h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                   {documentResult.central_concepts?.map((concept: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={concept}/></div></li>
+                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={cleanAsterisks(concept)}/></div></li>
                   ))}
                 </ul>
               </div>

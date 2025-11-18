@@ -128,51 +128,34 @@ class DuckDuckGoSearchTool(BaseTool):
             logger.error(f"Error en búsqueda síncrona DuckDuckGo: {str(e)}")
             return []
 
-    def _format_results(self, results: list, query: str) -> tuple[str, List[Source]]:  # Modificamos el tipo de retorno
+    def _format_results(self, results: list, query: str) -> tuple[str, List[Source]]:
         """
-        Formatea los resultados de búsqueda en un formato legible.
+        Formatea los resultados de búsqueda en un contexto para el LLM y una lista de fuentes.
         """
+        from core.citation_models import format_context_with_sources, create_web_source
+
         if not results:
             return "No se encontraron resultados de búsqueda.", []
 
-        snippets_to_summarize = []
-        sources: List[Source] = []  # Inicializamos la lista de fuentes
-        for result in results:
-            title = result.get('title', 'Sin título')
-            snippet = result.get('snippet', 'Sin descripción disponible')
-            url = result.get('url', '')
-            source_name = result.get('source', 'DuckDuckGo')  # Renombramos la variable para evitar confusión
-            idx = result.get('id', 1)  # Obtenemos el ID único
+        sources: List[Source] = []
+        for idx, result in enumerate(results, 1):
+            # Usamos el helper create_web_source para mantener la consistencia
+            source = create_web_source(
+                source_id=idx,
+                title=result.get('title', 'Sin título'),
+                url=result.get('url', ''),
+                snippet=result.get('snippet', 'Sin descripción disponible')
+            )
+            sources.append(source)
 
-            # Limpiar y preparar el snippet
-            if snippet and len(snippet.strip()) > 20:
-                # Información detallada para el LLM
-                detailed_info = f"**Fuente {idx}: {title}**\n"
-                detailed_info += f"Contenido: {snippet}\n"
-                if url:
-                    detailed_info += f"URL: {url}\n"
-                detailed_info += f"Proveedor: {source_name}\n"
-                snippets_to_summarize.append(detailed_info)
-
-                # Creamos el objeto Source y lo agregamos a la lista
-                sources.append(Source(id=idx, title=title, url=url, snippet=snippet))
-
-        if not snippets_to_summarize:
+        if not sources:
             return "No se encontraron resultados de búsqueda con suficiente contenido para analizar.", []
 
-        combined_snippets = "\n\n".join(snippets_to_summarize)
-        final_response = (
-            "Aquí están los resultados de la búsqueda web con DuckDuckGo. INSTRUCCIONES IMPORTANTES para tu respuesta:\n\n"
-            "1. Proporciona una respuesta DETALLADA y COMPLETA basada en la información encontrada\n"
-            "2. NO resumas excesivamente - incluye detalles específicos, datos, fechas y contexto relevante\n"
-            "3. SIEMPRE incluye la sección 'Fuentes' al final con los enlaces exactos que te proporciono\n"
-            "4. Organiza la información de manera clara con subtítulos si es necesario\n"
-            "5. Si hay información contradictoria entre fuentes, menciónalo\n"
-            "6. Mantén un tono conversacional pero informativo\n\n"
-            f"--- INFORMACIÓN DETALLADA DE LAS FUENTES ---\n{combined_snippets}\n\n"
-        )
+        # Usamos la función centralizada para formatear el contexto
+        context_for_llm = format_context_with_sources(sources)
+
         logger.info(f"✅ Resultados de búsqueda DuckDuckGo procesados exitosamente para la consulta: '{query}'")
-        return final_response, sources  # Devolvemos la respuesta formateada y la lista de fuentes
+        return context_for_llm, sources
 
     def _run(self, query: str, **kwargs) -> str:
         """Versión síncrona (no implementada, usa la versión async)."""

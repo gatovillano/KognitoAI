@@ -58,10 +58,17 @@ services:
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
       - ./scripts:/app/scripts
-    env_file:
-      - ./.env
-    networks:
-      - kognito_network
+    env_file:                                                                                                                                        
+      - ./.env                                                                                                                                       
+    networks:                                                                                                                                        
+      - kognito_network                                                                                                                              
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all # O puedes especificar un número, por ejemplo, 1
+              capabilities: [gpu]
    
   # 3. El Cliente de Telegram
   telegram_client:

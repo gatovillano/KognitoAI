@@ -223,7 +223,7 @@ async def _run_fts_search(
             """
             query_params: Dict[str, Any] = {
                 "account_id": account_id,
-                "query_fts": query,
+                "query_fts": query.replace('\x00', '')[:2000], # Limpiar NUL bytes y truncar a 2000 caracteres
             }
 
             filter_clauses = []
@@ -321,7 +321,7 @@ async def _run_fts_search(
 async def get_relevant_memories(
     account_id: str,
     query: str,
-    k: int = 10,
+    k: int = 20,
     workspace_id: Optional[str] = None,
     filter_topics: Optional[List[str]] = None,
     filter_document_ids: Optional[List[str]] = None,

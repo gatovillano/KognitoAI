@@ -23,7 +23,7 @@ export function UniversalSearchDialog({ isOpen, onOpenChange, searchTerm, setSea
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const { user } = useAuth();
-  const { activeWorkspace } = useWorkspace();
+  const { currentWorkspace: activeWorkspace } = useWorkspace();
   const router = useRouter(); // Inicializar useRouter
 
   useEffect(() => {
@@ -184,24 +184,26 @@ export function UniversalSearchDialog({ isOpen, onOpenChange, searchTerm, setSea
           />
           <Search className="h-4 w-4 absolute left-2.5 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
         </div>
-        <ScrollArea className="flex-1 pr-4">
-          {loading && searchTerm && <p className="text-center text-muted-foreground">Buscando...</p>}
-          {!loading && searchTerm && results.length === 0 && (
-            <p className="text-center text-muted-foreground">No se encontraron resultados para "{searchTerm}"</p>
-          )}
-          {!loading && !searchTerm && (
-            <p className="text-center text-muted-foreground">Empieza a escribir para buscar en todos tus datos.</p>
-          )}
-          {!loading && results.length > 0 && (
-            <div className="space-y-2">
-              {results.map((result, index) => (
-                <React.Fragment key={index}>
-                  {renderResult(result)}
-                </React.Fragment>
-              ))}
-            </div>
-          )}
-        </ScrollArea>
+        <div className="flex-1 overflow-y-auto -mr-4 pr-4">
+          <ScrollArea className="h-full">
+            {loading && searchTerm && <p className="text-center text-muted-foreground">Buscando...</p>}
+            {!loading && searchTerm && results.length === 0 && (
+              <p className="text-center text-muted-foreground">No se encontraron resultados para "{searchTerm}"</p>
+            )}
+            {!loading && !searchTerm && (
+              <p className="text-center text-muted-foreground">Empieza a escribir para buscar en todos tus datos.</p>
+            )}
+            {!loading && results.length > 0 && (
+              <div className="space-y-2">
+                {results.map((result, index) => (
+                  <React.Fragment key={index}>
+                    {renderResult(result)}
+                  </React.Fragment>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </div>
       </DialogContent>
     </Dialog>
   );

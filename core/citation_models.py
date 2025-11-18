@@ -21,6 +21,8 @@ class SourceType(str, Enum):
     MEMORY = "memory"
     CODE = "code"
     DATABASE = "database"
+    GRAPH = "graph"
+    NOTE = "note"
 
 
 class Source(BaseModel):
@@ -34,7 +36,7 @@ class Source(BaseModel):
         type: Tipo de fuente (web, document, memory, etc.)
         metadata: Metadatos adicionales específicos del tipo de fuente
     """
-    id: int = Field(..., description="Identificador único para la cita")
+    id: Union[int, str] = Field(..., description="Identificador único para la cita")
     title: str = Field(..., description="Título descriptivo de la fuente")
     url: str = Field(..., description="URL o identificador de la fuente")
     snippet: str = Field(..., description="Fragmento relevante de la fuente")
@@ -88,8 +90,9 @@ def format_context_with_sources(sources: List[Source]) -> str:
         return ""
     context_parts = []
     for source in sources:
+        # No incluir la URL en el snippet que se pasa al LLM para evitar que la repita
         context_parts.append(
-            f"Fuente [{source.id}] - {source.title}:\n{source.snippet}\nURL: {source.url}\n"
+            f"Contexto [{source.id}] - {source.title}:\n{source.snippet}\n"
         )
     return "\n".join(context_parts)
 
@@ -163,6 +166,29 @@ def create_memory_source(source_id: int, title: str, memory_id: str, snippet: st
     )
 
 
+def create_note_source(source_id: int, title: str, note_id: str, snippet: str,
+                       metadata: Optional[Dict[str, Any]] = None) -> Source:
+    """
+    Función helper para crear una fuente de nota.
+    Args:
+        source_id: ID único de la fuente
+        title: Título de la nota
+        note_id: Identificador de la nota en la base de datos
+        snippet: Fragmento relevante de la nota
+        metadata: Metadatos adicionales (ej: categoría, etc.)
+    Returns:
+        Objeto Source configurado para nota
+    """
+    return Source(
+        id=source_id,
+        title=title,
+        url=f"note://{note_id}",
+        snippet=snippet,
+        type=SourceType.NOTE,
+        metadata=metadata or {}
+    )
+
+
 # Constantes para el sistema de prompts
 CITATION_SYSTEM_PROMPT = """
 Cuando uses información de las fuentes proporcionadas, SIEMPRE cita la fuente usando el formato [número] al final de la oración o párrafo que use esa información.
@@ -171,10 +197,15 @@ Ejemplo:
 - "La inteligencia artificial está transformando la industria [1]."
 - "Según estudios recientes, el 85% de las empresas planean adoptar IA en los próximos dos años [2] [3]."
 
+MUY IMPORTANTE: El formato de la cita debe ser EXCLUSIVAMENTE el número de la fuente entre corchetes. NUNCA incluyas palabras como "Fuente", "Ref", "Cita" o cualquier otro texto dentro de los corchetes.
+
+INCORRECTO: [Fuente 1], [Ref. 2], [Cita 3]
+CORRECTO: [1], [2], [3]
+
 Reglas para las citas:
-1. Usa SOLO los números de fuente proporcionados en el contexto
+1. Usa SOLO los números de fuente proporcionados en el contexto, y sin ninguna palabra adicional dentro de los corchetes.
 2. Coloca las citas al final de las oraciones que usen esa información
-3. Si usas información de múltiples fuentes en una oración, incluye todas las citas
+3. Si usas información de múltiples fuentes en una oración, incluye todas las citas por separado. Por ejemplo, en lugar de `[1, 2, 3]`, debes usar `[1] [2] [3]`.
 4. NO inventes números de citas que no correspondan a las fuentes proporcionadas
 5. Sé preciso: solo cita las fuentes que realmente usaste para esa información específica
 """

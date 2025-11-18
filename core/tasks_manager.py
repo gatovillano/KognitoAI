@@ -3,13 +3,18 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 from sqlalchemy import select, update, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.database import Task, Account, Workspace, ContactProfile # Importar los modelos necesarios
+from utils.db_session import DBSession # Para manejar la sesión de la base de datos
+
+logger = logging.getLogger(__name__)
+
+from core.database import SessionLocal, Task, Account, Workspace, ContactProfile # Importar los modelos necesarios
 from utils.db_session import DBSession # Para manejar la sesión de la base de datos
 
 logger = logging.getLogger(__name__)
@@ -41,20 +46,24 @@ class TasksManager:
             "linked_profiles": linked_profiles_data
         }
 
-    async def add_task(
+    async def create_task( # Renombrado de add_task a create_task
         self,
         account_id: str,
         description: str,
         due_date: Optional[datetime] = None,
-        workspace_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+        is_completed: Optional[bool] = False, # Añadido para consistencia con CalDAV
+        workspace_id: Optional[str] = None,
+        task_id: Optional[int] = None
+    ) -> Task: # Devolver el objeto Task directamente para ScheduleEvent
         """
         Añade una nueva tarea a la base de datos.
         """
         new_task = Task(
+            id=task_id, # Usar el ID proporcionado o dejar que la base de datos lo genere
             account_id=uuid.UUID(account_id),
             description=description,
             due_date=due_date,
+            is_completed=is_completed,
             workspace_id=uuid.UUID(workspace_id) if workspace_id else None
         )
         self.db_session.add(new_task)
@@ -71,7 +80,7 @@ class TasksManager:
             raise Exception("Tarea no encontrada después de la creación.")
 
         logger.info(f"Tarea '{description}' añadida para account {account_id}.")
-        return self._task_to_dict(loaded_task)
+        return loaded_task # Devolver el objeto Task
 
     async def list_tasks(
         self,
@@ -103,16 +112,19 @@ class TasksManager:
     async def update_task(
         self,
         account_id: str,
-        task_id: str,
+        task_id: uuid.UUID, # Cambiado a uuid.UUID
+        summary: Optional[str] = None, # Añadido summary para consistencia
         description: Optional[str] = None,
         due_date: Optional[datetime] = None,
-        is_completed: Optional[bool] = None
-    ) -> Optional[Dict[str, Any]]:
+        is_completed: Optional[bool] = None,
+        workspace_id: Optional[str] = None,
+        linked_profiles: Optional[List[str]] = None,
+    ) -> Optional[Task]: # Devolver el objeto Task
         """
         Actualiza una tarea existente.
         """
         stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
-            Task.id == uuid.UUID(task_id),
+            Task.id == task_id, # Usar task_id como uuid.UUID
             Task.account_id == uuid.UUID(account_id)
         )
         result = await self.db_session.execute(stmt)
@@ -122,24 +134,47 @@ class TasksManager:
             logger.warning(f"Tarea {task_id} no encontrada o no pertenece a account {account_id}.")
             return None
 
+        if summary is not None:
+            task.summary = summary
         if description is not None:
             task.description = description
         if due_date is not None:
             task.due_date = due_date
         if is_completed is not None:
             task.is_completed = is_completed
+        if workspace_id is not None:
+            task.workspace_id = uuid.UUID(workspace_id) if workspace_id else None
         
-        await self.db_session.commit()
-        await self.db_session.refresh(task)
-        logger.info(f"Tarea {task_id} actualizada para account {account_id}.")
-        return self._task_to_dict(task)
+        # Lógica para linked_profiles
+        if linked_profiles is not None:
+            current_profile_uuids = {cp.id for cp in task.contact_profiles}
+            new_profile_uuids = {uuid.UUID(pid) for pid in linked_profiles}
 
-    async def delete_task(self, account_id: str, task_id: str) -> bool:
+            to_add_uuids = new_profile_uuids - current_profile_uuids
+            to_remove_uuids = current_profile_uuids - new_profile_uuids
+
+            if to_add_uuids:
+                new_profiles = await self.db_session.execute(select(ContactProfile).where(ContactProfile.id.in_(list(to_add_uuids))))
+                task.contact_profiles.extend(new_profiles.scalars().all())
+            
+            if to_remove_uuids:
+                task.contact_profiles = [cp for cp in task.contact_profiles if cp.id not in to_remove_uuids]
+        
+        try:
+            await self.db_session.commit()
+            await self.db_session.refresh(task)
+            return task
+        except Exception as e:
+            logger.error(f"Error al actualizar la tarea {task_id}: {e}", exc_info=True)
+            await self.db_session.rollback()
+            return None
+
+    async def delete_task(self, account_id: str, task_id: uuid.UUID) -> bool: # Cambiado a uuid.UUID
         """
         Elimina una tarea.
         """
         stmt = select(Task).where(
-            Task.id == uuid.UUID(task_id),
+            Task.id == task_id, # Usar task_id como uuid.UUID
             Task.account_id == uuid.UUID(account_id)
         )
         result = await self.db_session.execute(stmt)
@@ -154,39 +189,50 @@ class TasksManager:
         logger.info(f"Tarea {task_id} eliminada para account {account_id}.")
         return True
 
-    async def get_task_by_id(self, account_id: str, task_id: str) -> Optional[Dict[str, Any]]:
+    async def get_task_by_id(self, account_id: str, task_id: uuid.UUID) -> Optional[Task]: # Cambiado a uuid.UUID, devuelve objeto Task
         """
         Obtiene una tarea por su ID.
         """
         stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
-            Task.id == uuid.UUID(task_id),
+            Task.id == task_id, # Usar task_id como uuid.UUID
             Task.account_id == uuid.UUID(account_id)
         )
         result = await self.db_session.execute(stmt)
         task = result.scalars().first()
-        if task: 
-            return self._task_to_dict(task)
-        return None
+        return task
+        
+    async def get_tasks_as_dicts(self, account_id: str, include_completed: bool = False) -> List[Dict[str, Any]]:
+        """
+        Recupera tareas de un usuario y las devuelve como una lista de diccionarios.
+        Si include_completed es False (por defecto), solo recupera tareas no completadas.
+        """
+        async with DBSession(SessionLocal) as db:
+            stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
+                Task.account_id == uuid.UUID(account_id)
+            )
+            if not include_completed:
+                stmt = stmt.where(Task.is_completed == False)
+            
+            stmt = stmt.order_by(desc(Task.created_at))
+            result = await db.execute(stmt)
+            tasks = result.scalars().all()
+            return [self._task_to_dict(task) for task in tasks]
 
-    async def link_profile_to_task(self, account_id: str, task_id: str, profile_id: str) -> bool:
+
+    async def link_profile_to_task(self, account_id: str, task_id: uuid.UUID, profile_id: uuid.UUID) -> bool: # Cambiado a uuid.UUID
         """
         Vincula un perfil a una tarea existente.
         """
         logger.info(f"Intentando vincular perfil {profile_id} a la tarea {task_id} para la cuenta {account_id}")
         account_uuid = uuid.UUID(account_id)
-        task_uuid = uuid.UUID(task_id)
-        if isinstance(profile_id, uuid.UUID):
-            profile_uuid = profile_id
-        else:
-            profile_uuid = uuid.UUID(profile_id)
-        task_stmt = select(Task).options(selectinload(Task.contact_profiles)).where(Task.id == task_uuid, Task.account_id == account_uuid)
+        task_stmt = select(Task).options(selectinload(Task.contact_profiles)).where(Task.id == task_id, Task.account_id == account_uuid)
         task = (await self.db_session.execute(task_stmt)).scalars().first()
         if not task:
             logger.warning(f"Tarea {task_id} no encontrada o no pertenece a la cuenta {account_id}.")
             return False
 
         # Verificar que el perfil existe y pertenece al usuario
-        profile_stmt = select(ContactProfile).where(ContactProfile.id == profile_uuid, ContactProfile.account_id == account_uuid)
+        profile_stmt = select(ContactProfile).where(ContactProfile.id == profile_id, ContactProfile.account_id == account_uuid)
         profile = (await self.db_session.execute(profile_stmt)).scalars().first()
         if not profile:
             logger.warning(f"Perfil {profile_id} no encontrado o no pertenece a la cuenta {account_id}.")
@@ -204,7 +250,7 @@ class TasksManager:
         logger.info(f"Perfil {profile_id} vinculado exitosamente a la tarea {task_id}.")
         return True
 
-    async def unlink_profile_from_task(self, account_id: str, task_id: str, profile_id: str) -> bool:
+    async def unlink_profile_from_task(self, account_id: str, task_id: uuid.UUID, profile_id: uuid.UUID) -> bool: # Cambiado a uuid.UUID
         """
         Desvincula un perfil de una tarea existente.
         """
@@ -212,14 +258,14 @@ class TasksManager:
         account_uuid = uuid.UUID(account_id)
 
         # Verificar que la tarea existe y pertenece al usuario
-        task_stmt = select(Task).options(selectinload(Task.contact_profiles)).where(Task.id == uuid.UUID(task_id), Task.account_id == account_uuid)
+        task_stmt = select(Task).options(selectinload(Task.contact_profiles)).where(Task.id == task_id, Task.account_id == account_uuid)
         task = (await self.db_session.execute(task_stmt)).scalars().first()
         if not task:
             logger.warning(f"Tarea {task_id} no encontrada o no pertenece a la cuenta {account_id}.")
             return False
 
         # Eliminar el vínculo
-        profile_to_remove_stmt = select(ContactProfile).where(ContactProfile.id == uuid.UUID(profile_id), ContactProfile.account_id == account_uuid)
+        profile_to_remove_stmt = select(ContactProfile).where(ContactProfile.id == profile_id, ContactProfile.account_id == account_uuid)
         profile_to_remove = (await self.db_session.execute(profile_to_remove_stmt)).scalars().first()
 
         if profile_to_remove and profile_to_remove in task.contact_profiles:
@@ -230,3 +276,79 @@ class TasksManager:
         else:
             logger.warning(f"El vínculo entre la tarea {task_id} y el perfil {profile_id} no fue encontrado para desvincular o el perfil no existe/no pertenece al usuario.")
             return False
+
+# Funciones a nivel de módulo para ser usadas por la API
+async def create_task(
+    account_id: str,
+    description: str,
+    due_date: Optional[datetime] = None,
+    is_completed: Optional[bool] = False,
+    workspace_id: Optional[str] = None,
+    task_id: Optional[int] = None
+) -> Tuple[bool, str, Task | None]:
+    """Wrapper para TasksManager.create_task."""
+    async with DBSession(SessionLocal) as db:
+        manager = TasksManager(db)
+        try:
+            new_task = await manager.create_task(account_id, description, due_date, is_completed, workspace_id, task_id)
+            return True, "Tarea creada exitosamente.", new_task
+        except Exception as e:
+            logger.error(f"Error al crear tarea: {e}", exc_info=True)
+            return False, f"Error al crear tarea: {e}", None
+
+async def get_task_by_id_db(account_id: str, task_id: str) -> Optional[Task]: # task_id como str para compatibilidad con CalDAV
+    """Wrapper para TasksManager.get_task_by_id."""
+    async with DBSession(SessionLocal) as db:
+        manager = TasksManager(db)
+        try:
+            # Convertir task_id a UUID
+            task_uuid = uuid.UUID(task_id)
+            return await manager.get_task_by_id(account_id, task_uuid)
+        except ValueError:
+            logger.warning(f"ID de tarea inválido: {task_id}")
+            return None
+
+async def update_task_db(
+    db_session: AsyncSession, # Recibe la sesión directamente para transacciones externas
+    account_id: str,
+    task_id: str, # task_id como str para compatibilidad con CalDAV
+    summary: Optional[str] = None,
+    description: Optional[str] = None,
+    due_date: Optional[datetime] = None,
+    is_completed: Optional[bool] = None,
+    workspace_id: Optional[str] = None,
+    linked_profiles: Optional[List[str]] = None,
+) -> Optional[Task]:
+    """Wrapper para TasksManager.update_task."""
+    manager = TasksManager(db_session)
+    try:
+        # Convertir task_id a UUID
+        task_uuid = uuid.UUID(task_id)
+        return await manager.update_task(account_id, task_uuid, summary, description, due_date, is_completed, workspace_id, linked_profiles)
+    except ValueError:
+        logger.warning(f"ID de tarea inválido: {task_id}")
+        return None
+
+async def delete_task(account_id: str, task_id: str) -> Tuple[bool, str]: # task_id como str para compatibilidad con CalDAV
+    """Wrapper para TasksManager.delete_task."""
+    async with DBSession(SessionLocal) as db:
+        manager = TasksManager(db)
+        try:
+            # Convertir task_id a UUID
+            task_uuid = uuid.UUID(task_id)
+            success = await manager.delete_task(account_id, task_uuid)
+            if success:
+                return True, "Tarea eliminada exitosamente."
+            return False, "Tarea no encontrada o no se pudo eliminar."
+        except ValueError:
+            logger.warning(f"ID de tarea inválido: {task_id}")
+            return False, "ID de tarea inválido."
+        except Exception as e:
+            logger.error(f"Error al eliminar tarea: {e}", exc_info=True)
+            return False, f"Error al eliminar tarea: {e}"
+
+async def get_tasks_as_dicts(account_id: str, include_completed: bool = False) -> List[Dict[str, Any]]:
+    """Wrapper para TasksManager.get_tasks_as_dicts."""
+    async with DBSession(SessionLocal) as db:
+        manager = TasksManager(db)
+        return await manager.get_tasks_as_dicts(account_id, include_completed)

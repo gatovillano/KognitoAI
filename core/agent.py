@@ -53,16 +53,19 @@ from core.database import SessionLocal, Account, ChatThread, Workspace
 from utils.db_session import DBSession
 #from utils.helpers import sanitize_html
 from core.config import settings
-from core.citation_models import ToolOutputWithSources
+from core.citation_models import ToolOutputWithSources, Source
 from core.llm_manager import get_main_llm, get_fast_llm
 from core.prompts import SUMMARIZATION_PROMPT, THREAD_TITLE_PROMPT
 from core.enhanced_memory_manager import EnhancedMemoryManager
 from knowledge_graph.graph_database import GraphDB
+
 # --- Claves para estado temporal ---
 from utils.image_generation import GENERATED_IMAGE_KEY
 # from tools.get_document_content_tool import DOCUMENT_NAME_KEY
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+
+from core.websocket_manager import send_personal_message # Importar aquí para evitar circular imports
 
 
 # --- Configuración del Logger ---
@@ -325,33 +328,88 @@ async def call_model_node(state: AgentState):
         document_ids_for_rag = [item['id'] for item in rag_context if item.get('type') == 'document']
         document_names_for_rag = [item.get('name') for item in rag_context if item.get('type') == 'document' and item.get('name')] # Manejar 'name' de forma segura
         has_explicit_rag_context = True
-    # --- INICIO DE LA LÓGICA DE MEMORIA MEJORADA (siempre se ejecuta ahora) ---
-    graph_db = GraphDB(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
-    graph_db.connect()
-    enhanced_memory_manager = EnhancedMemoryManager(graph_db=graph_db)
+    # --- INICIO DE LA LÓGICA DE MEMORIA MEJORADA ---
+    # Se ejecuta solo si no venimos de una llamada a herramienta, para no sobrescribir sus fuentes.
+    last_message = state["messages"][-1] if state["messages"] else None
+    is_after_tool_call = isinstance(last_message, ToolMessage)
 
-    enhanced_context = await enhanced_memory_manager.get_enhanced_context(
-        user_query=user_message,
-        user_id=state['account_id'],
-        workspace_id=state.get('workspace_id'),
-        explicit_document_ids=document_ids_for_rag # Pasar los IDs de documentos explícitos
-    )
+    relevant_memories_text = ""
+    if not is_after_tool_call:
+        logger.info("Ejecutando búsqueda RAG del agente (no es una vuelta de herramienta).")
+        graph_db = GraphDB(
+            uri=str(settings.neo4j_uri) if settings.neo4j_uri else "",
+            user=str(settings.neo4j_user) if settings.neo4j_user else "",
+            password=str(settings.neo4j_password) if settings.neo4j_password else ""
+        )
+        graph_db.connect()
+        enhanced_memory_manager = EnhancedMemoryManager(graph_db=graph_db)
 
-    # Convert Source objects to dicts for JSON serialization
-    if enhanced_context and 'sources' in enhanced_context:
-        traditional_sources = enhanced_context['sources'].get('traditional_embeddings', {}).get('results', [])
-        enhanced_context['sources']['traditional_embeddings']['results'] = [source.dict() for source in traditional_sources]
+        enhanced_context = await enhanced_memory_manager.get_enhanced_context(
+            user_query=user_message,
+            user_id=state['account_id'],
+            workspace_id=state.get('workspace_id'),
+            explicit_document_ids=document_ids_for_rag
+        )
 
-    relevant_memories_text = json.dumps(enhanced_context, indent=2, ensure_ascii=False)
-    sources_for_prompt = enhanced_context.get('sources', {}).get('traditional_embeddings', {}).get('results', [])
+        # --- INICIO: Procesamiento Unificado de Contexto y Fuentes ---
+        all_sources_objects = []
+        relevant_memories_text = ""
+
+        if enhanced_context:
+            # 1. Recopilar todas las fuentes (tradicionales y del grafo) en una sola lista
+            traditional_sources_raw = enhanced_context.get('sources', {}).get('traditional_embeddings', {}).get('results', [])
+            all_sources_objects.extend(traditional_sources_raw)
+
+            insights = enhanced_context.get('enhanced_insights', [])
+            for insight in insights:
+                all_sources_objects.append(Source(
+                    id=f"insight_{uuid.uuid4().hex[:10]}",
+                    title=f"Insight del Grafo: {insight.get('type', 'Desconocido')}",
+                    snippet=insight.get('description', 'Sin descripción.'),
+                    type='graph', metadata=insight, url=f"graph_insight_{uuid.uuid4().hex[:10]}"
+                ))
+
+            paths = enhanced_context.get('reasoning_paths', [])
+            for path in paths:
+                steps_desc = "\\n".join([f" - {s.get('from', '?')} -> {s.get('to', '?')}" for s in path.get('steps', [])])
+                snippet = f"{path.get('description', 'Sin descripción.')}\\n{steps_desc}"
+                all_sources_objects.append(Source(
+                    id=f"path_{uuid.uuid4().hex[:10]}",
+                    title=f"Ruta de Razonamiento: {path.get('type', 'Desconocido')}",
+                    snippet=snippet, type='graph', metadata=path, url=f"graph_path_{uuid.uuid4().hex[:10]}"
+                ))
+
+            # 2. Re-indexar todas las fuentes con IDs numéricos secuenciales
+            relevant_memories_parts = []
+            final_sources_for_state = []
+            for i, source_obj in enumerate(all_sources_objects, start=1):
+                # Para el prompt del LLM
+                relevant_memories_parts.append(f"[{i}] {source_obj.snippet}")
+                
+                # Para el estado que va al frontend
+                source_dict = source_obj.dict()
+                if hasattr(source_obj, 'id'):
+                    source_dict['original_id'] = source_obj.id
+                source_dict['id'] = i
+                final_sources_for_state.append(source_dict)
+            
+            relevant_memories_text = "\\n\\n".join(relevant_memories_parts)
+            state['sources'] = final_sources_for_state
+            logger.info(f"✅ {len(final_sources_for_state)} fuentes combinadas y re-indexadas añadidas al estado.")
+        else:
+            logger.info("No se generó contexto enriquecido.")
+        # --- FIN: Procesamiento Unificado ---
+    else:
+        logger.info("Saltando la búsqueda RAG del agente porque el estado ya contiene fuentes de una herramienta.")
     # --- FIN DE LA LÓGICA DE MEMORIA MEJORADA ---
         
-# --- FIN DE LA LÓGICA DE RAG EXPLÍCITO ---
-    state['sources'] = sources_for_prompt
+    # Las fuentes RAG se pasan al LLM como contexto a través de 'relevant_memories_text'.
+    # Las fuentes de las herramientas ejecutadas poblarán state['sources'] en tool_node.
+    # No es necesario inicializar state['sources'] con fuentes RAG aquí, ya que tool_node las manejará.
     
     from core.prompt_manager import PromptManager
     prompt_manager = PromptManager(settings={"default_system_prompt": settings.default_system_prompt})
-    
+        
     tools = await get_all_langchain_tools(
         account_id=state['account_id'],
         telegram_id=state.get('telegram_id')
@@ -370,7 +428,7 @@ async def call_model_node(state: AgentState):
         telegram_id=state.get('telegram_id'),
         user_message=user_message,
         has_explicit_rag_context=has_explicit_rag_context,
-        explicit_document_names=document_names_for_rag
+        explicit_document_names=[name for name in document_names_for_rag if name is not None] if document_names_for_rag else None
     )
 
     if state.get('workspace_id'):
@@ -390,29 +448,32 @@ async def call_model_node(state: AgentState):
                 telegram_id=state.get('telegram_id'),
                 user_message=user_message,
                 has_explicit_rag_context=has_explicit_rag_context,
-                explicit_document_names=document_names_for_rag # Pasar el nuevo parámetro
-            )    # 2. Preparar el LLM con herramientas
+                explicit_document_names=[str(name) for name in document_names_for_rag if name is not None] if document_names_for_rag else None # Pasar el nuevo parámetro
+            )
+    # 2. Preparar el LLM con herramientas
     llm = get_main_llm()
     if not llm:
         raise ValueError("El LLM principal no está disponible.")
         
+    logger.debug(f"DEBUG (agent.py - call_model_node): System Prompt final antes de LLM: {system_prompt_content}")
     llm_with_tools = cast(ChatGoogleGenerativeAI, llm).bind_tools(tools)
-    
+
     # 3. Construir el prompt y la cadena de ejecución
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt_content),
         MessagesPlaceholder(variable_name="messages"),
     ])
-    
+
     chain = prompt | llm_with_tools
-    
+
     # 4. Invocar la cadena y añadir la respuesta al estado
     # MODIFICACIÓN CLAVE: Usar astream en lugar de ainvoke
     full_ai_message_content = ""
     tool_calls_from_llm = []
     final_response_message = None
-
-    from core.websocket_manager import send_personal_message # Importar aquí para evitar circular imports
+    
+    target_account_id = "telegram_bot_service" if state.get('telegram_id') else state['account_id']
+    conn_type = "chat" if state.get('telegram_id') else None
 
     async for chunk in chain.astream({"messages": state["messages"]}):
         if isinstance(chunk, AIMessage):
@@ -430,8 +491,6 @@ async def call_model_node(state: AgentState):
             
             # Enviar el chunk al WebSocket
             logger.debug(f"DEBUG (agent.py): Enviando stream_chunk para taskId {state.get('task_id')}: {chunk.content}")
-            target_account_id = "telegram_bot_service" if state.get('telegram_id') else state['account_id']
-            conn_type = "chat" if state.get('telegram_id') else None
             await send_personal_message(target_account_id, {
                 "type": "stream_chunk",
                 "thread_id": state['thread_id'],
@@ -441,6 +500,7 @@ async def call_model_node(state: AgentState):
             
             final_response_message = chunk # Guardar el último chunk para construir el mensaje final
 
+    logger.debug(f"DEBUG (agent.py - call_model_node): Respuesta cruda del LLM (acumulada): {full_ai_message_content}")
     # Construir el AIMessage final con el contenido acumulado y tool_calls
     if final_response_message:
         final_ai_message = AIMessage(
@@ -465,14 +525,18 @@ async def call_model_node(state: AgentState):
         ]
         final_ai_message.additional_kwargs["tool_code"] = json.dumps(tool_code_data)
             
-    return {"messages": state["messages"] + [final_ai_message]}
-
+    return {
+        "messages": state["messages"] + [final_ai_message],
+        "sources": state.get("sources")
+    }
 async def generate_response_node(state: AgentState):
     """
     Nodo final que simplemente pasa el estado para que el consumidor lo reciba.
     Actúa como un punto de salida nombrado que 'api/chat.py' puede escuchar.
     """
     logger.info("--- (Grafo) Nodo: Generar Respuesta ---")
+    if isinstance(state["messages"][-1], AIMessage):
+        logger.debug(f"DEBUG (agent.py - generate_response_node): AIMessage final del agente: {state['messages'][-1].content}")
     return {"messages": state["messages"]}
 
 async def tool_node(state: AgentState):
@@ -496,23 +560,20 @@ async def tool_node(state: AgentState):
     )
     tool_map = {tool.name: tool for tool in tools}
 
-    target_account_id = "telegram_bot_service" if state.get('telegram_id') else state['account_id']
-    conn_type = "chat" if state.get('telegram_id') else None
-    target_account_id = "telegram_bot_service" if state.get('telegram_id') else state['account_id']
-    conn_type = "chat" if state.get('telegram_id') else None
+    # Redundancia eliminada
     tool_messages = []
     # Cargar las fuentes existentes del estado para poder añadir nuevas
     current_sources = state.get("sources") or []
     # Usar un set para evitar duplicados basados en la URL
     existing_urls = {s['url'] for s in current_sources if 'url' in s and s['url']}
 
-
     for tool_call in tool_calls:
         tool_name = tool_call.get("name")
         tool_args = tool_call.get("args")
         
         # Enviar evento tool_start
-        from core.websocket_manager import send_personal_message
+        target_account_id = "telegram_bot_service" if state.get('telegram_id') else state['account_id']
+        conn_type = "chat" if state.get('telegram_id') else None
         logger.debug(f"DEBUG (agent.py): Enviando tool_start para taskId {state.get('task_id')}, tool {tool_name}")
         await send_personal_message(target_account_id, {
             "type": "tool_start",
@@ -526,59 +587,103 @@ async def tool_node(state: AgentState):
                 content=f"Error: Herramienta '{tool_name}' no encontrada.",
                 tool_call_id=tool_call.get("id")
             ))
+            # Enviar evento tool_end con error
+            await send_personal_message(target_account_id, {
+                "type": "tool_end",
+                "taskId": state.get("task_id"),
+                "toolName": tool_name,
+                "result": f"Error: Herramienta '{tool_name}' no encontrada.",
+                "error": True,
+                "sources": []
+            }, connection_type=conn_type)
             continue
             
         selected_tool = tool_map[tool_name]
         
         # --- INYECCIÓN DE ATRIBUTOS DE CONTEXTO ---
-        selected_tool.account_id = state['account_id']
-        selected_tool.workspace_id = state.get('workspace_id')
-        selected_tool.telegram_id = state.get('telegram_id')
-        
+        selected_tool.account_id = state['account_id']  # type: ignore
+        selected_tool.workspace_id = state.get('workspace_id')  # type: ignore
+        selected_tool.telegram_id = state.get('telegram_id')  # type: ignore
+
         if hasattr(selected_tool, 'thread_id'):
-            selected_tool.thread_id = state['messages'][-1].additional_kwargs.get('thread_id')
+            selected_tool.thread_id = state['messages'][-1].additional_kwargs.get('thread_id')  # type: ignore
         # --- FIN INYECCIÓN ---
 
         try:
             logger.info(f"Ejecutando herramienta '{tool_name}' con argumentos: {tool_args}")
-            output = await selected_tool.ainvoke(tool_args)
-            logger.info(f"Resultado de la herramienta '{tool_name}': {output}")
+            # La salida de la herramienta ahora siempre es un dict (model_dump de ToolOutputWithSources)
+            output_dump = await selected_tool.ainvoke(tool_args)
+            logger.info(f"Resultado de la herramienta '{tool_name}': {output_dump}")
             
-            # --- INICIO: Lógica de resumen para cognee_conceptual_processing ---
-            if tool_name == "cognee_conceptual_processing":
+            # Asegurar que tool_output siempre sea un objeto ToolOutputWithSources válido
+            tool_output: ToolOutputWithSources
+            context_content: str = ""
+            sources_list = []
+
+            if isinstance(output_dump, str):
                 try:
-                    output_data = json.loads(output)
-                    if output_data.get("status") == "completed":
-                        llm = get_fast_llm()
-                        if llm:
-                            summary_prompt = f"""Eres un asistente de IA. Has procesado unos documentos y has extraído conocimiento. Ahora, resume los resultados de forma amigable para el usuario. No inventes detalles, basa tu resumen estrictamente en los siguientes datos JSON. Explica brevemente qué son las citas conceptuales y los perfiles de ideas si aparecen en los resultados. Sé conciso y claro. Datos a resumir: {json.dumps(output_data, indent=2, ensure_ascii=False)}"""
-                            summary_response = await llm.ainvoke(summary_prompt)
-                            output = summary_response.content if hasattr(summary_response, 'content') else str(summary_response)
-                            logger.info(f"Resumen generado para cognee_conceptual_processing: {output}")
-                        else:
-                            logger.warning("No se pudo generar resumen para cognee_conceptual_processing: LLM rápido no disponible.")
+                    parsed_output = json.loads(output_dump)
+                    # Caso 1: Salida de knowledge_search con 'results'
+                    if "results" in parsed_output and isinstance(parsed_output.get("results"), list):
+                        logger.info(f"Procesando salida estructurada de '{tool_name}' con 'results'.")
+                        context_parts = []
+                        temp_sources = []
+                        for i, result in enumerate(parsed_output["results"], start=1):
+                            context_parts.append(f"Contexto [{i}] - {result.get('metadata', {}).get('file_name', 'Sin título')}:\\n{result.get('content', '')}\\n")
+                            source = Source(
+                                id=i,
+                                title=result.get('metadata', {}).get('file_name', 'Fuente Desconocida'),
+                                url=str(result.get('metadata', {}).get('document_id', '')),
+                                snippet=result.get('content', ''),
+                                type=SourceType.DOCUMENT,
+                                metadata=result.get('metadata', {})
+                            )
+                            temp_sources.append(source)
+                        context_content = "\\n".join(context_parts)
+                        sources_list = temp_sources
+                    # Caso 2: Salida estándar con 'context_for_llm'
+                    elif "context_for_llm" in parsed_output:
+                        logger.info(f"Procesando salida estándar de '{tool_name}' con 'context_for_llm'.")
+                        context_content = parsed_output["context_for_llm"]
+                        sources_list = parsed_output.get("sources", [])
+                    # Fallback para otros JSON
                     else:
-                        error_message = output_data.get("details", "Ocurrió un error desconocido durante el procesamiento.")
-                        output = f"No pude completar el procesamiento conceptual. Razón: {error_message}"
-                except (json.JSONDecodeError, TypeError):
-                    logger.warning("La salida de cognee_conceptual_processing no es un JSON válido, no se puede generar resumen.")
-            # --- FIN: Lógica de resumen ---
+                        logger.warning(f"La salida JSON de '{tool_name}' no tiene un formato esperado. Usando como texto plano.")
+                        context_content = output_dump
+                    
+                    tool_output = ToolOutputWithSources(context_for_llm=context_content, sources=sources_list)
+
+                except json.JSONDecodeError:
+                    # Fallback para strings que no son JSON
+                    logger.warning(f"La salida de '{tool_name}' no es un JSON válido. Usando como texto plano.")
+                    context_content = output_dump
+                    tool_output = ToolOutputWithSources(context_for_llm=context_content, sources=[])
+            elif isinstance(output_dump, dict):
+                if "context_for_llm" in output_dump:
+                    context_content = output_dump["context_for_llm"]
+                else:
+                    context_content = json.dumps(output_dump, ensure_ascii=False) # Si no hay, usar el dict como string
+                
+                if "sources" in output_dump:
+                    sources_list = output_dump["sources"]
+
+                tool_output = ToolOutputWithSources(context_for_llm=context_content, sources=sources_list)
+            else:
+                context_content = str(output_dump)
+                tool_output = ToolOutputWithSources(context_for_llm=context_content, sources=[])
 
             # --- INICIO: Procesamiento de salida de herramienta y extracción de fuentes ---
-            tool_content_for_llm = ""
-            if isinstance(output, ToolOutputWithSources):
-                tool_content_for_llm = output.context_for_llm
-                if output.sources:
-                    for source in output.sources:
-                        if source.url not in existing_urls:
-                            current_sources.append(source.dict())
-                            existing_urls.add(source.url)
-            elif not isinstance(output, str):
-                tool_content_for_llm = json.dumps(output, ensure_ascii=False)
-            else:
-                tool_content_for_llm = output
-            # --- FIN: Procesamiento de salida ---
+            tool_content_for_llm = tool_output.context_for_llm
+            tool_sources_to_add: List[Dict[str, Any]] = []
 
+            if tool_output.sources:
+                for source in tool_output.sources:
+                    if source.url and source.url not in existing_urls:
+                        tool_sources_to_add.append(source.dict())
+                        existing_urls.add(source.url)
+
+            current_sources.extend(tool_sources_to_add)
+            
             tool_messages.append(ToolMessage(
                 content=tool_content_for_llm,
                 tool_call_id=tool_call.get("id")
@@ -591,7 +696,7 @@ async def tool_node(state: AgentState):
                 "taskId": state.get("task_id"),
                 "toolName": tool_name,
                 "result": tool_content_for_llm,
-                "sources": [s for s in current_sources if s['url'] in [src.url for src in getattr(output, 'sources', [])]] # Enviar solo las fuentes de esta herramienta
+                "sources": tool_sources_to_add, # Enviar solo las fuentes generadas por esta herramienta
             }, connection_type=conn_type)
 
         except Exception as e:
@@ -607,11 +712,47 @@ async def tool_node(state: AgentState):
                 "taskId": state.get("task_id"),
                 "toolName": tool_name,
                 "result": f"Error: {e}",
-                "error": True
+                "error": True,
+                "sources": [] # No hay fuentes en caso de error
             }, connection_type=conn_type)
             
+    # --- INICIO: Deduplicación y asignación de IDs secuenciales ---
+    deduplicated_sources = []
+    seen_source_identifiers = set()
+
+    for source in current_sources:
+        # Crear un identificador único para la deduplicación
+        # Se puede ajustar para usar una combinación de campos si la URL no es suficiente
+        identifier_parts = []
+        if 'url' in source and source['url']:
+            identifier_parts.append(source['url'])
+        if 'type' in source and source['type']:
+            identifier_parts.append(source['type'])
+        if 'name' in source and source['name']:
+            identifier_parts.append(source['name'])
+        if 'title' in source and source['title']:
+            identifier_parts.append(source['title'])
+        
+        source_identifier = "_".join(map(str, identifier_parts))
+        
+        if source_identifier and source_identifier not in seen_source_identifiers:
+            deduplicated_sources.append(source)
+            seen_source_identifiers.add(source_identifier)
+        elif not source_identifier: # Si no hay identificador, añadirla de todos modos (ej. fuentes sin URL)
+             deduplicated_sources.append(source)
+
+    final_sources_with_sequential_ids = []
+    for index, source in enumerate(deduplicated_sources, start=1):
+        source_copy = source.copy()
+        if 'id' in source_copy:
+            source_copy['original_id'] = source_copy['id']
+        source_copy['id'] = index
+        final_sources_with_sequential_ids.append(source_copy)
+    
+    # --- FIN: Deduplicación y asignación de IDs secuenciales ---
+
     # Devolver los mensajes de la herramienta Y las fuentes actualizadas al estado del grafo
-    return {"messages": state["messages"] + tool_messages, "sources": current_sources}
+    return {"messages": state["messages"] + tool_messages, "sources": final_sources_with_sequential_ids}
 
 # --- 2. Enrutador ---
 

@@ -59,7 +59,7 @@ export default function AgendaPage() {
   const [allTasks, setAllTasks] = useState<TaskResponse[]>([]); // Nuevo estado para todas las tareas
   const [isLoading, setIsLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
-  const [viewType, setViewType] = useState<'day' | 'week' | 'month'>('day'); // Nuevo estado para el tipo de vista
+  const [viewType, setViewType] = useState<'day' | 'week' | 'month'>('month'); // Nuevo estado para el tipo de vista
   
   const [isEventDialogOpen, setIsEventDialogOpen] = useState(false);
   const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false); // Nuevo estado para el diálogo de tareas
@@ -213,6 +213,43 @@ export default function AgendaPage() {
     }
   };
 
+  const handleMoveTask = async (taskId: string, newDate: Date) => {
+    const taskToMove = allTasks.find(task => task.id === taskId);
+    if (!taskToMove) return;
+
+    const originalTaskDueDate = taskToMove.due_date ? new Date(taskToMove.due_date) : new Date();
+    const updatedDateTime = new Date(
+      newDate.getFullYear(),
+      newDate.getMonth(),
+      newDate.getDate(),
+      originalTaskDueDate.getHours(),
+      originalTaskDueDate.getMinutes(),
+      originalTaskDueDate.getSeconds()
+    );
+
+    const toastId = toast.loading('Moviendo tarea...');
+    try {
+      // Optimistic update
+      setAllTasks(prev => prev.map(task => 
+        task.id === taskId ? { ...task, due_date: updatedDateTime.toISOString() } : task
+      ));
+
+      // API call
+      await apiClient.put(`/api/tasks/${taskId}`, {
+        due_date: updatedDateTime.toISOString(),
+      });
+
+      toast.success('Tarea movida exitosamente.', { id: toastId });
+    } catch (error) {
+      toast.error('Error al mover la tarea.', { id: toastId });
+      console.error('Error moving task:', error);
+      // Revert on error
+      setAllTasks(prev => prev.map(task => 
+        task.id === taskId ? taskToMove : task
+      ));
+    }
+  };
+
   // Filtrado de eventos y tareas para la vista diaria
   const eventsForSelectedPeriod = allEvents.filter(event => {
     if (!selectedDate) return false;
@@ -291,7 +328,7 @@ export default function AgendaPage() {
                   <DropdownMenuItem onClick={() => setIsEventDialogOpen(true)}>
                     <PlusCircle className="mr-2 h-4 w-4" /> Agendar Evento
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setIsTaskDialogOpen(true)}> {/* Nuevo botón para tarea */}
+                  <DropdownMenuItem onClick={() => { setSelectedTask(null); setIsTaskDialogOpen(true); }}>
                     <CheckCircle2 className="mr-2 h-4 w-4" /> Añadir Tarea
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
@@ -348,6 +385,7 @@ export default function AgendaPage() {
                     onToggleTaskCompleted={handleToggleTaskCompleted}
                     onCreateEvent={handleCreateEvent} // Pasar la función para crear eventos
                     onMoveEvent={handleMoveEvent} // Pasar la función para mover eventos
+                    onMoveTask={handleMoveTask} // Pasar la función para mover tareas
                   />
                 ) : (
                   <>

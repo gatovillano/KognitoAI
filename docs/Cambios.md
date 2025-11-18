@@ -1,66 +1,55 @@
-## 11-11-2025 Desactivación de la herramienta `knowledge_base_analyzer`
+## 18-11-2025 Actualización de alineación de botones de citación
 
-Se desactivó la herramienta `knowledge_base_analyzer` para el LLM, eliminando sus referencias y el archivo de la herramienta.
+### Descripción general:
+Se solicitó corregir la alineación vertical de los botones de citación en el chat y asegurar la consistencia del tamaño de fuente. La solución implicó modificar `MarkdownRenderer` para envolver el texto y `SourceButton` en un contenedor `inline-flex` con `align-items: baseline;`, y ajustar las clases de `SourceButton` en `ChatMessage.tsx`.
 
-- **Eliminación de importación**: Se eliminó la importación de `KnowledgeAnalysisTool` en [`core/tools.py`](core/tools.py:66).
-- **Eliminación de descripción**: Se eliminó la descripción de `knowledge_base_analyzer` en [`core/config.py`](core/config.py:207).
-- **Eliminación de referencia en `prompt_manager`**: Se eliminó la referencia a `knowledge_base_analyzer` en [`core/prompt_manager.py`](core/prompt_manager.py:127).
-- **Eliminación del archivo de la herramienta**: Se eliminó el archivo [`tools/knowledge_analysis_tool.py`](tools/knowledge_analysis_tool.py).
-
+- **Modificación en MarkdownRenderer.tsx**: Se envolvió la salida de `marked.parseInline` y `SourceButton` en un `<span>` con las clases `inline-flex` y `items-baseline` para mejorar la alineación vertical de los elementos en línea.
+- **Modificación en ChatMessage.tsx**: Se eliminaron las clases de alineación redundantes (`align-middle`, `align-text-bottom`) y se aseguró que `SourceButton` tuviera la clase `text-xl` para coincidir con el tamaño de fuente. Se verificó que estos cambios ya estaban aplicados en el archivo.
 ---
+## 18-11-2025 Corrección de Indentación en cognee_integration.py
 
-## 11-11-2025 Corrección de error 404 en `get-document-content`
+### Descripción general:
+Se identificó y corrigió un `IndentationError` en el archivo `knowledge_graph/cognee_integration.py` en la línea 1272. Este error impedía la correcta ejecución del módulo.
 
-Se corrigió un error 404 al acceder al endpoint `/api/get-document-content` modificando las llamadas en el frontend para que coincidieran con la definición del endpoint en el backend.
-
-- **Modificación en `api/documents.py`**: Se cambió el método del endpoint `/get-document-content` de `POST` a `GET` y se ajustó para recibir el `file_name` como parámetro de consulta.
-- **Modificación en `src/app/(dashboard)/teams/[id]/dashboard/page.tsx`**: Se actualizó la llamada a la API de `apiClient.post` a `apiClient.get` y se pasó el `file_name` como parámetro de consulta.
-- **Modificación en `src/app/(dashboard)/rag/preview-document-dialog.tsx`**: Se actualizó la llamada a la API de `apiClient.post` a `apiClient.get` y se pasó el `file_name` como parámetro de consulta.
-
+- **Punto 1**: Se ajustó la indentación de los bucles `for node in path_object.nodes:` y `for rel in path_object.relationships:` dentro del método `_format_advanced_search_results` para asegurar la correcta anidación y sintaxis de Python.
 ---
+## 18-11-2025 Reubicación del Acceso al Módulo de Análisis
 
-## 11-11-2025 Mejora en la actualización de títulos en tiempo real
+### Descripción general:
+Se modificó la página de Colecciones de Conocimientos (`rag/page.tsx`) para reubicar el acceso al módulo de Análisis. Anteriormente, se accedía a través de un `DropdownMenu` global, pero ahora se ha implementado un botón dedicado de "Análisis" junto al botón "Subir Documento" en la parte superior derecha de la página.
 
-Se mejoró la actualización de títulos en tiempo real en la página de detalles de la colección para que sea más fluida y no recargue toda la lista de documentos.
-
-- **Modificación en `src/components/DocumentCollectionDisplay.tsx`**:
-    - Se eliminó el `toast` de la función `onTitleUpdated` para evitar notificaciones excesivas.
-    - Se eliminó la llamada a `fetchPageData()` de la función `onTitleExtractionCompleted` para evitar la recarga completa de la página.
-
+- **Punto 1**: Se añadió un nuevo botón con el texto "Análisis" y el icono `ScanSearch` al lado del botón "Subir Documento".
+- **Punto 2**: El nuevo botón de "Análisis" tiene un estilo idéntico al botón "Subir Documento" (azul, mismo tamaño, etc.).
+- **Punto 3**: Se configuró el `onClick` del botón de "Análisis" para navegar a la ruta `/analysis`, proporcionando un acceso directo y visible al módulo de análisis global.
 ---
+## 18-11-2025 Actualización de Icono y Estilo del Botón de Análisis
 
-## 11-11-2025 Corrección de codificación de URL y prefijo en `get-document-content`
+### Descripción general:
+Se actualizó el botón de "Análisis" en la página de Colecciones de Conocimientos (`rag/page.tsx`) para que su icono y estilo coincidan con las convenciones del proyecto.
 
-Se corrigió un error 404 que ocurría con nombres de archivo que contenían caracteres especiales y la falta del prefijo `/documents` en la URL. El problema se resolvió codificando correctamente el `file_name` y añadiendo el prefijo `/documents` en el frontend antes de enviarlo al backend.
-
-- **Modificación en `src/app/(dashboard)/teams/[id]/dashboard/page.tsx`**: Se utilizó `encodeURIComponent` para codificar el `file_name` y se añadió el prefijo `/documents` en la llamada a `/api/get-document-content`.
-- **Modificación en `src/app/(dashboard)/rag/preview-document-dialog.tsx`**: Se utilizó `encodeURIComponent` para codificar el `file_name` y se añadió el prefijo `/documents` en la llamada a `/api/get-document-content`.
-
+- **Punto 1**: Se cambió el icono del botón de "Análisis" de `ScanSearch` a `BarChart3` para alinearse con el icono utilizado en el `Sidebar.tsx` para la sección de "Análisis".
+- **Punto 2**: Se ajustaron las clases CSS del botón de "Análisis" para que su color y apariencia sean idénticos a los del botón "Subir Documento", utilizando `bg-primary hover:bg-primary/90`.
 ---
+## 18-11-2025 Corrección de Importación de Icono en rag/page.tsx
 
-## 11-11-2025 Corrección de `ReferenceError: router is not defined` en `AnalysisPage`
+### Descripción general:
+Se corrigió un `ReferenceError` (`BarChart3 is not defined`) en `src/app/(dashboard)/rag/page.tsx` añadiendo la importación faltante del componente `BarChart3` de `lucide-react`.
 
-Se corrigió el error `ReferenceError: router is not defined` en el componente `AnalysisPage` al inicializar correctamente el hook `useRouter` de Next.js.
-
-- **Modificación en `src/app/(dashboard)/analysis/page.tsx`**: Se añadió la línea `const router = useRouter();` dentro del componente funcional `AnalysisPage`.
+- **Punto 1**: Se añadió `BarChart3` a la lista de importaciones de `lucide-react` en la parte superior del archivo `rag/page.tsx`.
 ---
-## 11-11-25 Mejora en la visualización de detalles de análisis
+## 18-11-2025 Eliminación del Acceso al Módulo de Análisis del Sidebar
 
-Se ha mejorado el componente `analysis-detail-dialog.tsx` para que muestre correctamente los campos de todos los tipos de análisis, incluyendo los de código, por tema y los insights proactivos manuales.
+### Descripción general:
+Se eliminó el enlace directo al módulo de "Análisis" del `Sidebar.tsx`, ya que ahora se accede a esta funcionalidad a través de un botón dedicado en la página de Colecciones de Conocimientos (`rag/page.tsx`).
 
-- **Análisis de `analysis-detail-dialog.tsx`**: Se analizó el componente para entender su estructura y la lógica de renderizado de los diferentes tipos de análisis.
-- **Identificación de tipos de datos**: Se revisaron los archivos `utils/advanced_text_analyzer.py`, `utils/advanced_code_analyzer.py` y `utils/analysis_on_topic.py` para identificar la estructura de datos de cada tipo de análisis.
-- **Implementación de la lógica de renderizado**: Se añadió la lógica necesaria en `analysis-detail-dialog.tsx` para mostrar los campos específicos de cada tipo de análisis.
-- **Corrección de errores de TypeScript**: Se solucionaron los errores de tipos y de sintaxis JSX que surgieron durante la implementación.
+- **Punto 1**: Se eliminó el componente `Link` y su `Button` asociado que dirigían a la ruta `/analysis` del `Sidebar.tsx`.
 ---
-## 11-11-25 Corrección en la reconstrucción de contenido de documentos para Cognee
-Se ha corregido un error en la función `_reconstruct_document_content` en `knowledge_graph/cognee_integration.py` que impedía la correcta reconstrucción del contenido de los documentos. El problema se debía a que la función no buscaba el `file_name` en la ubicación correcta del diccionario de documentos.
+## 18-11-2025 Configuración de Faster Whisper para GPU con Fallback a CPU
 
-- **Modificación en `knowledge_graph/cognee_integration.py`**: Se actualizó la línea 409 para incluir `doc.get("file_name")` en la lógica de obtención del nombre del archivo, asegurando que se encuentre correctamente cuando se pasa directamente en la raíz del diccionario del documento.
----
-## 11-11-25 Cambio de herramienta para "Crear Grafo de Conocimiento" en RAG
+### Descripción general:
+Se modificó `utils/audio_transcriber.py` para mejorar la robustez en la carga del modelo Faster Whisper, permitiendo el uso de GPU (`cuda`) si está disponible y configurado correctamente, con un fallback automático a CPU en caso de fallo o indisponibilidad de la GPU.
 
-Se ha modificado la funcionalidad de "Crear Grafo de Conocimiento" en la interfaz de usuario de RAG para que utilice la herramienta `cognee_knowledge_graph_tool` en lugar de `cognee_conceptual_processing_tool`. Este cambio asegura que la acción de crear grafos desde el frontend esté alineada con la herramienta más adecuada para esta tarea.
-
-- **Modificación en `src/app/(dashboard)/rag/page.tsx`**: La función `handleProcessKnowledgeGraph` fue actualizada para invocar la herramienta `cognee_knowledge_graph` con la acción `process_documents` a través del endpoint `/api/tools/run`.
-- **Modificación en `src/components/DocumentCollectionDisplay.tsx`**: La función `handleProcessKnowledgeGraph` fue actualizada para invocar la herramienta `cognee_knowledge_graph` con la acción `process_documents` a través del endpoint `/api/tools/run`.
+- **Punto 1**: Se añadió la importación de `torch` para verificar dinámicamente la disponibilidad de CUDA (`torch.cuda.is_available()`).
+- **Punto 2**: La función `load_whisper_model` ahora determina el dispositivo (`cuda` o `cpu`) y el `compute_type` (`int8` para GPU, `float32` para CPU) de forma dinámica.
+- **Punto 3**: Se implementó un bloque `try-except` para intentar cargar el modelo en el dispositivo determinado y, si falla en GPU, se realiza un segundo intento en CPU con `compute_type="float32"`.
+- **Punto 4**: La función `get_whisper_model` ahora utiliza `asyncio.get_running_loop().run_in_executor(None, load_whisper_model)` para ejecutar la carga del modelo en un hilo separado, evitando bloquear el event loop principal de la aplicación asíncrona.
