@@ -8,7 +8,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2, Upload, CheckCircle, XCircle, Clock, Network, ChevronDown, Settings, AlertTriangle } from 'lucide-react';
+import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2, Upload, CheckCircle, XCircle, Clock, Network, ChevronDown, Settings, AlertTriangle, BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
@@ -61,6 +61,9 @@ export default function RagCollectionsPage() {
   const [isShareCollectionOpen, setIsShareCollectionOpen] = useState(false);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
   
+  // Nuevo estado para el diálogo de análisis global
+  const [isGlobalAnalysisOpen, setIsGlobalAnalysisOpen] = useState(false);
+
   const router = useRouter();
 
   const fetchCollections = useCallback(async () => {
@@ -109,6 +112,13 @@ export default function RagCollectionsPage() {
     }
   };
 
+  // Nueva función para abrir el diálogo de análisis global
+  const handleGlobalAnalysis = () => {
+    setIsGlobalAnalysisOpen(true);
+    setAnalyzingTopic(null); // Resetear para un análisis global
+    setCollectionAnalysisResult(null); // Resetear para un análisis global
+  };
+
   useEffect(() => {
     if (!collectionPollingId) return;
 
@@ -152,7 +162,7 @@ export default function RagCollectionsPage() {
     if (!deletingTopic) return;
     const toastId = toast.loading(`Eliminando colección...`);
     try {
-      await apiClient.post('/api/collections/delete', { topic: deletingTopic });
+      await apiClient.post('/api/documents/collections/delete', { topic: deletingTopic });
       toast.success(`Colección "${deletingTopic}" eliminada.`, { id: toastId });
       // Actualización optimista: eliminar la colección del estado inmediatamente
       setCollections(prevCollections => prevCollections.filter(col => col.topic !== deletingTopic));
@@ -364,6 +374,12 @@ export default function RagCollectionsPage() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* Botón de Análisis */}
+          <Button size="sm" className="bg-primary hover:bg-primary/90 gap-1 sm:gap-2 w-full sm:w-auto" onClick={() => router.push('/analysis')}>
+            <BarChart3 className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+            <span className="text-xs sm:text-sm">Análisis</span>
+          </Button>
 
           {/* Botón Principal */}
           <Button size="sm" className="bg-primary hover:bg-primary/90 gap-1 sm:gap-2 w-full sm:w-auto" onClick={() => setIsUploadOpen(true)}>

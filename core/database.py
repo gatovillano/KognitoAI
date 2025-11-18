@@ -564,6 +564,7 @@ class Nota(Base):
     category = Column(String, default="General")
     created_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+    etag = Column(String, nullable=True)
     embedding = Column(Vector(768), nullable=True)
     text_search_vector = Column(TSVECTOR, nullable=True)
 
@@ -654,6 +655,8 @@ class AgendaEvent(Base):
     external_attendees = Column(ARRAY(String), nullable=True, comment="Nombres de asistentes no registrados.")
     is_active = Column(Boolean, default=True, nullable=False)
     job_name = Column(String, nullable=True, unique=True) # Para poder cancelar los jobs de Telegram
+    etag = Column(String, nullable=True)
+    duration_minutes = Column(Integer, nullable=True)
 
     contact_profiles = relationship(
         "ContactProfile",
@@ -695,7 +698,9 @@ class AgendaEvent(Base):
             "user_timezone": str(user_tz),
             "is_active": self.is_active,
             "attendees": [str(att.id) for att in self.attendees],
-            "external_attendees": self.external_attendees if self.external_attendees else []
+            "external_attendees": self.external_attendees if self.external_attendees else [],
+            "duration_minutes": self.duration_minutes,
+            "etag": self.etag
         }
 
 
@@ -897,7 +902,7 @@ class Task(Base):
     description = Column(Text, nullable=False)
     is_completed = Column(Boolean, default=False, nullable=False)
     due_date = Column(DateTime(timezone=True), nullable=True)
-    
+    status = Column(String(50), nullable=False, default="Pendiente", comment="Estado de la tarea para tableros Kanban (ej. Pendiente, En Progreso, Completado).")
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
 

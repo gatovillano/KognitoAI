@@ -7,7 +7,7 @@ import json
 import asyncio
 import os
 import pickle
-from typing import Annotated, Optional, AsyncGenerator, Any, List, Dict
+from typing import Annotated, Optional, AsyncGenerator, Any, List, Dict, Union
 from io import BytesIO
 import httpx
 from fastapi import APIRouter, HTTPException, Depends, status, Form, File, UploadFile, Query
@@ -90,6 +90,7 @@ class Message(BaseModel):
     created_at: datetime # Cambiado a datetime
     image_base64: Optional[str] = None
     document_url: Optional[str] = None
+    sources: Optional[List[Source]] = None # Añadido para incluir las fuentes
 
 class PaginatedChatMessagesResponse(BaseModel):
     total: int
@@ -181,13 +182,13 @@ async def get_threads(
         
         # Filter by workspace_id if provided
         if workspace_id:
-            if str(workspace_id).lower() == "none": # Acceder al valor y luego a .lower()
+            if str(workspace_id).lower() == "none":
                 base_query = base_query.where(ChatThread.workspace_id == None)
             else:
-                base_query = base_query.where(ChatThread.workspace_id == uuid.UUID(str(workspace_id))) # Acceder al valor y luego a UUID
+                base_query = base_query.where(ChatThread.workspace_id == uuid.UUID(str(workspace_id)))
 
         # Consulta para el total de hilos
-        total_stmt = select(func.count()).select_from(base_query.alias())
+        total_stmt = select(func.count(ChatThread.id)).select_from(base_query.alias()) # Corregido: func.count(ChatThread.id)
         total_result = await db.execute(total_stmt)
         total_threads = total_result.scalar_one()
 
@@ -264,11 +265,15 @@ async def get_messages_for_thread(
                 else:
                     text_content = str(msg.content)
 
+                # Extraer sources si existen en additional_kwargs
+                message_sources = msg.additional_kwargs.get("sources", [])
+                
                 real_messages.append(Message(
                     text=text_content,
                     sender="user" if isinstance(msg, HumanMessage) else "ai",
                     created_at=msg.additional_kwargs.get("created_at", datetime.now(timezone.utc)),
-                    image_base64=image_content
+                    image_base64=image_content,
+                    sources=message_sources # Asignar las fuentes extraídas
                 ))
 
         # Sort messages by created_at in ascending order
@@ -477,7 +482,7 @@ async def text_to_speech(request: TextToSpeechRequest):
     # Parámetros para open-edgetts.
     tts_payload = {
         'input': text_to_speak,
-        'voice': request.voice if request.voice else 'es-MX-JorgeNeural',
+        'voice': request.voice if request.voice else 'es-MX-DaliaNeural',
         'model': 'edge-tts',
         'speed': 1.0,
     }
@@ -676,13 +681,11 @@ async def create_and_run_agent_streaming(
         # El rag_context se pasará directamente al estado del agente, no se pre-procesa aquí.
         # El user_message se mantiene sin modificar aquí.
 
-
-
         # --- Construcción del Mensaje Multimodal ---
-        content_parts = [{"type": "text", "text": user_message}]
+        # Langchain espera una lista de dicts o strings para el contenido multimodal.
+        # Los dicts deben tener la estructura esperada por el modelo (e.g., {"type": "image_url", "image_url": {"url": "..."}})
+        content_parts: List[Union[str, Dict[str, Any]]] = [{"type": "text", "text": user_message}]
         if image_base64:
-            # Asumimos que image_base64 es una data URL (p.ej., "data:image/jpeg;base64,...")
-            # y la pasamos directamente. Los modelos de Google aceptan este formato.
             logger.info("Adjuntando imagen al mensaje para el LLM.")
             content_parts.append({
                 "type": "image_url",
@@ -754,10 +757,19 @@ async def create_and_run_agent_streaming(
                 logger.info(f"[AUTO-TÍTULO] Hilo {thread_id} cumple condición para nombrar/renombrar con {message_count} mensajes. Título actual: '{current_title}'")
                 background_tasks.add_task(force_update_thread_title, thread_id)
         
+        # --- Lógica de Extracción de Fuentes Finales ---
+        # Las fuentes ya deberían estar correctamente priorizadas y procesadas en el AIMessage final
+        # por la lógica en core/agent.py (específicamente en tool_node y call_model_node).
+        # Aquí, simplemente extraemos las fuentes del AIMessage final.
+        final_sources = final_ai_message.additional_kwargs.get("sources", [])
+        
+        logger.info(f"DEBUG (create_and_run_agent_streaming): Fuentes finales extraídas del AIMessage: {final_sources}")
+        
         await send_personal_message(target_account_id, {
             "type": "stream_end",
             "thread_id": thread_id,
             "taskId": task_id,
+            "sources": final_sources,
         }, connection_type=conn_type)
 
     except Exception as e:

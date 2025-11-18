@@ -19,6 +19,7 @@ from core.prompts import (
     THREAD_TITLE_PROMPT,
     ENRICHED_PROMPT_TEMPLATE
 )
+from core.citation_models import CITATION_SYSTEM_PROMPT # Importar CITATION_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +164,10 @@ class PromptManager:
             "<hr>",
             system_prompt_content,
             "<hr>",
-            
+            CITATION_SYSTEM_PROMPT, # Añadir las instrucciones de citación
         ]
-        return "\n".join(final_prompt_parts)
+        final_prompt = "\n".join(final_prompt_parts)
+        logger.debug(f"DEBUG (PromptManager): Prompt final del sistema enviado al LLM:\n{final_prompt}") # Log para depuración
+        return final_prompt
+
 

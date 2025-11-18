@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 html, body, #__next {
   height: 100%;
   margin: 0;
@@ -5,10 +9,7 @@ html, body, #__next {
   overflow: hidden; /* Esto es crucial para evitar el scroll de la página */
 }
 
-@import url('https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap');
-
 body {
-  font-weight: 700;
 }
 
 /* Estilos para Tiptap TaskList */
