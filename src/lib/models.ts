@@ -6,7 +6,6 @@ export interface ThemeQuote {
 export interface ThemeReference {
   theme: string;
   related_quotes: ThemeQuote[];
-  citas?: ThemeQuote[];
 }
 
 export interface CollectionConnection {

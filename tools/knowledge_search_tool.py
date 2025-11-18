@@ -91,7 +91,7 @@ class KnowledgeSearchTool(BaseTool):
             results = await get_relevant_memories(
                 account_id=self.account_id,
                 query=query,
-                content_type=category,
+                content_types=content_types,
                 filter_topics=filter_topics,
                 workspace_id=self.workspace_id,
                 k=k,

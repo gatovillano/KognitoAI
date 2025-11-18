@@ -16,13 +16,19 @@ interface MonthlyScheduleViewProps {
   onEditTask: (task: TaskResponse) => void;
   onToggleTaskCompleted: (task: TaskResponse) => void;
   onCreateEvent: (date: Date) => void; // Nueva prop para crear eventos
-  onMoveEvent: (eventId: number, newDate: Date) => void; // Nueva prop para mover eventos
+  onMoveEvent: (eventId: string, newDate: Date) => void; // Nueva prop para mover eventos
+  onMoveTask: (taskId: string, newDate: Date) => void; // Nueva prop para mover tareas
 }
 
-// Tipo para el elemento arrastrable
+// Tipos para los elementos arrastrables
 interface DraggedEvent {
-  id: number;
+  id: string;
   type: 'event';
+}
+
+interface DraggedTask {
+  id: string;
+  type: 'task';
 }
 
 interface EventCardProps {
@@ -60,6 +66,52 @@ const EventCard: React.FC<EventCardProps> = ({ event, onEditEvent }) => {
   );
 };
 
+interface TaskCardProps {
+  task: TaskResponse;
+  onEditTask: (task: TaskResponse) => void;
+  onToggleTaskCompleted: (task: TaskResponse) => void;
+}
+
+const TaskCard: React.FC<TaskCardProps> = ({ task, onEditTask, onToggleTaskCompleted }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [{ isDragging }, drag] = useDrag(() => ({
+    type: 'task',
+    item: { id: task.id, type: 'task' },
+    collect: (monitor) => ({
+      isDragging: monitor.isDragging()
+    })
+  }));
+  drag(ref);
+
+  const isPastDue = !task.is_completed && new Date(task.due_date!) < new Date();
+
+  return (
+    <div
+      key={task.id}
+      ref={ref}
+      className={`p-1 rounded-md ${task.is_completed ? 'bg-green-100 text-green-800 line-through' : 'bg-yellow-100 text-yellow-800'} ${isPastDue ? 'bg-red-200 text-red-800' : ''} cursor-pointer hover:opacity-80`}
+      style={{ opacity: isDragging ? 0.5 : 1 }}
+      onClick={(e) => { e.stopPropagation(); onEditTask(task as TaskResponse); }} // Evitar que el clic se propague al día
+    >
+      <div className="flex items-center gap-1">
+        <Checkbox
+          checked={task.is_completed}
+          onCheckedChange={() => onToggleTaskCompleted(task as TaskResponse)}
+          className="h-3 w-3"
+        />
+        <p className="font-semibold flex-grow truncate">{(task as TaskResponse).description}</p>
+      </div>
+      {(task as TaskResponse).due_date && (
+        <div className="flex items-center mt-1">
+          <Clock className="h-3 w-3 mr-1" />
+          {format(new Date((task as TaskResponse).due_date!), 'HH:mm', { locale: es })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+
 interface DayCellProps {
   day: Date;
   dayEvents: AgendaEvent[];
@@ -70,7 +122,8 @@ interface DayCellProps {
   onEditEvent: (event: AgendaEvent) => void;
   onEditTask: (task: TaskResponse) => void;
   onToggleTaskCompleted: (task: TaskResponse) => void;
-  onMoveEvent: (eventId: number, newDate: Date) => void;
+  onMoveEvent: (eventId: string, newDate: Date) => void;
+  onMoveTask: (taskId: string, newDate: Date) => void;
 }
 
 const DayCell: React.FC<DayCellProps> = ({
@@ -84,16 +137,21 @@ const DayCell: React.FC<DayCellProps> = ({
   onEditTask,
   onToggleTaskCompleted,
   onMoveEvent,
+  onMoveTask,
 }) => {
   const dropRef = useRef<HTMLDivElement>(null);
-  const [{ isOver }, drop] = useDrop<DraggedEvent, unknown, { isOver: boolean }>(
+  const [{ isOver }, drop] = useDrop<DraggedEvent | DraggedTask, unknown, { isOver: boolean }>(
     () => ({
-      accept: 'event',
+      accept: ['event', 'task'],
       drop: (item, monitor) => {
         if (monitor.didDrop()) {
           return;
         }
-        onMoveEvent(item.id, day);
+        if (item.type === 'event') {
+          onMoveEvent(item.id, day);
+        } else if (item.type === 'task') {
+          onMoveTask(item.id, day);
+        }
       },
       collect: (monitor) => ({
         isOver: monitor.isOver(),
@@ -116,31 +174,14 @@ const DayCell: React.FC<DayCellProps> = ({
         {dayEvents.map(event => (
           <EventCard key={event.id} event={event} onEditEvent={onEditEvent} />
         ))}
-        {dayTasks.map(task => {
-          const isPastDue = !task.is_completed && new Date(task.due_date!) < new Date();
-          return (
-            <div
-              key={task.id}
-              className={`p-1 rounded-md ${task.is_completed ? 'bg-green-100 text-green-800 line-through' : 'bg-yellow-100 text-yellow-800'} ${isPastDue ? 'bg-red-200 text-red-800' : ''} cursor-pointer hover:opacity-80`}
-              onClick={(e) => { e.stopPropagation(); onEditTask(task as TaskResponse); }} // Evitar que el clic se propague al día
-            >
-              <div className="flex items-center gap-1">
-                <Checkbox
-                  checked={task.is_completed}
-                  onCheckedChange={() => onToggleTaskCompleted(task as TaskResponse)}
-                  className="h-3 w-3"
-                />
-                <p className="font-semibold flex-grow truncate">{(task as TaskResponse).description}</p>
-              </div>
-              {(task as TaskResponse).due_date && (
-                <div className="flex items-center mt-1">
-                  <Clock className="h-3 w-3 mr-1" />
-                  {format(new Date((task as TaskResponse).due_date!), 'HH:mm', { locale: es })}
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {dayTasks.map(task => (
+          <TaskCard
+            key={task.id}
+            task={task}
+            onEditTask={onEditTask}
+            onToggleTaskCompleted={onToggleTaskCompleted}
+          />
+        ))}
         {dayEvents.length === 0 && dayTasks.length === 0 && (
           <p className="text-center text-muted-foreground py-4">Sin elementos</p>
         )}
@@ -159,6 +200,7 @@ export function MonthlyScheduleView({
   onToggleTaskCompleted,
   onCreateEvent,
   onMoveEvent,
+  onMoveTask,
 }: MonthlyScheduleViewProps) {
   const startOfCurrentMonth = startOfMonth(currentDate);
   const endOfCurrentMonth = endOfMonth(currentDate);
@@ -238,6 +280,7 @@ export function MonthlyScheduleView({
               onEditTask={onEditTask}
               onToggleTaskCompleted={onToggleTaskCompleted}
               onMoveEvent={onMoveEvent}
+              onMoveTask={onMoveTask}
             />
           );
         })}

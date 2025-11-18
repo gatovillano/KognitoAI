@@ -260,7 +260,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                         <MoreVertical className="h-3 w-3 text-muted-foreground" />
                       </div>
                     </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-40 text-sm">
+                  <DropdownMenuContent align="end" className="w-40 text-base">
                     <DropdownMenuItem
                       onClick={(e) => {
                         e.preventDefault();
@@ -330,7 +330,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           )}
         >
           <Plus className={cn("h-4 w-4", !isCollapsed && "mr-2")} />
-          {!isCollapsed && <span className="text-sm font-medium">Nuevo Chat</span>}
+          {!isCollapsed && <span className="text-base font-medium">Nuevo Chat</span>}
         </Button>
       </div>
 
@@ -338,7 +338,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
       <div className={cn("w-full mt-2", isCollapsed && "flex flex-col items-center")}>
         {!isCollapsed && (
             <div className="flex items-center justify-between mb-3 px-2">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Herramientas</p>
+              <p className="text-base font-medium text-muted-foreground uppercase tracking-wider">Herramientas</p>
               <Button 
                 variant="ghost" 
                 size="icon" 
@@ -362,7 +362,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <FolderKanban className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Escritorio</span>}
+              {!isCollapsed && <span className="text-base font-medium">Escritorio</span>}
             </Button>
           </Link>
           <Link href="/rag" passHref onClick={onLinkClick} title="Gestión de Conocimientos">
@@ -375,7 +375,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <BookMarked className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Conocimientos</span>}
+              {!isCollapsed && <span className="text-base font-medium">Conocimientos</span>}
             </Button>
           </Link>
           <Link href="/agenda" passHref onClick={onLinkClick} title="Agenda">
@@ -388,7 +388,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <Calendar className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Agenda</span>}
+              {!isCollapsed && <span className="text-base font-medium">Agenda</span>}
             </Button>
           </Link>
           <Link href="/notes" passHref onClick={onLinkClick} title="Notas">
@@ -401,7 +401,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <Notebook className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Notas</span>}
+              {!isCollapsed && <span className="text-base font-medium">Notas</span>}
             </Button>
           </Link>
           <Link href="/profiles" passHref onClick={onLinkClick} title="Perfiles">
@@ -414,7 +414,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <User className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Perfiles</span>}
+              {!isCollapsed && <span className="text-base font-medium">Perfiles</span>}
             </Button>
           </Link>
           <Link href="/galleries" passHref onClick={onLinkClick} title="Álbumes">
@@ -427,7 +427,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <ImageIcon className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Galerías</span>}
+              {!isCollapsed && <span className="text-base font-medium">Galerías</span>}
             </Button>
           </Link>
           <Link href="/forms" passHref onClick={onLinkClick} title="Formularios">
@@ -440,22 +440,10 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <ClipboardList className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Formularios</span>}
+              {!isCollapsed && <span className="text-base font-medium">Formularios</span>}
             </Button>
           </Link>
-          <Link href="/analysis" passHref onClick={onLinkClick} title="Análisis">
-            <Button
-              variant={pathname?.startsWith('/analysis') ? 'secondary' : 'ghost'}
-              className={cn(
-                "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
-                isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                pathname?.startsWith('/analysis') && "bg-primary/10 text-primary border border-primary/20"
-              )}
-            >
-              <BarChart3 className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Análisis</span>}
-            </Button>
-          </Link>
+
           <Link href="/teams" passHref onClick={onLinkClick} title="Equipos">
             <Button
               variant={pathname?.startsWith('/teams') ? 'secondary' : 'ghost'}
@@ -466,7 +454,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <Users className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Equipos</span>}
+              {!isCollapsed && <span className="text-base font-medium">Equipos</span>}
             </Button>
           </Link>
           <Link href="/workspaces" passHref onClick={onLinkClick} title="Workspaces">
@@ -479,7 +467,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               )}
             >
               <Bot className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")}/>
-              {!isCollapsed && <span className="text-xs font-medium">Workspaces</span>}
+              {!isCollapsed && <span className="text-base font-medium">Workspaces</span>}
             </Button>
           </Link>
         </nav>
@@ -492,7 +480,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           <div className="mt-4 mb-6">
             <div className="flex items-center justify-between gap-2 mb-4 px-2">
               <div className="flex items-center gap-2">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Conversaciones</p>
+                <p className="text-base font-semibold text-muted-foreground uppercase tracking-wider">Conversaciones</p>
               </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -500,7 +488,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                     <MoreVertical className="h-3.5 w-3.5 text-muted-foreground" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="text-xs">
+                <DropdownMenuContent align="end" className="text-base">
                   <DropdownMenuItem onClick={handleRenameAllThreads}>
                     <Sparkles className="mr-1.5 h-3.5 w-3.5 text-yellow-500" />
                     <span>Nombrar todos</span>
@@ -513,7 +501,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
         )}
         {!isCollapsed && (
             <div className="flex items-center justify-between mb-3 px-2">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Fijados</p>
+              <p className="text-base font-medium text-muted-foreground uppercase tracking-wider">Fijados</p>
               <Button 
                 variant="ghost" 
                 size="icon" 
@@ -533,7 +521,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground px-2 mb-2">
+                <p className="text-base text-muted-foreground px-2 mb-2">
                   {searchTerm || platformFilter !== 'all'
                     ? "No se encontraron conversaciones fijadas que coincidan con los filtros."
                     : "No hay conversaciones fijadas."}
@@ -543,7 +531,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
           )}
           {!isCollapsed && (
             <div className="flex items-center justify-between mb-3 px-2 mt-4">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Recientes</p>
+              <p className="text-base font-medium text-muted-foreground uppercase tracking-wider">Recientes</p>
               <Button 
                 variant="ghost" 
                 size="icon" 
@@ -579,7 +567,7 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               <div className="relative">
                 <Avatar className="h-8 w-8 border-2 border-primary/20">
                   <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />
-                  <AvatarFallback className="bg-primary text-primary-foreground font-semibold text-xs">
+                  <AvatarFallback className="bg-primary text-primary-foreground font-semibold text-base">
                     {user?.username?.slice(0, 2).toUpperCase() || "KA"}
                   </AvatarFallback>
                 </Avatar>
@@ -587,10 +575,10 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               </div>
               {!isCollapsed && (
                 <div className="flex flex-col items-start overflow-hidden flex-1">
-                  <span className="font-semibold text-xs truncate w-full text-left text-foreground group-hover:text-primary transition-colors">
+                  <span className="font-semibold text-base truncate w-full text-left text-foreground group-hover:text-primary transition-colors">
                     {user?.username || "Usuario"}
                   </span>
-                  <span className="text-xs text-muted-foreground truncate w-full text-left">
+                  <span className="text-base text-muted-foreground truncate w-full text-left">
                     {user?.email || "Sin Email"}
                   </span>
                 </div>
@@ -598,11 +586,11 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               {!isCollapsed && <Settings className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary transition-colors" />}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52 text-sm">
+          <DropdownMenuContent align="end" className="w-52 text-base">
             <div className="flex items-center justify-start gap-2 p-2">
               <div className="flex flex-col space-y-0.5 leading-none">
-                {user?.username && <p className="font-medium text-sm">{user.username}</p>}
-                {user?.email && <p className="w-[180px] truncate text-xs text-muted-foreground">{user.email}</p>}
+                {user?.username && <p className="font-medium text-base">{user.username}</p>}
+                {user?.email && <p className="w-[180px] truncate text-base text-muted-foreground">{user.email}</p>}
               </div>
             </div>
             <DropdownMenuSeparator />

@@ -1270,7 +1270,7 @@ class CogneeIntegration:
             if "path" in record and record["path"] is not None:
                 path_object = record["path"]
                 for node in path_object.nodes:
-                    all_nodes[node.element_id] = self._node_to_dict(node)
+                    all_nodes[str(node.element_id)] = self._node_to_dict(node)
                 for rel in path_object.relationships:
                     all_relationships[rel.element_id] = self._relationship_to_dict(rel)
             # Manejar resultados que son Nodos directos (ej. RETURN n)

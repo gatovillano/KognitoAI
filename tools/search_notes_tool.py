@@ -10,7 +10,7 @@ from sqlalchemy import text, select
 from core.database import SessionLocal, Nota
 from utils.embeddings import get_embedding_model
 from utils.db_session import DBSession
-from core.citation_models import ToolOutputWithSources, create_document_source
+from core.citation_models import ToolOutputWithSources, create_document_source, create_note_source, SourceType
 
 logger = logging.getLogger(__name__) 
 
@@ -110,20 +110,20 @@ class SearchNotesTool(BaseTool):
             sources = []
             for i, note in enumerate(notes):
                 note_id, title, content, category, similarity_score = note
+                # Incluir la cita numérica en el contexto para el LLM
                 formatted_notes.append(
-                    f"Nota ID: {note_id}\n"
+                    f"[{i + 1}] Nota ID: {note_id}\n"
                     f"Título: {title if title else 'Sin título'}\n"
                     f"Categoría: {category}\n"
                     f"Contenido: {content}\n"
                     f"Similitud: {similarity_score:.4f}"
                 )
-                sources.append(create_document_source(
+                sources.append(create_note_source(
                     source_id=i + 1,
                     title=title if title else f"Nota {note_id}",
-                    file_path=f"note://{note_id}", # Usar un esquema de URI personalizado para notas
+                    note_id=str(note_id), # Pasar el ID de la nota
                     snippet=content,
                     metadata={
-                        "note_id": str(note_id),
                         "category": category,
                         "similarity_score": similarity_score
                     }

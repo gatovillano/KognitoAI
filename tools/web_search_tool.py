@@ -78,102 +78,84 @@ class WebSearchTool(BaseTool):
         query: str,
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
         **kwargs: Any
-    ) -> ToolOutputWithSources:
+    ) -> dict:
         logger.info(f"🏹 Realizando búsqueda en Brave con la consulta: '{query}'")
         
         if not self._brave_search_tool:
-            return ToolOutputWithSources(
+            output = ToolOutputWithSources(
                 context_for_llm="Error: La funcionalidad de búsqueda web no está configurada en el servidor.",
                 sources=[]
             )
+            return output.model_dump()
         
         try:
-            loop = asyncio.get_event_loop()
             # Accedemos al wrapper interno para obtener resultados estructurados
             search_results_str = await self._brave_search_tool.arun(query)
             
             if not search_results_str:
-                return ToolOutputWithSources(
-                    context_for_llm="No se encontraron resultados de búsqueda.",
-                    sources=[]
-                )
+                output = ToolOutputWithSources(context_for_llm="No se encontraron resultados de búsqueda.", sources=[])
+                return output.model_dump()
 
             try:
                 search_results = json.loads(search_results_str)
             except json.JSONDecodeError:
                 logger.error(f"Error al decodificar la respuesta JSON de Brave: {search_results_str}")
-                return ToolOutputWithSources(
-                    context_for_llm="Error al procesar los resultados de la búsqueda (formato inválido).",
-                    sources=[]
-                )
+                output = ToolOutputWithSources(context_for_llm="Error al procesar los resultados de la búsqueda (formato inválido).", sources=[])
+                return output.model_dump()
 
             # Inicializar el scraper
             scraper = WebScraperTool(account_id=self.account_id)
             
             # Procesar todos los resultados para obtener el contenido completo
+            scraping_tasks = []
+            valid_results = []
             for result in search_results:
-                url = result.get("link")
-                if not url:
-                    continue
-                
-                logger.info(f"🔎 Scrapeando contenido de: {url}")
-                scraped_content = await scraper._arun(url=url)
-                
-                scraped_content = await scraper._arun(url=url)
-                
-                # Verificar si el scrapeo fue exitoso y el contenido es válido
-                if scraped_content and \
-                   not scraped_content.startswith("Ocurrió un error") and \
-                   not scraped_content.startswith("No se pudo"):
-                    # Reemplazamos el snippet con el contenido completo.
-                    result["snippet"] = scraped_content
-                    logger.info(f"✅ Scrapeo exitoso para {url}. Contenido completo utilizado.")
-                else:
-                    logger.warning(f"⚠️ Scrapeo fallido o contenido inválido para {url}. Usando snippet original. Error/Contenido: {scraped_content}")
-                    # Mantener el snippet original si el scrapeo falla o devuelve un error
-                    # No es necesario hacer nada aquí, ya que result["snippet"] ya contiene el snippet original
+                if result.get("link"):
+                    valid_results.append(result)
+                    scraping_tasks.append(scraper._arun(url=result["link"]))
 
-            formatted_results, sources = self._format_results(search_results)
-            return ToolOutputWithSources(context_for_llm=formatted_results, sources=sources)
+            scraped_contents = await asyncio.gather(*scraping_tasks, return_exceptions=True)
+
+            for i, content in enumerate(scraped_contents):
+                if isinstance(content, Exception) or not content or content.startswith("Ocurrió un error") or content.startswith("No se pudo"):
+                    logger.warning(f"⚠️ Scrapeo fallido o contenido inválido para {valid_results[i]['link']}. Usando snippet original.")
+                else:
+                    valid_results[i]["snippet"] = content
+                    logger.info(f"✅ Scrapeo exitoso para {valid_results[i]['link']}. Contenido completo utilizado.")
+
+            context_for_llm, sources = self._format_results(valid_results)
+            output = ToolOutputWithSources(context_for_llm=context_for_llm, sources=sources)
+            return output.model_dump()
 
         except Exception as e:
             logger.error(f"Error al realizar búsqueda con Brave: {str(e)}", exc_info=True)
-            return ToolOutputWithSources(
-                context_for_llm=f"Error al realizar la búsqueda: {str(e)}",
-                sources=[]
-            )
+            output = ToolOutputWithSources(context_for_llm=f"Error al realizar la búsqueda: {str(e)}", sources=[])
+            return output.model_dump()
 
     def _format_results(self, results: List[Dict[str, str]]) -> tuple[str, List[Source]]:
+        from core.citation_models import format_context_with_sources, create_web_source
+        
         if not results:
             return "No se encontraron resultados.", []
 
-        snippets = []
         sources: List[Source] = []
         for idx, r in enumerate(results, 1):
             if r.get('snippet'):
-                snippets.append(f"Fuente {idx}: {r.get('title', 'Sin título')}\nContenido: {r.get('snippet')}")
-                # Asegurarse de que la URL tenga un esquema completo
-                original_url = r.get('link', '')
-                parsed_url = urlparse(original_url)
-                if not parsed_url.scheme:
-                    # Si no hay esquema, asumir https por defecto
-                    full_url = urlunparse(parsed_url._replace(scheme='https'))
-                else:
-                    full_url = original_url
-
-                sources.append(
-                    Source(
-                        id=idx,
-                        title=r.get('title', 'Sin título'),
-                        url=full_url, # Usar la URL completa
-                        snippet=r.get('snippet', '')
-                    )
+                # Usamos el helper create_web_source para mantener la consistencia
+                source = create_web_source(
+                    source_id=idx,
+                    title=r.get('title', 'Sin título'),
+                    url=r.get('link', ''),
+                    snippet=r.get('snippet', '')
                 )
+                sources.append(source)
 
-        if not snippets:
+        if not sources:
             return "No se encontraron resultados con suficiente contenido.", []
 
-        return f"Resultados de la búsqueda web:\n\n" + "\n\n".join(snippets), sources
+        # Usamos la función centralizada para formatear el contexto
+        context_for_llm = format_context_with_sources(sources)
+        return context_for_llm, sources
 
     def _run(self, query: str, **kwargs: Any) -> str:
         """La ejecución síncrona no está implementada para este wrapper."""

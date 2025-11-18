@@ -104,7 +104,7 @@ class MultiQueryRetriever:
                 workspace_id=workspace_id,
                 filter_topics=topics,
                 k=self.k,
-                content_type=content_type,
+                content_types=[content_type] if content_type else None, # Pasarlo como lista
                 category=category,
                 filter_document_ids=document_ids,
             )
