@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 import { Network } from 'lucide-react';
-import { Loader2, Info, Filter, ChevronDown, Search, BarChart3, FileText, FolderKanban, Lightbulb, Code, Calendar, Eye, Plus, TrendingUp, AlertTriangle, HelpCircle, CheckCircle, Clock, XCircle } from 'lucide-react'; // Añadidos iconos para el dashboard
+import { Loader2, Info, Filter, ChevronDown, Search, BarChart3, FileText, FolderKanban, Lightbulb, Code, Calendar, Eye, Plus, TrendingUp, AlertTriangle, HelpCircle, CheckCircle, Clock, XCircle, ArrowLeft } from 'lucide-react'; // Añadidos iconos para el dashboard
 
 import { toast } from 'sonner';
 
@@ -442,25 +442,33 @@ const [hasMore, setHasMore] = useState(false);
 
             {/* Header y título */}
 
-            <div className="spacing-component">
+                        <div className="spacing-component">
 
-              <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center justify-between gap-2">
 
-                <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2">
 
-                  <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
+                              <Button variant="ghost" size="icon" onClick={() => router.push('/rag')} className="h-8 w-8 text-muted-foreground">
 
-                    Centro de Análisis
+                                <ArrowLeft className="h-5 w-5" />
 
-                  </h1>
+                              </Button>
 
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
-                    <Info className="h-5 w-5" />
-                  </Button>
+                              <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
 
-                </div>
+                                Centro de Análisis
 
-                 <div className="flex gap-2">
+                              </h1>
+
+                              <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+
+                                <Info className="h-5 w-5" />
+
+                              </Button>
+
+                            </div>
+
+                             <div className="flex gap-2">
                    <Button onClick={() => setShowInsightFormModal(true)} className="gap-2">
                      <Plus className="h-4 w-4" />
                      Generar Insight Manual

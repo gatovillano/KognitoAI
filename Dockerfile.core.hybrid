@@ -1,14 +1,14 @@
 # Dockerfile.core.hybrid
 # Versión optimizada que incluye dependencias para pipeline híbrido sin problemas de build
 
-FROM python:3.11-slim
+FROM nvcr.io/nvidia/pytorch:23.09-py3
 
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 ENV PYTHONPATH /app:/app/external_agents/open_deep_research/src
 ENV PATH="/usr/bin:$PATH"
 
-# Instalar dependencias del sistema esenciales
+# Instalar dependencias del sistema esenciales (algunas ya estarán en la imagen de PyTorch, pero las mantenemos por si acaso)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \

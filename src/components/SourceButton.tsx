@@ -7,7 +7,7 @@ export interface Source {
   title: string;
   url: string;
   snippet: string;
-  type: 'web' | 'document' | 'memory' | 'code' | 'database';
+  type: 'web' | 'document' | 'memory' | 'code' | 'database' | 'graph' | 'note';
   metadata?: Record<string, any>;
   name?: string;
 }
@@ -91,11 +91,15 @@ export const SourceButton: React.FC<{ source: Source; citationNumber: number }> 
               Relevancia: {Math.round(source.metadata.similarity_score * 100)}%
             </div>
           )}
-          {source.url && (source.type === 'document' || source.type === 'memory' || source.type === 'code' || source.type === 'database' || source.type === 'note') && (
+          {source.url && (source.type === 'document' || source.type === 'memory' || source.type === 'code' || source.type === 'database' || source.type === 'note' || source.type === 'graph') && (
             <div className="text-xs text-muted-foreground mt-2 break-all">
               Fuente: {source.type === 'note' && source.url.startsWith('note://') ? (
                 <a href={`/notes/${source.url.replace('note://', '')}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                  {source.url}
+                  {source.title}
+                </a>
+              ) : source.type === 'graph' && source.url.startsWith('graph://') ? (
+                <a href={`/graphs/${source.url.replace('graph://', '')}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                  {source.title}
                 </a>
               ) : (
                 source.url
