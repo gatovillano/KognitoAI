@@ -67,6 +67,33 @@ from sqlalchemy.orm import selectinload
 
 from core.websocket_manager import send_personal_message # Importar aquí para evitar circular imports
 
+def sanitize_json_content(content):
+    """
+    Sanitiza el contenido de un mensaje para eliminar caracteres Unicode inválidos
+    que puedan causar problemas al serializar a JSON en PostgreSQL.
+    """
+    if isinstance(content, str):
+        # Remover caracteres de control (0x00-0x1F) excepto tab (\t), newline (\n), carriage return (\r)
+        sanitized = ''.join(char for char in content if ord(char) >= 32 or char in '\t\n\r')
+        return sanitized
+    elif isinstance(content, list):
+        # Si es una lista (contenido multimodal), sanitizar cada elemento
+        sanitized_list = []
+        for item in content:
+            if isinstance(item, dict):
+                sanitized_item = {}
+                for key, value in item.items():
+                    if isinstance(value, str):
+                        sanitized_item[key] = ''.join(char for char in value if ord(char) >= 32 or char in '\t\n\r')
+                    else:
+                        sanitized_item[key] = value
+                sanitized_list.append(sanitized_item)
+            else:
+                sanitized_list.append(item)
+        return sanitized_list
+    else:
+        return content
+
 
 # --- Configuración del Logger ---
 logger = logging.getLogger(__name__)
@@ -135,7 +162,11 @@ async def summarize_history_in_background(
             additional_kwargs={"role": "summary"}
         )
         # Guardar el resumen como un mensaje más, sin borrar el historial
-        await chat_message_history.aadd_messages([summary_message])
+        sanitized_summary_message = HumanMessage(
+            content=sanitize_json_content(summary_message.content),
+            additional_kwargs=summary_message.additional_kwargs
+        )
+        await chat_message_history.aadd_messages([sanitized_summary_message])
         logger.info("✅ Sumarización en segundo plano completada y resumen añadido al historial.")
 
         # --- MODIFICACIÓN: Guardar resumen en memoria vectorial con workspace_id ---
@@ -334,6 +365,8 @@ async def call_model_node(state: AgentState):
     is_after_tool_call = isinstance(last_message, ToolMessage)
 
     relevant_memories_text = ""
+    final_sources_for_state = state.get('sources', []) # Mantener las fuentes existentes si las hay
+
     if not is_after_tool_call:
         logger.info("Ejecutando búsqueda RAG del agente (no es una vuelta de herramienta).")
         graph_db = GraphDB(
@@ -351,12 +384,8 @@ async def call_model_node(state: AgentState):
             explicit_document_ids=document_ids_for_rag
         )
 
-        # --- INICIO: Procesamiento Unificado de Contexto y Fuentes ---
         all_sources_objects = []
-        relevant_memories_text = ""
-
         if enhanced_context:
-            # 1. Recopilar todas las fuentes (tradicionales y del grafo) en una sola lista
             traditional_sources_raw = enhanced_context.get('sources', {}).get('traditional_embeddings', {}).get('results', [])
             all_sources_objects.extend(traditional_sources_raw)
 
@@ -366,7 +395,7 @@ async def call_model_node(state: AgentState):
                     id=f"insight_{uuid.uuid4().hex[:10]}",
                     title=f"Insight del Grafo: {insight.get('type', 'Desconocido')}",
                     snippet=insight.get('description', 'Sin descripción.'),
-                    type='graph', metadata=insight, url=f"graph_insight_{uuid.uuid4().hex[:10]}"
+                    type='graph', metadata=insight, url=f"graph://insight_{uuid.uuid4().hex[:10]}"
                 ))
 
             paths = enhanced_context.get('reasoning_paths', [])
@@ -376,17 +405,14 @@ async def call_model_node(state: AgentState):
                 all_sources_objects.append(Source(
                     id=f"path_{uuid.uuid4().hex[:10]}",
                     title=f"Ruta de Razonamiento: {path.get('type', 'Desconocido')}",
-                    snippet=snippet, type='graph', metadata=path, url=f"graph_path_{uuid.uuid4().hex[:10]}"
+                    snippet=snippet, type='graph', metadata=path, url=f"graph://path_{uuid.uuid4().hex[:10]}"
                 ))
 
-            # 2. Re-indexar todas las fuentes con IDs numéricos secuenciales
+            # Re-indexar todas las fuentes con IDs numéricos secuenciales
             relevant_memories_parts = []
-            final_sources_for_state = []
+            final_sources_for_state = [] # Reiniciar si se encontraron nuevas fuentes RAG
             for i, source_obj in enumerate(all_sources_objects, start=1):
-                # Para el prompt del LLM
                 relevant_memories_parts.append(f"[{i}] {source_obj.snippet}")
-                
-                # Para el estado que va al frontend
                 source_dict = source_obj.dict()
                 if hasattr(source_obj, 'id'):
                     source_dict['original_id'] = source_obj.id
@@ -394,19 +420,20 @@ async def call_model_node(state: AgentState):
                 final_sources_for_state.append(source_dict)
             
             relevant_memories_text = "\\n\\n".join(relevant_memories_parts)
-            state['sources'] = final_sources_for_state
+            state['sources'] = final_sources_for_state # Actualizar el estado con las nuevas fuentes RAG
             logger.info(f"✅ {len(final_sources_for_state)} fuentes combinadas y re-indexadas añadidas al estado.")
         else:
             logger.info("No se generó contexto enriquecido.")
-        # --- FIN: Procesamiento Unificado ---
     else:
-        logger.info("Saltando la búsqueda RAG del agente porque el estado ya contiene fuentes de una herramienta.")
-    # --- FIN DE LA LÓGICA DE MEMORIA MEJORADA ---
+        logger.info("Saltando la búsqueda RAG del agente porque es una vuelta de herramienta. Manteniendo fuentes existentes.")
+        # Si ya hay fuentes en el estado (de tool_node), usarlas para el prompt
+        if final_sources_for_state:
+            relevant_memories_parts = []
+            for i, source_dict in enumerate(final_sources_for_state, start=1):
+                relevant_memories_parts.append(f"[{i}] {source_dict.get('snippet', '')}")
+            relevant_memories_text = "\\n\\n".join(relevant_memories_parts)
+    # --- FIN DE LA LÓGICA DE MANEJO DE FUENTES ---
         
-    # Las fuentes RAG se pasan al LLM como contexto a través de 'relevant_memories_text'.
-    # Las fuentes de las herramientas ejecutadas poblarán state['sources'] en tool_node.
-    # No es necesario inicializar state['sources'] con fuentes RAG aquí, ya que tool_node las manejará.
-    
     from core.prompt_manager import PromptManager
     prompt_manager = PromptManager(settings={"default_system_prompt": settings.default_system_prompt})
         
@@ -416,13 +443,12 @@ async def call_model_node(state: AgentState):
     )
     
     workspace_prompt = None
-    # Inicializar system_prompt_content aquí para evitar UnboundLocalError
     system_prompt_content = prompt_manager.build_system_prompt(
         user_profile=user_profile,
         relevant_memories=relevant_memories_text,
         summary_string="",
         custom_prompt_from_profile=str(user_profile.system_prompt) if user_profile and user_profile.system_prompt else None,
-        workspace_prompt=None, # Se establecerá más abajo si existe
+        workspace_prompt=None,
         tools=tools,
         account_id=state['account_id'],
         telegram_id=state.get('telegram_id'),
@@ -448,9 +474,9 @@ async def call_model_node(state: AgentState):
                 telegram_id=state.get('telegram_id'),
                 user_message=user_message,
                 has_explicit_rag_context=has_explicit_rag_context,
-                explicit_document_names=[str(name) for name in document_names_for_rag if name is not None] if document_names_for_rag else None # Pasar el nuevo parámetro
+                explicit_document_names=[str(name) for name in document_names_for_rag if name is not None] if document_names_for_rag else None
             )
-    # 2. Preparar el LLM con herramientas
+    
     llm = get_main_llm()
     if not llm:
         raise ValueError("El LLM principal no está disponible.")
@@ -458,7 +484,6 @@ async def call_model_node(state: AgentState):
     logger.debug(f"DEBUG (agent.py - call_model_node): System Prompt final antes de LLM: {system_prompt_content}")
     llm_with_tools = cast(ChatGoogleGenerativeAI, llm).bind_tools(tools)
 
-    # 3. Construir el prompt y la cadena de ejecución
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt_content),
         MessagesPlaceholder(variable_name="messages"),
@@ -466,8 +491,6 @@ async def call_model_node(state: AgentState):
 
     chain = prompt | llm_with_tools
 
-    # 4. Invocar la cadena y añadir la respuesta al estado
-    # MODIFICACIÓN CLAVE: Usar astream en lugar de ainvoke
     full_ai_message_content = ""
     tool_calls_from_llm = []
     final_response_message = None
@@ -477,7 +500,6 @@ async def call_model_node(state: AgentState):
 
     async for chunk in chain.astream({"messages": state["messages"]}):
         if isinstance(chunk, AIMessage):
-            # Acumular contenido
             if isinstance(chunk.content, str):
                 full_ai_message_content += chunk.content
             elif isinstance(chunk.content, list):
@@ -485,35 +507,32 @@ async def call_model_node(state: AgentState):
                     if isinstance(part, dict) and part.get("type") == "text":
                         full_ai_message_content += part.get("text", "")
             
-            # Acumular tool_calls
             if chunk.tool_calls:
                 tool_calls_from_llm.extend(chunk.tool_calls)
             
-            # Enviar el chunk al WebSocket
             logger.debug(f"DEBUG (agent.py): Enviando stream_chunk para taskId {state.get('task_id')}: {chunk.content}")
             await send_personal_message(target_account_id, {
                 "type": "stream_chunk",
                 "thread_id": state['thread_id'],
                 "taskId": state.get("task_id"),
-                "chunk": str(chunk.content or "") # Ensure chunk is always a string
+                "chunk": str(chunk.content or "")
             }, connection_type=conn_type)
             
-            final_response_message = chunk # Guardar el último chunk para construir el mensaje final
+            final_response_message = chunk
 
     logger.debug(f"DEBUG (agent.py - call_model_node): Respuesta cruda del LLM (acumulada): {full_ai_message_content}")
-    # Construir el AIMessage final con el contenido acumulado y tool_calls
     if final_response_message:
         final_ai_message = AIMessage(
             content=full_ai_message_content,
             tool_calls=tool_calls_from_llm,
-            additional_kwargs=final_response_message.additional_kwargs # Mantener otros kwargs
+            additional_kwargs=final_response_message.additional_kwargs
         )
     else:
         final_ai_message = AIMessage(content=full_ai_message_content, tool_calls=tool_calls_from_llm)
 
     # Adjuntar fuentes y tool_calls a la respuesta del LLM si existen
-    if state.get("sources"):
-        final_ai_message.additional_kwargs["sources"] = state["sources"]
+    if final_sources_for_state: # Usar las fuentes que se han acumulado en final_sources_for_state
+        final_ai_message.additional_kwargs["sources"] = final_sources_for_state
     
     if final_ai_message.tool_calls:
         tool_code_data = [
@@ -527,7 +546,7 @@ async def call_model_node(state: AgentState):
             
     return {
         "messages": state["messages"] + [final_ai_message],
-        "sources": state.get("sources")
+        "sources": final_sources_for_state # Asegurarse de que las fuentes se propaguen en el estado
     }
 async def generate_response_node(state: AgentState):
     """
@@ -677,12 +696,14 @@ async def tool_node(state: AgentState):
             tool_sources_to_add: List[Dict[str, Any]] = []
 
             if tool_output.sources:
-                for source in tool_output.sources:
-                    if source.url and source.url not in existing_urls:
-                        tool_sources_to_add.append(source.dict())
-                        existing_urls.add(source.url)
-
-            current_sources.extend(tool_sources_to_add)
+                logger.info(f"La herramienta '{tool_name}' devolvió {len(tool_output.sources)} fuentes. Reemplazando fuentes existentes.")
+                # Sobrescribe completamente las fuentes actuales con las de la herramienta
+                current_sources = [s.dict() for s in tool_output.sources]
+                # Asigna las mismas fuentes para el evento websocket
+                tool_sources_to_add = current_sources
+            else:
+                # Si la herramienta no devuelve fuentes, nos aseguramos de que no se añada nada
+                tool_sources_to_add = []
             
             tool_messages.append(ToolMessage(
                 content=tool_content_for_llm,
