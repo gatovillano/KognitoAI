@@ -161,7 +161,6 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
         }
         toast.info('Subiendo documentos...', {
           description: `A la colección: ${topicForUpload}`,
-          duration: 0,
           id: 'upload-progress'
         });
 

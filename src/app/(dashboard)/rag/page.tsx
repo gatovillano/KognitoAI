@@ -393,7 +393,21 @@ export default function RagCollectionsPage() {
  
        {renderContent()}
  
-       <UploadDocumentDialog isOpen={isUploadOpen} onOpenChange={setIsUploadOpen} onUploadSuccess={() => { /* WebSocket handles updates */ }} onUploadStart={() => { /* WebSocket handles updates */ }} />
+       <UploadDocumentDialog
+        isOpen={isUploadOpen}
+        onOpenChange={setIsUploadOpen}
+        onUploadSuccess={() => { /* WebSocket handles updates */ }}
+        onUploadStart={(fileNames, topic) => {
+          const newTasks = fileNames.map(name => ({
+            id: name, // Usar el nombre del archivo como ID temporal
+            name,
+            topic,
+            status: 'uploading' as const,
+            progress: 0,
+          }));
+          setUploadTasks(prev => [...prev, ...newTasks]);
+        }}
+      />
        <CreateCollectionDialog isOpen={isCreateOpen} onOpenChange={setIsCreateOpen} onCreateSuccess={handleCollectionCreated} />
        <GitHubRepoDialog isOpen={isGitHubRepoOpen} onOpenChange={setIsGitHubRepoOpen} onSuccess={() => { fetchCollections(); /* WebSocket handles upload tasks updates */ }} />
        <CollectionAnalysisDialog

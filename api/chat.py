@@ -558,7 +558,7 @@ async def save_system_message(
 
         # Crear un AIMessage para guardar en el historial
         ai_message = AIMessage(
-            content=request.text,
+            content=sanitize_json_content(request.text),
             additional_kwargs={"created_at": request.created_at or datetime.now(timezone.utc)}
         )
         await chat_message_history.aadd_messages([ai_message])
@@ -645,7 +645,7 @@ async def create_and_run_agent_streaming(
     """
     Ejecuta el agente LangGraph y transmite los resultados a través de WebSockets.
     """
-    from core.agent import AgentState, create_langgraph_agent # Importar AgentState
+    from core.agent import AgentState, create_langgraph_agent, sanitize_json_content # Importar AgentState y sanitize_json_content
     from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
     from langchain_community.chat_message_histories import PostgresChatMessageHistory
     from core.config import settings
@@ -707,7 +707,12 @@ async def create_and_run_agent_streaming(
         }
 
         # Asegurarse de que el historial de mensajes se inicialice con el mensaje del usuario
-        await chat_message_history.aadd_messages([initial_human_message])
+        # Sanitizar el contenido del mensaje antes de guardarlo
+        sanitized_human_message = HumanMessage(
+            content=sanitize_json_content(initial_human_message.content),
+            additional_kwargs=initial_human_message.additional_kwargs
+        )
+        await chat_message_history.aadd_messages([sanitized_human_message])
 
         config: RunnableConfig = {"configurable": {"thread_id": thread_id}} # Castear a RunnableConfig
         final_graph_state = None
@@ -735,7 +740,13 @@ async def create_and_run_agent_streaming(
 
         # Guardar el AIMessage final completo en el historial
         logger.info(f"DEBUG (create_and_run_agent_streaming): Guardando respuesta final en historial. thread_id: {thread_id}, task_id: {task_id}")
-        await chat_message_history.aadd_messages([final_ai_message])
+        # Sanitizar el contenido del mensaje antes de guardarlo
+        sanitized_ai_message = AIMessage(
+            content=sanitize_json_content(final_ai_message.content),
+            tool_calls=final_ai_message.tool_calls,
+            additional_kwargs=final_ai_message.additional_kwargs
+        )
+        await chat_message_history.aadd_messages([sanitized_ai_message])
 
         # El resto de la lógica para actualizar el título y enviar el evento final
         if background_tasks:
