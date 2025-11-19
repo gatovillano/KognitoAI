@@ -95,7 +95,39 @@ class GeneratePdfRequest(BaseModel):
     note_id: int
     format: str = "markdown" # Por ahora solo soportamos markdown
 
+class LinkNoteToWorkspaceRequest(BaseModel):
+    workspace_id: str # El ID del workspace al que se quiere vincular
+
 # --- Endpoints de la API ---
+
+@router.post("/notes/{note_id}/link-to-workspace", summary="Vincular una nota a un workspace")
+async def link_note_to_workspace_endpoint(
+    note_id: int,
+    request: LinkNoteToWorkspaceRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    notes_manager: NotesManager = Depends(get_notes_manager)
+):
+    """
+    Vincula una nota a un workspace específico.
+    """
+    # Obtener la nota para verificar permisos
+    note_data = await notes_manager.get_note_by_id(current_account_id, note_id)
+    if not note_data:
+        raise HTTPException(status_code=404, detail="Nota no encontrada o no autorizada.")
+
+    # Verificar permisos de workspace si la nota ya pertenece a uno o si se va a vincular a uno nuevo
+    # El usuario debe tener al menos permiso de 'member' en el workspace de destino
+    if not await check_workspace_permission(current_account_id, request.workspace_id, notes_manager.db, required_roles=['admin', 'owner', 'member']):
+        raise HTTPException(status_code=403, detail="No tienes permiso para vincular notas a este workspace.")
+
+    success = await notes_manager.update_note(
+        account_id=current_account_id,
+        note_id=note_id,
+        new_workspace_id=request.workspace_id
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Nota no encontrada o no autorizada para vincular.")
+    return {"message": f"Nota con ID {note_id} vinculada al workspace {request.workspace_id} correctamente."}
 
 @router.post("/notes/generate-pdf", summary="Generar PDF de una nota")
 async def generate_note_pdf_endpoint(

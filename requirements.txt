@@ -100,7 +100,6 @@ caldav
 defusedxml
 MarkupSafe
 xmltodict
-dav-py
 python-caldav
 pyicloud
 caldav-tools
