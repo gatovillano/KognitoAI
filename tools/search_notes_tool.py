@@ -112,11 +112,7 @@ class SearchNotesTool(BaseTool):
                 note_id, title, content, category, similarity_score = note
                 # Incluir la cita numérica en el contexto para el LLM
                 formatted_notes.append(
-                    f"[{i + 1}] Nota ID: {note_id}\n"
-                    f"Título: {title if title else 'Sin título'}\n"
-                    f"Categoría: {category}\n"
-                    f"Contenido: {content}\n"
-                    f"Similitud: {similarity_score:.4f}"
+                    f"[{i + 1}] Título: {title if title else 'Sin título'} (Categoría: {category}, ID: {note_id})"
                 )
                 sources.append(create_note_source(
                     source_id=i + 1,

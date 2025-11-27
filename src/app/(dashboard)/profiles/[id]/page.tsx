@@ -496,16 +496,16 @@ export default function ProfileDetailsPage() {
           isOpen={showViewEventDialog}
           onOpenChange={setShowViewEventDialog}
           onSaveSuccess={fetchProfileDetails} // Para refrescar los datos después de una actualización
-          event={selectedEvent ? {
-            ...selectedEvent,
-            user_timezone: '', // Add a default value for user_timezone
-            team_shared: false,
-            workspace_id: undefined,
-            workspace_name: undefined,
-            workspace_color: undefined,
-            linked_profiles: [],
-          } : null}
-
+                    event={selectedEvent ? {                                           
+                      ...selectedEvent,
+                      id: String(selectedEvent.id), // Convertir id a string
+                      user_timezone: '', // Add a default value for user_timezone      
+                      team_shared: false,
+                      workspace_id: undefined,
+                      workspace_name: undefined,
+                      workspace_color: undefined,
+                      linked_profiles: [],
+                    } : null}
         />
       )}
 

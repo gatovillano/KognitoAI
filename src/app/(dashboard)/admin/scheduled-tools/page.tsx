@@ -570,7 +570,7 @@ export default function ScheduledToolsAdminPage() {
           <DialogHeader>
             <DialogTitle>Editar Herramienta Programada</DialogTitle>
             <DialogDescription>
-              Modifica la configuración de la herramienta programada "{selectedTool?.job_name}"
+              {`Modifica la configuración de la herramienta programada "${selectedTool?.job_name}"`}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">

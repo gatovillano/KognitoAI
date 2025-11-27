@@ -36,15 +36,21 @@ class Config:
     def __init__(self):
         logger.info("⚙️ Inicializando la configuración de la aplicación...")
 
-        # --- Configuración de Modelos de Lenguaje (Priorizando Google) ---
+        # --- Configuración de Modelos de Lenguaje (LiteLLM) ---
         # El LLM principal para el agente (texto y razonamiento).
-        self.llm_provider: str = os.getenv("LLM_PROVIDER", "google")
-        self.openai_compatible_api_url: Optional[str] = os.getenv("OPENAI_COMPATIBLE_API_URL")
-        self.openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
-        self.google_main_model_name: str = os.getenv("GOOGLE_MAIN_MODEL_NAME", "gemini-2.0-flash")
-
+        # Ejemplo: "gemini/gemini-1.5-pro", "openai/gpt-4o", "anthropic/claude-3-opus"
+        self.llm_model: str = os.getenv("LLM_MODEL", "gemini/gemini-2.0-flash")
+        
         # El LLM para tareas rápidas y económicas como la sumarización.
-        self.google_summary_model_name: str = os.getenv("GOOGLE_SUMMARY_MODEL_NAME", "gemini-2.5-flash")
+        # Ejemplo: "gemini/gemini-1.5-flash", "openai/gpt-3.5-turbo"
+        self.fast_llm_model: str = os.getenv("FAST_LLM_MODEL", "gemini/gemini-2.0-flash")
+
+        # Base URL para modelos personalizados (ej. Ollama, LM Studio)
+        self.llm_api_base: Optional[str] = os.getenv("LLM_API_BASE")
+
+        # Mantener compatibilidad hacia atrás (deprecated)
+        self.google_main_model_name: str = os.getenv("GOOGLE_MAIN_MODEL_NAME", "gemini-2.0-flash")
+        self.google_summary_model_name: str = os.getenv("GOOGLE_SUMMARY_MODEL_NAME", "gemini-2.0-flash")
         
         # El modelo de Vertex AI para la generación de imágenes (ej. Imagen 3).
         self.google_image_generation_model_name: str = os.getenv("GOOGLE_IMAGE_GENERATION_MODEL_NAME", "imagegeneration@006")
@@ -60,7 +66,7 @@ class Config:
         # Un valor más alto fomenta respuestas más creativas y detalladas.
         self.llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", 0.7))
         self.ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text:q4_K_M") # Modelo de embedding de Ollama cuantizado
-        self.ollama_api_url: str = os.getenv("OLLAMA_API_URL", "http://196.168.100.106:11434") # URL interna del servicio Ollama
+        self.ollama_api_url: str = os.getenv("OLLAMA_API_URL", "http://host.docker.internal:11434") # URL por defecto para acceder al host desde Docker
         self.llm_request_timeout: int = int(os.getenv("LLM_REQUEST_TIMEOUT", 120)) # Nuevo: Tiempo de espera para las solicitudes al LLM en segundos
 
 
@@ -109,19 +115,19 @@ class Config:
         self.neo4j_uri: Optional[str] = os.getenv("NEO4J_URI", "bolt://localhost:7687")
         self.neo4j_user: Optional[str] = os.getenv("NEO4J_USER", "neo4j")
         self.neo4j_password: Optional[str] = os.getenv("NEO4J_PASSWORD")
-        self.cognee_api_url: Optional[str] = os.getenv("COGNEE_API_URL")
+
 
         
         # --- Configuración de RAG (Chunking) ---
-        self.chunk_size: int = int(os.getenv("CHUNK_SIZE", 1000))
-        self.chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", 200))
+        self.chunk_size: int = int(os.getenv("CHUNK_SIZE", 100))
+        self.chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", 20))
         self.internal_api_key_for_bot: str = os.getenv("INTERNAL_API_KEY_FOR_BOT", "super-secret-internal-key")
         self.global_collection_name: str = os.getenv("GLOBAL_COLLECTION_NAME", "global_knowledge_base") # Nueva variable
 
         # RAG General
         self.embedding_model_name: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-ada-002") # O "ollama/nomic-embed-text"
-        self.embedding_chunk_size: int = int(os.getenv("EMBEDDING_CHUNK_SIZE", 1000))
-        self.embedding_chunk_overlap: int = int(os.getenv("EMBEDDING_CHUNK_OVERLAP", 200))
+        self.embedding_chunk_size: int = int(os.getenv("EMBEDDING_CHUNK_SIZE", 100))
+        self.embedding_chunk_overlap: int = int(os.getenv("EMBEDDING_CHUNK_OVERLAP", 20))
 
         # Reranking
         self.reranker_model_name: str = os.getenv("RERANKER_MODEL_NAME", "cross-encoder/ms-marco-MiniLM-L-6-v2")
@@ -247,8 +253,10 @@ class Config:
             raise ValueError("ERROR CRÍTICO: DATABASE_URL no está definido. La persistencia no funcionará.")
 
         # Esenciales para la IA de Google.
-        if not self.google_api_key:
-            logger.warning("⚠️ ADVERTENCIA: GOOGLE_API_KEY no está definido. Los LLMs de GenAI Studio no funcionarán.")
+        # Esenciales para la IA (LiteLLM maneja las keys internamente, pero advertimos si faltan las comunes)
+        if not os.getenv("GOOGLE_API_KEY") and not os.getenv("OPENAI_API_KEY") and not os.getenv("ANTHROPIC_API_KEY") and not os.getenv("OPENROUTER_API_KEY"):
+             logger.warning("⚠️ ADVERTENCIA: No se detectaron API KEYS comunes (GOOGLE, OPENAI, ANTHROPIC, OPENROUTER). Asegúrate de configurar la necesaria para tu LLM_MODEL.")
+
         if not self.google_project_id:
             logger.warning("⚠️ ADVERTENCIA: GOOGLE_PROJECT_ID no está definido. Vertex AI no funcionará.")
         if not self.google_project_location:

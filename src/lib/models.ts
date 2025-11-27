@@ -25,6 +25,7 @@ export interface CollectionAnalysis {
   final_reflections: string[];
   collection_insights: string[];
   methodological_notes: string[];
+  kai_synthesis?: string;
   patrones_semanticos?: {
     total_documentos?: number;
     total_chunks_analizados?: number;
@@ -73,7 +74,7 @@ export interface KeyTopic {
   cluster_id?: number;
   description?: string;
   topics?: string[];
-  quotes?: { document_title: string; quote: string; }[];
+  citations?: { document_title: string; quote: string; }[];
 }
 
 export interface DashboardInsightsResponse {
@@ -94,10 +95,11 @@ export interface DocumentAnalysisResult {
   central_concepts?: string[];
   discipline?: string[];
   authorial_tone?: string;
-  knowledge_gaps?: string[];
+  knowledge_gaps?: Array<{ gap: string; description: string }>;
   exploration_questions?: string[];
   problematic_areas?: string[];
   final_reflections?: string[];
+  kai_synthesis?: string;
   sentiment_analysis?: {
     overall_sentiment: string;
     score: number;
@@ -146,6 +148,24 @@ export interface CodeAnalysisResultFrontend {
   }>;
 }
 
+export interface NoteAnalysisResult {
+  executive_summary: string;
+  key_themes: string[];
+  potential_implications: string[];
+  action_suggestions: string[];
+  related_concepts: string[];
+  kai_insight: string;
+}
+
+export interface NoteCollectionAnalysisResult {
+  collection_summary: string;
+  cross_cutting_themes: Array<string | { theme: string; description: string }>;
+  synthesized_insights: string[];
+  strategic_recommendations: string[];
+  knowledge_gaps: string[];
+  kai_synthesis: string;
+}
+
 export interface Analysis {
   id: string;
   type: AnalysisType;
@@ -165,7 +185,7 @@ export interface Analysis {
   file_name?: string;
   topic?: string;
   author?: string;
-  result?: DocumentAnalysisResult | CodeAnalysisResultFrontend | CollectionAnalysis | any;
+  result?: DocumentAnalysisResult | CodeAnalysisResultFrontend | CollectionAnalysis | NoteAnalysisResult | NoteCollectionAnalysisResult | any;
   full_data?: any; // Añadido para que coincida con la implementación existente
 }
 
@@ -192,6 +212,9 @@ export type AnalysisType =
   | 'code'
   | 'semantic'
   | 'semantic_summary'
-  | 'code'
   | 'topic_analysis'
-  | 'proactive_insight_manual';
+  | 'proactive_insight_manual'
+  | 'note_analysis'
+  | 'note_collection_analysis'
+  | 'knowledge_graph_analysis'
+  | 'custom_analysis';

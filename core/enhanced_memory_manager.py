@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
 
-from core.memory_manager import get_relevant_memories
+from core.memory_manager import get_relevant_memories, add_memory_to_vector_db
 
 logger = logging.getLogger(__name__)
 
@@ -328,7 +328,8 @@ class EnhancedMemoryManager:
         user_message: str, 
         llm_response: str, 
         user_id: str,
-        enhanced_context: Optional[Dict[str, Any]] = None
+        enhanced_context: Optional[Dict[str, Any]] = None,
+        workspace_id: Optional[str] = None
     ) -> bool:
         """
         Guarda una memoria enriquecida que incluye contexto del grafo.
@@ -338,27 +339,55 @@ class EnhancedMemoryManager:
             llm_response: Respuesta del LLM
             user_id: ID del usuario
             enhanced_context: Contexto enriquecido usado
+            workspace_id: ID del workspace (opcional)
             
         Returns:
             True si se guardó correctamente
         """
         try:
-            # Crear memoria enriquecida
-            enhanced_memory = {
-                "user_message": user_message,
-                "llm_response": llm_response,
-                "user_id": user_id,
-                "timestamp": datetime.now().isoformat(),
-                "enhanced_context": enhanced_context,
-                "memory_type": "enhanced_episodic"
-            }
+            # Construir el contenido de la memoria
+            content = f"User: {user_message}\nAI: {llm_response}"
             
-            # Aquí integrarías con tu sistema de guardado de memorias
-            # Por ejemplo, guardar en pgvector con metadatos enriquecidos
+            # Si hay contexto enriquecido, podríamos querer incluir un resumen o metadatos
+            # Por ahora, guardamos la interacción principal
+            
+            await add_memory_to_vector_db(
+                account_id=user_id,
+                content=content,
+                type="enhanced_episodic",
+                workspace_id=workspace_id
+            )
             
             logger.info(f"✅ Memoria enriquecida guardada para usuario {user_id}")
             return True
             
         except Exception as e:
             logger.error(f"❌ Error guardando memoria enriquecida: {e}")
+            return False
+
+    async def add_memory(
+        self,
+        user_id: str,
+        content: str,
+        type: str = "general_memory",
+        workspace_id: Optional[str] = None,
+        topic: Optional[str] = None,
+        category: Optional[str] = None
+    ) -> bool:
+        """
+        Wrapper para añadir una memoria directamente usando el sistema subyacente.
+        Permite que EnhancedMemoryManager sea el punto de entrada único.
+        """
+        try:
+            await add_memory_to_vector_db(
+                account_id=user_id,
+                content=content,
+                type=type,
+                workspace_id=workspace_id,
+                topic=topic,
+                category=category
+            )
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error añadiendo memoria a través de EnhancedMemoryManager: {e}")
             return False

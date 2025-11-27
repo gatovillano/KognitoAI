@@ -24,73 +24,30 @@ from fastapi import BackgroundTasks
 from core.config import settings
 
 # Configuración del logger para este módulo.
+from utils.db_session import DBSession
+
 logger = logging.getLogger(__name__)
 
-
 class ConversationAnalysisInput(BaseModel):
-    """
-    Define el esquema de entrada para la herramienta de análisis de historial de conversaciones.
-    Valida que el argumento necesario, `account_id`, sea proporcionado.
-    """
-    # Los parámetros de contexto se moverán a los atributos de la clase
-    pass
-
+    account_id: str = Field(..., description="El ID universal de la cuenta del usuario.")
+    thread_ids: Optional[List[str]] = Field(default=None, description="Lista opcional de IDs de hilos de chat específicos a analizar.")
 
 class ConversationHistoryAnalyzerTool(BaseTool):
-    """
-    Una herramienta de LangChain que analiza en segundo plano el historial de conversaciones
-    de un usuario para extraer intereses y temas clave, actualizando su perfil.
-    """
     name: str = "conversation_history_analyzer"
-    description: str = (
-        "Útil para analizar en segundo plano el historial de conversaciones de un usuario, "
-        "extrayendo intereses y temas clave para actualizar su perfil. Esta herramienta "
-        "se ejecuta de manera asíncrona y no interfiere con la interacción en tiempo real."
-    )
+    description: str = "Analiza el historial de conversaciones del usuario para extraer intereses y temas clave."
     args_schema: Type[BaseModel] = ConversationAnalysisInput
-    return_direct: bool = False
+    account_id: str = Field(..., description="ID de la cuenta del usuario")
 
-    # Parámetros de contexto
-    account_id: Optional[str] = Field(None, description="ID de la cuenta del usuario.")
-    workspace_id: Optional[UUID] = Field(None, description="ID del espacio de trabajo actual.")
-    telegram_id: Optional[int] = Field(None, description="ID del usuario de Telegram.")
-    thread_id: Optional[UUID] = Field(None, description="ID del hilo de conversación actual.")
-
-    async def _arun(
-        self,
-        thread_ids_str: Optional[str] = None,  # Esto es un argumento, no un contexto de la herramienta
-        background_tasks: Optional[BackgroundTasks] = None,
-        **kwargs: Any
-    ) -> str:
+    async def _arun(self, account_id: str, thread_ids: Optional[List[str]] = None) -> None:
         """
-        Ejecuta la lógica de la herramienta de forma asíncrona, iniciando un análisis en segundo plano.
+        Analiza el historial de conversaciones del usuario y actualiza su perfil con los intereses y temas clave extraídos.
 
         Args:
-            thread_ids_str: Cadena opcional de IDs de hilos de chat específicos a analizar, separados por comas.
-            background_tasks: Objeto BackgroundTasks para programar la tarea en segundo plano.
-            **kwargs: Argumentos adicionales (no utilizados).
-
-        Returns:
-            Un mensaje de texto indicando que el análisis ha sido iniciado.
+            account_id: El ID universal de la cuenta del usuario.
+            thread_ids: Lista opcional de IDs de hilos de chat específicos a analizar.
         """
-        if self.account_id is None:
-            logger.error("ConversationHistoryAnalyzerTool requiere un 'account_id' para ejecutarse.")
-            return "Error: No se ha proporcionado un ID de cuenta. No se puede iniciar el análisis."
-
-        logger.info(f"Ejecutando ConversationHistoryAnalyzerTool para la cuenta '{self.account_id}'.")
-        logger.info(f"Workspace ID: {self.workspace_id}, Telegram ID: {self.telegram_id}, Thread ID: {self.thread_id}")
-
-        thread_ids = thread_ids_str.split(',') if thread_ids_str else None
-
-        if background_tasks:
-            background_tasks.add_task(self.analyze_conversation_history, str(self.account_id), thread_ids)
-            logger.info(f"Análisis de historial de conversaciones programado en segundo plano para la cuenta '{self.account_id}'.")
-            return "Análisis de historial de conversaciones iniciado en segundo plano. Los resultados se guardarán en tu perfil pronto."
-        else:
-            logger.warning(f"No se proporcionó BackgroundTasks; ejecutando análisis sincrónicamente para la cuenta '{self.account_id}'.")
-            await self.analyze_conversation_history(str(self.account_id), thread_ids)
-            return "Análisis de historial de conversaciones completado. Los resultados han sido guardados en tu perfil."
-
+        # Delegar la lógica principal a un método interno para facilitar pruebas y claridad
+        await self.analyze_conversation_history(account_id, thread_ids)
 
     async def analyze_conversation_history(self, account_id: str, thread_ids: Optional[List[str]] = None) -> None:
         """
@@ -102,7 +59,7 @@ class ConversationHistoryAnalyzerTool(BaseTool):
         """
         try:
             logger.info(f"Iniciando análisis de historial de conversaciones para la cuenta '{account_id}'.") # Usar account_id del parámetro
-            async with SessionLocal() as db_session:
+            async with DBSession(SessionLocal) as db_session:
                 # Obtener los hilos de chat del usuario
                 # Usar account_id del parámetro para el filtrado
                 if thread_ids:

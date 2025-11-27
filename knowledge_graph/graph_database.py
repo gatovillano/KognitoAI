@@ -11,15 +11,21 @@ class GraphDB:
     Clase de envoltura para manejar la conexión y las operaciones con una base de datos de grafos Neo4j.
     """
 
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = super(GraphDB, cls).__new__(cls)
+        return cls._instance
+
     def __init__(self, uri: str, user: Optional[str] = None, password: Optional[str] = None):
         """
         Inicializa la conexión a la base de datos.
-
-        Args:
-            uri (str): URI de la base de datos Neo4j (ej. "bolt://localhost:7687").
-            user (str, optional): Nombre de usuario para la autenticación.
-            password (str, optional): Contraseña para la autenticación.
         """
+        # Evitar re-inicialización si ya está configurado
+        if hasattr(self, 'uri') and self.uri:
+            return
+
         self.uri = uri
         self.user = user
         self.password = password

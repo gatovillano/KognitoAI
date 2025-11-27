@@ -5,12 +5,15 @@ from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 import logging
 from datetime import datetime
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
 from core.database import get_db_session
 from core.config import settings
-from knowledge_graph.cognee_integration import CogneeIntegration
-from knowledge_graph.langchain_cognee_adapter import LangChainCogneeAdapter
+from knowledge_graph.graph_integration import GraphIntegration
 from knowledge_graph.graph_database import GraphDB
+from knowledge_graph.entity_quality_reviewer import EntityQualityReviewer
+from knowledge_graph.trend_analyzer import TrendAnalyzer
 from utils.security import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -21,6 +24,8 @@ router = APIRouter()
 class ProcessGraphRequest(BaseModel):
     workspace_id: Optional[str] = None
     force_reprocess: bool = False
+    dataset_name: Optional[str] = None
+    topic: Optional[str] = None  # Filtrar por colección específica
 
 class SearchGraphRequest(BaseModel):
     workspace_id: Optional[str] = None
@@ -30,7 +35,11 @@ class SearchGraphRequest(BaseModel):
 class EntityConnectionsRequest(BaseModel):
     workspace_id: Optional[str] = None
     entity_id: str
-    max_depth: int = 2
+    depth: int = 1
+
+class ClearGraphRequest(BaseModel):
+    workspace_id: Optional[str] = None
+    confirm_delete_all: bool = False
 
 class GraphResponse(BaseModel):
     success: bool
@@ -40,7 +49,7 @@ class GraphResponse(BaseModel):
 
 # Inicializar componentes de forma lazy (solo cuando se necesiten)
 graph_db = None
-cognee_integration = None
+graph_integration = None
 
 def get_graph_db():
     """Obtiene la instancia de GraphDB, creándola si es necesario."""
@@ -66,59 +75,18 @@ def get_graph_db():
             )
     return graph_db
 
-def get_cognee_integration():
-    """Obtiene la instancia de CogneeIntegration, creándola si es necesario."""
-    global cognee_integration
-    if cognee_integration is None:
-        cognee_integration = CogneeIntegration(get_graph_db())
-    return cognee_integration
-
-def get_langchain_cognee_adapter():
-    """Obtiene la instancia de LangChainCogneeAdapter."""
-    from core.llm_manager import get_main_llm
-    return LangChainCogneeAdapter(get_graph_db(), get_main_llm())
+def get_graph_integration():
+    """Obtiene la instancia de GraphIntegration, creándola si es necesario."""
+    global graph_integration
+    if graph_integration is None:
+        graph_integration = GraphIntegration(get_graph_db())
+    return graph_integration
 
 
 
-@router.get("/knowledge-graph/{workspace_id}", response_model=GraphResponse)
-async def get_knowledge_graph(
-    workspace_id: str,
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Obtiene el grafo de conocimiento existente para un workspace.
-    """
-    try:
-        # Reutilizar la lógica de get_knowledge_graph_data para obtener los datos del grafo
-        graph_data_response = await get_knowledge_graph_data(workspace_id, current_user)
-        
-        if graph_data_response.success:
-            if graph_data_response.data and (graph_data_response.data.get("nodes") or graph_data_response.data.get("edges")):
-                return GraphResponse(
-                    success=True,
-                    data=graph_data_response.data,
-                    message=f"Grafo obtenido: {len(graph_data_response.data.get('nodes', []))} nodos y {len(graph_data_response.data.get('edges', []))} aristas."
-                )
-            else:
-                return GraphResponse(
-                    success=False,
-                    error="Grafo vacío. Procesa los documentos primero para generar el grafo."
-                )
-        else:
-            return GraphResponse(
-                success=False,
-                error=graph_data_response.error,
-                message="Error al obtener los datos del grafo."
-            )
-        
-    except Exception as e:
-        logger.error(f"❌ Error obteniendo grafo: {e}")
-        return GraphResponse(
-            success=False,
-            error=str(e)
-        )
 
-@router.get("/knowledge-graph/status", response_model=GraphResponse)
+
+@router.get("/status", response_model=GraphResponse)
 async def get_graph_status(
     workspace_id: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
@@ -265,7 +233,8 @@ async def test_neo4j_connection(
 async def process_knowledge_graph_optimized(
     request: ProcessGraphRequest,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Procesa documentos con el pipeline OPTIMIZADO (sin Fase 3 pesada).
@@ -275,39 +244,52 @@ async def process_knowledge_graph_optimized(
         logger.info(f"⚡ Iniciando procesamiento OPTIMIZADO para workspace: {request.workspace_id}")
 
         # Obtener documentos del workspace
-        async with get_db_session() as session:
-            # Query para obtener documentos únicos del workspace
-            # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
-            query = """
-                SELECT DISTINCT ON (cmetadata->>'document_id')
-                       cmetadata->>'file_name' AS file_name,
-                       topic AS topic,
-                       cmetadata->>'title' AS title,
-                       cmetadata->>'author' AS author,
-                       cmetadata->>'document_id' AS document_id,
-                       workspace_id::text AS workspace_id,
-                       team_id::text AS team_id,
-                       CASE WHEN team_id IS NOT NULL THEN true ELSE false END AS team_shared,
-                       document AS content
-                FROM langchain_pg_embedding
-                WHERE account_id = :account_id
-                  AND cmetadata->>'type' = 'document_chunk'
-                  {f"AND workspace_id::text = '{request.workspace_id}'" if request.workspace_id else "AND workspace_id IS NULL"}
-                ORDER BY cmetadata->>'document_id', id
-                LIMIT 100;
-            """
- 
-            result = await session.execute(query, {'account_id': current_user['account_id']})
- 
-            documents = []
-            for row in result.fetchall():
-                doc_dict = dict(row)
-                # Agregar contenido si está disponible
-                if doc_dict.get('content'):
-                    doc_dict['content'] = doc_dict['content']
-                else:
-                    doc_dict['content'] = f"Documento: {doc_dict.get('title', 'Sin título')}"
-                documents.append(doc_dict)
+        # Query para obtener documentos únicos del workspace
+        # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
+        # Construir filtros dinámicamente
+        filters = ["account_id = :account_id", "cmetadata->>'type' = 'document_chunk'"]
+        
+        if request.workspace_id:
+            filters.append(f"workspace_id::text = '{request.workspace_id}'")
+        else:
+            filters.append("workspace_id IS NULL")
+        
+        # NUEVO: Filtrar por topic si se especifica
+        if request.topic:
+            filters.append(f"topic = :topic")
+        
+        where_clause = " AND ".join(filters)
+        
+        query = text(f"""
+            SELECT DISTINCT ON (cmetadata->>'document_id')
+                   cmetadata->>'file_name' AS file_name,
+                   topic AS topic,
+                   cmetadata->>'title' AS title,
+                   cmetadata->>'author' AS author,
+                   cmetadata->>'document_id' AS document_id,
+                   workspace_id::text AS workspace_id,
+                   document AS content
+            FROM langchain_pg_embedding
+            WHERE {where_clause}
+            ORDER BY cmetadata->>'document_id', id
+            LIMIT 100;
+        """)
+
+        params = {'account_id': current_user['account_id']}
+        if request.topic:
+            params['topic'] = request.topic
+        
+        result = await db.execute(query, params)
+
+        documents = []
+        for row in result.fetchall():
+            doc_dict = dict(row._mapping)
+            # Agregar contenido si está disponible
+            if doc_dict.get('content'):
+                doc_dict['content'] = doc_dict['content']
+            else:
+                doc_dict['content'] = f"Documento: {doc_dict.get('title', 'Sin título')}"
+            documents.append(doc_dict)
  
         if not documents:
             detail_msg = "No se encontraron documentos en este workspace" if request.workspace_id else "No se encontraron documentos en el contexto general"
@@ -316,7 +298,8 @@ async def process_knowledge_graph_optimized(
                 error=detail_msg
             )
  
-        logger.info(f"📄 Encontrados {len(documents)} documentos para procesamiento optimizado en {'workspace ' + request.workspace_id if request.workspace_id else 'contexto general'}")
+        context_desc = f"colección '{request.topic}'" if request.topic else (f"workspace {request.workspace_id}" if request.workspace_id else "contexto general")
+        logger.info(f"📄 Encontrados {len(documents)} documentos para procesamiento optimizado en {context_desc}")
  
         # Procesar con pipeline híbrido optimizado
         from knowledge_graph.hybrid_graph_processor import HybridGraphProcessor
@@ -324,10 +307,17 @@ async def process_knowledge_graph_optimized(
         processor = HybridGraphProcessor()
         await processor.initialize()
  
-        dataset_name = f"workspace_{request.workspace_id}_optimized" if request.workspace_id else "global_context_optimized"
+        # Usar dataset_name proporcionado o generar uno por defecto
+        if request.dataset_name:
+            dataset_name = request.dataset_name
+        else:
+            dataset_name = f"workspace_{request.workspace_id}_optimized" if request.workspace_id else "global_context_optimized"
+            
         graph_data = await processor.process_documents(
             documents,
-            dataset_name
+            dataset_name,
+            account_id=current_user['account_id'],
+            workspace_id=request.workspace_id
         )
  
         # Guardar en Neo4j
@@ -440,7 +430,9 @@ async def process_knowledge_graph_with_cooccurrence(
         # Procesar documentos
         graph_data = await processor.process_documents(
             documents,
-            dataset_name
+            dataset_name,
+            account_id=current_user['account_id'],
+            workspace_id=request.workspace_id
         )
  
         # Guardar resultado final también
@@ -466,7 +458,7 @@ async def process_knowledge_graph_with_cooccurrence(
             error=str(e)
         )
 
-@router.get("/knowledge-graph/stats", response_model=GraphResponse)
+@router.get("/stats", response_model=GraphResponse)
 async def get_graph_stats(
     workspace_id: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
@@ -511,111 +503,61 @@ async def get_graph_stats(
             error=str(e)
         )
 
-@router.post("/process-knowledge-graph-langchain-cognee", response_model=GraphResponse)
-async def process_knowledge_graph_langchain_cognee(
-    request: ProcessGraphRequest,
-    background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    PRUEBA: Procesa documentos usando langchain-cognee en lugar de nuestra implementación.
-    """
-    try:
-        logger.info(f"🧪 PRUEBA langchain-cognee para workspace: {request.workspace_id if request.workspace_id else 'contexto general'}")
- 
-        # Obtener documentos del workspace
-        async with get_db_session() as session:
-            # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
-            query = f"""
-                SELECT DISTINCT ON (cmetadata->>'document_id')
-                       cmetadata->>'file_name' AS file_name,
-                       topic AS topic,
-                       cmetadata->>'title' AS title,
-                       cmetadata->>'author' AS author,
-                       document AS content
-                FROM langchain_pg_embedding
-                WHERE account_id = :account_id
-                  AND cmetadata->>'type' = 'document_chunk'
-                  {f"AND workspace_id::text = '{request.workspace_id}'" if request.workspace_id else "AND workspace_id IS NULL"}
-                ORDER BY cmetadata->>'document_id', id
-                LIMIT 10;
-            """
- 
-            result = await session.execute(query, {'account_id': current_user['account_id']})
- 
-            documents = []
-            for row in result.fetchall():
-                doc_dict = dict(row)
-                if doc_dict.get('content'):
-                    doc_dict['content'] = doc_dict['content']
-                else:
-                    doc_dict['content'] = f"Documento: {doc_dict.get('title', 'Sin título')}"
-                documents.append(doc_dict)
- 
-        if not documents:
-            detail_msg = "No se encontraron documentos en este workspace" if request.workspace_id else "No se encontraron documentos en el contexto general"
-            return GraphResponse(
-                success=False,
-                error=detail_msg
-            )
- 
-        logger.info(f"📄 Procesando {len(documents)} documentos con langchain-cognee en {'workspace ' + request.workspace_id if request.workspace_id else 'contexto general'}")
- 
-        # Usar langchain-cognee
-        adapter = get_langchain_cognee_adapter()
-        dataset_name = f"workspace_{request.workspace_id}" if request.workspace_id else "global_context"
-        result = await adapter.process_documents_with_langchain_cognee(
-            documents,
-            dataset_name
-        )
- 
-        logger.info(f"✅ Procesamiento con langchain-cognee completado para {'workspace ' + request.workspace_id if request.workspace_id else 'contexto general'}")
- 
-        return GraphResponse(
-            success=True,
-            data=result,
-            message=f"Procesado con langchain-cognee: {result.get('entities_processed', 0)} entidades"
-        )
 
-    except Exception as e:
-        logger.error(f"❌ Error con langchain-cognee: {e}")
-        return GraphResponse(
-            success=False,
-            error=f"Error langchain-cognee: {str(e)}"
-        )
 
 @router.post("/clear-neo4j", response_model=GraphResponse)
 async def clear_neo4j(
+    request: ClearGraphRequest = ClearGraphRequest(),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Limpia completamente la base de datos Neo4j.
-    ⚠️ CUIDADO: Esta acción elimina TODOS los datos.
+    Limpia la base de datos Neo4j.
+    
+    - Si se proporciona `workspace_id`, solo elimina los nodos de ese workspace.
+    - Si NO se proporciona `workspace_id`, requiere `confirm_delete_all=True` para eliminar TODO.
     """
     try:
-        logger.info("🧹 Iniciando limpieza completa de Neo4j...")
-
         db = get_graph_db()
+        
+        if request.workspace_id:
+            logger.info(f"🧹 Iniciando limpieza de Neo4j para workspace: {request.workspace_id}...")
+            # Eliminar solo nodos del workspace
+            clear_query = "MATCH (n) WHERE n.workspace_id = $workspace_id DETACH DELETE n"
+            await db.execute_query(clear_query, {"workspace_id": request.workspace_id})
+            message = f"Datos del workspace {request.workspace_id} eliminados"
+            
+        else:
+            if not request.confirm_delete_all:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Para eliminar TODA la base de datos, debes establecer confirm_delete_all=True"
+                )
+                
+            logger.info("🧹 Iniciando limpieza COMPLETA de Neo4j...")
+            # Eliminar todo
+            clear_query = "MATCH (n) DETACH DELETE n"
+            await db.execute_query(clear_query)
+            message = "Neo4j limpiado completamente (todos los datos)"
 
-        # Query para eliminar todo
-        clear_query = "MATCH (n) DETACH DELETE n"
-        await db.execute_query(clear_query)
-
-        # Verificar que se limpió
-        count_query = "MATCH (n) RETURN count(n) as total"
-        result = await db.execute_query(count_query)
+        # Verificar nodos restantes (global o por workspace)
+        if request.workspace_id:
+            count_query = "MATCH (n) WHERE n.workspace_id = $workspace_id RETURN count(n) as total"
+            result = await db.execute_query(count_query, {"workspace_id": request.workspace_id})
+        else:
+            count_query = "MATCH (n) RETURN count(n) as total"
+            result = await db.execute_query(count_query)
+            
         total_nodes = result[0]["total"] if result else 0
 
-        logger.info(f"✅ Neo4j limpiado. Nodos restantes: {total_nodes}")
+        logger.info(f"✅ Limpieza completada. Nodos restantes: {total_nodes}")
 
         return GraphResponse(
             success=True,
             data={
-                "nodes_deleted": "all",
-                "relationships_deleted": "all",
+                "nodes_deleted": "workspace" if request.workspace_id else "all",
                 "remaining_nodes": total_nodes
             },
-            message="Neo4j limpiado completamente"
+            message=message
         )
 
     except Exception as e:
@@ -995,20 +937,80 @@ async def get_trend_summary(
             error=f"Error obteniendo resumen: {str(e)}"
         )
 
-@router.get("/knowledge-graph/data", response_model=GraphResponse)
-async def get_knowledge_graph_data(
+@router.get("/datasets", response_model=GraphResponse)
+async def get_available_datasets(
     workspace_id: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Obtiene los nodos y aristas del grafo de conocimiento, opcionalmente filtrado por workspace_id,
+    Obtiene la lista de datasets únicos disponibles en Neo4j para el usuario actual.
+    Opcionalmente filtra por workspace_id.
+    """
+    try:
+        db = get_graph_db()
+        
+        # Construir query para obtener datasets únicos
+        params = {'account_id': current_user['account_id']}
+        where_clauses = ["n.account_id = $account_id", "n.dataset_name IS NOT NULL"]
+        
+        if workspace_id and workspace_id.lower() != "all":
+            if workspace_id.lower() == "global_context":
+                where_clauses.append("n.workspace_id IS NULL")
+            else:
+                where_clauses.append("n.workspace_id = $workspace_id")
+                params['workspace_id'] = workspace_id
+        
+        where_statement = " WHERE " + " AND ".join(where_clauses)
+        
+        query = f"""
+        MATCH (n)
+        {where_statement}
+        RETURN DISTINCT n.dataset_name as dataset_name, count(n) as node_count
+        ORDER BY dataset_name
+        """
+        
+        logger.info(f"Executing datasets query: {query}")
+        result = await db.execute_query(query, params)
+        
+        datasets = [
+            {
+                "name": record["dataset_name"],
+                "node_count": record["node_count"]
+            }
+            for record in result
+        ]
+        
+        return GraphResponse(
+            success=True,
+            data={"datasets": datasets},
+            message=f"Encontrados {len(datasets)} datasets"
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo datasets: {e}", exc_info=True)
+        return GraphResponse(
+            success=False,
+            error=f"Error obteniendo datasets: {str(e)}"
+        )
+
+
+@router.get("/data", response_model=GraphResponse)
+async def get_knowledge_graph_data(
+    workspace_id: Optional[str] = None,
+    dataset_name: Optional[str] = None,
+    limit: int = 100,
+    max_hops: int = 2,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Obtiene los nodos y aristas del grafo de conocimiento, opcionalmente filtrado por workspace_id y/o dataset_name,
     en un formato compatible con vis.js/vis-network.
     """
     try:
         db = get_graph_db()
         
         # Parámetros iniciales siempre incluyen el account_id
-        params = {'account_id': current_user['account_id']}
+        params = {'account_id': current_user['account_id'], 'limit': limit}
 
         # Construir la cláusula WHERE dinámicamente
         where_clauses = ["n.account_id = $account_id"]
@@ -1019,6 +1021,12 @@ async def get_knowledge_graph_data(
             else:
                 where_clauses.append("n.workspace_id = $workspace_id")
                 params['workspace_id'] = workspace_id
+        
+        # Agregar filtro por dataset_name si se proporciona
+        if dataset_name and dataset_name.lower() != "all":
+            where_clauses.append("n.dataset_name = $dataset_name")
+            params['dataset_name'] = dataset_name
+
 
         # Unir cláusulas
         where_statement = " WHERE " + " AND ".join(where_clauses)
@@ -1039,6 +1047,7 @@ async def get_knowledge_graph_data(
  
         nodes_map = {}
         edges_list = []
+        added_edge_ids = set()
 
         for record in result:
             n = record["n"]
@@ -1047,10 +1056,17 @@ async def get_knowledge_graph_data(
 
             # Función auxiliar para obtener propiedades de forma segura
             def get_node_properties(node):
-                node_id_str = str(node.id)
-                node_label = node.get("name", node.get("label", node_id_str))
-                node_type = node.get('type', 'Desconocido')
-                node_name_for_title = node.get('name', node.get('label', ''))
+                # Manejar si el nodo es un objeto o un diccionario
+                if hasattr(node, 'id'):
+                    node_id_str = str(node.id)
+                    node_label = getattr(node, 'name', getattr(node, 'label', node_id_str))
+                    node_type = getattr(node, 'type', 'Desconocido')
+                    node_name_for_title = getattr(node, 'name', getattr(node, 'label', ''))
+                else:
+                    node_id_str = str(node.get('id'))
+                    node_label = node.get("name", node.get("label", node_id_str))
+                    node_type = node.get('type', 'Desconocido')
+                    node_name_for_title = node.get('name', node.get('label', ''))
                 
                 return {
                     "id": node_id_str,
@@ -1059,24 +1075,42 @@ async def get_knowledge_graph_data(
                 }
 
             # Añadir nodo 'n'
-            if str(n.id) not in nodes_map:
-                nodes_map[str(n.id)] = get_node_properties(n)
+            n_id = str(n.get('id')) if isinstance(n, dict) else str(n.id)
+            if n_id not in nodes_map:
+                nodes_map[n_id] = get_node_properties(n)
             
             # Añadir nodo 'm' si existe (para relaciones)
-            if m and str(m.id) not in nodes_map:
-                nodes_map[str(m.id)] = get_node_properties(m)
+            m_id = None
+            if m:
+                m_id = str(m.get('id')) if isinstance(m, dict) else str(m.id)
+                if m_id not in nodes_map:
+                    nodes_map[m_id] = get_node_properties(m)
             
             # Añadir relación si existe
-            if r:
-                edge_id = f"{str(n.id)}-{r.type}-{str(m.id)}"
-                edges_list.append({
-                    "id": edge_id,
-                    "from": str(n.id),
-                    "to": str(m.id),
-                    "label": r.type,
-                    "arrows": "to", # Asumimos flechas direccionales para visualización
-                    "title": f"Tipo de relación: {r.type}\nDesde: {nodes_map[str(n.id)]['label']}\nHacia: {nodes_map[str(m.id)]['label']}"
-                })
+            if r and m_id:
+                # Determinar tipo de relación
+                rel_type = "RELATED"
+                if isinstance(r, tuple) or isinstance(r, list):
+                    if len(r) > 1:
+                        rel_type = str(r[1])
+                elif hasattr(r, 'type'):
+                    rel_type = r.type
+                elif isinstance(r, dict):
+                    rel_type = r.get('type', 'RELATED')
+
+                edge_id = f"{n_id}-{rel_type}-{m_id}"
+                
+                # Evitar duplicados
+                if edge_id not in added_edge_ids:
+                    added_edge_ids.add(edge_id)
+                    edges_list.append({
+                        "id": edge_id,
+                        "from": n_id,
+                        "to": m_id,
+                        "label": rel_type,
+                        "arrows": "to", # Asumimos flechas direccionales para visualización
+                        "title": f"Tipo de relación: {rel_type}\nDesde: {nodes_map[n_id]['label']}\nHacia: {nodes_map[m_id]['label']}"
+                    })
         
         nodes_list = list(nodes_map.values())
 
@@ -1096,3 +1130,157 @@ async def get_knowledge_graph_data(
             success=False,
             error=f"Error obteniendo datos del grafo: {str(e)}"
         )
+
+# Modelos para análisis de calidad y tendencias
+class EntityCorrection(BaseModel):
+    entity_id: str
+    correction_type: str  # 'type_change', 'merge', 'delete'
+    new_type: Optional[str] = None
+    target_entity_id: Optional[str] = None  # Para merges
+
+class ApplyCorrectionsRequest(BaseModel):
+    corrections: List[Dict[str, Any]]
+    auto_apply: bool = False
+
+class TrendAnalysisRequest(BaseModel):
+    dataset_name: str
+    time_window: str = "last_6_months"
+    workspace_id: Optional[str] = None
+
+@router.post("/review-entities")
+async def review_entities(
+    workspace_id: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Revisa la calidad de las entidades en el grafo y sugiere correcciones.
+    Detecta entidades mal clasificadas, duplicados y anomalías.
+    """
+    try:
+        db = get_graph_db()
+        # Inicializar LLM (necesario para validación contextual)
+        from core.llm_manager import LLMManager
+        llm_manager = LLMManager()
+        # Usar un modelo rápido para validación
+        llm = llm_manager.get_llm(model_name="gemini-1.5-flash") 
+        
+        reviewer = EntityQualityReviewer(db, llm)
+        results = await reviewer.review_all_entities(workspace_id)
+        
+        return GraphResponse(
+            success=True,
+            data=results,
+            message="Revisión de entidades completada"
+        )
+    except Exception as e:
+        logger.error(f"❌ Error revisando entidades: {e}")
+        return GraphResponse(
+            success=False,
+            error=str(e)
+        )
+
+@router.post("/apply-entity-corrections")
+async def apply_entity_corrections(
+    request: ApplyCorrectionsRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Aplica las correcciones sugeridas a las entidades.
+    """
+    try:
+        db = get_graph_db()
+        reviewer = EntityQualityReviewer(db)
+        
+        results = await reviewer.apply_corrections(request.corrections, request.auto_apply)
+        
+        return GraphResponse(
+            success=True,
+            data=results,
+            message="Correcciones aplicadas exitosamente"
+        )
+    except Exception as e:
+        logger.error(f"❌ Error aplicando correcciones: {e}")
+        return GraphResponse(
+            success=False,
+            error=str(e)
+        )
+
+@router.post("/detect-trends")
+async def detect_trends(
+    request: TrendAnalysisRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Detecta tendencias emergentes y patrones temporales en el grafo.
+    """
+    try:
+        db = get_graph_db()
+        
+        # Inicializar embeddings (necesario para análisis semántico)
+        from utils.embeddings import get_embedding_model, initialize_embeddings
+        
+        # Asegurar que el modelo esté inicializado
+        embedding_model = get_embedding_model()
+        if not embedding_model:
+            await initialize_embeddings()
+            embedding_model = get_embedding_model()
+            
+        analyzer = TrendAnalyzer(db, embedding_model)
+        
+        trends = await analyzer.detect_trends(
+            dataset_name=request.dataset_name,
+            time_window=request.time_window
+        )
+        
+        return GraphResponse(
+            success=True,
+            data=trends,
+            message="Análisis de tendencias completado"
+        )
+    except Exception as e:
+        logger.error(f"❌ Error detectando tendencias: {e}")
+        return GraphResponse(
+            success=False,
+            error=str(e)
+        )
+
+# IMPORTANTE: Esta ruta dinámica DEBE estar al final del archivo
+# para evitar que capture las rutas estáticas como /data, /status, etc.
+@router.get("/{workspace_id}", response_model=GraphResponse)
+async def get_knowledge_graph(
+    workspace_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Obtiene el grafo de conocimiento existente para un workspace.
+    """
+    try:
+        # Reutilizar la lógica de get_knowledge_graph_data para obtener los datos del grafo
+        graph_data_response = await get_knowledge_graph_data(workspace_id, current_user)
+        
+        if graph_data_response.success:
+            if graph_data_response.data and (graph_data_response.data.get("nodes") or graph_data_response.data.get("edges")):
+                return GraphResponse(
+                    success=True,
+                    data=graph_data_response.data,
+                    message=f"Grafo obtenido: {len(graph_data_response.data.get('nodes', []))} nodos y {len(graph_data_response.data.get('edges', []))} aristas."
+                )
+            else:
+                return GraphResponse(
+                    success=False,
+                    error="Grafo vacío. Procesa los documentos primero para generar el grafo."
+                )
+        else:
+            return GraphResponse(
+                success=False,
+                error=graph_data_response.error,
+                message="Error al obtener los datos del grafo."
+            )
+        
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo grafo: {e}")
+        return GraphResponse(
+            success=False,
+            error=str(e)
+        )
+

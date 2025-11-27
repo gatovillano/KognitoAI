@@ -17,6 +17,8 @@ import { CustomChartTooltip } from '@/components/CustomChartTooltip';
 import { DashboardHelpCarousel } from '@/components/DashboardHelpCarousel';
 import WelcomeInfo from '@/components/WelcomeInfo';
 import dynamic from 'next/dynamic';
+import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
+import { type Analysis } from '@/lib/models';
 
 const WelcomeDialog = dynamic(() => import('@/components/WelcomeDialog').then(mod => mod.WelcomeDialog), { ssr: false });
 
@@ -51,13 +53,6 @@ interface DashboardData {
   proactive_insights: Insight[];
 }
 
-interface AnalysisData {
-  id: string;
-  file_name: string;
-  result_payload: any;
-  created_at: string;
-}
-
 interface Insight {
   id: string;
   type: string;
@@ -80,10 +75,12 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [viewingInsight, setViewingInsight] = useState<Insight | null>(null);
-  const [analysisData, setAnalysisData] = useState<AnalysisData[]>([]);
+  const [analysisData, setAnalysisData] = useState<Analysis[]>([]);
+  const [viewingAnalysis, setViewingAnalysis] = useState<Analysis | null>(null);
   const [isWelcomeDialogOpen, setIsWelcomeDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [isUpdatingTopics, setIsUpdatingTopics] = useState(false);
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(e.target.value);
@@ -95,7 +92,7 @@ export default function DashboardPage() {
       try {
         const [insightsResponse, analysesResponse, conversationsResponse] = await Promise.all([
           apiClient.post('/api/dashboard-insights', { all: false }),
-          apiClient.post('/api/get-saved-analyses', { all: true }),
+          apiClient.post('/api/get-all-analysis', { limit: 12, offset: 0 }),
           apiClient.get('/api/threads') // Nueva llamada para obtener conversaciones
         ]);
 
@@ -122,7 +119,7 @@ export default function DashboardPage() {
           ...insightsResponse.data,
           proactive_insights: transformedInsights
         });
-        setAnalysisData(analysesResponse.data);
+        setAnalysisData(analysesResponse.data.analysis || []);
         setConversations(fetchedConversations); // Guardar las conversaciones
 
         const hasVisited = localStorage.getItem('hasVisitedDashboard');
@@ -170,10 +167,6 @@ export default function DashboardPage() {
                 <p className="text-muted-foreground">Kognito está encontrando patrones y conexiones en tu conocimiento de forma inteligente.</p>
               </div>
             </div>
-            <Link href="/dashboard" className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Volver al Dashboard
-            </Link>
           </div>
 
           <div className="mb-8">
@@ -208,7 +201,7 @@ export default function DashboardPage() {
                   <button
                     className="px-6 py-3 gradient-primary text-white rounded-xl font-medium shadow-medium hover:shadow-strong transition-all duration-300 flex items-center gap-2 hover:scale-105"
                     onClick={async () => {
-                      setIsLoading(true);
+                      setIsUpdatingTopics(true);
                       try {
                         // Trigger semantic analysis process
                         const triggerResponse = await apiClient.post('/api/update-semantic-topics');
@@ -216,7 +209,7 @@ export default function DashboardPage() {
                         toast.info('Análisis semántico iniciado en segundo plano.', {
                           description: 'Recibirás una notificación cuando haya terminado.',
                         });
-                        
+
                         // Poll for task status
                         let taskStatus = 'pending';
                         while (taskStatus === 'pending' || taskStatus === 'processing') {
@@ -242,12 +235,12 @@ export default function DashboardPage() {
                         toast.error('Error al iniciar análisis semántico.');
                         console.error("Update semantic topics error:", error);
                       } finally {
-                        setIsLoading(false);
+                        setIsUpdatingTopics(false);
                       }
                     }}
-                    disabled={isLoading}
+                    disabled={isUpdatingTopics}
                   >
-                    {isLoading ? (
+                    {isUpdatingTopics ? (
                       <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -336,65 +329,42 @@ export default function DashboardPage() {
             </Card>
           </div>
 
-          {/* Galería de Tarjetas de Insights */}
+          {/* Últimos Análisis Realizados */}
           <div className="spacing-section mt-16">
             <div className="mb-6">
               <div>
                 <h2 className="text-2xl font-semibold flex items-center">
-                  <Sparkles className="mr-3 h-6 w-6 text-primary" />
-                  Descubrimientos Proactivos
+                  <BrainCircuit className="mr-3 h-6 w-6 text-primary" />
+                  Últimos Análisis Realizados
                 </h2>
-                <p className="text-muted-foreground mt-1">Insights generados automáticamente por Kognito.</p>
+                <p className="text-muted-foreground mt-1">Análisis recientes de tus documentos y colecciones.</p>
               </div>
             </div>
-            <div className="flex justify-end items-center spacing-component mb-10">
-              <Link href="/dashboard/insights" className="typography-body-small font-medium text-primary hover:text-primary/80 transition-colors">
-                Ver todo
-              </Link>
-            </div>
             <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3 px-2">
-              {(data.proactive_insights || []).slice(0, 6).map(insight => ( // Limitar a 6 en el dashboard
-                <Card key={insight.id} className="modern-card border-0 shadow-medium hover:shadow-strong transition-all duration-300 cursor-pointer hover:scale-105 group" onClick={() => setViewingInsight(insight)}>
+              {analysisData.slice(0, 6).map(analysis => (
+                <Card
+                  key={analysis.id}
+                  className="modern-card border-0 shadow-medium hover:shadow-strong transition-all duration-300 group cursor-pointer hover:scale-105"
+                  onClick={() => setViewingAnalysis(analysis)}
+                >
                   <CardHeader className="pb-3">
                     <div className="flex items-center gap-3">
-                       <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
-                       {getInsightIcon(insight.type)}
-                       <CardTitle className="text-lg font-semibold group-hover:text-primary transition-colors">
-                         {(insight.type || '').charAt(0).toUpperCase() + (insight.type || '').slice(1)}
-                       </CardTitle>
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
+                      <FileText className="h-5 w-5 text-primary" />
+                      <CardTitle className="text-lg font-semibold group-hover:text-primary transition-colors truncate" title={analysis.title || analysis.file_name}>
+                        {analysis.title || analysis.file_name}
+                      </CardTitle>
                     </div>
                   </CardHeader>
                   <CardContent className="pt-0">
-                    <p className="text-sm text-muted-foreground line-clamp-3 mb-4 leading-relaxed">{insight.summary}</p>
-                    <div className="text-xs space-y-2">
-                      <p className="font-semibold text-foreground">Ítems Relacionados:</p>
-                      {(() => {
-                        // Handle different possible structures of related_items
-                        let items: any = insight.related_items || [];
-
-                        // If related_items is an object with an 'items' property, use that
-                        if (typeof items === 'object' && !Array.isArray(items) && (items as any).items) {
-                          items = (items as any).items;
-                        }
-
-                        // Ensure we have an array
-                        if (!Array.isArray(items)) {
-                          items = [];
-                        }
-
-                        return items.slice(0, 2).map((item: any, idx: number) => (
-                          <p key={idx} className="flex items-center gap-2 text-muted-foreground truncate">
-                            <FileText className="h-3 w-3 text-primary/60" />
-                            <span className="truncate">{item.title || item.reference || 'Sin título'}</span>
-                          </p>
-                        ));
-                      })()}
-                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Analizado el: {analysis.created_at ? new Date(analysis.created_at).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Fecha no disponible'}
+                    </p>
                   </CardContent>
                 </Card>
               ))}
-              {data && data.proactive_insights.length === 0 && (
-                <p className="text-center text-muted-foreground py-10 col-span-full">Kognito aún no ha encontrado descubrimientos proactivos.</p>
+              {analysisData.length === 0 && (
+                <p className="text-center text-muted-foreground py-10 col-span-full">No se han encontrado análisis recientes.</p>
               )}
             </div>
           </div>
@@ -414,8 +384,8 @@ export default function DashboardPage() {
               <QuestionSlider
                 title="Brechas de Conocimiento"
                 questions={analysisData
-                  .filter(a => a.file_name.startsWith('Colección:'))
-                  .flatMap(a => a.result_payload.emergent_knowledge_gaps || [])
+                  .filter(a => a.type === 'collection')
+                  .flatMap(a => (a.full_data?.emergent_knowledge_gaps || a.result?.emergent_knowledge_gaps) || [])
                   .slice(0, 10)
                 }
                 icon={<Search className="h-5 w-5 text-primary" />}
@@ -423,8 +393,8 @@ export default function DashboardPage() {
                 onReload={async () => {
                   setIsLoading(true);
                   try {
-                    const analysesResponse = await apiClient.post('/api/get-saved-analyses', { all: true });
-                    setAnalysisData(analysesResponse.data);
+                    const analysesResponse = await apiClient.post('/api/get-all-analysis', { limit: 12, offset: 0 });
+                    setAnalysisData(analysesResponse.data.analysis || []);
                     toast.success('Datos de análisis recargados.');
                   } catch (error) {
                     toast.error('Error al recargar datos de análisis.');
@@ -440,8 +410,9 @@ export default function DashboardPage() {
               <QuestionSlider
                 title="Preguntas para Explorar"
                 questions={analysisData
-                  .filter(a => !a.file_name.startsWith('Colección:'))
-                  .flatMap(a => a.result_payload.knowledge_gaps || [])
+                  .filter(a => a.type === 'document')
+                  .flatMap(a => (a.full_data?.knowledge_gaps || a.result?.knowledge_gaps) || [])
+                  .map((gapObject: any) => (typeof gapObject === 'string' ? gapObject : gapObject.gap)) // Handle both string and object
                   .slice(0, 10)
                 }
                 icon={<BrainCircuit className="h-5 w-5 text-primary" />}
@@ -467,12 +438,18 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
-      
+
       <WelcomeDialog isOpen={isWelcomeDialogOpen} onOpenChange={setIsWelcomeDialogOpen} />
 
       {/* El diálogo para mostrar los detalles */}
       <InsightDetailDialog isOpen={!!viewingInsight} onOpenChange={(open: boolean) => !open && setViewingInsight(null)}
-      insight={viewingInsight} />
+        insight={viewingInsight} />
+
+      <AnalysisDetailDialog
+        isOpen={!!viewingAnalysis}
+        onOpenChange={(open: boolean) => !open && setViewingAnalysis(null)}
+        analysis={viewingAnalysis}
+      />
     </>
   );
 }

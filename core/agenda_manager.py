@@ -32,7 +32,9 @@ async def schedule_event(
     location: Optional[str] = None,
     attendee_ids: Optional[List[str]] = None,
     external_attendees: Optional[List[str]] = None,
-    event_id: Optional[int] = None
+    event_id: Optional[int] = None,
+    end_date: Optional[str] = None, # Nuevo campo
+    end_time: Optional[str] = None # Nuevo campo
 ) -> Tuple[bool, str, AgendaEvent | None]:
     """
     Crea un nuevo evento y lo guarda en la base de datos para un usuario o workspace.
@@ -87,9 +89,32 @@ async def schedule_event(
             except ValueError:
                 return False, f"Formato de fecha u hora inválido: {event_date} {event_time}", None
 
+            end_datetime_utc: Optional[datetime] = None
+            if end_date and end_time:
+                try:
+                    local_end_datetime_str = f"{end_date} {end_time}"
+                    naive_end_datetime = datetime.strptime(local_end_datetime_str, "%Y-%m-%d %H:%M")
+                    localized_end_dt = user_tz.localize(naive_end_datetime)
+                    end_datetime_utc = localized_end_dt.astimezone(pytz.utc)
+                    logger.info(f"[schedule_event] end_datetime_utc (antes de guardar): {end_datetime_utc}")
+                except ValueError:
+                    return False, f"Formato de fecha u hora de finalización inválido: {end_date} {end_time}", None
+            elif end_date: # Si solo se proporciona la fecha, la hora se asume como medianoche
+                try:
+                    local_end_datetime_str = f"{end_date} 00:00"
+                    naive_end_datetime = datetime.strptime(local_end_datetime_str, "%Y-%m-%d %H:%M")
+                    localized_end_dt = user_tz.localize(naive_end_datetime)
+                    end_datetime_utc = localized_end_dt.astimezone(pytz.utc)
+                    logger.info(f"[schedule_event] end_datetime_utc (antes de guardar): {end_datetime_utc}")
+                except ValueError:
+                    return False, f"Formato de fecha de finalización inválido: {end_date}", None
+
             now_utc = datetime.now(pytz.utc)
             if event_datetime_utc < now_utc:
                 return False, "No puedo programar eventos en el pasado. Por favor, elige una fecha y hora futura.", None
+            
+            if end_datetime_utc and end_datetime_utc < event_datetime_utc:
+                return False, "La fecha de finalización no puede ser anterior a la fecha de inicio.", None
 
             new_event = AgendaEvent(
                 id=event_id, # Usar el ID proporcionado o dejar que la base de datos lo genere
@@ -99,6 +124,7 @@ async def schedule_event(
                 description=description,
                 location=location,
                 event_datetime_utc=event_datetime_utc,
+                end_date=end_datetime_utc, # Asignar la fecha de finalización
                 is_active=True,
                 external_attendees=external_attendees if external_attendees else []
             )
@@ -354,6 +380,7 @@ async def update_event_db(
     description: Optional[str] = None,
     location: Optional[str] = None,
     event_datetime_utc: Optional[datetime] = None,
+    end_date: Optional[datetime] = None, # Nuevo campo
     attendee_ids: Optional[List[str]] = None,
     external_attendees: Optional[List[str]] = None,
     workspace_id: Optional[str] = None,
@@ -380,6 +407,8 @@ async def update_event_db(
             event.location = location
         if event_datetime_utc is not None:
             event.event_datetime_utc = event_datetime_utc
+        if end_date is not None: # Nuevo campo
+            event.end_date = end_date
         if workspace_id is not None:
             event.workspace_id = uuid.UUID(workspace_id) if workspace_id else None
         
@@ -501,6 +530,8 @@ async def update_task_db(
     summary: Optional[str] = None,
     description: Optional[str] = None,
     due_date: Optional[datetime] = None,
+    start_date: Optional[datetime] = None, # Nuevo campo
+    end_date: Optional[datetime] = None, # Nuevo campo
     is_completed: Optional[bool] = None,
     workspace_id: Optional[str] = None,
     linked_profiles: Optional[List[str]] = None, # Añadir linked_profiles
@@ -525,6 +556,10 @@ async def update_task_db(
             task.description = description
         if due_date is not None:
             task.due_date = due_date
+        if start_date is not None: # Nuevo campo
+            task.start_date = start_date
+        if end_date is not None: # Nuevo campo
+            task.end_date = end_date
         if is_completed is not None:
             task.is_completed = is_completed
         if workspace_id is not None:

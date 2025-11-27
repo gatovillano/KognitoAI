@@ -52,7 +52,7 @@ const InsightGeneratorForm: React.FC<InsightGeneratorFormProps> = ({ accountId }
 
                   description: `La tarea de insights ha sido iniciada con ID: ${response.data.task_id}. Puedes consultar su estado.`,
 
-                  variant: 'success',
+                  variant: 'default',
 
                 });
 

@@ -136,7 +136,7 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
 
       const response = await apiClient.post(endpoint, payload);
       toast.success(isEditing ? '¡Nota actualizada!' : '¡Nota creada!', { id: toastId });
-      
+
       const noteId = isEditing ? note.id : response.data.id;
       // Si hay un team_id seleccionado, compartimos la nota con el equipo
       if (values.team_id) {
@@ -144,37 +144,31 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
           noteIds: [noteId]
         });
         toast.success('Nota compartida con equipo!');
-      } else {
-        // Si no hay team_id seleccionado, eliminamos la compartición
-        try {
-          await apiClient.post(`/api/notes/${noteId}/unshare`, {});
-          toast.success('Nota ya no está compartida con ningún equipo.');
-        } catch (error) {
-          console.error("Error al descompartir la nota:", error);
-          toast.error('Error al descompartir la nota.');
-        }
       }
+      // La lógica de eliminar compartición de equipo se debe manejar de otra forma, 
+      // ya que /api/notes/:id/unshare desvincula del WORKSPACE, no del equipo.
+      // Por ahora, eliminamos este bloque para evitar el bug de desvinculación de workspace.
 
       // Llamamos al callback para actualizar la UI de la página principal
       // Si estamos editando, fusionamos los datos viejos y nuevos. Si no, usamos la respuesta de la API.
       // Aseguramos que team_shared se actualice basado en si hay un team_id seleccionado.
       const selectedWorkspace = workspaces.find(ws => ws.id === values.workspace_id);
 
-      const updatedNote = isEditing 
-        ? { 
-            ...note, 
-            ...values, 
-            team_shared: !!values.team_id,
-            workspace_name: selectedWorkspace?.name || '',
-            workspace_color: selectedWorkspace?.color || '',
-          }
+      const updatedNote = isEditing
+        ? {
+          ...note,
+          ...values,
+          team_shared: !!values.team_id,
+          workspace_name: selectedWorkspace?.name || '',
+          workspace_color: selectedWorkspace?.color || '',
+        }
         : {
-            ...response.data,
-            team_shared: !!values.team_id,
-            workspace_id: values.workspace_id, // Usar el valor del formulario para notas nuevas
-            workspace_name: selectedWorkspace?.name || '',
-            workspace_color: selectedWorkspace?.color || '',
-          };
+          ...response.data,
+          team_shared: !!values.team_id,
+          workspace_id: values.workspace_id, // Usar el valor del formulario para notas nuevas
+          workspace_name: selectedWorkspace?.name || '',
+          workspace_color: selectedWorkspace?.color || '',
+        };
       onSaveSuccess(updatedNote);
       onOpenChange(false);
     } catch (error) {
@@ -205,57 +199,57 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
             <ScrollArea className="h-[400px] pr-4">
               <div className="grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="title" render={({ field }) => (
-                <FormItem><FormLabel>Título</FormLabel><FormControl><Input placeholder="Título de la nota" {...field} /></FormControl><FormMessage /></FormItem>
+                  <FormItem><FormLabel>Título</FormLabel><FormControl><Input placeholder="Título de la nota" {...field} /></FormControl><FormMessage /></FormItem>
                 )} />
                 <FormField control={form.control} name="category" render={({ field }) => (
-                <FormItem><FormLabel>Categoría</FormLabel><FormControl><Input placeholder="Ej: Trabajo, Personal" {...field} value={field.value || ''} /></FormControl><FormMessage /></FormItem>
+                  <FormItem><FormLabel>Categoría</FormLabel><FormControl><Input placeholder="Ej: Trabajo, Personal" {...field} value={field.value || ''} /></FormControl><FormMessage /></FormItem>
                 )} />
-            </div>
-            <FormField control={form.control} name="workspace_id" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Workspace</FormLabel>
-                <FormControl>
-                  <select 
-                    className="w-full border rounded-md p-2"
-                    onChange={field.onChange} 
-                    value={field.value || ''}
-                    disabled={loadingWorkspaces}
-                  >
-                    <option value="">{loadingWorkspaces ? "Cargando workspaces..." : "Ninguno"}</option>
-                    {workspaces.map(workspace => (
-                      <option key={workspace.id} value={workspace.id}>
-                        {workspace.name}
-                      </option>
-                    ))}
-                  </select>
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="content" render={({ field }) => (
-              <FormItem><FormLabel>Contenido</FormLabel><FormControl><Textarea placeholder="Contenido de la nota" {...field} rows={10} /></FormControl><FormMessage /></FormItem>
-            )} />
-            <FormField control={form.control} name="team_id" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Compartir con Equipo</FormLabel>
-                <FormControl>
-                  <select 
-                    className="w-full border rounded-md p-2"
-                    onChange={field.onChange} 
-                    value={field.value || ''}
-                    disabled={loadingTeams}
-                  >
-                    <option value="">{loadingTeams ? "Cargando equipos..." : "Ninguno"}</option>
-                    {teams.map(team => (
-                      <option key={team.id} value={team.id.toString()}>
-                        {team.name}
-                      </option>
-                    ))}
-                  </select>
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
+              </div>
+              <FormField control={form.control} name="workspace_id" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Workspace</FormLabel>
+                  <FormControl>
+                    <select
+                      className="w-full border rounded-md p-2"
+                      onChange={field.onChange}
+                      value={field.value || ''}
+                      disabled={loadingWorkspaces}
+                    >
+                      <option value="">{loadingWorkspaces ? "Cargando workspaces..." : "Ninguno"}</option>
+                      {workspaces.map(workspace => (
+                        <option key={workspace.id} value={workspace.id}>
+                          {workspace.name}
+                        </option>
+                      ))}
+                    </select>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="content" render={({ field }) => (
+                <FormItem><FormLabel>Contenido</FormLabel><FormControl><Textarea placeholder="Contenido de la nota" {...field} rows={10} /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={form.control} name="team_id" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Compartir con Equipo</FormLabel>
+                  <FormControl>
+                    <select
+                      className="w-full border rounded-md p-2"
+                      onChange={field.onChange}
+                      value={field.value || ''}
+                      disabled={loadingTeams}
+                    >
+                      <option value="">{loadingTeams ? "Cargando equipos..." : "Ninguno"}</option>
+                      {teams.map(team => (
+                        <option key={team.id} value={team.id.toString()}>
+                          {team.name}
+                        </option>
+                      ))}
+                    </select>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
             </ScrollArea>
             <DialogFooter className="flex-col-reverse sm:flex-row sm:justify-between sm:space-x-2">
               <Button type="button" variant="outline" onClick={handleGoToAdvancedEditor}>

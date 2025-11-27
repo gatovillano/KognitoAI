@@ -8,6 +8,7 @@ from pydantic.v1 import BaseModel, Field
 
 from core.database import SessionLocal
 from core.notes_manager import NotesManager
+from utils.db_session import DBSession
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +38,9 @@ class UpdateNoteTool(BaseTool):
         **kwargs: Any,
     ) -> str:
         logger.info(f"Ejecutando UpdateNoteTool para nota {note_id} de cuenta {self.account_id[:8]}...")
+
         try:
-            async with SessionLocal() as session:
+            async with DBSession(SessionLocal) as session:
                 notes_manager = NotesManager(session)
                 success = await notes_manager.update_note(
                     account_id=self.account_id,

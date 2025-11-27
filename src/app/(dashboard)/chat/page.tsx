@@ -98,6 +98,7 @@ export default function NewChatPage() {
         onImageUpload={() => {}}
         selectedContext={selectedContext}
         onContextSelected={setSelectedContext}
+        isVectorizingFile={false} // Añadir la prop requerida
       />
       <WelcomeDialog isOpen={isWelcomeDialogOpen} onOpenChange={setIsWelcomeDialogOpen} />
     </>

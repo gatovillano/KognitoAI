@@ -4,7 +4,7 @@ import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
 from langchain_core.language_models.base import BaseLanguageModel
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.chat_models import ChatLiteLLM
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -33,17 +33,16 @@ async def initialize_llms():
     """
     global _main_agent_llm_instance, _fast_task_llm_instance
     
-    if not settings.google_api_key:
-        logger.error("FATAL ERROR! GOOGLE_API_KEY is not configured. The agent cannot function.")
-        raise ValueError("Google API key has not been configured.")
-
+    global _main_agent_llm_instance, _fast_task_llm_instance
+    
     try:
-        logger.info(f"🛠️ Initializing main agent LLM (ChatGoogleGenerativeAI - {settings.google_main_model_name})...")
-        main_llm = ChatGoogleGenerativeAI(
-            model=settings.google_main_model_name,
+        logger.info(f"🛠️ Initializing main agent LLM (LiteLLM - {settings.llm_model})...")
+        main_llm = ChatLiteLLM(
+            model=settings.llm_model,
             temperature=settings.llm_temperature,
-            google_api_key=settings.google_api_key,
-            streaming=True
+            streaming=True,
+            api_base=settings.llm_api_base, # Opcional, para Ollama/etc
+            verbose=True
         )
         _main_agent_llm_instance = main_llm
         logger.info("✅ Main agent LLM initialized.")
@@ -52,12 +51,13 @@ async def initialize_llms():
         raise
 
     try:
-        logger.info(f"🛠️ Initializing fast task LLM (ChatGoogleGenerativeAI - {settings.google_summary_model_name})...")
-        fast_llm = ChatGoogleGenerativeAI(
-            model=settings.google_summary_model_name,
+        logger.info(f"🛠️ Initializing fast task LLM (LiteLLM - {settings.fast_llm_model})...")
+        fast_llm = ChatLiteLLM(
+            model=settings.fast_llm_model,
             temperature=0.0,
-            google_api_key=settings.google_api_key,
-            streaming=True
+            streaming=True,
+            api_base=settings.llm_api_base,
+            verbose=True
         )
         _fast_task_llm_instance = fast_llm
         logger.info("✅ Fast task LLM initialized.")
@@ -98,6 +98,10 @@ async def get_enhanced_llm_response(
         llm = get_main_llm()
         if not llm:
             raise ValueError("LLM no inicializado")
+
+        # Log del modelo en uso
+        model_name = getattr(llm, 'model', 'unknown')
+        logger.info(f"🤖 ENHANCED RESPONSE: Usando modelo '{model_name}' para generar respuesta.")
 
         logger.info(f"📝 Prompt enviado al LLM: {enriched_prompt[:1000]}...") # Log del prompt
         response = await _invoke_llm_cached(llm, enriched_prompt)

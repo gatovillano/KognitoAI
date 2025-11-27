@@ -11,6 +11,7 @@ from sqlalchemy.ext.declarative import declarative_base
 
 # Importaciones del proyecto
 from core.database import SessionLocal, ChatThread
+from core.dependencies import get_db_session
 
 # --- Base y Modelo ORM para LangChain History ---
 # Se necesita una Base local porque la tabla de LangChain no está en nuestro Base de core.database
@@ -26,10 +27,7 @@ class LangchainChatMessage(Base):
     message = Column(JSONB, nullable=False)
 
 # --- Dependencia de FastAPI ---
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependencia de FastAPI para crear y limpiar una sesión de base de datos por petición."""
-    async with SessionLocal() as session:
-        yield session
+# get_db eliminado en favor de core.dependencies.get_db_session
 
 router = APIRouter()
 
@@ -55,7 +53,7 @@ class SearchResponse(BaseModel):
     messages: List[MessageSearchResult]
 
 @router.get("/search/all", response_model=SearchResponse)
-async def search_all(query: str = Query(..., min_length=3), db: AsyncSession = Depends(get_db)):
+async def search_all(query: str = Query(..., min_length=3), db: AsyncSession = Depends(get_db_session)):
     """
     Busca en todos los hilos de chat y mensajes.
     """

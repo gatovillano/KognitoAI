@@ -39,6 +39,9 @@ class TasksManager:
             "description": task.description,
             "is_completed": task.is_completed,
             "due_date": task.due_date.isoformat() if task.due_date else None,
+            "start_date": task.start_date.isoformat() if task.start_date else None, # Nuevo campo
+            "end_date": task.end_date.isoformat() if task.end_date else None, # Nuevo campo
+            "status": task.status,
             "created_at": task.created_at.isoformat(),
             "updated_at": task.updated_at.isoformat(),
             "account_id": str(task.account_id),
@@ -51,6 +54,8 @@ class TasksManager:
         account_id: str,
         description: str,
         due_date: Optional[datetime] = None,
+        start_date: Optional[datetime] = None, # Nuevo campo
+        end_date: Optional[datetime] = None, # Nuevo campo
         is_completed: Optional[bool] = False, # Añadido para consistencia con CalDAV
         workspace_id: Optional[str] = None,
         task_id: Optional[int] = None
@@ -63,6 +68,8 @@ class TasksManager:
             account_id=uuid.UUID(account_id),
             description=description,
             due_date=due_date,
+            start_date=start_date, # Nuevo campo
+            end_date=end_date, # Nuevo campo
             is_completed=is_completed,
             workspace_id=uuid.UUID(workspace_id) if workspace_id else None
         )
@@ -87,6 +94,7 @@ class TasksManager:
         account_id: str,
         workspace_id: Optional[str] = None,
         is_completed: Optional[bool] = None,
+        status: Optional[str] = None,
         search_term: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
@@ -99,6 +107,8 @@ class TasksManager:
             stmt = stmt.where(Task.workspace_id == uuid.UUID(workspace_id))
         if is_completed is not None:
             stmt = stmt.where(Task.is_completed == is_completed)
+        if status:
+            stmt = stmt.where(Task.status == status)
         if search_term:
             stmt = stmt.where(Task.description.ilike(f"%{search_term}%"))
 
@@ -116,8 +126,11 @@ class TasksManager:
         summary: Optional[str] = None, # Añadido summary para consistencia
         description: Optional[str] = None,
         due_date: Optional[datetime] = None,
+        start_date: Optional[datetime] = None, # Nuevo campo
+        end_date: Optional[datetime] = None, # Nuevo campo
         is_completed: Optional[bool] = None,
         workspace_id: Optional[str] = None,
+        status: Optional[str] = None,  # Añadido parámetro status
         linked_profiles: Optional[List[str]] = None,
     ) -> Optional[Task]: # Devolver el objeto Task
         """
@@ -140,10 +153,16 @@ class TasksManager:
             task.description = description
         if due_date is not None:
             task.due_date = due_date
+        if start_date is not None: # Nuevo campo
+            task.start_date = start_date
+        if end_date is not None: # Nuevo campo
+            task.end_date = end_date
         if is_completed is not None:
             task.is_completed = is_completed
         if workspace_id is not None:
             task.workspace_id = uuid.UUID(workspace_id) if workspace_id else None
+        if status is not None:
+            task.status = status
         
         # Lógica para linked_profiles
         if linked_profiles is not None:
@@ -282,6 +301,8 @@ async def create_task(
     account_id: str,
     description: str,
     due_date: Optional[datetime] = None,
+    start_date: Optional[datetime] = None, # Nuevo campo
+    end_date: Optional[datetime] = None, # Nuevo campo
     is_completed: Optional[bool] = False,
     workspace_id: Optional[str] = None,
     task_id: Optional[int] = None
@@ -290,7 +311,7 @@ async def create_task(
     async with DBSession(SessionLocal) as db:
         manager = TasksManager(db)
         try:
-            new_task = await manager.create_task(account_id, description, due_date, is_completed, workspace_id, task_id)
+            new_task = await manager.create_task(account_id, description, due_date, start_date, end_date, is_completed, workspace_id, task_id)
             return True, "Tarea creada exitosamente.", new_task
         except Exception as e:
             logger.error(f"Error al crear tarea: {e}", exc_info=True)
@@ -315,8 +336,11 @@ async def update_task_db(
     summary: Optional[str] = None,
     description: Optional[str] = None,
     due_date: Optional[datetime] = None,
+    start_date: Optional[datetime] = None, # Nuevo campo
+    end_date: Optional[datetime] = None, # Nuevo campo
     is_completed: Optional[bool] = None,
     workspace_id: Optional[str] = None,
+    status: Optional[str] = None,  # Añadido parámetro status
     linked_profiles: Optional[List[str]] = None,
 ) -> Optional[Task]:
     """Wrapper para TasksManager.update_task."""
@@ -324,7 +348,7 @@ async def update_task_db(
     try:
         # Convertir task_id a UUID
         task_uuid = uuid.UUID(task_id)
-        return await manager.update_task(account_id, task_uuid, summary, description, due_date, is_completed, workspace_id, linked_profiles)
+        return await manager.update_task(account_id, task_uuid, summary, description, due_date, start_date, end_date, is_completed, workspace_id, status, linked_profiles)
     except ValueError:
         logger.warning(f"ID de tarea inválido: {task_id}")
         return None

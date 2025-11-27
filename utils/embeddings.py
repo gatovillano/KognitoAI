@@ -55,11 +55,14 @@ async def initialize_embeddings():
         logger.info(f"✅ Modelo de embeddings de Ollama '{_embedding_model.model}' inicializado correctamente con base URL: {ollama_base_url_cleaned}") # type: ignore
     except Exception as e:
         logger.error(f"❌ Error al inicializar el modelo de embeddings de Ollama: {e}", exc_info=True)
-        
-        raise
+        # No relanzamos la excepción para permitir que la API arranque, pero logueamos el error crítico.
+        # El usuario verá errores cuando intente usar funciones que requieran embeddings.
+        logger.warning("⚠️ La API arrancará sin modelo de embeddings. Revisa OLLAMA_API_URL y asegúrate de que Ollama esté corriendo.")
+        return None
 
     if _embedding_model is None:
-        raise ValueError("No se pudo inicializar ningún modelo de embeddings. Revisa tus configuraciones y dependencias.")
+        logger.warning("⚠️ No se pudo inicializar ningún modelo de embeddings. Revisa tus configuraciones y dependencias.")
+        return None
 
     # No es necesario devolver _embedding_model directamente aquí, ya que es global.
     # Pero si otras partes del código lo esperan como retorno, podrías mantenerlo.

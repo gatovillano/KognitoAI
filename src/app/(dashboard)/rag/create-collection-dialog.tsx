@@ -18,7 +18,7 @@ interface CreateCollectionDialogProps {
 
 export function CreateCollectionDialog({ isOpen, onOpenChange, onCreateSuccess }: CreateCollectionDialogProps) {
   const params = useParams();
-  const workspaceId = params.id as string | undefined;
+  const workspaceId = params?.id as string | undefined;
 
   const [topicName, setTopicName] = useState('');
   const [description, setDescription] = useState('');

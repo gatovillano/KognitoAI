@@ -30,7 +30,8 @@ from utils.security import decode_access_token
 from utils.embeddings import initialize_embeddings
 from utils.audio_transcriber import load_whisper_model
 from utils.ascii_logo import print_startup_logo
-from api.users import get_current_admin_account, get_db # Importar dependencias de users
+from api.users import get_current_admin_account # Importar dependencias de users
+from core.dependencies import get_db_session # Importar get_db_session
 from utils.tool_scheduler import tool_scheduler # Importar tool_scheduler
 from utils.scheduled_tools_manager import scheduled_tools_manager # Importar scheduled_tools_manager
 from telegram_client.bot_manager import bot_manager # Importar bot_manager
@@ -273,7 +274,7 @@ app.include_router(telegram_router, prefix="", tags=["telegram"])
 app.include_router(logs_router, prefix="/api", tags=["logs"])
 app.include_router(scheduled_tools_router, prefix="/api", tags=["scheduled-tools"])
 app.include_router(tasks_router, prefix="/api", tags=["tasks"]) # Incluir el router de tasks
-app.include_router(knowledge_graph_router, prefix="/api", tags=["knowledge-graph"])
+app.include_router(knowledge_graph_router, prefix="/api/knowledge-graph", tags=["knowledge-graph"])
 app.include_router(graph_router, prefix="/api", tags=["graph"])
 app.include_router(search_router, prefix="/api", tags=["search"])
 app.include_router(galleries_router, prefix="/api/galleries", tags=["galleries"])
@@ -289,7 +290,7 @@ class AdminMetricsResponse(BaseModel):
 @app.get("/api/admin/metrics", response_model=AdminMetricsResponse, summary="Obtener métricas del sistema (solo admin)")
 async def get_admin_metrics(
     admin_account: Account = Depends(get_current_admin_account),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Obtiene métricas clave del sistema para el panel de administración.

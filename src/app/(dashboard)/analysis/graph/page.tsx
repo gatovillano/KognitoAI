@@ -1,10 +1,12 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Loader2, Info, RefreshCcw, Search, ExternalLink, Brain, Network, GitGraph } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Loader2, Info, RefreshCcw, Search, ExternalLink, Brain, Network, GitGraph, Database, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import dynamic from 'next/dynamic';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -22,17 +24,30 @@ const GraphVisualization = dynamic(() => import('@/components/KnowledgeGraph/Gra
 });
 
 // Hook personalizado para el grafo de conocimiento
-const useKnowledgeGraph = (maxNodes: number, maxHops: number) => {
+const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: string) => {
   const [graphData, setGraphData] = useState<{ nodes: any[], edges: any[] } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [processingStatus, setProcessingStatus] = useState<string | null>(null);
+  const [availableDatasets, setAvailableDatasets] = useState<Array<{ name: string, node_count: number }>>([]);
+
+  const loadAvailableDatasets = useCallback(async () => {
+    try {
+      const response = await apiClient.get('/api/knowledge-graph/datasets?workspace_id=all');
+      if (response.data.success && response.data.data?.datasets) {
+        setAvailableDatasets(response.data.data.datasets);
+      }
+    } catch (err) {
+      console.error('Error loading datasets:', err);
+    }
+  }, []);
 
   const loadGraphData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await apiClient.get(`/api/knowledge-graph/data?workspace_id=all&limit=${maxNodes}&max_hops=${maxHops}`);
+      const datasetParam = selectedDataset !== 'all' ? `&dataset_name=${encodeURIComponent(selectedDataset)}` : '';
+      const response = await apiClient.get(`/api/knowledge-graph/data?workspace_id=all&limit=${maxNodes}&max_hops=${maxHops}${datasetParam}`);
       if (response.data.success) {
         setGraphData(response.data.data);
       } else {
@@ -44,7 +59,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number) => {
     } finally {
       setIsLoading(false);
     }
-  }, [maxNodes, maxHops]);
+  }, [maxNodes, maxHops, selectedDataset]);
 
   const processKnowledgeGraph = useCallback(async () => {
     setIsLoading(true);
@@ -78,13 +93,15 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number) => {
 
   useEffect(() => {
     loadGraphData();
-  }, [loadGraphData]);
+    loadAvailableDatasets();
+  }, [loadGraphData, loadAvailableDatasets]);
 
   return {
     graphData,
     isLoading,
     error,
     processingStatus,
+    availableDatasets,
     loadGraphData,
     processKnowledgeGraph,
     refreshGraphData,
@@ -94,20 +111,23 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number) => {
 };
 
 export default function KnowledgeGraphPage() {
+  const router = useRouter();
   const [graphQuery, setGraphQuery] = useState('');
   const [maxNodes, setMaxNodes] = useState(25);
   const [maxHops, setMaxHops] = useState(2);
+  const [selectedDataset, setSelectedDataset] = useState('all');
 
   const {
     graphData,
     isLoading,
     error,
     processingStatus,
+    availableDatasets,
     processKnowledgeGraph,
     refreshGraphData,
     searchGraph,
     clearError,
-  } = useKnowledgeGraph(maxNodes, maxHops);
+  } = useKnowledgeGraph(maxNodes, maxHops, selectedDataset);
   const [searchResults, setSearchResults] = useState<any[]>([]);
 
   useEffect(() => {
@@ -190,6 +210,9 @@ export default function KnowledgeGraphPage() {
   return (
     <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-8">
       <div className="flex items-center gap-2">
+        <Button variant="ghost" size="icon" onClick={() => router.push('/analysis')} className="h-8 w-8 text-muted-foreground">
+          <ArrowLeft className="h-5 w-5" />
+        </Button>
         <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
           Grafos de Conocimiento
         </h1>
@@ -246,7 +269,28 @@ export default function KnowledgeGraphPage() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+            <div>
+              <Label htmlFor="dataset-select" className="mb-2 block flex items-center gap-2">
+                <Database className="h-4 w-4" />
+                Dataset
+              </Label>
+              <Select value={selectedDataset} onValueChange={setSelectedDataset}>
+                <SelectTrigger id="dataset-select" className="w-full">
+                  <SelectValue placeholder="Seleccionar dataset" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">
+                    Todos los datasets ({availableDatasets.reduce((sum, d) => sum + d.node_count, 0)} nodos)
+                  </SelectItem>
+                  {availableDatasets.map((dataset) => (
+                    <SelectItem key={dataset.name} value={dataset.name}>
+                      {dataset.name} ({dataset.node_count} nodos)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div>
               <Label htmlFor="max-nodes" className="mb-2 block">Máximo de Nodos: {maxNodes}</Label>
               <Input

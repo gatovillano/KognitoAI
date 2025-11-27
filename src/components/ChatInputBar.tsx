@@ -159,6 +159,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     isWebSearchForcedState,
     isComprehensiveAnalysisForcedState,
     isDeepResearchForcedState,
+    setNewMessage, // Added setNewMessage
   ]);
 
   const handleAttachNote = useCallback((note: { title?: string; content: string }) => {

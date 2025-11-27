@@ -12,26 +12,23 @@ from sqlalchemy import select, func
 
 from core.database import Account
 
-from core.database import SessionLocal, Workspace, ChatThread, WorkspacePermission
+from core.database import SessionLocal, Workspace, ChatThread, WorkspacePermission, Task, AgendaEvent
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.agent import create_thread_for_account, force_update_thread_title
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain_core.messages import HumanMessage, AIMessage
 from core.config import settings
+from api.tasks import list_tasks as get_tasks_from_api
+from api.agenda import _get_events_logic as get_events_from_api
+from core.dependencies import get_db_session # Importar dependencia centralizada
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session:  # type: ignore
-        try:
-            yield session
-        finally:
-            await session.close()
+# get_db eliminado en favor de core.dependencies.get_db_session
 
 
 async def check_workspace_permission(
@@ -79,7 +76,7 @@ class WorkspaceUpdateRequest(BaseModel):
  
 # --- Modelos Pydantic para Compartir Workspaces ---
 class ShareWorkspaceRequest(BaseModel):
-    account_id: uuid.UUID
+    email: str # Cambiado de account_id
     role: str = Field(..., pattern="^(owner|editor|viewer)$") # Validar que el rol sea uno de los permitidos
 
 class UpdateWorkspacePermissionRequest(BaseModel):
@@ -87,7 +84,7 @@ class UpdateWorkspacePermissionRequest(BaseModel):
 
 class PermissionResponse(BaseModel):
    account_id: str
-   email: str
+   email: Optional[str]
    role: str
 
 # --- Endpoints para Workspaces ---
@@ -98,7 +95,7 @@ class PaginatedWorkspacesResponse(BaseModel):
 @router.get("/workspaces", response_model=PaginatedWorkspacesResponse, summary="Listar workspaces del usuario con paginación")
 async def list_workspaces(
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_session),
     skip: int = Query(0, ge=0, description="Número de elementos a omitir"),
     limit: int = Query(10, ge=1, le=100, description="Número máximo de elementos a devolver")
 ):
@@ -123,7 +120,7 @@ async def list_workspaces(
     )
 
 @router.get("/workspaces/{workspace_id}", response_model=WorkspaceResponse, summary="Obtener detalles de un workspace")
-async def get_workspace(workspace_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def get_workspace(workspace_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     workspace_uuid = uuid.UUID(workspace_id)
     account_uuid = uuid.UUID(current_account_id)
 
@@ -135,7 +132,7 @@ async def get_workspace(workspace_id: str, current_account_id: str = Depends(get
     return WorkspaceResponse(id=str(workspace.id), name=workspace.name, system_prompt=workspace.system_prompt, color=workspace.color, created_at=workspace.created_at)
 
 @router.post("/workspaces", response_model=WorkspaceResponse, status_code=status.HTTP_201_CREATED, summary="Crear un nuevo workspace")
-async def create_workspace(request: WorkspaceCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def create_workspace(request: WorkspaceCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     new_workspace = Workspace(
         account_id=uuid.UUID(current_account_id),
         name=request.name,
@@ -157,7 +154,7 @@ async def create_workspace(request: WorkspaceCreateRequest, current_account_id: 
     return WorkspaceResponse(id=str(new_workspace.id), name=new_workspace.name, system_prompt=new_workspace.system_prompt, color=new_workspace.color, created_at=new_workspace.created_at)  # type: ignore
 
 @router.put("/workspaces/{workspace_id}", response_model=WorkspaceResponse, summary="Actualizar un workspace")
-async def update_workspace(workspace_id: str, request: WorkspaceUpdateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def update_workspace(workspace_id: str, request: WorkspaceUpdateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     workspace_uuid = uuid.UUID(workspace_id)
     account_uuid = uuid.UUID(current_account_id)
 
@@ -176,7 +173,7 @@ async def update_workspace(workspace_id: str, request: WorkspaceUpdateRequest, c
     return WorkspaceResponse(id=str(workspace.id), name=workspace.name, system_prompt=workspace.system_prompt, color=workspace.color, created_at=workspace.created_at)
 
 @router.delete("/workspaces/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Eliminar un workspace")
-async def delete_workspace(workspace_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def delete_workspace(workspace_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     workspace_uuid = uuid.UUID(workspace_id)
     account_uuid = uuid.UUID(current_account_id)
 
@@ -196,19 +193,26 @@ async def share_workspace(
     workspace_id: str,
     request: ShareWorkspaceRequest,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
-    workspace_uuid = uuid.UUID(workspace_id)
+    workspace_uuid = uuid.UUID(workspace_id) # Convertir a UUID
     current_account_uuid = uuid.UUID(current_account_id)
-    invited_account_uuid = request.account_id
+
+    # NEW: Look up account by email
+    invited_user_email = request.email
+    invited_account = await db.scalar(select(Account).where(func.lower(Account.email) == func.lower(invited_user_email)))
+    if not invited_account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Usuario con email '{invited_user_email}' no encontrado.")
+
+    invited_account_uuid = invited_account.id
 
     # 1. Verificar permisos del usuario actual (owner o editor)
     await check_workspace_permission(db, workspace_uuid, current_account_uuid, required_roles=['owner', 'editor'])
 
-    # 2. Verificar que el account_id del invitado existe
-    account_exists = await db.scalar(select(Account).where(Account.id == invited_account_uuid))
-    if not account_exists:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="El usuario invitado no existe.")
+    # 2. Verificar que el account_id del invitado existe (ya se hizo con la búsqueda por email)
+    # account_exists = await db.scalar(select(Account).where(Account.id == invited_account_uuid))
+    # if not account_exists:
+    #     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="El usuario invitado no existe.")
 
     # 3. Verificar si ya existe una entrada en WorkspacePermission para este workspace_id y account_id
     existing_permission = await db.scalar(
@@ -243,7 +247,7 @@ async def update_workspace_permission(
     account_id: str,
     request: UpdateWorkspacePermissionRequest,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     workspace_uuid = uuid.UUID(workspace_id)
     account_to_modify_uuid = uuid.UUID(account_id)
@@ -289,7 +293,7 @@ async def update_workspace_permission(
 async def get_workspace_permissions(
     workspace_id: str,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     workspace_uuid = uuid.UUID(workspace_id)
     current_account_uuid = uuid.UUID(current_account_id)
@@ -325,7 +329,7 @@ async def delete_workspace_permission(
     workspace_id: str,
     account_id: str,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     workspace_uuid = uuid.UUID(workspace_id)
     account_to_remove_uuid = uuid.UUID(account_id)
@@ -363,3 +367,39 @@ async def delete_workspace_permission(
         await db.rollback()
         logger.error(f"Error al revocar el acceso del workspace: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor al revocar el acceso del workspace.")
+
+@router.get("/workspaces/{workspace_id}/items", summary="Listar todos los items de un workspace (tareas y eventos)")
+async def list_workspace_items(
+    workspace_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Lista todas las tareas y eventos de la agenda asociados a un workspace específico.
+    """
+    # Verificar permisos para el workspace
+    workspace_uuid = uuid.UUID(workspace_id)
+    account_uuid = uuid.UUID(current_account_id)
+    await check_workspace_permission(db, workspace_uuid, account_uuid, required_roles=['owner', 'editor', 'viewer'])
+
+    # Obtener tareas
+    from core.tasks_manager import TasksManager
+    tasks_manager = TasksManager(db)
+    tasks = await get_tasks_from_api(current_account_id=current_account_id, workspace_id=workspace_id, tasks_manager=tasks_manager)
+    
+    # Obtener eventos
+    events = await get_events_from_api(current_account_id=current_account_id, workspace_id=workspace_id, db=db)
+
+    # Añadir un campo 'type' y combinar
+    items = []
+    for task in tasks:
+        task_dict = task
+        task_dict['type'] = 'task'
+        items.append(task_dict)
+    
+    for event in events:
+        event_dict = event # asumiendo que ya es un dict
+        event_dict['type'] = 'event'
+        items.append(event_dict)
+
+    return items

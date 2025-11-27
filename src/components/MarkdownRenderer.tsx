@@ -5,7 +5,7 @@ import { marked } from 'marked';
 import { sentImage } from '@/lib/imageUtils';
 import { toast } from 'sonner';
 import Prism from 'prismjs';
-import 'prismjs/themes/prism-dark.css';
+import 'prismjs/themes/prism-okaidia.css';
 
 // Importar lenguajes de programación comunes
 import 'prismjs/components/prism-docker';
@@ -124,8 +124,8 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
 
     try {
       const renderer = new marked.Renderer();
-      renderer.html = function({ text }) { return text; };
-      renderer.code = function({ text, lang }) {
+      renderer.html = function ({ text }) { return text; };
+      renderer.code = function ({ text, lang }) {
         if (lang === 'mermaid') {
           return `<div class="mermaid-code-block" data-mermaid-code="${encodeURIComponent(text)}"></div>`;
         }
@@ -139,7 +139,7 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
         };
         if (language === 'markup-templating') language = 'markup';
         else if (languageMap[language]) language = languageMap[language];
-        
+
         let prismLanguage = Prism.languages[language];
         if (!prismLanguage) {
           console.warn(`Language '${language}' not found in Prism, falling back to markup.`);
@@ -147,7 +147,7 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
           language = 'markup';
         }
         const finalLanguage = prismLanguage || Prism.languages.markup;
-        
+
         let highlightedCode = text;
         try {
           if (finalLanguage) {
@@ -165,159 +165,159 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
         if (match) html = match[1];
       }
 
-                  if (!contentParts) {
+      if (!contentParts) {
 
-                    return html;
+        return html;
 
-                  }
+      }
 
-      
 
-            const citationMap = new Map(contentParts
 
-              .filter(p => p.type === 'citation' && p.source && p.citationNumber !== undefined)
+      const citationMap = new Map(contentParts
 
-              .map(p => [`[${p.citationNumber}]`, p]));
+        .filter(p => p.type === 'citation' && p.source && p.citationNumber !== undefined)
 
-      
+        .map(p => [`[${p.citationNumber}]`, p]));
 
-            const regex = /(\[\d+\])/g;
 
-            
 
-            // Replace citation markers with placeholder spans
+      const regex = /(\[\d+\])/g;
 
-            const finalHtml = html.replace(regex, (match) => {
 
-              const citationPart = citationMap.get(match);
 
-              if (citationPart && citationPart.source) {
+      // Replace citation markers with placeholder spans
 
-                // Render a placeholder span that we will hydrate on the client
+      const finalHtml = html.replace(regex, (match) => {
 
-                return `<span class="source-button-placeholder" data-citation-number="${citationPart.citationNumber}"></span>`;
+        const citationPart = citationMap.get(match);
 
-              }
+        if (citationPart && citationPart.source) {
 
-              return match;
+          // Render a placeholder span that we will hydrate on the client
 
-            });
+          return `<span class="source-button-placeholder" data-citation-number="${citationPart.citationNumber}"></span>`;
 
-      
+        }
 
-            return finalHtml; // Return the raw HTML string
+        return match;
 
-          } catch (error: any) {
+      });
 
-            console.error("Error parsing markdown:", error);
 
-            return `<p>Error rendering content: ${error.message || error}</p>`;
+
+      return finalHtml; // Return the raw HTML string
+
+    } catch (error: any) {
+
+      console.error("Error parsing markdown:", error);
+
+      return `<p>Error rendering content: ${error.message || error}</p>`;
+
+    }
+
+  }, [content, contentParts, inline]);
+
+
+
+  useEffect(() => {
+
+    if (isStreaming) return;
+
+
+
+    const hydrateSourceButtons = () => {
+
+      if (!containerRef.current || !contentParts) return;
+
+
+
+      const citationMap = new Map(contentParts
+
+        .filter(p => p.type === 'citation' && p.source && p.citationNumber !== undefined)
+
+        .map(p => [p.citationNumber, p.source]));
+
+
+
+      const placeholders = Array.from(containerRef.current.querySelectorAll('.source-button-placeholder'));
+
+
+
+      placeholders.forEach((placeholder) => {
+
+
+
+        // Defer each hydration to a separate macrotask to prevent
+
+
+
+        // one component's render (and its side-effects like portals)
+
+
+
+        // from interfering with the iteration of the next one.
+
+
+
+        setTimeout(() => {
+
+
+
+          // Avoid re-hydrating if a root is already attached
+
+
+
+          if (placeholder.hasAttribute('data-hydrated')) return;
+
+
+
+
+
+
+
+          const citationNumber = parseInt(placeholder.getAttribute('data-citation-number') || '0', 10);
+
+
+
+          const source = citationMap.get(citationNumber);
+
+
+
+
+
+
+
+          if (source) {
+
+
+
+            const root = createRoot(placeholder);
+
+
+
+            root.render(<SourceButton source={source} citationNumber={citationNumber} />);
+
+
+
+            placeholder.setAttribute('data-hydrated', 'true');
+
+
 
           }
 
-        }, [content, contentParts, inline]);
 
-      
 
-        useEffect(() => {
+        }, 0);
 
-          if (isStreaming) return;
 
-      
 
-          const hydrateSourceButtons = () => {
+      });
 
-            if (!containerRef.current || !contentParts) return;
+    };
 
-            
 
-            const citationMap = new Map(contentParts
 
-              .filter(p => p.type === 'citation' && p.source && p.citationNumber !== undefined)
-
-              .map(p => [p.citationNumber, p.source]));
-
-      
-
-            const placeholders = Array.from(containerRef.current.querySelectorAll('.source-button-placeholder'));
-
-            
-
-                  placeholders.forEach((placeholder) => {
-
-            
-
-                    // Defer each hydration to a separate macrotask to prevent
-
-            
-
-                    // one component's render (and its side-effects like portals)
-
-            
-
-                    // from interfering with the iteration of the next one.
-
-            
-
-                    setTimeout(() => {
-
-            
-
-                      // Avoid re-hydrating if a root is already attached
-
-            
-
-                      if (placeholder.hasAttribute('data-hydrated')) return;
-
-            
-
-            
-
-            
-
-                      const citationNumber = parseInt(placeholder.getAttribute('data-citation-number') || '0', 10);
-
-            
-
-                      const source = citationMap.get(citationNumber);
-
-            
-
-            
-
-            
-
-                      if (source) {
-
-            
-
-                        const root = createRoot(placeholder);
-
-            
-
-                        root.render(<SourceButton source={source} citationNumber={citationNumber} />);
-
-            
-
-                        placeholder.setAttribute('data-hydrated', 'true');
-
-            
-
-                      }
-
-            
-
-                    }, 0);
-
-            
-
-                  });
-
-          };
-
-      
-
-          const setupCodeBlocks = () => {
+    const setupCodeBlocks = () => {
       if (!containerRef.current) return;
       const codeBlocks = containerRef.current.querySelectorAll('pre code:not([data-buttons-added="true"])');
       codeBlocks.forEach((block, index) => {
@@ -328,7 +328,7 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
         const codeBlockIndex = `codeblock-${index}`;
 
         const footer = document.createElement('div');
-        footer.className = 'flex items-center justify-between px-4 py-2 bg-muted/30 border-t border-border/20 rounded-b-2xl';
+        footer.className = 'flex items-center justify-between px-4 py-2 bg-white/5 border-t border-white/10 rounded-b-2xl';
         const languageLabel = document.createElement('span');
         languageLabel.className = 'text-xs font-medium text-muted-foreground uppercase tracking-wide';
         languageLabel.textContent = language;
@@ -337,7 +337,7 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
 
         if (language === 'html') {
           const previewBtn = document.createElement('button');
-          previewBtn.className = 'inline-flex items-center justify-center text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground h-7 px-3 rounded-md border border-border/30 bg-background/50 mr-2';
+          previewBtn.className = 'inline-flex items-center justify-center text-xs font-medium transition-colors hover:bg-white/10 hover:text-white h-7 px-3 rounded-md border border-white/10 bg-transparent mr-2 text-gray-300';
           previewBtn.innerHTML = '👁️ Previsualizar';
           previewBtn.onclick = () => handlePreview(codeText);
           buttonsWrapper.appendChild(previewBtn);
@@ -345,7 +345,7 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
 
         const copyBtn = document.createElement('button');
         copyBtn.id = `copy-btn-${codeBlockIndex}`;
-        copyBtn.className = 'inline-flex items-center justify-center text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground h-7 px-3 rounded-md border border-border/30 bg-background/50';
+        copyBtn.className = 'inline-flex items-center justify-center text-xs font-medium transition-colors hover:bg-white/10 hover:text-white h-7 px-3 rounded-md border border-white/10 bg-transparent text-gray-300';
         copyBtn.innerHTML = copiedStates[codeBlockIndex] ? '✓ Copiado' : '📋 Copiar';
         copyBtn.onclick = () => handleCopy(codeText, codeBlockIndex);
         buttonsWrapper.appendChild(copyBtn);
@@ -353,7 +353,7 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
         footer.appendChild(languageLabel);
         footer.appendChild(buttonsWrapper);
         wrapper.appendChild(footer);
-        wrapper.className = 'backdrop-blur-md rounded-2xl border border-border/20 bg-muted/50';
+        wrapper.className = 'backdrop-blur-md rounded-2xl border border-border/20 bg-[#1e1e1e] my-4 overflow-hidden';
         wrapper.style.backgroundColor = '';
         (block as HTMLElement).style.color = '';
         block.setAttribute('data-buttons-added', 'true');
@@ -419,10 +419,10 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
     }
   }, [fontSize]);
 
-  const containerClass = inline 
-    ? `${fontSize} text-foreground` 
+  const containerClass = inline
+    ? `${fontSize} text-foreground`
     : `${proseSizeClass} max-w-none text-foreground`;
-  
+
   const ContainerElement = inline ? 'span' : 'div';
 
   return (

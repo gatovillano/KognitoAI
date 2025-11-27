@@ -57,12 +57,13 @@ class HybridGraphProcessor:
             # Priorizar modelo en español
             model_name = "es_core_news_sm"  # Modelo pequeño para español (~15MB)
             try:
-                self.spacy_model = spacy.load(model_name, disable=["parser", "lemmatizer"])
+                # Solo deshabilitar lemmatizer, mantener parser para noun_chunks
+                self.spacy_model = spacy.load(model_name, disable=["lemmatizer"])
                 logger.info(f"✅ spaCy modelo español cargado: {model_name}")
             except OSError:
                 logger.info(f"📥 Descargando modelo spaCy español: {model_name}")
                 download(model_name)
-                self.spacy_model = spacy.load(model_name, disable=["parser", "lemmatizer"])
+                self.spacy_model = spacy.load(model_name, disable=["lemmatizer"])
                 logger.info(f"✅ spaCy modelo español descargado y cargado: {model_name}")
 
         except Exception as e:
@@ -71,40 +72,37 @@ class HybridGraphProcessor:
                 import spacy
                 model_name = "en_core_web_sm"
                 try:
-                    self.spacy_model = spacy.load(model_name, disable=["parser", "lemmatizer"])
+                    self.spacy_model = spacy.load(model_name, disable=["lemmatizer"])
                     logger.info(f"✅ spaCy modelo inglés cargado (fallback): {model_name}")
                 except OSError:
                     logger.info(f"📥 Descargando modelo spaCy inglés (fallback): {model_name}")
                     spacy.cli.download(model_name)
-                    self.spacy_model = spacy.load(model_name, disable=["parser", "lemmatizer"])
+                    self.spacy_model = spacy.load(model_name, disable=["lemmatizer"])
                     logger.info(f"✅ spaCy modelo inglés descargado y cargado (fallback): {model_name}")
             except Exception as e2:
                 logger.error(f"❌ Error inicializando spaCy: {e2}")
                 raise
     
     async def _initialize_sentence_transformers(self):
-        """Inicializa SentenceTransformers con modelo pequeño."""
+        """Inicializa el modelo de embeddings usando Ollama."""
         try:
-            from sentence_transformers import SentenceTransformer
-
-            # Usar modelo multilingüe que funciona bien con español
-            model_name = "paraphrase-multilingual-MiniLM-L12-v2"  # Soporta español
-            logger.info(f"📥 Cargando SentenceTransformer multilingüe: {model_name}")
-
-            # Configurar cache local para evitar re-descargas
-            import os
-            cache_dir = "/app/.cache/sentence_transformers"
-            os.makedirs(cache_dir, exist_ok=True)
-
-            self.sentence_transformer = SentenceTransformer(
-                model_name,
-                cache_folder=cache_dir,
-                device='cpu'  # Forzar CPU para menor uso de memoria
-            )
-            logger.info(f"✅ SentenceTransformer multilingüe cargado: {model_name}")
+            from utils.embeddings import get_embedding_model, initialize_embeddings
+            
+            logger.info("📥 Inicializando modelo de embeddings con Ollama...")
+            
+            # Inicializar el modelo de embeddings si no está ya inicializado
+            await initialize_embeddings()
+            
+            # Obtener la instancia del modelo
+            self.sentence_transformer = get_embedding_model()
+            
+            if self.sentence_transformer is None:
+                raise ValueError("No se pudo obtener el modelo de embeddings de Ollama")
+            
+            logger.info(f"✅ Modelo de embeddings Ollama inicializado: {self.sentence_transformer.model}")
 
         except Exception as e:
-            logger.error(f"❌ Error inicializando SentenceTransformers: {e}")
+            logger.error(f"❌ Error inicializando embeddings de Ollama: {e}")
             raise
 
     def set_save_callback(self, callback):
@@ -112,13 +110,62 @@ class HybridGraphProcessor:
         self._save_callback = callback
         logger.info("💾 Callback de guardado configurado")
     
-    async def process_documents(self, documents: List[Dict[str, Any]], dataset_name: str) -> Dict[str, Any]:
+    def _add_tenant_ids(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Agrega account_id, workspace_id y dataset_name a un diccionario de datos (entidad o relación).
+        
+        Args:
+            data: Diccionario de entidad o relación
+            
+        Returns:
+            El mismo diccionario con los IDs y dataset_name agregados
+        """
+        if hasattr(self, 'account_id') and self.account_id:
+            data["account_id"] = self.account_id
+        if hasattr(self, 'workspace_id') and self.workspace_id:
+            data["workspace_id"] = self.workspace_id
+        if hasattr(self, 'dataset_name') and self.dataset_name:
+            data["dataset_name"] = self.dataset_name
+        return data
+    
+    async def _get_embeddings(self, texts: List[str]):
+        """
+        Genera embeddings para una lista de textos usando Ollama.
+        
+        Args:
+            texts: Lista de textos para generar embeddings
+            
+        Returns:
+            Array numpy con los embeddings
+        """
+        import numpy as np
+        
+        if not texts:
+            return np.array([])
+        
+        # Generar embeddings de manera async
+        embeddings = []
+        for text in texts:
+            embedding = await self.sentence_transformer.aembed_query(text)
+            embeddings.append(embedding)
+        
+        return np.array(embeddings)
+    
+    async def process_documents(
+        self, 
+        documents: List[Dict[str, Any]], 
+        dataset_name: str,
+        account_id: Optional[str] = None,
+        workspace_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Procesa documentos usando el pipeline híbrido.
         
         Args:
             documents: Lista de documentos con contenido
             dataset_name: Nombre del dataset
+            account_id: ID de la cuenta del usuario (para multi-tenancy)
+            workspace_id: ID del workspace (para organización)
             
         Returns:
             Dict con entidades, relaciones y metadatos del grafo
@@ -126,7 +173,15 @@ class HybridGraphProcessor:
         if not self.initialized:
             await self.initialize()
         
+        # Almacenar IDs y dataset_name para usarlos en la creación de entidades/relaciones
+        self.account_id = account_id
+        self.workspace_id = workspace_id
+        self.dataset_name = dataset_name
+        
         logger.info(f"🧠 Iniciando procesamiento híbrido de {len(documents)} documentos")
+        logger.info(f"   📋 Account ID: {account_id}")
+        logger.info(f"   📁 Workspace ID: {workspace_id}")
+        logger.info(f"   📦 Dataset: {dataset_name}")
         
         try:
             # Fase 1: Extracción de entidades con spaCy
@@ -236,7 +291,7 @@ class HybridGraphProcessor:
                 entity_key = f"{ent.text.lower()}_{ent.label_}"
                 if entity_key not in entity_set and len(ent.text.strip()) > 2:
                     entity_set.add(entity_key)
-                    entities.append({
+                    entity_data = self._add_tenant_ids({
                         "id": f"entity_{len(entities)}",
                         "name": ent.text.strip(),
                         "type": ent.label_,
@@ -245,6 +300,7 @@ class HybridGraphProcessor:
                         "confidence": 0.9,  # spaCy es bastante confiable
                         "extraction_method": "spacy_ner"
                     })
+                    entities.append(entity_data)
             
             # Extraer conceptos semánticos más ricos
             await self._extract_semantic_concepts(spacy_doc, doc, i, entities, entity_set)
@@ -305,24 +361,36 @@ class HybridGraphProcessor:
         entity_texts = [f"{e['name']} {e['description']}" for e in named_entities]
 
         if concept_texts and entity_texts:
-            concept_embeddings = self.sentence_transformer.encode(concept_texts)
-            entity_embeddings = self.sentence_transformer.encode(entity_texts)
+            concept_embeddings = await self._get_embeddings(concept_texts)
+            entity_embeddings = await self._get_embeddings(entity_texts)
 
             # Calcular similitudes cruzadas
             from sklearn.metrics.pairwise import cosine_similarity
+            import numpy as np
+            
             cross_similarities = cosine_similarity(concept_embeddings, entity_embeddings)
 
-            # Crear relaciones con umbral más alto para mayor calidad
+            # OPTIMIZACIÓN: En lugar de iterar sobre TODAS las combinaciones,
+            # solo tomamos las top-k más similares para cada concepto
             threshold = 0.7
+            max_relations_per_concept = 5  # Limitar a las 5 relaciones más fuertes por concepto
+            
+            logger.info(f"⚡ Optimizando: buscando top-{max_relations_per_concept} relaciones por concepto")
+            
             for i, concept in enumerate(concepts):
-                for j, entity in enumerate(named_entities):
-                    similarity = cross_similarities[i][j]
+                # Obtener los índices de las entidades más similares para este concepto
+                similarities_for_concept = cross_similarities[i]
+                top_indices = np.argsort(similarities_for_concept)[-max_relations_per_concept:][::-1]
+                
+                for j in top_indices:
+                    similarity = similarities_for_concept[j]
 
                     if similarity > threshold:
+                        entity = named_entities[j]
                         # Determinar tipo de relación más específico
                         rel_type = self._determine_relationship_type(concept, entity, similarity)
 
-                        relationships.append({
+                        relationships.append(self._add_tenant_ids({
                             "id": f"concept_rel_{len(relationships)}",
                             "source_entity_id": concept["id"],
                             "target_entity_id": entity["id"],
@@ -331,7 +399,9 @@ class HybridGraphProcessor:
                             "description": f"{concept['name']} está relacionado con {entity['name']}",
                             "confidence": float(similarity),
                             "extraction_method": "semantic_concept_entity"
-                        })
+                        }))
+            
+            logger.info(f"✅ Creadas {len([r for r in relationships if r.get('extraction_method') == 'semantic_concept_entity'])} relaciones concepto-entidad")
 
     async def _create_concept_similarity_relationships(self, entities_by_type, relationships):
         """Crea relaciones entre conceptos similares."""
@@ -348,20 +418,32 @@ class HybridGraphProcessor:
 
         # Crear embeddings para conceptos
         concept_texts = [f"{c['name']} {c['description']}" for c in all_concepts]
-        embeddings = self.sentence_transformer.encode(concept_texts)
+        embeddings = await self._get_embeddings(concept_texts)
 
         # Calcular similitudes
         from sklearn.metrics.pairwise import cosine_similarity
+        import numpy as np
+        
         similarities = cosine_similarity(embeddings)
 
-        # Crear relaciones con umbral alto para conceptos de calidad
+        # OPTIMIZACIÓN: Limitar el número de relaciones por concepto
         threshold = 0.75
+        max_relations_per_concept = 3  # Solo las 3 relaciones más fuertes
+        
+        logger.info(f"⚡ Optimizando: buscando top-{max_relations_per_concept} conceptos similares por concepto")
+        
         for i in range(len(all_concepts)):
-            for j in range(i + 1, len(all_concepts)):
-                similarity = similarities[i][j]
+            # Obtener los índices de los conceptos más similares (excluyendo el mismo)
+            similarities_for_concept = similarities[i]
+            # Excluir el propio concepto (i) y obtener los top-k
+            top_indices = np.argsort(similarities_for_concept)[-(max_relations_per_concept+1):-1][::-1]
+            
+            for j in top_indices:
+                if j > i:  # Evitar duplicados (solo crear A->B, no B->A)
+                    similarity = similarities[i][j]
 
-                if similarity > threshold:
-                    relationships.append({
+                    if similarity > threshold:
+                        relationships.append(self._add_tenant_ids({
                         "id": f"concept_sim_{len(relationships)}",
                         "source_entity_id": all_concepts[i]["id"],
                         "target_entity_id": all_concepts[j]["id"],
@@ -370,7 +452,7 @@ class HybridGraphProcessor:
                         "description": f"Conceptos relacionados: {all_concepts[i]['name']} ↔ {all_concepts[j]['name']}",
                         "confidence": float(similarity),
                         "extraction_method": "semantic_concept_similarity"
-                    })
+                    }))
 
     async def _create_hierarchical_relationships(self, entities_by_type, relationships):
         """Crea relaciones jerárquicas entre conceptos generales y específicos."""
@@ -396,8 +478,8 @@ class HybridGraphProcessor:
             target_texts = [f"{c['name']}" for c in target_concepts]
 
             if source_texts and target_texts:
-                source_embeddings = self.sentence_transformer.encode(source_texts)
-                target_embeddings = self.sentence_transformer.encode(target_texts)
+                source_embeddings = await self._get_embeddings(source_texts)
+                target_embeddings = await self._get_embeddings(target_texts)
 
                 from sklearn.metrics.pairwise import cosine_similarity
                 similarities = cosine_similarity(source_embeddings, target_embeddings)
@@ -409,7 +491,7 @@ class HybridGraphProcessor:
                         similarity = similarities[i][j]
 
                         if similarity > threshold:
-                            relationships.append({
+                            relationships.append(self._add_tenant_ids({
                                 "id": f"hierarchy_{len(relationships)}",
                                 "source_entity_id": source_concept["id"],
                                 "target_entity_id": target_concept["id"],
@@ -418,7 +500,7 @@ class HybridGraphProcessor:
                                 "description": f"{source_concept['name']} {rel_type.lower().replace('_', ' ')} {target_concept['name']}",
                                 "confidence": float(similarity),
                                 "extraction_method": "semantic_hierarchy"
-                            })
+                            }))
 
     def _determine_relationship_type(self, concept, entity, similarity):
         """Determina el tipo de relación más específico basado en los tipos de entidades."""
@@ -477,7 +559,7 @@ class HybridGraphProcessor:
                     entity2_pos = content.find(found_entities[j]['name'].lower())
                     
                     if abs(entity1_pos - entity2_pos) < 200:  # Aparecen cerca
-                        relationships.append({
+                        relationships.append(self._add_tenant_ids({
                             "id": f"cooc_{len(relationships)}",
                             "source_entity_id": found_entities[i]["id"],
                             "target_entity_id": found_entities[j]["id"],
@@ -487,7 +569,7 @@ class HybridGraphProcessor:
                             "confidence": 0.8,
                             "extraction_method": "cooccurrence_analysis",
                             "source_document": doc.get('title', 'documento')
-                        })
+                        }))
         
         return relationships
 
@@ -521,7 +603,7 @@ class HybridGraphProcessor:
                     if len(relationships) >= 100:  # Límite de relaciones
                         break
 
-                    relationships.append({
+                    relationships.append(self._add_tenant_ids({
                         "id": f"light_cooc_{len(relationships)}",
                         "source_entity_id": found_entities[j]["id"],
                         "target_entity_id": found_entities[k]["id"],
@@ -531,7 +613,7 @@ class HybridGraphProcessor:
                         "confidence": 0.6,
                         "extraction_method": "cooccurrence_light",
                         "source_document": doc.get('title', 'documento')
-                    })
+                    }))
 
                 if len(relationships) >= 100:
                     break
@@ -627,7 +709,7 @@ class HybridGraphProcessor:
                             distance = abs(pos1 - pos2)
                             confidence = max(0.5, 1.0 - (distance / 300))
 
-                            relationships.append({
+                            relationships.append(self._add_tenant_ids({
                                 "id": f"opt_cooc_{len(relationships)}",
                                 "source_entity_id": entity1["id"],
                                 "target_entity_id": entity2["id"],
@@ -638,7 +720,7 @@ class HybridGraphProcessor:
                                 "extraction_method": "cooccurrence_optimized",
                                 "source_document": doc.get("title", f"doc_{doc_idx}"),
                                 "window_position": start
-                            })
+                            }))
 
                 # Límite de relaciones por documento
                 if len(relationships) >= 2000:
@@ -678,7 +760,7 @@ class HybridGraphProcessor:
                 concept_key = f"{chunk.text.lower()}_noun_phrase"
                 if concept_key not in entity_set:
                     entity_set.add(concept_key)
-                    entities.append({
+                    entities.append(self._add_tenant_ids({
                         "id": f"concept_np_{len(entities)}",
                         "name": chunk.text.strip(),
                         "type": "CONCEPT_PHRASE",
@@ -686,7 +768,7 @@ class HybridGraphProcessor:
                         "source_document": doc.get('title', f'doc_{doc_index}'),
                         "confidence": 0.8,
                         "extraction_method": "spacy_noun_phrases"
-                    })
+                    }))
 
         # 2. Extraer conceptos compuestos (adjetivo + sustantivo)
         for i, token in enumerate(spacy_doc[:-1]):
@@ -705,7 +787,7 @@ class HybridGraphProcessor:
                     len(compound_concept) < 50):
 
                     entity_set.add(concept_key)
-                    entities.append({
+                    entities.append(self._add_tenant_ids({
                         "id": f"concept_comp_{len(entities)}",
                         "name": compound_concept.strip(),
                         "type": "CONCEPT_COMPOUND",
@@ -713,7 +795,7 @@ class HybridGraphProcessor:
                         "source_document": doc.get('title', f'doc_{doc_index}'),
                         "confidence": 0.75,
                         "extraction_method": "spacy_compounds"
-                    })
+                    }))
 
         # 3. Extraer términos técnicos (sustantivos con alta frecuencia)
         noun_freq = {}
@@ -732,7 +814,7 @@ class HybridGraphProcessor:
                 concept_key = f"{lemma}_technical"
                 if concept_key not in entity_set:
                     entity_set.add(concept_key)
-                    entities.append({
+                    entities.append(self._add_tenant_ids({
                         "id": f"concept_tech_{len(entities)}",
                         "name": lemma.title(),
                         "type": "CONCEPT_TECHNICAL",
@@ -740,7 +822,7 @@ class HybridGraphProcessor:
                         "source_document": doc.get('title', f'doc_{doc_index}'),
                         "confidence": min(0.9, 0.6 + (freq * 0.1)),  # Confianza basada en frecuencia
                         "extraction_method": "spacy_technical_terms"
-                    })
+                    }))
 
         # 4. Extraer expresiones clave usando dependencias sintácticas
         for token in spacy_doc:
@@ -759,7 +841,7 @@ class HybridGraphProcessor:
                         len(expression) < 60):
 
                         entity_set.add(concept_key)
-                        entities.append({
+                        entities.append(self._add_tenant_ids({
                             "id": f"concept_expr_{len(entities)}",
                             "name": expression.strip(),
                             "type": "CONCEPT_EXPRESSION",
@@ -767,6 +849,6 @@ class HybridGraphProcessor:
                             "source_document": doc.get('title', f'doc_{doc_index}'),
                             "confidence": 0.7,
                             "extraction_method": "spacy_expressions"
-                        })
+                        }))
 
         logger.debug(f"✅ Conceptos semánticos extraídos del documento {doc_index + 1}")

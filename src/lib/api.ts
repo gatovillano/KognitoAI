@@ -79,4 +79,15 @@ apiClient.interceptors.response.use(
   }
 );
 
+export const userSettings = {
+  get: async () => {
+    const response = await apiClient.get('/users/me/settings');
+    return response.data;
+  },
+  update: async (settings: any) => {
+    const response = await apiClient.put('/users/me/settings', settings);
+    return response.data;
+  },
+};
+
 export default apiClient;

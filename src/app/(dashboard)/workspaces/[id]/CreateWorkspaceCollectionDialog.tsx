@@ -55,7 +55,7 @@ export function CreateWorkspaceCollectionDialog({ isOpen, onOpenChange, onCreate
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-md w-full max-h-[90vh] p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>Crear Nueva Colección en Workspace</DialogTitle>
           <DialogDescription>
@@ -65,8 +65,8 @@ export function CreateWorkspaceCollectionDialog({ isOpen, onOpenChange, onCreate
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="topic-name">Nombre de la Colección</Label>
-            <Input 
-              id="topic-name" 
+            <Input
+              id="topic-name"
               value={topicName}
               onChange={(e) => setTopicName(e.target.value)}
               placeholder="Ej: Proyectos 2025"
@@ -74,15 +74,16 @@ export function CreateWorkspaceCollectionDialog({ isOpen, onOpenChange, onCreate
           </div>
           <div className="space-y-2">
             <Label htmlFor="description">Descripción (Opcional)</Label>
-            <Textarea 
-              id="description" 
+            <Textarea
+              id="description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Describe el propósito de esta colección..."
               rows={3}
+              className="resize-none max-h-[150px]"
             />
           </div>
-          
+
         </div>
         <DialogFooter>
           <Button onClick={handleCreate} disabled={isLoading}>

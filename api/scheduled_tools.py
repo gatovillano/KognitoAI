@@ -17,6 +17,7 @@ from core.database import SessionLocal, Account
 from utils.security import get_current_account_id
 from utils.tool_scheduler import tool_scheduler
 from utils.scheduled_tools_manager import scheduled_tools_manager
+from core.dependencies import get_db_session
 
 logger = logging.getLogger(__name__)
 
@@ -24,16 +25,10 @@ router = APIRouter()
 
 # --- Dependencias ---
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session:  # type: ignore
-        try:
-            yield session
-        finally:
-            await session.close()
+# get_db eliminado en favor de core.dependencies.get_db_session
 
 # Dependencia para verificar si el usuario es administrador
-async def get_current_admin_account(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)) -> Account:
+async def get_current_admin_account(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)) -> Account:
     account = await db.get(Account, uuid.UUID(current_account_id))
     if not account or not bool(account.is_admin):  # type: ignore
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes permisos de administrador.")
@@ -80,7 +75,7 @@ class ScheduledToolsStatusResponse(BaseModel):
 @router.get("/admin/scheduled-tools", response_model=List[ScheduledToolResponse], summary="Listar herramientas programadas")
 async def list_scheduled_tools(
     admin_account: Account = Depends(get_current_admin_account),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Lista todas las herramientas programadas en el sistema.
@@ -131,7 +126,7 @@ async def list_scheduled_tools(
 async def create_scheduled_tool(
     request: CreateScheduledToolRequest,
     admin_account: Account = Depends(get_current_admin_account),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Crea una nueva herramienta programada.
@@ -233,7 +228,7 @@ async def update_scheduled_tool(
     job_name: str,
     request: UpdateScheduledToolRequest,
     admin_account: Account = Depends(get_current_admin_account),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Actualiza una herramienta programada existente.
@@ -291,7 +286,7 @@ async def update_scheduled_tool(
 async def delete_scheduled_tool(
     job_name: str,
     admin_account: Account = Depends(get_current_admin_account),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Elimina una herramienta programada.
@@ -333,7 +328,7 @@ async def delete_scheduled_tool(
 @router.get("/admin/scheduled-tools/status", response_model=ScheduledToolsStatusResponse, summary="Estado del sistema de herramientas programadas")
 async def get_scheduled_tools_status(
     admin_account: Account = Depends(get_current_admin_account),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Obtiene el estado general del sistema de herramientas programadas.

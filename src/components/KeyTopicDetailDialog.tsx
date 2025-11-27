@@ -20,8 +20,8 @@ export const KeyTopicDetailDialog: React.FC<KeyTopicDetailDialogProps> = ({ isOp
   // Función para simular la obtención de citas por sub-tema
   // En un caso real, esto podría implicar una llamada a la API o una búsqueda en los datos existentes
   const getQuotesForSubTopic = (subTopic: string): any[] => {
-    if (keyTopic?.quotes && keyTopic.quotes.length > 0) {
-      return keyTopic.quotes;
+    if (keyTopic?.citations && keyTopic.citations.length > 0) {
+      return keyTopic.citations;
     }
     return [];
   };

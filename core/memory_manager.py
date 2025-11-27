@@ -36,6 +36,13 @@ from sqlalchemy.orm import selectinload, joinedload
 from langchain_core.retrievers import BaseRetriever # Nueva importación
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+import tiktoken # Importar tiktoken
+
+def num_tokens_from_string(string: str, encoding_name: str = "cl100k_base") -> int:
+    """Returns the number of tokens in a text string."""
+    encoding = tiktoken.get_encoding(encoding_name)
+    num_tokens = len(encoding.encode(string))
+    return num_tokens
 
 from core.database import (
     Perfil,
@@ -78,6 +85,7 @@ async def _run_semantic_search(
     content_types: Optional[List[str]] = None,
     category: Optional[str] = None,
     explicit_document_ids: Optional[List[str]] = None,
+    db_session: Optional[AsyncSession] = None, # Optimization: Reuse session
 ) -> List[Tuple[LCDocument, float]]:
     """
     Realiza una búsqueda semántica en la base de datos vectorial, filtrando por account_id y content_types.
@@ -134,9 +142,13 @@ async def _run_semantic_search(
             sql_query += " ORDER BY similarity_score LIMIT :k"
             query_params["k"] = k
 
-            async with DBSession(SessionLocal) as session:
-                results = await session.execute(text(sql_query), query_params)
+            if db_session:
+                results = await db_session.execute(text(sql_query), query_params)
                 rows = results.fetchall()
+            else:
+                async with DBSession(SessionLocal) as session:
+                    results = await session.execute(text(sql_query), query_params)
+                    rows = results.fetchall()
 
             for row in rows:
                 doc_content, doc_metadata, topic, cat, ws_id, similarity_score = row
@@ -157,13 +169,17 @@ async def _run_semantic_search(
 
         # Búsqueda en la tabla de Notas si se especifica
         if content_types and "user_notes" in content_types:
-            async with DBSession(SessionLocal) as session:
-                note_query = select(Nota, (Nota.embedding.l2_distance(query_embedding)).label("similarity_score")).where(
-                    Nota.account_id == uuid.UUID(account_id)
-                ).order_by("similarity_score").limit(k)
-                
-                note_results = await session.execute(note_query)
+            note_query = select(Nota, (Nota.embedding.l2_distance(query_embedding)).label("similarity_score")).where(
+                Nota.account_id == uuid.UUID(account_id)
+            ).order_by("similarity_score").limit(k)
+            
+            if db_session:
+                note_results = await db_session.execute(note_query)
                 note_rows = note_results.all()
+            else:
+                async with DBSession(SessionLocal) as session:
+                    note_results = await session.execute(note_query)
+                    note_rows = note_results.all()
 
                 for nota, score in note_rows:
                     # El score de l2_distance es menor cuanto más similar, lo convertimos a similitud
@@ -201,6 +217,7 @@ async def _run_fts_search(
     content_types: Optional[List[str]] = None,
     category: Optional[str] = None,
     explicit_document_ids: Optional[List[str]] = None,
+    db_session: Optional[AsyncSession] = None, # Optimization: Reuse session
 ) -> List[LCDocument]:
     """
     Realiza una búsqueda de texto completo (FTS) en la base de datos, filtrando por account_id y content_types.
@@ -257,9 +274,13 @@ async def _run_fts_search(
             sql_query += " ORDER BY rank_score DESC LIMIT :k"
             query_params["k"] = k
 
-            async with DBSession(SessionLocal) as session:
-                results = await session.execute(text(sql_query), query_params)
+            if db_session:
+                results = await db_session.execute(text(sql_query), query_params)
                 rows = results.fetchall()
+            else:
+                async with DBSession(SessionLocal) as session:
+                    results = await session.execute(text(sql_query), query_params)
+                    rows = results.fetchall()
 
             for row in rows:
                 doc_content, doc_metadata, topic, cat, ws_id, rank_score = row
@@ -281,17 +302,21 @@ async def _run_fts_search(
 
         # Búsqueda en la tabla de Notas si se especifica
         if content_types and "user_notes" in content_types:
-            async with DBSession(SessionLocal) as session:
-                note_query = select(
-                    Nota,
-                    func.ts_rank(Nota.text_search_vector, func.plainto_tsquery('spanish', query)).label("rank_score")
-                ).where(
-                    Nota.account_id == uuid.UUID(account_id),
-                    Nota.text_search_vector.op('@@')(func.plainto_tsquery('spanish', query))
-                ).order_by(text("rank_score DESC")).limit(k)
+            note_query = select(
+                Nota,
+                func.ts_rank(Nota.text_search_vector, func.plainto_tsquery('spanish', query)).label("rank_score")
+            ).where(
+                Nota.account_id == uuid.UUID(account_id),
+                Nota.text_search_vector.op('@@')(func.plainto_tsquery('spanish', query))
+            ).order_by(text("rank_score DESC")).limit(k)
 
-                note_results = await session.execute(note_query)
+            if db_session:
+                note_results = await db_session.execute(note_query)
                 note_rows = note_results.all()
+            else:
+                async with DBSession(SessionLocal) as session:
+                    note_results = await session.execute(note_query)
+                    note_rows = note_results.all()
 
                 for nota, score in note_rows:
                     doc = LCDocument(
@@ -357,6 +382,7 @@ async def get_relevant_memories(
             content_types: Optional[List[str]] # Nuevo
             category: Optional[str]
             explicit_document_ids: Optional[List[str]]
+            db_session: Optional[AsyncSession] # Optimization
 
             def _get_relevant_documents(self, query_str: str, **kwargs) -> List[LCDocument]:
                 return []
@@ -380,6 +406,7 @@ async def get_relevant_memories(
                     content_types=self.content_types, # Pasado
                     category=self.category,
                     explicit_document_ids=self.explicit_document_ids,
+                    db_session=self.db_session, # Optimization
                 )
                 return [doc for doc, score in semantic_results_with_scores]
 
@@ -394,6 +421,7 @@ async def get_relevant_memories(
             content_types: Optional[List[str]] # Nuevo
             category: Optional[str]
             explicit_document_ids: Optional[List[str]]
+            db_session: Optional[AsyncSession] # Optimization
 
             def _get_relevant_documents(self, query_str: str, **kwargs) -> List[LCDocument]:
                 return []
@@ -416,40 +444,45 @@ async def get_relevant_memories(
         # Ya no necesitamos una colección de LangchainPgCollection específica
         # porque filtraremos directamente por account_id y content_type en las búsquedas SQL.
 
-        semantic_retriever = KognitoPGVectorRetriever(
-            k=k,
-            similarity_threshold=similarity_threshold,
-            filter_topics=filter_topics,
-            filter_document_ids=filter_document_ids,
-            account_id=account_id,
-            workspace_id=workspace_id,
-            content_types=content_types, # Pasado
-            category=category,
-            explicit_document_ids=explicit_document_ids,
-        )
-
-        fts_retriever = KognitoFTSRetriever(
-            k=k,
-            filter_topics=filter_topics,
-            filter_document_ids=filter_document_ids,
-            account_id=account_id,
-            workspace_id=workspace_id,
-            content_types=content_types, # Pasado
-            category=category,
-            explicit_document_ids=explicit_document_ids,
-        )
-
-        from langchain.retrievers import EnsembleRetriever
-
-        final_retrieved_docs: List[LCDocument] = []
-        if hybrid_search:
-            ensemble_retriever = EnsembleRetriever(
-                retrievers=[semantic_retriever, fts_retriever],
-                weights=[1 - bm25_weight, bm25_weight]
+        # Create sessions for retrievers
+        # We use two separate sessions to allow safe parallel execution if EnsembleRetriever runs them concurrently
+        async with DBSession(SessionLocal) as session_semantic, DBSession(SessionLocal) as session_fts:
+            semantic_retriever = KognitoPGVectorRetriever(
+                k=k,
+                similarity_threshold=similarity_threshold,
+                filter_topics=filter_topics,
+                filter_document_ids=filter_document_ids,
+                account_id=account_id,
+                workspace_id=workspace_id,
+                content_types=content_types, # Pasado
+                category=category,
+                explicit_document_ids=explicit_document_ids,
+                db_session=session_semantic
             )
-            final_retrieved_docs = await ensemble_retriever.ainvoke(query)
-        else:
-            final_retrieved_docs = await semantic_retriever.ainvoke(query)
+
+            fts_retriever = KognitoFTSRetriever(
+                k=k,
+                filter_topics=filter_topics,
+                filter_document_ids=filter_document_ids,
+                account_id=account_id,
+                workspace_id=workspace_id,
+                content_types=content_types, # Pasado
+                category=category,
+                explicit_document_ids=explicit_document_ids,
+                db_session=session_fts
+            )
+
+            from langchain.retrievers import EnsembleRetriever
+
+            final_retrieved_docs: List[LCDocument] = []
+            if hybrid_search:
+                ensemble_retriever = EnsembleRetriever(
+                    retrievers=[semantic_retriever, fts_retriever],
+                    weights=[1 - bm25_weight, bm25_weight]
+                )
+                final_retrieved_docs = await ensemble_retriever.ainvoke(query)
+            else:
+                final_retrieved_docs = await semantic_retriever.ainvoke(query)
 
         # Reranking
         if reranking:
@@ -756,33 +789,6 @@ async def process_document_for_rag(
         logger.warning("Could not import send_personal_message, WebSocket notifications will be disabled.")
     except Exception as e:
         logger.error(f"Error sending WebSocket notification: {e}")
-    """
-    Divide, embebe y almacena el texto de un documento en la DB vectorial.
-    
-    CAMBIO: Ahora usa solo langchain_pg_embedding para todos los documentos,
-    agregando workspace_id como metadato y columna cuando corresponde.
-    """
-    # Decodificar el nombre del topic al principio
-    decoded_topic = unquote(topic)
-    task_id = metadata.get("task_id") if metadata else None
-    try:
-        from core.websocket_manager import send_personal_message
-        if account_id and task_id:
-            await send_personal_message(account_id, {
-                "type": "document_processing_started",
-                "file_name": file_name,
-                "task_id": task_id,
-            })
-    except ImportError:
-        logger.warning("Could not import send_personal_message, WebSocket notifications will be disabled.")
-    except Exception as e:
-        logger.error(f"Error sending WebSocket notification: {e}")
-    """
-    Divide, embebe y almacena el texto de un documento en la DB vectorial.
-    
-    CAMBIO: Ahora usa solo langchain_pg_embedding para todos los documentos,
-    agregando workspace_id como metadato y columna cuando corresponde.
-    """
     logger.info(f"DEBUG: process_document_for_rag llamado con file_name={file_name}, topic={topic} (decoded: {decoded_topic}), account_id={account_id}, workspace_id={workspace_id}")
     if not extracted_text:
         return 0
@@ -810,24 +816,26 @@ async def process_document_for_rag(
             return 0
 
         logger.info(f"Tamaño del texto extraído para '{file_name}': {len(extracted_text)} caracteres.")
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=CHUNK_OVERLAP,
+            length_function=num_tokens_from_string # Usar la función de conteo de tokens
+        )
         texts = text_splitter.split_text(extracted_text)
         logger.info(f"Documento '{file_name}' dividido en {len(texts)} chunks.")
         
         # Determinar la colección de LangChain (topic)
         # Si se proporciona workspace_id, la colección será específica de ese workspace.
         # Si no, será una colección de usuario/global.
-        if workspace_id:
-            # Para colecciones de workspace, el nombre de la colección en PGVector será el topic
-            # El topic es el nombre de la colección dentro del workspace.
-            langchain_collection_name = decoded_topic # Usar el nombre decodificado
-            scope = "workspace"
-        elif is_global:
+        scope = "personal"
+        if is_global:
             langchain_collection_name = GLOBAL_COLLECTION_NAME
             scope = "global"
         elif account_id:
-            langchain_collection_name = f"user_documents_{account_id}"
-            scope = "personal"
+            # Para documentos personales o de workspace, el nombre de la colección es el topic.
+            langchain_collection_name = decoded_topic
+            if workspace_id:
+                scope = "workspace"
         else:
             logger.error("❌ process_document_for_rag llamado sin account_id, workspace_id o is_global=True.")
             return 0
@@ -1287,10 +1295,9 @@ async def list_user_documents(
     async with DBSession(SessionLocal) as db:
         try:
             base_clauses = [
-                "account_id = :account_id",
                 "cmetadata->>'type' = 'document_chunk'"
             ]
-            params: Dict[str, Any] = {"account_id": account_id}
+            params: Dict[str, Any] = {}
 
             # --- Lógica de Filtro de Contexto Explícito ---
             if document_ids or topics:
@@ -1311,14 +1318,19 @@ async def list_user_documents(
                     logger.info("📎 Topic es 'all_documents', no se aplicará filtro de topic.")
                 else:
                     if isinstance(workspace_id, str) and workspace_id:
+                        # Si se especifica workspace, mostrar TODOS los documentos del workspace
                         base_clauses.append("workspace_id = :workspace_id")
                         params["workspace_id"] = workspace_id
                     else:
+                        # Si no hay workspace, filtrar por account_id y workspace NULL
+                        base_clauses.append("account_id = :account_id")
                         base_clauses.append("workspace_id IS NULL")
+                        params["account_id"] = account_id
 
                     if topic: # Filtro de compatibilidad
                         base_clauses.append("topic = :topic")
                         params["topic"] = str(topic.description) if isinstance(topic, FieldInfo) else str(topic)
+
 
             query_str = f"""
                 SELECT DISTINCT ON (cmetadata->>'document_id')
@@ -1559,15 +1571,20 @@ async def list_user_collections(account_id: str, workspace_id: Optional[str] = N
 
             # 1. Obtener colecciones definidas por el usuario en UserDocumentTopic
             user_topics_query = select(UserDocumentTopic).options(
-                joinedload(UserDocumentTopic.workspace)
-            ).where(
-                UserDocumentTopic.account_id == uuid.UUID(account_id)
+                joinedload(UserDocumentTopic.workspace),
+                joinedload(UserDocumentTopic.account)
             )
 
-            # Si se especifica un workspace, filtramos. Si no, traemos todas.
+            # Si se especifica un workspace, mostrar TODAS las colecciones de ese workspace
+            # (no solo las del usuario actual)
             if workspace_id:
                 user_topics_query = user_topics_query.where(
                     UserDocumentTopic.workspace_id == uuid.UUID(workspace_id)
+                )
+            else:
+                # Si no se especifica workspace, mostrar solo las colecciones del usuario
+                user_topics_query = user_topics_query.where(
+                    UserDocumentTopic.account_id == uuid.UUID(account_id)
                 )
 
             result = await db.execute(user_topics_query)
@@ -1577,12 +1594,10 @@ async def list_user_collections(account_id: str, workspace_id: Optional[str] = N
             for topic in user_topics:
                 # Contar documentos en langchain_pg_embedding para esta colección
                 count_clauses = [
-                    "account_id = :account_id",
                     "cmetadata->>'type' = 'document_chunk'",
                     "topic = :topic_name"
                 ]
                 count_params: Dict[str, Any] = {
-                    "account_id": account_id,
                     "topic_name": topic.name
                 }
                 if topic.workspace_id:
@@ -1605,6 +1620,8 @@ async def list_user_collections(account_id: str, workspace_id: Optional[str] = N
                     "workspace_id": str(topic.workspace_id) if topic.workspace_id else None,
                     "workspace_name": topic.workspace.name if topic.workspace else None,
                     "workspace_color": topic.workspace.color if topic.workspace else None,
+                    "created_by_account_id": str(topic.account_id),
+                    "created_by_email": topic.account.email if topic.account else None,
                     "has_knowledge_graph": False
                 })
 
@@ -1673,6 +1690,88 @@ async def create_empty_collection(
             await db.rollback()
             return False
 
+
+async def update_collection(
+    account_id: str,
+    old_topic_name: str,
+    new_topic_name: Optional[str] = None,
+    new_description: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    team_id: Optional[str] = None
+) -> bool:
+    """
+    Actualiza una colección existente (nombre, descripción, workspace_id o team_id).
+    
+    Args:
+        account_id: ID de la cuenta del usuario.
+        old_topic_name: Nombre actual de la colección a actualizar.
+        new_topic_name: Nuevo nombre de la colección (opcional).
+        new_description: Nueva descripción de la colección (opcional).
+        workspace_id: ID del workspace (opcional).
+        team_id: ID del team (opcional).
+        
+    Returns:
+        True si la colección se actualizó exitosamente, False en caso contrario.
+    """
+    # Decodificar nombres de topic al principio
+    decoded_old_topic_name = unquote(old_topic_name)
+    decoded_new_topic_name = unquote(new_topic_name) if new_topic_name else None
+    
+    logger.info(f"Actualizando colección '{decoded_old_topic_name}' para cuenta {account_id}. Nuevos datos: topic={decoded_new_topic_name}, description={new_description}, workspace_id={workspace_id}, team_id={team_id}")
+
+    async with DBSession(SessionLocal) as db:
+        try:
+            # Buscar la colección
+            collection_query = select(UserDocumentTopic).where(
+                UserDocumentTopic.account_id == uuid.UUID(account_id),
+                UserDocumentTopic.name == decoded_old_topic_name
+            )
+            
+            # Agregar filtro de workspace si se proporciona
+            if workspace_id:
+                collection_query = collection_query.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
+            
+            collection = (await db.execute(collection_query)).scalars().first()
+
+            if not collection:
+                logger.warning(f"Colección '{decoded_old_topic_name}' no encontrada para la cuenta {account_id}.")
+                return False
+
+            # Verificar si el nuevo nombre ya existe (si se proporciona)
+            if decoded_new_topic_name and decoded_new_topic_name != decoded_old_topic_name:
+                existing_query = select(UserDocumentTopic).where(
+                    UserDocumentTopic.account_id == uuid.UUID(account_id),
+                    UserDocumentTopic.name == decoded_new_topic_name
+                )
+                if workspace_id:
+                    existing_query = existing_query.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
+                else:
+                    existing_query = existing_query.where(UserDocumentTopic.workspace_id.is_(None))
+                
+                existing_collection = (await db.execute(existing_query)).scalars().first()
+                if existing_collection:
+                    logger.warning(f"Ya existe una colección con el nombre '{decoded_new_topic_name}' para la cuenta {account_id}.")
+                    return False
+
+            # Actualizar los campos proporcionados
+            if decoded_new_topic_name:
+                collection.name = decoded_new_topic_name
+            if new_description is not None:
+                collection.description = new_description
+            if workspace_id:
+                collection.workspace_id = uuid.UUID(workspace_id)
+            if team_id:
+                collection.team_id = uuid.UUID(team_id)
+            
+            await db.commit()
+            await db.refresh(collection)
+
+            logger.info(f"✅ Colección '{decoded_old_topic_name}' actualizada exitosamente.")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error al actualizar la colección '{decoded_old_topic_name}': {e}", exc_info=True)
+            await db.rollback()
+            return False
 
 async def update_collection_workspace(account_id: str, topic_name: str, workspace_id: str) -> bool:
     """
@@ -1871,7 +1970,10 @@ async def get_user_document_topic_by_name(account_id: str, topic_name: str, work
             # Si workspace_id es None, no añadimos ninguna condición de workspace_id,
             # lo que significa que buscará la colección en todos los workspaces del usuario.
 
-            topic_query = select(UserDocumentTopic).options(selectinload(UserDocumentTopic.contact_profiles)).where(*conditions)
+            topic_query = select(UserDocumentTopic).options(
+                selectinload(UserDocumentTopic.contact_profiles),
+                selectinload(UserDocumentTopic.account)
+            ).where(*conditions)
 
             # Log the SQL query before execution
             from sqlalchemy.dialects import postgresql # Import for compiling query
@@ -1886,12 +1988,10 @@ async def get_user_document_topic_by_name(account_id: str, topic_name: str, work
 
             # Contar documentos en langchain_pg_embedding
             count_clauses = [
-                "account_id = :account_id",
                 "cmetadata->>'type' = 'document_chunk'",
                 "topic = :topic_name"
             ]
             count_params: Dict[str, Any] = {
-                "account_id": account_id,
                 "topic_name": decoded_topic_name # Usar el nombre decodificado
             }
             if workspace_id:
@@ -1922,6 +2022,8 @@ async def get_user_document_topic_by_name(account_id: str, topic_name: str, work
                 "description": collection.description,
                 "document_count": document_count,
                 "workspace_id": str(collection.workspace_id) if collection.workspace_id else None,
+                "created_by_account_id": str(collection.account_id),
+                "created_by_email": collection.account.email if collection.account else None,
                 "linked_profiles": linked_profiles_data,
                 "has_knowledge_graph": False # Placeholder, se actualizará si se genera un KG
             }
