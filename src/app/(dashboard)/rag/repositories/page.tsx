@@ -23,8 +23,8 @@ import { UploadDocumentDialog } from '../upload-document-dialog';
 import { PreviewDocumentDialog } from '../preview-document-dialog';
 import { EditDocumentDialog } from '../edit-document-dialog';
 import { DeleteConfirmationDialog } from '../delete-confirmation-dialog';
-import { AnalysisResultDialog } from '../analysis-result-dialog';
-import { CollectionAnalysisDialog } from '../collection-analysis-dialog';
+import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
+import { Analysis, AnalysisType } from '@/lib/models';
 import { ShareDocumentDialog } from '../share-document-dialog';
 import { GitHubRepoDialog } from '../github-repo-dialog';
 import { UpdateRepositoryDialog } from '../update-repository-dialog';
@@ -47,15 +47,10 @@ export default function RepositoriesPage() {
   const [uploadingFiles, setUploadingFiles] = useState<string[]>([]);
   const [uploadTopic, setUploadTopic] = useState<string>('');
   
-  // Estados para análisis de documento individual
+  // Estados para análisis
   const [documentToAnalyze, setDocumentToAnalyze] = useState<Document | null>(null);
-  const [docAnalysisResult, setDocAnalysisResult] = useState<any>(null);
-  const [isDocAnalysisOpen, setIsDocAnalysisOpen] = useState(false);
+  const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
   const [docPollingId, setDocPollingId] = useState<string | null>(null);
-
-  // Estados para análisis de colección completa
-  const [collectionAnalysisResult, setCollectionAnalysisResult] = useState<any>(null);
-  const [isCollectionAnalysisOpen, setIsCollectionAnalysisOpen] = useState(false);
   const [collectionPollingId, setCollectionPollingId] = useState<string | null>(null);
 
   // Estado para el historial de análisis
@@ -153,15 +148,29 @@ export default function RepositoriesPage() {
 
         const { status, result, error } = response.data;
         if (status === 'completed') {
-          clearInterval(poller); setDocPollingId(null); setDocAnalysisResult(result);
-          setIsDocAnalysisOpen(true); toast.success("¡Análisis de documento completado!"); fetchPageData();
+          clearInterval(poller);
+          setDocPollingId(null);
+          
+          const newAnalysis: Analysis = {
+            id: docPollingId,
+            type: 'document',
+            title: `Análisis: ${documentToAnalyze?.file_name || "Documento"}`,
+            created_at: new Date().toISOString(),
+            result: result,
+            full_data: result,
+            file_name: documentToAnalyze?.file_name,
+          };
+
+          setSelectedAnalysis(newAnalysis);
+          toast.success("¡Análisis de documento completado!");
+          fetchPageData();
         } else if (status === 'failed') {
           clearInterval(poller); setDocPollingId(null); toast.error("El análisis del documento falló: " + error);
         }
       } catch (err) { clearInterval(poller); setDocPollingId(null); toast.error("Error al consultar el análisis."); }
     }, 5000);
     return () => clearInterval(poller);
-  }, [docPollingId, fetchPageData]);
+  }, [docPollingId, fetchPageData, documentToAnalyze]);
 
   // --- Polling para Análisis de Colección ---
   useEffect(() => {
@@ -179,8 +188,29 @@ export default function RepositoriesPage() {
 
         const { status, result, error } = response.data;
         if (status === 'completed') {
-          clearInterval(poller); setCollectionPollingId(null); setCollectionAnalysisResult(result);
-          setIsCollectionAnalysisOpen(true); toast.success("¡Análisis de colección completado!"); fetchPageData();
+          clearInterval(poller);
+          setCollectionPollingId(null);
+          
+          const analysisType = result?.analysis_metadata?.analysis_type || 'collection';
+          let title = `Análisis de Colección: Repositorios`;
+          if (analysisType === 'semantic_summary') {
+              title = `Resumen Semántico: Repositorios`;
+          } else if (analysisType === 'knowledge_graph_analysis') {
+              title = `Análisis de Grafo: Repositorios`;
+          }
+
+          const newAnalysis: Analysis = {
+              id: collectionPollingId,
+              type: analysisType,
+              title: title,
+              created_at: new Date().toISOString(),
+              result: result,
+              full_data: result,
+          };
+
+          setSelectedAnalysis(newAnalysis);
+          toast.success("¡Análisis de colección completado!");
+          fetchPageData();
         } else if (status === 'failed') {
           clearInterval(poller); setCollectionPollingId(null); toast.error("El análisis de la colección falló: " + error);
         }
@@ -328,14 +358,29 @@ export default function RepositoriesPage() {
                   </AccordionTrigger>
                   <AccordionContent>
                     <Button variant="link" className="p-0 h-auto text-xs sm:text-sm" onClick={() => {
-                      if (analysis.file_name.startsWith('Colección:')) {
-                        setCollectionAnalysisResult(analysis.result_payload);
-                        setIsCollectionAnalysisOpen(true);
-                      } else {
-                        setDocAnalysisResult(analysis.result_payload);
-                        setDocumentToAnalyze({ file_name: analysis.file_name, topic: 'Repositories', title: '', author: '' });
-                        setIsDocAnalysisOpen(true);
+                      let analysisType: AnalysisType = 'document';
+                      const fileName = analysis.file_name || '';
+
+                      if (fileName.startsWith('Resumen Semántico:')) {
+                        analysisType = 'semantic_summary';
+                      } else if (fileName.startsWith('Colección:')) {
+                        analysisType = 'collection';
+                      } else if (fileName.startsWith('Análisis Personalizado:')) {
+                        analysisType = 'custom_analysis';
+                      } else if (fileName.startsWith('Análisis de Grafo de Conocimiento:')) {
+                        analysisType = 'knowledge_graph_analysis';
                       }
+
+                      const newAnalysis: Analysis = {
+                        id: analysis.id,
+                        type: analysisType,
+                        title: fileName,
+                        created_at: analysis.created_at,
+                        result: analysis.result_payload,
+                        full_data: analysis.result_payload,
+                        file_name: fileName,
+                      };
+                      setSelectedAnalysis(newAnalysis);
                     }}>
                       Ver Resultados Detallados
                     </Button>
@@ -368,8 +413,11 @@ export default function RepositoriesPage() {
       <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchPageData} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />
-      <AnalysisResultDialog isOpen={isDocAnalysisOpen} onOpenChange={setIsDocAnalysisOpen} analysis={docAnalysisResult} document={documentToAnalyze ?? { file_name: '', topic: 'Repositories', title: '', author: '' }} />
-      <CollectionAnalysisDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} topic="Repositories" />
+      <AnalysisDetailDialog
+        analysis={selectedAnalysis}
+        isOpen={!!selectedAnalysis}
+        onOpenChange={(open) => !open && setSelectedAnalysis(null)}
+      />
       <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={fetchPageData} document={documentToShare} />
     </div>
   );

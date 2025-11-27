@@ -13,8 +13,7 @@ import apiClient from '@/lib/api';
 import { PreviewDocumentDialog } from '../../preview-document-dialog';
 import { EditDocumentDialog } from '../../edit-document-dialog';
 import { DeleteConfirmationDialog } from '../../delete-confirmation-dialog';
-import { AnalysisResultDialog } from '../../analysis-result-dialog';
-import { CodeAnalysisResultDialog } from '../../code-analysis-result-dialog';
+import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
 import { ShareDocumentDialog } from '../../share-document-dialog';
 import { UpdateRepositoryDialog } from '../../update-repository-dialog';
 import type { Document } from '../../columns';
@@ -41,21 +40,13 @@ export default function RepositoryDetailPage() {
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isUpdateRepoOpen, setIsUpdateRepoOpen] = useState(false);
   
-  // Estados para análisis de documento individual
+  // Estados para análisis
   const [documentToAnalyze, setDocumentToAnalyze] = useState<Document | null>(null);
-  const [docAnalysisResult, setDocAnalysisResult] = useState<any>(null);
-  const [isDocAnalysisOpen, setIsDocAnalysisOpen] = useState(false);
+  const [selectedAnalysis, setSelectedAnalysis] = useState<any>(null);
+  const [isAnalysisDetailOpen, setIsAnalysisDetailOpen] = useState(false);
   const [docPollingId, setDocPollingId] = useState<string | null>(null);
-
-  // Estados para análisis de colección completa
-  const [collectionAnalysisResult, setCollectionAnalysisResult] = useState<any>(null);
-  const [isCollectionAnalysisOpen, setIsCollectionAnalysisOpen] = useState(false);
   const [collectionPollingId, setCollectionPollingId] = useState<string | null>(null);
-
-  // Estados para vectorización de repositorio
   const [vectorizationPollingId, setVectorizationPollingId] = useState<string | null>(null);
-  const [vectorizationResult, setVectorizationResult] = useState<any>(null);
-  const [isVectorizationOpen, setIsVectorizationOpen] = useState(false);
 
   // Componente auxiliar para el menú de acciones del documento
   const DocumentActionsDropdown = ({ doc }: { doc: Document }) => (
@@ -197,8 +188,8 @@ export default function RepositoryDetailPage() {
         const response = await apiClient.get(`/api/get-analysis-result/${docPollingId}`);
         const { status, result, error } = response.data;
         if (status === 'completed') {
-          clearInterval(poller); setDocPollingId(null); setDocAnalysisResult(result);
-          setIsDocAnalysisOpen(true); toast.success('Análisis de documento completado');
+          clearInterval(poller); setDocPollingId(null); setSelectedAnalysis(result);
+          setIsAnalysisDetailOpen(true); toast.success('Análisis de documento completado');
         } else if (status === 'failed') {
           clearInterval(poller); setDocPollingId(null); toast.error('El análisis del documento falló: ' + error);
         }
@@ -215,8 +206,8 @@ export default function RepositoryDetailPage() {
         const response = await apiClient.get(`/api/get-analysis-result/${collectionPollingId}`);
         const { status, result, error } = response.data;
         if (status === 'completed') {
-          clearInterval(poller); setCollectionPollingId(null); setCollectionAnalysisResult(result);
-          setIsCollectionAnalysisOpen(true); toast.success('Análisis de repositorio completado');
+          clearInterval(poller); setCollectionPollingId(null); setSelectedAnalysis(result);
+          setIsAnalysisDetailOpen(true); toast.success('Análisis de repositorio completado');
           // Actualizar el historial de análisis
           window.dispatchEvent(new Event('updateAnalysisHistory'));
         } else if (status === 'failed') {
@@ -235,8 +226,8 @@ export default function RepositoryDetailPage() {
         const response = await apiClient.get(`/api/github/get-vectorization-result/${vectorizationPollingId}`);
         const { status, result, error } = response.data;
         if (status === 'completed') {
-          clearInterval(poller); setVectorizationPollingId(null); setVectorizationResult(result);
-          setIsVectorizationOpen(true); toast.success('Vectorización de repositorio completada');
+          clearInterval(poller); setVectorizationPollingId(null); setSelectedAnalysis(result);
+          setIsAnalysisDetailOpen(true); toast.success('Vectorización de repositorio completada');
         } else if (status === 'failed') {
           clearInterval(poller); setVectorizationPollingId(null); toast.error('La vectorización del repositorio falló: ' + error);
         }
@@ -486,14 +477,8 @@ export default function RepositoryDetailPage() {
                       </AccordionTrigger>
                       <AccordionContent>
                         <Button variant="link" className="p-0 h-auto text-xs sm:text-sm" onClick={() => {
-                          if (analysis.file_name.startsWith('Colección:')) {
-                            setCollectionAnalysisResult(analysis.result_payload);
-                            setIsCollectionAnalysisOpen(true);
-                          } else {
-                            setDocAnalysisResult(analysis.result_payload);
-                            setDocumentToAnalyze({ file_name: analysis.file_name, topic: 'Repositories', title: '', author: '' });
-                            setIsDocAnalysisOpen(true);
-                          }
+                          setSelectedAnalysis(analysis.result_payload);
+                          setIsAnalysisDetailOpen(true);
                         }}>
                           Ver Resultados Detallados
                         </Button>
@@ -518,9 +503,7 @@ export default function RepositoryDetailPage() {
         onDeleteSuccess={refreshDocuments}
         document={documentToDelete}
       />
-      <CodeAnalysisResultDialog isOpen={isDocAnalysisOpen} onOpenChange={setIsDocAnalysisOpen} analysis={docAnalysisResult} repoName={repoName} />
-      <CodeAnalysisResultDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} repoName={repoName} />
-      <AnalysisResultDialog isOpen={isVectorizationOpen} onOpenChange={setIsVectorizationOpen} analysis={vectorizationResult} document={{ file_name: repoName, topic: 'Repositories', title: 'Vectorización de ' + repoName, author: '' }} />
+      <AnalysisDetailDialog isOpen={isAnalysisDetailOpen} onOpenChange={setIsAnalysisDetailOpen} analysis={selectedAnalysis} />
       <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={() => {}} document={documentToShare} />
       <UpdateRepositoryDialog
         isOpen={isUpdateRepoOpen}

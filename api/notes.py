@@ -29,6 +29,7 @@ import os
 import shutil
 from pathlib import Path
 from api.contact_profiles import ContactProfileResponse # Importar ContactProfileResponse
+from core.dependencies import get_db_session # Importar dependencia centralizada
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -37,12 +38,9 @@ router = APIRouter()
 
 # --- Dependencias de FastAPI ---
 
-async def get_db() -> AsyncSession:
-    """Crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session:
-        yield session
+# get_db eliminado en favor de core.dependencies.get_db_session
 
-def get_notes_manager(db: AsyncSession = Depends(get_db)) -> NotesManager:
+def get_notes_manager(db: AsyncSession = Depends(get_db_session)) -> NotesManager:
     """Inyecta una instancia del gestor de notas."""
     return NotesManager(db)
 
@@ -136,7 +134,7 @@ async def generate_note_pdf_endpoint(
     notes_manager: NotesManager = Depends(get_notes_manager)
 ):
     """
-    Genera un PDF a partir del contenido de una nota.
+    Genera un PDF a partir del contenido de una nota con diseño estilizado.
     """
     note_data = await notes_manager.get_note_by_id(current_account_id, request.note_id)
     if not note_data:
@@ -156,46 +154,212 @@ async def generate_note_pdf_endpoint(
     created_at_dt = note_data['created_at']
     if isinstance(created_at_dt, str):
         try:
-            created_at_dt = datetime.fromisoformat(created_at_dt.replace('Z', '+00:00')) # Manejar formato ISO con Z
+            created_at_dt = datetime.fromisoformat(created_at_dt.replace('Z', '+00:00'))
         except ValueError:
-            # Si falla la conversión, se puede loggear o manejar de otra forma
-            # En este caso, si no se puede parsear, created_at_dt seguirá siendo un string
             pass
 
-    # Crear un HTML completo con estilos básicos
+    # Leer el logo y convertirlo a base64 para incluirlo en el HTML
+    import base64
+    logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'public', 'logo-simple.png')
+    try:
+        with open(logo_path, 'rb') as logo_file:
+            logo_base64 = base64.b64encode(logo_file.read()).decode('utf-8')
+            logo_data_uri = f"data:image/png;base64,{logo_base64}"
+    except Exception as e:
+        logger.warning(f"No se pudo cargar el logo: {e}")
+        logo_data_uri = ""
+
+    # Crear un HTML completo con estilos mejorados y profesionales
     full_html = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <title>{note_data.get("title", "Nota sin título")}</title>
         <style>
-            body {{ font-family: sans-serif; margin: 0.3in; font-size: 10pt; text-align: justify; }}
-            h1 {{ color: #333; border-bottom: 1px solid #eee; padding-bottom: 0.2em; font-size: 16pt; }}
-            p {{ line-height: 1.4; text-align: justify; }}
-            pre {{ background-color: #f4f4f4; padding: 1em; border-radius: 5px; overflow-x: auto; }}
-            code {{ font-family: monospace; }}
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+            
+            * {{
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }}
+            
+            body {{
+                font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                margin: 0;
+                padding: 0;
+                font-size: 11pt;
+                line-height: 1.6;
+                color: #1a1a1a;
+                position: relative;
+                min-height: 100vh;
+            }}
+            
+            .page-container {{
+                margin: 0.5in 0.5in 1in 0.5in;
+                padding-bottom: 60px;
+            }}
+            
+            .header {{
+                margin-bottom: 2em;
+                padding-bottom: 1em;
+                border-bottom: 3px solid #6366f1;
+            }}
+            
+            h1 {{
+                color: #1a1a1a;
+                font-size: 24pt;
+                font-weight: 700;
+                margin-bottom: 0.5em;
+                letter-spacing: -0.02em;
+            }}
+            
+            .note-date {{
+                font-size: 9pt;
+                color: #6b7280;
+                font-weight: 400;
+                margin-top: 0.5em;
+            }}
+            
+            .content {{
+                margin-top: 2em;
+            }}
+            
+            .content p {{
+                margin-bottom: 1em;
+                text-align: justify;
+                line-height: 1.7;
+            }}
+            
+            .content h2 {{
+                color: #374151;
+                font-size: 16pt;
+                font-weight: 600;
+                margin-top: 1.5em;
+                margin-bottom: 0.75em;
+                border-left: 4px solid #6366f1;
+                padding-left: 0.5em;
+            }}
+            
+            .content h3 {{
+                color: #4b5563;
+                font-size: 13pt;
+                font-weight: 600;
+                margin-top: 1.2em;
+                margin-bottom: 0.6em;
+            }}
+            
+            .content ul, .content ol {{
+                margin-left: 1.5em;
+                margin-bottom: 1em;
+            }}
+            
+            .content li {{
+                margin-bottom: 0.4em;
+            }}
+            
+            pre {{
+                background-color: #f9fafb;
+                border: 1px solid #e5e7eb;
+                border-radius: 6px;
+                padding: 1em;
+                overflow-x: auto;
+                margin-bottom: 1em;
+                font-size: 9pt;
+            }}
+            
+            code {{
+                font-family: 'Courier New', monospace;
+                background-color: #f3f4f6;
+                padding: 0.2em 0.4em;
+                border-radius: 3px;
+                font-size: 9.5pt;
+            }}
+            
+            pre code {{
+                background-color: transparent;
+                padding: 0;
+            }}
+            
             table {{
                 width: 100%;
                 border-collapse: collapse;
-                margin-bottom: 1em;
+                margin-bottom: 1.5em;
+                font-size: 10pt;
             }}
+            
             th, td {{
-                border: 1px solid #ccc;
-                padding: 0.5em;
+                border: 1px solid #d1d5db;
+                padding: 0.6em 0.8em;
                 text-align: left;
             }}
+            
             th {{
-                background-color: #f0f0f0;
+                background-color: #f3f4f6;
+                font-weight: 600;
+                color: #374151;
             }}
-            .note-meta {{ font-size: 0.9em; color: #666; margin-top: 1em; border-top: 1px solid #eee; padding-top: 0.5em; }}
+            
+            tr:nth-child(even) {{
+                background-color: #f9fafb;
+            }}
+            
+            .footer {{
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                height: 60px;
+                display: flex;
+                flex-direction: row;
+                align-items: center;
+                justify-content: flex-start;
+                gap: 10px;
+                border-top: 1px solid #e5e7eb;
+                background-color: #ffffff;
+                padding: 15px 0.5in;
+            }}
+            
+            .footer-logo {{
+                width: 28px;
+                height: 28px;
+                opacity: 0.9;
+            }}
+            
+            .footer-text {{
+                font-size: 10pt;
+                color: #6b7280;
+                font-weight: 500;
+                letter-spacing: 0.02em;
+            }}
+            
+            blockquote {{
+                border-left: 4px solid #e5e7eb;
+                padding-left: 1em;
+                margin-left: 0;
+                margin-bottom: 1em;
+                color: #6b7280;
+                font-style: italic;
+            }}
         </style>
     </head>
     <body>
-        <h1>{note_data.get("title", "Nota sin título")}</h1>
-        {html_content}
-        <div class="note-meta">
-            <p>Categoría: {note_data.get('category', 'N/A')}</p>
-            <p>Creada el: {created_at_dt.strftime('%Y-%m-%d %H:%M:%S') if isinstance(created_at_dt, datetime) else str(created_at_dt)}</p>
+        <div class="page-container">
+            <div class="header">
+                <h1>{note_data.get("title", "Nota sin título")}</h1>
+                <div class="note-date">
+                    Creada el: {created_at_dt.strftime('%d de %B de %Y, %H:%M') if isinstance(created_at_dt, datetime) else str(created_at_dt)}
+                </div>
+            </div>
+            
+            <div class="content">
+                {html_content}
+            </div>
+        </div>
+        
+        <div class="footer">
+            {f'<img src="{logo_data_uri}" class="footer-logo" alt="Kognito AI Logo" />' if logo_data_uri else ''}
+            <span class="footer-text">Kognito AI</span>
         </div>
     </body>
     </html>

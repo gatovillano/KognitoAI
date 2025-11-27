@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
 import { CalendarIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -15,9 +14,10 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn } from '@/lib/utils';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { TaskResponse } from './page'; // Importar el tipo TaskResponse
+import { TaskResponse } from './types';
 import { ProfileSelectorDialog } from '@/components/dialogs/ProfileSelectorDialog';
 import { Tag } from '@/components/ui/tag'; // Assuming a Tag component for displaying linked profiles
+import { KanbanStatus } from '../workspaces/[id]/projects/types'; // Correctly placed import
 
 interface TaskDialogProps {
   isOpen: boolean;
@@ -29,8 +29,9 @@ interface TaskDialogProps {
 
 export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspaceId }: TaskDialogProps) {
   const [description, setDescription] = useState(task?.description || '');
-  const [dueDate, setDueDate] = useState<Date | undefined>(task?.due_date ? new Date(task.due_date) : undefined);
-  const [isCompleted, setIsCompleted] = useState(task?.is_completed || false);
+  const [startDate, setStartDate] = useState<Date | undefined>(task?.start_date ? new Date(task.start_date) : undefined); // Nuevo estado
+  const [endDate, setEndDate] = useState<Date | undefined>(task?.end_date ? new Date(task.end_date) : undefined); // Nuevo estado
+  const [status, setStatus] = useState<KanbanStatus>('Pendiente');
   const [isLoading, setIsLoading] = useState(false);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
@@ -41,14 +42,16 @@ export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspac
   useEffect(() => {
     if (task) {
       setDescription(task.description);
-      setDueDate(task.due_date ? new Date(task.due_date) : undefined);
-      setIsCompleted(task.is_completed);
+      setStartDate(task.start_date ? new Date(task.start_date) : undefined); // Inicializar startDate
+      setEndDate(task.end_date ? new Date(task.end_date) : undefined); // Inicializar endDate
+      setStatus(task.status as KanbanStatus || (task.is_completed ? 'Hecho' : 'Pendiente'));
       setSelectedWorkspaceId(task.workspace_id || ''); // Precargar workspace_id si la tarea ya lo tiene
     } else {
       // Resetear el formulario si no hay tarea para editar
       setDescription('');
-      setDueDate(undefined);
-      setIsCompleted(false);
+      setStartDate(undefined); // Resetear startDate
+      setEndDate(undefined); // Resetear endDate
+      setStatus('Pendiente');
       setSelectedWorkspaceId(workspaceId || ''); // Usar el workspaceId del prop para nueva tarea
     }
   }, [task, isOpen, workspaceId]); // Resetear cuando la tarea o el estado del diálogo cambian
@@ -92,24 +95,25 @@ export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspac
     }
 
     setIsLoading(true);
+    const payload = {
+      description: description,
+      start_date: startDate?.toISOString(), // Nuevo campo
+      end_date: endDate?.toISOString(), // Nuevo campo
+      status: status,
+      is_completed: status === 'Hecho',
+      workspace_id: selectedWorkspaceId,
+    };
+
     try {
       let savedTask: TaskResponse;
       if (task) {
         // Actualizar tarea existente
-        const response = await apiClient.put(`/api/tasks/${task.id}`, {
-          description: description,
-          due_date: dueDate?.toISOString(),
-          is_completed: isCompleted,
-        });
+        const response = await apiClient.put(`/api/tasks/${task.id}`, payload);
         savedTask = response.data;
         toast.success('Tarea actualizada con éxito.');
       } else {
         // Crear nueva tarea
-        const response = await apiClient.post('/api/tasks', {
-          description: description,
-          due_date: dueDate?.toISOString(),
-          workspace_id: selectedWorkspaceId, // Usar el estado del selector
-        });
+        const response = await apiClient.post('/api/tasks', payload);
         savedTask = response.data;
         toast.success('Tarea creada con éxito.');
       }
@@ -193,8 +197,23 @@ export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspac
             </select>
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="dueDate" className="text-right">
-              Fecha Límite
+            <Label htmlFor="status" className="text-right">
+              Estado
+            </Label>
+            <select
+              id="status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value as KanbanStatus)}
+              className="col-span-3 border rounded-md p-2 bg-background"
+            >
+              <option value="Pendiente">Pendiente</option>
+              <option value="En Progreso">En Progreso</option>
+              <option value="Hecho">Hecho</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="startDate" className="text-right">
+              Fecha Inicio
             </Label>
             <Popover>
               <PopoverTrigger asChild>
@@ -202,37 +221,52 @@ export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspac
                   variant={"outline"}
                   className={cn(
                     "col-span-3 justify-start text-left font-normal",
-                    !dueDate && "text-muted-foreground"
+                    !startDate && "text-muted-foreground"
                   )}
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
-                  {dueDate ? format(dueDate, "PPP", { locale: es }) : <span>Selecciona una fecha</span>}
+                  {startDate ? format(startDate, "PPP", { locale: es }) : <span>Selecciona una fecha</span>}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0">
                 <Calendar
                   mode="single"
-                  selected={dueDate}
-                  onSelect={setDueDate}
+                  selected={startDate}
+                  onSelect={setStartDate}
                   initialFocus
                   locale={es}
                 />
               </PopoverContent>
             </Popover>
           </div>
-          {task && ( // Solo mostrar el checkbox si estamos editando una tarea existente
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="isCompleted" className="text-right">
-                Completada
-              </Label>
-              <Checkbox
-                id="isCompleted"
-                checked={isCompleted}
-                onCheckedChange={(checked) => setIsCompleted(Boolean(checked))}
-                className="col-span-3"
-              />
-            </div>
-          )}
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="endDate" className="text-right">
+              Fecha Fin
+            </Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant={"outline"}
+                  className={cn(
+                    "col-span-3 justify-start text-left font-normal",
+                    !endDate && "text-muted-foreground"
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {endDate ? format(endDate, "PPP", { locale: es }) : <span>Selecciona una fecha</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0">
+                <Calendar
+                  mode="single"
+                  selected={endDate}
+                  onSelect={setEndDate}
+                  initialFocus
+                  locale={es}
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
         </div>
         {task && ( // Only show if editing an existing task
           <div className="space-y-2">

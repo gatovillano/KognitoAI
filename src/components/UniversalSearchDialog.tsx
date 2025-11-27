@@ -111,7 +111,7 @@ export function UniversalSearchDialog({ isOpen, onOpenChange, searchTerm, setSea
           <div className="flex items-center space-x-2 p-2 hover:bg-muted rounded-md cursor-pointer" onClick={() => handleResultClick(result)}>
             {getIcon(result.type)}
             <div>
-              <p className="font-medium">Hilo de Chat: {result.title || "Hilo sin título"}</p>
+              <p className="font-medium">Hilo de Chat: {result.title || 'Hilo sin título'}</p>
               <p className="text-xs text-muted-foreground">{result.created_at ? new Date(result.created_at).toLocaleDateString() : ''}</p>
             </div>
           </div>
@@ -188,7 +188,7 @@ export function UniversalSearchDialog({ isOpen, onOpenChange, searchTerm, setSea
           <ScrollArea className="h-full">
             {loading && searchTerm && <p className="text-center text-muted-foreground">Buscando...</p>}
             {!loading && searchTerm && results.length === 0 && (
-              <p className="text-center text-muted-foreground">No se encontraron resultados para "{searchTerm}"</p>
+              <p className="text-center text-muted-foreground">{`No se encontraron resultados para &quot;${searchTerm}&quot;`}</p>
             )}
             {!loading && !searchTerm && (
               <p className="text-center text-muted-foreground">Empieza a escribir para buscar en todos tus datos.</p>

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import SessionLocal, Task # Importar SessionLocal y el modelo Task
 from core.tasks_manager import TasksManager # Importar el TasksManager
 from utils.security import get_current_account_id # Para obtener el account_id del usuario autenticado
+from core.dependencies import get_db_session # Importar dependencia centralizada
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +21,9 @@ router = APIRouter()
 
 # --- Dependencias de FastAPI ---
 
-async def get_db() -> AsyncSession:
-    """Crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session:
-        yield session
+# get_db eliminado en favor de core.dependencies.get_db_session
 
-def get_tasks_manager(db: AsyncSession = Depends(get_db)) -> TasksManager:
+def get_tasks_manager(db: AsyncSession = Depends(get_db_session)) -> TasksManager:
     """Inyecta una instancia del gestor de tareas."""
     return TasksManager(db)
 
@@ -36,7 +34,9 @@ class TaskResponse(BaseModel):
     id: uuid.UUID
     description: str
     is_completed: bool
-    due_date: Optional[datetime] = None
+    start_date: Optional[datetime] = None # Nuevo campo
+    end_date: Optional[datetime] = None # due_date ahora es end_date
+    status: str  # Añadido el nuevo campo
     created_at: datetime
     updated_at: datetime
     account_id: uuid.UUID
@@ -51,14 +51,17 @@ class TaskResponse(BaseModel):
 class TaskCreateRequest(BaseModel):
     """Define la estructura de datos para crear una nueva tarea."""
     description: str = Field(..., min_length=1, max_length=500)
-    due_date: Optional[datetime] = None
+    start_date: Optional[datetime] = None # Nuevo campo
+    end_date: Optional[datetime] = None # due_date ahora es end_date
     workspace_id: Optional[str] = None
 
 class TaskUpdateRequest(BaseModel):
     """Define la estructura de datos para actualizar una tarea existente."""
     description: Optional[str] = Field(None, min_length=1, max_length=500)
-    due_date: Optional[datetime] = None
+    start_date: Optional[datetime] = None # Nuevo campo
+    end_date: Optional[datetime] = None # due_date ahora es end_date
     is_completed: Optional[bool] = None
+    status: Optional[str] = None  # Añadido campo status
 
 class ProfileLinkRequest(BaseModel):
     profile_id: uuid.UUID
@@ -75,10 +78,11 @@ async def create_task(
     Crea una nueva tarea para el usuario autenticado.
     """
     try:
-        new_task = await tasks_manager.add_task(
+        new_task = await tasks_manager.create_task(
             account_id=current_account_id,
             description=request.description,
-            due_date=request.due_date,
+            start_date=request.start_date,
+            end_date=request.end_date,
             workspace_id=request.workspace_id
         )
         return new_task
@@ -130,6 +134,7 @@ async def list_tasks(
     tasks_manager: TasksManager = Depends(get_tasks_manager),
     workspace_id: Optional[str] = None,
     is_completed: Optional[bool] = None,
+    status: Optional[str] = None,  # Nuevo parámetro de filtro
     search_term: Optional[str] = None
 ):
     """
@@ -140,6 +145,7 @@ async def list_tasks(
             account_id=current_account_id,
             workspace_id=workspace_id,
             is_completed=is_completed,
+            status=status,  # Pasar el nuevo parámetro
             search_term=search_term
         )
         return tasks
@@ -200,8 +206,10 @@ async def update_task(
             account_id=current_account_id,
             task_id=task_id,
             description=request.description,
-            due_date=request.due_date,
-            is_completed=request.is_completed
+            start_date=request.start_date,
+            end_date=request.end_date,
+            is_completed=request.is_completed,
+            status=request.status  # Añadido parámetro status
         )
         if not updated_task:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tarea no encontrada o no pertenece al usuario.")

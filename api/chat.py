@@ -35,19 +35,15 @@ from tools.add_web_to_rag_tool import AddWebToRAGTool
 from tools.ddg_search_tool import create_ddg_search_tool
 from core.websocket_manager import send_personal_message
 from langchain_core.runnables import RunnableConfig # Importar RunnableConfig
+from core.dependencies import get_db_session # Importar dependencia centralizada
+from utils.db_session import DBSession # Importar DBSession para tareas en background
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session:  # type: ignore
-        try:
-            yield session
-        finally:
-            await session.close()
+# get_db eliminado en favor de core.dependencies.get_db_session
 
 # --- Modelos para el Chat ---
 class Source(BaseModel):
@@ -134,7 +130,7 @@ class PaginatedThreadsResponse(BaseModel):
 async def create_thread(
     request: CreateThreadRequest,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Endpoint para crear un nuevo hilo de chat.
@@ -165,7 +161,7 @@ async def create_thread(
 @router.get("/threads", response_model=PaginatedThreadsResponse, summary="Obtener lista de hilos de chat con paginación")
 async def get_threads(
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_session),
     workspace_id: Optional[str] = Query(None, description="Filtrar hilos por workspace ID"),
     skip: int = Query(0, ge=0, description="Número de hilos a omitir"),
     limit: int = Query(8, ge=1, le=100, description="Número máximo de hilos a devolver")
@@ -221,7 +217,7 @@ async def get_threads(
 async def get_messages_for_thread(
     thread_id: str,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_session),
     skip: int = Query(0, ge=0, description="Número de mensajes a omitir"),
     limit: int = Query(20, ge=1, le=100, description="Número máximo de mensajes a devolver")
 ):
@@ -304,61 +300,117 @@ async def search_chat_messages(
     logger.info(f"Buscando '{query}' en chats para la cuenta {account_id} y workspace {workspace_id}")
     results = []
     
-    # Obtener hilos filtrados por workspace si se proporciona
-    threads_response = await get_threads(
-        current_account_id=account_id, 
-        db=db, 
-        workspace_id=workspace_id,
-        skip=0, 
-        limit=1000  # Límite alto para obtener todos los hilos relevantes
-    )
+    # Optimization: Use direct SQL queries instead of iterating over all threads and messages
     
-    processed_threads = set()
+    # 1. Search in thread titles
+    thread_query = select(ChatThread).where(
+        ChatThread.account_id == uuid.UUID(account_id),
+        ChatThread.title.ilike(f"%{query}%")
+    )
+    if workspace_id:
+        if str(workspace_id).lower() == "none":
+            thread_query = thread_query.where(ChatThread.workspace_id == None)
+        else:
+            thread_query = thread_query.where(ChatThread.workspace_id == uuid.UUID(str(workspace_id)))
+            
+    thread_results = await db.execute(thread_query)
+    threads = thread_results.scalars().all()
+    
+    for thread in threads:
+        results.append({
+            "type": "chat_thread",
+            "id": str(thread.id),
+            "title": thread.title,
+            "created_at": thread.created_at.isoformat() if thread.created_at else None
+        })
 
-    for thread in threads_response.threads:
-        # Buscar en el título del hilo
-        if query.lower() in thread.title.lower() and thread.id not in processed_threads:
-            results.append({
-                "type": "chat_thread",
-                "id": str(thread.id),
-                "title": thread.title,
-                "created_at": thread.created_at.isoformat() if thread.created_at else None
-            })
-            processed_threads.add(thread.id)
+    # 2. Search in messages (joining with ChatThread for permission)
+    # We use raw SQL because langchain_chat_history is not a mapped model in our codebase
+    # We cast message to text to search within the JSONB
+    message_sql = """
+        SELECT ct.id, ct.title, lch.message
+        FROM langchain_chat_history lch
+        JOIN chat_threads ct ON lch.session_id = ct.id::text
+        WHERE ct.account_id = :account_id
+        AND lch.message::text ILIKE :query
+    """
+    params = {"account_id": account_id, "query": f"%{query}%"}
+    
+    if workspace_id:
+        if str(workspace_id).lower() == "none":
+             message_sql += " AND ct.workspace_id IS NULL"
+        else:
+             message_sql += " AND ct.workspace_id = :workspace_id"
+             params["workspace_id"] = workspace_id
 
-        # Buscar en los mensajes del hilo
-        db_sync_url = settings.database_url.replace("+psycopg", "")
-        chat_message_history = PostgresChatMessageHistory(
-            connection_string=db_sync_url,
-            session_id=str(thread.id),
-            table_name="langchain_chat_history",
-        )
-        all_messages = await chat_message_history.aget_messages()
+    message_results = await db.execute(text(message_sql), params)
+    rows = message_results.fetchall()
+    
+    for row in rows:
+        thread_id_str, thread_title, message_json = row
         
-        for msg in all_messages:
-            text_content = ""
-            if isinstance(msg.content, list):
-                for part in msg.content:
+        # Parse message content
+        # message_json is a dict (JSONB)
+        text_content = ""
+        sender = "unknown"
+        created_at = datetime.now(timezone.utc)
+        
+        try:
+            if isinstance(message_json, str):
+                 message_data = json.loads(message_json)
+            else:
+                 message_data = message_json
+            
+            # LangChain message structure: {"type": "human", "data": {"content": ...}} or direct keys
+            msg_type = message_data.get("type")
+            if msg_type == "human":
+                sender = "user"
+            elif msg_type == "ai":
+                sender = "ai"
+            
+            # Extract content
+            if "data" in message_data and isinstance(message_data["data"], dict):
+                content = message_data["data"].get("content")
+                additional_kwargs = message_data["data"].get("additional_kwargs", {})
+            else:
+                content = message_data.get("content")
+                additional_kwargs = message_data.get("additional_kwargs", {})
+
+            if additional_kwargs:
+                 created_at_str = additional_kwargs.get("created_at")
+                 if created_at_str:
+                     try:
+                         created_at = datetime.fromisoformat(created_at_str)
+                     except:
+                         pass
+
+            if isinstance(content, list):
+                for part in content:
                     if isinstance(part, dict) and part.get("type") == "text":
                         text_content += part.get("text", "")
             else:
-                text_content = str(msg.content)
-            
-            if query.lower() in text_content.lower():
-                results.append({
-                    "type": "chat_message",
-                    "thread_id": str(thread.id),
-                    "thread_title": thread.title,
-                    "content": text_content,
-                    "sender": "user" if isinstance(msg, HumanMessage) else "ai",
-                    "created_at": msg.additional_kwargs.get("created_at", datetime.now(timezone.utc)).isoformat()
-                })
+                text_content = str(content) if content else ""
+                
+        except Exception as e:
+            logger.warning(f"Error parsing message for search: {e}")
+            continue
+
+        # Double check query match in extracted text (since SQL match was on raw JSON)
+        if query.lower() in text_content.lower():
+            results.append({
+                "type": "chat_message",
+                "thread_id": str(thread_id_str),
+                "thread_title": thread_title,
+                "content": text_content,
+                "sender": sender,
+                "created_at": created_at.isoformat()
+            })
 
     # Aplicar paginación a los resultados finales
     return results[skip : skip + limit]
 
 @router.get("/threads/{thread_id}", summary="Obtener detalles de un hilo de chat")
-async def get_thread(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def get_thread(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Endpoint para obtener los detalles de un hilo de chat específico.
     """
@@ -379,7 +431,7 @@ async def get_thread(thread_id: str, current_account_id: str = Depends(get_curre
 
 
 @router.put("/threads/{thread_id}/pin", summary="Fijar o desfijar un hilo de chat")
-async def pin_thread(thread_id: str, request: PinThreadRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def pin_thread(thread_id: str, request: PinThreadRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Endpoint para fijar o desfijar un hilo de chat específico.
     """
@@ -399,7 +451,7 @@ async def pin_thread(thread_id: str, request: PinThreadRequest, current_account_
         raise HTTPException(status_code=500, detail="Ocurrió un error al actualizar el estado de fijado del hilo de chat.")
 
 @router.delete("/threads/{thread_id}", summary="Eliminar un hilo de chat")
-async def delete_thread(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def delete_thread(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Endpoint para eliminar un hilo de chat específico.
     """
@@ -419,7 +471,7 @@ async def delete_thread(thread_id: str, current_account_id: str = Depends(get_cu
         raise HTTPException(status_code=500, detail="Ocurrió un error al eliminar el hilo de chat.")
 
 @router.post("/threads/{thread_id}/generate-title", summary="Generar un título para un hilo de chat")
-async def generate_thread_title(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def generate_thread_title(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Endpoint para generar un título para un hilo de chat específico basado en su contenido.
     """
@@ -534,7 +586,7 @@ async def save_system_message(
     thread_id: str,
     request: SystemMessageRequest,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Endpoint para guardar un mensaje de sistema o de la IA en el historial de chat.
@@ -575,7 +627,7 @@ async def handle_chat(
     background_tasks: BackgroundTasks,
     request: ChatRequest,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Acepta una solicitud de chat, inicia una tarea en segundo plano para procesarla
@@ -645,7 +697,7 @@ async def create_and_run_agent_streaming(
     """
     Ejecuta el agente LangGraph y transmite los resultados a través de WebSockets.
     """
-    from core.agent import AgentState, create_langgraph_agent, sanitize_json_content # Importar AgentState y sanitize_json_content
+    from core.agent import AgentState, get_langgraph_agent, sanitize_json_content # Usar versión cacheada
     from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
     from langchain_community.chat_message_histories import PostgresChatMessageHistory
     from core.config import settings
@@ -669,7 +721,8 @@ async def create_and_run_agent_streaming(
         }, connection_type=conn_type)
 
         # --- Preparación Inicial ---
-        agent_app = create_langgraph_agent()
+        # Optimization: Usar grafo cacheado en lugar de recrearlo
+        agent_app = get_langgraph_agent()
         db_sync_url = settings.database_url.replace("+psycopg", "")
         chat_message_history = PostgresChatMessageHistory(
             connection_string=db_sync_url,
@@ -749,12 +802,17 @@ async def create_and_run_agent_streaming(
         await chat_message_history.aadd_messages([sanitized_ai_message])
 
         # El resto de la lógica para actualizar el título y enviar el evento final
+        # Optimization: Calculate message count locally to avoid fetching all messages again
         if background_tasks:
-            updated_history = await chat_message_history.aget_messages()
-            real_messages = [m for m in updated_history if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
-            message_count = len(real_messages)
+            # updated_history = await chat_message_history.aget_messages() # Removed
+            # real_messages = [m for m in updated_history if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
+            
+            # Estimate count: previous history + user message + AI message
+            # We filter summary messages from history_messages first
+            previous_real_messages = [m for m in history_messages if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
+            message_count = len(previous_real_messages) + 2 # +1 User, +1 AI
 
-            async with SessionLocal() as db:
+            async with DBSession(SessionLocal) as db:
                 thread = await db.get(ChatThread, uuid.UUID(thread_id))
                 current_title = thread.title if thread else ""
 

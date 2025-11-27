@@ -4,7 +4,7 @@ import { es } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, Clock, CheckCircle2 } from 'lucide-react';
 import { Checkbox } from '../../../components/ui/checkbox';
 import { Button } from '@/components/ui/button';
-import { AgendaEvent, TaskResponse } from './page'; // Importar los tipos
+import { AgendaEvent, TaskResponse } from './types';
 import { useDrag, useDrop } from 'react-dnd';
 
 interface MonthlyScheduleViewProps {
@@ -44,7 +44,7 @@ const EventCard: React.FC<EventCardProps> = ({ event, onEditEvent }) => {
     collect: (monitor) => ({
       isDragging: monitor.isDragging()
     })
-  }));
+  }), [event.id]);
   drag(ref);
 
   return (
@@ -80,10 +80,10 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onEditTask, onToggleTaskCompl
     collect: (monitor) => ({
       isDragging: monitor.isDragging()
     })
-  }));
+  }), [task.id]);
   drag(ref);
 
-  const isPastDue = !task.is_completed && new Date(task.due_date!) < new Date();
+  const isPastDue = !task.is_completed && task.end_date && new Date(task.end_date) < new Date();
 
   return (
     <div
@@ -101,10 +101,10 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onEditTask, onToggleTaskCompl
         />
         <p className="font-semibold flex-grow truncate">{(task as TaskResponse).description}</p>
       </div>
-      {(task as TaskResponse).due_date && (
+      {task.end_date && (
         <div className="flex items-center mt-1">
           <Clock className="h-3 w-3 mr-1" />
-          {format(new Date((task as TaskResponse).due_date!), 'HH:mm', { locale: es })}
+          {format(new Date(task.end_date), 'HH:mm', { locale: es })}
         </div>
       )}
     </div>
@@ -148,7 +148,7 @@ const DayCell: React.FC<DayCellProps> = ({
           return;
         }
         if (item.type === 'event') {
-          onMoveEvent(item.id, day);
+          onMoveEvent(item.id, day); // item.id ya es string
         } else if (item.type === 'task') {
           onMoveTask(item.id, day);
         }
@@ -157,7 +157,7 @@ const DayCell: React.FC<DayCellProps> = ({
         isOver: monitor.isOver(),
       }),
     })
-  );
+    , [day, onMoveEvent, onMoveTask]);
   drop(dropRef);
 
   return (
@@ -222,15 +222,68 @@ export function MonthlyScheduleView({
   // Función para filtrar eventos/tareas por día
   const filterItemsByDay = <T extends AgendaEvent | TaskResponse>(items: T[], day: Date): T[] => {
     return items.filter(item => {
-      const itemDate = 'event_datetime_local' in item ? new Date(item.event_datetime_local) : new Date(item.due_date!);
-      return (
-        itemDate.getDate() === day.getDate() &&
-        itemDate.getMonth() === day.getMonth() &&
-        itemDate.getFullYear() === day.getFullYear()
-      );
+      // Lógica para Eventos (AgendaEvent) - PRIORIDAD ALTA
+      if ('event_datetime_local' in item) {
+        const itemDate = new Date(item.event_datetime_local);
+        return (
+          itemDate.getDate() === day.getDate() &&
+          itemDate.getMonth() === day.getMonth() &&
+          itemDate.getFullYear() === day.getFullYear()
+        );
+      }
+
+      // Lógica específica para Tareas con rango
+      if ('start_date' in item || 'end_date' in item) {
+        const task = item as unknown as TaskResponse;
+
+        // Si no tiene fechas, usar created_at como fecha de visualización
+        if (!task.start_date && !task.end_date) {
+          const createdAt = new Date(task.created_at);
+          return (
+            createdAt.getDate() === day.getDate() &&
+            createdAt.getMonth() === day.getMonth() &&
+            createdAt.getFullYear() === day.getFullYear()
+          );
+        }
+
+        const currentDayStart = new Date(day);
+        currentDayStart.setHours(0, 0, 0, 0);
+
+        const currentDayEnd = new Date(day);
+        currentDayEnd.setHours(23, 59, 59, 999);
+
+        // Rango completo
+        if (task.start_date && task.end_date) {
+          const taskStart = new Date(task.start_date);
+          taskStart.setHours(0, 0, 0, 0);
+          const taskEnd = new Date(task.end_date);
+          taskEnd.setHours(23, 59, 59, 999);
+          return currentDayStart <= taskEnd && currentDayEnd >= taskStart;
+        }
+
+        // Solo end_date
+        if (task.end_date) {
+          const taskEnd = new Date(task.end_date);
+          return taskEnd.getDate() === day.getDate() &&
+            taskEnd.getMonth() === day.getMonth() &&
+            taskEnd.getFullYear() === day.getFullYear();
+        }
+
+        // Solo start_date
+        if (task.start_date) {
+          const taskStart = new Date(task.start_date);
+          return taskStart.getDate() === day.getDate() &&
+            taskStart.getMonth() === day.getMonth() &&
+            taskStart.getFullYear() === day.getFullYear();
+        }
+
+        return false;
+      }
+
+      return false;
     }).sort((a: T, b: T) => {
-      const dateA = 'event_datetime_local' in a ? new Date(a.event_datetime_local) : new Date(a.due_date!);
-      const dateB = 'event_datetime_local' in b ? new Date(b.event_datetime_local) : new Date(b.due_date!);
+      const dateA = 'event_datetime_local' in a ? new Date(a.event_datetime_local) : ('end_date' in a && a.end_date ? new Date(a.end_date) : new Date(0));
+      const dateB = 'event_datetime_local' in b ? new Date(b.event_datetime_local) : ('end_date' in b && b.end_date ? new Date(b.end_date) : new Date(0));
       return dateA.getTime() - dateB.getTime();
     });
   };

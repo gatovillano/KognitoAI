@@ -30,6 +30,7 @@ from telegram.ext import Application, CommandHandler, CallbackContext
 from core.config import settings
 from core.database import SessionLocal
 from core.repositories.account_repository import AccountRepository
+from utils.db_session import DBSession
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ async def start(update: Update, context: CallbackContext) -> None:
     logger.info(f"Comando /start recibido de {user.id} ({user.first_name})")
 
     try:
-        async with SessionLocal() as session:
+        async with DBSession(SessionLocal) as session:
             repo = AccountRepository(session)
             result = await repo.get_or_create_account_from_platform_id(
                 platform='telegram',
@@ -121,7 +122,7 @@ async def open_documents_panel(update: Update, context: CallbackContext) -> None
 
     # Es crucial que el usuario esté registrado para poder abrir el panel.
     try:
-        async with SessionLocal() as session:
+        async with DBSession(SessionLocal) as session:
             repo = AccountRepository(session)
             account, _ = await repo.get_or_create_account_from_platform_id(
                 platform='telegram',
@@ -183,7 +184,7 @@ async def open_conversation(update: Update, context: CallbackContext) -> None:
         conversation_name = " ".join(command_text[1:])
         
         # Obtener o crear la cuenta del usuario
-        async with SessionLocal() as session:
+        async with DBSession(SessionLocal) as session:
             repo = AccountRepository(session)
             result = await repo.get_or_create_account_from_platform_id(
                 platform='telegram',

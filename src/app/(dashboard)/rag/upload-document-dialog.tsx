@@ -20,6 +20,7 @@ import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'; // Importar Tabs
 import { TiptapEditor } from '@/components/TiptapEditor'; // Importar TiptapEditor
+import { ScrollArea } from '@/components/ui/scroll-area'; // Importar ScrollArea
 import apiClient from '@/lib/api';
 
 const formSchema = z.object({
@@ -78,9 +79,8 @@ function Dropzone({ children, onDrop, onDragOver, onDragLeave, isDragging }: Dro
       onDrop={onDrop}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
-      className={`relative border-2 rounded-lg transition-colors ${
-        isDragging ? 'border-primary bg-primary/10' : 'border-dashed border-gray-300 dark:border-gray-700'
-      }`}
+      className={`relative border-2 rounded-lg transition-colors ${isDragging ? 'border-primary bg-primary/10' : 'border-dashed border-gray-300 dark:border-gray-700'
+        }`}
     >
       {children}
       {isDragging && (
@@ -107,7 +107,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
   });
 
   const files = form.watch('files');
-  
+
   // Rellenamos el formulario cuando cambia el estado de apertura o el defaultTopic
   useEffect(() => {
     if (isOpen) {
@@ -143,7 +143,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     setIsSubmitting(true);
-    
+
     const topicForUpload = defaultTopic || values.topic || 'General';
     const fileNames: string[] = [];
     const formData = new FormData();
@@ -180,7 +180,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
         setIsSubmitting(false);
         return;
       }
-      
+
       onUploadStart(fileNames, topicForUpload);
       onOpenChange(false); // Cierra el diálogo inmediatamente
 
@@ -222,7 +222,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl w-full p-4 sm:p-6">
+      <DialogContent className="max-w-xl w-full max-h-[90vh] flex flex-col p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle className="text-lg sm:text-xl">Subir Nuevo Documento</DialogTitle>
           <DialogDescription>
@@ -233,7 +233,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="flex-1 flex flex-col space-y-4 overflow-hidden">
             {/* ---- CAMBIO DE RENDERIZADO: El campo 'topic' solo se muestra si NO hay defaultTopic ---- */}
             {!defaultTopic && (
               <FormField
@@ -278,7 +278,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
                         <label htmlFor="file-upload-input" className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer bg-muted hover:bg-muted/80 transition-colors">
                           <div className="flex flex-col items-center justify-center pt-5 pb-6">
                             <svg className="w-8 h-8 mb-4 text-muted-foreground" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
-                              <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L7 9m3-3 3 3"/>
+                              <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L7 9m3-3 3 3" />
                             </svg>
                             <p className="mb-2 text-sm text-muted-foreground"><span className="font-semibold">Haz clic para subir</span> o arrastra y suelta</p>
                             <p className="text-xs text-muted-foreground">PDF, DOCX, TXT, MD, HTML (MAX. 5MB)</p>
@@ -292,13 +292,15 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
                 {files && files.length > 0 && (
                   <div className="mt-4 space-y-2 text-sm">
                     <p className="font-medium">Archivos seleccionados:</p>
-                    <ul className="list-disc list-inside space-y-1">
-                      {Array.from(files as FileList).map((file: File) => (
-                        <li key={file.name} className="truncate">
-                          {file.name} ({Math.round(file.size / 1024)} KB)
-                        </li>
-                      ))}
-                    </ul>
+                    <ScrollArea className="max-h-[200px] w-full rounded-md border p-2">
+                      <ul className="list-disc list-inside space-y-1">
+                        {Array.from(files as FileList).map((file: File) => (
+                          <li key={file.name} className="break-all">
+                            <span>{file.name}</span> ({Math.round(file.size / 1024)} KB)
+                          </li>
+                        ))}
+                      </ul>
+                    </ScrollArea>
                   </div>
                 )}
               </TabsContent>

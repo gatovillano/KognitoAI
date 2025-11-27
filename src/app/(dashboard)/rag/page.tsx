@@ -16,13 +16,15 @@ import { Info } from 'lucide-react';
 
 import { UploadDocumentDialog } from './upload-document-dialog';
 import { CreateCollectionDialog } from './create-collection-dialog';
-import { CollectionAnalysisDialog } from './collection-analysis-dialog';
+import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
 import UploadProgressIndicator, { UploadTask } from '@/components/UploadProgressIndicator';
+import { Analysis } from '@/lib/models';
 import { GitHubRepoDialog } from './github-repo-dialog';
 import { EditCollectionDialog } from './edit-collection-dialog';
 import { ShareCollectionDialog } from './share-collection-dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { CollectionDisplay, StaticCollectionCard } from '@/components/CollectionDisplay'; // Import CollectionDisplay and StaticCollectionCard
+import { DatasetNameDialog } from './dataset-name-dialog';
 
 interface Collection {
   topic: string;
@@ -50,9 +52,8 @@ export default function RagCollectionsPage() {
 
   // Estados para procesamiento de grafos de conocimiento
   const [isProcessingKnowledgeGraph, setIsProcessingKnowledgeGraph] = useState(false);
-  
-  const [collectionAnalysisResult, setCollectionAnalysisResult] = useState<any>(null);
-  const [isCollectionAnalysisOpen, setIsCollectionAnalysisOpen] = useState(false);
+
+  const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
   const [collectionPollingId, setCollectionPollingId] = useState<string | null>(null);
   const [analyzingTopic, setAnalyzingTopic] = useState<string | null>(null);
 
@@ -60,9 +61,13 @@ export default function RagCollectionsPage() {
   const [isEditCollectionOpen, setIsEditCollectionOpen] = useState(false);
   const [isShareCollectionOpen, setIsShareCollectionOpen] = useState(false);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
-  
+
   // Nuevo estado para el diálogo de análisis global
   const [isGlobalAnalysisOpen, setIsGlobalAnalysisOpen] = useState(false);
+
+  // Estado para el diálogo de configuración de grafo
+  const [isDatasetDialogOpen, setIsDatasetDialogOpen] = useState(false);
+  const [processingTopic, setProcessingTopic] = useState<string | null>(null);
 
   const router = useRouter();
 
@@ -101,11 +106,11 @@ export default function RagCollectionsPage() {
       return;
     }
     try {
-      setCollectionAnalysisResult(null); 
+      setSelectedAnalysis(null);
       setAnalyzingTopic(topic);
       const response = await apiClient.post('/api/start-collection-analysis', { topic });
       setCollectionPollingId(response.data.task_id);
-      toast.info(`Análisis de la colección &quot;${topic}&quot; iniciado.`);
+      toast.info(`Análisis de la colección "${topic}" iniciado.`);
     } catch (error) {
       toast.error("No se pudo iniciar el análisis de la colección.");
       setAnalyzingTopic(null);
@@ -116,7 +121,7 @@ export default function RagCollectionsPage() {
   const handleGlobalAnalysis = () => {
     setIsGlobalAnalysisOpen(true);
     setAnalyzingTopic(null); // Resetear para un análisis global
-    setCollectionAnalysisResult(null); // Resetear para un análisis global
+    setSelectedAnalysis(null); // Resetear para un análisis global
   };
 
   useEffect(() => {
@@ -129,8 +134,25 @@ export default function RagCollectionsPage() {
 
         if (status === 'completed') {
           clearInterval(poller);
-          setCollectionAnalysisResult(result);
-          setIsCollectionAnalysisOpen(true);
+
+          const analysisType = result?.analysis_metadata?.analysis_type || 'collection';
+          let title = `Análisis de Colección: ${analyzingTopic}`;
+          if (analysisType === 'semantic_summary') {
+            title = `Resumen Semántico: ${analyzingTopic}`;
+          } else if (analysisType === 'knowledge_graph_analysis') {
+            title = `Análisis de Grafo: ${analyzingTopic}`;
+          }
+
+          const newAnalysis: Analysis = {
+            id: collectionPollingId,
+            type: analysisType,
+            title: title,
+            created_at: new Date().toISOString(),
+            result: result,
+            full_data: result,
+          };
+
+          setSelectedAnalysis(newAnalysis);
           toast.success(`¡Análisis de "${analyzingTopic}" completado!`);
           setCollectionPollingId(null);
           setAnalyzingTopic(null);
@@ -151,12 +173,7 @@ export default function RagCollectionsPage() {
     return () => clearInterval(poller);
   }, [collectionPollingId, analyzingTopic]);
 
-  const handleAnalysisDialogClose = (isOpen: boolean) => {
-    setIsCollectionAnalysisOpen(isOpen);
-    if (!isOpen) {
-      setCollectionAnalysisResult(null);
-    }
-  };
+
 
   const handleDeleteConfirm = async () => {
     if (!deletingTopic) return;
@@ -199,37 +216,54 @@ export default function RagCollectionsPage() {
     setSelectedCollection(null);
   };
 
-  const handleProcessKnowledgeGraph = async (topic?: string) => {
+  const handleProcessKnowledgeGraph = (topic?: string) => {
     if (isProcessingKnowledgeGraph) {
       toast.info("Ya hay un procesamiento de grafo en progreso.");
       return;
     }
+    setProcessingTopic(topic || null);
+    setIsDatasetDialogOpen(true);
+  };
 
+  const handleConfirmProcessGraph = async (datasetName: string, mode: 'hybrid' | 'conceptual') => {
     setIsProcessingKnowledgeGraph(true);
     const toastId = toast.loading(
-      topic
-        ? `Procesando grafo de conocimiento para "${topic}"...`
-        : "Procesando grafo de conocimiento para todos los documentos..."
+      processingTopic
+        ? `Procesando grafo de conocimiento para "${processingTopic}" (Modo: ${mode === 'hybrid' ? 'Estándar' : 'Conceptual'})...`
+        : `Procesando grafo global (Modo: ${mode === 'hybrid' ? 'Estándar' : 'Conceptual'})...`
     );
 
     try {
-      const payload = {
+      // Determinar qué endpoint usar basado en el modo
+      if (mode === 'conceptual') {
+        // Modo Conceptual: Usar la herramienta de Cognee
+        const payload = {
           tool_name: "cognee_knowledge_graph",
           action: "process_documents",
-          dataset_name: topic,
-          documents: [] // Se podría añadir lógica para obtener documentos si es necesario
-      };
-
-      const response = await apiClient.post('/api/tools/run', payload);
+          dataset_name: datasetName,
+          documents: []
+        };
+        await apiClient.post('/api/tools/run', payload);
+      } else {
+        // Modo Híbrido (Estándar): Llamar al endpoint optimizado
+        await apiClient.post('/api/knowledge-graph/process-knowledge-graph-optimized', {
+          workspace_id: collections.length > 0 ? collections[0].workspace_id : undefined,
+          dataset_name: datasetName,
+          topic: processingTopic || undefined,  // Filtrar por colección específica
+          force_reprocess: true
+        });
+      }
 
       toast.success(
         `¡Creación de grafo iniciada!`,
         { id: toastId }
       );
     } catch (error) {
-      toast.error("Error al iniciar el procesamiento del grafo de conocimiento.", { id: toastId });
+      console.error(error);
+      toast.error("Error al iniciar el procesamiento del grafo.", { id: toastId });
     } finally {
       setIsProcessingKnowledgeGraph(false);
+      setProcessingTopic(null);
     }
   };
 
@@ -390,38 +424,38 @@ export default function RagCollectionsPage() {
       </div>
 
       {uploadTasks.length > 0 && <UploadProgressIndicator tasks={uploadTasks} />}
- 
-       {renderContent()}
- 
-       <UploadDocumentDialog
+
+      {renderContent()}
+
+      <UploadDocumentDialog
         isOpen={isUploadOpen}
         onOpenChange={setIsUploadOpen}
         onUploadSuccess={() => { /* WebSocket handles updates */ }}
         onUploadStart={(fileNames, topic) => {
           const newTasks = fileNames.map(name => ({
             id: name, // Usar el nombre del archivo como ID temporal
-            name,
+            file_names: [name], // Añadir file_names como un array con el nombre del archivo
             topic,
-            status: 'uploading' as const,
+            status: 'pending' as const,
             progress: 0,
+            created_at: new Date().toISOString(), // Añadir created_at con la fecha actual
           }));
           setUploadTasks(prev => [...prev, ...newTasks]);
         }}
       />
-       <CreateCollectionDialog isOpen={isCreateOpen} onOpenChange={setIsCreateOpen} onCreateSuccess={handleCollectionCreated} />
-       <GitHubRepoDialog isOpen={isGitHubRepoOpen} onOpenChange={setIsGitHubRepoOpen} onSuccess={() => { fetchCollections(); /* WebSocket handles upload tasks updates */ }} />
-       <CollectionAnalysisDialog
-         isOpen={isCollectionAnalysisOpen}
-         onOpenChange={handleAnalysisDialogClose}
-         analysis={collectionAnalysisResult}
-         topic={analyzingTopic ?? ''}
+      <CreateCollectionDialog isOpen={isCreateOpen} onOpenChange={setIsCreateOpen} onCreateSuccess={handleCollectionCreated} />
+      <GitHubRepoDialog isOpen={isGitHubRepoOpen} onOpenChange={setIsGitHubRepoOpen} onSuccess={() => { fetchCollections(); /* WebSocket handles upload tasks updates */ }} />
+      <AnalysisDetailDialog
+        isOpen={!!selectedAnalysis}
+        onOpenChange={(open) => !open && setSelectedAnalysis(null)}
+        analysis={selectedAnalysis}
       />
       <AlertDialog open={!!deletingTopic} onOpenChange={(open) => !open && setDeletingTopic(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta acción es irreversible y eliminará la colección &quot;{deletingTopic}&quot; y todos sus documentos permanentemente.
+              Esta acción es irreversible y eliminará la colección {"\u0022"}{deletingTopic}{"\u0022"} y todos sus documentos permanentemente.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -443,6 +477,14 @@ export default function RagCollectionsPage() {
         onOpenChange={setIsShareCollectionOpen}
         onShareSuccess={handleShareSuccess}
         collection={selectedCollection}
+      />
+
+      <DatasetNameDialog
+        isOpen={isDatasetDialogOpen}
+        onOpenChange={setIsDatasetDialogOpen}
+        onConfirm={handleConfirmProcessGraph}
+        defaultTopic={processingTopic}
+        workspaceId={collections.length > 0 ? collections[0].workspace_id : undefined}
       />
 
       {/* {linkingCollection && (
@@ -471,7 +513,7 @@ export default function RagCollectionsPage() {
           <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
             <p><strong>¿Qué son las Colecciones de Conocimientos?</strong></p>
             <p>Son agrupaciones temáticas de documentos que te permiten mantener tu información organizada y relevante. Puedes crear colecciones para diferentes proyectos, temas o áreas de interés.</p>
-            
+
             <p><strong>Características Principales:</strong></p>
             <ul className="list-disc pl-5 space-y-2">
               <li><strong>Memoria de Kognito:</strong> Los documentos que subes se integran a la "memoria" de Kognito, enriqueciendo sus respuestas por relevancia con la consulta en el chat.</li>
@@ -483,7 +525,7 @@ export default function RagCollectionsPage() {
               <li><strong>Integración con GitHub:</strong> Añade repositorios de GitHub directamente a tus colecciones para analizar código y documentación.</li>
               <li><strong>Colaboración:</strong> Comparte colecciones con tu equipo para trabajar de forma conjunta.</li>
             </ul>
-            
+
             <p><strong>Interacción con IA:</strong></p>
             <p>Además de la gestión manual, puedes interactuar con tus colecciones a través del chat de IA. La IA dispone de herramientas especializadas para:</p>
             <ul className="list-disc pl-5 space-y-2">

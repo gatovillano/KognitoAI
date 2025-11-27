@@ -45,6 +45,7 @@ class SingleTextAnalysis(BaseModel):
     exploration_questions: List[str] = Field(description="Una lista de 5 a 8 preguntas adicionales para explorar a partir del texto, que el texto inspira pero no responde directamente.")
     problematic_areas: List[str] = Field(description="Una lista de 3 a 5 áreas problemáticas, desafíos o puntos de controversia identificados en el texto.")
     final_reflections: List[str] = Field (description="Una lista de 3 a 5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
+    kai_synthesis: str = Field(description="Una síntesis única y profunda desde la perspectiva de KAI (Kognito AI) como exocerebro del usuario. Debe ser una reflexión de alto nivel (100-150 palabras) que conecte el contenido del documento con el contexto más amplio del conocimiento del usuario, identificando oportunidades, conexiones no obvias y valor estratégico.")
 
 class CollectionAnalysis(BaseModel):
     """Define la estructura de salida para el análisis de una colección de textos."""
@@ -59,6 +60,7 @@ class CollectionAnalysis(BaseModel):
     final_reflections: List[str] = Field(description="3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
     collection_insights: List[str] = Field(description="3-5 insights únicos que emergen del análisis conjunto de todos los documentos, que no serían evidentes analizando documentos individuales")
     methodological_notes: List[str] = Field(description="2-3 observaciones sobre la metodología, enfoque o perspectiva común en los documentos analizados")
+    kai_synthesis: str = Field(description="Una síntesis de alto nivel desde la perspectiva de KAI (Kognito AI) como exocerebro del usuario. Debe ser una reflexión estratégica (150-200 palabras) que conecte el contenido de la colección con el contexto más amplio del conocimiento del usuario, identificando patrones emergentes, oportunidades de acción y valor estratégico único que surge del análisis conjunto.")
 
 
 # --- Clase Principal del Analizador ---
@@ -129,7 +131,7 @@ class AdvancedTextAnalyzer:
             )
 
         prompt = f"""
-        Eres un analista experto en análisis textual de conocimientos. Realiza un análisis exhaustivo y detallado del siguiente texto. Asegúrate de que todo el contenido generado esté en español.
+        Eres KAI (Kognito AI), un analista experto en análisis textual de conocimientos que actúa como exocerebro proactivo del usuario. Realiza un análisis exhaustivo y detallado del siguiente texto. Asegúrate de que todo el contenido generado esté en español.
  
         INSTRUCCIONES ESPECÍFICAS:
         1. **Resumen ejecutivo**: Conciso pero completo (50-80 palabras) en español.
@@ -171,9 +173,17 @@ class AdvancedTextAnalyzer:
 
         8. **Preguntas para explorar**: 5-8 preguntas adicionales para explorar a partir del texto, que el texto inspira pero no responde directamente.
 
-        8. **Problemáticas**: 3-5 áreas problemáticas, desafíos o puntos de controversia identificados en el texto.
+        9. **Problemáticas**: 3-5 áreas problemáticas, desafíos o puntos de controversia identificados en el texto.
 
-        9. **Reflexiones finales**: 3-5 reflexiones sobre importancia, aportes y proyecciones
+        10. **Reflexiones finales**: 3-5 reflexiones sobre importancia, aportes y proyecciones
+
+        11. **Síntesis de KAI**: Como exocerebro del usuario, genera una reflexión estratégica de alto nivel (100-150 palabras) que:
+            - Conecte este documento con el contexto más amplio del conocimiento del usuario
+            - Identifique oportunidades de acción o aplicación práctica
+            - Señale conexiones no obvias con otros dominios o áreas de interés
+            - Destaque el valor estratégico único de este contenido
+            - Proponga formas de aprovechar este conocimiento de manera proactiva
+            - Adopta un tono reflexivo, estratégico y orientado a la acción
 
         Para los temas clave y conceptos centrales, utiliza nombres precisos y relevantes al contexto del texto, priorizando términos específicos del dominio o categorías reconocibles por el usuario.
 
@@ -213,7 +223,7 @@ class AdvancedTextAnalyzer:
 
         output_parser = PydanticOutputParser(pydantic_object=CollectionAnalysis)
         prompt = f"""
-        Eres un analista de investigación experto en síntesis de conocimiento. Analiza esta colección de documentos. Asegúrate de que todo el contenido generado esté en español.
+        Eres KAI (Kognito AI), un analista de investigación experto en síntesis de conocimiento que actúa como exocerebro proactivo del usuario. Analiza esta colección de documentos. Asegúrate de que todo el contenido generado esté en español.
  
         INSTRUCCIONES ESPECÍFICAS PARA EL ANÁLISIS DE COLECCIÓN:
         Tu tarea es generar un análisis exhaustivo de la colección de documentos, asegurándote de incluir TODOS los siguientes campos en tu respuesta JSON, siguiendo las descripciones y formatos indicados. Todo el contenido generado debe estar en español:
@@ -225,10 +235,17 @@ class AdvancedTextAnalyzer:
         5.  **identified_connections**: Una lista de insights específicos que conectan dos o más documentos. Incluye sinergias, evoluciones, contradicciones o complementariedades. Cada conexión debe especificar los títulos de los documentos involucrados y una descripción del insight.
         6.  **emergent_knowledge_gaps**: Una lista de 5-8 preguntas inteligentes o áreas que la colección en su conjunto no responde o deja abiertas.
         7.  **exploration_questions**: Una lista de 5-8 preguntas adicionales para explorar a partir de la colección, que el texto inspira pero no responde directamente.
-        7.  **problematic_areas**: Una lista de 3 a 5 áreas problemáticas o desafíos comunes/emergentes identificados a través de la colección de documentos.
-        8.  **final_reflections**: 3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales, puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión.
-        8.  **collection_insights**: 3-5 insights únicos que emergen del análisis conjunto de todos los documentos, que no serían evidentes analizando documentos individuales.
-        9.  **methodological_notes**: 2-3 observaciones sobre la metodología, enfoque o perspectiva común en los documentos analizados.
+        8.  **problematic_areas**: Una lista de 3 a 5 áreas problemáticas o desafíos comunes/emergentes identificados a través de la colección de documentos.
+        9.  **final_reflections**: 3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales, puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión.
+        10. **collection_insights**: 3-5 insights únicos que emergen del análisis conjunto de todos los documentos, que no serían evidentes analizando documentos individuales.
+        11. **methodological_notes**: 2-3 observaciones sobre la metodología, enfoque o perspectiva común en los documentos analizados.
+        12. **kai_synthesis**: Como exocerebro del usuario, genera una síntesis estratégica de alto nivel (150-200 palabras) que:
+            - Conecte el contenido de esta colección con el contexto más amplio del conocimiento del usuario
+            - Identifique patrones emergentes y oportunidades estratégicas únicas que surgen del análisis conjunto
+            - Señale conexiones no obvias entre los documentos y con otros dominios
+            - Destaque el valor estratégico único de esta colección como un todo
+            - Proponga acciones concretas o áreas de exploración prioritarias
+            - Adopta un tono reflexivo, estratégico y orientado a la acción
 
         Asegúrate de que cada campo esté presente en la salida JSON, incluso si está vacío (en cuyo caso, usa un array vacío `[]` para las listas o un string vacío `""` para los strings).
 
