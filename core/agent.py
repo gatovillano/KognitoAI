@@ -481,6 +481,10 @@ async def call_model_node(state: AgentState):
     if not llm:
         raise ValueError("El LLM principal no está disponible.")
         
+    # Log del modelo en uso para confirmación visual
+    model_name = getattr(llm, 'model', settings.llm_model)
+    logger.info(f"🤖 AGENT EXECUTION: Generando respuesta usando modelo: '{model_name}'")
+
     logger.debug(f"DEBUG (agent.py - call_model_node): System Prompt final antes de LLM: {system_prompt_content}")
     llm_with_tools = cast(ChatGoogleGenerativeAI, llm).bind_tools(tools)
 
@@ -573,11 +577,9 @@ async def tool_node(state: AgentState):
     if not tool_calls:
         return {"messages": state["messages"]}
 
-    tools = await get_all_langchain_tools(
-        account_id=state['account_id'],
-        telegram_id=state.get('telegram_id')
-    )
-    tool_map = {tool.name: tool for tool in tools}
+    # Optimization: Instantiate only the requested tool using get_tool_by_name
+    # tools = await get_all_langchain_tools(...) # Removed to avoid overhead
+    # tool_map = {tool.name: tool for tool in tools} # Removed
 
     # Redundancia eliminada
     tool_messages = []
@@ -600,8 +602,17 @@ async def tool_node(state: AgentState):
             "toolName": tool_name,
         }, connection_type=conn_type)
 
-        if tool_name not in tool_map:
-            logger.error(f"Herramienta '{tool_name}' no encontrada.")
+        # Use get_tool_by_name to instantiate the tool on demand
+        from core.tools import get_tool_by_name
+        selected_tool = await get_tool_by_name(
+            tool_name=tool_name,
+            account_id=state['account_id'],
+            telegram_id=state.get('telegram_id'),
+            thread_id=state['messages'][-1].additional_kwargs.get('thread_id')
+        )
+
+        if not selected_tool:
+            logger.error(f"Herramienta '{tool_name}' no encontrada o falló al instanciarse.")
             tool_messages.append(ToolMessage(
                 content=f"Error: Herramienta '{tool_name}' no encontrada.",
                 tool_call_id=tool_call.get("id")
@@ -611,13 +622,12 @@ async def tool_node(state: AgentState):
                 "type": "tool_end",
                 "taskId": state.get("task_id"),
                 "toolName": tool_name,
+                "status": "error",
                 "result": f"Error: Herramienta '{tool_name}' no encontrada.",
                 "error": True,
                 "sources": []
             }, connection_type=conn_type)
             continue
-            
-        selected_tool = tool_map[tool_name]
         
         # --- INYECCIÓN DE ATRIBUTOS DE CONTEXTO ---
         selected_tool.account_id = state['account_id']  # type: ignore
@@ -696,11 +706,18 @@ async def tool_node(state: AgentState):
             tool_sources_to_add: List[Dict[str, Any]] = []
 
             if tool_output.sources:
-                logger.info(f"La herramienta '{tool_name}' devolvió {len(tool_output.sources)} fuentes. Reemplazando fuentes existentes.")
-                # Sobrescribe completamente las fuentes actuales con las de la herramienta
-                current_sources = [s.dict() for s in tool_output.sources]
-                # Asigna las mismas fuentes para el evento websocket
-                tool_sources_to_add = current_sources
+                logger.info(f"La herramienta '{tool_name}' devolvió {len(tool_output.sources)} fuentes. Añadiendo a fuentes existentes.")
+                # Convertir las nuevas fuentes a dicts
+                new_sources_dicts = [s.dict() for s in tool_output.sources]
+                
+                # Asegurarse de que current_sources es una lista antes de extender
+                if current_sources is None:
+                    current_sources = []
+                
+                current_sources.extend(new_sources_dicts)
+                
+                # Asigna las nuevas fuentes para el evento websocket
+                tool_sources_to_add = new_sources_dicts
             else:
                 # Si la herramienta no devuelve fuentes, nos aseguramos de que no se añada nada
                 tool_sources_to_add = []
@@ -716,6 +733,7 @@ async def tool_node(state: AgentState):
                 "type": "tool_end",
                 "taskId": state.get("task_id"),
                 "toolName": tool_name,
+                "status": "end",
                 "result": tool_content_for_llm,
                 "sources": tool_sources_to_add, # Enviar solo las fuentes generadas por esta herramienta
             }, connection_type=conn_type)
@@ -732,6 +750,7 @@ async def tool_node(state: AgentState):
                 "type": "tool_end",
                 "taskId": state.get("task_id"),
                 "toolName": tool_name,
+                "status": "error",
                 "result": f"Error: {e}",
                 "error": True,
                 "sources": [] # No hay fuentes en caso de error
@@ -792,6 +811,28 @@ def should_continue(state: AgentState) -> str:
     return "generate_response"
 
 # --- 3. Ensamblaje del Grafo ---
+
+# Global cache for the compiled agent graph (singleton pattern)
+_compiled_agent_graph = None
+
+def get_langgraph_agent():
+    """
+    Retorna el grafo compilado del agente, creándolo y cacheándolo en la primera llamada.
+    
+    Optimization: El grafo es stateless (el estado se pasa como parámetro AgentState),
+    por lo que es seguro y eficiente cachearlo globalmente como singleton.
+    
+    Returns:
+        CompiledGraph: El grafo LangGraph compilado y listo para usar.
+    """
+    global _compiled_agent_graph
+    
+    if _compiled_agent_graph is None:
+        logger.info("🔧 Compilando grafo LangGraph del agente por primera vez...")
+        _compiled_agent_graph = create_langgraph_agent()
+        logger.info("✅ Grafo LangGraph compilado y cacheado exitosamente")
+    
+    return _compiled_agent_graph
 
 def create_langgraph_agent():
     """

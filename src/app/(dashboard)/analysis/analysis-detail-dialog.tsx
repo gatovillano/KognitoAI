@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Analysis, AnalysisType, Insight, Question, CollectionAnalysis, DocumentAnalysisResult as SingleTextAnalysis, CollectionConnection, ThemeReference, ThemeQuote, CodeAnalysisResultFrontend } from '@/lib/models';
+import { Analysis, AnalysisType, Insight, Question, CollectionAnalysis, DocumentAnalysisResult as SingleTextAnalysis, CollectionConnection, ThemeReference, ThemeQuote, CodeAnalysisResultFrontend, NoteCollectionAnalysisResult, NoteAnalysisResult } from '@/lib/models';
 import { Lightbulb, Workflow, ScrollText, Megaphone, Target, BarChart3, TrendingUp, FlaskConical, Puzzle, Goal, LibraryBig, Bot, CircleCheck, Info, Sparkles, XCircle, FileWarning, HelpCircle, Brain, Network, Volume2, Loader2, Pause, Calendar, AlertTriangle, Expand, Atom, FileText, Settings, GitBranch } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -16,6 +16,163 @@ import { useTextToSpeech } from '@/hooks/useTextToSpeech';
 
 const cleanAsterisks = (text: string) => {
   return text.replace(/^\*+|\*+$/g, '');
+};
+
+// Helper function to get color scheme for each analysis type
+const getAnalysisColorScheme = (type: AnalysisType) => {
+  switch (type) {
+    case 'document':
+    case 'document_summary':
+      return {
+        color: 'blue',
+        cardBg: 'bg-blue-50/50 border-blue-100 dark:bg-blue-900/10 dark:border-blue-900/50',
+        cardTitle: 'text-blue-900 dark:text-blue-100',
+        icon: 'text-blue-600',
+        alertGradient: 'from-blue-50 to-indigo-50 border-blue-200 dark:from-blue-950/30 dark:to-indigo-950/30 dark:border-blue-800',
+        alertIcon: 'text-blue-600 dark:text-blue-400',
+        alertTitle: 'text-blue-800 dark:text-blue-300',
+        alertDesc: 'text-blue-900/90 dark:text-blue-200/90',
+        hoverBorder: 'hover:border-blue-200'
+      };
+    case 'collection':
+      return {
+        color: 'green',
+        cardBg: 'bg-green-50/50 border-green-100 dark:bg-green-900/10 dark:border-green-900/50',
+        cardTitle: 'text-green-900 dark:text-green-100',
+        icon: 'text-green-600',
+        alertGradient: 'from-green-50 to-emerald-50 border-green-200 dark:from-green-950/30 dark:to-emerald-950/30 dark:border-green-800',
+        alertIcon: 'text-green-600 dark:text-green-400',
+        alertTitle: 'text-green-800 dark:text-green-300',
+        alertDesc: 'text-green-900/90 dark:text-green-200/90',
+        hoverBorder: 'hover:border-green-200'
+      };
+    case 'semantic':
+    case 'semantic_summary':
+      return {
+        color: 'indigo',
+        cardBg: 'bg-indigo-50/50 border-indigo-100 dark:bg-indigo-900/10 dark:border-indigo-900/50',
+        cardTitle: 'text-indigo-900 dark:text-indigo-100',
+        icon: 'text-indigo-600',
+        alertGradient: 'from-indigo-50 to-purple-50 border-indigo-200 dark:from-indigo-950/30 dark:to-purple-950/30 dark:border-indigo-800',
+        alertIcon: 'text-indigo-600 dark:text-indigo-400',
+        alertTitle: 'text-indigo-800 dark:text-indigo-300',
+        alertDesc: 'text-indigo-900/90 dark:text-indigo-200/90',
+        hoverBorder: 'hover:border-indigo-200'
+      };
+    case 'code':
+      return {
+        color: 'cyan',
+        cardBg: 'bg-cyan-50/50 border-cyan-100 dark:bg-cyan-900/10 dark:border-cyan-900/50',
+        cardTitle: 'text-cyan-900 dark:text-cyan-100',
+        icon: 'text-cyan-600',
+        alertGradient: 'from-cyan-50 to-blue-50 border-cyan-200 dark:from-cyan-950/30 dark:to-blue-950/30 dark:border-cyan-800',
+        alertIcon: 'text-cyan-600 dark:text-cyan-400',
+        alertTitle: 'text-cyan-800 dark:text-cyan-300',
+        alertDesc: 'text-cyan-900/90 dark:text-cyan-200/90',
+        hoverBorder: 'hover:border-cyan-200'
+      };
+    case 'insight':
+    case 'proactive_insight_manual':
+      return {
+        color: 'yellow',
+        cardBg: 'bg-yellow-50/50 border-yellow-100 dark:bg-yellow-900/10 dark:border-yellow-900/50',
+        cardTitle: 'text-yellow-900 dark:text-yellow-100',
+        icon: 'text-yellow-600',
+        alertGradient: 'from-yellow-50 to-amber-50 border-yellow-200 dark:from-yellow-950/30 dark:to-amber-950/30 dark:border-yellow-800',
+        alertIcon: 'text-yellow-600 dark:text-yellow-400',
+        alertTitle: 'text-yellow-800 dark:text-yellow-300',
+        alertDesc: 'text-yellow-900/90 dark:text-yellow-200/90',
+        hoverBorder: 'hover:border-yellow-200'
+      };
+    case 'note_analysis':
+      return {
+        color: 'amber',
+        cardBg: 'bg-amber-50/50 border-amber-100 dark:bg-amber-900/10 dark:border-amber-900/50',
+        cardTitle: 'text-amber-900 dark:text-amber-100',
+        icon: 'text-amber-600',
+        alertGradient: 'from-amber-50 to-yellow-50 border-amber-200 dark:from-amber-950/30 dark:to-yellow-950/30 dark:border-amber-800',
+        alertIcon: 'text-amber-600 dark:text-amber-400',
+        alertTitle: 'text-amber-800 dark:text-amber-300',
+        alertDesc: 'text-amber-900/90 dark:text-amber-200/90',
+        hoverBorder: 'hover:border-amber-200'
+      };
+    case 'note_collection_analysis':
+      return {
+        color: 'orange',
+        cardBg: 'bg-orange-50/50 border-orange-100 dark:bg-orange-900/10 dark:border-orange-900/50',
+        cardTitle: 'text-orange-900 dark:text-orange-100',
+        icon: 'text-orange-600',
+        alertGradient: 'from-orange-50 to-red-50 border-orange-200 dark:from-orange-950/30 dark:to-red-950/30 dark:border-orange-800',
+        alertIcon: 'text-orange-600 dark:text-orange-400',
+        alertTitle: 'text-orange-800 dark:text-orange-300',
+        alertDesc: 'text-orange-900/90 dark:text-orange-200/90',
+        hoverBorder: 'hover:border-orange-200'
+      };
+    case 'knowledge_graph_analysis':
+      return {
+        color: 'purple',
+        cardBg: 'bg-purple-50/50 border-purple-100 dark:bg-purple-900/10 dark:border-purple-900/50',
+        cardTitle: 'text-purple-900 dark:text-purple-100',
+        icon: 'text-purple-600',
+        alertGradient: 'from-purple-50 to-pink-50 border-purple-200 dark:from-purple-950/30 dark:to-pink-950/30 dark:border-purple-800',
+        alertIcon: 'text-purple-600 dark:text-purple-400',
+        alertTitle: 'text-purple-800 dark:text-purple-300',
+        alertDesc: 'text-purple-900/90 dark:text-purple-200/90',
+        hoverBorder: 'hover:border-purple-200'
+      };
+    case 'custom_analysis':
+      return {
+        color: 'red',
+        cardBg: 'bg-red-50/50 border-red-100 dark:bg-red-900/10 dark:border-red-900/50',
+        cardTitle: 'text-red-900 dark:text-red-100',
+        icon: 'text-red-600',
+        alertGradient: 'from-red-50 to-rose-50 border-red-200 dark:from-red-950/30 dark:to-rose-950/30 dark:border-red-800',
+        alertIcon: 'text-red-600 dark:text-red-400',
+        alertTitle: 'text-red-800 dark:text-red-300',
+        alertDesc: 'text-red-900/90 dark:text-red-200/90',
+        hoverBorder: 'hover:border-red-200'
+      };
+    default:
+      return {
+        color: 'gray',
+        cardBg: 'bg-gray-50/50 border-gray-100 dark:bg-gray-900/10 dark:border-gray-900/50',
+        cardTitle: 'text-gray-900 dark:text-gray-100',
+        icon: 'text-gray-600',
+        alertGradient: 'from-gray-50 to-slate-50 border-gray-200 dark:from-gray-950/30 dark:to-slate-950/30 dark:border-gray-800',
+        alertIcon: 'text-gray-600 dark:text-gray-400',
+        alertTitle: 'text-gray-800 dark:text-gray-300',
+        alertDesc: 'text-gray-900/90 dark:text-gray-200/90',
+        hoverBorder: 'hover:border-gray-200'
+      };
+  }
+};
+
+const getAnalysisTypeBadgeColor = (type: AnalysisType) => {
+  switch (type) {
+    case 'document':
+    case 'document_summary':
+      return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100 border-blue-200 dark:border-blue-800';
+    case 'collection':
+      return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 border-green-200 dark:border-green-800';
+    case 'semantic':
+    case 'semantic_summary':
+      return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-100 border-indigo-200 dark:border-indigo-800';
+    case 'code':
+      return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-100 border-cyan-200 dark:border-cyan-800';
+    case 'insight':
+    case 'proactive_insight_manual':
+      return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100 border-yellow-200 dark:border-yellow-800';
+    case 'note_analysis':
+      return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100 border-amber-200 dark:border-amber-800';
+    case 'note_collection_analysis':
+      return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100 border-orange-200 dark:border-orange-800';
+    case 'knowledge_graph_analysis':
+      return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-100 border-purple-200 dark:border-purple-800';
+    case 'custom_analysis':
+      return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100 border-red-200 dark:border-red-800';
+    default:
+      return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100 border-gray-200 dark:border-gray-700';
+  }
 };
 
 // import { processContentWithCitations } // Importa la función de procesamiento
@@ -42,66 +199,57 @@ interface ConceptDetailDialogProps {
 const ConceptDetailDialog: React.FC<ConceptDetailDialogProps> = ({ isOpen, onOpenChange, concept }) => {
   if (!concept) return null;
 
+  // Parsear el concepto en formato "CONCEPTO: DEFINICIÓN"
+  const conceptParts = concept.split(':');
+  const conceptName = conceptParts[0]?.trim() || '';
+  const conceptDefinition = conceptParts.slice(1).join(':').trim() || '';
+
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg w-full max-h-[90vh] rounded-3xl backdrop-blur-xl bg-card/95 border-0 shadow-2xl flex flex-col p-0">
-        <DialogHeader className="p-6 pb-0">
-          <DialogTitle className="text-xl font-bold text-foreground">Detalles del Concepto</DialogTitle>
+      <DialogContent className="max-w-2xl w-full max-h-[80vh] rounded-lg bg-card border shadow-lg flex flex-col overflow-hidden">
+        <DialogHeader className="px-6 pt-6 pb-4">
+          <DialogTitle className="text-xl font-bold text-foreground">
+            Detalles del Concepto
+          </DialogTitle>
         </DialogHeader>
-        {concept && (
-          <div className="flex-1 overflow-y-auto pr-4">
-            <div className="space-y-4 pb-4">
-              <div>
-                <h4 className="font-semibold text-lg mb-3 text-foreground">
-                  {concept.split(':')[0]}
-                </h4>
-                <div className="p-4 bg-muted/50 rounded-lg border border-border/50">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {concept.split(':').slice(1).join(':').trim()}
-                  </ReactMarkdown>
-                </div>
-              </div>
 
-              <div className="mt-6">
-                <h5 className="font-semibold mb-3 text-sm text-foreground">Definición y contexto:</h5>
-                <div className="p-4 bg-purple-50/50 border-l-4 border-purple-200 rounded-r-lg border border-border/50">
-                  {(() => {
-                    // Parsear el concepto en formato "CONCEPTO: DEFINICIÓN"
-                    const conceptParts = concept?.split(':');
-                    if (conceptParts && conceptParts.length >= 2) {
-                      const conceptName = conceptParts[0].trim();
-                      const conceptDefinition = conceptParts.slice(1).join(':').trim();
-                      return (
-                        <div className="space-y-3">
-                          <div>
-                            <h6 className="font-medium text-sm text-purple-800 mb-1">Concepto:</h6>
-                            <p className="text-sm font-semibold">{conceptName}</p>
-                          </div>
-                          <div>
-                            <h6 className="font-medium text-sm text-purple-800 mb-1">Definición:</h6>
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{conceptDefinition}</ReactMarkdown>
-                          </div>
-                          <p className="text-xs text-purple-600 mt-4 pt-3 border-t border-purple-200">
-                            Para profundizar, puedes realizar una búsqueda dirigida en la colección.
-                          </p>
-                        </div>
-                      );
-                    } else {
-                      return (
-                        <div>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{concept}</ReactMarkdown>
-                          <p>Concepto no parseado</p>
-                        </div>
-                      );
-                    }
-                  })()}
-                </div>
+        <ScrollArea className="flex-1 px-6 py-2">
+          <div className="space-y-4 pb-4">
+            {/* Concepto Principal */}
+            <div>
+              <h4 className="text-lg font-semibold text-foreground mb-2">
+                {conceptName}
+              </h4>
+            </div>
+
+            {/* Definición */}
+            <div>
+              <div className="prose prose-sm max-w-none dark:prose-invert
+                prose-headings:text-foreground prose-headings:font-semibold
+                prose-p:text-muted-foreground prose-p:leading-relaxed
+                prose-strong:text-foreground prose-strong:font-semibold
+                prose-ul:text-muted-foreground prose-li:text-muted-foreground
+                prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:underline">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {conceptDefinition}
+                </ReactMarkdown>
               </div>
             </div>
+
+            {/* Nota informativa */}
+            <div className="pt-4 text-xs text-muted-foreground italic border-t">
+              Para profundizar en este concepto, puedes realizar una búsqueda dirigida en la colección.
+            </div>
           </div>
-        )}
-        <DialogFooter className="p-6 pt-0">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cerrar</Button>
+        </ScrollArea>
+
+        <DialogFooter className="px-6 py-4 border-t">
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+          >
+            Cerrar
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -130,6 +278,8 @@ const getAnalysisIcon = (type: AnalysisType) => {
     case 'code': return <Brain className="text-cyan-600" />;
     case 'topic_analysis': return <Network className="text-indigo-600" />;
     case 'proactive_insight_manual': return <Atom className="text-pink-500" />;
+    case 'knowledge_graph_analysis': return <Network className="text-purple-500" />;
+    case 'custom_analysis': return <FlaskConical className="text-red-500" />;
     default: return null;
   }
 };
@@ -156,6 +306,8 @@ const getAnalysisTypeLabel = (type: AnalysisType) => {
     case 'code': return 'Análisis de Código';
     case 'topic_analysis': return 'Análisis por Tema';
     case 'proactive_insight_manual': return 'Insight Proactivo Manual';
+    case 'knowledge_graph_analysis': return 'Análisis de Grafo de Conocimiento';
+    case 'custom_analysis': return 'Análisis Personalizado';
     default: return 'Análisis Desconocido';
   }
 };
@@ -210,7 +362,7 @@ const InsightBlock: React.FC<{ insight: Insight }> = ({ insight }) => (
       <h4 className="text-lg font-semibold">{insight.title}</h4>
       <Badge variant="secondary">{insight.type}</Badge>
     </div>
-    <div className="text-sm text-muted-foreground mb-3"><ReactMarkdown remarkPlugins={[remarkGfm]} children={insight.description || ''}/></div>
+    <div className="text-sm text-muted-foreground mb-3"><ReactMarkdown remarkPlugins={[remarkGfm]}>{typeof insight.description === 'string' ? insight.description : JSON.stringify(insight.description || '')}</ReactMarkdown></div>
     {insight.severity && (
       <p className="text-xs text-foreground mb-1"><strong>Severidad:</strong> {insight.severity}</p>
     )}
@@ -225,7 +377,7 @@ const InsightBlock: React.FC<{ insight: Insight }> = ({ insight }) => (
         <h5 className="font-medium text-sm mb-1">Recomendaciones:</h5>
         <ul className="list-disc pl-5 text-sm text-foreground space-y-1">
           {insight.recommendations.map((rec: string, i: number) => (
-            <li key={i}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={rec}/></div></li>
+            <li key={i}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{typeof rec === 'string' ? rec : JSON.stringify(rec)}</ReactMarkdown></div></li>
           ))}
         </ul>
       </div>
@@ -257,7 +409,7 @@ const ThemeQuotesDialog: React.FC<ThemeQuotesDialogProps> = ({ isOpen, onOpenCha
             <ul className="list-disc pl-5 space-y-3 text-sm text-muted-foreground">
               {theme.related_quotes.map((quote: ThemeQuote, qIdx: number) => (
                 <li key={qIdx} className="border-l-2 pl-3">
-                  <div className="italic mb-1"><ReactMarkdown remarkPlugins={[remarkGfm]} children={`"${quote.quote}"`}/></div>
+                  <div className="italic mb-1"><ReactMarkdown remarkPlugins={[remarkGfm]}>{`"${typeof quote.quote === 'string' ? quote.quote : JSON.stringify(quote.quote)}"`}</ReactMarkdown></div>
                   <p className="text-xs font-semibold text-gray-500">— {quote.document_title}</p>
                 </li>
               ))}
@@ -320,7 +472,9 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
     return `Resumen Semántico: ${semanticData.resumen_semantico}`;
   }, [semanticData]);
 
-  const handlePlayPause = () => play(textToRead);
+  const handlePlayPause = useCallback(() => {
+    play(textToRead);
+  }, [play, textToRead]);
   const isCurrentlyPlaying = isPlaying && activeText === textToRead;
   const isCurrentlyLoading = isLoading && activeText === textToRead;
 
@@ -378,14 +532,15 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
       });
     }
 
-        const processedOutput = { content: contentToProcess, sources: sources };
+    const processedOutput = { content: contentToProcess, sources: sources };
 
     switch (analysis.type) {
       case 'semantic':
       case 'semantic_summary':
+        const semanticColors = getAnalysisColorScheme(analysis.type);
         return (
           <>
-            <h3 className="text-xl font-bold mb-4">Detalle del Resumen Semántico</h3>
+            <h3 className="text-xl font-bold mb-4">Detalle del Resumen Semántico - KAI Exocerebro</h3>
 
             {/* Botón de texto a voz */}
             <div className="mb-4 flex items-center gap-2">
@@ -408,20 +563,32 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
             </div>
 
             {analysis.full_data?.resumen_semantico && (
-              <div className="mb-4 p-3 bg-muted rounded-md border border-border/50">
-                <h4 className="font-semibold text-lg mb-2">Resumen Semántico:</h4>
-                <div className="text-sm text-muted-foreground whitespace-pre-wrap"><ReactMarkdown remarkPlugins={[remarkGfm]} children={analysis.full_data.resumen_semantico || ''}/></div>
-              </div>
+              <Card className={`mb-4 ${semanticColors.cardBg}`}>
+                <CardHeader className="pb-2">
+                  <CardTitle className={`text-lg font-semibold ${semanticColors.cardTitle} flex items-center gap-2`}>
+                    <ScrollText className="w-5 h-5" />
+                    Resumen Semántico
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysis.full_data.resumen_semantico}</ReactMarkdown>
+                  </div>
+                </CardContent>
+              </Card>
             )}
 
             {analysis.full_data?.temas_transversales && analysis.full_data.temas_transversales.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Temas Transversales:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${semanticColors.icon}`}>
+                  <Target className="w-5 h-5" />
+                  Temas Transversales
+                </h4>
                 <div className="flex flex-wrap gap-2">
                   {analysis.full_data.temas_transversales?.map((theme: ThemeReference, idx: number) => (
                     <Badge
                       key={idx}
-                      className="cursor-pointer text-sm hover:bg-accent hover:text-accent-foreground transition-colors bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100"
+                      className={`cursor-pointer text-sm transition-colors border ${getAnalysisTypeBadgeColor(analysis.type)}`}
                       onClick={() => handleThemeClick(theme)}
                     >
                       {theme.theme}
@@ -433,37 +600,40 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
 
             {analysis.full_data?.patrones_semanticos && Object.keys(analysis.full_data.patrones_semanticos).length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Estadísticas del Análisis:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${semanticColors.icon}`}>
+                  <BarChart3 className="w-5 h-5" />
+                  Estadísticas del Análisis
+                </h4>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 text-center">
                   {analysis.full_data.patrones_semanticos.total_documentos && (
                     <div className="p-3 bg-muted rounded-md border border-border/50">
-                      <div className="text-2xl font-bold text-purple-600">
+                      <div className={`text-2xl font-bold ${semanticColors.icon}`}>
                         {analysis.full_data.patrones_semanticos.total_documentos}
                       </div>
-                      <div className="text-xs text-purple-400">Documentos</div>
+                      <div className="text-xs text-muted-foreground">Documentos</div>
                     </div>
                   )}
                   {analysis.full_data.patrones_semanticos.total_chunks_analizados && (
                     <div className="p-3 bg-muted rounded-md border border-border/50">
-                      <div className="text-2xl font-bold text-purple-600">
+                      <div className={`text-2xl font-bold ${semanticColors.icon}`}>
                         {analysis.full_data.patrones_semanticos.total_chunks_analizados}
                       </div>
-                      <div className="text-xs text-purple-400">Fragmentos</div>
+                      <div className="text-xs text-muted-foreground">Fragmentos</div>
                     </div>
                   )}
                   {analysis.full_data.patrones_semanticos.temas_identificados && (
                     <div className="p-3 bg-muted rounded-md border border-border/50">
-                      <div className="text-2xl font-bold text-purple-600">
+                      <div className={`text-2xl font-bold ${semanticColors.icon}`}>
                         {analysis.full_data.patrones_semanticos.temas_identificados}
                       </div>
-                      <div className="text-xs text-purple-400">Temas</div>
+                      <div className="text-xs text-muted-foreground">Temas</div>
                     </div>
                   )}
                   <div className="p-3 bg-muted rounded-md border border-border/50">
-                    <div className="text-2xl font-bold text-purple-600">
+                    <div className={`text-2xl font-bold ${semanticColors.icon}`}>
                       {analysis.full_data.conceptos_centrales.length}
                     </div>
-                    <div className="text-xs text-purple-400">Conceptos</div>
+                    <div className="text-xs text-muted-foreground">Conceptos</div>
                   </div>
                 </div>
               </div>
@@ -471,10 +641,13 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
 
             {analysis.full_data?.brechas_conocimiento && analysis.full_data.brechas_conocimiento.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Brechas de Conocimiento:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${semanticColors.icon}`}>
+                  <AlertTriangle className="w-5 h-5" />
+                  Brechas de Conocimiento
+                </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                   {analysis.full_data.brechas_conocimiento?.map((gap: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={gap}/></div></li>
+                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{gap}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
@@ -482,13 +655,13 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
 
             {analysis.full_data?.problematic_areas && analysis.full_data.problematic_areas.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2 flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-red-500" />
-                  Problemáticas:
+                <h4 className="font-semibold text-lg mb-2 flex items-center gap-2 text-red-600">
+                  <AlertTriangle className="w-5 h-5" />
+                  Problemáticas
                 </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                   {analysis.full_data.problematic_areas?.map((area: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={area}/></div></li>
+                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{area}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
@@ -496,10 +669,13 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
 
             {analysis.full_data?.exploration_questions && analysis.full_data.exploration_questions.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Preguntas para Explorar:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${semanticColors.icon}`}>
+                  <HelpCircle className="w-5 h-5" />
+                  Preguntas para Explorar
+                </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                   {analysis.full_data.exploration_questions?.map((question: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={question}/></div></li>
+                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{question}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
@@ -507,10 +683,13 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
 
             {analysis.full_data?.final_reflections && analysis.full_data.final_reflections.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Reflexiones Finales:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${semanticColors.icon}`}>
+                  <Sparkles className="w-5 h-5" />
+                  Reflexiones Finales
+                </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                   {analysis.full_data.final_reflections?.map((reflection: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={reflection}/></div></li>
+                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{reflection}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
@@ -520,70 +699,129 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
           </>
         );
       case 'insight':
+        const insightColors = getAnalysisColorScheme(analysis.type);
         return (
           <>
-            <h3 className="text-xl font-bold mb-4">Detalle del Insight</h3>
+            <h3 className="text-xl font-bold mb-4">Detalle del Insight - KAI Exocerebro</h3>
+
             {analysis.summary && (
-              <div className="mb-4 p-3 bg-muted rounded-md border border-border/50">
-                <h4 className="font-semibold text-lg mb-2">Resumen:</h4>
-                <div className="text-sm text-muted-foreground whitespace-pre-wrap"><ReactMarkdown remarkPlugins={[remarkGfm]} children={analysis.summary || ''}/></div>
-              </div>
+              <Card className={`mb-4 ${insightColors.cardBg}`}>
+                <CardHeader className="pb-2">
+                  <CardTitle className={`text-lg font-semibold ${insightColors.cardTitle} flex items-center gap-2`}>
+                    <Lightbulb className="w-5 h-5" />
+                    Resumen del Insight
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysis.summary}</ReactMarkdown>
+                  </div>
+                </CardContent>
+              </Card>
             )}
 
             {analysis.action_suggestion && (
-              <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <h4 className="font-medium text-sm text-yellow-800 mb-1">Sugerencia de Acción:</h4>
-                <div className="text-sm text-yellow-700"><ReactMarkdown remarkPlugins={[remarkGfm]} children={analysis.action_suggestion || ''}/></div>
-              </div>
+              <Alert className={`mb-4 bg-gradient-to-r ${insightColors.alertGradient}`}>
+                <Goal className={`h-5 w-5 ${insightColors.alertIcon}`} />
+                <AlertTitle className={`${insightColors.alertTitle} font-semibold mb-2`}>Sugerencia de Acción</AlertTitle>
+                <AlertDescription className={`${insightColors.alertDesc}`}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysis.action_suggestion}</ReactMarkdown>
+                </AlertDescription>
+              </Alert>
             )}
+
             {analysis.related_items && analysis.related_items.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Elementos Relacionados:</h4>
+                <h4 className={`font-semibold text-lg mb-3 flex items-center gap-2 ${insightColors.icon}`}>
+                  <Network className="w-5 h-5" />
+                  Elementos Relacionados
+                </h4>
                 <div className="flex flex-wrap gap-2">
                   {analysis.related_items.map((item: { title?: string; name?: string }, idx: number) => (
-                    <Badge key={idx} variant="secondary" className="text-sm">
+                    <Badge key={idx} variant="secondary" className={getAnalysisTypeBadgeColor(analysis.type)}>
                       {item.title || item.name || `Item ${idx + 1}`}
                     </Badge>
                   ))}
                 </div>
               </div>
             )}
+
             {analysis.tool_used && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Herramienta Utilizada:</h4>
+                <h4 className={`font-semibold text-lg mb-3 flex items-center gap-2 ${insightColors.icon}`}>
+                  <Settings className="w-5 h-5" />
+                  Herramienta Utilizada
+                </h4>
                 <Badge variant="outline" className="text-sm font-mono bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700">
                   {analysis.tool_used}
                 </Badge>
               </div>
             )}
-            {analysis.created_at && (
-              <p className="text-xs text-muted-foreground mb-1"><strong>Creado:</strong> {new Date(analysis.created_at).toLocaleString()}</p>
+
+            {(analysis.created_at || analysis.updated_at) && (
+              <div className="mb-4 text-xs text-muted-foreground space-y-1">
+                {analysis.created_at && (
+                  <p className="flex items-center gap-2">
+                    <Calendar className="w-3 h-3" />
+                    <strong>Creado:</strong> {new Date(analysis.created_at).toLocaleString()}
+                  </p>
+                )}
+                {analysis.updated_at && analysis.updated_at !== analysis.created_at && (
+                  <p className="flex items-center gap-2">
+                    <Calendar className="w-3 h-3" />
+                    <strong>Actualizado:</strong> {new Date(analysis.updated_at).toLocaleString()}
+                  </p>
+                )}
+              </div>
             )}
-            {analysis.updated_at && analysis.updated_at !== analysis.created_at && (
-              <p className="text-xs text-muted-foreground mb-4"><strong>Actualizado:</strong> {new Date(analysis.updated_at).toLocaleString()}</p>
-            )}
+
             <AnalysisCommonFields analysis={analysis} processedOutput={processedOutput} />
           </>
         );
       case 'collection':
-        const collectionData = analysis.full_data as CollectionAnalysis; // Usar full_data para colecciones
+        const collectionData = analysis.full_data as CollectionAnalysis;
+        const colColors = getAnalysisColorScheme(analysis.type);
         return (
           <>
-            <h3 className="text-xl font-bold mb-4">Detalle de Análisis de Colección</h3>
+            <h3 className="text-xl font-bold mb-4">Detalle de Análisis de Colección - KAI Exocerebro</h3>
+
             {collectionData?.collection_summary && (
-              <div className="mb-4 p-3 bg-muted rounded-md border border-border/50">
-                <h4 className="font-semibold text-lg mb-2">Resumen de la Colección:</h4>
-                <div className="text-sm text-muted-foreground whitespace-pre-wrap"><ReactMarkdown remarkPlugins={[remarkGfm]} children={collectionData.collection_summary || ''}/></div>
-              </div>
+              <Card className={`mb-4 ${colColors.cardBg}`}>
+                <CardHeader className="pb-2">
+                  <CardTitle className={`text-lg font-semibold ${colColors.cardTitle} flex items-center gap-2`}>
+                    <ScrollText className="w-5 h-5" />
+                    Resumen de la Colección
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{collectionData.collection_summary}</ReactMarkdown>
+                  </div>
+                </CardContent>
+              </Card>
             )}
+
+            {collectionData?.kai_synthesis && (
+              <Alert className={`mb-4 bg-gradient-to-r ${colColors.alertGradient}`}>
+                <Sparkles className={`h-5 w-5 ${colColors.alertIcon}`} />
+                <AlertTitle className={`${colColors.alertTitle} font-semibold mb-2`}>Síntesis de KAI</AlertTitle>
+                <AlertDescription className={`${colColors.alertDesc} italic`}>
+                  "{collectionData.kai_synthesis}"
+                </AlertDescription>
+              </Alert>
+            )}
+
             {collectionData?.cross_cutting_themes && collectionData.cross_cutting_themes.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Temas Transversales:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${colColors.icon}`}>
+                  <Target className="w-5 h-5" />
+                  Temas Transversales
+                </h4>
                 <div className="flex flex-wrap gap-2">
                   {collectionData.cross_cutting_themes.map((theme: ThemeReference, idx: number) => (
                     <Badge
                       key={idx}
-                      className="cursor-pointer text-sm hover:bg-accent hover:text-accent-foreground transition-colors bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100"
+                      className={`cursor-pointer text-sm transition-colors border ${getAnalysisTypeBadgeColor(analysis.type)}`}
                       onClick={() => handleThemeClick(theme)}
                     >
                       {theme.theme}
@@ -592,15 +830,19 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                 </div>
               </div>
             )}
+
             {collectionData?.central_concepts && collectionData.central_concepts.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Conceptos Centrales:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${colColors.icon}`}>
+                  <Lightbulb className="w-5 h-5" />
+                  Conceptos Centrales
+                </h4>
                 <div className="flex flex-wrap gap-2">
                   {collectionData.central_concepts.map((concept: string, idx: number) => (
                     <Badge
                       key={idx}
                       variant="outline"
-                      className="cursor-pointer text-sm hover:bg-accent hover:text-accent-foreground transition-colors bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100"
+                      className={`cursor-pointer text-sm transition-colors border hover:bg-accent hover:text-accent-foreground ${getAnalysisTypeBadgeColor(analysis.type)}`}
                       onClick={() => handleConceptClick(concept)}
                     >
                       {cleanAsterisks(concept.split(':')[0])}
@@ -609,253 +851,623 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                 </div>
               </div>
             )}
+
             {collectionData?.patrones_semanticos && Object.keys(collectionData.patrones_semanticos).length > 0 && (
-                <div className="mb-4">
-                  <h4 className="font-semibold text-lg mb-2">Estadísticas del Análisis:</h4>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 text-center">
-                    {collectionData.patrones_semanticos.total_documentos && (
-                      <div className="p-3 bg-muted rounded-md border border-border/50">
-                        <div className="text-2xl font-bold text-purple-600">
-                          {collectionData.patrones_semanticos.total_documentos}
-                        </div>
-                        <div className="text-xs text-purple-400">Documentos</div>
-                      </div>
-                    )}
-                    {collectionData.patrones_semanticos.total_chunks_analizados && (
-                      <div className="p-3 bg-muted rounded-md border border-border/50">
-                        <div className="text-2xl font-bold text-purple-600">
-                          {collectionData.patrones_semanticos.total_chunks_analizados}
-                        </div>
-                        <div className="text-xs text-purple-400">Fragmentos</div>
-                      </div>
-                    )}
-                    {collectionData.patrones_semanticos.temas_identificados && (
-                      <div className="p-3 bg-muted rounded-md border border-border/50">
-                        <div className="text-2xl font-bold text-purple-600">
-                          {collectionData.patrones_semanticos.temas_identificados}
-                        </div>
-                        <div className="text-xs text-purple-400">Temas</div>
-                      </div>
-                    )}
+              <div className="mb-4">
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${colColors.icon}`}>
+                  <BarChart3 className="w-5 h-5" />
+                  Estadísticas del Análisis
+                </h4>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 text-center">
+                  {collectionData.patrones_semanticos.total_documentos && (
                     <div className="p-3 bg-muted rounded-md border border-border/50">
-                      <div className="text-2xl font-bold text-purple-600">
-                        {collectionData.central_concepts.length}
+                      <div className={`text-2xl font-bold ${colColors.icon}`}>
+                        {collectionData.patrones_semanticos.total_documentos}
                       </div>
-                      <div className="text-xs text-purple-400">Conceptos</div>
+                      <div className="text-xs text-muted-foreground">Documentos</div>
                     </div>
+                  )}
+                  {collectionData.patrones_semanticos.total_chunks_analizados && (
+                    <div className="p-3 bg-muted rounded-md border border-border/50">
+                      <div className={`text-2xl font-bold ${colColors.icon}`}>
+                        {collectionData.patrones_semanticos.total_chunks_analizados}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Fragmentos</div>
+                    </div>
+                  )}
+                  {collectionData.patrones_semanticos.temas_identificados && (
+                    <div className="p-3 bg-muted rounded-md border border-border/50">
+                      <div className={`text-2xl font-bold ${colColors.icon}`}>
+                        {collectionData.patrones_semanticos.temas_identificados}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Temas</div>
+                    </div>
+                  )}
+                  <div className="p-3 bg-muted rounded-md border border-border/50">
+                    <div className={`text-2xl font-bold ${colColors.icon}`}>
+                      {collectionData.central_concepts.length}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Conceptos</div>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
+
             {collectionData?.concept_relationships && collectionData.concept_relationships.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Relaciones entre Conceptos:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${colColors.icon}`}>
+                  <Network className="w-5 h-5" />
+                  Relaciones entre Conceptos
+                </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                   {collectionData.concept_relationships.map((relationship: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={relationship}/></div></li>
+                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{relationship}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
             )}
+
             {collectionData?.identified_connections && collectionData.identified_connections.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Conexiones Identificadas:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${colColors.icon}`}>
+                  <GitBranch className="w-5 h-5" />
+                  Conexiones Identificadas
+                </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                   {collectionData.identified_connections.map((connection: CollectionConnection, idx: number) => (
                     <li key={idx}>
                       <p className="font-semibold">{connection.document_titles.join(', ')}</p>
-                      <div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={connection.insight}/></div>
+                      <div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{connection.insight}</ReactMarkdown></div>
                     </li>
                   ))}
                 </ul>
               </div>
             )}
+
             {collectionData?.emergent_knowledge_gaps && collectionData.emergent_knowledge_gaps.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Brechas de Conocimiento Emergentes:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${colColors.icon}`}>
+                  <AlertTriangle className="w-5 h-5" />
+                  Brechas de Conocimiento Emergentes
+                </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                   {collectionData.emergent_knowledge_gaps.map((gap: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={gap}/></div></li>
+                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{gap}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
             )}
+
             {collectionData?.exploration_questions && collectionData.exploration_questions.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Preguntas para Explorar:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${colColors.icon}`}>
+                  <HelpCircle className="w-5 h-5" />
+                  Preguntas para Explorar
+                </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                   {collectionData.exploration_questions.map((question: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={question}/></div></li>
+                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{question}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
             )}
+
             {collectionData?.problematic_areas && collectionData.problematic_areas.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2 flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-red-500" />
-                  Problemáticas:
+                <h4 className="font-semibold text-lg mb-2 flex items-center gap-2 text-red-600">
+                  <AlertTriangle className="w-5 h-5" />
+                  Problemáticas
                 </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                   {collectionData.problematic_areas.map((area: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={area}/></div></li>
+                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{area}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
             )}
+
             {collectionData?.final_reflections && collectionData.final_reflections.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Reflexiones Finales:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${colColors.icon}`}>
+                  <Sparkles className="w-5 h-5" />
+                  Reflexiones Finales
+                </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                   {collectionData.final_reflections.map((reflection: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={reflection}/></div></li>
+                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{reflection}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
             )}
+
             {collectionData?.collection_insights && collectionData.collection_insights.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Insights de la Colección:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${colColors.icon}`}>
+                  <Lightbulb className="w-5 h-5" />
+                  Insights de la Colección
+                </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                   {collectionData.collection_insights.map((insight: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={insight}/></div></li>
+                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{insight}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
             )}
+
             {collectionData?.methodological_notes && collectionData.methodological_notes.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Notas Metodológicas:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${colColors.icon}`}>
+                  <FileText className="w-5 h-5" />
+                  Notas Metodológicas
+                </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                   {collectionData.methodological_notes.map((note: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={note}/></div></li>
+                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{note}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
             )}
+
             <AnalysisCommonFields analysis={analysis} processedOutput={processedOutput} />
           </>
         );
       case 'code':
-        const codeResult = analysis.result as CodeAnalysisResultFrontend;
+        const codeResult = (analysis.result || analysis.full_data) as CodeAnalysisResultFrontend;
+        const codeColors = getAnalysisColorScheme(analysis.type);
+
         return (
           <>
-            <h3 className="text-xl font-bold mb-4">Análisis de Código Fuente</h3>
+            <h3 className="text-xl font-bold mb-4">Análisis de Código Fuente - KAI Exocerebro</h3>
 
-            {codeResult?.executive_summary && (
-              <div className="mb-4 p-3 bg-muted rounded-md border border-border/50">
-                <h4 className="font-semibold text-lg mb-2">Resumen Ejecutivo:</h4>
-                <div className="text-sm text-muted-foreground whitespace-pre-wrap"><ReactMarkdown remarkPlugins={[remarkGfm]} children={codeResult.executive_summary || ''}/></div>
-              </div>
-            )}
+            <Tabs defaultValue="overview" className="w-full">
+              <TabsList className="grid w-full grid-cols-2 md:grid-cols-3 lg:grid-cols-6 mb-4">
+                <TabsTrigger value="overview">Resumen</TabsTrigger>
+                <TabsTrigger value="structure">Estructura</TabsTrigger>
+                <TabsTrigger value="patterns">Patrones</TabsTrigger>
+                <TabsTrigger value="dependencies">Dependencias</TabsTrigger>
+                <TabsTrigger value="issues">Problemas</TabsTrigger>
+                <TabsTrigger value="recommendations">Recomendaciones</TabsTrigger>
+              </TabsList>
 
-            {codeResult?.code_structure && codeResult.code_structure.length > 0 && (
-              <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Estructura del Código:</h4>
-                <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {codeResult.code_structure.map((item: { component: string; description: string }, idx: number) => (
-                    <li key={idx}>
-                      <p className="font-semibold">{item.component}</p>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} children={item.description}/>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+              <TabsContent value="overview" className="space-y-4">
+                {codeResult?.executive_summary && (
+                  <Card className={`${codeColors.cardBg}`}>
+                    <CardHeader className="pb-2">
+                      <CardTitle className={`text-lg font-semibold ${codeColors.cardTitle} flex items-center gap-2`}>
+                        <FileText className="w-5 h-5" />
+                        Resumen Ejecutivo
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{codeResult.executive_summary}</ReactMarkdown>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </TabsContent>
 
-            {codeResult?.design_patterns && codeResult.design_patterns.length > 0 && (
-              <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Patrones de Diseño Identificados:</h4>
-                <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {codeResult.design_patterns.map((item: { pattern: string; description: string }, idx: number) => (
-                    <li key={idx}>
-                      <p className="font-semibold">{item.pattern}</p>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} children={item.description}/>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+              <TabsContent value="structure" className="space-y-4">
+                {codeResult?.code_structure && codeResult.code_structure.length > 0 ? (
+                  <Card className="border-none shadow-none bg-transparent p-0">
+                    <CardHeader className="px-0 pt-0 pb-2">
+                      <CardTitle className={`flex items-center gap-2 text-lg font-semibold ${codeColors.cardTitle}`}>
+                        <GitBranch className="h-5 w-5" />
+                        Estructura del Código ({codeResult.code_structure.length} componentes)
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <div className="space-y-3">
+                        {codeResult.code_structure.map((item: { component: string; description: string }, idx: number) => (
+                          <div key={idx} className={`border-l-4 border-blue-500 pl-4 p-3 bg-muted rounded-md border border-border/50 ${codeColors.hoverBorder}`}>
+                            <h4 className="font-medium">{item.component}</h4>
+                            <div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item.description}</ReactMarkdown></div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No se encontraron componentes de estructura.</p>
+                )}
+              </TabsContent>
 
-            {codeResult?.dependencies && codeResult.dependencies.length > 0 && (
-              <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Dependencias Clave:</h4>
-                <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {codeResult.dependencies.map((item: { library: string; description: string }, idx: number) => (
-                    <li key={idx}>
-                      <p className="font-semibold">{item.library}</p>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} children={item.description}/>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+              <TabsContent value="patterns" className="space-y-4">
+                {codeResult?.design_patterns && codeResult.design_patterns.length > 0 ? (
+                  <Card className="border-none shadow-none bg-transparent p-0">
+                    <CardHeader className="px-0 pt-0 pb-2">
+                      <CardTitle className={`flex items-center gap-2 text-lg font-semibold ${codeColors.cardTitle}`}>
+                        <Settings className="h-5 w-5" />
+                        Patrones de Diseño ({codeResult.design_patterns.length} patrones)
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <div className="space-y-3">
+                        {codeResult.design_patterns.map((item: { pattern: string; description: string }, idx: number) => (
+                          <div key={idx} className={`border-l-4 border-green-500 pl-4 p-3 bg-muted rounded-md border border-border/50 ${codeColors.hoverBorder}`}>
+                            <h4 className="font-medium">{item.pattern}</h4>
+                            <div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item.description}</ReactMarkdown></div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No se encontraron patrones de diseño específicos.</p>
+                )}
+              </TabsContent>
 
-            {codeResult?.potential_issues && codeResult.potential_issues.length > 0 && (
-              <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2 flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-red-500" />
-                  Problemas Potenciales:
-                </h4>
-                <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {codeResult.potential_issues.map((item: { issue: string; description: string }, idx: number) => (
-                    <li key={idx}>
-                      <p className="font-semibold">{item.issue}</p>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} children={item.description}/>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+              <TabsContent value="dependencies" className="space-y-4">
+                {codeResult?.dependencies && codeResult.dependencies.length > 0 ? (
+                  <Card className="border-none shadow-none bg-transparent p-0">
+                    <CardHeader className="px-0 pt-0 pb-2">
+                      <CardTitle className={`flex items-center gap-2 text-lg font-semibold ${codeColors.cardTitle}`}>
+                        <LibraryBig className="h-5 w-5" />
+                        Dependencias ({codeResult.dependencies.length} bibliotecas)
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <div className="grid gap-3">
+                        {codeResult.dependencies.map((item: { library: string; description: string }, idx: number) => (
+                          <div key={idx} className={`flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3 p-3 border rounded-lg border-border/50 ${codeColors.hoverBorder}`}>
+                            <Badge variant="secondary">{item.library}</Badge>
+                            <div className="text-sm text-muted-foreground flex-1"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item.description}</ReactMarkdown></div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No se identificaron dependencias específicas.</p>
+                )}
+              </TabsContent>
 
-            {codeResult?.recommendations && codeResult.recommendations.length > 0 && (
-              <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Recomendaciones:</h4>
-                <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {codeResult.recommendations.map((item: { recommendation: string; rationale: string; application: string; implementation: string }, idx: number) => (
-                    <li key={idx}>
-                      <p className="font-semibold">{item.recommendation}</p>
-                      <p className="text-xs text-muted-foreground">**Justificación:** <ReactMarkdown remarkPlugins={[remarkGfm]} children={item.rationale}/></p>
-                      <p className="text-xs text-muted-foreground">**Aplicación:** <ReactMarkdown remarkPlugins={[remarkGfm]} children={item.application}/></p>
-                      <p className="text-xs text-muted-foreground">**Implementación:** <ReactMarkdown remarkPlugins={[remarkGfm]} children={item.implementation}/></p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            
+              <TabsContent value="issues" className="space-y-4">
+                {codeResult?.potential_issues && codeResult.potential_issues.length > 0 ? (
+                  <Card className="border-none shadow-none bg-transparent p-0">
+                    <CardHeader className="px-0 pt-0 pb-2">
+                      <CardTitle className="flex items-center gap-2 text-lg font-semibold text-orange-600 dark:text-orange-400">
+                        <AlertTriangle className="h-5 w-5" />
+                        Problemas Potenciales ({codeResult.potential_issues.length} problemas)
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <div className="space-y-3">
+                        {codeResult.potential_issues.map((item: { issue: string; description: string }, idx: number) => (
+                          <div key={idx} className="border-l-4 border-orange-500 pl-4 p-3 bg-orange-50 dark:bg-orange-950/20 rounded-r-lg border border-border/50">
+                            <h4 className="font-medium text-orange-800 dark:text-orange-200">{item.issue}</h4>
+                            <div className="text-sm text-orange-700 dark:text-orange-300"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item.description}</ReactMarkdown></div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No se identificaron problemas potenciales.</p>
+                )}
+              </TabsContent>
+
+              <TabsContent value="recommendations" className="space-y-4">
+                {codeResult?.recommendations && codeResult.recommendations.length > 0 ? (
+                  <Card className="border-none shadow-none bg-transparent p-0">
+                    <CardHeader className="px-0 pt-0 pb-2">
+                      <CardTitle className={`flex items-center gap-2 text-lg font-semibold ${codeColors.cardTitle}`}>
+                        <Lightbulb className="h-5 w-5" />
+                        Recomendaciones ({codeResult.recommendations.length} sugerencias)
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <div className="space-y-4">
+                        {codeResult.recommendations.map((item: { recommendation: string; rationale: string; application: string; implementation: string }, idx: number) => (
+                          <div key={idx} className={`border rounded-lg p-4 space-y-2 border-border/50 ${codeColors.hoverBorder}`}>
+                            <h4 className={`font-medium ${codeColors.cardTitle}`}>{item.recommendation}</h4>
+                            {item.rationale && (
+                              <div className="text-sm text-muted-foreground"><strong>Justificación:</strong> <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.rationale}</ReactMarkdown></div>
+                            )}
+                            {item.application && (
+                              <div className="text-sm text-muted-foreground"><strong>Aplicación:</strong> <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.application}</ReactMarkdown></div>
+                            )}
+                            {item.implementation && (
+                              <div className="text-sm text-muted-foreground"><strong>Implementación:</strong> <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.implementation}</ReactMarkdown></div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No se generaron recomendaciones específicas.</p>
+                )}
+              </TabsContent>
+            </Tabs>
+
             <AnalysisCommonFields analysis={analysis} processedOutput={processedOutput} />
           </>
         );
-      case 'document':
-      case 'document_summary':
-        const documentResult = analysis.result as SingleTextAnalysis;
+      case 'note_collection_analysis':
+        const collectionNoteResult = (analysis.result || analysis.full_data) as NoteCollectionAnalysisResult;
+        const ncColors = getAnalysisColorScheme(analysis.type);
+
         return (
           <>
-            <h3 className="text-xl font-bold mb-4">Detalle del Documento Analizado</h3>
+            <h3 className="text-xl font-bold mb-4">Análisis de Colección de Notas - KAI Exocerebro</h3>
+
+            {collectionNoteResult?.collection_summary && (
+              <Card className={`mb-4 ${ncColors.cardBg}`}>
+                <CardHeader className="pb-2">
+                  <CardTitle className={`text-lg font-semibold ${ncColors.cardTitle} flex items-center gap-2`}>
+                    <ScrollText className="w-5 h-5" />
+                    Resumen de la Colección
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{collectionNoteResult.collection_summary}</ReactMarkdown>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {collectionNoteResult?.kai_synthesis && (
+              <Alert className={`mb-4 bg-gradient-to-r ${ncColors.alertGradient}`}>
+                <Sparkles className={`h-5 w-5 ${ncColors.alertIcon}`} />
+                <AlertTitle className={`${ncColors.alertTitle} font-semibold mb-2`}>Síntesis de KAI</AlertTitle>
+                <AlertDescription className={`${ncColors.alertDesc} italic`}>
+                  "{collectionNoteResult.kai_synthesis}"
+                </AlertDescription>
+              </Alert>
+            )}
+
+
+            {collectionNoteResult?.cross_cutting_themes && collectionNoteResult.cross_cutting_themes.length > 0 && (
+              <div className="mb-4">
+                <h4 className={`font-semibold text-lg mb-3 flex items-center gap-2 ${ncColors.icon}`}>
+                  <Target className="w-5 h-5" />
+                  Temas Transversales
+                </h4>
+                <div className="flex flex-wrap gap-2">
+                  {collectionNoteResult.cross_cutting_themes.map((theme: string | { theme: string; description: string }, idx: number) => (
+                    <Badge key={idx} variant="secondary" className="bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100 border-orange-200 dark:border-orange-800">
+                      {typeof theme === 'string' ? theme : theme.theme}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {collectionNoteResult?.synthesized_insights && collectionNoteResult.synthesized_insights.length > 0 && (
+              <div className="mb-4">
+                <h4 className={`font-semibold text-lg mb-3 flex items-center gap-2 ${ncColors.icon}`}>
+                  <Lightbulb className="w-5 h-5" />
+                  Insights Sintetizados
+                </h4>
+                <div className="space-y-3">
+                  {collectionNoteResult.synthesized_insights.map((insight: any, idx: number) => (
+                    <Card key={idx} className="bg-card border-border/50">
+                      <CardContent className="p-3">
+                        <div className="text-sm">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {typeof insight === 'string' ? insight : (insight.insight || insight.description || JSON.stringify(insight))}
+                          </ReactMarkdown>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {collectionNoteResult?.strategic_recommendations && collectionNoteResult.strategic_recommendations.length > 0 && (
+              <div className="mb-4">
+                <h4 className={`font-semibold text-lg mb-3 flex items-center gap-2 ${ncColors.icon}`}>
+                  <Goal className="w-5 h-5" />
+                  Recomendaciones Estratégicas
+                </h4>
+                <div className="grid gap-3">
+                  {collectionNoteResult.strategic_recommendations.map((rec: any, idx: number) => (
+                    <div key={idx} className={`flex items-start gap-3 p-3 rounded-lg bg-card border border-border/50 ${ncColors.hoverBorder} transition-colors`}>
+                      <CircleCheck className="w-5 h-5 text-green-500 mt-0.5 shrink-0" />
+                      <span className="text-sm">
+                        {typeof rec === 'string' ? rec : (
+                          <span>
+                            <strong>{rec.recommendation}</strong>
+                            {rec.description && <span className="block text-muted-foreground mt-1">{rec.description}</span>}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {collectionNoteResult?.knowledge_gaps && collectionNoteResult.knowledge_gaps.length > 0 && (
+              <div className="mb-4">
+                <h4 className={`font-semibold text-lg mb-3 flex items-center gap-2 ${ncColors.icon}`}>
+                  <AlertTriangle className="w-5 h-5" />
+                  Brechas de Conocimiento
+                </h4>
+                <ul className="space-y-2 list-disc list-inside text-sm text-muted-foreground">
+                  {collectionNoteResult.knowledge_gaps.map((gap: any, idx: number) => (
+                    <li key={idx}>
+                      {typeof gap === 'string' ? gap : (
+                        <span>
+                          <strong>{gap.gap}</strong>
+                          {gap.description && <span className="block text-muted-foreground ml-4 mt-1">{gap.description}</span>}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <AnalysisCommonFields analysis={analysis} processedOutput={processedOutput} />
+          </>
+        );
+
+      case 'note_analysis':
+        const noteResult = (analysis.result || analysis.full_data) as NoteAnalysisResult;
+        const noteColors = getAnalysisColorScheme(analysis.type);
+
+        return (
+          <>
+            <h3 className="text-xl font-bold mb-4">Análisis de Nota - KAI Exocerebro</h3>
+
+            {noteResult?.executive_summary && (
+              <Card className={`mb-4 ${noteColors.cardBg}`}>
+                <CardHeader className="pb-2">
+                  <CardTitle className={`text-lg font-semibold ${noteColors.cardTitle} flex items-center gap-2`}>
+                    <ScrollText className="w-5 h-5" />
+                    Resumen Ejecutivo
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{noteResult.executive_summary}</ReactMarkdown>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {noteResult?.key_themes && noteResult.key_themes.length > 0 && (
+              <div className="mb-4">
+                <h4 className={`font-semibold text-lg mb-3 flex items-center gap-2 ${noteColors.icon}`}>
+                  <Target className="w-5 h-5" />
+                  Temas Clave
+                </h4>
+                <ul className="space-y-2 list-disc list-inside text-sm text-muted-foreground">
+                  {noteResult.key_themes.map((point: string, idx: number) => (
+                    <li key={idx}><ReactMarkdown remarkPlugins={[remarkGfm]}>{point}</ReactMarkdown></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {noteResult?.action_suggestions && noteResult.action_suggestions.length > 0 && (
+              <div className="mb-4">
+                <h4 className={`font-semibold text-lg mb-3 flex items-center gap-2 ${noteColors.icon}`}>
+                  <Goal className="w-5 h-5" />
+                  Acciones Sugeridas
+                </h4>
+                <div className="grid gap-3">
+                  {noteResult.action_suggestions.map((item: string, idx: number) => (
+                    <div key={idx} className={`flex items-start gap-3 p-3 rounded-lg bg-card border border-border/50 ${noteColors.hoverBorder} transition-colors`}>
+                      <CircleCheck className="w-5 h-5 text-green-500 mt-0.5 shrink-0" />
+                      <span className="text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item}</ReactMarkdown></span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {noteResult?.potential_implications && noteResult.potential_implications.length > 0 && (
+              <div className="mb-4">
+                <h4 className={`font-semibold text-lg mb-3 flex items-center gap-2 ${noteColors.icon}`}>
+                  <AlertTriangle className="w-5 h-5" />
+                  Implicaciones Potenciales
+                </h4>
+                <ul className="space-y-2 list-disc list-inside text-sm text-muted-foreground">
+                  {noteResult.potential_implications.map((implication: string, idx: number) => (
+                    <li key={idx}><ReactMarkdown remarkPlugins={[remarkGfm]}>{implication}</ReactMarkdown></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {noteResult?.related_concepts && noteResult.related_concepts.length > 0 && (
+              <div className="mb-4">
+                <h4 className={`font-semibold text-lg mb-3 flex items-center gap-2 ${noteColors.icon}`}>
+                  <Lightbulb className="w-5 h-5" />
+                  Conceptos Relacionados
+                </h4>
+                <ul className="space-y-2 list-disc list-inside text-sm text-muted-foreground">
+                  {noteResult.related_concepts.map((concept: string, idx: number) => (
+                    <li key={idx}><ReactMarkdown remarkPlugins={[remarkGfm]}>{concept}</ReactMarkdown></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {noteResult?.kai_insight && (
+              <Alert className={`mb-4 bg-gradient-to-r ${noteColors.alertGradient}`}>
+                <Sparkles className={`h-5 w-5 ${noteColors.alertIcon}`} />
+                <AlertTitle className={`${noteColors.alertTitle} font-semibold mb-2`}>Insight de KAI</AlertTitle>
+                <AlertDescription className={`${noteColors.alertDesc} italic`}>
+                  "{noteResult.kai_insight}"
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <AnalysisCommonFields analysis={analysis} processedOutput={processedOutput} />
+          </>
+        );
+
+      case 'document':
+      case 'document_summary':
+        const documentResult = (analysis.result || analysis.full_data) as SingleTextAnalysis;
+        const docColors = getAnalysisColorScheme(analysis.type);
+        return (
+          <>
+            <h3 className="text-xl font-bold mb-4">Análisis de Documento - KAI Exocerebro</h3>
 
             {documentResult?.executive_summary && (
-              <div className="mb-4 p-3 bg-muted rounded-md border border-border/50">
-                <h4 className="font-semibold text-lg mb-2">Resumen Ejecutivo:</h4>
-                <div className="text-sm text-muted-foreground whitespace-pre-wrap"><ReactMarkdown remarkPlugins={[remarkGfm]} children={documentResult.executive_summary || ''}/></div>
-              </div>
+              <Card className={`mb-4 ${docColors.cardBg}`}>
+                <CardHeader className="pb-2">
+                  <CardTitle className={`text-lg font-semibold ${docColors.cardTitle} flex items-center gap-2`}>
+                    <ScrollText className="w-5 h-5" />
+                    Resumen Ejecutivo
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{documentResult.executive_summary}</ReactMarkdown>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {documentResult?.kai_synthesis && (
+              <Alert className={`mb-4 bg-gradient-to-r ${docColors.alertGradient}`}>
+                <Sparkles className={`h-5 w-5 ${docColors.alertIcon}`} />
+                <AlertTitle className={`${docColors.alertTitle} font-semibold mb-2`}>Síntesis de KAI</AlertTitle>
+                <AlertDescription className={`${docColors.alertDesc} italic`}>
+                  "{documentResult.kai_synthesis}"
+                </AlertDescription>
+              </Alert>
             )}
 
             {documentResult?.general_analysis && (
-              <div className="mb-4 p-3 bg-muted rounded-md border border-border/50">
-                <h4 className="font-semibold text-lg mb-2">Análisis General:</h4>
-                <div className="text-sm text-muted-foreground whitespace-pre-wrap"><ReactMarkdown remarkPlugins={[remarkGfm]} children={documentResult.general_analysis || ''}/></div>
-              </div>
+              <Card className="mb-4 bg-muted/50 border-border/50">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                    <FileText className="w-5 h-5" />
+                    Análisis General
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{documentResult.general_analysis}</ReactMarkdown>
+                  </div>
+                </CardContent>
+              </Card>
             )}
 
             {documentResult?.authorial_tone && (
-              <p className="text-sm text-muted-foreground mb-1"><strong>Tono Autorial:</strong> {documentResult.authorial_tone}</p>
+              <div className="mb-4 flex items-center gap-2 text-sm text-muted-foreground">
+                <Volume2 className="w-4 h-4" />
+                <strong>Tono Autorial:</strong> {documentResult.authorial_tone}
+              </div>
             )}
 
             {documentResult?.discipline && documentResult.discipline.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Disciplina:</h4>
+                <h4 className="font-semibold text-lg mb-2 flex items-center gap-2">
+                  <LibraryBig className="w-5 h-5 text-blue-600" />
+                  Disciplina
+                </h4>
                 <div className="flex flex-wrap gap-2">
-                  {documentResult.discipline?.map((disc: string, idx: number) => (
+                  {documentResult.discipline.map((disc: string, idx: number) => (
                     <Badge key={idx} variant="outline" className="text-sm">
                       {disc}
                     </Badge>
@@ -866,13 +1478,16 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
 
             {documentResult?.key_themes && documentResult.key_themes.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Temas Clave:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${docColors.icon}`}>
+                  <Target className="w-5 h-5" />
+                  Temas Clave
+                </h4>
                 <div className="flex flex-wrap gap-2">
-                  {documentResult.key_themes?.map((theme: ThemeReference, idx: number) => (
+                  {documentResult.key_themes.map((theme: ThemeReference, idx: number) => (
                     <Badge
                       key={idx}
                       variant="secondary"
-                      className="cursor-pointer text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                      className={`cursor-pointer text-sm transition-colors border ${getAnalysisTypeBadgeColor(analysis.type)}`}
                       onClick={() => handleThemeClick(theme)}
                     >
                       {theme.theme}
@@ -884,43 +1499,103 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
 
             {documentResult?.central_concepts && documentResult.central_concepts.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Conceptos Centrales:</h4>
-                <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {documentResult.central_concepts?.map((concept: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={cleanAsterisks(concept)}/></div></li>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${docColors.icon}`}>
+                  <Lightbulb className="w-5 h-5" />
+                  Conceptos Centrales
+                </h4>
+                <div className="flex flex-wrap gap-2">
+                  {documentResult.central_concepts.map((concept: string, idx: number) => (
+                    <Button
+                      key={idx}
+                      variant="outline"
+                      className={`h-auto py-2 px-3 text-sm justify-start font-normal transition-all shadow-sm hover:bg-accent hover:text-accent-foreground`}
+                      onClick={() => handleConceptClick(concept)}
+                    >
+                      <Lightbulb className={`w-4 h-4 mr-2 shrink-0 ${docColors.icon}`} />
+                      <span>{cleanAsterisks(concept.split(':')[0])}</span>
+                    </Button>
                   ))}
-                </ul>
+                </div>
               </div>
             )}
 
             {documentResult?.knowledge_gaps && documentResult.knowledge_gaps.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Brechas de Conocimiento:</h4>
-                <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {documentResult.knowledge_gaps?.map((gap: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={gap}/></div></li>
-                  ))}
-                </ul>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${docColors.icon}`}>
+                  <AlertTriangle className="w-5 h-5" />
+                  Brechas de Conocimiento
+                </h4>
+                <Card
+                  className={`cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-300 border border-border/50 group ${docColors.hoverBorder}`}
+                  onClick={() => setIsKnowledgeGapsDialogOpen(true)}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className={`h-5 w-5 ${docColors.icon}`} />
+                        <span className="font-medium text-sm">
+                          {documentResult.knowledge_gaps.length} brecha{documentResult.knowledge_gaps.length !== 1 ? 's' : ''} de conocimiento
+                        </span>
+                      </div>
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                        <Expand className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                    </div>
+                    <div className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{documentResult.knowledge_gaps[0].gap}</ReactMarkdown>
+                    </div>
+                    <div className="mt-3 text-xs text-primary/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1">
+                      <Expand className="h-3 w-3" />
+                      Haz clic para ver todas las brechas
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
             )}
 
             {documentResult?.exploration_questions && documentResult.exploration_questions.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Preguntas para Explorar:</h4>
-                <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {documentResult.exploration_questions?.map((question: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={question}/></div></li>
-                  ))}
-                </ul>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${docColors.icon}`}>
+                  <HelpCircle className="w-5 h-5" />
+                  Preguntas para Explorar
+                </h4>
+                <Card
+                  className={`cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-300 border border-border/50 group ${docColors.hoverBorder}`}
+                  onClick={() => setIsQuestionsDialogOpen(true)}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <HelpCircle className={`h-5 w-5 ${docColors.icon}`} />
+                        <span className="font-medium text-sm">
+                          {documentResult.exploration_questions.length} pregunta{documentResult.exploration_questions.length !== 1 ? 's' : ''} para explorar
+                        </span>
+                      </div>
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                        <Expand className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                    </div>
+                    <div className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{documentResult.exploration_questions[0]}</ReactMarkdown>
+                    </div>
+                    <div className="mt-3 text-xs text-primary/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1">
+                      <Expand className="h-3 w-3" />
+                      Haz clic para ver todas las preguntas
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
             )}
 
             {documentResult?.problematic_areas && documentResult.problematic_areas.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Áreas Problemáticas:</h4>
+                <h4 className="font-semibold text-lg mb-2 flex items-center gap-2 text-red-600">
+                  <AlertTriangle className="w-5 h-5" />
+                  Áreas Problemáticas
+                </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {documentResult.problematic_areas?.map((area: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={area}/></div></li>
+                  {documentResult.problematic_areas.map((area: string, idx: number) => (
+                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{area}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
@@ -928,10 +1603,13 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
 
             {documentResult?.final_reflections && documentResult.final_reflections.length > 0 && (
               <div className="mb-4">
-                <h4 className="font-semibold text-lg mb-2">Reflexiones Finales:</h4>
+                <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${docColors.icon}`}>
+                  <Sparkles className="w-5 h-5" />
+                  Reflexiones Finales
+                </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {documentResult.final_reflections?.map((reflection: string, idx: number) => (
-                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={reflection}/></div></li>
+                  {documentResult.final_reflections.map((reflection: string, idx: number) => (
+                    <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{reflection}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
@@ -962,19 +1640,19 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
             {analysis.summary && (
               <div className="mb-4 p-3 bg-muted rounded-md border border-border/50">
                 <h4 className="font-semibold text-lg mb-2">Resumen:</h4>
-                <div className="text-sm text-muted-foreground whitespace-pre-wrap"><ReactMarkdown remarkPlugins={[remarkGfm]} children={analysis.summary || ''}/></div>
+                <div className="text-sm text-muted-foreground whitespace-pre-wrap"><ReactMarkdown remarkPlugins={[remarkGfm]}>{typeof analysis.summary === 'string' ? analysis.summary : JSON.stringify(analysis.summary || '')}</ReactMarkdown></div>
               </div>
             )}
             {analysis.rawContent && !analysis.summary && ( // Mostrar rawContent si no hay summary
               <div className="mb-4 p-3 bg-muted rounded-md border border-border/50">
                 <h4 className="font-semibold text-lg mb-2">Contenido:</h4>
-                <div className="text-sm text-muted-foreground whitespace-pre-wrap"><ReactMarkdown remarkPlugins={[remarkGfm]} children={analysis.rawContent || ''}/></div>
+                <div className="text-sm text-muted-foreground whitespace-pre-wrap"><ReactMarkdown remarkPlugins={[remarkGfm]}>{typeof analysis.rawContent === 'string' ? analysis.rawContent : JSON.stringify(analysis.rawContent || '')}</ReactMarkdown></div>
               </div>
             )}
             {analysis.result && typeof analysis.result === 'string' && ( // Para topic_analysis que devuelve un string en result
               <div className="mb-4 p-3 bg-muted rounded-md border border-border/50">
                 <h4 className="font-semibold text-lg mb-2">Resultado:</h4>
-                <div className="text-sm text-muted-foreground whitespace-pre-wrap"><ReactMarkdown remarkPlugins={[remarkGfm]} children={analysis.result || ''}/></div>
+                <div className="text-sm text-muted-foreground whitespace-pre-wrap"><ReactMarkdown remarkPlugins={[remarkGfm]}>{typeof analysis.result === 'string' ? analysis.result : JSON.stringify(analysis.result || '')}</ReactMarkdown></div>
               </div>
             )}
 
@@ -982,10 +1660,10 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
 
             {analysis.type === 'question' && analysis.questions && analysis.questions.length > 0 && (
               <div className="mt-6 p-4 border rounded-md bg-accent/20">
-                <h4 className="font-bold mb-2 flex items-center gap-2"><HelpCircle className="h-5 w-5"/>Preguntas Relacionadas</h4>
+                <h4 className="font-bold mb-2 flex items-center gap-2"><HelpCircle className="h-5 w-5" />Preguntas Relacionadas</h4>
                 <ul className="list-disc pl-5 text-sm space-y-1">
                   {analysis.questions.map((q: Question | string, i: number) => (
-                    <li key={i}>{typeof q === 'string' ? q : q.issue || q.description || `Pregunta ${i+1}`}</li>
+                    <li key={i}>{typeof q === 'string' ? q : q.issue || q.description || `Pregunta ${i + 1}`}</li>
                   ))}
                 </ul>
               </div>
@@ -1001,12 +1679,12 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                 {analysis.workflow_steps.map((step: { title: string; description: string }, index: number) => (
                   <li key={index}>
                     <p className="font-semibold">{step.title}</p>
-                    <div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]} children={step.description}/></div>
+                    <div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{typeof step.description === 'string' ? step.description : JSON.stringify(step.description)}</ReactMarkdown></div>
                   </li>
                 ))}
               </ol>
             ) : (
-              <div className="prose dark:prose-invert max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]} children={processedOutput.content || ''}/></div>
+              <div className="prose dark:prose-invert max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]}>{typeof processedOutput.content === 'string' ? processedOutput.content : JSON.stringify(processedOutput.content || '')}</ReactMarkdown></div>
             )}
             <AnalysisCommonFields analysis={analysis} processedOutput={processedOutput} />
           </>
@@ -1014,12 +1692,12 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
       default:
         return (
           <>
-            <div className="prose dark:prose-invert max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]} children={processedOutput.content || ''}/></div>
+            <div className="prose dark:prose-invert max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]}>{typeof processedOutput.content === 'string' ? processedOutput.content : JSON.stringify(processedOutput.content || '')}</ReactMarkdown></div>
             <AnalysisCommonFields analysis={analysis} processedOutput={processedOutput} />
           </>
         );
     }
-  }, [analysis, handleThemeClick, handleConceptClick, handlePlayPause, isCurrentlyLoading, isCurrentlyPlaying, textToRead]);
+  }, [analysis, handleThemeClick, handleConceptClick, handlePlayPause, isCurrentlyLoading, isCurrentlyPlaying]);
 
   if (!analysis) return null;
 
@@ -1063,7 +1741,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                         <h4 className="font-bold mb-3">Preguntas generadas:</h4>
                         <ul className="list-disc pl-5 text-sm space-y-2">
                           {getQuestions().map((q: Question | string, i: number) => (
-                            <li key={i}>{typeof q === 'string' ? q : q.issue || q.description || `Pregunta ${i+1}`}</li>
+                            <li key={i}>{typeof q === 'string' ? q : q.issue || q.description || `Pregunta ${i + 1}`}</li>
                           ))}
                         </ul>
                         <Button

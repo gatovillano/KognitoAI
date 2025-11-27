@@ -8,6 +8,8 @@ from io import BytesIO
 from pydub import AudioSegment # Importar pydub
 import os # Importar os para manejar archivos temporales
 
+import tempfile
+
 from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
@@ -53,7 +55,7 @@ async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> Option
         logger.error("El modelo de transcripción no está disponible.")
         return None
 
-    temp_file_path = None
+    temp_audio_path = None
     try:
         # Log para verificar el tamaño del audio antes de transcribir
         audio_file.seek(0, 2)
@@ -61,26 +63,27 @@ async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> Option
         audio_file.seek(0)
         logger.info(f"Transcribiendo archivo de audio con tamaño: {file_size} bytes y formato: {file_format}.")
 
-        # Usar un archivo temporal para evitar problemas con pipes y formatos como webm
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_format}") as temp_file:
-            temp_file.write(audio_file.read())
-            temp_file_path = temp_file.name
+        # Crear un archivo temporal para procesar el audio.
+        # Esto evita problemas con ffmpeg y pipes (seekback error) al leer desde memoria.
+        with tempfile.NamedTemporaryFile(suffix=f".{file_format}", delete=False) as temp_file:
+            temp_file.write(audio_file.getvalue())
+            temp_audio_path = temp_file.name
         
-        audio_file.seek(0) # Resetear el puntero del BytesIO por si se necesita en otro lado
-
-        # Convertir el audio a formato WAV usando pydub desde el archivo temporal
-        audio_segment = AudioSegment.from_file(temp_file_path, format=file_format)
+        logger.info(f"Procesando audio desde archivo temporal: {temp_audio_path}")
+        audio_segment = AudioSegment.from_file(temp_audio_path, format=file_format)
+        
+        # Convertir a formato WAV en memoria, que es el formato esperado por Whisper.
         wav_file = BytesIO()
         audio_segment.export(wav_file, format="wav")
         wav_file.seek(0)
-        logger.info(f"Audio convertido a WAV. Tamaño: {wav_file.getbuffer().nbytes} bytes.")
+        logger.info(f"Audio convertido a WAV en memoria. Tamaño: {wav_file.getbuffer().nbytes} bytes.")
 
-        # Especificar el idioma a español para mejorar la precisión
+        # Transcribir el audio WAV con el modelo Whisper.
         segments, info = model.transcribe(
-            wav_file, # Pasar el archivo WAV convertido
+            wav_file,
             language="es",
             vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=500) # Ajustar la duración mínima de silencio
+            vad_parameters=dict(min_silence_duration_ms=500)
         )
         transcribed_text = " ".join([segment.text for segment in segments]).strip()
         
@@ -90,21 +93,24 @@ async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> Option
             
         logger.info(f"Audio transcrito. Idioma detectado: {info.language}")
         return transcribed_text
+
     except Exception as e:
         logger.error(f"Error durante la transcripción: {e}", exc_info=True)
         return None
     finally:
-        # Asegurarse de que el archivo temporal se elimine
-        if temp_file_path and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+        # Limpiar el archivo temporal
+        if temp_audio_path and os.path.exists(temp_audio_path):
+            try:
+                os.remove(temp_audio_path)
+                logger.debug(f"Archivo temporal eliminado: {temp_audio_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"No se pudo eliminar el archivo temporal {temp_audio_path}: {cleanup_error}")
 
 import numpy as np
 
 import collections
 
 import subprocess
-
-import tempfile # Necesario para NamedTemporaryFile si se decide usarlo para debugging o alternativas
 
 from fastapi import WebSocket, WebSocketDisconnect
 

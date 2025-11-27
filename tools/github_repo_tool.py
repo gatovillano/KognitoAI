@@ -11,6 +11,8 @@ import hashlib
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, ConfigDict
 
+from utils.db_session import DBSession
+
 logger = logging.getLogger(__name__)
 
 class GitHubRepoInput(BaseModel):
@@ -249,6 +251,8 @@ class GitHubRepoTool(BaseTool):
             logger.error(f"Error al leer recursivamente el directorio {directory_path} del repositorio {repo_url}: {e}", exc_info=True)
             return f"Error al leer recursivamente el directorio: {e}"
 
+
+
     async def _add_as_knowledge_collection(self, repo_url: str, collection_topic: Optional[str] = None, vectorize: bool = False) -> str:
         """
         Añade un repositorio de GitHub como colección de conocimientos, ya sea en una colección RAG específica o como conocimiento general de una cuenta.
@@ -264,7 +268,7 @@ class GitHubRepoTool(BaseTool):
             from tools.document_rag_tool import DocumentRAGTool
             
             if self.session is None:
-                selfsession = requests.Session()
+                self.session = requests.Session()
             
             # Obtener información del repositorio
             api_url = self._get_api_url(repo_url)
@@ -281,9 +285,7 @@ class GitHubRepoTool(BaseTool):
             tree = response.json()["tree"]
             
             # Conectar a la base de datos
-            db_session = SessionLocal()
-            
-            try:
+            async with DBSession(SessionLocal) as db_session:
                 file_count = 0
                 vectorized_count = 0
                 
@@ -384,12 +386,10 @@ class GitHubRepoTool(BaseTool):
                             logger.info(f"⏩ Archivo {file_path} no vectorizado (vectorize=False).")
                 
                 logger.info(f"DEBUG: Antes del commit en _add_as_knowledge_collection. Archivos a añadir/actualizar: {file_count}")
-                await db_session.commit()
+                # Commit is handled by DBSession context manager if no exception
                 logger.info(f"DEBUG: Después del commit en _add_as_knowledge_collection.")
                 return f"Repositorio {repo_name} añadido/actualizado con {file_count} archivos. {vectorized_count} archivos vectorizados correctamente para la cuenta {self.account_id} con tema '{collection_topic if collection_topic else 'repositorio'}'."
-            finally:
-                logger.info(f"DEBUG: Cerrando db_session en _add_as_knowledge_collection.")
-                await db_session.close()
+
         except Exception as e:
             logger.error(f"Error al añadir el repositorio {repo_url} como colección de conocimientos: {e}", exc_info=True)
             return f"Error al añadir el repositorio como colección de conocimientos: {e}"
@@ -420,9 +420,7 @@ class GitHubRepoTool(BaseTool):
             default_branch = repo_info.get("default_branch", "main")
 
             # Conectar a la base de datos
-            db_session = SessionLocal()
-
-            try:
+            async with DBSession(SessionLocal) as db_session:
                 updated_files = 0
                 new_files = 0
                 deleted_files = 0
@@ -564,14 +562,11 @@ class GitHubRepoTool(BaseTool):
                         #         logger.error(f"❌ Error vectorizando nuevo archivo {file_path}: {vec_error}", exc_info=True)
 
                 logger.info(f"DEBUG: Antes del commit en _update_repository_documents. Nuevos: {new_files}, Actualizados: {updated_files}, Eliminados: {deleted_files}")
-                await db_session.commit()
+                # Commit is handled by DBSession context manager
                 logger.info(f"DEBUG: Después del commit en _update_repository_documents.")
                 
                 return f"Repositorio {repo_name} actualizado. Archivos nuevos: {new_files}, Archivos actualizados: {updated_files}, Archivos eliminados: {deleted_files}." # Eliminar referencia a archivos vectorizados
 
-            finally:
-                logger.info(f"DEBUG: Cerrando db_session en _update_repository_documents.")
-                await db_session.close()
         except Exception as e:
             logger.error(f"Error al actualizar documentos del repositorio {repo_url}: {e}", exc_info=True)
             return f"Error al actualizar documentos del repositorio: {e}"
@@ -603,9 +598,7 @@ class GitHubRepoTool(BaseTool):
             default_branch = repo_info.get("default_branch", "main")
             
             # Conectar a la base de datos
-            db_session = SessionLocal()
-            
-            try:
+            async with DBSession(SessionLocal) as db_session:
                 updated_files = 0
                 new_files = 0
                 deleted_files = 0
@@ -760,13 +753,12 @@ class GitHubRepoTool(BaseTool):
                         else:
                             logger.info(f"⏩ Nuevo archivo {file_path} añadido, no vectorizado (vectorize=False).")
                 
-                await db_session.commit()
+                # Commit is handled by DBSession context manager
                 if collection_topic:
                     return f"Colección con tema '{collection_topic}' actualizada desde {repo_name}. Archivos nuevos: {new_files}, Archivos actualizados: {updated_files}, Archivos eliminados: {deleted_files}. {vectorized_count} archivos vectorizados."
                 else:
                     return f"Colección de conocimientos generales para {repo_name} actualizada. Archivos nuevos: {new_files}, Archivos actualizados: {updated_files}, Archivos eliminados: {deleted_files}. {vectorized_count} archivos vectorizados."
-            finally:
-                await db_session.close()
+
         except Exception as e:
             logger.error(f"Error al actualizar la colección de conocimientos para el repositorio {repo_url}: {e}", exc_info=True)
             return f"Error al actualizar la colección de conocimientos: {e}"

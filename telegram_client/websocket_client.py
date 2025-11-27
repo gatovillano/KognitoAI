@@ -143,7 +143,10 @@ class TelegramWebSocketClient:
 
         try:
             # Llamar a la nueva función de ayuda
-            await send_agent_response(self.application.bot, chat_id, chat_id, text, user_data)
+            if bot_manager.bot is None:
+                logger.error("El bot no está inicializado en bot_manager. No se puede enviar el mensaje desde WebSocket.")
+                return
+            await send_agent_response(bot_manager.bot, chat_id, chat_id, text, user_data)
             
             # Después de llamar a send_agent_response, guardar los cambios en persistence
             if self.application.persistence:
@@ -156,7 +159,10 @@ class TelegramWebSocketClient:
                 formatted_text = markdown_to_telegram_html(text)
                 pages = split_text_into_pages(formatted_text, 4096)
                 for i, page in enumerate(pages):
-                    await self.application.bot.send_message(chat_id=chat_id, text=page, parse_mode='HTML', disable_web_page_preview=True)
+                    if bot_manager.bot is None:
+                        logger.error("Fallback: El bot no está inicializado en bot_manager.")
+                        break
+                    await bot_manager.bot.send_message(chat_id=chat_id, text=page, parse_mode='HTML', disable_web_page_preview=True)
                     if i < len(pages) - 1:
                         await asyncio.sleep(0.5)
             except Exception as fallback_e:

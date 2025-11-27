@@ -9,7 +9,7 @@ from sqlalchemy import update
 from utils.document_parser import extract_text_and_metadata_from_document
 from core.memory_manager import process_document_for_rag, process_multiple_documents_for_rag, list_user_documents, update_document_metadata
 from core.websocket_manager import send_personal_message # Importar send_personal_message
-from tools.cognee_knowledge_graph_tool import CogneeKnowledgeGraphTool
+from tools.knowledge_graph_tool import KnowledgeGraphTool
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
@@ -232,12 +232,12 @@ async def process_knowledge_graph(account_id: str, topic: Optional[str] = None):
             logger.info("No se encontraron documentos para procesar en el grafo.")
             return {"message": "No se encontraron documentos para procesar."}
 
-        # Preparar documentos para Cognee
-        cognee_documents = []
+        # Preparar documentos para KnowledgeGraphTool
+        kg_documents = []
         for doc in documents:
-            cognee_documents.append({
+            kg_documents.append({
                 "content": doc.get("content", ""),
-                "title": doc.get("file_name", "Documento sin título"),
+                "file_name": doc.get("file_name", "Documento sin título"),
                 "metadata": {
                     "file_name": doc.get("file_name"),
                     "topic": doc.get("topic"),
@@ -245,10 +245,10 @@ async def process_knowledge_graph(account_id: str, topic: Optional[str] = None):
                 }
             })
 
-        tool = CogneeKnowledgeGraphTool(account_id=account_id)
+        tool = KnowledgeGraphTool(account_id=account_id)
         tool_input = {
             "action": "process_documents",
-            "documents": cognee_documents,
+            "documents": kg_documents,
             "dataset_name": f"kognito_{account_id}"
         }
         result = await tool._arun(
@@ -257,7 +257,7 @@ async def process_knowledge_graph(account_id: str, topic: Optional[str] = None):
             dataset_name=tool_input.get("dataset_name", f"kognito_{account_id}")
         )
         logger.info(f"Procesamiento de grafo completado para {account_id}: {result}")
-        return {"message": f"Procesamiento de grafo de conocimiento completado para {len(cognee_documents)} documentos.", "result": result}
+        return {"message": f"Procesamiento de grafo de conocimiento completado para {len(kg_documents)} documentos.", "result": result}
 
     except Exception as e:
         logger.error(f"Error en procesamiento de grafo para {account_id}: {e}", exc_info=True)

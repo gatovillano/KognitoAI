@@ -5,8 +5,10 @@ from core.database import SessionLocal, Account
 from utils.security import create_access_token
 from sqlalchemy import select
 
+from utils.db_session import DBSession
+
 async def generate_admin_token():
-    async with SessionLocal() as session:
+    async with DBSession(SessionLocal) as session:
         result = await session.execute(select(Account).where(Account.is_admin == True).limit(1))
         admin_user = result.scalars().first()
 

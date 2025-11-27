@@ -11,22 +11,18 @@ from sqlalchemy import select
 from core.database import SessionLocal, Account, PlatformIdentity, delete_accounts_by_ids
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
+from core.dependencies import get_db_session # Importar dependencia centralizada
+from api.schemas import UserSettingsResponse, UserSettingsUpdateRequest
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session:  # type: ignore
-        try:
-            yield session
-        finally:
-            await session.close()
+# get_db eliminado en favor de core.dependencies.get_db_session
 
 # Dependencia para verificar si el usuario es administrador
-async def get_current_admin_account(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)) -> Account:
+async def get_current_admin_account(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)) -> Account:
     account = await db.get(Account, uuid.UUID(current_account_id))
     if not account or not bool(account.is_admin):  # type: ignore
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes permisos de administrador.")
@@ -47,7 +43,7 @@ class UserProfileResponse(BaseModel):
         from_attributes = True  # Habilita compatibilidad con ORM de SQLAlchemy
 
 @router.get("/users/me", response_model=UserProfileResponse, summary="Obtener perfil del usuario actual (protegido)")
-async def read_users_me(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def read_users_me(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Devuelve los datos públicos del usuario actualmente autenticado a través del token JWT.
     """
@@ -80,11 +76,73 @@ async def read_users_me(current_account_id: str = Depends(get_current_account_id
         is_admin=bool(account.is_admin)  # type: ignore
     )
 
+
+# --- Endpoints de Configuración de Usuario ---
+@router.get("/users/me/settings", response_model=UserSettingsResponse, summary="Obtener configuración del usuario actual")
+async def get_user_settings(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
+    """
+    Obtiene la configuración detallada del usuario actualmente autenticado.
+    """
+    account = await db.get(Account, uuid.UUID(current_account_id))
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
+    
+    return UserSettingsResponse(
+        name=account.name,
+        email=account.email,
+        phone=account.phone,
+        bio=account.bio,
+        profiles_enabled=account.profiles_enabled,
+        galleries_enabled=account.galleries_enabled,
+        forms_enabled=account.forms_enabled,
+        theme=account.theme,
+        notifications_email=account.notifications_email,
+        notifications_push=account.notifications_push,
+        language=account.language,
+        privacy_data_sharing=account.privacy_data_sharing
+    )
+
+@router.put("/users/me/settings", response_model=UserSettingsResponse, summary="Actualizar configuración del usuario actual")
+async def update_user_settings(
+    settings_update: UserSettingsUpdateRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Actualiza la configuración del usuario actualmente autenticado.
+    """
+    account = await db.get(Account, uuid.UUID(current_account_id))
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
+
+    # Aplicar actualizaciones
+    for field, value in settings_update.dict(exclude_unset=True).items():
+        setattr(account, field, value)
+    
+    await db.commit()
+    await db.refresh(account)
+
+    return UserSettingsResponse(
+        name=account.name,
+        email=account.email,
+        phone=account.phone,
+        bio=account.bio,
+        profiles_enabled=account.profiles_enabled,
+        galleries_enabled=account.galleries_enabled,
+        forms_enabled=account.forms_enabled,
+        theme=account.theme,
+        notifications_email=account.notifications_email,
+        notifications_push=account.notifications_push,
+        language=account.language,
+        privacy_data_sharing=account.privacy_data_sharing
+    )
+
+
 # --- Endpoints de Administración de Usuarios (Solo para Admins) ---
 @router.get("/admin/users", response_model=List[UserProfileResponse], summary="Listar todos los usuarios (solo admin)")
 async def list_all_users(
     admin_account: Account = Depends(get_current_admin_account),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Lista todos los usuarios registrados en el sistema. Requiere privilegios de administrador.
@@ -122,7 +180,7 @@ async def list_all_users(
     return users_data
 
 @router.get("/users", response_model=List[UserProfileResponse], summary="Listar todos los usuarios (público)")
-async def list_all_users_public(db: AsyncSession = Depends(get_db)):
+async def list_all_users_public(db: AsyncSession = Depends(get_db_session)):
     """
     Lista todos los usuarios registrados en el sistema.
     """
@@ -166,7 +224,7 @@ class DeleteUsersRequest(BaseModel):
 async def delete_users_by_ids_endpoint(
     request: DeleteUsersRequest,
     admin_account: Account = Depends(get_current_admin_account),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Elimina una o varias cuentas de usuario por sus IDs. Requiere privilegios de administrador.
@@ -190,7 +248,7 @@ async def delete_users_by_ids_endpoint(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno al eliminar cuentas.")
 
 @router.get("/users/search", summary="Buscar usuario por email o nombre de usuario")
-async def search_user(identifier: str = Query(...), current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def search_user(identifier: str = Query(...), current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Busca un usuario por email o nombre de usuario de Telegram. Devuelve el account_id si se encuentra.
     Solo accesible para usuarios autenticados.

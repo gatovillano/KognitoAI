@@ -39,5 +39,3 @@ beautifulsoup4
 # === DEVELOPMENT ===
 pytest
 psutil
-
-alembic

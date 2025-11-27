@@ -317,7 +317,7 @@ export default function ProfilesPage() {
             <AlertDialogHeader>
               <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
               <AlertDialogDescription>
-                Esta acción es irreversible y eliminará el perfil permanentemente.
+                {`Esta acción es irreversible y eliminará el perfil permanentemente.`}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

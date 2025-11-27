@@ -50,7 +50,7 @@ export const KeyTopicSliderDialog: React.FC<KeyTopicSliderDialogProps> = ({ isOp
                   <h4 className="font-medium mb-2">Citas:</h4>
                   <ul className="list-disc pl-5 text-sm space-y-1">
                     {currentTopic.citations.map((citation, i) => (
-                      <li key={i}>{citation}</li>
+                      <li key={i}>{citation.quote} (Fuente: {citation.document_title})</li>
                     ))}
                   </ul>
                 </div>

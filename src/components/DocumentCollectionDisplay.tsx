@@ -22,13 +22,13 @@ import { UploadDocumentDialog } from '@/app/(dashboard)/rag/upload-document-dial
 import { PreviewDocumentDialog } from '@/app/(dashboard)/rag/preview-document-dialog';
 import { EditDocumentDialog } from '@/app/(dashboard)/rag/edit-document-dialog';
 import { DeleteConfirmationDialog } from '@/app/(dashboard)/rag/delete-confirmation-dialog';
-import { AnalysisResultDialog } from '@/app/(dashboard)/rag/analysis-result-dialog';
+import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
 import UploadProgressIndicator, { UploadTask } from '@/components/UploadProgressIndicator';
-import { CollectionAnalysisDialog } from '@/app/(dashboard)/rag/collection-analysis-dialog';
-import { SemanticAnalysisDialog } from '@/app/(dashboard)/rag/semantic-analysis-dialog';
+import AnalysisProgressIndicator from '@/components/AnalysisProgressIndicator';
 import { ShareDocumentDialog } from '@/app/(dashboard)/rag/share-document-dialog';
 import { CustomAnalysisDialog } from '@/app/(dashboard)/rag/custom-analysis-dialog';
-import { KnowledgeGraphAnalysisDialog } from '@/app/(dashboard)/rag/knowledge-graph-analysis-dialog';
+
+import { Analysis, AnalysisType } from '@/lib/models';
 
 interface DocumentCollectionDisplayProps {
   topic: string;
@@ -67,7 +67,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     }));
     setDocuments(prevDocs => [...newPlaceholders, ...prevDocs]);
   };
-  
+
   // Estados para diálogos
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [documentToPreview, setDocumentToPreview] = useState<Document | null>(null);
@@ -75,33 +75,26 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null);
   const [documentToShare, setDocumentToShare] = useState<Document | null>(null);
   const [isShareOpen, setIsShareOpen] = useState(false);
-  
-  // Estados para análisis de documento individual
-  const [documentToAnalyze, setDocumentToAnalyze] = useState<Document | null>(null);
-  const [docAnalysisResult, setDocAnalysisResult] = useState<any>(null);
-  const [isDocAnalysisOpen, setIsDocAnalysisOpen] = useState(false);
-  const [docPollingId, setDocPollingId] = useState<string | null>(null);
 
-  // Estados para análisis de colección completa
-  const [collectionAnalysisResult, setCollectionAnalysisResult] = useState<any>(null);
-  const [isCollectionAnalysisOpen, setIsCollectionAnalysisOpen] = useState(false);
+  // Estados para análisis
+  const [documentToAnalyze, setDocumentToAnalyze] = useState<Document | null>(null);
+  const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
+  const [docPollingId, setDocPollingId] = useState<string | null>(null);
   const [collectionPollingId, setCollectionPollingId] = useState<string | null>(null);
+  const [currentAnalysisType, setCurrentAnalysisType] = useState<AnalysisType | null>(null);
 
   // Estado para análisis personalizado
   const [isCustomAnalysisOpen, setIsCustomAnalysisOpen] = useState(false);
 
-  // Estados para análisis semántico
-  const [semanticAnalysisResult, setSemanticAnalysisResult] = useState<any>(null);
-  const [isSemanticAnalysisOpen, setIsSemanticAnalysisOpen] = useState(false);
-
   // Estado para el historial de análisis
   const [savedAnalyses, setSavedAnalyses] = useState([]);
 
+  // Estados para el progreso del análisis
+  const [analysisProgress, setAnalysisProgress] = useState<number | null>(null);
+  const [analysisText, setAnalysisText] = useState<string>("");
+
   // Estados para procesamiento de grafos de conocimiento
   const [isProcessingKnowledgeGraph, setIsProcessingKnowledgeGraph] = useState(false);
-  // Nuevo estado para el análisis de grafo de conocimiento
-  const [knowledgeGraphAnalysisResult, setKnowledgeGraphAnalysisResult] = useState<any>(null);
-  const [isKnowledgeGraphAnalysisOpen, setIsKnowledgeGraphAnalysisOpen] = useState(false);
 
   const fetchPageData = useCallback(async () => {
     setIsLoading(true);
@@ -112,7 +105,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         apiClient.post('/api/get-saved-analyses', commonParams),
         apiClient.get(`/api/collections/${topic}/details`, { params: workspaceId ? { workspace_id: workspaceId } : {} })
       ]);
-      
+
       const serverDocuments = docsRes.data;
 
       const savedAnalysesData = analysesRes.data;
@@ -139,10 +132,14 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   }, [topic, workspaceId]);
 
   // WebSocket para actualizaciones en tiempo real
-  const onTitleUpdated = (data: { file_name: string; new_title: string; progress: number; total: number }) => {
+  const onTitleUpdated = (message: WebSocketMessage) => {
+    if (!message || !message.file_name) {
+      console.error("Received undefined message or file_name in onTitleUpdated", message);
+      return;
+    }
     setDocuments(prevDocs =>
       prevDocs.map(doc =>
-        doc.file_name === data.file_name ? { ...doc, title: data.new_title } : doc
+        doc.file_name === message.file_name ? { ...doc, title: message.new_title } : doc
       )
     );
   };
@@ -153,6 +150,10 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   });
 
   const onTitleExtractionCompleted = useCallback((data: { updated_count: number; total_processed: number; message: string }) => {
+    if (!data) {
+      console.error("Received undefined data in onTitleExtractionCompleted", data);
+      return;
+    }
     toast.success(data.message || `Extracción de títulos completada.`);
   }, []);
 
@@ -166,22 +167,38 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   }, []);
 
   const onUploadProgress = useCallback((data: { task_id: string; progress: number; message: string; }) => {
+    if (!data || !data.task_id) {
+      console.error("Received undefined data or task_id in onUploadProgress", data);
+      return;
+    }
     setUploadTasks(prev => prev.map(task => task.id === data.task_id ? { ...task, progress: data.progress } : task));
   }, []);
 
   const onUploadCompleted = useCallback((data: { task_id: string; message: string; }) => {
+    if (!data || !data.task_id) {
+      console.error("Received undefined data or task_id in onUploadCompleted", data);
+      return;
+    }
     toast.success(data.message || 'Subida completada.');
     setUploadTasks(prev => prev.filter(task => task.id !== data.task_id));
     fetchPageData();
   }, [fetchPageData]);
 
   const onUploadFailed = useCallback((data: { task_id: string; error_message: string; }) => {
+    if (!data || !data.task_id) {
+      console.error("Received undefined data or task_id in onUploadFailed", data);
+      return;
+    }
     toast.error(data.error_message || 'Falló la subida de archivos.');
     setUploadTasks(prev => prev.filter(task => task.id !== data.task_id));
     fetchPageData(); // Recargar para limpiar
   }, [fetchPageData]);
 
   const onDocumentProcessingStarted = useCallback((message: WebSocketMessage) => {
+    if (!message || !message.file_name) {
+      console.error("Received undefined message or file_name in onDocumentProcessingStarted", message);
+      return;
+    }
     setDocuments(prevDocs => {
       const docIndex = prevDocs.findIndex(d => d.file_name === message.file_name && d.document_type === 'placeholder');
 
@@ -208,6 +225,10 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   }, [topic]);
 
   const onDocumentProcessingCompleted = useCallback((message: WebSocketMessage) => {
+    if (!message || !message.file_name) {
+      console.error("Received undefined message or file_name in onDocumentProcessingCompleted", message);
+      return;
+    }
     toast.success(`"${message.file_name}" procesado con éxito.`);
     // Simplemente recargamos los datos. La nueva lógica en fetchPageData se encargará
     // de reemplazar el placeholder con el documento real sin afectar a los demás.
@@ -215,9 +236,13 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   }, [fetchPageData]);
 
   const onDocumentProcessingFailed = useCallback((message: WebSocketMessage) => {
+    if (!message || !message.file_name) {
+      console.error("Received undefined message or file_name in onDocumentProcessingFailed", message);
+      return;
+    }
     toast.error(`Error procesando "${message.file_name}"`, { description: message.error });
     // Actualizamos el placeholder a un estado de error
-    setDocuments(prevDocs => prevDocs.map(doc => 
+    setDocuments(prevDocs => prevDocs.map(doc =>
       doc.file_name === message.file_name ? { ...doc, status: 'failed', title: 'Error de procesamiento' } : doc
     ));
   }, []);
@@ -233,7 +258,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
 
       switch (message.type) {
         case 'title_updated':
-          onTitleUpdatedRef.current(message.data);
+          onTitleUpdatedRef.current(message);
           break;
         case 'title_extraction_completed':
           onTitleExtractionCompleted(message.data);
@@ -285,15 +310,17 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   const handleAnalyzeDocument = useCallback(async (doc: Document) => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
     setDocumentToAnalyze(doc);
+    setCurrentAnalysisType('document');
     try {
       const response = await apiClient.post('/api/start-document-analysis', { file_name: doc.file_name, ...(workspaceId && { workspace_id: workspaceId }) });
       setDocPollingId(response.data.task_id);
       toast.info(`Análisis para "${doc.file_name}" iniciado.`);
     } catch (error) { toast.error("No se pudo iniciar el análisis del documento."); }
   }, [docPollingId, collectionPollingId, workspaceId]);
-  
+
   const handleAnalyzeCollection = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
+    setCurrentAnalysisType('collection');
     try {
       const response = await apiClient.post('/api/start-collection-analysis', { topic, ...(workspaceId && { workspace_id: workspaceId }) });
       setCollectionPollingId(response.data.task_id);
@@ -304,52 +331,101 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   // --- Polling para Análisis de Documento ---
   useEffect(() => {
     if (!docPollingId) return;
+
+    const docName = documentToAnalyze?.file_name || 'el documento';
+    setAnalysisText(`Analizando ${docName}...`);
+    setAnalysisProgress(null);
+
     const poller = setInterval(async () => {
       try {
         const response = await apiClient.get(`/api/get-analysis-result/${docPollingId}`);
-        const { status, result, error } = response.data;
+        const { status, result, error, progress } = response.data;
+
+        if (progress !== undefined) {
+          setAnalysisProgress(progress);
+        }
+
         if (status === 'completed') {
-          clearInterval(poller); setDocPollingId(null); setDocAnalysisResult(result);
-          setIsDocAnalysisOpen(true); toast.success("¡Análisis de documento completado!"); fetchPageData();
+          clearInterval(poller);
+          setDocPollingId(null);
+
+          const newAnalysis: Analysis = {
+            id: docPollingId,
+            type: 'document',
+            title: `Análisis: ${documentToAnalyze?.file_name || "Documento"}`,
+            created_at: new Date().toISOString(),
+            result: result,
+            full_data: result,
+            file_name: documentToAnalyze?.file_name,
+          };
+
+          setSelectedAnalysis(newAnalysis);
+          toast.success("¡Análisis de documento completado!");
+          fetchPageData();
+          setAnalysisProgress(null);
         } else if (status === 'failed') {
           clearInterval(poller); setDocPollingId(null); toast.error("El análisis del documento falló: " + error);
+          setAnalysisProgress(null);
         }
-      } catch (err) { clearInterval(poller); setDocPollingId(null); toast.error("Error al consultar el análisis."); }
+      } catch (err) { clearInterval(poller); setDocPollingId(null); toast.error("Error al consultar el análisis."); setAnalysisProgress(null); }
     }, 5000);
     return () => clearInterval(poller);
-  }, [docPollingId, fetchPageData]);
+  }, [docPollingId, fetchPageData, documentToAnalyze]);
 
   // --- Polling para Análisis de Colección ---
   useEffect(() => {
     if (!collectionPollingId) return;
+
+    let currentAnalysisText = `Analizando la colección "${collectionName || topic}"...`;
+    setAnalysisText(currentAnalysisText);
+    setAnalysisProgress(null);
+
     const poller = setInterval(async () => {
       try {
         const response = await apiClient.get(`/api/get-analysis-result/${collectionPollingId}`);
-        const { status, result, error } = response.data;
+        const { status, result, error, progress } = response.data;
+
+        if (progress !== undefined) {
+          setAnalysisProgress(progress);
+        }
+
         if (status === 'completed') {
-          clearInterval(poller); setCollectionPollingId(null);
-          // Verificar si es análisis semántico o de grafo de conocimiento
-          if (result?.analysis_metadata?.analysis_type === 'semantic_summary') {
-            setSemanticAnalysisResult(result);
-            setIsSemanticAnalysisOpen(true);
+          clearInterval(poller);
+          setCollectionPollingId(null);
+
+          const analysisType = result?.analysis_metadata?.analysis_type || currentAnalysisType || 'collection';
+          let title = `Análisis de Colección: ${collectionName || topic}`;
+          if (analysisType === 'semantic_summary') {
+            title = `Resumen Semántico: ${collectionName || topic}`;
             toast.success("¡Resumen semántico completado!");
-          } else if (result?.analysis_metadata?.analysis_type === 'knowledge_graph_analysis') {
-            setKnowledgeGraphAnalysisResult(result);
-            setIsKnowledgeGraphAnalysisOpen(true);
+          } else if (analysisType === 'knowledge_graph_analysis') {
+            title = `Análisis de Grafo: ${collectionName || topic}`;
             toast.success("¡Análisis de grafo de conocimiento completado!");
           } else {
-            setCollectionAnalysisResult(result);
-            setIsCollectionAnalysisOpen(true);
             toast.success("¡Análisis de colección completado!");
           }
+
+          const newAnalysis: Analysis = {
+            id: collectionPollingId,
+            type: analysisType,
+            title: title,
+            created_at: new Date().toISOString(),
+            result: result,
+            full_data: result,
+          };
+
+          setSelectedAnalysis(newAnalysis);
+
           fetchPageData();
+          setAnalysisProgress(null);
         } else if (status === 'failed') {
           clearInterval(poller); setCollectionPollingId(null); toast.error("El análisis de la colección falló: " + error);
+          setAnalysisProgress(null);
         }
-      } catch (err) { clearInterval(poller); setCollectionPollingId(null); toast.error("Error al consultar el análisis."); }
+      } catch (err) { clearInterval(poller); setCollectionPollingId(null); toast.error("Error al consultar el análisis."); setAnalysisProgress(null); }
     }, 5000);
     return () => clearInterval(poller);
-  }, [collectionPollingId, fetchPageData]);
+  }, [collectionPollingId, fetchPageData, collectionName, topic, currentAnalysisType]);
 
   // --- Handler para Extraer Títulos de la Colección ---
   const handleExtractTitles = async () => {
@@ -372,6 +448,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   // --- Handler para Resumen Semántico de la Colección ---
   const handleSemanticSummary = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
+    setCurrentAnalysisType('semantic_summary');
     try {
       const response = await apiClient.post('/api/start-semantic-summary', { topic, ...(workspaceId && { workspace_id: workspaceId }) });
       setCollectionPollingId(response.data.task_id);
@@ -414,6 +491,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   // --- Handler para Análisis de Grafo de Conocimiento ---
   const handleKnowledgeGraphAnalysis = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
+    setCurrentAnalysisType('knowledge_graph_analysis');
     try {
       const response = await apiClient.post('/api/documents/start-knowledge-graph-analysis', { topic, ...(workspaceId && { workspace_id: workspaceId }) });
       setCollectionPollingId(response.data.task_id);
@@ -422,17 +500,17 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   };
 
   const columns = useMemo(() => getColumns(
-      (doc) => setDocumentToPreview(doc),
-      (doc) => setDocumentToEdit(doc),
-      (doc) => setDocumentToDelete(doc),
-      handleAnalyzeDocument,
-      (doc) => {
-        setDocumentToShare(doc);
-        setIsShareOpen(true);
-      },
-      handleExtractTitleForDocument
+    (doc) => setDocumentToPreview(doc),
+    (doc) => setDocumentToEdit(doc),
+    (doc) => setDocumentToDelete(doc),
+    handleAnalyzeDocument,
+    (doc) => {
+      setDocumentToShare(doc);
+      setIsShareOpen(true);
+    },
+    handleExtractTitleForDocument
   ), [handleAnalyzeDocument, handleExtractTitleForDocument]);
-  
+
   const router = useRouter();
 
   if (isLoading) {
@@ -503,7 +581,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                 <Sparkles className="mr-2 h-4 w-4" />
                 <span>Análisis Personalizado</span>
               </DropdownMenuItem>
-              
+
               <DropdownMenuItem onClick={handleExtractTitles} disabled={!!docPollingId || !!collectionPollingId}>
                 <Text className="mr-2 h-4 w-4" />
                 <span>Extraer Títulos</span>
@@ -521,12 +599,9 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
           </DropdownMenu>
         </div>
       </div>
-      
+
       {(docPollingId || collectionPollingId) && (
-        <div className="bg-muted text-muted-foreground p-3 rounded-md mb-4 flex items-center gap-2 text-sm animate-pulse">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          <span>Un análisis está en progreso. La interfaz sigue siendo funcional...</span>
-        </div>
+        <AnalysisProgressIndicator progress={analysisProgress} text={analysisText} />
       )}
 
       {uploadTasks.length > 0 && (
@@ -565,113 +640,120 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
           </CardContent>
         </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <History className="h-6 w-6" />
-            Historial de Análisis
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {savedAnalyses.length > 0 ? (
-            <div className="w-full overflow-y-auto">
-              <Accordion type="single" collapsible className="w-full">
-                {savedAnalyses.map((analysis: any) => (
-                  <AccordionItem value={`item-${analysis.id}`} key={analysis.id}>
-                    <AccordionTrigger>
-                      <div className="flex items-center gap-2 text-left flex-1 min-w-0">
-                        {analysis.file_name.startsWith('Resumen Semántico:') ? <Brain className="h-4 w-4" /> :
-                         analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                        <span className="font-medium truncate">{analysis.file_name}</span>
-                        <span className="ml-auto text-xs text-muted-foreground pr-4">{new Date(analysis.created_at).toLocaleDateString()}</span>
-                      </div>
-                    </AccordionTrigger>
-                    <AccordionContent>
-                      <div className="space-y-3">
-                        {/* Mostrar resumen según el tipo de análisis */}
-                        {analysis.file_name.startsWith('Colección:') && analysis.result_payload?.collection_summary && (
-                          <div className="p-3 bg-muted rounded-lg">
-                            <h4 className="font-medium text-sm mb-2">Resumen de la Colección:</h4>
-                            <p className="text-sm text-muted-foreground">
-                              {analysis.result_payload.collection_summary}
-                            </p>
-                          </div>
-                        )}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <History className="h-6 w-6" />
+              Historial de Análisis
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {savedAnalyses.length > 0 ? (
+              <div className="w-full overflow-y-auto">
+                <Accordion type="single" collapsible className="w-full">
+                  {savedAnalyses.map((analysis: any) => (
+                    <AccordionItem value={`item-${analysis.id}`} key={analysis.id}>
+                      <AccordionTrigger>
+                        <div className="flex items-center gap-2 text-left flex-1 min-w-0">
+                          {analysis.file_name.startsWith('Resumen Semántico:') ? <Brain className="h-4 w-4" /> :
+                            analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                          <span className="font-medium truncate">{analysis.file_name}</span>
+                          <span className="ml-auto text-xs text-muted-foreground pr-4">{new Date(analysis.created_at).toLocaleDateString()}</span>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="space-y-3">
+                          {/* Mostrar resumen según el tipo de análisis */}
+                          {analysis.file_name.startsWith('Colección:') && analysis.result_payload?.collection_summary && (
+                            <div className="p-3 bg-muted rounded-lg">
+                              <h4 className="font-medium text-sm mb-2">Resumen de la Colección:</h4>
+                              <p className="text-sm text-muted-foreground">
+                                {analysis.result_payload.collection_summary}
+                              </p>
+                            </div>
+                          )}
 
-                        {analysis.file_name.startsWith('Resumen Semántico:') && analysis.result_payload?.resumen_semantico && (
-                          <div className="p-3 bg-muted rounded-lg">
-                            <h4 className="font-medium text-sm mb-2">Resumen Semántico:</h4>
-                            <p className="text-sm text-muted-foreground">
-                              {analysis.result_payload.resumen_semantico}
-                            </p>
-                          </div>
-                        )}
+                          {analysis.file_name.startsWith('Resumen Semántico:') && analysis.result_payload?.resumen_semantico && (
+                            <div className="p-3 bg-muted rounded-lg">
+                              <h4 className="font-medium text-sm mb-2">Resumen Semántico:</h4>
+                              <p className="text-sm text-muted-foreground">
+                                {analysis.result_payload.resumen_semantico}
+                              </p>
+                            </div>
+                          )}
 
-                        {analysis.file_name.startsWith('Análisis Personalizado:') && analysis.result_payload?.analysis_result && (
-                          <div className="p-3 bg-muted rounded-lg">
-                            <h4 className="font-medium text-sm mb-2">Resultado del Análisis:</h4>
-                            <p className="text-sm text-muted-foreground">
-                              {typeof analysis.result_payload.analysis_result === 'string'
-                                ? analysis.result_payload.analysis_result
-                                : JSON.stringify(analysis.result_payload.analysis_result).substring(0, 200) + '...'}
-                            </p>
-                          </div>
-                        )}
+                          {analysis.file_name.startsWith('Análisis Personalizado:') && analysis.result_payload?.analysis_result && (
+                            <div className="p-3 bg-muted rounded-lg">
+                              <h4 className="font-medium text-sm mb-2">Resultado del Análisis:</h4>
+                              <p className="text-sm text-muted-foreground">
+                                {typeof analysis.result_payload.analysis_result === 'string'
+                                  ? analysis.result_payload.analysis_result
+                                  : JSON.stringify(analysis.result_payload.analysis_result).substring(0, 200) + '...'}
+                              </p>
+                            </div>
+                          )}
 
-                        {analysis.file_name.startsWith('Análisis de Grafo de Conocimiento:') && analysis.result_payload?.graph_summary && (
-                          <div className="p-3 bg-muted rounded-lg">
-                            <h4 className="font-medium text-sm mb-2">Resumen del Grafo de Conocimiento:</h4>
-                            <p className="text-sm text-muted-foreground">
-                              {analysis.result_payload.graph_summary}
-                            </p>
-                          </div>
-                        )}
+                          {analysis.file_name.startsWith('Análisis de Grafo de Conocimiento:') && analysis.result_payload?.graph_summary && (
+                            <div className="p-3 bg-muted rounded-lg">
+                              <h4 className="font-medium text-sm mb-2">Resumen del Grafo de Conocimiento:</h4>
+                              <p className="text-sm text-muted-foreground">
+                                {analysis.result_payload.graph_summary}
+                              </p>
+                            </div>
+                          )}
 
-                        {!analysis.file_name.startsWith('Colección:') &&
-                         !analysis.file_name.startsWith('Resumen Semántico:') &&
-                         !analysis.file_name.startsWith('Análisis Personalizado:') &&
-                         !analysis.file_name.startsWith('Análisis de Grafo de Conocimiento:') &&
-                         analysis.result_payload?.resumen_ejecutivo && (
-                          <div className="p-3 bg-muted rounded-lg">
-                            <h4 className="font-medium text-sm mb-2">Resumen Ejecutivo:</h4>
-                            <p className="text-sm text-muted-foreground">
-                              {analysis.result_payload.resumen_ejecutivo}
-                            </p>
-                          </div>
-                        )}
+                          {!analysis.file_name.startsWith('Colección:') &&
+                            !analysis.file_name.startsWith('Resumen Semántico:') &&
+                            !analysis.file_name.startsWith('Análisis Personalizado:') &&
+                            !analysis.file_name.startsWith('Análisis de Grafo de Conocimiento:') &&
+                            analysis.result_payload?.resumen_ejecutivo && (
+                              <div className="p-3 bg-muted rounded-lg">
+                                <h4 className="font-medium text-sm mb-2">Resumen Ejecutivo:</h4>
+                                <p className="text-sm text-muted-foreground">
+                                  {analysis.result_payload.resumen_ejecutivo}
+                                </p>
+                              </div>
+                            )}
 
-                        <Button variant="link" className="p-0 h-auto" onClick={() => {
-                          if (analysis.file_name.startsWith('Resumen Semántico:')) {
-                            setSemanticAnalysisResult(analysis.result_payload);
-                            setIsSemanticAnalysisOpen(true);
-                          } else if (analysis.file_name.startsWith('Colección:')) {
-                            setCollectionAnalysisResult(analysis.result_payload);
-                            setIsCollectionAnalysisOpen(true);
-                          } else if (analysis.file_name.startsWith('Análisis Personalizado:')) {
-                            setDocAnalysisResult(analysis.result_payload);
-                            setIsDocAnalysisOpen(true);
-                          } else if (analysis.file_name.startsWith('Análisis de Grafo de Conocimiento:')) {
-                            setKnowledgeGraphAnalysisResult(analysis.result_payload);
-                            setIsKnowledgeGraphAnalysisOpen(true);
-                          } else {
-                            setDocAnalysisResult(analysis.result_payload);
-                            setDocumentToAnalyze({ file_name: analysis.file_name, topic, title: '', author: '' });
-                            setIsDocAnalysisOpen(true);
-                          }
-                        }}>
-                          Ver Resultados Detallados →
-                        </Button>
-                      </div>
-                    </AccordionContent>
-                  </AccordionItem>
-                ))}
-              </Accordion>
-            </div>
-          ) : (
-            !isLoading && <p className="text-sm text-muted-foreground text-center py-4">No hay análisis guardados para esta vista.</p>
-          )}
-        </CardContent>
-      </Card>
+                          <Button variant="link" className="p-0 h-auto" onClick={() => {
+                            let analysisType: AnalysisType = 'document';
+                            const fileName = analysis.file_name || '';
+
+                            if (fileName.startsWith('Resumen Semántico:')) {
+                              analysisType = 'semantic_summary';
+                            } else if (fileName.startsWith('Colección:')) {
+                              analysisType = 'collection';
+                            } else if (fileName.startsWith('Análisis Personalizado:')) {
+                              analysisType = 'custom_analysis';
+                            } else if (fileName.startsWith('Análisis de Grafo de Conocimiento:')) {
+                              analysisType = 'knowledge_graph_analysis';
+                            }
+
+                            const newAnalysis: Analysis = {
+                              id: analysis.id,
+                              type: analysisType,
+                              title: fileName,
+                              created_at: analysis.created_at,
+                              result: analysis.result_payload,
+                              full_data: analysis.result_payload,
+                              file_name: fileName,
+                            };
+
+                            setSelectedAnalysis(newAnalysis);
+                          }}>
+                            Ver Resultados Detallados →
+                          </Button>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
+              </div>
+            ) : (
+              !isLoading && <p className="text-sm text-muted-foreground text-center py-4">No hay análisis guardados para esta vista.</p>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Diálogos */}
@@ -686,9 +768,15 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
       <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchPageData} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />
-      <AnalysisResultDialog isOpen={isDocAnalysisOpen} onOpenChange={setIsDocAnalysisOpen} analysis={docAnalysisResult} document={documentToAnalyze ?? { file_name: '', topic: topic, title: '', author: '' }} />
-      <CollectionAnalysisDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={collectionAnalysisResult} topic={topic} />
-      <SemanticAnalysisDialog isOpen={isSemanticAnalysisOpen} onOpenChange={setIsSemanticAnalysisOpen} analysis={semanticAnalysisResult} topic={topic} />
+      <AnalysisDetailDialog
+        analysis={selectedAnalysis}
+        isOpen={!!selectedAnalysis}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedAnalysis(null);
+          }
+        }}
+      />
       <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={fetchPageData} document={documentToShare} />
       <CustomAnalysisDialog
         isOpen={isCustomAnalysisOpen}
@@ -700,11 +788,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         }}
       />
 
-      <KnowledgeGraphAnalysisDialog
-        isOpen={isKnowledgeGraphAnalysisOpen}
-        onOpenChange={setIsKnowledgeGraphAnalysisOpen}
-        analysis={knowledgeGraphAnalysisResult}
-      />
+
     </>
   );
 }

@@ -58,10 +58,18 @@ services:
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
       - ./scripts:/app/scripts
-    env_file:                                                                                                                                        
-      - ./.env                                                                                                                                       
-    networks:                                                                                                                                        
-      - kognito_network                                                                                                                              
+    env_file:
+      - ./.env
+    networks:
+      - kognito_network
+    ipc: host # Añadir el modo IPC para el rendimiento de PyTorch
+    ulimits: # Configuración de ulimits para PyTorch
+      memlock:
+        soft: -1
+        hard: -1
+      stack:
+        soft: 67108864
+        hard: 67108864
     deploy:
       resources:
         reservations:

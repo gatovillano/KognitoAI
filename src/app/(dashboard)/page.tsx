@@ -259,6 +259,7 @@ export default function ChatLandingPage() {
       workspaceId={workspaceId}
       selectedContext={selectedContext}
       onContextSelected={setSelectedContext}
+      isVectorizingFile={false} // Añadir la prop requerida
     />
   );
 }

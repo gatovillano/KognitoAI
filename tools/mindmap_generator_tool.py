@@ -18,6 +18,8 @@ from utils.generate_mind_map import format_mindmap_data
 
 logger = logging.getLogger(__name__)
 
+from utils.db_session import DBSession
+
 from pydantic import BaseModel, Field
 from typing import Type
 from langchain_core.tools import BaseTool
@@ -73,22 +75,23 @@ class MindmapGeneratorTool(BaseTool):
             if not base64_image:
                 return "Error al generar el mapa mental visual."
 
+# ...
+
             # 4. Guardar el resultado en la base de datos
             task_id = str(uuid.uuid4())
-            db_session = SessionLocal()
-            try:
-                # Usamos el account_id pasado como parámetro, si está disponible, de lo contrario usamos el de la instancia
-                account_id_value = uuid.UUID(account_id) if account_id else (uuid.UUID(self.account_id) if self.account_id else None)
-                new_task = MindmapTask(
-                    id=uuid.UUID(task_id),
-                    account_id=account_id_value if account_id_value else None,
-                    topic=topic_hint if topic_hint else "Tema Principal",
-                    status="completed",
-                    result_payload={"base64_image": base64_image}
-                )
-                db_session.add(new_task)
+            async with DBSession(SessionLocal) as db_session:
                 try:
-                    db_session.commit()
+                    # Usamos el account_id pasado como parámetro, si está disponible, de lo contrario usamos el de la instancia
+                    account_id_value = uuid.UUID(account_id) if account_id else (uuid.UUID(self.account_id) if self.account_id else None)
+                    new_task = MindmapTask(
+                        id=uuid.UUID(task_id),
+                        account_id=account_id_value if account_id_value else None,
+                        topic=topic_hint if topic_hint else "Tema Principal",
+                        status="completed",
+                        result_payload={"base64_image": base64_image}
+                    )
+                    db_session.add(new_task)
+                    # Commit is handled by DBSession context manager if no exception
                 except Exception as db_error:
                     logger.error(f"Error al guardar en la base de datos: {db_error}")
                     # Si falla el guardado debido a restricciones NOT NULL, verificamos si podemos continuar sin account_id
@@ -96,9 +99,7 @@ class MindmapGeneratorTool(BaseTool):
                         logger.warning("Reintentando sin account_id debido a restricción NOT NULL.")
                         new_task.account_id = None
                         db_session.add(new_task)
-                        db_session.commit()
-            finally:
-                db_session.close()
+                        # Commit is handled by DBSession context manager if no exception
 
             # 5. Devolver un mensaje con el ID de tarea para referencia
             # El frontend recuperará la imagen a través del endpoint /api/get-mindmap-result/{task_id}

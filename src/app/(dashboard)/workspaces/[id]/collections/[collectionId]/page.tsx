@@ -23,7 +23,7 @@ interface PageProps {
 
 export default function WorkspaceCollectionDetailPage({ params }: PageProps) {
   const { id: workspaceId, collectionId } = use(params);
-  
+
   const [collectionData, setCollectionData] = useState<Collection | null>(null);
   const [isLoadingCollection, setIsLoadingCollection] = useState(true);
 
@@ -59,7 +59,7 @@ export default function WorkspaceCollectionDetailPage({ params }: PageProps) {
   return (
     <div className="h-full">
       <DocumentCollectionDisplay
-        topic={collectionId}
+        topic={collectionData.topic}
         workspaceId={workspaceId}
         collectionName={collectionData.topic}
         backButtonText="Volver al Workspace"

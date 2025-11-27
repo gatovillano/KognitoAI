@@ -32,26 +32,23 @@ export default function DashboardLayout({
       <div className="flex h-screen w-full items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-2">
             <Image src="/logo-simple.png" alt="Kognito" width={40} height={40} className="animate-pulse" />
-            <p className="text-muted-foreground">Cargando Kognito...</p>
+            <p className="text-muted-foreground"></p>
         </div>
       </div>
     );
   }
 
   return (
-    <>
-      <WorkspaceProvider>
-        <WebSocketProvider>
-          <DndProvider backend={HTML5Backend}>
-            <WorkspaceTitleProvider>
-              <AppShell>
-                {React.isValidElement(children) ? children : null}
-              </AppShell>
-            </WorkspaceTitleProvider>
-          </DndProvider>
-        </WebSocketProvider>
-      </WorkspaceProvider>
-      <Toaster richColors position="top-right" />
-    </>
+    <WorkspaceProvider>
+      <WebSocketProvider>
+        <DndProvider backend={HTML5Backend}>
+          <WorkspaceTitleProvider>
+            <AppShell>
+              {React.isValidElement(children) ? children : null}
+            </AppShell>
+          </WorkspaceTitleProvider>
+        </DndProvider>
+      </WebSocketProvider>
+    </WorkspaceProvider>
   );
 }

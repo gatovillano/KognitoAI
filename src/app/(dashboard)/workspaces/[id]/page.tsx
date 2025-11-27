@@ -11,7 +11,7 @@ import { ArrowLeft, Bot, Plus, MessageSquare, BookMarked, MoreVertical, Sparkles
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import apiClient from '@/lib/api';
 import { CreateWorkspaceCollectionDialog } from './CreateWorkspaceCollectionDialog';
-import { AgendaEvent, TaskResponse } from '../../agenda/page'; // Import types from agenda page
+import { AgendaEvent, TaskResponse } from '../../agenda/types'; // Import types from agenda page
 import { Note } from '../../notes/page'; // Import type from notes page
 import { EventDialog } from '../../agenda/event-dialog'; // Import EventDialog
 import { TaskDialog } from '../../agenda/task-dialog'; // Import TaskDialog
@@ -20,6 +20,8 @@ import { ViewNoteDialog } from '../../notes/view-note-dialog'; // Import ViewNot
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { WeeklyScheduleView } from '../../agenda/WeeklyScheduleView'; // Import WeeklyScheduleView
 import { ShareWorkspaceDialog } from '../ShareWorkspaceDialog'; // Import ShareWorkspaceDialog
+import { KanbanBoardWrapper } from './projects/KanbanBoardWrapper';
+import { GanttChart } from './projects/GanttChart'; // Import GanttChart
 
 interface ChatThread {
   id: string;
@@ -63,6 +65,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const [agendaEvents, setAgendaEvents] = useState<AgendaEvent[]>([]); // New state for agenda events
   const [tasks, setTasks] = useState<TaskResponse[]>([]); // New state for tasks
   const [notes, setNotes] = useState<Note[]>([]); // New state for notes
+  const [viewMode, setViewMode] = useState<'list' | 'kanban' | 'gantt'>('list'); // New state for view mode
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
@@ -157,20 +160,20 @@ export default function WorkspaceDashboard({ params }: PageProps) {
     try {
       // Fetch workspace info, collections, events, tasks, and notes in parallel
       console.log('DEBUG: Fetching collections with workspace_id:', workspaceId);
-      const [wsResponse, collectionsResponse, eventsResponse, tasksResponse, notesResponse] = await Promise.all([
+      const [wsResponse, collectionsResponse, itemsResponse, notesResponse] = await Promise.all([
         apiClient.get(`/api/workspaces/${workspaceId}`),
-        apiClient.get(`/api/collections`, { params: { ...{ workspace_id: workspaceId } } }),
-        apiClient.post('/api/list-events', { workspace_id: workspaceId }),
-        apiClient.get('/api/tasks', { params: { ...{ workspace_id: workspaceId } } }),
+        apiClient.get(`/api/collections`, { params: { workspace_id: workspaceId } }),
+        apiClient.get(`/api/workspaces/${workspaceId}/items`),
         apiClient.post('/api/notes/list-notes', { workspace_id: workspaceId })
       ]);
-      console.log('DEBUG: collectionsResponse from API:', collectionsResponse);
 
       setWorkspace(wsResponse.data);
       setCollections(collectionsResponse.data);
-      console.log('DEBUG: Collections data from API:', collectionsResponse.data);
-      setAgendaEvents(eventsResponse.data); // El backend ya filtra por workspace_id
-      setTasks(tasksResponse.data.filter((task: TaskResponse) => task.workspace_id === workspaceId));
+      
+      const items = itemsResponse.data;
+      setAgendaEvents(items.filter((item: any) => item.type === 'event'));
+      setTasks(items.filter((item: any) => item.type === 'task'));
+
       setNotes(notesResponse.data.notes);
 
       // Fetch the first page of chats separately
@@ -197,7 +200,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
     setSearchTerm(e.target.value);
   };
 
-  const filteredChats = searchTerm 
+  const filteredChats = searchTerm
     ? chats.filter(chat => chat.title.toLowerCase().includes(searchTerm.toLowerCase()))
     : chats;
 
@@ -205,13 +208,6 @@ export default function WorkspaceDashboard({ params }: PageProps) {
     ? collections.filter(col => (col.title || col.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
     : collections;
 
-  const filteredAgendaEvents = searchTerm
-    ? agendaEvents.filter(event => event.summary.toLowerCase().includes(searchTerm.toLowerCase()))
-    : agendaEvents;
-
-  const filteredTasks = searchTerm
-    ? tasks.filter(task => task.description.toLowerCase().includes(searchTerm.toLowerCase()))
-    : tasks;
 
   const filteredNotes = searchTerm
     ? notes.filter(note => (note.title || '').toLowerCase().includes(searchTerm.toLowerCase()) || note.content.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -331,9 +327,9 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const handleCreateCollection = async () => {
     if (newCollectionTitle) {
       try {
-        const response = await apiClient.post(`/api/workspaces/${workspaceId}/collections`, { 
-          title: newCollectionTitle, 
-          description: newCollectionDescription 
+        const response = await apiClient.post(`/api/workspaces/${workspaceId}/collections`, {
+          title: newCollectionTitle,
+          description: newCollectionDescription
         });
         const newCollection = response.data;
         setCollections((prevCollections) => [...prevCollections, newCollection]);
@@ -351,32 +347,32 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
 
   const handleOpenAddExistingCollectionDialog = async () => {
-      setLoadingCollections(true);
-      try {
-        const response = await apiClient.get('/api/collections');
-        const allCollections = response.data.map((col: any) => ({
-          id: col.topic || col.id || col.title || `collection-${Math.random().toString(36).substring(2, 11)}`,
-          title: col.topic || col.title || 'Sin título',
-          name: col.topic || col.title || 'Sin título',
-          topic: col.topic || col.title || '',
-          workspace_id: col.workspace_id || '',
-          created_at: col.created_at || new Date().toISOString(),
-          description: col.description || (col.document_count > 0 ? `${col.document_count} documentos` : 'Colección vacía'),
-          document_count: col.document_count || 0
-        }));
-        // Filtrar para mostrar solo las colecciones que no están ya en este workspace
-        const filteredCollections = allCollections.filter(
-          (col: Collection) => !collections.some(existingCol => existingCol.id === col.id)
-        );
-        setAvailableCollections(filteredCollections);
-        setCollectionDialogOpen(true);
-      } catch (error) {
-        console.error('Error al cargar las colecciones disponibles:', error);
-        alert('Error al cargar las colecciones disponibles.');
-      } finally {
-        setLoadingCollections(false);
-      }
-    };
+    setLoadingCollections(true);
+    try {
+      const response = await apiClient.get('/api/collections');
+      const allCollections = response.data.map((col: any) => ({
+        id: col.topic || col.id || col.title || `collection-${Math.random().toString(36).substring(2, 11)}`,
+        title: col.topic || col.title || 'Sin título',
+        name: col.topic || col.title || 'Sin título',
+        topic: col.topic || col.title || '',
+        workspace_id: col.workspace_id || '',
+        created_at: col.created_at || new Date().toISOString(),
+        description: col.description || (col.document_count > 0 ? `${col.document_count} documentos` : 'Colección vacía'),
+        document_count: col.document_count || 0
+      }));
+      // Filtrar para mostrar solo las colecciones que no están ya en este workspace
+      const filteredCollections = allCollections.filter(
+        (col: Collection) => !collections.some(existingCol => existingCol.id === col.id)
+      );
+      setAvailableCollections(filteredCollections);
+      setCollectionDialogOpen(true);
+    } catch (error) {
+      console.error('Error al cargar las colecciones disponibles:', error);
+      alert('Error al cargar las colecciones disponibles.');
+    } finally {
+      setLoadingCollections(false);
+    }
+  };
 
   const handleAddExistingCollection = async () => {
     if (selectedCollectionId) {
@@ -452,78 +448,78 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   };
 
   const handleRenameCollection = async () => {
-  if (selectedCollection && newCollectionTitle) {
-    // Asegurarse de que el collectionIdentifier tenga un valor válido
-    const collectionIdentifier = encodeURIComponent(selectedCollection.topic || selectedCollection.title || selectedCollection.id || '');
-    if (!collectionIdentifier) {
-      console.error('DEBUG (Frontend): collectionIdentifier es nulo o vacío para renombrar.');
-      alert('No se pudo identificar la colección para renombrar.');
-      handleCloseRenameCollectionDialog();
-      return;
-    }
-    const url = `/api/update-collection`; // Cambiar a la ruta POST
-    const data = {
-      old_topic: selectedCollection.topic || selectedCollection.name || selectedCollection.title || selectedCollection.id, // Usar el topic/nombre actual
-      new_topic: newCollectionTitle,
-      new_description: newCollectionDescription,
-      workspace_id: workspaceId // Asegurarse de pasar el workspace_id
-    };
-    console.log('DEBUG (Frontend): Renaming collection POST request URL:', url);
-    console.log('DEBUG (Frontend): Renaming collection POST request data:', data);
-    console.log('DEBUG (Frontend): Selected collection for rename:', selectedCollection);
-    try {
-      await apiClient.post(url, data); // Cambiar a POST
-      setCollections((prevCollections) =>
-        prevCollections.map((col) =>
-          col.id === selectedCollection.id ? { ...col, title: newCollectionTitle, name: newCollectionTitle, description: newCollectionDescription, topic: newCollectionTitle } : col
-        )
-      );
-    } catch (error) {
-      console.error('Error al renombrar la colección:', error);
-      alert('Error al renombrar la colección.');
-    } finally {
-      handleCloseRenameCollectionDialog();
-    }
-  } else {
-    handleCloseRenameCollectionDialog();
-  }
-};
-
-const handleDeleteCollection = async (collectionId: string) => {
-  if (confirm('¿Estás seguro de que deseas eliminar esta colección? Esta acción no se puede deshacer.')) {
-    try {
-      const collectionToDelete = collections.find(col => col.id === collectionId);
-      if (collectionToDelete) {
-        // Asegurarse de que el collectionIdentifier tenga un valor válido
-        const collectionIdentifier = encodeURIComponent(collectionToDelete.topic || collectionToDelete.title || collectionToDelete.id || '');
-        if (!collectionIdentifier) {
-          console.error('DEBUG (Frontend): collectionIdentifier es nulo o vacío para eliminar.');
-          alert('No se pudo identificar la colección para eliminar.');
-          return;
-        }
-        const url = `/api/collections/delete`; // Cambiar a la ruta POST para eliminar
-        const data = {
-          topic: collectionIdentifier,
-          workspace_id: workspaceId // Asegurarse de pasar el workspace_id
-        };
-        console.log('DEBUG (Frontend): Deleting collection POST request URL:', url);
-        console.log('DEBUG (Frontend): Collection to delete:', collectionToDelete);
-        try {
-          await apiClient.post(url, data); // Cambiar a POST
-          setCollections((prevCollections) => prevCollections.filter((col) => col.id !== collectionId));
-        } catch (error) {
-          console.error('Error al eliminar la colección:', error);
-          alert('Error al eliminar la colección.');
-        }
-      } else {
-        alert('Colección no encontrada para eliminar.');
+    if (selectedCollection && newCollectionTitle) {
+      // Asegurarse de que el collectionIdentifier tenga un valor válido
+      const collectionIdentifier = encodeURIComponent(selectedCollection.topic || selectedCollection.title || selectedCollection.id || '');
+      if (!collectionIdentifier) {
+        console.error('DEBUG (Frontend): collectionIdentifier es nulo o vacío para renombrar.');
+        alert('No se pudo identificar la colección para renombrar.');
+        handleCloseRenameCollectionDialog();
+        return;
       }
-    } catch (error) {
-      console.error('Error general al eliminar la colección:', error);
-      alert('Error general al eliminar la colección.');
+      const url = `/api/update-collection`; // Cambiar a la ruta POST
+      const data = {
+        old_topic: selectedCollection.topic || selectedCollection.name || selectedCollection.title || selectedCollection.id, // Usar el topic/nombre actual
+        new_topic: newCollectionTitle,
+        new_description: newCollectionDescription,
+        workspace_id: workspaceId // Asegurarse de pasar el workspace_id
+      };
+      console.log('DEBUG (Frontend): Renaming collection POST request URL:', url);
+      console.log('DEBUG (Frontend): Renaming collection POST request data:', data);
+      console.log('DEBUG (Frontend): Selected collection for rename:', selectedCollection);
+      try {
+        await apiClient.post(url, data); // Cambiar a POST
+        setCollections((prevCollections) =>
+          prevCollections.map((col) =>
+            col.id === selectedCollection.id ? { ...col, title: newCollectionTitle, name: newCollectionTitle, description: newCollectionDescription, topic: newCollectionTitle } : col
+          )
+        );
+      } catch (error) {
+        console.error('Error al renombrar la colección:', error);
+        alert('Error al renombrar la colección.');
+      } finally {
+        handleCloseRenameCollectionDialog();
+      }
+    } else {
+      handleCloseRenameCollectionDialog();
     }
-  }
-};
+  };
+
+  const handleDeleteCollection = async (collectionId: string) => {
+    if (confirm('¿Estás seguro de que deseas eliminar esta colección? Esta acción no se puede deshacer.')) {
+      try {
+        const collectionToDelete = collections.find(col => col.id === collectionId);
+        if (collectionToDelete) {
+          // Asegurarse de que el collectionIdentifier tenga un valor válido
+          const collectionIdentifier = encodeURIComponent(collectionToDelete.topic || collectionToDelete.title || collectionToDelete.id || '');
+          if (!collectionIdentifier) {
+            console.error('DEBUG (Frontend): collectionIdentifier es nulo o vacío para eliminar.');
+            alert('No se pudo identificar la colección para eliminar.');
+            return;
+          }
+          const url = `/api/collections/delete`; // Cambiar a la ruta POST para eliminar
+          const data = {
+            topic: collectionIdentifier,
+            workspace_id: workspaceId // Asegurarse de pasar el workspace_id
+          };
+          console.log('DEBUG (Frontend): Deleting collection POST request URL:', url);
+          console.log('DEBUG (Frontend): Collection to delete:', collectionToDelete);
+          try {
+            await apiClient.post(url, data); // Cambiar a POST
+            setCollections((prevCollections) => prevCollections.filter((col) => col.id !== collectionId));
+          } catch (error) {
+            console.error('Error al eliminar la colección:', error);
+            alert('Error al eliminar la colección.');
+          }
+        } else {
+          alert('Colección no encontrada para eliminar.');
+        }
+      } catch (error) {
+        console.error('Error general al eliminar la colección:', error);
+        alert('Error general al eliminar la colección.');
+      }
+    }
+  };
 
   if (loading) {
     return <LoadingSpinner />;
@@ -546,7 +542,7 @@ const handleDeleteCollection = async (collectionId: string) => {
   }
 
   const handleEventSaveSuccess = (newEvent: AgendaEvent) => {
-    setAgendaEvents(prev => [...prev, newEvent].sort((a,b) => new Date(a.event_datetime_utc).getTime() - new Date(b.event_datetime_utc).getTime()));
+    setAgendaEvents(prev => [...prev, newEvent].sort((a, b) => new Date(a.event_datetime_utc).getTime() - new Date(b.event_datetime_utc).getTime()));
   };
 
   const handleTaskSaveSuccess = (newTask: TaskResponse) => {
@@ -563,7 +559,7 @@ const handleDeleteCollection = async (collectionId: string) => {
   };
 
   const handleNoteSaveSuccess = (newNote: Note) => {
-    setNotes(prev => [...prev, newNote].sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+    setNotes(prev => [...prev, newNote].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
   };
 
   const handleNoteClick = (note: Note) => {
@@ -572,6 +568,7 @@ const handleDeleteCollection = async (collectionId: string) => {
   };
 
   return (
+    // <DndProvider backend={HTML5Backend}>
     <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-3">
@@ -622,7 +619,7 @@ const handleDeleteCollection = async (collectionId: string) => {
             <p className="text-muted-foreground mt-1">Conversaciones específicas de este espacio</p>
           </div>
         </div>
-        
+
         {filteredChats.length === 0 ? (
           <div className="text-center py-16 border-2 border-dashed border-border rounded-xl">
             <MessageSquare className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
@@ -630,7 +627,7 @@ const handleDeleteCollection = async (collectionId: string) => {
               {searchTerm ? 'No se encontraron chats' : 'No hay chats aún'}
             </h3>
             <p className="text-muted-foreground mb-6 max-w-md mx-auto">
-              {searchTerm 
+              {searchTerm
                 ? 'No hay chats que coincidan con tu búsqueda. Intenta con otros términos.'
                 : 'Comienza una nueva conversación especializada en este workspace.'
               }
@@ -644,7 +641,7 @@ const handleDeleteCollection = async (collectionId: string) => {
           </div>
         ) : (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            <Card 
+            <Card
               className="group border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center text-center p-6 cursor-pointer min-h-[180px]"
               onClick={handleNewChat}
             >
@@ -733,10 +730,10 @@ const handleDeleteCollection = async (collectionId: string) => {
             Añadir Existente
           </Button>
         </div>
-        
+
         {filteredCollections.length === 0 ? (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            <Card 
+            <Card
               className="group border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center text-center p-8 cursor-pointer min-h-[200px]"
               onClick={() => setCreateCollectionDialogOpen(true)}
             >
@@ -751,7 +748,7 @@ const handleDeleteCollection = async (collectionId: string) => {
           </div>
         ) : (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            <Card 
+            <Card
               className="group border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center text-center p-6 cursor-pointer"
               onClick={() => setCreateCollectionDialogOpen(true)}
             >
@@ -762,7 +759,7 @@ const handleDeleteCollection = async (collectionId: string) => {
               <p className="text-xs text-muted-foreground">Nuevo tema de documentos</p>
             </Card>
             {filteredCollections.map((collection) => (
-                            <Card key={collection.topic || collection.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleCollectionClick(collection.topic || collection.id)}>
+              <Card key={collection.topic || collection.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleCollectionClick(collection.topic || collection.id)}>
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -844,33 +841,47 @@ const handleDeleteCollection = async (collectionId: string) => {
             <p className="text-muted-foreground mt-1">Eventos y tareas programadas para este espacio</p>
           </div>
         </div>
-        <div className="flex justify-end mb-4">
-          <Button variant="outline" onClick={() => {
-            setSelectedEvent(null);
-            setIsEventDialogOpen(true);
-          }} className="mr-2">
-            <Plus className="mr-2 h-4 w-4" />
-            Nuevo Evento
-          </Button>
-          <Button variant="outline" onClick={() => {
-            setSelectedTask(null);
-            setIsTaskDialogOpen(true);
-          }}>
-            <Plus className="mr-2 h-4 w-4" />
-            Nueva Tarea
-          </Button>
+        <div className="flex justify-between items-center mb-4">
+          <div>
+            <Button variant={viewMode === 'list' ? 'default' : 'outline'} onClick={() => setViewMode('list')} className="mr-2">Lista</Button>
+            <Button variant={viewMode === 'kanban' ? 'default' : 'outline'} onClick={() => setViewMode('kanban')} className="mr-2">Kanban</Button>
+            <Button variant={viewMode === 'gantt' ? 'default' : 'outline'} onClick={() => setViewMode('gantt')}>Gantt</Button>
+          </div>
+          <div>
+            <Button variant="outline" onClick={() => {
+              setSelectedEvent(null);
+              setIsEventDialogOpen(true);
+            }} className="mr-2">
+              <Plus className="mr-2 h-4 w-4" />
+              Nuevo Evento
+            </Button>
+            <Button variant="outline" onClick={() => {
+              setSelectedTask(null);
+              setIsTaskDialogOpen(true);
+            }}>
+              <Plus className="mr-2 h-4 w-4" />
+              Nueva Tarea
+            </Button>
+          </div>
         </div>
-        <WeeklyScheduleView
-          currentDate={currentDate}
-          events={agendaEvents}
-          tasks={tasks}
-          onDateChange={setCurrentDate}
-          onEditEvent={handleEditEvent}
-          onDeleteEvent={handleDeleteEvent}
-          onEditTask={handleEditTask}
-          onDeleteTask={handleDeleteTask}
-          onToggleTaskCompleted={handleToggleTaskCompleted}
-        />
+        {viewMode === 'list' && (
+          <WeeklyScheduleView
+            currentDate={currentDate}
+            events={agendaEvents}
+            tasks={tasks}
+            onDateChange={setCurrentDate}
+            onEditEvent={handleEditEvent}
+            onDeleteEvent={handleDeleteEvent}
+            onEditTask={handleEditTask}
+            onDeleteTask={handleDeleteTask}
+            onToggleTaskCompleted={handleToggleTaskCompleted}
+          />
+        )}
+        {viewMode === 'kanban' && <KanbanBoardWrapper workspaceId={workspaceId} />}
+        {viewMode === 'gantt' && <GanttChart items={[
+          ...agendaEvents.map(event => ({ ...event, type: 'event' as const })),
+          ...tasks.map(task => ({ ...task, type: 'task' as const }))
+        ]} />}
       </div>
 
       {/* Notes Section (NEW) */}
@@ -958,9 +969,9 @@ const handleDeleteCollection = async (collectionId: string) => {
         )}
       </div>
 
-      <CreateWorkspaceCollectionDialog 
-        isOpen={createCollectionDialogOpen} 
-        onOpenChange={setCreateCollectionDialogOpen} 
+      <CreateWorkspaceCollectionDialog
+        isOpen={createCollectionDialogOpen}
+        onOpenChange={setCreateCollectionDialogOpen}
         onCreateSuccess={handleCreateCollectionSuccess}
         workspaceId={workspaceId}
       />
@@ -1132,5 +1143,6 @@ const handleDeleteCollection = async (collectionId: string) => {
         onNoteUpdated={fetchInitialData} // Llamar a fetchInitialData para recargar los datos
       />
     </div>
+    // </DndProvider>
   );
 }

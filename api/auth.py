@@ -22,19 +22,14 @@ from core.repositories.account_repository import AccountRepository
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.security import get_password_hash, verify_password, create_access_token, get_current_account_id, oauth2_scheme
+from core.dependencies import get_db_session
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_db() -> AsyncSession:
-    """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+# get_db eliminado en favor de core.dependencies.get_db_session
 
 api_key_header = APIKeyHeader(name="X-Internal-API-Key", auto_error=False) # type: ignore
 
@@ -117,7 +112,7 @@ class TelegramLoginRequest(BaseModel):
 
 # --- Endpoints de Email/Pass y Social Login ---
 @router.post("/auth/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED, summary="Registrar con email/pass")
-async def register_user(request: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register_user(request: RegisterRequest, db: AsyncSession = Depends(get_db_session)):
     """Registra una nueva cuenta de usuario con email y contraseña."""
     existing_account_result = await db.execute(select(Account).where(Account.email == request.email))
     if existing_account_result.scalars().first():
@@ -136,7 +131,7 @@ async def register_user(request: RegisterRequest, db: AsyncSession = Depends(get
     return RegisterResponse(access_token=access_token, message="¡Registro exitoso! Ya puedes iniciar sesión.")
 
 @router.post("/auth/login", response_model=TokenResponse, summary="Iniciar sesión con email/pass")
-async def login_for_access_token(request: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login_for_access_token(request: LoginRequest, db: AsyncSession = Depends(get_db_session)):
     """Inicia sesión con email y contraseña y devuelve un token de acceso JWT."""
     account_result = await db.execute(select(Account).where(Account.email == request.email))
     account = account_result.scalars().first()
@@ -156,7 +151,7 @@ def verify_telegram_hash(data: TelegramLoginRequest, bot_token: str) -> bool:
     return hmac.compare_digest(calculated_hash, data.hash)
 
 @router.post("/auth/telegram/callback", response_model=TokenResponse, summary="Callback de Login Social de Telegram")
-async def handle_telegram_login(login_data: TelegramLoginRequest, db: AsyncSession = Depends(get_db)):
+async def handle_telegram_login(login_data: TelegramLoginRequest, db: AsyncSession = Depends(get_db_session)):
     """Maneja el callback de autenticación social de Telegram, crea o vincula la cuenta y devuelve un token."""
     logger.warning("--- /api/auth/telegram/callback endpoint has been hit! ---")
     if not settings.telegram_bot_token: raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Autenticación de Telegram no configurada.")
@@ -207,7 +202,7 @@ async def request_verification_code_options():
     )
 
 @router.post("/auth/request-code", summary="Solicitar código de verificación")
-async def request_verification_code(request_data: AuthRequestCode, db: AsyncSession = Depends(get_db)):
+async def request_verification_code(request_data: AuthRequestCode, db: AsyncSession = Depends(get_db_session)):
     """Busca al usuario, genera un código, lo guarda en la BD y lo envía a Telegram vía HTTP."""
     repo = AccountRepository(db)
     identity = await repo.find_telegram_identity(request_data.identifier)
@@ -249,7 +244,7 @@ async def request_verification_code(request_data: AuthRequestCode, db: AsyncSess
         raise HTTPException(status_code=500, detail="Fallo al enviar el mensaje a través del servicio interno.")
 
 @router.post("/auth/verify-code", response_model=TokenResponse, summary="Verificar código")
-async def verify_code_and_get_token(request_data: AuthVerifyCode, db: AsyncSession = Depends(get_db)):
+async def verify_code_and_get_token(request_data: AuthVerifyCode, db: AsyncSession = Depends(get_db_session)):
     """Verifica un código contra la BD y devuelve un token si es válido."""
     repo = AccountRepository(db)
     identity = await repo.find_telegram_identity(request_data.identifier)
@@ -318,7 +313,7 @@ async def debug_token(token: str = Depends(oauth2_scheme)):
         }
 
 @router.post("/auth/emergency-token", response_model=TokenResponse, summary="Token de emergencia (solo debug)")
-async def emergency_token(telegram_id: str, db: AsyncSession = Depends(get_db)):
+async def emergency_token(telegram_id: str, db: AsyncSession = Depends(get_db_session)):
     """Genera un token de emergencia para un usuario de Telegram (solo en modo debug)."""
     if not settings.debug_mode:
         raise HTTPException(status_code=404, detail="Endpoint no disponible")
@@ -353,7 +348,7 @@ async def clear_frontend_tokens():
     }
 
 @router.post("/get-system-prompt")
-async def get_system_prompt(user_id: int = Depends(get_validated_user_id), db: AsyncSession = Depends(get_db)):
+async def get_system_prompt(user_id: int = Depends(get_validated_user_id), db: AsyncSession = Depends(get_db_session)):
     """
     Obtiene el prompt de sistema personalizado para un usuario de Telegram.
     Protegido por `initData` de Telegram.
@@ -371,7 +366,7 @@ async def get_system_prompt(user_id: int = Depends(get_validated_user_id), db: A
     return {"prompt": prompt, "is_custom": is_custom}
 
 @router.post("/save-system-prompt")
-async def save_system_prompt(user_id: int = Depends(get_validated_user_id), system_prompt: str = Form(""), db: AsyncSession = Depends(get_db)):
+async def save_system_prompt(user_id: int = Depends(get_validated_user_id), system_prompt: str = Form(""), db: AsyncSession = Depends(get_db_session)):
     """
     Guarda el prompt de sistema personalizado para un usuario de Telegram.
     Protegido por `initData` de Telegram.

@@ -11,7 +11,8 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
 from sqlalchemy import select, desc, update, or_
 
-from core.database import SessionLocal, Account, TeamMember, AgendaEvent, Workspace, get_db_session, ContactProfile, WorkspacePermission # Import ContactProfile model, WorkspacePermission
+from core.database import SessionLocal, Account, TeamMember, AgendaEvent, Workspace, ContactProfile, WorkspacePermission # Import ContactProfile model, WorkspacePermission
+from core.dependencies import get_db_session
 from utils.security import get_current_account_id, check_workspace_permission
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload # Import selectinload
@@ -27,7 +28,8 @@ from utils.db_session import DBSession
 @router.get("/agenda/events/{event_id}", summary="Obtener un evento por ID")
 async def get_event_by_id_endpoint(
     event_id: int,
-    current_account_id: str = Depends(get_current_account_id)
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Obtiene un evento específico por su ID, incluyendo los perfiles de contacto vinculados.
@@ -39,9 +41,8 @@ async def get_event_by_id_endpoint(
     # Si el evento tiene un workspace_id, verificar permisos
     if event.get("workspace_id"):
         # Necesitamos una sesión de DB para check_workspace_permission
-        async with DBSession(SessionLocal) as db:
-            if not await check_workspace_permission(current_account_id, event["workspace_id"], db, required_roles=['owner', 'editor', 'viewer']):
-                raise HTTPException(status_code=403, detail="No tienes permiso para acceder a este evento.")
+        if not await check_workspace_permission(current_account_id, event["workspace_id"], db, required_roles=['owner', 'editor', 'viewer']):
+            raise HTTPException(status_code=403, detail="No tienes permiso para acceder a este evento.")
                 
     return event
 
@@ -81,57 +82,86 @@ async def get_linked_profiles_to_event_endpoint(
             })
         return linked_profiles_data
 
-class ListEventsRequest(BaseModel):
-    include_past: bool = False
-    workspace_id: Optional[str] = None # Nuevo campo
-
-@router.post("/list-events")
-async def list_events_endpoint(request: ListEventsRequest, current_account_id: str = Depends(get_current_account_id)):
-    """Lista los eventos de la agenda del usuario, incluyendo eventos compartidos con equipos y workspaces, filtrados por workspace_id si se proporciona."""
+async def _get_events_logic(
+    current_account_id: str,
+    db: AsyncSession,
+    workspace_id: Optional[str] = None,
+    include_past: bool = False,
+):
+    """
+    Lógica para listar eventos de la agenda del usuario, con la opción de filtrar por workspace_id.
+    Esta función requiere una sesión de base de datos activa.
+    """
     account_uuid = uuid.UUID(current_account_id)
-    
     from core.agenda_manager import get_events_as_dicts
 
-    if request.workspace_id:
-        # Si se proporciona workspace_id, verificar permisos
-        async with DBSession(SessionLocal) as db:
-            if not await check_workspace_permission(current_account_id, request.workspace_id, db, required_roles=['owner', 'editor', 'viewer']):
-                raise HTTPException(status_code=403, detail="No tienes permiso para acceder a eventos en este workspace.")
+    # Si se especifica un workspace_id, filtramos por él
+    if workspace_id:
+        if not await check_workspace_permission(current_account_id, workspace_id, db, required_roles=['owner', 'editor', 'viewer']):
+            raise HTTPException(status_code=403, detail="No tienes permiso para acceder a eventos en este workspace.")
         
-        # Luego, obtener eventos para ese workspace
-        workspace_events = await get_events_as_dicts(
+        events = await get_events_as_dicts(
             account_id=current_account_id,
-            workspace_id=request.workspace_id,
-            include_past=request.include_past
+            workspace_id=workspace_id,
+            include_past=include_past
         )
-        logger.info(f"Workspace events for workspace {request.workspace_id} and account {current_account_id}: {len(workspace_events)} events found")
-        return list(workspace_events)
-    else:
-        # Lógica existente para listar todos los eventos si no hay workspace_id
-        personal_events = await get_events_as_dicts(current_account_id, include_past=request.include_past)
-        logger.info(f"Personal events for account {current_account_id}: {len(personal_events)} events found")
-        
-        async with DBSession(SessionLocal) as db:
-            # Obtener todos los workspaces a los que el usuario tiene acceso
-            workspaces_result = await db.execute(
-                select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == account_uuid)
-            )
-            workspace_ids = [str(ws_id) for ws_id in workspaces_result.scalars().all()]
-            logger.info(f"Workspaces for account {current_account_id} (events): {workspace_ids})")
-        
-        workspace_events = []
-        for workspace_id in workspace_ids:
-            workspace_events_for_id = await get_events_as_dicts(
-                account_id=current_account_id,
-                workspace_id=workspace_id,
-                include_past=request.include_past
-            )
-            logger.info(f"Workspace events for workspace {workspace_id} and account {current_account_id}: {len(workspace_events_for_id)} events found")
-            workspace_events.extend(workspace_events_for_id)
-        
-        combined_events = {event['id']: event for event in personal_events + workspace_events}.values()
-        logger.info(f"Total combined events for account {current_account_id}: {len(combined_events)} events")
-        return list(combined_events)
+        return list(events)
+
+    # Si no se especifica un workspace_id, obtenemos los eventos personales y de todos los workspaces a los que tiene acceso
+    personal_events = await get_events_as_dicts(current_account_id, include_past=include_past)
+    
+    workspaces_result = await db.execute(
+        select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == account_uuid)
+    )
+    accessible_workspace_ids = [str(ws_id) for ws_id in workspaces_result.scalars().all()]
+
+    workspace_events = []
+    for ws_id in accessible_workspace_ids:
+        events_for_ws = await get_events_as_dicts(
+            account_id=current_account_id,
+            workspace_id=ws_id,
+            include_past=include_past
+        )
+        workspace_events.extend(events_for_ws)
+    
+    # Combinamos y eliminamos duplicados
+    combined_events = {event['id']: event for event in list(personal_events) + workspace_events}.values()
+    return list(combined_events)
+
+@router.get("/agenda/events", summary="Listar eventos de la agenda")
+async def list_events_endpoint(
+    current_account_id: str = Depends(get_current_account_id),
+    workspace_id: Optional[str] = None,
+    include_past: bool = False,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Lista los eventos de la agenda del usuario, con la opción de filtrar por workspace_id.
+    """
+    return await _get_events_logic(
+        current_account_id=current_account_id,
+        db=db,
+        workspace_id=workspace_id,
+        include_past=include_past
+    )
+
+class ListEventsRequest(BaseModel):
+    include_past: bool = False
+    workspace_id: Optional[str] = None
+
+@router.post("/list-events", deprecated=True)
+async def deprecated_list_events_endpoint(
+    request: ListEventsRequest, 
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """**OBSOLETO**: Usar `GET /agenda/events` en su lugar."""
+    return await list_events_endpoint(
+        current_account_id=current_account_id,
+        workspace_id=request.workspace_id,
+        include_past=request.include_past,
+        db=db
+    )
 
 # --- MODELOS PYDANTIC PARA AGENDA ---
 class EventRequest(BaseModel):
@@ -139,6 +169,8 @@ class EventRequest(BaseModel):
     description: str
     event_date: str  # Fecha en formato YYYY-MM-DD
     event_time: str  # Hora en formato HH:MM
+    end_date: Optional[str] = None # Nuevo campo para la fecha de finalización
+    end_time: Optional[str] = None # Nuevo campo para la hora de finalización
     location: Optional[str] = None # Nuevo campo para la ubicación
     attendee_ids: Optional[List[uuid.UUID]] = None # Nuevo campo para IDs de asistentes registrados
     external_attendees: Optional[List[str]] = None # Nuevo campo para nombres de asistentes externos
@@ -149,10 +181,13 @@ class EventUpdateRequest(BaseModel):
     description: Optional[str] = None
     event_date: Optional[str] = None
     event_time: Optional[str] = None
+    end_date: Optional[str] = None # Nuevo campo para la fecha de finalización
+    end_time: Optional[str] = None # Nuevo campo para la hora de finalización
     location: Optional[str] = None # Nuevo campo para la ubicación
     attendee_ids: Optional[List[uuid.UUID]] = None # Nuevo campo para IDs de asistentes registrados
     external_attendees: Optional[List[str]] = None # Nuevo campo para nombres de asistentes externos
     workspace_id: Optional[str] = None
+    status: Optional[str] = None # Nuevo campo para el estado (Kanban)
 
 @router.post("/add-event")
 async def add_event_endpoint(
@@ -170,7 +205,9 @@ async def add_event_endpoint(
         location=event.location,
         attendee_ids=event.attendee_ids,
         external_attendees=event.external_attendees,
-        workspace_id=event.workspace_id
+        workspace_id=event.workspace_id,
+        end_date=event.end_date, # Nuevo campo
+        end_time=event.end_time # Nuevo campo
     )
     if not success or not new_event_instance:
         raise HTTPException(status_code=400, detail=message or "Error desconocido al crear el evento.")
@@ -251,6 +288,7 @@ async def update_event_endpoint(
         if attendee_ids_to_update is not None or external_attendees_to_update is not None:
             await _update_event_attendees(event, current_account_id, attendee_ids_to_update, external_attendees_to_update)
 
+        # Manejar la actualización de la fecha y hora de inicio
         if ('event_date' in update_data and update_data['event_date']) or ('event_time' in update_data and update_data['event_time']):
             account = await session.get(Account, uuid.UUID(current_account_id))
             if not account or not account.timezone:
@@ -304,12 +342,66 @@ async def update_event_endpoint(
             event.event_datetime_utc = event_datetime_utc
             del update_data['event_datetime']
 
+        # Manejar la actualización de la fecha y hora de finalización
+        if 'end_date' in update_data or 'end_time' in update_data:
+            account = await session.get(Account, uuid.UUID(current_account_id))
+            if not account or not account.timezone:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No se pudo determinar la zona horaria del usuario.")
+            
+            user_tz = pytz.timezone(account.timezone)
+            
+            # Obtener los nuevos valores, convirtiendo cadenas vacías a None
+            new_end_date_str = update_data.get('end_date')
+            if new_end_date_str == '':
+                new_end_date_str = None
+            
+            new_end_time_str = update_data.get('end_time')
+            if new_end_time_str == '':
+                new_end_time_str = None
+
+            # Si ambos son None, significa que se quiere eliminar la fecha de finalización
+            if new_end_date_str is None and new_end_time_str is None:
+                event.end_date = None
+            else:
+                # Usar los nuevos valores si se proporcionan, de lo contrario, mantener los actuales del evento
+                # Si event.end_date es None, strftime fallará, así que manejamos eso.
+                current_end_date_str = event.end_date.strftime('%Y-%m-%d') if event.end_date else None
+                current_end_time_str = event.end_date.strftime('%H:%M') if event.end_date else None
+
+                final_end_date_str = new_end_date_str if new_end_date_str is not None else current_end_date_str
+                final_end_time_str = new_end_time_str if new_end_time_str is not None else current_end_time_str
+
+                if final_end_date_str and final_end_time_str:
+                    try:
+                        local_end_datetime_str = f"{final_end_date_str} {final_end_time_str}"
+                        naive_end_datetime = datetime.strptime(local_end_datetime_str, "%Y-%m-%d %H:%M")
+                        localized_end_dt = user_tz.localize(naive_end_datetime)
+                        event.end_date = localized_end_dt.astimezone(pytz.utc)
+                    except ValueError:
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Formato de fecha u hora de finalización inválido: {final_end_date_str} {final_end_time_str}")
+                elif final_end_date_str: # Si solo se proporciona la fecha, la hora se asume como medianoche
+                    try:
+                        local_end_datetime_str = f"{final_end_date_str} 00:00"
+                        naive_end_datetime = datetime.strptime(local_end_datetime_str, "%Y-%m-%d %H:%M")
+                        localized_end_dt = user_tz.localize(naive_end_datetime)
+                        event.end_date = localized_end_dt.astimezone(pytz.utc)
+                    except ValueError:
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Formato de fecha de finalización inválido: {final_end_date_str}")
+                else:
+                    event.end_date = None # Si no hay fecha final, se establece a None
+
+            if 'end_date' in update_data:
+                del update_data['end_date']
+            if 'end_time' in update_data:
+                del update_data['end_time']
 
         logger.info(f"[update_event_endpoint] Evento antes de la actualización: {event.description}, {event.event_datetime_utc}")
 
 
 
         for key, value in update_data.items():
+            if key == 'status': # Validar que el estado sea válido si es necesario
+                pass 
             setattr(event, key, value)
         
         logger.info(f"[update_event_endpoint] Evento después de setattr: {event.description}, {event.event_datetime_utc}")
@@ -333,7 +425,7 @@ class EventCancelRequest(BaseModel):
 from api.schemas import ProfileLinkRequest
 
 @router.post("/cancel-event")
-async def cancel_event_endpoint(event: EventCancelRequest, current_account_id: str = Depends(get_current_account_id)):
+async def cancel_event_endpoint(event: EventCancelRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """Cancela un evento de la agenda del usuario. Protegido por JWT."""
     # Obtener el evento para verificar el workspace_id
     event_data = await get_event_by_id(current_account_id, event.event_id)
@@ -342,9 +434,8 @@ async def cancel_event_endpoint(event: EventCancelRequest, current_account_id: s
 
     # Verificar permisos de workspace si el evento pertenece a uno
     if event_data.get("workspace_id"):
-        async with DBSession(SessionLocal) as db:
-                            if not await check_workspace_permission(current_account_id, event_data["workspace_id"], db, required_roles=['owner', 'editor']):
-                                raise HTTPException(status_code=403, detail="No tienes permiso para cancelar este evento.")
+        if not await check_workspace_permission(current_account_id, event_data["workspace_id"], db, required_roles=['owner', 'editor']):
+            raise HTTPException(status_code=403, detail="No tienes permiso para cancelar este evento.")
     success, message = await cancel_event(current_account_id, event.event_id, workspace_id=event_data.get("workspace_id"))
     if not success:
         raise HTTPException(status_code=404, detail=message)
@@ -354,7 +445,8 @@ async def cancel_event_endpoint(event: EventCancelRequest, current_account_id: s
 async def link_profile_to_event_endpoint(
     event_id: int,
     profile_link_request: ProfileLinkRequest,
-    current_account_id: str = Depends(get_current_account_id)
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Vincula un perfil de contacto a un evento.
@@ -366,9 +458,8 @@ async def link_profile_to_event_endpoint(
 
     # Verificar permisos de workspace si el evento pertenece a uno
     if event_data.get("workspace_id"):
-        async with DBSession(SessionLocal) as db:
-            if not await check_workspace_permission(current_account_id, event_data["workspace_id"], db, required_roles=['owner', 'editor']):
-                raise HTTPException(status_code=403, detail="No tienes permiso para vincular perfiles a este evento.")
+        if not await check_workspace_permission(current_account_id, event_data["workspace_id"], db, required_roles=['owner', 'editor']):
+            raise HTTPException(status_code=403, detail="No tienes permiso para vincular perfiles a este evento.")
     from core.agenda_manager import link_profile_to_event # Explicit import
     success = await link_profile_to_event(
         account_id=current_account_id,
@@ -383,7 +474,8 @@ async def link_profile_to_event_endpoint(
 async def unlink_profile_from_event_endpoint(
     event_id: int,
     profile_link_request: ProfileLinkRequest,
-    current_account_id: str = Depends(get_current_account_id)
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Desvincula un perfil de contacto de un evento.
@@ -395,9 +487,8 @@ async def unlink_profile_from_event_endpoint(
 
     # Verificar permisos de workspace si el evento pertenece a uno
     if event_data.get("workspace_id"):
-        async with DBSession(SessionLocal) as db:
-            if not await check_workspace_permission(current_account_id, event_data["workspace_id"], db, required_roles=['owner', 'editor']):
-                raise HTTPException(status_code=403, detail="No tienes permiso para desvincular perfiles de este evento.")
+        if not await check_workspace_permission(current_account_id, event_data["workspace_id"], db, required_roles=['owner', 'editor']):
+            raise HTTPException(status_code=403, detail="No tienes permiso para desvincular perfiles de este evento.")
 
     from core.agenda_manager import unlink_profile_from_event # Explicit import
     success = await unlink_profile_from_event(

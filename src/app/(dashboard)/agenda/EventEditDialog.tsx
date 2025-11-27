@@ -20,6 +20,9 @@ const formSchema = z.object({
   location: z.string().optional(),
   date: z.string().min(1, "Debes seleccionar una fecha."),
   time: z.string().min(1, "Debes especificar una hora."),
+  end_date: z.string().optional(),
+  end_time: z.string().optional(),
+  status: z.string().optional(),
   attendee_ids: z.array(z.string()).optional(),
   external_attendees: z.array(z.string()).optional(),
   team_id: z.string().optional(),
@@ -50,6 +53,9 @@ export function EventEditDialog({ isOpen, onOpenChange, onSaveSuccess, onCloseDe
       location: event?.location || '',
       date: event?.event_datetime_local ? event.event_datetime_local.split('T')[0] : '',
       time: event?.event_datetime_local ? event.event_datetime_local.split('T')[1].substring(0, 5) : '',
+      end_date: event?.end_date ? event.end_date.split('T')[0] : '',
+      end_time: event?.end_date ? event.end_date.split('T')[1].substring(0, 5) : '',
+      status: event?.status || 'Pendiente',
       attendee_ids: event?.attendee_ids || [],
       external_attendees: event?.external_attendees || [],
       team_id: event?.team_id?.toString() || '',
@@ -121,6 +127,9 @@ export function EventEditDialog({ isOpen, onOpenChange, onSaveSuccess, onCloseDe
         location: event.location || '',
         date: event.event_datetime_local ? new Date(event.event_datetime_local).toLocaleDateString('en-CA') : '',
         time: event.event_datetime_local ? new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false }) : '',
+        end_date: event.end_date ? new Date(event.end_date).toLocaleDateString('en-CA') : '',
+        end_time: event.end_date ? new Date(event.end_date).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false }) : '',
+        status: event.status || 'Pendiente',
         attendee_ids: event.attendee_ids || [],
         external_attendees: event.external_attendees || [],
         team_id: event.team_id?.toString() || '',
@@ -138,6 +147,9 @@ export function EventEditDialog({ isOpen, onOpenChange, onSaveSuccess, onCloseDe
         location: values.location,
         event_date: values.date,
         event_time: values.time,
+        end_date: values.end_date,
+        end_time: values.end_time,
+        status: values.status,
         attendee_ids: values.attendee_ids,
         external_attendees: values.external_attendees,
         team_id: values.team_id ? parseInt(values.team_id) : null,
@@ -214,13 +226,38 @@ export function EventEditDialog({ isOpen, onOpenChange, onSaveSuccess, onCloseDe
                 <FormItem><FormLabel>Hora</FormLabel><FormControl><Input type="time" {...field} /></FormControl><FormMessage /></FormItem>
               )} />
             </div>
+            <div className="grid grid-cols-2 gap-4">
+              <FormField control={form.control} name="end_date" render={({ field }) => (
+                <FormItem><FormLabel>Fecha Fin</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={form.control} name="end_time" render={({ field }) => (
+                <FormItem><FormLabel>Hora Fin</FormLabel><FormControl><Input type="time" {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+            </div>
+            <FormField control={form.control} name="status" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Estado</FormLabel>
+                <FormControl>
+                  <select
+                    className="w-full border rounded-md p-2"
+                    onChange={field.onChange}
+                    value={field.value || 'Pendiente'}
+                  >
+                    <option value="Pendiente">Pendiente</option>
+                    <option value="En Progreso">En Progreso</option>
+                    <option value="Hecho">Hecho</option>
+                  </select>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
             <FormField control={form.control} name="team_id" render={({ field }) => (
               <FormItem>
                 <FormLabel>Compartir con Equipo</FormLabel>
                 <FormControl>
-                  <select 
+                  <select
                     className="w-full border rounded-md p-2"
-                    onChange={field.onChange} 
+                    onChange={field.onChange}
                     value={field.value || ''}
                     disabled={loadingTeams}
                   >

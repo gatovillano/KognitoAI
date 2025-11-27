@@ -18,9 +18,7 @@ import { UploadDocumentDialog } from '../upload-document-dialog';
 import { PreviewDocumentDialog } from '../preview-document-dialog';
 import { EditDocumentDialog } from '../edit-document-dialog';
 import { DeleteConfirmationDialog } from '../delete-confirmation-dialog';
-import { AnalysisResultDialog } from '../analysis-result-dialog';
-import { CollectionAnalysisDialog } from '../collection-analysis-dialog'; // Aunque no lo iniciamos aquí, lo necesitamos por si el usuario abre un análisis guardado de colección
-import { SemanticAnalysisDialog } from '../semantic-analysis-dialog';
+import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
 import { CustomAnalysisDialog } from '../custom-analysis-dialog'; // Nueva importación
 
 export default function AllDocumentsPage() {
@@ -38,9 +36,8 @@ export default function AllDocumentsPage() {
   // Estados para el análisis
   const [documentToAnalyze, setDocumentToAnalyze] = useState<Document | null>(null);
   const [analysisResult, setAnalysisResult] = useState<any>(null);
-  const [isAnalysisDialogOpen, setIsAnalysisDialogOpen] = useState(false);
-  const [isCollectionAnalysisOpen, setIsCollectionAnalysisOpen] = useState(false); // Necesario para el diálogo
-  const [isSemanticAnalysisOpen, setIsSemanticAnalysisOpen] = useState(false); // Para análisis semánticos
+  const [isAnalysisDetailOpen, setIsAnalysisDetailOpen] = useState(false);
+  const [selectedAnalysis, setSelectedAnalysis] = useState<any>(null);
   const [docPollingId, setDocPollingId] = useState<string | null>(null);
   const [collectionPollingId, setCollectionPollingId] = useState<string | null>(null); // Nuevo estado para polling de colección
   const [isProcessingKnowledgeGraph, setIsProcessingKnowledgeGraph] = useState(false); // Nuevo estado para grafo de conocimiento
@@ -77,8 +74,8 @@ export default function AllDocumentsPage() {
         try {
           const response = await apiClient.get(`/api/get-analysis-result/${docPollingId}`);
           if (response.data.status === 'completed') {
-            setAnalysisResult(response.data.result);
-            setIsAnalysisDialogOpen(true);
+            setSelectedAnalysis(response.data.result);
+            setIsAnalysisDetailOpen(true);
             setDocPollingId(null);
             toast.success("¡Análisis completado!");
             fetchPageData(); // Refresca la lista de análisis guardados
@@ -109,17 +106,13 @@ export default function AllDocumentsPage() {
         const { status, result, error } = response.data;
         if (status === 'completed') {
           clearInterval(poller); setCollectionPollingId(null);
+          setSelectedAnalysis(result);
+          setIsAnalysisDetailOpen(true);
           if (result?.analysis_metadata?.analysis_type === 'semantic_summary') {
-            setAnalysisResult(result); // Reutilizamos analysisResult para el diálogo semántico
-            setIsSemanticAnalysisOpen(true);
             toast.success("¡Resumen semántico completado!");
           } else if (result?.analysis_metadata?.analysis_type === 'custom_analysis') {
-            setAnalysisResult(result); // Reutilizamos analysisResult para el diálogo de análisis personalizado
-            setIsAnalysisDialogOpen(true); // Usamos el diálogo de análisis de documento para mostrar el resultado
             toast.success("¡Análisis personalizado completado!");
           } else {
-            setAnalysisResult(result); // Reutilizamos analysisResult para el diálogo de colección
-            setIsCollectionAnalysisOpen(true);
             toast.success("¡Análisis de colección completado!");
           }
           fetchPageData();
@@ -289,15 +282,8 @@ export default function AllDocumentsPage() {
                 </AccordionTrigger>
                 <AccordionContent>
                   <Button variant="link" className="p-0 h-auto text-xs sm:text-sm" onClick={() => {
-                    setAnalysisResult(analysis.result_payload);
-                    if (analysis.file_name.startsWith('Resumen Semántico:')) {
-                      setIsSemanticAnalysisOpen(true);
-                    } else if (analysis.file_name.startsWith('Colección:')) {
-                      setIsCollectionAnalysisOpen(true);
-                    } else {
-                      setDocumentToAnalyze({ file_name: analysis.file_name, topic: '', title: '', author: '' });
-                      setIsAnalysisDialogOpen(true);
-                    }
+                    setSelectedAnalysis(analysis.result_payload);
+                    setIsAnalysisDetailOpen(true);
                   }}>
                     Ver Resultados Detallados
                   </Button>
@@ -320,9 +306,7 @@ export default function AllDocumentsPage() {
       <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchPageData} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />
-      <AnalysisResultDialog isOpen={isAnalysisDialogOpen} onOpenChange={setIsAnalysisDialogOpen} analysis={analysisResult} document={documentToAnalyze} />
-      <CollectionAnalysisDialog isOpen={isCollectionAnalysisOpen} onOpenChange={setIsCollectionAnalysisOpen} analysis={analysisResult} topic={documentToAnalyze?.file_name?.replace('Colección: ', '') ?? ''} />
-      <SemanticAnalysisDialog isOpen={isSemanticAnalysisOpen} onOpenChange={setIsSemanticAnalysisOpen} analysis={analysisResult} topic={documentToAnalyze?.file_name?.replace('Resumen Semántico: ', '') ?? ''} />
+      <AnalysisDetailDialog isOpen={isAnalysisDetailOpen} onOpenChange={setIsAnalysisDetailOpen} analysis={selectedAnalysis} />
       <CustomAnalysisDialog
         isOpen={isCustomAnalysisOpen}
         onOpenChange={setIsCustomAnalysisOpen}

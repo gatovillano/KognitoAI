@@ -13,19 +13,14 @@ from core.database import SessionLocal, Account, Team, TeamMember, Nota, AgendaE
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.db_session import DBSession
+from core.dependencies import get_db_session
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session:  # type: ignore
-        try:
-            yield session
-        finally:
-            await session.close()
+# get_db eliminado en favor de core.dependencies.get_db_session
 
 # --- Modelos Pydantic para Equipos ---
 class TeamCreateRequest(BaseModel):
@@ -56,7 +51,7 @@ class TeamResponse(BaseModel):
     members_count: int = 0  # Añadir el campo para el conteo de miembros
 
 @router.get("/teams", response_model=List[TeamResponse], summary="Listar equipos del usuario")
-async def list_teams(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def list_teams(current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Lista todos los equipos de un usuario autenticado, incluyendo aquellos donde es administrador o miembro.
     """
@@ -93,7 +88,7 @@ async def list_teams(current_account_id: str = Depends(get_current_account_id), 
     return response_teams
 
 @router.get("/teams/{team_id}", response_model=TeamResponse, summary="Obtener detalles de un equipo")
-async def get_team(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def get_team(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Obtiene los detalles de un equipo específico si pertenece al usuario autenticado.
     """
@@ -116,7 +111,7 @@ async def get_team(team_id: str, current_account_id: str = Depends(get_current_a
     )
 
 @router.post("/teams", response_model=TeamResponse, status_code=status.HTTP_201_CREATED, summary="Crear un nuevo equipo")
-async def create_team(team: TeamCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def create_team(team: TeamCreateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Crea un nuevo equipo para el usuario autenticado.
     """
@@ -135,7 +130,7 @@ async def create_team(team: TeamCreateRequest, current_account_id: str = Depends
     )
 
 @router.put("/teams/{team_id}", response_model=TeamResponse, summary="Actualizar un equipo existente")
-async def update_team(team_id: str, team_update: TeamUpdateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def update_team(team_id: str, team_update: TeamUpdateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Actualiza un equipo existente si pertenece al usuario autenticado.
     """
@@ -162,7 +157,7 @@ async def update_team(team_id: str, team_update: TeamUpdateRequest, current_acco
     )
 
 @router.post("/teams/{team_id}/share/documents", summary="Compartir documentos con un equipo")
-async def share_documents_with_team(team_id: str, share_request: TeamShareRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def share_documents_with_team(team_id: str, share_request: TeamShareRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Comparte documentos con un equipo específico.
     """
@@ -183,7 +178,9 @@ async def share_documents_with_team(team_id: str, share_request: TeamShareReques
     # Importar las tablas necesarias de memory_manager
     from sqlalchemy import text
 
-    async with DBSession(SessionLocal) as db_session:
+    # Usar la sesión inyectada 'db' en lugar de crear una nueva
+    db_session = db
+    if True: # Mantener indentación para minimizar cambios, o refactorizar para eliminar el bloque
         for file_name in share_request.documentIds:
             # 1. Verificar que el documento existe para esta cuenta
             check_sql = text("""
@@ -236,7 +233,7 @@ async def share_documents_with_team(team_id: str, share_request: TeamShareReques
         return {"message": f"{updated_count} documentos compartidos con equipo {team_id}"}
 
 @router.post("/teams/{team_id}/share/events", summary="Compartir eventos con un equipo")
-async def share_events_with_team(team_id: str, share_request: TeamShareRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def share_events_with_team(team_id: str, share_request: TeamShareRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Comparte eventos con un equipo específico.
     """
@@ -268,7 +265,7 @@ async def share_events_with_team(team_id: str, share_request: TeamShareRequest, 
     return {"message": f"{updated_count} eventos compartidos con equipo {team_id}"}
 
 @router.post("/teams/{team_id}/share/notes", summary="Compartir notas con un equipo")
-async def share_notes_with_team(team_id: str, share_request: TeamShareRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def share_notes_with_team(team_id: str, share_request: TeamShareRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Comparte notas con un equipo específico.
     """
@@ -300,7 +297,7 @@ async def share_notes_with_team(team_id: str, share_request: TeamShareRequest, c
     return {"message": f"{updated_count} notas compartidas con equipo {team_id}"}
 
 @router.post("/teams/{team_id}/share/collections", summary="Compartir una colección completa con un equipo")
-async def share_collection_with_team(team_id: str, share_request: TeamShareCollectionRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def share_collection_with_team(team_id: str, share_request: TeamShareCollectionRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Comparte una colección completa (todos sus documentos) con un equipo específico.
     """
@@ -371,7 +368,7 @@ class TeamMemberRemoveRequest(BaseModel):
     account_id: str
 
 @router.post("/teams/{team_id}/members", response_model=dict, status_code=status.HTTP_201_CREATED, summary="Añadir miembro a un equipo")
-async def add_team_member(team_id: str, request: TeamMemberAddRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def add_team_member(team_id: str, request: TeamMemberAddRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Añade un miembro a un equipo específico. Solo el administrador del equipo puede realizar esta acción.
     """
@@ -395,7 +392,7 @@ async def add_team_member(team_id: str, request: TeamMemberAddRequest, current_a
     return {"message": f"Miembro {request.account_id} añadido al equipo {team_id}"}
 
 @router.delete("/teams/{team_id}/members", response_model=dict, summary="Eliminar miembro de un equipo")
-async def remove_team_member(team_id: str, request: TeamMemberRemoveRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def remove_team_member(team_id: str, request: TeamMemberRemoveRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Elimina un miembro de un equipo específico. Solo el administrador del equipo puede realizar esta acción.
     """
@@ -416,7 +413,7 @@ async def remove_team_member(team_id: str, request: TeamMemberRemoveRequest, cur
     return {"message": f"Miembro {request.account_id} eliminado del equipo {team_id}"}
 
 @router.get("/teams/{team_id}/members", response_model=List[dict], summary="Listar miembros de un equipo")
-async def list_team_members(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def list_team_members(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Lista todos los miembros de un equipo específico. Accesible para cualquier miembro del equipo.
     """
@@ -437,7 +434,7 @@ async def list_team_members(team_id: str, current_account_id: str = Depends(get_
     return [{"account_id": str(member.account_id), "joined_at": member.joined_at} for member in members]
 
 @router.get("/teams/{team_id}/documents", response_model=List[dict], summary="Listar documentos compartidos con un equipo")
-async def list_team_documents(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def list_team_documents(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Lista todos los documentos compartidos con un equipo específico. Accesible para cualquier miembro del equipo.
     """
@@ -482,7 +479,7 @@ async def list_team_documents(team_id: str, current_account_id: str = Depends(ge
     return documents
 
 @router.get("/teams/{team_id}/notes", response_model=List[dict], summary="Listar notas compartidas con un equipo")
-async def list_team_notes(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def list_team_notes(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Lista todas las notas compartidas con un equipo específico. Accesible para cualquier miembro del equipo.
     """
@@ -503,7 +500,7 @@ async def list_team_notes(team_id: str, current_account_id: str = Depends(get_cu
     return [{"id": note.id, "title": note.title, "updated_at": note.updated_at} for note in notes]
 
 @router.get("/teams/{team_id}/collections", response_model=List[dict], summary="Listar colecciones compartidas con un equipo")
-async def list_team_collections(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def list_team_collections(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Lista todas las colecciones compartidas con un equipo específico.
     Accesible para cualquier miembro del equipo.
@@ -559,7 +556,7 @@ async def list_team_collections(team_id: str, current_account_id: str = Depends(
     return shared_collections
 
 @router.get("/teams/{team_id}/shared-items", response_model=List[dict], summary="Listar todos los elementos compartidos con un equipo")
-async def list_team_shared_items(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def list_team_shared_items(team_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Lista todos los elementos (documentos, eventos y notas) compartidos con un equipo específico.
     Accesible para cualquier miembro del equipo.
@@ -665,7 +662,7 @@ class SharedItemUpdateRequest(BaseModel):
     content: Optional[str] = None
 
 @router.post("/teams/{team_id}/shared-items/update", response_model=dict, summary="Actualizar un elemento compartido")
-async def update_shared_item(team_id: str, request: SharedItemUpdateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db)):
+async def update_shared_item(team_id: str, request: SharedItemUpdateRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
     """
     Actualiza un elemento compartido (nota o documento) con un equipo específico.
     Accesible para cualquier miembro del equipo.

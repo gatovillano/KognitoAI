@@ -8,7 +8,9 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-from core.database import get_db_session, GitHubDocument # Asumiendo que get_db_session existe o se puede crear
+from core.database import GitHubDocument # Asumiendo que get_db_session existe o se puede crear
+from core.dependencies import get_db_session
+from utils.db_session import DBSession
 from tools.github_repo_tool import GitHubRepoTool
 from utils.security import get_current_account_id
 from core.database import Account
@@ -245,7 +247,7 @@ async def update_repository_task(task_id: str, account_id: str, repo_url: str, c
     from sqlalchemy import update
     import uuid
 
-    async with SessionLocal() as db: # type: ignore
+    async with DBSession(SessionLocal) as db: # type: ignore
         try:
             # Marcar la tarea como 'processing'
             stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
@@ -339,7 +341,7 @@ async def vectorize_repository_task(task_id: str, account_id: str, repo_name: st
     from core.database import SessionLocal, AnalysisTask
     from core.memory_manager import process_document_for_rag
     from sqlalchemy import select, update
-    async with SessionLocal() as db:
+    async with DBSession(SessionLocal) as db:
         try:
             # Marcar la tarea como 'processing'
             stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")

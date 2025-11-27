@@ -31,8 +31,9 @@ class DeleteNoteTool(BaseTool):
 
     async def _arun(self, note_id: int, **kwargs: Any) -> str:
         logger.info(f"Ejecutando DeleteNoteTool para cuenta '{self.account_id}' y nota ID '{note_id}'.")
+
         try:
-            async with SessionLocal() as session:
+            async with DBSession(SessionLocal) as session:
                 notes_manager = NotesManager(session)
                 success = await notes_manager.delete_note(account_id=self.account_id, note_id=note_id)
             

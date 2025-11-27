@@ -8,11 +8,13 @@ from core.database import SessionLocal, Account, AgendaEvent, Task
 from core.agenda_manager import schedule_event
 from core.tasks_manager import create_task
 
+from utils.db_session import DBSession
+
 async def create_test_data():
     account_id_str = "test_user" # Usamos un string para el ID de cuenta de prueba
     account_uuid = uuid.UUID('00000000-0000-0000-0000-000000000001') # Un UUID fijo para el test_user
 
-    async with SessionLocal() as db:
+    async with DBSession(SessionLocal) as db:
         # 1. Crear o obtener la cuenta de prueba
         account = await db.get(Account, account_uuid)
         if not account:

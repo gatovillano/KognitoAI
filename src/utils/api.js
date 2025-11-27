@@ -139,7 +139,9 @@ export const handleAPIError = (error) => {
  * Hook personalizado para manejar estados de carga y errores
  */
 export const useAPICall = () => {
+  /** @type {[boolean, React.Dispatch<React.SetStateAction<boolean>>]} */
   const [loading, setLoading] = React.useState(false);
+  /** @type {[string | null, React.Dispatch<React.SetStateAction<string | null>>]} */
   const [error, setError] = React.useState(null);
 
   const callAPI = async (apiFunction, ...args) => {

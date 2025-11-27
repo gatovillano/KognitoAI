@@ -17,10 +17,15 @@ from core.memory_manager import list_user_documents, get_full_document_content
 from core.database import GitHubDocument
 from utils.advanced_text_analyzer import text_analyzer
 from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 import numpy as np
 from collections import Counter
 from utils.embeddings import get_embedding_model
 from utils.proactive_knowledge_linker import get_text_embedding # Importar get_text_embedding desde proactive_knowledge_linker
+from core.dependencies import get_db_session
+from utils.db_session import DBSession
+from core.notes_manager import NotesManager
+from utils.note_analysis_utils import analyze_single_note, analyze_note_collection, summarize_note
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -29,23 +34,17 @@ router = APIRouter()
 
 from typing import AsyncGenerator
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependencia de FastAPI que crea y limpia una sesión de base de datos por petición."""
-    async with SessionLocal() as session: # type: ignore
-        try:
-            yield session
-        finally:
-            await session.close()
+# get_db eliminado en favor de core.dependencies.get_db_session
 
 async def list_all_user_documents(account_id: str, topic: Optional[str] = None):
     """
     Combina documentos regulares y documentos de GitHub para un usuario.
     """
-    # Obtener documentos regulares
-    regular_docs = await list_user_documents(account_id)
+    # Obtener documentos regulares, pasando el topic para filtrar en la BD
+    regular_docs = await list_user_documents(account_id=account_id, topic=topic)
     
     # Obtener documentos de GitHub
-    async with SessionLocal() as db: # type: ignore
+    async with DBSession(SessionLocal) as db: # type: ignore
         query = select(GitHubDocument).where(GitHubDocument.account_id == uuid.UUID(account_id))
         result = await db.execute(query)
         github_docs = result.scalars().all()
@@ -82,7 +81,7 @@ class GetSavedAnalysesRequest(BaseModel):
 async def get_saved_analyses_endpoint(
     req: GetSavedAnalysesRequest,
     current_account_id: str = Depends(get_current_account_id), 
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Recupera la lista de análisis completados.
@@ -179,7 +178,7 @@ class DeleteAnalysisRequest(BaseModel):
 async def delete_analysis_endpoint(
     req: DeleteAnalysisRequest,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Elimina un análisis guardado por su ID de tarea, si pertenece al usuario autenticado.
@@ -205,7 +204,7 @@ class DashboardInsightsRequest(BaseModel):
 async def get_dashboard_insights(
     req: DashboardInsightsRequest,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Agrega y devuelve datos de análisis (manuales) y insights (proactivos)
@@ -492,7 +491,7 @@ async def run_notes_collection_analysis_and_save(task_id: str, account_id: str, 
     """
     Obtiene el contenido de las notas, las analiza y guarda el resultado.
     """
-    async with SessionLocal() as db_session: # type: ignore
+    async with DBSession(SessionLocal) as db_session: # type: ignore
         try:
             # Marcar la tarea como 'processing'
             await db_session.execute(update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing"))
@@ -545,7 +544,7 @@ async def start_notes_collection_analysis_endpoint(
     req: AnalyzeNotesRequest,
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Inicia un análisis de una colección de notas y devuelve un ID de tarea."""
     new_task = AnalysisTask(
@@ -570,7 +569,7 @@ class AnalyzeDocumentRequest(BaseModel):
 
 async def run_document_analysis_and_save(task_id: str, account_id: str, file_name: str):
     """Función pesada que se ejecuta en segundo plano."""
-    async with SessionLocal() as db_session: # type: ignore
+    async with DBSession(SessionLocal) as db_session: # type: ignore
         try:
             # 1. Marcar la tarea como 'processing'
             stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
@@ -613,7 +612,7 @@ async def start_document_analysis_endpoint(
     req: AnalyzeDocumentRequest,
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Inicia un análisis de un documento y devuelve un ID de tarea."""
     # Verificar que el documento existe antes de crear la tarea
@@ -639,7 +638,7 @@ async def start_document_analysis_endpoint(
 async def get_analysis_result_endpoint(
     task_id: str,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Consulta el estado y el resultado de una tarea de análisis."""
     logger.info(f"Consulta de estado de tarea: task_id={task_id}, account_id={current_account_id}")
@@ -657,7 +656,7 @@ async def get_analysis_result_endpoint(
 async def get_mindmap_result_endpoint(
     task_id: str,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Consulta el estado y el resultado de una tarea de generación de mapa mental."""
     task = await db.get(MindmapTask, uuid.UUID(task_id))
@@ -673,7 +672,7 @@ async def run_collection_analysis_and_save(task_id: str, account_id: str, topic:
     """
     Obtiene todos los documentos de una colección, los analiza y guarda el resultado.
     """
-    async with SessionLocal() as db_session: # type: ignore
+    async with DBSession(SessionLocal) as db_session: # type: ignore
         try:
             # Marcar la tarea como 'processing'
             await db_session.execute(update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing"))
@@ -683,9 +682,9 @@ async def run_collection_analysis_and_save(task_id: str, account_id: str, topic:
 
             # 1. Obtener todos los documentos de la colección
             all_docs_in_topic = []
-            # (Aquí usamos la función combinada que incluye documentos de GitHub)
-            doc_list = await list_all_user_documents(account_id)
-            filtered_doc_list = [doc for doc in doc_list if doc.get('topic') == topic]
+            # (Aquí usamos la función combinada que incluye documentos de GitHub,
+            # pasando el 'topic' directamente para que filtre de forma eficiente)
+            filtered_doc_list = await list_all_user_documents(account_id, topic=topic)
             
             for doc_meta in filtered_doc_list:
                 content = await get_full_document_content(account_id, doc_meta['file_name'])
@@ -733,7 +732,7 @@ async def start_collection_analysis_endpoint(
     req: AnalyzeCollectionRequest,
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Inicia un análisis de una colección completa y devuelve un ID de tarea."""
     new_task = AnalysisTask(
@@ -756,7 +755,7 @@ async def start_semantic_summary_endpoint(
     req: AnalyzeCollectionRequest,
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Inicia un análisis semántico específico de una colección.
@@ -780,7 +779,7 @@ async def start_semantic_summary_endpoint(
 async def update_semantic_topics_endpoint(
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_session),
     max_terms: Optional[int] = Form(None)
 ):
     """
@@ -803,22 +802,158 @@ async def update_semantic_topics_endpoint(
 
     return {"task_id": str(new_task.id)}
 
+def find_optimal_clusters(embeddings_array: np.ndarray, min_clusters: int = 2, max_clusters: int = 10) -> dict:
+    """
+    Determina el número óptimo de clusters usando elbow method y silhouette score.
+    
+    Args:
+        embeddings_array: Array numpy con los embeddings
+        min_clusters: Número mínimo de clusters a evaluar
+        max_clusters: Número máximo de clusters a evaluar
+    
+    Returns:
+        dict con 'optimal_k', 'silhouette_score', 'inertia', 'all_scores', 'all_inertias'
+    """
+    n_samples = len(embeddings_array)
+    
+    # Ajustar límites según el número de muestras
+    if n_samples < 2:
+        logger.warning(f"Número de muestras insuficiente para clustering: {n_samples}")
+        return {
+            "optimal_k": 1,
+            "silhouette_score": 0.0,
+            "inertia": 0.0,
+            "all_scores": [],
+            "all_inertias": [],
+            "method": "insufficient_samples"
+        }
+    
+    # El número máximo de clusters no puede ser mayor que n_samples - 1
+    max_clusters = min(max_clusters, n_samples - 1)
+    min_clusters = min(min_clusters, max_clusters)
+    
+    if min_clusters >= max_clusters:
+        # Si solo podemos tener un valor de k, usarlo directamente
+        logger.info(f"Solo es posible evaluar k={min_clusters} clusters")
+        kmeans = KMeans(n_clusters=min_clusters, random_state=42, n_init='auto')
+        clusters = kmeans.fit_predict(embeddings_array)
+        
+        # Calcular silhouette score solo si tenemos al menos 2 clusters
+        sil_score = 0.0
+        if min_clusters >= 2:
+            try:
+                sil_score = silhouette_score(embeddings_array, clusters)
+            except Exception as e:
+                logger.warning(f"No se pudo calcular silhouette score: {e}")
+        
+        return {
+            "optimal_k": min_clusters,
+            "silhouette_score": float(sil_score),
+            "inertia": float(kmeans.inertia_),
+            "all_scores": [float(sil_score)],
+            "all_inertias": [float(kmeans.inertia_)],
+            "method": "single_k_available"
+        }
+    
+    # Evaluar diferentes valores de k
+    silhouette_scores = []
+    inertias = []
+    k_range = range(min_clusters, max_clusters + 1)
+    
+    logger.info(f"Evaluando número óptimo de clusters en rango [{min_clusters}, {max_clusters}] para {n_samples} muestras")
+    
+    for k in k_range:
+        try:
+            kmeans = KMeans(n_clusters=k, random_state=42, n_init='auto')
+            clusters = kmeans.fit_predict(embeddings_array)
+            
+            # Calcular silhouette score
+            sil_score = silhouette_score(embeddings_array, clusters)
+            silhouette_scores.append(sil_score)
+            inertias.append(kmeans.inertia_)
+            
+            logger.info(f"k={k}: silhouette={sil_score:.4f}, inertia={kmeans.inertia_:.2f}")
+            
+        except Exception as e:
+            logger.error(f"Error al evaluar k={k}: {e}")
+            silhouette_scores.append(0.0)
+            inertias.append(float('inf'))
+    
+    # Determinar el k óptimo usando silhouette score (queremos maximizar)
+    if silhouette_scores:
+        optimal_idx = np.argmax(silhouette_scores)
+        optimal_k = min_clusters + optimal_idx
+        optimal_silhouette = silhouette_scores[optimal_idx]
+        optimal_inertia = inertias[optimal_idx]
+        
+        logger.info(f"✅ Número óptimo de clusters determinado: k={optimal_k} (silhouette={optimal_silhouette:.4f})")
+        
+        return {
+            "optimal_k": int(optimal_k),
+            "silhouette_score": float(optimal_silhouette),
+            "inertia": float(optimal_inertia),
+            "all_scores": [float(s) for s in silhouette_scores],
+            "all_inertias": [float(i) for i in inertias],
+            "method": "silhouette_optimization",
+            "k_range_evaluated": list(k_range)
+        }
+    else:
+        # Fallback al valor mínimo si algo salió mal
+        logger.warning("No se pudieron calcular scores, usando k mínimo como fallback")
+        return {
+            "optimal_k": min_clusters,
+            "silhouette_score": 0.0,
+            "inertia": 0.0,
+            "all_scores": [],
+            "all_inertias": [],
+            "method": "fallback"
+        }
+
 async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: Optional[int] = None):
     """
     Proceso en segundo plano para realizar análisis semántico y agrupación de temas.
     Integración con modelos de embeddings y LLMs para clustering y etiquetado.
     Se puede limitar el número de términos analizados con max_terms.
-    Ahora incluye detalles de los temas individuales agrupados.
+    Ahora incluye detalles de los temas individuales agrupados y sistema de progreso detallado.
     """
-    async with SessionLocal() as db_session: #type: ignore
+    async with DBSession(SessionLocal) as db_session: #type: ignore
         try:
-            # Marcar la tarea como 'processing' y notificar al usuario
-            stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
+            # 1. Actualizar tarea a 'processing' con información de progreso inicial
+            progress_info = {
+                "status": "processing",
+                "current_step": "Iniciando análisis semántico...",
+                "progress_percentage": 5,
+                "details": [
+                    {"step": "Recopilando temas de análisis previos", "status": "pending", "timestamp": datetime.now().isoformat()},
+                    {"step": "Generando embeddings", "status": "pending", "timestamp": datetime.now().isoformat()},
+                    {"step": "Optimizando número de clusters", "status": "pending", "timestamp": datetime.now().isoformat()},
+                    {"step": "Realizando clustering", "status": "pending", "timestamp": datetime.now().isoformat()},
+                    {"step": "Generando títulos descriptivos con IA", "status": "pending", "timestamp": datetime.now().isoformat()},
+                    {"step": "Completando análisis", "status": "pending", "timestamp": datetime.now().isoformat()}
+                ],
+                "estimated_time_remaining": "5-10 minutos"
+            }
+            
+            stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="processing",
+                result_payload=progress_info
+            )
             await db_session.execute(stmt_processing)
             await db_session.commit()
             logger.info(f"Iniciando análisis semántico para tarea {task_id} para la cuenta {account_id}...")
 
-            # 1. Obtener todos los temas de análisis previos
+            # 2. Obtener todos los temas de análisis previos
+            progress_info["current_step"] = "Recopilando temas de análisis previos..."
+            progress_info["progress_percentage"] = 10
+            progress_info["details"][0]["status"] = "processing"
+            progress_info["details"][0]["timestamp"] = datetime.now().isoformat()
+            
+            stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                result_payload=progress_info
+            )
+            await db_session.execute(stmt_update)
+            await db_session.commit()
+            
             analysis_stmt = select(AnalysisTask.result_payload).where(
                 AnalysisTask.account_id == uuid.UUID(account_id),
                 AnalysisTask.status == "completed",
@@ -844,13 +979,42 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
 
             if not unique_topics:
                 logger.info(f"No hay temas únicos para procesar en la tarea {task_id}. Completando sin resultados.")
+                progress_info["current_step"] = "No se encontraron temas para analizar"
+                progress_info["progress_percentage"] = 100
+                progress_info["details"][0]["status"] = "completed"
+                progress_info["status"] = "completed"
+                
                 stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-                    status="completed", result_payload={"grouped_topics": [], "detailed_clusters": []})
+                    status="completed", result_payload={**progress_info, "grouped_topics": [], "detailed_clusters": []})
                 await db_session.execute(stmt_completed)
                 await db_session.commit()
                 return
 
-            # 2. Integrar el MODELO DE EMBEDDINGS dedicado (Ollama en este caso)
+            # Actualizar progreso: temas recopilados
+            progress_info["current_step"] = f"Temas recopilados: {len(unique_topics)} temas únicos"
+            progress_info["progress_percentage"] = 20
+            progress_info["details"][0]["status"] = "completed"
+            progress_info["details"][1]["status"] = "processing"
+            progress_info["details"][1]["timestamp"] = datetime.now().isoformat()
+            
+            stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                result_payload=progress_info
+            )
+            await db_session.execute(stmt_update)
+            await db_session.commit()
+
+            # 3. Generar embeddings
+            progress_info["current_step"] = "Generando embeddings para temas..."
+            progress_info["progress_percentage"] = 25
+            progress_info["estimated_time_remaining"] = "4-8 minutos"
+            
+            stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                result_payload=progress_info
+            )
+            await db_session.execute(stmt_update)
+            await db_session.commit()
+            
+            # Integrar el MODELO DE EMBEDDINGS dedicado (Ollama en este caso)
             embedding_model = get_embedding_model()
             if not embedding_model:
                 logger.error("No hay modelo de embeddings disponible (Ollama).")
@@ -861,6 +1025,20 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
                 logger.info(f"Generando embeddings para {len(unique_topics)} temas de forma batch...")
                 embeddings = await embedding_model.aembed_documents(unique_topics)
                 logger.info(f"Embeddings generados exitosamente para {len(embeddings)} temas.")
+                
+                # Actualizar progreso: embeddings completados
+                progress_info["current_step"] = f"Embeddings generados: {len(embeddings)} vectores"
+                progress_info["progress_percentage"] = 45
+                progress_info["details"][1]["status"] = "completed"
+                progress_info["details"][2]["status"] = "processing"
+                progress_info["details"][2]["timestamp"] = datetime.now().isoformat()
+                
+                stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                    result_payload=progress_info
+                )
+                await db_session.execute(stmt_update)
+                await db_session.commit()
+                
             except Exception as e:
                 logger.error(f"Error al obtener embeddings de forma batch con Ollama: {e}", exc_info=True)
                 raise ValueError(f"Fallo al generar embeddings de forma batch: {e}")
@@ -869,90 +1047,151 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
                 logger.info("No se generaron embeddings, saltando clustering y agrupación.")
                 simulated_grouped_topics = []
                 detailed_clusters_data = [] # También vacío si no hay embeddings
+                clustering_metrics = None
             else:
-                # 3. Implementar clustering (e.g., K-Means)
-                n_clusters = min(5, max(1, len(embeddings) // 2 + 1)) 
-                if len(embeddings) < n_clusters:
-                    n_clusters = len(embeddings)
+                # 4. Determinar número óptimo de clusters
+                progress_info["current_step"] = "Optimizando número de clusters..."
+                progress_info["progress_percentage"] = 50
+                progress_info["estimated_time_remaining"] = "3-6 minutos"
                 
+                stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                    result_payload=progress_info
+                )
+                await db_session.execute(stmt_update)
+                await db_session.commit()
+                
+                embeddings_array = np.array(embeddings)
+                
+                # Calcular número óptimo de clusters
+                optimization_result = find_optimal_clusters(
+                    embeddings_array,
+                    min_clusters=2,
+                    max_clusters=min(10, len(embeddings) - 1)
+                )
+                
+                n_clusters = optimization_result["optimal_k"]
+                clustering_metrics = optimization_result
+                
+                logger.info(f"🎯 Usando {n_clusters} clusters (método: {optimization_result['method']})")
+                
+                # Actualizar progreso: optimización completada
+                progress_info["current_step"] = f"Clusters optimizados: {n_clusters} grupos"
+                progress_info["progress_percentage"] = 65
+                progress_info["details"][2]["status"] = "completed"
+                progress_info["details"][3]["status"] = "processing"
+                progress_info["details"][3]["timestamp"] = datetime.now().isoformat()
+                
+                stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                    result_payload=progress_info
+                )
+                await db_session.execute(stmt_update)
+                await db_session.commit()
+
+                # 5. Realizar clustering
                 clusters = []
                 if n_clusters > 1:
-                    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init='auto') 
-                    clusters = kmeans.fit_predict(np.array(embeddings))
+                    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init='auto')
+                    clusters = kmeans.fit_predict(embeddings_array)
                 else:
                     clusters = [0] * len(unique_topics) if len(unique_topics) > 0 else []
 
-                # 4. Agrupar temas por cluster y contar menciones
+                # Actualizar progreso: clustering completado
+                progress_info["current_step"] = "Clustering completado, agrupando temas..."
+                progress_info["progress_percentage"] = 75
+                progress_info["details"][3]["status"] = "completed"
+                progress_info["details"][4]["status"] = "processing"
+                progress_info["details"][4]["timestamp"] = datetime.now().isoformat()
+                
+                stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                    result_payload=progress_info
+                )
+                await db_session.execute(stmt_update)
+                await db_session.commit()
+
+                # 6. Agrupar temas por cluster y contar menciones
                 cluster_dict = {}
-                # Lista temporal para almacenar los detalles de cada tema y su cluster
                 temp_detailed_data = []
 
                 for i, topic in enumerate(unique_topics):
-                    cluster_id = clusters[i] if len(clusters) > 0 else 0 # Asegurar cluster_id incluso si clusters está vacío
-
+                    cluster_id = clusters[i] if len(clusters) > 0 else 0
                     if cluster_id not in cluster_dict:
-                        cluster_dict[cluster_id] = {"topics": [], "mentions": 0, "id": cluster_id} # Añadir id del cluster
+                        cluster_dict[cluster_id] = {"topics": [], "mentions": 0, "id": cluster_id}
                     cluster_dict[cluster_id]["topics"].append(topic)
                     cluster_dict[cluster_id]["mentions"] += topic_counts[topic]
-
-                    # Capturar el detalle de cada tema único y su asignación de cluster
                     temp_detailed_data.append({"term": topic, "cluster_id": int(cluster_id), "mentions": int(topic_counts[topic])})
 
-                # 5. Generar un término representativo para cada cluster usando el LLM generativo
+                # 7. Generar títulos descriptivos con LLM (mejorado)
                 grouped_topics = []
-                detailed_clusters_data = []  # Lista final con información completa de clusters
+                detailed_clusters_data = []
                 llm_for_summarization = get_fast_llm()
                 if not llm_for_summarization:
-                    logger.error("No hay LLM generativo disponible para generar términos representativos.")
-                    raise ValueError("LLM generativo no disponible para generación de términos representativos.")
+                    logger.error("No hay LLM generativo disponible para generar títulos descriptivos.")
+                    raise ValueError("LLM generativo no disponible para generación de títulos descriptivos.")
                 else:
-                    logger.info("LLM generativo disponible, procediendo a generar términos representativos.")
+                    logger.info("LLM generativo disponible, procediendo a generar títulos descriptivos.")
+
+                progress_info["current_step"] = "Generando títulos descriptivos con IA..."
+                progress_info["progress_percentage"] = 80
+                progress_info["estimated_time_remaining"] = "1-3 minutos"
+                
+                stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                    result_payload=progress_info
+                )
+                await db_session.execute(stmt_update)
+                await db_session.commit()
 
                 for cluster_id, data in cluster_dict.items():
                     try:
                         topics_for_prompt = ", ".join(data["topics"][:15])
+                        representative_term = None
+                        description = None
+                        
                         if not topics_for_prompt:
-                            representative_term = f"Grupo {cluster_id + 1}"
+                            representative_term = data["topics"][0] if data["topics"] else f"Grupo {cluster_id + 1}"
                             description = f"Agrupación que incluye: {', '.join(data['topics'][:3])}"
                         else:
+                            # Prompt mejorado para títulos más descriptivos
                             prompt = (
                                 f"Analiza el siguiente grupo de temas relacionados y proporciona:\n"
-                                f"1. Una etiqueta representativa concisa (máximo 3 palabras) NUNCA USES GRUPO nº. Responde en español.\n"
-                                f"2. Una descripción clara de qué conceptos agrupa (máximo 2 líneas). Responde en español.\n\n"
+                                f"1. Un título representativo y altamente descriptivo (máximo 5 palabras). NO uses 'Grupo' o 'Clúster' seguido de un número. Responde en español.\n"
+                                f"2. Una descripción clara y concisa de qué conceptos o ideas agrupa este grupo (máximo 2 líneas). Responde en español.\n\n"
                                 f"Temas: {topics_for_prompt}\n\n"
+                                f"Considera qué idea o concepto general une a estos temas específicos.\n\n"
                                 f"Formato de respuesta (en español):\n"
-                                f"ETIQUETA: [etiqueta aquí]\n"
+                                f"TÍTULO: [título aquí]\n"
                                 f"DESCRIPCIÓN: [descripción aquí]"
                             )
-                            logger.info(f"Generando término representativo para cluster {cluster_id} con prompt: {prompt[:100]}...")
+                            logger.info(f"Generando título descriptivo para cluster {cluster_id} con {len(data['topics'])} temas")
                             response = await llm_for_summarization.ainvoke([HumanMessage(content=prompt)])
                             content = response.content.strip()
-                            logger.info(f"Respuesta generada para cluster {cluster_id}: {content}")
+                            logger.info(f"Respuesta LLM para cluster {cluster_id}: {content[:200]}")
 
-                            # Parsear la respuesta
-                            representative_term = f"Grupo {cluster_id + 1}"
-                            description = f"Agrupación que incluye: {', '.join(data['topics'][:3])}"
-
+                            # Parsear la respuesta del LLM (con nuevo formato)
                             lines = content.split('\n')
                             for line in lines:
-                                if line.startswith('ETIQUETA:'):
-                                    term = line.replace('ETIQUETA:', '').strip()
-                                    if term and len(term.split()) <= 3:
+                                line = line.strip()
+                                if line.startswith('TÍTULO:'):
+                                    term = line.replace('TÍTULO:', '').strip()
+                                    if term and len(term.split()) <= 5 and not term.lower().startswith(('grupo', 'clúster')):
                                         representative_term = term
+                                        logger.info(f"✓ Título aceptado para cluster {cluster_id}: '{term}'")
                                 elif line.startswith('DESCRIPCIÓN:'):
                                     desc = line.replace('DESCRIPCIÓN:', '').strip()
-                                    if desc and len(desc) <= 150:
+                                    if desc and len(desc) <= 300:
                                         description = desc
 
-                            if not representative_term or representative_term == f"Grupo {cluster_id + 1}":
-                                representative_term = f"Grupo {cluster_id + 1}"
+                            if not representative_term:
+                                representative_term = data["topics"][0] if data["topics"] else f"Cluster {cluster_id + 1}"
+                                logger.warning(f"⚠️ LLM no generó título válido para cluster {cluster_id}, usando tema más común: '{representative_term}'")
+                            
+                            if not description:
+                                description = f"Agrupación de temas relacionados con: {', '.join(data['topics'][:3])}"
 
                     except Exception as e:
-                        logger.error(f"Error al generar término representativo para cluster {cluster_id}: {e}", exc_info=True)
-                        representative_term = f"Grupo {cluster_id + 1}"
-                        description = f"Agrupación que incluye: {', '.join(data['topics'][:3])}"
+                        logger.error(f"Error al generar título descriptivo para cluster {cluster_id}: {e}", exc_info=True)
+                        representative_term = data["topics"][0] if data["topics"] else f"Cluster {cluster_id + 1}"
+                        description = f"Agrupación de temas relacionados con: {', '.join(data['topics'][:3])}"
 
-                    # Añadir información completa del cluster a detailed_clusters_data
                     detailed_clusters_data.append({
                         "cluster_id": int(cluster_id),
                         "representative_term": representative_term,
@@ -962,7 +1201,6 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
                         "topic_count": len(data["topics"])
                     })
 
-                    # Añadir el ID del cluster al grupo final para poder vincularlo con detailed_clusters
                     grouped_topics.append({
                         "topic": representative_term,
                         "mentions": int(data["mentions"]),
@@ -974,11 +1212,24 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
                 # Ordenar por menciones descendentes y limitar a los 10 principales
                 simulated_grouped_topics = sorted(grouped_topics, key=lambda x: x["mentions"], reverse=True)[:10]
 
-            # 6. Guardar el resultado y marcar como 'completed'
-            # El payload ahora incluye 'detailed_clusters' y metadata de herramienta
-            result_payload = {
+            # 8. Guardar el resultado final y marcar como 'completed'
+            progress_info["current_step"] = "Guardando resultados finales..."
+            progress_info["progress_percentage"] = 95
+            progress_info["details"][4]["status"] = "completed"
+            progress_info["details"][5]["status"] = "processing"
+            progress_info["details"][5]["timestamp"] = datetime.now().isoformat()
+            
+            stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                result_payload=progress_info
+            )
+            await db_session.execute(stmt_update)
+            await db_session.commit()
+
+            final_result_payload = {
                 "grouped_topics": simulated_grouped_topics,
                 "detailed_clusters": detailed_clusters_data,
+                "clustering_metrics": clustering_metrics,
+                "progress_info": progress_info,
                 "tool_used": "semantic_topic_analysis_tool.py",
                 "analysis_metadata": {
                     "tool_used": "semantic_topic_analysis_tool.py",
@@ -990,17 +1241,35 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
                 }
             }
 
+            progress_info["current_step"] = "Análisis semántico completado"
+            progress_info["progress_percentage"] = 100
+            progress_info["status"] = "completed"
+            progress_info["estimated_time_remaining"] = None
+            progress_info["details"][5]["status"] = "completed"
+            progress_info["details"][5]["timestamp"] = datetime.now().isoformat()
+            
             stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 status="completed",
-                result_payload=result_payload
+                result_payload=final_result_payload
             )
             await db_session.execute(stmt_completed)
             await db_session.commit()
             logger.info(f"Análisis semántico para tarea {task_id} completado con {len(simulated_grouped_topics)} grupos de temas y {len(detailed_clusters_data)} temas detallados.")
         except Exception as e:
             logger.error(f"Fallo en tarea de análisis semántico {task_id}: {e}", exc_info=True)
+            progress_info["current_step"] = f"Error durante el análisis: {str(e)}"
+            progress_info["status"] = "failed"
+            progress_info["details"] = [
+                {"step": step_info["step"], "status": "failed" if i == 4 else "completed", "timestamp": step_info.get("timestamp", datetime.now().isoformat())}
+                for i, step_info in enumerate(progress_info.get("details", []))
+            ]
+            progress_info["details"][-1]["status"] = "failed"
+            
             stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-                status="failed", error_message=str(e))
+                status="failed",
+                result_payload=progress_info,
+                error_message=str(e)
+            )
             await db_session.execute(stmt_failed)
             await db_session.commit()
 
@@ -1009,7 +1278,7 @@ async def run_semantic_summary_analysis(task_id: str, account_id: str, topic: st
     Proceso en segundo plano para realizar un resumen semántico específico de una colección.
     Se enfoca en agrupación semántica de documentos y extracción de patrones dentro de la colección.
     """
-    async with SessionLocal() as db_session: # type: ignore
+    async with DBSession(SessionLocal) as db_session: # type: ignore
         try:
             # Marcar la tarea como 'processing'
             stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
@@ -1106,7 +1375,7 @@ async def run_single_note_analysis_and_save(task_id: str, account_id: str, note_
     """
     Analiza una sola nota y guarda el resultado.
     """
-    async with SessionLocal() as db_session: # type: ignore
+    async with DBSession(SessionLocal) as db_session: # type: ignore
         try:
             # Marcar la tarea como 'processing'
             await db_session.execute(update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing"))
@@ -1148,7 +1417,7 @@ async def start_single_note_analysis_endpoint(
     req: AnalyzeSingleNoteRequest,
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Inicia un análisis de una sola nota y devuelve un ID de tarea."""
     new_task = AnalysisTask(
@@ -1174,7 +1443,7 @@ async def run_single_note_summary_and_save(task_id: str, account_id: str, note_t
     """
     Genera un resumen ejecutivo de una sola nota y guarda el resultado.
     """
-    async with SessionLocal() as db_session: # type: ignore
+    async with DBSession(SessionLocal) as db_session: # type: ignore
         try:
             # Marcar la tarea como 'processing'
             await db_session.execute(update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing"))
@@ -1216,7 +1485,7 @@ async def start_single_note_summary_endpoint(
     req: SummarizeSingleNoteRequest,
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Inicia la generación de un resumen ejecutivo de una sola nota y devuelve un ID de tarea."""
     new_task = AnalysisTask(
@@ -1251,15 +1520,44 @@ class GetAllAnalysisRequest(BaseModel):
 
 async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: str):
     """Función pesada que se ejecuta en segundo plano para análisis de código."""
-    async with SessionLocal() as db_session: # type: ignore
+    async with DBSession(SessionLocal) as db_session: # type: ignore
         try:
-            # 1. Marcar la tarea como 'processing'
-            stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
+            # 1. Actualizar tarea a 'processing' con información de progreso inicial
+            progress_info = {
+                "status": "processing",
+                "current_step": "Iniciando análisis de código...",
+                "progress_percentage": 5,
+                "details": [
+                    {"step": "Obteniendo documentos de GitHub", "status": "pending", "timestamp": datetime.now().isoformat()},
+                    {"step": "Dividiendo código en chunks", "status": "pending", "timestamp": datetime.now().isoformat()},
+                    {"step": "Analizando chunks de código", "status": "pending", "timestamp": datetime.now().isoformat()},
+                    {"step": "Generando resumen ejecutivo", "status": "pending", "timestamp": datetime.now().isoformat()},
+                    {"step": "Completando análisis", "status": "pending", "timestamp": datetime.now().isoformat()}
+                ],
+                "estimated_time_remaining": "3-8 minutos"
+            }
+            
+            stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="processing",
+                result_payload=progress_info
+            )
             await db_session.execute(stmt_processing)
             await db_session.commit()
             
             logger.info(f"Iniciando análisis de código para tarea {task_id}...")
-            # Obtener los documentos específicos de GitHub del repositorio
+            
+            # 2. Obtener los documentos específicos de GitHub del repositorio
+            progress_info["current_step"] = "Obteniendo documentos de GitHub..."
+            progress_info["progress_percentage"] = 10
+            progress_info["details"][0]["status"] = "processing"
+            progress_info["details"][0]["timestamp"] = datetime.now().isoformat()
+            
+            stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                result_payload=progress_info
+            )
+            await db_session.execute(stmt_update)
+            await db_session.commit()
+            
             query = select(GitHubDocument).where(
                 GitHubDocument.account_id == account_id,
                 GitHubDocument.repo_url.endswith(f"/{repo_name}")
@@ -1272,7 +1570,30 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
             if not github_docs:
                 raise ValueError("No se encontraron documentos de GitHub para el repositorio.")
             
-            # 2. Análisis por chunks para repositorios grandes
+            # Actualizar progreso: documentos obtenidos
+            progress_info["current_step"] = f"Documentos obtenidos: {len(github_docs)} archivos"
+            progress_info["progress_percentage"] = 20
+            progress_info["details"][0]["status"] = "completed"
+            progress_info["details"][1]["status"] = "processing"
+            progress_info["details"][1]["timestamp"] = datetime.now().isoformat()
+            
+            stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                result_payload=progress_info
+            )
+            await db_session.execute(stmt_update)
+            await db_session.commit()
+
+            # 3. Dividir código en chunks
+            progress_info["current_step"] = "Dividiendo código en chunks..."
+            progress_info["progress_percentage"] = 25
+            progress_info["estimated_time_remaining"] = "2-6 minutos"
+            
+            stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                result_payload=progress_info
+            )
+            await db_session.execute(stmt_update)
+            await db_session.commit()
+
             from utils.advanced_code_analyzer import analyze_code_content
             
             chunk_size = 150000  # ~150k caracteres por chunk (~200k tokens aprox)
@@ -1305,7 +1626,30 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
             
             logger.info(f"Código dividido en {len(chunks)} chunks para análisis")
             
-            # 3. Analizar cada chunk
+            # Actualizar progreso: chunks creados
+            progress_info["current_step"] = f"Código dividido: {len(chunks)} chunks"
+            progress_info["progress_percentage"] = 35
+            progress_info["details"][1]["status"] = "completed"
+            progress_info["details"][2]["status"] = "processing"
+            progress_info["details"][2]["timestamp"] = datetime.now().isoformat()
+            
+            stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                result_payload=progress_info
+            )
+            await db_session.execute(stmt_update)
+            await db_session.commit()
+
+            # 4. Analizar cada chunk
+            progress_info["current_step"] = "Analizando chunks de código..."
+            progress_info["progress_percentage"] = 40
+            progress_info["estimated_time_remaining"] = "1-5 minutos"
+            
+            stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                result_payload=progress_info
+            )
+            await db_session.execute(stmt_update)
+            await db_session.commit()
+            
             all_chunk_results = []
             combined_categories = {
                 "code_structure": [],
@@ -1318,10 +1662,13 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
             for i, chunk in enumerate(chunks):
                 logger.info(f"Analizando chunk {i+1}/{len(chunks)} ({len(chunk['files'])} archivos)")
                 
-                # Actualizar progreso en la base de datos
-                progress_message = f"Analizando parte {i+1} de {len(chunks)}..."
+                # Actualizar progreso para cada chunk
+                chunk_progress = f"Analizando chunk {i+1}/{len(chunks)} ({len(chunk['files'])} archivos)"
+                progress_info["current_step"] = chunk_progress
+                progress_info["progress_percentage"] = 40 + int((i / len(chunks)) * 40)  # Progreso entre 40% y 80%
+                
                 stmt_progress = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-                    result_payload={"progress": f"{i+1}/{len(chunks)}", "message": progress_message})
+                    result_payload=progress_info)
                 await db_session.execute(stmt_progress)
                 await db_session.commit()
                 
@@ -1350,7 +1697,20 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                 else:
                     logger.warning(f"Resultado inesperado del análisis de chunk {i+1}: {type(chunk_result)}")
             
-            # 4. Generar resumen ejecutivo consolidado
+            # Actualizar progreso: chunks analizados
+            progress_info["current_step"] = "Chunks analizados, generando resumen..."
+            progress_info["progress_percentage"] = 85
+            progress_info["details"][2]["status"] = "completed"
+            progress_info["details"][3]["status"] = "processing"
+            progress_info["details"][3]["timestamp"] = datetime.now().isoformat()
+            
+            stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                result_payload=progress_info
+            )
+            await db_session.execute(stmt_update)
+            await db_session.commit()
+
+            # 5. Generar resumen ejecutivo consolidado
             from tools.analyze_code_for_insights_tool import AnalyzeCodeForInsightsTool
             
             # Crear un resumen de todos los chunks para el formatted_result
@@ -1388,8 +1748,21 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
             except Exception as e:
                 logger.warning(f"Error generando resultado formateado: {e}")
                 formatted_result = final_summary
+
+            # Actualizar progreso: resumen generado
+            progress_info["current_step"] = "Resumen ejecutivo generado"
+            progress_info["progress_percentage"] = 95
+            progress_info["details"][3]["status"] = "completed"
+            progress_info["details"][4]["status"] = "processing"
+            progress_info["details"][4]["timestamp"] = datetime.now().isoformat()
             
-            # 5. Estructura final del resultado
+            stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                result_payload=progress_info
+            )
+            await db_session.execute(stmt_update)
+            await db_session.commit()
+            
+            # 6. Estructura final del resultado
             analysis_result = {
                 "formatted_result": formatted_result,
                 "executive_summary": f"Análisis completo de {len(github_docs)} archivos en {len(chunks)} partes del repositorio {repo_name}",
@@ -1398,6 +1771,7 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                 "dependencies": combined_categories["dependencies"],
                 "potential_issues": combined_categories["potential_issues"],
                 "recommendations": combined_categories["recommendations"],
+                "progress_info": progress_info,
                 "tool_used": "advanced_code_analyzer.py",
                 "analysis_metadata": {
                     "tool_used": "advanced_code_analyzer.py",
@@ -1409,7 +1783,14 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                 }
             }
 
-            # 6. Guardar el resultado y marcar como 'completed'
+            # 7. Guardar el resultado y marcar como 'completed'
+            progress_info["current_step"] = "Análisis de código completado"
+            progress_info["progress_percentage"] = 100
+            progress_info["status"] = "completed"
+            progress_info["estimated_time_remaining"] = None
+            progress_info["details"][4]["status"] = "completed"
+            progress_info["details"][4]["timestamp"] = datetime.now().isoformat()
+            
             stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 status="completed", result_payload=analysis_result)
             await db_session.execute(stmt_completed)
@@ -1418,8 +1799,18 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
 
         except Exception as e:
             logger.error(f"Fallo en tarea de análisis de código {task_id}: {e}", exc_info=True)
+            progress_info["current_step"] = f"Error durante el análisis: {str(e)}"
+            progress_info["status"] = "failed"
+            progress_info["details"] = [
+                {"step": step_info["step"], "status": "failed" if i == 3 else "completed", "timestamp": step_info.get("timestamp", datetime.now().isoformat())}
+                for i, step_info in enumerate(progress_info.get("details", []))
+            ]
+            progress_info["details"][-1]["status"] = "failed"
+            
             stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-                status="failed", error_message=str(e))
+                status="failed",
+                result_payload=progress_info,
+                error_message=str(e))
             await db_session.execute(stmt_failed)
             await db_session.commit()
 
@@ -1428,7 +1819,7 @@ async def start_code_analysis_endpoint(
     req: AnalyzeCodeRequest,
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Inicia una tarea de análisis de código o repositorio y devuelve un ID de tarea."""
     # Verificar que el repositorio existe antes de crear la tarea
@@ -1456,7 +1847,7 @@ async def start_custom_analysis_endpoint(
     req: CustomAnalysisRequest,
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Inicia un análisis personalizado con campos y configuración definidos por el usuario.
@@ -1488,7 +1879,7 @@ async def start_custom_analysis_endpoint(
 async def get_all_analysis_endpoint(
     req: GetAllAnalysisRequest,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Obtiene todos los análisis del usuario de forma unificada.
@@ -1540,6 +1931,15 @@ async def get_all_analysis_endpoint(
             elif file_name.startswith("Análisis Personalizado:"):
                 analysis_type = "custom"
                 title = file_name
+            elif task_analysis_type == "single_note":
+                analysis_type = "note_analysis"
+                title = file_name if "Nota:" in file_name else f"Análisis de Nota: {file_name}"
+            elif task_analysis_type == "single_note_summary":
+                analysis_type = "note_analysis"
+                title = file_name if "Resumen de Nota:" in file_name else f"Resumen de Nota: {file_name}"
+            elif task_analysis_type == "notes_collection":
+                analysis_type = "note_collection_analysis"
+                title = file_name if "Colección de Notas:" in file_name else f"Análisis de Colección de Notas: {file_name}"
             else:
                 # Fallback: inferir del contenido del resultado o default a "document"
                 analysis_type = "document"
@@ -1760,7 +2160,7 @@ class GetRepoAnalysesRequest(BaseModel):
 async def get_repo_analyses_endpoint(
     req: GetRepoAnalysesRequest,
     current_account_id: str = Depends(get_current_account_id), 
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Recupera la lista de análisis completados para un repositorio específico.
@@ -1805,7 +2205,7 @@ async def run_proactive_insight_generation_and_save(task_id: str, account_id: st
     """
     Función en segundo plano para ejecutar la generación proactiva de insights.
     """
-    async with SessionLocal() as db_session: # type: ignore
+    async with DBSession(SessionLocal) as db_session: # type: ignore
         try:
             # Marcar la tarea como 'processing'
             stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
@@ -1854,7 +2254,7 @@ async def start_proactive_insight_generation_endpoint(
     req: StartProactiveInsightGenerationRequest,
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Inicia una tarea en segundo plano para generar insights proactivos para una cuenta.
@@ -1909,7 +2309,7 @@ class GetAnalysisTypesRequest(BaseModel):
 async def get_analysis_types_endpoint(
     req: GetAnalysisTypesRequest,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Obtiene los tipos de análisis disponibles y sus estadísticas de uso.
@@ -2098,7 +2498,7 @@ class GetAnalysisByTypeRequest(BaseModel):
 async def get_analysis_by_type_endpoint(
     req: GetAnalysisByTypeRequest,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Obtiene análisis filtrados por tipo usando la nueva columna analysis_type.
@@ -2152,7 +2552,7 @@ async def run_custom_analysis_and_save(
     """
     Función en segundo plano para realizar análisis personalizado.
     """
-    async with SessionLocal() as db_session: # type: ignore
+    async with DBSession(SessionLocal) as db_session: # type: ignore
         try:
             # Marcar la tarea como 'processing'
             stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
@@ -2269,3 +2669,105 @@ Realiza un análisis personalizado del siguiente documento con estas especificac
                 status="failed", error_message=str(e))
             await db_session.execute(stmt_failed)
             await db_session.commit()
+
+# --- Note Analysis Endpoints ---
+
+class AnalyzeNoteRequest(BaseModel):
+    note_id: int
+
+class AnalyzeNoteCollectionRequest(BaseModel):
+    note_ids: List[int]
+    collection_name: str = "Selección de Notas"
+
+@router.post("/analyze-note", summary="Analizar una nota individual")
+async def analyze_note_endpoint(
+    req: AnalyzeNoteRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    notes_manager = NotesManager(db)
+    note = await notes_manager.get_note_by_id(current_account_id, req.note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Nota no encontrada")
+    
+    # Perform analysis
+    analysis_result = await analyze_single_note(note['content'], note.get('title', 'Sin título'))
+    
+    # Save analysis task
+    new_task = AnalysisTask(
+        id=uuid.uuid4(),
+        account_id=uuid.UUID(current_account_id),
+        analysis_type="note_analysis",
+        file_name=note.get('title', 'Nota sin título'),
+        status="completed",
+        result_payload=analysis_result,
+        created_at=datetime.now(timezone.utc)
+    )
+    db.add(new_task)
+    await db.commit()
+    
+    return {
+        "task_id": str(new_task.id),
+        "result_payload": analysis_result
+    }
+
+@router.post("/analyze-note-collection", summary="Analizar una colección de notas")
+async def analyze_note_collection_endpoint(
+    req: AnalyzeNoteCollectionRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    notes_manager = NotesManager(db)
+    notes_data = []
+    for nid in req.note_ids:
+        n = await notes_manager.get_note_by_id(current_account_id, nid)
+        if n:
+            notes_data.append(n)
+            
+    if not notes_data:
+        raise HTTPException(status_code=404, detail="No se encontraron notas válidas")
+
+    # Perform analysis
+    analysis_result = await analyze_note_collection(notes_data, req.collection_name)
+    
+    # Save analysis task
+    new_task = AnalysisTask(
+        id=uuid.uuid4(),
+        account_id=uuid.UUID(current_account_id),
+        analysis_type="note_collection_analysis",
+        file_name=req.collection_name,
+        status="completed",
+        result_payload=analysis_result,
+        created_at=datetime.now(timezone.utc)
+    )
+    db.add(new_task)
+    await db.commit()
+    
+    return {
+        "task_id": str(new_task.id),
+        "result_payload": analysis_result
+    }
+
+@router.post("/summarize-note", summary="Generar resumen semántico de una nota")
+async def summarize_note_endpoint(
+    req: AnalyzeNoteRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    notes_manager = NotesManager(db)
+    note = await notes_manager.get_note_by_id(current_account_id, req.note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Nota no encontrada")
+    
+    # Generate summary
+    summary_result = await summarize_note(note['content'], note.get('title', 'Sin título'))
+    
+    # Return summary directly (no need to save as task for quick summaries)
+    return {
+        "task_id": f"summary-{req.note_id}",
+        "summary": summary_result.get("summary", ""),
+        "key_points": summary_result.get("key_points", []),
+        "main_topic": summary_result.get("main_topic", ""),
+        "context": summary_result.get("context", ""),
+        "result_payload": summary_result
+    }
