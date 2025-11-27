@@ -16,9 +16,10 @@ import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'; // Importar Sheet
 import { useDrag, useDrop } from 'react-dnd';
-import { ManageLinkedProfilesDialog } from './ManageLinkedProfilesDialog'; // Nueva importación
-import { AnalysisResultDialog } from './analysis-result-dialog'; // Nueva importación
-import { ContactProfile } from '../profiles/page'; // Nueva importación
+import { ManageLinkedProfilesDialog } from './ManageLinkedProfilesDialog';
+import { AnalysisDetailDialog } from '../analysis/analysis-detail-dialog';
+import { ContactProfile } from '../profiles/page';
+import { Analysis } from '@/lib/models';
 
 export interface Note {
   id: number;
@@ -47,7 +48,7 @@ export default function NotesPage() {
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isLinkProfileDialogOpen, setIsLinkProfileDialogOpen] = useState(false);
   const [linkingNote, setLinkingNote] = useState<Note | null>(null);
-  const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const [analysisResult, setAnalysisResult] = useState<Analysis | null>(null);
   const [isAnalysisResultDialogOpen, setIsAnalysisResultDialogOpen] = useState(false);
   const [currentAnalysisTaskId, setCurrentAnalysisTaskId] = useState<string | null>(null);
   const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
@@ -186,34 +187,56 @@ export default function NotesPage() {
 
     const toastId = toast.loading("Iniciando análisis de todas las notas...");
     try {
-      const notesForAnalysis = notes.map(note => ({
-        id: note.id,
-        title: note.title || "Nota sin título",
-        content: note.content
-      }));
+      const noteIds = notes.map(note => note.id);
+      const response = await apiClient.post('/api/analyze-note-collection', {
+        note_ids: noteIds,
+        collection_name: "Todas las Notas"
+      });
 
-      const response = await apiClient.post('/api/start-notes-collection-analysis', { notes: notesForAnalysis });
-      toast.success(`Análisis de notas iniciado. ID de tarea: ${response.data.task_id}`, { id: toastId });
-      setCurrentAnalysisTaskId(response.data.task_id);
+      toast.dismiss(toastId);
+      toast.success(`Análisis de notas completado.`);
+
+      const newAnalysis: Analysis = {
+        id: response.data.task_id || `analysis-${Date.now()}`,
+        type: 'note_collection_analysis',
+        title: "Análisis de Todas las Notas",
+        created_at: new Date().toISOString(),
+        result: response.data.result_payload
+      };
+
+      setAnalysisResult(newAnalysis);
+      setIsAnalysisResultDialogOpen(true);
     } catch (error) {
-      toast.error("Error al iniciar el análisis de notas.", { id: toastId });
-      console.error("Error al iniciar el análisis de notas:", error);
+      toast.dismiss(toastId);
+      toast.error("Error al analizar las notas.");
+      console.error("Error al analizar las notas:", error);
     }
   };
 
   const handleAnalyzeSingleNote = async (note: Note) => {
     const toastId = toast.loading("Iniciando análisis de la nota...");
     try {
-      const response = await apiClient.post('/api/start-single-note-analysis', {
-        title: note.title || "Nota sin título",
-        content: note.content,
+      const response = await apiClient.post('/api/analyze-note', {
         note_id: note.id
       });
-      toast.success(`Análisis de nota iniciado. ID de tarea: ${response.data.task_id}`, { id: toastId });
-      setCurrentAnalysisTaskId(response.data.task_id);
+
+      toast.dismiss(toastId);
+      toast.success(`Análisis de nota completado.`);
+
+      const newAnalysis: Analysis = {
+        id: response.data.task_id || `analysis-${Date.now()}`,
+        type: 'note_analysis',
+        title: `Análisis: ${note.title || "Nota sin título"}`,
+        created_at: new Date().toISOString(),
+        result: response.data.result_payload
+      };
+
+      setAnalysisResult(newAnalysis);
+      setIsAnalysisResultDialogOpen(true);
     } catch (error) {
-      toast.error("Error al iniciar el análisis de la nota.", { id: toastId });
-      console.error("Error al iniciar el análisis de la nota:", error);
+      toast.dismiss(toastId);
+      toast.error("Error al analizar la nota.");
+      console.error("Error al analizar la nota:", error);
     }
   };
 
@@ -223,40 +246,71 @@ export default function NotesPage() {
   };
 
   const handleSummarizeSingleNote = async (note: Note) => {
-    const toastId = toast.loading("Iniciando resumen de la nota...");
+    const toastId = toast.loading("Generando resumen semántico...");
     try {
-      const response = await apiClient.post('/api/start-single-note-summary', {
-        title: note.title || "Nota sin título",
-        content: note.content,
+      const response = await apiClient.post('/api/summarize-note', {
         note_id: note.id
       });
-      toast.success(`Resumen de nota iniciado. ID de tarea: ${response.data.task_id}`, { id: toastId });
+
+      toast.dismiss(toastId);
+      toast.success(`Resumen de nota completado.`);
+
+      // Aquí podrías decidir cómo mostrar el resumen.
+      // Por ahora, lo mostraremos en el diálogo de análisis existente.
+      const newAnalysis: Analysis = {
+        id: response.data.task_id || `summary-${Date.now()}`,
+        type: 'semantic',
+        title: `Resumen: ${note.title || "Nota sin título"}`,
+        created_at: new Date().toISOString(),
+        result: response.data.result_payload,
+      };
+
+      setAnalysisResult(newAnalysis);
+      setIsAnalysisResultDialogOpen(true);
     } catch (error) {
-      toast.error("Error al iniciar el resumen de la nota.", { id: toastId });
-      console.error("Error al iniciar el resumen de la nota:", error);
+      toast.dismiss(toastId);
+      toast.error("Error al generar el resumen de la nota.");
+      console.error("Error al resumir la nota:", error);
     }
   };
 
-  const handleAnalyzeGroupedNotes = async (notesToAnalyze: Note[], groupName: string) => {
-    if (notesToAnalyze.length === 0) {
-      toast.info(`No hay notas en ${groupName} para analizar.`);
+
+
+  const handleAnalyzeGroupedNotes = async (notesToAnalyze: Note[], groupName: any) => {
+    const groupNameStr = (typeof groupName === 'object' && groupName !== null)
+      ? groupName.name
+      : String(groupName);
+
+    if (!groupNameStr || notesToAnalyze.length === 0) {
+      toast.info(`No hay notas para analizar.`);
       return;
     }
 
-    const toastId = toast.loading(`Iniciando análisis de notas en ${groupName}...`);
+    const toastId = toast.loading(`Iniciando análisis de notas en ${groupNameStr}...`);
     try {
-      const notesForAnalysis = notesToAnalyze.map(note => ({
-        id: note.id,
-        title: note.title || "Nota sin título",
-        content: note.content
-      }));
+      const noteIds = notesToAnalyze.map(note => note.id);
+      const response = await apiClient.post('/api/analyze-note-collection', {
+        note_ids: noteIds,
+        collection_name: groupNameStr
+      });
 
-      const response = await apiClient.post('/api/start-notes-collection-analysis', { notes: notesForAnalysis });
-      toast.success(`Análisis de notas en ${groupName} iniciado. ID de tarea: ${response.data.task_id}`, { id: toastId });
-      setCurrentAnalysisTaskId(response.data.task_id);
+      toast.dismiss(toastId);
+      toast.success(`Análisis de notas en ${groupNameStr} completado.`);
+
+      const newAnalysis: Analysis = {
+        id: response.data.task_id || `analysis-${Date.now()}`,
+        type: 'note_collection_analysis',
+        title: `Análisis de Colección: ${groupNameStr}`,
+        created_at: new Date().toISOString(),
+        result: response.data.result_payload
+      };
+
+      setAnalysisResult(newAnalysis);
+      setIsAnalysisResultDialogOpen(true);
     } catch (error) {
-      toast.error(`Error al iniciar el análisis de notas en ${groupName}.`, { id: toastId });
-      console.error(`Error al iniciar el análisis de notas en ${groupName}:`, error);
+      toast.dismiss(toastId);
+      toast.error(`Error al analizar notas en ${groupNameStr}.`);
+      console.error(`Error al analizar notas en ${groupNameStr}:`, error);
     }
   };
 
@@ -275,7 +329,7 @@ export default function NotesPage() {
     }
   };
 
-  const NoteCard = ({ note, onAnalyzeNote, onSummarizeNote, onLinkProfile }: { note: Note, onAnalyzeNote: (note: Note) => void, onSummarizeNote: (note: Note) => void, onLinkProfile: (note: Note) => void }) => {
+  const NoteCard = ({ note, onAnalyzeNote, onLinkProfile, onSummarizeNote }: { note: Note, onAnalyzeNote: (note: Note) => void, onLinkProfile: (note: Note) => void, onSummarizeNote: (note: Note) => void }) => {
     const [{ isDragging }, drag] = useDrag({
       type: 'NOTE',
       item: { id: note.id, category: note.category },
@@ -350,7 +404,7 @@ export default function NotesPage() {
                     onSummarizeNote(note);
                   }}>
                     <FileText className="mr-2 h-4 w-4" />
-                    Resumen Semántico
+                    Resumir Nota
                   </DropdownMenuItem>
                   <DropdownMenuSeparator /> {/* Separador para el nuevo botón */}
                   <DropdownMenuItem onClick={(e) => {
@@ -380,15 +434,15 @@ export default function NotesPage() {
                 <div
                   className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full"
                   style={{
-                      backgroundColor: note.workspace_color ? `${note.workspace_color}20` : '#f3f4f6', // bg-gray-100
+                    backgroundColor: note.workspace_color ? `${note.workspace_color}20` : '#f3f4f6', // bg-gray-100
                   }}
                 >
                   <span
-                      className="h-2 w-2 rounded-full"
-                      style={{ backgroundColor: note.workspace_color || '#888888' }}
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: note.workspace_color || '#888888' }}
                   ></span>
                   <span style={{ color: note.workspace_color || '#374151' }}>
-                      {note.workspace_name}
+                    {note.workspace_name}
                   </span>
                 </div>
               )}
@@ -456,7 +510,7 @@ export default function NotesPage() {
 
   const renderNotes = () => {
     console.log("RenderNotes - notes.length:", notes.length, "isLoading:", isLoading, "workspaceView:", workspaceView, "workspaceGroupView:", workspaceGroupView); // Log para depuración
-    
+
     const filteredNotes = workspaceView
       ? notes.filter(note => note.workspace_id === workspaceView)
       : notes;
@@ -499,7 +553,7 @@ export default function NotesPage() {
               return (
                 <WorkspaceDropZone key={workspaceId} workspace={workspaceInfo} onAnalyzeGroup={handleAnalyzeGroupedNotes}>
                   {workspaceNotes.map((note) => (
-                    <NoteCard key={note.id} note={note} onAnalyzeNote={handleAnalyzeSingleNote} onSummarizeNote={handleSummarizeSingleNote} onLinkProfile={handleLinkProfile} />
+                    <NoteCard key={note.id} note={note} onAnalyzeNote={handleAnalyzeSingleNote} onLinkProfile={handleLinkProfile} onSummarizeNote={handleSummarizeSingleNote} />
                   ))}
                 </WorkspaceDropZone>
               );
@@ -525,7 +579,7 @@ export default function NotesPage() {
             {Object.entries(groupedNotes).map(([category, categoryNotes]) => (
               <CategoryDropZone key={category} category={category} onAnalyzeGroup={handleAnalyzeGroupedNotes}>
                 {categoryNotes.map((note) => (
-                  <NoteCard key={note.id} note={note} onAnalyzeNote={handleAnalyzeSingleNote} onSummarizeNote={handleSummarizeSingleNote} onLinkProfile={handleLinkProfile} />
+                  <NoteCard key={note.id} note={note} onAnalyzeNote={handleAnalyzeSingleNote} onLinkProfile={handleLinkProfile} onSummarizeNote={handleSummarizeSingleNote} />
                 ))}
               </CategoryDropZone>
             ))}
@@ -538,7 +592,7 @@ export default function NotesPage() {
       <motion.div layout className="grid gap-6 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-3">
         <AnimatePresence>
           {filteredNotes.map((note) => (
-            <NoteCard key={note.id} note={note} onAnalyzeNote={handleAnalyzeSingleNote} onSummarizeNote={handleSummarizeSingleNote} onLinkProfile={handleLinkProfile} />
+            <NoteCard key={note.id} note={note} onAnalyzeNote={handleAnalyzeSingleNote} onLinkProfile={handleLinkProfile} onSummarizeNote={handleSummarizeSingleNote} />
           ))}
         </AnimatePresence>
       </motion.div>
@@ -547,189 +601,189 @@ export default function NotesPage() {
 
   return (
     <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold flex items-center">
-              <Notebook className="mr-3 h-8 w-8 text-primary" />
-              Mis Notas
-              <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
-                <Info className="h-4 w-4" />
-              </Button>
-            </h1>
-          </div>
-          <div className="flex items-center gap-2">
-            {!workspaceGroupView && (
-              <Select onValueChange={(value) => setWorkspaceView(value === "all" ? null : value)} value={workspaceView || "all"}>
-                <SelectTrigger className="w-[180px] h-8">
-                  <SelectValue placeholder="Filtrar por Workspace" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas las Notas</SelectItem>
-                  {availableWorkspaces.map((ws) => (
-                    <SelectItem key={ws.id} value={ws.id}>
-                      <div className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ws.color || '#888888' }}></span>
-                        {ws.name}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8 px-2 md:px-4">
-                  <span className="hidden md:inline">Acciones</span> <MoreHorizontal className="md:ml-2 h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[180px]">
-                <DropdownMenuItem onClick={() => { setEditingNote(null); setIsNoteDialogOpen(true); }}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Nueva Nota
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => {
-                  setCategoryView(!categoryView);
-                  if (workspaceGroupView) setWorkspaceGroupView(false); // Desactivar vista por workspace si se activa vista por categoría
-                }}>
-                  {categoryView ? "Vista General" : "Vista por Categoría"}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => {
-                  setWorkspaceGroupView(!workspaceGroupView);
-                  if (categoryView) setCategoryView(false); // Desactivar vista por categoría si se activa vista por workspace
-                  setWorkspaceView(null); // Limpiar filtro de workspace al activar vista agrupada
-                }}>
-                  {workspaceGroupView ? "Vista General" : "Vista por Workspace"}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleAnalyzeAllNotes}>
-                  <Lightbulb className="mr-2 h-4 w-4" />
-                  Analizar Notas
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => toast.info("Funcionalidad 'Resumen Semántico' en desarrollo.")}>
-                  <FileText className="mr-2 h-4 w-4" />
-                  Resumen Semántico
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-
-        {renderNotes()}
-
-        {hasMore && (
-          <div className="flex justify-center mt-8">
-            <Button onClick={handleLoadMore} disabled={isFetchingMore}>
-              {isFetchingMore ? "Cargando más..." : "Ver más"}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center">
+            <Notebook className="mr-3 h-8 w-8 text-primary" />
+            Mis Notas
+            <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+              <Info className="h-4 w-4" />
             </Button>
-          </div>
-        )}
-
-        <NoteDialog
-          isOpen={isNoteDialogOpen}
-          onOpenChange={setIsNoteDialogOpen}
-          note={editingNote}
-          onSaveSuccess={handleSaveSuccess}
-        />
-
-        <ViewNoteDialog
-          isOpen={isViewDialogOpen}
-          onOpenChange={setIsViewDialogOpen}
-          note={viewingNote}
-          onNoteUpdated={() => fetchNotes(0, limit, false)}
-        />
-
-        {linkingNote && ( // Renderizado condicional del diálogo de vinculación
-          <ManageLinkedProfilesDialog
-            isOpen={isLinkProfileDialogOpen}
-            onOpenChange={setIsLinkProfileDialogOpen}
-            item={{ id: String(linkingNote.id), name: linkingNote.title || undefined }} // Convertir id a string y pasar title como name
-            itemType="note" // Especificar el tipo de item
-            onLinkedProfilesUpdated={() => fetchNotes(0, limit, false)}
-            onLink={async (profileId, noteId) => {
-              try {
-                await apiClient.post(`/api/notes/${noteId}/link-profile`, { profile_id: profileId });
-                toast.success('Perfil vinculado exitosamente.');
-                fetchNotes(0, limit, false);
-              } catch (error) {
-                toast.error('Error al vincular el perfil.');
-                console.error('Error linking profile:', error);
-              }
-            }}
-            onUnlink={async (profileId, noteId) => {
-              try {
-                await apiClient.post(`/api/notes/${noteId}/unlink-profile`, { profile_id: profileId });
-                toast.success('Perfil desvinculado exitosamente.');
-                fetchNotes(0, limit, false);
-              } catch (error) {
-                toast.error('Error al desvincular el perfil.');
-                console.error('Error unlinking profile:', error);
-              }
-            }}
-          />
-        )}
-
-        <AlertDialog open={!!deletingNote} onOpenChange={(open) => !open && setDeletingNote(null)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Esta acción es irreversible y eliminará la nota permanentemente.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancelar</AlertDialogCancel>
-              <AlertDialogAction onClick={handleDeleteConfirm} className="bg-destructive hover:bg-destructive/90">Sí, eliminar</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-
-        <AnalysisResultDialog
-          analysis={analysisResult}
-          isOpen={isAnalysisResultDialogOpen}
-          onOpenChange={setIsAnalysisResultDialogOpen}
-        />
-
-        <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
-          <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
-            <SheetHeader>
-              <SheetTitle className="text-xl font-bold text-primary">Módulo de Notas</SheetTitle>
-              <SheetDescription className="text-sm text-muted-foreground">
-                Captura, organiza y gestiona tus ideas, pensamientos y recordatorios de forma eficiente.
-              </SheetDescription>
-            </SheetHeader>
-            <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
-              <p><strong>¿Qué puedes hacer en tus Notas?</strong></p>
-              <ul className="list-disc pl-5 space-y-2">
-                <li><strong>Crear y Editar Notas:</strong> Escribe y organiza tus ideas con títulos y contenido.</li>
-                <li><strong>Categorizar Notas:</strong> Agrupa tus notas por categorías para una mejor organización.</li>
-                <li><strong>Organizar por Workspaces:</strong> Asocia notas a diferentes workspaces para mantener la información segmentada.</li>
-                <li><strong>Análisis de Notas:</strong> Obtén insights y resúmenes semánticos de tus notas, individualmente o en grupos.</li>
-                <li><strong>Vincular a Perfiles:</strong> Conecta tus notas a perfiles de contacto para contextualizar la información.</li>
-                <li><strong>Gestión de Notas:</strong> Edita, elimina y visualiza tus notas fácilmente.</li>
-              </ul>
-
-              <p><strong>Interacción con IA:</strong></p>
-              <p>Además de la gestión manual, puedes interactuar con tus notas a través del chat de IA. Las notas se integran a la "memoria" de Kognito, enriqueciendo sus respuestas por relevancia con la consulta. La IA dispone de herramientas especializadas para:</p>
-              <ul className="list-disc pl-5 space-y-2">
-                <li>Buscar y recuperar información específica de tus notas.</li>
-                <li>Generar resúmenes y extraer ideas clave de tus notas.</li>
-                <li>Responder preguntas utilizando el contenido de tus notas.</li>
-                <li>Crear nuevas notas o expandir las existentes basándose en conversaciones.</li>
-              </ul>
-
-              <p><strong>Beneficios Clave:</strong></p>
-              <ul className="list-disc pl-5 space-y-2">
-                <li><strong>Captura Rápida de Ideas:</strong> No pierdas ningún pensamiento importante.</li>
-                <li><strong>Organización Flexible:</strong> Adapta la estructura de tus notas a tus necesidades.</li>
-                <li><strong>Conocimiento Contextualizado:</strong> Conecta ideas y personas para una comprensión más profunda.</li>
-                <li><strong>Potenciado por IA:</strong> Aprovecha la inteligencia artificial para analizar y gestionar tu conocimiento.</li>
-              </ul>
-
-              <p>¡Convierte tus ideas en conocimiento accionable con el Módulo de Notas!</p>
-            </div>
-          </SheetContent>
-        </Sheet>
+          </h1>
+        </div>
+        <div className="flex items-center gap-2">
+          {!workspaceGroupView && (
+            <Select onValueChange={(value) => setWorkspaceView(value === "all" ? null : value)} value={workspaceView || "all"}>
+              <SelectTrigger className="w-[180px] h-8">
+                <SelectValue placeholder="Filtrar por Workspace" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las Notas</SelectItem>
+                {availableWorkspaces.map((ws) => (
+                  <SelectItem key={ws.id} value={ws.id}>
+                    <div className="flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ws.color || '#888888' }}></span>
+                      {ws.name}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 px-2 md:px-4">
+                <span className="hidden md:inline">Acciones</span> <MoreHorizontal className="md:ml-2 h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-[180px]">
+              <DropdownMenuItem onClick={() => { setEditingNote(null); setIsNoteDialogOpen(true); }}>
+                <Plus className="mr-2 h-4 w-4" />
+                Nueva Nota
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => {
+                setCategoryView(!categoryView);
+                if (workspaceGroupView) setWorkspaceGroupView(false); // Desactivar vista por workspace si se activa vista por categoría
+              }}>
+                {categoryView ? "Vista General" : "Vista por Categoría"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                setWorkspaceGroupView(!workspaceGroupView);
+                if (categoryView) setCategoryView(false); // Desactivar vista por categoría si se activa vista por workspace
+                setWorkspaceView(null); // Limpiar filtro de workspace al activar vista agrupada
+              }}>
+                {workspaceGroupView ? "Vista General" : "Vista por Workspace"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleAnalyzeAllNotes}>
+                <Lightbulb className="mr-2 h-4 w-4" />
+                Analizar Notas
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => toast.info(`Funcionalidad 'Resumen Semántico' en desarrollo.`)}>
+                <FileText className="mr-2 h-4 w-4" />
+                Resumen Semántico
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
+
+      {renderNotes()}
+
+      {hasMore && (
+        <div className="flex justify-center mt-8">
+          <Button onClick={handleLoadMore} disabled={isFetchingMore}>
+            {isFetchingMore ? "Cargando más..." : "Ver más"}
+          </Button>
+        </div>
+      )}
+
+      <NoteDialog
+        isOpen={isNoteDialogOpen}
+        onOpenChange={setIsNoteDialogOpen}
+        note={editingNote}
+        onSaveSuccess={handleSaveSuccess}
+      />
+
+      <ViewNoteDialog
+        isOpen={isViewDialogOpen}
+        onOpenChange={setIsViewDialogOpen}
+        note={viewingNote}
+        onNoteUpdated={() => fetchNotes(0, limit, false)}
+      />
+
+      {linkingNote && ( // Renderizado condicional del diálogo de vinculación
+        <ManageLinkedProfilesDialog
+          isOpen={isLinkProfileDialogOpen}
+          onOpenChange={setIsLinkProfileDialogOpen}
+          item={{ id: String(linkingNote.id), name: linkingNote.title || undefined }} // Convertir id a string y pasar title como name
+          itemType="note" // Especificar el tipo de item
+          onLinkedProfilesUpdated={() => fetchNotes(0, limit, false)}
+          onLink={async (profileId, noteId) => {
+            try {
+              await apiClient.post(`/api/notes/${noteId}/link-profile`, { profile_id: profileId });
+              toast.success('Perfil vinculado exitosamente.');
+              fetchNotes(0, limit, false);
+            } catch (error) {
+              toast.error('Error al vincular el perfil.');
+              console.error('Error linking profile:', error);
+            }
+          }}
+          onUnlink={async (profileId, noteId) => {
+            try {
+              await apiClient.post(`/api/notes/${noteId}/unlink-profile`, { profile_id: profileId });
+              toast.success('Perfil desvinculado exitosamente.');
+              fetchNotes(0, limit, false);
+            } catch (error) {
+              toast.error('Error al desvincular el perfil.');
+              console.error('Error unlinking profile:', error);
+            }
+          }}
+        />
+      )}
+
+      <AlertDialog open={!!deletingNote} onOpenChange={(open) => !open && setDeletingNote(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción es irreversible y eliminará la nota permanentemente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteConfirm} className="bg-destructive hover:bg-destructive/90">Sí, eliminar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AnalysisDetailDialog
+        analysis={analysisResult}
+        isOpen={isAnalysisResultDialogOpen}
+        onOpenChange={setIsAnalysisResultDialogOpen}
+      />
+
+      <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="text-xl font-bold text-primary">Módulo de Notas</SheetTitle>
+            <SheetDescription className="text-sm text-muted-foreground">
+              Captura, organiza y gestiona tus ideas, pensamientos y recordatorios de forma eficiente.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
+            <p><strong>¿Qué puedes hacer en tus Notas?</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Crear y Editar Notas:</strong> Escribe y organiza tus ideas con títulos y contenido.</li>
+              <li><strong>Categorizar Notas:</strong> Agrupa tus notas por categorías para una mejor organización.</li>
+              <li><strong>Organizar por Workspaces:</strong> Asocia notas a diferentes workspaces para mantener la información segmentada.</li>
+              <li><strong>Análisis de Notas:</strong> Obtén insights y resúmenes semánticos de tus notas, individualmente o en grupos.</li>
+              <li><strong>Vincular a Perfiles:</strong> Conecta tus notas a perfiles de contacto para contextualizar la información.</li>
+              <li><strong>Gestión de Notas:</strong> Edita, elimina y visualiza tus notas fácilmente.</li>
+            </ul>
+
+            <p><strong>Interacción con IA:</strong></p>
+            <p>Además de la gestión manual, puedes interactuar con tus notas a través del chat de IA. Las notas se integran a la "memoria" de Kognito, enriqueciendo sus respuestas por relevancia con la consulta. La IA dispone de herramientas especializadas para:</p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li>Buscar y recuperar información específica de tus notas.</li>
+              <li>Generar resúmenes y extraer ideas clave de tus notas.</li>
+              <li>Responder preguntas utilizando el contenido de tus notas.</li>
+              <li>Crear nuevas notas o expandir las existentes basándose en conversaciones.</li>
+            </ul>
+
+            <p><strong>Beneficios Clave:</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Captura Rápida de Ideas:</strong> No pierdas ningún pensamiento importante.</li>
+              <li><strong>Organización Flexible:</strong> Adapta la estructura de tus notas a tus necesidades.</li>
+              <li><strong>Conocimiento Contextualizado:</strong> Conecta ideas y personas para una comprensión más profunda.</li>
+              <li><strong>Potenciado por IA:</strong> Aprovecha la inteligencia artificial para analizar y gestionar tu conocimiento.</li>
+            </ul>
+
+            <p>¡Convierte tus ideas en conocimiento accionable con el Módulo de Notas!</p>
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
   );
 }

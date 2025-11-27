@@ -274,7 +274,7 @@ export default function WorkspacesPage() {
               <li><strong>Productividad Aumentada:</strong> Mejora la eficiencia al tener asistentes de IA especializados a tu disposición.</li>
             </ul>
 
-            <p>¡Crea workspaces para cada aspecto de tu vida profesional o personal y potencia tu experiencia con Kognito AI!</p>
+            <p>{`¡Crea workspaces para cada aspecto de tu vida profesional o personal y potencia tu experiencia con Kognito AI!`}</p>
           </div>
         </SheetContent>
       </Sheet>

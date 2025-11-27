@@ -417,7 +417,7 @@ export default function AdminPage({ params }: PageProps) {
             <DialogHeader>
               <DialogTitle>Editar Usuario</DialogTitle>
               <DialogDescription>
-                Modifica los detalles del usuario "{editingUser?.name}".
+                {`Modifica los detalles del usuario "${editingUser?.name}".`}
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">

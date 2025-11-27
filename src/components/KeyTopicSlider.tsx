@@ -79,7 +79,7 @@ export const KeyTopicSlider: React.FC<KeyTopicSliderProps> = ({
               <h4 className="font-medium text-sm mb-1">Citas:</h4>
               <ul className="list-disc pl-5 text-xs space-y-1">
                 {currentTopic.citations.map((citation, i) => (
-                  <li key={i}>{citation}</li>
+                  <li key={i}>{citation.quote} (Fuente: {citation.document_title})</li>
                 ))}
               </ul>
             </div>

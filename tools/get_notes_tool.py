@@ -9,6 +9,8 @@ from langchain_core.tools import BaseTool
 from core.database import SessionLocal
 from core.notes_manager import NotesManager
 
+from utils.db_session import DBSession
+
 logger = logging.getLogger(__name__)
 
 class GetNotesInput(BaseModel):
@@ -20,6 +22,8 @@ class GetNotesInput(BaseModel):
         None,
         description="Busca un texto específico en el título o contenido de las notas."
     )
+
+from core.citation_models import ToolOutputWithSources, create_note_source
 
 class GetNotesTool(BaseTool):
     name: str = "get_notes_tool"
@@ -34,15 +38,17 @@ class GetNotesTool(BaseTool):
         self,
         category: Optional[str] = None,
         search_query: Optional[str] = None,
+        limit: int = 10,
+        offset: int = 0,
         **kwargs: Any,
-    ) -> str:
+    ) -> ToolOutputWithSources:
         if not self.account_id:
-            return "Error: No se pudo identificar la cuenta del usuario."
+            return ToolOutputWithSources(context_for_llm="Error: Se requiere el ID de la cuenta para obtener las notas.", sources=[])
 
         logger.info(f"Buscando notas para cuenta {self.account_id} con filtros: Categoria='{category}', Query='{search_query}'")
 
         try:
-            async with SessionLocal() as session:
+            async with DBSession(SessionLocal) as session:
                 notes_manager = NotesManager(session)
                 notes_list = []
                 total_notes = 0
@@ -62,20 +68,41 @@ class GetNotesTool(BaseTool):
                     )
 
             if not notes_list:
-                return "No tienes ninguna nota guardada o ninguna coincide con tu búsqueda."
+                return ToolOutputWithSources(context_for_llm="No tienes ninguna nota guardada o ninguna coincide con tu búsqueda.", sources=[])
 
             response_lines = [f"Encontré {total_notes} nota(s). Aquí están las primeras:"]
-            for note in notes_list:
-                title = f"<b>{note['title']}</b>" if note.get('title') else "Nota sin título"
+            sources = []
+            
+            for i, note in enumerate(notes_list):
+                title = note.get('title') or "Nota sin título"
+                content = note.get('content') or ""
+                note_id = str(note.get('id'))
+                category_val = note.get('category') or "Sin categoría"
+                
+                # Crear la representación de texto para el LLM
                 team_info = f" (Equipo: {note['team_id']})" if note.get('team_shared') else ""
                 workspace_info = f" (Workspace: {note.get('workspace_name')})" if note.get('workspace_id') else ""
-                response_lines.append(f"\n- <b>ID: {note['id']}</b> | {title} (Categoría: {note['category']}){team_info}{workspace_info}\n  <i>{note['content']}</i>")
+                response_lines.append(f"\n- <b>ID: {note_id}</b> | {title} (Categoría: {category_val}){team_info}{workspace_info}\n  <i>{content}</i>")
+                
+                # Crear el objeto Source estructurado
+                sources.append(create_note_source(
+                    source_id=i + 1,
+                    title=title,
+                    note_id=note_id,
+                    snippet=content,
+                    metadata={
+                        "category": category_val,
+                        "team_id": note.get('team_id'),
+                        "workspace_id": note.get('workspace_id')
+                    }
+                ))
 
-            return "\n".join(response_lines)
+            context_for_llm = "\n".join(response_lines)
+            return ToolOutputWithSources(context_for_llm=context_for_llm, sources=sources)
 
         except Exception as e:
             logger.error(f"Error al ejecutar get_notes para cuenta {self.account_id}: {e}", exc_info=True)
-            return "Ocurrió un error inesperado al buscar tus notas."
+            return ToolOutputWithSources(context_for_llm="Ocurrió un error inesperado al buscar tus notas.", sources=[])
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError("get_notes_tool no soporta ejecución síncrona.")

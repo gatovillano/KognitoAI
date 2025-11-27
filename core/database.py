@@ -117,9 +117,26 @@ class Account(Base):
     hashed_password = Column(String(255), nullable=True)
     username = Column(String(255), unique=True, nullable=True, index=True) 
     timezone = Column(String(255), nullable=True, default="UTC", comment="Zona horaria preferida de la cuenta.")
-    custom_system_prompt = Column(Text, nullable=True, comment="Prompt de sistema personalizado para la IA de esta cuenta.")
+    custom_system_prompt = Column(Text, nullable=True, comment="Prompt de sistema específico para la IA de esta cuenta.")
     is_admin = Column(Boolean, default=False, nullable=False, comment="Indica si esta cuenta tiene privilegios de administrador.")
     is_active = Column(Boolean, default=True, nullable=False, comment="Indica si esta cuenta está activa y puede usar el sistema.")
+    
+    # Nuevos campos para configuración de usuario
+    phone = Column(String(255), nullable=True, comment="Número de teléfono del usuario.")
+    bio = Column(Text, nullable=True, comment="Biografía o descripción personal del usuario.")
+    
+    # Toggles para módulos
+    profiles_enabled = Column(Boolean, default=False, nullable=False, comment="Indica si el módulo de perfiles está habilitado para la cuenta.")
+    galleries_enabled = Column(Boolean, default=False, nullable=False, comment="Indica si el módulo de galerías está habilitado para la cuenta.")
+    forms_enabled = Column(Boolean, default=False, nullable=False, comment="Indica si el módulo de formularios está habilitado para la cuenta.")
+
+    # Configuraciones adicionales
+    theme = Column(String(50), nullable=False, default="system", comment="Tema de la interfaz de usuario (e.g., 'light', 'dark', 'system').")
+    notifications_email = Column(Boolean, default=True, nullable=False, comment="Indica si las notificaciones por correo electrónico están habilitadas.")
+    notifications_push = Column(Boolean, default=True, nullable=False, comment="Indica si las notificaciones push están habilitadas.")
+    language = Column(String(10), nullable=False, default="en", comment="Idioma preferido de la interfaz de usuario (e.g., 'en', 'es').")
+    privacy_data_sharing = Column(Boolean, default=False, nullable=False, comment="Indica si el usuario permite compartir datos para mejoras del servicio.")
+
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 
     # --- Relaciones con otros modelos ---
@@ -363,6 +380,7 @@ class UserDocumentTopic(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=True, index=True)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete='SET NULL'), nullable=True, index=True) # NUEVA COLUMNA
 
     name = Column(String(255), nullable=False, comment="El nombre del tema/colección (corresponde al 'topic' en cmetadata).")
     description = Column(Text, nullable=True, comment="Descripción opcional de la colección.")
@@ -657,6 +675,8 @@ class AgendaEvent(Base):
     job_name = Column(String, nullable=True, unique=True) # Para poder cancelar los jobs de Telegram
     etag = Column(String, nullable=True)
     duration_minutes = Column(Integer, nullable=True)
+    status = Column(String(50), nullable=False, default="Pendiente", comment="Estado del evento para tableros Kanban (ej. Pendiente, En Progreso, Completado).")
+    end_date = Column(DateTime(timezone=True), nullable=True) # Nuevo campo para la fecha de finalización
 
     contact_profiles = relationship(
         "ContactProfile",
@@ -695,11 +715,13 @@ class AgendaEvent(Base):
             "location": self.location,
             "event_datetime_utc": self.event_datetime_utc.isoformat(),
             "event_datetime_local": local_datetime.isoformat(),
+            "end_date": self.end_date.isoformat() if self.end_date else None, # Nuevo campo
             "user_timezone": str(user_tz),
             "is_active": self.is_active,
             "attendees": [str(att.id) for att in self.attendees],
             "external_attendees": self.external_attendees if self.external_attendees else [],
             "duration_minutes": self.duration_minutes,
+            "status": self.status,
             "etag": self.etag
         }
 
@@ -902,6 +924,8 @@ class Task(Base):
     description = Column(Text, nullable=False)
     is_completed = Column(Boolean, default=False, nullable=False)
     due_date = Column(DateTime(timezone=True), nullable=True)
+    start_date = Column(DateTime(timezone=True), nullable=True) # Nuevo campo para la fecha de inicio
+    end_date = Column(DateTime(timezone=True), nullable=True) # Nuevo campo para la fecha de finalización
     status = Column(String(50), nullable=False, default="Pendiente", comment="Estado de la tarea para tableros Kanban (ej. Pendiente, En Progreso, Completado).")
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
@@ -948,7 +972,7 @@ class GitHubDocument(Base):
     workspace = relationship("Workspace", backref="github_documents")
     account = relationship("Account", backref="github_documents")
 
-    __table_args__ = (UniqueConstraint('repo_url', 'file_path', name='_github_repo_file_uc'),)
+    __table_args__ = (UniqueConstraint('repo_url', 'file_path', name='_github_repo_file_uc'), {'extend_existing': True})
 
     def __repr__(self):
         return f"<GitHubDocument(repo_url='{self.repo_url}', file_path='{self.file_path}')>"
@@ -968,7 +992,7 @@ class AnalyzedPair(Base):
     last_analyzed_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
     
     __table_args__ = (
-        UniqueConstraint('account_id', 'document_id_a', 'document_id_b', name='_account_document_pair_uc'),
+        UniqueConstraint('account_id', 'document_id_a', 'document_id_b', name='_account_document_pair_uc'), {'extend_existing': True}
     )
 
     def __repr__(self):
@@ -1139,7 +1163,7 @@ async def get_or_create_account_from_platform_id(
         Tupla (Account, bool) donde bool indica si la cuenta fue creada (True) o ya existía (False),
         o None si hubo un error.
     """
-    async with SessionLocal() as db_session:
+    async with DBSession(SessionLocal) as db_session:
         try:
             # Buscar identidad existente
             stmt = select(PlatformIdentity).where(

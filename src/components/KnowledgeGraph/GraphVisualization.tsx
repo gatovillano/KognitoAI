@@ -17,8 +17,8 @@ interface VisGraphNode {
 
 interface VisGraphEdge {
   id?: string | number;
-  from: string | number;
-  to: string | number;
+  source: string | number;
+  target: string | number;
   arrows?: string;
   label?: string;
   title?: string;
@@ -34,7 +34,7 @@ interface GraphVisualizationProps {
   } | null;
   isLoading?: boolean;
   error?: string | null;
-  onNodeClick?: (node: GraphNode) => void;
+  onNodeClick?: (node: VisGraphNode) => void;
   // onEdgeClick?: (edge: GraphEdge) => void; // Puedes añadir si necesitas interactividad con aristas
 }
 
@@ -44,8 +44,8 @@ export const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   error = null,
   onNodeClick,
 }) => {
-  const nodes = graphData?.nodes || [];
-  const edges = graphData?.edges || [];
+  const nodes = React.useMemo(() => graphData?.nodes || [], [graphData?.nodes]);
+  const edges = React.useMemo(() => graphData?.edges || [], [graphData?.edges]);
   const visJsContainer = useRef<HTMLDivElement>(null);
   const networkRef = useRef<Network | null>(null);
 
@@ -70,8 +70,8 @@ export const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     
     const visEdges = new DataSet<VisGraphEdge>(edges.map(edge => ({
         id: edge.id,
-        from: edge.source,
-        to: edge.target,
+        source: edge.source,
+        target: edge.target,
         label: edge.label,
         title: edge.properties?.description || edge.label, // Tooltip
         properties: edge.properties,

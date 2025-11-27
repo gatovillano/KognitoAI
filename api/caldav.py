@@ -78,15 +78,28 @@ def _task_to_ical(task: Task, account_timezone: str) -> str:
     ical_todo.add('summary', task.description) # Usamos description como summary para Task
 
     user_tz = pytz.timezone(account_timezone)
-    if task.due_date:
-        # Asumimos que task.due_date ya está en UTC si se guarda así, o se convierte.
-        # Para VTODO, DUE puede ser solo fecha o fecha y hora.
-        # Si task.due_date es datetime, lo convertimos a la zona horaria del usuario.
+    
+    # Map end_date to DUE
+    if task.end_date:
+        if isinstance(task.end_date, datetime):
+            end_date_local = task.end_date.astimezone(user_tz)
+            ical_todo.add('due', vDatetime(end_date_local))
+        else: # Si es solo fecha (aunque el modelo dice DateTime)
+            ical_todo.add('due', task.end_date)
+    elif task.due_date: # Fallback to due_date if end_date is missing
         if isinstance(task.due_date, datetime):
             due_date_local = task.due_date.astimezone(user_tz)
             ical_todo.add('due', vDatetime(due_date_local))
-        else: # Si es solo fecha
+        else:
             ical_todo.add('due', task.due_date)
+
+    # Map start_date to DTSTART
+    if task.start_date:
+        if isinstance(task.start_date, datetime):
+            start_date_local = task.start_date.astimezone(user_tz)
+            ical_todo.add('dtstart', vDatetime(start_date_local))
+        else:
+            ical_todo.add('dtstart', task.start_date)
 
     if task.description:
         ical_todo.add('description', task.description)
@@ -95,6 +108,13 @@ def _task_to_ical(task: Task, account_timezone: str) -> str:
     if task.is_completed:
         ical_todo.add('status', 'COMPLETED')
         ical_todo.add('completed', vDatetime(datetime.now(pytz.utc).astimezone(user_tz))) # Fecha de completado
+    elif task.status:
+        # Map internal status to iCal status if possible, or just use custom property
+        # Standard VTODO statuses: NEEDS-ACTION, COMPLETED, IN-PROCESS, CANCELLED
+        if task.status == 'En Progreso':
+            ical_todo.add('status', 'IN-PROCESS')
+        elif task.status == 'Pendiente':
+            ical_todo.add('status', 'NEEDS-ACTION')
 
     ical_todo.add('dtstamp', vDatetime(datetime.now(pytz.utc))) # Timestamp de la creación/última modificación
 
@@ -195,17 +215,30 @@ async def _ical_to_task_data(ical_data: bytes, account_id: str, db: AsyncSession
             task_data['description'] = str(ical_todo.get('summary', '')) # Usamos summary de iCal como description de Task
             task_data['summary'] = str(ical_todo.get('summary', '')) # También lo guardamos en summary para compatibilidad
 
-            # DUE date
+            # DUE date -> end_date
             due = ical_todo.get('due')
             if due:
                 if isinstance(due.dt, datetime):
-                    task_data['due_date'] = due.dt.astimezone(pytz.utc)
+                    task_data['end_date'] = due.dt.astimezone(pytz.utc)
                 else: # Si es solo fecha
-                    task_data['due_date'] = pytz.utc.localize(datetime(due.dt.year, due.dt.month, due.dt.day, 23, 59, 59))
+                    task_data['end_date'] = pytz.utc.localize(datetime(due.dt.year, due.dt.month, due.dt.day, 23, 59, 59))
             
+            # DTSTART -> start_date
+            dtstart = ical_todo.get('dtstart')
+            if dtstart:
+                if isinstance(dtstart.dt, datetime):
+                    task_data['start_date'] = dtstart.dt.astimezone(pytz.utc)
+                else:
+                    task_data['start_date'] = pytz.utc.localize(datetime(dtstart.dt.year, dtstart.dt.month, dtstart.dt.day, 0, 0, 0))
+
             # STATUS
             status_ical = str(ical_todo.get('status', '')).upper()
             task_data['is_completed'] = (status_ical == 'COMPLETED')
+            
+            if status_ical == 'IN-PROCESS':
+                task_data['status'] = 'En Progreso'
+            elif status_ical == 'NEEDS-ACTION':
+                task_data['status'] = 'Pendiente'
 
             # UID
             task_data['id'] = str(ical_todo.get('uid', uuid.uuid4()))
@@ -391,8 +424,10 @@ async def put_caldav_resource(
                 task_id=int(uid), # El UID de CalDAV se mapea a nuestro ID
                 summary=data.get('summary'),
                 description=data.get('description'),
-                due_date=data.get('due_date'),
+                end_date=data.get('end_date'), # Updated to use end_date
+                start_date=data.get('start_date'), # Added start_date
                 is_completed=data.get('is_completed'),
+                status=data.get('status'), # Added status update
             )
             if not updated_instance:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al actualizar la tarea.")
@@ -422,7 +457,8 @@ async def put_caldav_resource(
             success, message, new_instance = await create_task(
                 account_id=current_account_id,
                 description=data.get('description', 'Tarea CalDAV'),
-                due_date=data.get('due_date'),
+                end_date=data.get('end_date'), # Updated to use end_date
+                start_date=data.get('start_date'), # Added start_date
                 is_completed=data.get('is_completed', False),
                 task_id=task_id_to_use # Pasar el UID como task_id
             )
@@ -649,9 +685,12 @@ async def report_caldav_calendar_collection(
     tasks = await get_tasks_as_dicts(current_account_id, include_completed=True) # Incluir completadas para REPORT
 
     for task in tasks:
-        # Asumiendo que due_date es el campo relevante para el rango de tiempo
-        if task['due_date']:
-            task_dt_utc = datetime.fromisoformat(task['due_date'].replace("Z", "+00:00"))
+        # Asumiendo que end_date es el campo relevante para el rango de tiempo (o start_date)
+        # Usamos end_date como principal referencia para el filtro de tiempo si existe
+        check_date = task['end_date'] if task['end_date'] else task['due_date']
+        
+        if check_date:
+            task_dt_utc = datetime.fromisoformat(check_date.replace("Z", "+00:00"))
             if (not start_time_utc or task_dt_utc >= start_time_utc) and \
                (not end_time_utc or task_dt_utc <= end_time_utc):
                 
@@ -669,8 +708,11 @@ async def report_caldav_calendar_collection(
                     id=task['id'],
                     account_id=uuid.UUID(task['account_id']),
                     description=task['description'],
-                    due_date=task_dt_utc,
+                    due_date=task['due_date'], # Keep due_date for fallback in _task_to_ical
+                    end_date=datetime.fromisoformat(task['end_date'].replace("Z", "+00:00")) if task['end_date'] else None,
+                    start_date=datetime.fromisoformat(task['start_date'].replace("Z", "+00:00")) if task['start_date'] else None,
                     is_completed=task['is_completed'],
+                    status=task.get('status'),
                     etag=task['etag'] # Incluir el ETag
                 )
                 caldata.text = _task_to_ical(task_obj, account.timezone)

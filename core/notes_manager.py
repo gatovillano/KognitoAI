@@ -95,16 +95,19 @@ class NotesManager:
                 except ValueError:
                     raise HTTPException(status_code=400, detail=f"El ID de workspace '{workspace_id}' proporcionado no es un UUID válido.")
 
-        base_stmt = select(Nota).where(Nota.account_id == account_uuid)
-
+        # Si se especifica un workspace, mostrar TODAS las notas de ese workspace
+        # (no solo las del usuario actual), después de verificar permisos
         if workspace_uuid:
             try:
                 await check_workspace_permission(str(account_uuid), str(workspace_uuid), self.db, required_roles=['admin', 'owner', 'member', 'viewer'])
             except Exception as e:
                 logger.warning(f"Permission denied for account {account_id} on workspace {workspace_id}: {e}")
                 return 0, []
-            base_stmt = base_stmt.where(Nota.workspace_id == workspace_uuid)
+            # Mostrar todas las notas del workspace, sin filtrar por account_id
+            base_stmt = select(Nota).where(Nota.workspace_id == workspace_uuid)
         else:
+            # Si no se especifica workspace, mostrar notas personales y de workspaces accesibles
+            base_stmt = select(Nota).where(Nota.account_id == account_uuid)
             accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == account_uuid)
             result = await self.db.execute(accessible_workspaces_stmt)
             accessible_workspace_ids = [row[0] for row in result.fetchall()]
@@ -127,8 +130,12 @@ class NotesManager:
         total_result = await self.db.execute(total_stmt)
         total_notes = total_result.scalar_one()
 
-        # Obtener notas paginadas
-        paginated_stmt = base_stmt.options(selectinload(Nota.contact_profiles), selectinload(Nota.workspace)).order_by(Nota.created_at.desc()).offset(skip).limit(limit)
+        # Obtener notas paginadas, incluyendo información del creador
+        paginated_stmt = base_stmt.options(
+            selectinload(Nota.contact_profiles), 
+            selectinload(Nota.workspace),
+            selectinload(Nota.account)
+        ).order_by(Nota.created_at.desc()).offset(skip).limit(limit)
         
         logger.info(f"SQL statement for paginated notes: {paginated_stmt}")
         result = await self.db.execute(paginated_stmt)
@@ -143,6 +150,8 @@ class NotesManager:
                 "workspace_id": str(note.workspace_id) if note.workspace_id else None,
                 "workspace_name": note.workspace.name if note.workspace else None,
                 "workspace_color": note.workspace.color if note.workspace else None,
+                "created_by_account_id": str(note.account_id),
+                "created_by_email": note.account.email if note.account else None,
                 "linked_profiles": [{
                     "id": str(cp.id),
                     "account_id": str(cp.account_id),
@@ -409,7 +418,11 @@ class NotesManager:
         """
         logger.info(f"Consultando nota {note_id} para la cuenta {account_id}.")
         
-        stmt = select(Nota).options(selectinload(Nota.contact_profiles), selectinload(Nota.workspace)).where(
+        stmt = select(Nota).options(
+            selectinload(Nota.contact_profiles), 
+            selectinload(Nota.workspace),
+            selectinload(Nota.account)
+        ).where(
             Nota.id == note_id,
             Nota.account_id == uuid.UUID(account_id)
         )
@@ -448,5 +461,7 @@ class NotesManager:
             "workspace_id": str(note.workspace_id) if note.workspace_id else None,
             "workspace_name": note.workspace.name if note.workspace else None,
             "workspace_color": note.workspace.color if note.workspace else None,
+            "created_by_account_id": str(note.account_id),
+            "created_by_email": note.account.email if note.account else None,
             "linked_profiles": linked_profiles_data
         }

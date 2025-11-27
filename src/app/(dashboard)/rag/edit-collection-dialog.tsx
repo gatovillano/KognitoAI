@@ -31,32 +31,61 @@ export function EditCollectionDialog({ isOpen, onOpenChange, onEditSuccess, coll
   const [topicName, setTopicName] = useState('');
   const [description, setDescription] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>('');
+  const [workspaces, setWorkspaces] = useState<Array<{ id: string; name: string; color?: string }>>([]);
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
 
   useEffect(() => {
     if (isOpen && collection) {
       setTopicName(collection.topic);
       setDescription(collection.description || '');
+      setSelectedWorkspaceId(collection.workspace_id || '');
     }
   }, [isOpen, collection]);
 
+  useEffect(() => {
+    const fetchWorkspaces = async () => {
+      setLoadingWorkspaces(true);
+      try {
+        const response = await apiClient.get('/api/workspaces');
+        if (Array.isArray(response.data)) {
+          setWorkspaces(response.data);
+        } else if (response.data && Array.isArray(response.data.workspaces)) {
+          setWorkspaces(response.data.workspaces);
+        } else {
+          console.warn("API /api/workspaces did not return an array:", response.data);
+          setWorkspaces([]);
+        }
+      } catch (error) {
+        console.error("Error fetching workspaces:", error);
+        toast.error('Error al cargar los workspaces.');
+      } finally {
+        setLoadingWorkspaces(false);
+      }
+    };
+    if (isOpen) {
+      fetchWorkspaces();
+    }
+  }, [isOpen]);
+
   const handleEdit = async () => {
     if (!collection) return;
-    
+
     if (!topicName.trim() || topicName.trim().length < 3) {
       toast.error("El nombre de la colección debe tener al menos 3 caracteres.");
       return;
     }
-    
+
     setIsLoading(true);
     try {
       await apiClient.post('/api/update-collection', {
         old_topic: collection.topic,
         new_topic: topicName.trim() !== collection.topic ? topicName.trim() : undefined,
         new_description: description.trim() !== (collection.description || '') ? description.trim() : undefined,
-        workspace_id: workspaceId, // Pass workspaceId
+        workspace_id: selectedWorkspaceId || undefined, // Send selected workspace
         team_id: teamId           // Pass teamId
       });
-      
+
       toast.success(`Colección "${topicName}" actualizada exitosamente.`);
       onEditSuccess();
       onOpenChange(false);
@@ -72,6 +101,7 @@ export function EditCollectionDialog({ isOpen, onOpenChange, onEditSuccess, coll
     onOpenChange(false);
     setTopicName('');
     setDescription('');
+    setSelectedWorkspaceId('');
   };
 
   return (
@@ -86,8 +116,8 @@ export function EditCollectionDialog({ isOpen, onOpenChange, onEditSuccess, coll
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="topic-name">Nombre de la Colección</Label>
-            <Input 
-              id="topic-name" 
+            <Input
+              id="topic-name"
               value={topicName}
               onChange={(e) => setTopicName(e.target.value)}
               placeholder="Ej: Proyectos 2025"
@@ -95,13 +125,30 @@ export function EditCollectionDialog({ isOpen, onOpenChange, onEditSuccess, coll
           </div>
           <div className="space-y-2">
             <Label htmlFor="description">Descripción (Opcional)</Label>
-            <Textarea 
-              id="description" 
+            <Textarea
+              id="description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Describe el propósito de esta colección..."
               rows={3}
             />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="workspace">Workspace (Opcional)</Label>
+            <select
+              id="workspace"
+              className="w-full border rounded-md p-2"
+              value={selectedWorkspaceId}
+              onChange={(e) => setSelectedWorkspaceId(e.target.value)}
+              disabled={loadingWorkspaces}
+            >
+              <option value="">{loadingWorkspaces ? "Cargando workspaces..." : "Ninguno"}</option>
+              {workspaces.map(workspace => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
         <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">

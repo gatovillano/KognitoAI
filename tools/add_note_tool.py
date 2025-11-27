@@ -3,30 +3,31 @@
 import logging
 import asyncio
 from typing import Type, Any, Optional
-from pydantic import BaseModel, Field
-from langchain.tools import BaseTool
+from pydantic.v1 import BaseModel, Field
+from langchain_core.tools import BaseTool
+
 
 from core.database import SessionLocal
 from core.notes_manager import NotesManager
 
+from utils.db_session import DBSession
+
 logger = logging.getLogger(__name__)
 
 class AddNoteInput(BaseModel):
-    content: str = Field(description="El contenido principal de la nota a guardar.")
-    title: str = Field(default="", description="Un título opcional para la nota.")
-    category: str = Field(default="General", description="Una categoría opcional para la nota.")
+    content: str = Field(..., description="El contenido principal de la nota.")
+    title: str = Field(default="", description="Título opcional para la nota.")
+    category: str = Field(default="General", description="Categoría para organizar la nota.")
 
 class AddNoteTool(BaseTool):
-    name: str = "add_note_tool"
-    description: str = (
-        "Útil para cuando un usuario quiere crear o guardar una nueva nota, apunte o idea. "
-        "Debes proporcionar el contenido y, opcionalmente, un título y una categoría."
-    )
+    name: str = "add_note"
+    description: str = "Guarda una nota de texto en la memoria del usuario. Útil para recordar información importante, ideas o tareas."
     args_schema: Type[BaseModel] = AddNoteInput
-    account_id: Optional[str] = Field(None, description="ID de la cuenta a la que pertenece la nota.")
-    workspace_id: Optional[str] = Field(None, description="ID del espacio de trabajo al que pertenece la nota.")
-    telegram_id: Optional[str] = Field(None, description="ID de Telegram del usuario.")
-    thread_id: Optional[str] = Field(None, description="ID del hilo de conversación.")
+    account_id: str
+    workspace_id: Optional[str] = Field(None, description="El ID del espacio de trabajo del usuario.")
+    telegram_id: Optional[int] = Field(None, description="El ID de usuario de Telegram.")
+
+
 
     async def _arun(
         self,
@@ -39,7 +40,7 @@ class AddNoteTool(BaseTool):
             return "Error: Se requiere el ID de la cuenta y el contenido para guardar una nota."
         
         try:
-            async with SessionLocal() as session:
+            async with DBSession(SessionLocal) as session:
                 notes_manager = NotesManager(session)
                 result_dict = await notes_manager.add_note(
                     account_id=self.account_id,

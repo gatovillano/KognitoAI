@@ -20,12 +20,13 @@ from pydantic import BaseModel
 from sqlalchemy import select, text, update
 import asyncio
 
-from core.database import SessionLocal, LangchainPgCollection, UploadTask, GitHubDocument, get_db_session
+from core.database import SessionLocal, LangchainPgCollection, UploadTask, GitHubDocument
 from utils.security import get_current_account_id, check_workspace_permission
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.document_parser import extract_text_and_metadata_from_document
 from core.memory_manager import process_document_for_rag, list_user_documents, list_user_documents_all_teams, delete_document_chunks, get_full_document_content, update_document_metadata, list_user_collections, link_profile_to_collection, unlink_profile_from_collection, get_user_document_topic_by_name, update_collection_workspace, create_empty_collection
 from utils.db_session import DBSession
+from core.dependencies import get_db_session
 from tools.add_web_to_rag_tool import AddWebToRAGTool
 from core.websocket_manager import send_personal_message
 from core.tasks import process_upload_task, extract_titles_and_update_metadata, process_knowledge_graph
@@ -50,6 +51,7 @@ async def link_profile_to_collection_endpoint(
     topic: str = Depends(decoded_topic),
     current_account_id: str = Depends(get_current_account_id),
     workspace_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db_session)
     # team_id: Optional[str] = Query(None) # Eliminado, ya no se usa team_id
 ):
     """
@@ -57,9 +59,9 @@ async def link_profile_to_collection_endpoint(
     """
     # Verificar permisos de workspace si se proporciona
     if workspace_id:
-        async with DBSession(SessionLocal) as db:
-            if not await check_workspace_permission(current_account_id, workspace_id, db, required_roles=["owner", "editor"]):
-                raise HTTPException(status_code=403, detail="No tienes permiso para vincular perfiles a colecciones en este workspace.")
+        if not await check_workspace_permission(current_account_id, workspace_id, db, required_roles=["owner", "editor"]):
+            raise HTTPException(status_code=403, detail="No tienes permiso para vincular perfiles a colecciones en este workspace.")
+
 
     success = await link_profile_to_collection(
         account_id=current_account_id,
@@ -83,9 +85,8 @@ async def unlink_profile_from_collection_endpoint(
     """
     # Verificar permisos de workspace si se proporciona
     if workspace_id:
-        async with DBSession(SessionLocal) as db:
-            if not await check_workspace_permission(current_account_id, workspace_id, db, required_roles=["owner", "editor"]):
-                raise HTTPException(status_code=403, detail="No tienes permiso para desvincular perfiles de colecciones en este workspace.")
+        if not await check_workspace_permission(current_account_id, workspace_id, db, required_roles=["owner", "editor"]):
+            raise HTTPException(status_code=403, detail="No tienes permiso para desvincular perfiles de colecciones en este workspace.")
 
     success = await unlink_profile_from_collection(
         account_id=current_account_id,
@@ -112,9 +113,8 @@ async def upload_document_endpoint(
 
     # Verificar permisos de workspace si se proporciona
     if workspace_id:
-        async with DBSession(SessionLocal) as db_session:
-            if not await check_workspace_permission(current_account_id, workspace_id, db_session, required_roles=["owner", "editor"]):
-                raise HTTPException(status_code=403, detail="No tienes permiso para subir documentos a este workspace.")
+        if not await check_workspace_permission(current_account_id, workspace_id, db, required_roles=["owner", "editor"]):
+            raise HTTPException(status_code=403, detail="No tienes permiso para subir documentos a este workspace.")
 
     # Leer y almacenar los datos de los archivos
     file_data_list = []
@@ -182,6 +182,7 @@ async def upload_chat_document_endpoint(
     current_account_id: str = Depends(get_current_account_id),
     file: UploadFile = File(...),
     workspace_id: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Sube un documento para el contexto de un chat, lo procesa para RAG y lo devuelve.
@@ -189,9 +190,8 @@ async def upload_chat_document_endpoint(
     """
     # Verificar permisos de workspace si se proporciona
     if workspace_id:
-        async with DBSession(SessionLocal) as db_session:
-            if not await check_workspace_permission(current_account_id, workspace_id, db_session, required_roles=["owner", "editor", "viewer"]):
-                raise HTTPException(status_code=403, detail="No tienes permiso para subir documentos a este workspace.")
+        if not await check_workspace_permission(current_account_id, workspace_id, db, required_roles=["owner", "editor", "viewer"]):
+            raise HTTPException(status_code=403, detail="No tienes permiso para subir documentos a este workspace.")
 
     try:
         content_bytes = await file.read()
@@ -242,9 +242,8 @@ async def list_documents_endpoint(
     
     # Verificar permisos de workspace si se proporciona
     if workspace_id:
-        async with DBSession(SessionLocal) as db_session:
-            if not await check_workspace_permission(current_account_id, workspace_id, db_session, required_roles=["owner", "editor", "viewer"]):
-                raise HTTPException(status_code=403, detail="No tienes permiso para listar documentos de este workspace.")
+        if not await check_workspace_permission(current_account_id, workspace_id, db, required_roles=["owner", "editor", "viewer"]):
+            raise HTTPException(status_code=403, detail="No tienes permiso para listar documentos de este workspace.")
 
     # Usar list_user_documents para filtrar por workspace_id
     # Si workspace_id es None, list_user_documents listará documentos con workspace_id IS NULL
@@ -291,9 +290,8 @@ async def delete_document_endpoint(
 
     # Verificar permisos de workspace si se proporciona
     if request.workspace_id:
-        async with DBSession(SessionLocal) as db_session:
-            if not await check_workspace_permission(current_account_id, request.workspace_id, db_session, required_roles=["owner", "editor"]):
-                raise HTTPException(status_code=403, detail="No tienes permiso para eliminar documentos de este workspace.")
+        if not await check_workspace_permission(current_account_id, request.workspace_id, db, required_roles=["owner", "editor"]):
+            raise HTTPException(status_code=403, detail="No tienes permiso para eliminar documentos de este workspace.")
 
     success = await delete_document_chunks(
         account_id=str(account_id_uuid),
@@ -325,9 +323,8 @@ async def update_document_metadata_endpoint(
     # Por simplicidad, asumiremos que si request.workspace_id es None, es un documento personal
     # Si request.workspace_id está presente, verificamos permisos
     if request.workspace_id:
-        async with DBSession(SessionLocal) as db_session:
-            if not await check_workspace_permission(current_account_id, request.workspace_id, db_session, required_roles=["owner", "editor"]):
-                raise HTTPException(status_code=403, detail="No tienes permiso para actualizar metadatos de documentos en este workspace.")
+        if not await check_workspace_permission(current_account_id, request.workspace_id, db, required_roles=["owner", "editor"]):
+            raise HTTPException(status_code=403, detail="No tienes permiso para actualizar metadatos de documentos en este workspace.")
 
     # Usa los datos del objeto 'request'
     success = await update_document_metadata(
@@ -429,6 +426,7 @@ async def get_collection_details_by_name(
     current_account_id: str = Depends(get_current_account_id),
     topic: str = Depends(decoded_topic),
     workspace_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db_session)
     # team_id: Optional[str] = Query(None) # Eliminado, ya no se usa team_id
 ):
     """
@@ -436,9 +434,8 @@ async def get_collection_details_by_name(
     """
     # Verificar permisos de workspace si se proporciona
     if workspace_id:
-        async with DBSession(SessionLocal) as db_session:
-            if not await check_workspace_permission(current_account_id, workspace_id, db_session, required_roles=["owner", "editor", "viewer"]):
-                raise HTTPException(status_code=403, detail="No tienes permiso para acceder a esta colección.")
+        if not await check_workspace_permission(current_account_id, workspace_id, db, required_roles=["owner", "editor", "viewer"]):
+            raise HTTPException(status_code=403, detail="No tienes permiso para acceder a esta colección.")
 
     collection_details = await get_user_document_topic_by_name(
         account_id=current_account_id,

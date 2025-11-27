@@ -9,7 +9,7 @@ import { ChatAvatar } from './ChatAvatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
 import { ExternalLink } from 'lucide-react';
-import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon } from 'lucide-react';
+import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon, Notebook } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 
 export interface Source {
@@ -17,7 +17,7 @@ export interface Source {
   title: string;
   url: string;
   snippet: string;
-  type: 'web' | 'document' | 'memory' | 'code' | 'database';
+  type: 'web' | 'document' | 'memory' | 'code' | 'database' | 'note';
   metadata?: Record<string, any>;
   name?: string; // Añadir esta línea para el nombre del documento/memoria
 }
@@ -77,6 +77,8 @@ export const SourceButton: React.FC<{ source: Source; citationNumber: number }> 
         return <svg className="h-3 w-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
           <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z" />
         </svg>;
+      case 'note':
+        return <Notebook className="h-3 w-3 mr-1" />;
       default:
         return <FileIcon className="h-3 w-3 mr-1" />;
     }
@@ -121,9 +123,15 @@ export const SourceButton: React.FC<{ source: Source; citationNumber: number }> 
               Relevancia: {Math.round(source.metadata.similarity_score * 100)}%
             </div>
           )}
-          {source.url && (source.type === 'document' || source.type === 'memory' || source.type === 'code' || source.type === 'database') && (
+          {source.url && (source.type === 'document' || source.type === 'memory' || source.type === 'code' || source.type === 'database' || source.type === 'note') && (
             <div className="text-xs text-muted-foreground mt-2 break-all">
-              Fuente: {source.url}
+              Fuente: {source.type === 'note' && source.url.startsWith('note://') ? (
+                <a href={`/notes/${source.url.replace('note://', '')}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                  {source.title}
+                </a>
+              ) : (
+                source.url
+              )}
             </div>
           )}
         </DialogContent>
@@ -258,12 +266,21 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     uniqueSources
   );
 
+  // Determinar si el mensaje está en streaming
+  const isStreaming = msg.chunks !== undefined && msg.chunks.length > 0;
+
   return (
     <motion.div
       key={index}
-      initial={{ opacity: 0, y: 0 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: "easeOut" }}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{
+        opacity: 1,
+        y: 0
+      }}
+      transition={{
+        duration: 0.6,
+        ease: "easeOut"
+      }}
       className="group"
     >
       {msg.sender === 'user' ? (
@@ -275,7 +292,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
             <div
               className="rounded-3xl rounded-br-none px-4 py-2 shadow-sm bg-muted/80 backdrop-blur-sm text-foreground border border-border/10 relative min-w-[100px]">
               {/* Cola de la burbuja */}
-              
+
               {isEditing ? (
                 <textarea
                   value={editedText}
@@ -303,20 +320,20 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                   </div>
                 </div>
               )}
- 
-               {msg.image_base64 && (
-                 <div className="mt-3">
-                   <Image
-                     src={msg.image_base64}
-                     alt="Imagen adjunta"
-                     className="max-w-full h-auto rounded-2xl cursor-pointer shadow-sm"
-                     onClick={() => window.open(msg.image_base64, '_blank')}
-                     width={500} // Asumiendo un ancho razonable
-                     height={500} // Asumiendo una altura razonable
-                   />
-                 </div>
-               )}
-               {msg.document_url && (
+
+              {msg.image_base64 && (
+                <div className="mt-3">
+                  <Image
+                    src={msg.image_base64}
+                    alt="Imagen adjunta"
+                    className="max-w-full h-auto rounded-2xl cursor-pointer shadow-sm"
+                    onClick={() => window.open(msg.image_base64, '_blank')}
+                    width={500} // Asumiendo un ancho razonable
+                    height={500} // Asumiendo una altura razonable
+                  />
+                </div>
+              )}
+              {msg.document_url && (
                 <div className="mt-3 flex items-center gap-2 text-white/80 hover:text-white cursor-pointer" onClick={() => window.open(msg.document_url, '_blank')}>
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
@@ -373,7 +390,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                 <span className="font-semibold text-foreground">KAI</span>
                 <span className="text-lg text-muted-foreground">Assistant</span>
               </div>
-              
+
               <div className="w-full">
                 {msg.tool_code && (
                   <div className="bg-blue-900/20 p-3 rounded-lg text-sm text-blue-200 font-mono mb-4">
@@ -390,8 +407,17 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                     placeholder="Edita tu mensaje aquí..."
                   />
                 ) : (
-                  <div className="text-foreground break-words font-sans p-4 font-normal">
-                    {msg.sender === 'ai' && (msg.sources?.length > 0 || additionalSourcesToDisplay.length > 0) && /\[(\d+)\]/.test(msg.chunks?.join('') || msg.text) ? (
+                  <motion.div
+                    className="text-foreground break-words font-sans p-4 font-normal"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{
+                      duration: 0.5,
+                      ease: "easeInOut"
+                    }}
+                  >
+                    {msg.sender === 'ai' && (msg.sources && msg.sources.length > 0 || additionalSourcesToDisplay.length > 0) && /\[(\d+)\]/.test(msg.chunks?.join('') || msg.text) ? (
                       (() => {
                         // processMessageWithCitations ahora devuelve contentParts
                         const { contentParts, uncitedSources } = processMessageWithCitations(msg.chunks?.join('') || msg.text, uniqueSources);
@@ -408,9 +434,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                     ) : (
                       <MarkdownRenderer content={msg.chunks?.join('') || msg.text} fontSize="text-xl" isStreaming={msg.chunks !== undefined} />
                     )}
-                  </div>
+                  </motion.div>
                 )}
-               
+
                 {msg.document_url && (
                   <div className="mt-3 flex items-center gap-2 text-muted-foreground hover:text-foreground cursor-pointer" onClick={() => window.open(msg.document_url, '_blank')}>
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -430,7 +456,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                 )}
 
               </div>
-              
+
               {/* Botones de acción */}
               <div className="flex items-center gap-1 mt-0 ml-3 opacity-0 group-hover:opacity-100">
                 <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full" onClick={() => handleCopyMessage(msg.text)}>
