@@ -26,7 +26,6 @@ const formSchema = z.object({
   end_time: z.string().optional(), // Nuevo campo
   attendee_ids: z.array(z.string()).optional(), // Asistentes registrados (UUIDs)
   external_attendees: z.array(z.string()).optional(), // Asistentes externos (nombres)
-  team_id: z.string().optional(),
   workspace_id: z.string().optional(),
   status: z.enum(['Pendiente', 'En Progreso', 'Hecho']).optional(),
   duration_minutes: z.number().optional(),
@@ -42,8 +41,6 @@ interface EventDialogProps {
 }
 
 export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, event, initialDate }: EventDialogProps) {
-  const [teams, setTeams] = useState<any[]>([]);
-  const [loadingTeams, setLoadingTeams] = useState(false);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
 
@@ -59,28 +56,20 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
       end_time: '', // Nuevo campo
       attendee_ids: [],
       external_attendees: [],
-      team_id: '',
       workspace_id: '',
     },
   });
 
   useEffect(() => {
     const fetchTeamsAndWorkspaces = async () => {
-      setLoadingTeams(true);
       setLoadingWorkspaces(true);
       try {
-        const [teamsRes, workspacesRes] = await Promise.all([
-          apiClient.get('/api/teams'),
-          apiClient.get('/api/workspaces'),
-        ]);
-        setTeams(teamsRes.data);
+        const workspacesRes = await apiClient.get('/api/workspaces');
         setWorkspaces(workspacesRes.data.workspaces);
         console.log("Workspaces cargados:", workspacesRes.data.workspaces);
       } catch (error) {
         console.error("Error fetching teams or workspaces:", error);
-        toast.error('Error al cargar datos necesarios.');
       } finally {
-        setLoadingTeams(false);
         setLoadingWorkspaces(false);
       }
     };
@@ -106,7 +95,6 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
           end_time: endDateTime ? endDateTime.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false }) : '', // Inicializar end_time
           attendee_ids: event.attendees ? event.attendees.map(String) : [],
           external_attendees: event.external_attendees || [],
-          team_id: (typeof event.team_shared === 'string' ? event.team_shared : '') || '',
           status: (event as any).status || 'Pendiente',
           duration_minutes: (event as any).duration_minutes || undefined,
           // workspace_id se establecerá en un useEffect separado
@@ -123,7 +111,6 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
           time: defaultTime,
           end_date: '', // Resetear end_date
           end_time: '', // Resetear end_time
-          team_id: '',
           workspace_id: workspaceId || '',
           status: 'Pendiente',
           duration_minutes: undefined,
@@ -238,64 +225,45 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
               </FormItem>
             )} />
             <div className="grid grid-cols-2 gap-4">
-                <FormField control={form.control} name="date" render={({ field }) => (
+              <FormField control={form.control} name="date" render={({ field }) => (
                 <FormItem><FormLabel>Fecha Inicio</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
-                )} />
-                <FormField control={form.control} name="time" render={({ field }) => (
+              )} />
+              <FormField control={form.control} name="time" render={({ field }) => (
                 <FormItem><FormLabel>Hora Inicio</FormLabel><FormControl><Input type="time" {...field} /></FormControl><FormMessage /></FormItem>
-                )} />
+              )} />
             </div>
             <div className="grid grid-cols-2 gap-4">
-                <FormField control={form.control} name="end_date" render={({ field }) => (
+              <FormField control={form.control} name="end_date" render={({ field }) => (
                 <FormItem><FormLabel>Fecha Fin</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
-                )} />
-                <FormField control={form.control} name="end_time" render={({ field }) => (
+              )} />
+              <FormField control={form.control} name="end_time" render={({ field }) => (
                 <FormItem><FormLabel>Hora Fin</FormLabel><FormControl><Input type="time" {...field} /></FormControl><FormMessage /></FormItem>
-                )} />
+              )} />
             </div>
-            <FormField control={form.control} name="team_id" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Compartir con Equipo</FormLabel>
-                <FormControl>
-                  <select 
-                    className="w-full border rounded-md p-2"
-                    {...field}
-                    disabled={loadingTeams}
-                  >
-                    <option value="">{loadingTeams ? "Cargando equipos..." : "Seleccionar equipo (opcional)"}</option>
-                    {teams.map(team => (
-                      <option key={team.id} value={team.id.toString()}>
-                        {team.name}
-                      </option>
-                    ))}
-                  </select>
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
             <FormField control={form.control} name="workspace_id" render={({ field }) => {
               console.log("Renderizando select de Workspace:", { fieldValue: field.value, workspaces });
               return (
-              <FormItem>
-                <FormLabel>Asociar a Workspace</FormLabel>
-                <FormControl>
-                  <select
-                    key={event?.id ? event.id + workspaces.length : 'new' + workspaces.length} // Añadir key para forzar re-render
-                    className="w-full border rounded-md p-2"
-                    {...field}
-                    disabled={loadingWorkspaces}
-                  >
-                    <option value="">{loadingWorkspaces ? "Cargando workspaces..." : "Seleccionar workspace (opcional)"}</option>
-                    {workspaces.map(ws => (
-                      <option key={ws.id} value={ws.id.toString()}>
-                        {ws.name}
-                      </option>
-                    ))}
-                  </select>
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}} />
+                <FormItem>
+                  <FormLabel>Asociar a Workspace</FormLabel>
+                  <FormControl>
+                    <select
+                      key={event?.id ? event.id + workspaces.length : 'new' + workspaces.length} // Añadir key para forzar re-render
+                      className="w-full border rounded-md p-2"
+                      {...field}
+                      disabled={loadingWorkspaces}
+                    >
+                      <option value="">{loadingWorkspaces ? "Cargando workspaces..." : "Seleccionar workspace (opcional)"}</option>
+                      {workspaces.map(ws => (
+                        <option key={ws.id} value={ws.id.toString()}>
+                          {ws.name}
+                        </option>
+                      ))}
+                    </select>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )
+            }} />
             <DialogFooter>
               <Button type="submit" disabled={form.formState.isSubmitting}>
                 {form.formState.isSubmitting ? (event ? 'Guardando...' : 'Agendando...') : (event ? 'Guardar Cambios' : 'Agendar')}

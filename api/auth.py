@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, HTTPException, Depends, status, Form
+from fastapi import APIRouter, HTTPException, Depends, status, Form, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field, EmailStr
@@ -149,6 +149,10 @@ def verify_telegram_hash(data: TelegramLoginRequest, bot_token: str) -> bool:
     secret_key = hashlib.sha256(bot_token.encode()).digest()
     calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(calculated_hash, data.hash)
+
+
+
+
 
 @router.post("/auth/telegram/callback", response_model=TokenResponse, summary="Callback de Login Social de Telegram")
 async def handle_telegram_login(login_data: TelegramLoginRequest, db: AsyncSession = Depends(get_db_session)):

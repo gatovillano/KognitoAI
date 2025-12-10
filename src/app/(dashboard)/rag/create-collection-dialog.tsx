@@ -22,28 +22,7 @@ export function CreateCollectionDialog({ isOpen, onOpenChange, onCreateSuccess }
 
   const [topicName, setTopicName] = useState('');
   const [description, setDescription] = useState('');
-  const [teamId, setTeamId] = useState('');
-  const [teams, setTeams] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [loadingTeams, setLoadingTeams] = useState(false);
-
-  useEffect(() => {
-    const fetchTeams = async () => {
-      setLoadingTeams(true);
-      try {
-        const response = await apiClient.get('/api/teams');
-        setTeams(response.data);
-      } catch (error) {
-        console.error("Error fetching teams:", error);
-        toast.error('Error al cargar los equipos.');
-      } finally {
-        setLoadingTeams(false);
-      }
-    };
-    if (isOpen) {
-      fetchTeams();
-    }
-  }, [isOpen]);
 
   const handleCreate = async () => {
     if (!topicName.trim() || topicName.trim().length < 3) {
@@ -61,7 +40,6 @@ export function CreateCollectionDialog({ isOpen, onOpenChange, onCreateSuccess }
       onOpenChange(false);
       setTopicName('');
       setDescription('');
-      setTeamId('');
     } catch (error) {
       console.error("Error al crear la colección:", error);
       toast.error('Error al crear la colección.');
@@ -98,23 +76,6 @@ export function CreateCollectionDialog({ isOpen, onOpenChange, onCreateSuccess }
               placeholder="Describe el propósito de esta colección..."
               rows={3}
             />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="team-select">Compartir con Equipo</Label>
-            <select
-              id="team-select"
-              className="w-full border rounded-md p-2 text-sm"
-              value={teamId}
-              onChange={(e) => setTeamId(e.target.value)}
-              disabled={loadingTeams}
-            >
-              <option value="">{loadingTeams ? "Cargando equipos..." : "Seleccionar equipo (opcional)"}</option>
-              {teams.map(team => (
-                <option key={team.id} value={team.id.toString()}>
-                  {team.name}
-                </option>
-              ))}
-            </select>
           </div>
         </div>
         <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">

@@ -27,7 +27,6 @@ export interface TaskResponse {
   updated_at: string;
   account_id: string;
   workspace_id?: string;
-  team_id?: string;
   linked_profiles?: any[];
   start_date?: string;
   status?: string;

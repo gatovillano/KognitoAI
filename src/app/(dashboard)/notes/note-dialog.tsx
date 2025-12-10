@@ -40,8 +40,8 @@ const formSchema = z.object({
   title: z.string().optional(),
   category: z.string().min(2, "La categoría es muy corta.").optional(),
   content: z.string().min(1, "El contenido no puede estar vacío."),
-  team_id: z.string().optional(), // Optional field for sharing with a team
-  workspace_id: z.string().optional(), // New field
+  workspace_id: z.string().optional(),
+  team_id: z.string().optional(),
 });
 
 interface NoteDialogProps {
@@ -54,10 +54,10 @@ interface NoteDialogProps {
 
 export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspaceId }: NoteDialogProps) {
   const router = useRouter();
-  const [teams, setTeams] = useState<any[]>([]);
-  const [loadingTeams, setLoadingTeams] = useState(false);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
+  const [teams, setTeams] = useState<any[]>([]);
+  const [loadingTeams, setLoadingTeams] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -68,7 +68,7 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
       setLoadingTeams(true);
       try {
         const response = await apiClient.get('/api/teams');
-        setTeams(response.data);
+        setTeams(response.data.teams || []);
       } catch (error) {
         console.error("Error fetching teams:", error);
         toast.error('Error al cargar los equipos.');
@@ -81,19 +81,19 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
     }
   }, [isOpen]);
 
-  useEffect(() => { // NUEVO useEffect para workspaces
+  useEffect(() => {
     const fetchWorkspaces = async () => {
       setLoadingWorkspaces(true);
       try {
-        const response = await apiClient.get('/api/workspaces'); // Asumo este endpoint
+        const response = await apiClient.get('/api/workspaces');
         // Asegurarse de que response.data sea un array antes de asignarlo
         if (Array.isArray(response.data)) {
           setWorkspaces(response.data);
-        } else if (response.data && Array.isArray(response.data.workspaces)) { // Si la API devuelve un objeto con una propiedad 'workspaces'
+        } else if (response.data && Array.isArray(response.data.workspaces)) {
           setWorkspaces(response.data.workspaces);
         } else {
           console.warn("API /api/workspaces did not return an array or an object with a 'workspaces' array:", response.data);
-          setWorkspaces([]); // Asegurarse de que siempre sea un array
+          setWorkspaces([]);
         }
       } catch (error) {
         console.error("Error fetching workspaces:", error);
@@ -118,8 +118,8 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
         title: note?.title || '',
         category: note?.category || 'General',
         content: note?.content || '',
-        team_id: note?.team_id?.toString() || '', // Ensure team_id is reset
-        workspace_id: note?.workspace_id || '', // Ensure workspace_id is reset
+        workspace_id: note?.workspace_id || '',
+        team_id: note?.team_id || '',
       });
     }
   }, [isOpen, note, form]);
@@ -131,23 +131,12 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
       const endpoint = isEditing ? '/api/update-note' : '/api/add-note';
       const payload = isEditing
         ? { note_id: note.id, ...values }
-        : { workspace_id: workspaceId, ...values }; // Prioritize form values
-      // team_id is included in the payload as per schema
+        : { workspace_id: workspaceId, ...values };
 
       const response = await apiClient.post(endpoint, payload);
       toast.success(isEditing ? '¡Nota actualizada!' : '¡Nota creada!', { id: toastId });
 
       const noteId = isEditing ? note.id : response.data.id;
-      // Si hay un team_id seleccionado, compartimos la nota con el equipo
-      if (values.team_id) {
-        await apiClient.post(`/api/teams/${values.team_id}/share/notes`, {
-          noteIds: [noteId]
-        });
-        toast.success('Nota compartida con equipo!');
-      }
-      // La lógica de eliminar compartición de equipo se debe manejar de otra forma, 
-      // ya que /api/notes/:id/unshare desvincula del WORKSPACE, no del equipo.
-      // Por ahora, eliminamos este bloque para evitar el bug de desvinculación de workspace.
 
       // Llamamos al callback para actualizar la UI de la página principal
       // Si estamos editando, fusionamos los datos viejos y nuevos. Si no, usamos la respuesta de la API.
@@ -165,7 +154,7 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
         : {
           ...response.data,
           team_shared: !!values.team_id,
-          workspace_id: values.workspace_id, // Usar el valor del formulario para notas nuevas
+          workspace_id: values.workspace_id,
           workspace_name: selectedWorkspace?.name || '',
           workspace_color: selectedWorkspace?.color || '',
         };

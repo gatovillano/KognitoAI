@@ -1,8 +1,8 @@
 # api/knowledge_graph.py
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query
 from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Literal
 import logging
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +26,7 @@ class ProcessGraphRequest(BaseModel):
     force_reprocess: bool = False
     dataset_name: Optional[str] = None
     topic: Optional[str] = None  # Filtrar por colección específica
+    processing_mode: Optional[Literal["hybrid", "conceptual"]] = "hybrid"  # Modo de procesamiento
 
 class SearchGraphRequest(BaseModel):
     workspace_id: Optional[str] = None
@@ -301,36 +302,71 @@ async def process_knowledge_graph_optimized(
         context_desc = f"colección '{request.topic}'" if request.topic else (f"workspace {request.workspace_id}" if request.workspace_id else "contexto general")
         logger.info(f"📄 Encontrados {len(documents)} documentos para procesamiento optimizado en {context_desc}")
  
-        # Procesar con pipeline híbrido optimizado
-        from knowledge_graph.hybrid_graph_processor import HybridGraphProcessor
- 
-        processor = HybridGraphProcessor()
-        await processor.initialize()
- 
-        # Usar dataset_name proporcionado o generar uno por defecto
-        if request.dataset_name:
-            dataset_name = request.dataset_name
+        # Determinar el modo de procesamiento
+        processing_mode = request.processing_mode or "hybrid"
+
+        if processing_mode == "conceptual":
+            # Procesar con pipeline conceptual
+            logger.info("🧠 Procesando con modo conceptual...")
+
+            # Inicializar integración
+            graph_integration = get_graph_integration()
+
+            # Usar dataset_name proporcionado o generar uno por defecto
+            if request.dataset_name:
+                dataset_name = request.dataset_name
+            else:
+                dataset_name = f"workspace_{request.workspace_id}_conceptual" if request.workspace_id else "global_context_conceptual"
+
+            # Procesar documentos conceptualmente
+            result = await graph_integration.process_documents(
+                documents=documents,
+                dataset_name=dataset_name,
+                account_id=current_user['account_id'],
+                processing_mode="conceptual"
+            )
+
+            logger.info(f"✅ Procesamiento conceptual completado para {'workspace ' + request.workspace_id if request.workspace_id else 'contexto general'}")
+
+            return GraphResponse(
+                success=True,
+                data=result,
+                message=f"Grafo procesado conceptualmente: {result.get('conceptual_quotes', 0)} citas conceptuales, {result.get('thematic_relationships', 0)} relaciones temáticas, {result.get('idea_profiles', 0)} perfiles de ideas"
+            )
+
         else:
-            dataset_name = f"workspace_{request.workspace_id}_optimized" if request.workspace_id else "global_context_optimized"
-            
-        graph_data = await processor.process_documents(
-            documents,
-            dataset_name,
-            account_id=current_user['account_id'],
-            workspace_id=request.workspace_id
-        )
- 
-        # Guardar en Neo4j
-        from knowledge_graph.neo4j_adapter import Neo4jAdapter
-        db = get_graph_db()
-        adapter = Neo4jAdapter(db)
- 
-        await adapter.add_cognee_results_to_graph(
-            graph_data.get('entities', []),
-            graph_data.get('relationships', []),
-            workspace_id=request.workspace_id, # Pasar workspace_id
-            account_id=current_user['account_id']
-        )
+            # Procesar con pipeline híbrido optimizado (modo por defecto)
+            logger.info("⚙️ Procesando con modo híbrido...")
+
+            from knowledge_graph.hybrid_graph_processor import HybridGraphProcessor
+
+            processor = HybridGraphProcessor()
+            await processor.initialize()
+
+            # Usar dataset_name proporcionado o generar uno por defecto
+            if request.dataset_name:
+                dataset_name = request.dataset_name
+            else:
+                dataset_name = f"workspace_{request.workspace_id}_hybrid" if request.workspace_id else "global_context_hybrid"
+
+            graph_data = await processor.process_documents(
+                documents,
+                dataset_name,
+                account_id=current_user['account_id'],
+                workspace_id=request.workspace_id
+            )
+
+            # Guardar en Neo4j
+            from knowledge_graph.neo4j_adapter import Neo4jAdapter
+            db = get_graph_db()
+            adapter = Neo4jAdapter(db)
+
+            await adapter.add_cognee_results_to_graph(
+                graph_data.get('entities', []),
+                graph_data.get('relationships', []),
+                workspace_id=request.workspace_id, # Pasar workspace_id
+                account_id=current_user['account_id']
+            )
  
         logger.info(f"✅ Procesamiento optimizado completado para {'workspace ' + request.workspace_id if request.workspace_id else 'contexto general'}")
  
@@ -371,8 +407,8 @@ async def process_knowledge_graph_with_cooccurrence(
                        cmetadata->>'author' AS author,
                        cmetadata->>'document_id' AS document_id,
                        workspace_id::text AS workspace_id,
-                       team_id::text AS team_id,
-                       CASE WHEN team_id IS NOT NULL THEN true ELSE false END AS team_shared,
+                       NULL::text AS team_id,
+                       false AS team_shared,
                        document AS content
                 FROM langchain_pg_embedding
                 WHERE account_id = :account_id
@@ -476,7 +512,7 @@ async def get_graph_stats(
                 FROM langchain_pg_embedding
                 WHERE account_id = :account_id
                   AND cmetadata->>'type' = 'document_chunk'
-                  {f"AND workspace_id::text = '{workspace_id}'" if workspace_id else "AND workspace_id IS NULL"}
+                  {f"AND workspace_id::text = '{workspace_id}'" if workspace_id else ""}
             """
             
             result = await session.execute(query, {'account_id': current_user['account_id']})
@@ -951,17 +987,17 @@ async def get_available_datasets(
         
         # Construir query para obtener datasets únicos
         params = {'account_id': current_user['account_id']}
-        where_clauses = ["n.account_id = $account_id", "n.dataset_name IS NOT NULL"]
-        
+        where_clauses = ["(n.account_id = $account_id OR n.account_id IS NULL)", "n.dataset_name IS NOT NULL"]
+
         if workspace_id and workspace_id.lower() != "all":
             if workspace_id.lower() == "global_context":
                 where_clauses.append("n.workspace_id IS NULL")
             else:
                 where_clauses.append("n.workspace_id = $workspace_id")
                 params['workspace_id'] = workspace_id
-        
+
         where_statement = " WHERE " + " AND ".join(where_clauses)
-        
+
         query = f"""
         MATCH (n)
         {where_statement}
@@ -1000,6 +1036,8 @@ async def get_knowledge_graph_data(
     dataset_name: Optional[str] = None,
     limit: int = 100,
     max_hops: int = 2,
+    node_types: Optional[List[str]] = Query(None),
+    edge_types: Optional[List[str]] = Query(None),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -1013,32 +1051,49 @@ async def get_knowledge_graph_data(
         params = {'account_id': current_user['account_id'], 'limit': limit}
 
         # Construir la cláusula WHERE dinámicamente
-        where_clauses = ["n.account_id = $account_id"]
-        
+        where_clauses = ["(n.account_id = $account_id OR n.account_id IS NULL)"]
+
         if workspace_id and workspace_id.lower() != "all":
             if workspace_id.lower() == "global_context":
                 where_clauses.append("n.workspace_id IS NULL")
             else:
                 where_clauses.append("n.workspace_id = $workspace_id")
                 params['workspace_id'] = workspace_id
-        
+
         # Agregar filtro por dataset_name si se proporciona
         if dataset_name and dataset_name.lower() != "all":
             where_clauses.append("n.dataset_name = $dataset_name")
             params['dataset_name'] = dataset_name
 
+        # Filtros por tipo de nodo
+        if node_types:
+            where_clauses.append("n.type IN $node_types")
+            params['node_types'] = node_types
 
         # Unir cláusulas
         where_statement = " WHERE " + " AND ".join(where_clauses)
-        
+
+        # Filtros por tipo de relación
+        rel_where_clause = ""
+        if edge_types:
+            rel_where_clause = " AND type(r) IN $edge_types"
+            params['edge_types'] = edge_types
+
         # Consulta Cypher para obtener nodos y relaciones del usuario
+        # Si hay filtros de tipos de nodo, aplicarlos a ambos nodos conectados
+        node_type_filter = ""
+        if node_types:
+            node_type_filter = " AND (m.type IN $node_types OR m IS NULL)"
+
         query = f"""
         MATCH (n)
         {where_statement}
         OPTIONAL MATCH (n)-[r]-(m)
-        WHERE m.account_id = $account_id OR m IS NULL
+        WHERE (m.account_id = $account_id OR m.account_id IS NULL OR m IS NULL)
+        {rel_where_clause}
+        {node_type_filter}
         RETURN n, r, m
-        LIMIT 100
+        LIMIT $limit
         """
         
         logger.info(f"Executing Cypher Query: {query}")
@@ -1062,16 +1117,22 @@ async def get_knowledge_graph_data(
                     node_label = getattr(node, 'name', getattr(node, 'label', node_id_str))
                     node_type = getattr(node, 'type', 'Desconocido')
                     node_name_for_title = getattr(node, 'name', getattr(node, 'label', ''))
+                    # Obtener todas las propiedades del nodo
+                    all_properties = dict(node) if isinstance(node, dict) or hasattr(node, 'items') else {}
                 else:
                     node_id_str = str(node.get('id'))
                     node_label = node.get("name", node.get("label", node_id_str))
                     node_type = node.get('type', 'Desconocido')
                     node_name_for_title = node.get('name', node.get('label', ''))
-                
+                    # Obtener todas las propiedades del nodo
+                    all_properties = node if isinstance(node, dict) else {}
+
                 return {
                     "id": node_id_str,
                     "label": node_label,
-                    "title": f"Tipo: {node_type}\nNombre: {node_name_for_title}\nID: {node_id_str}"
+                    "type": node_type,
+                    "title": f"Tipo: {node_type}\nNombre: {node_name_for_title}\nID: {node_id_str}",
+                    "properties": all_properties
                 }
 
             # Añadir nodo 'n'
@@ -1129,6 +1190,79 @@ async def get_knowledge_graph_data(
         return GraphResponse(
             success=False,
             error=f"Error obteniendo datos del grafo: {str(e)}"
+        )
+
+@router.get("/metadata", response_model=GraphResponse)
+async def get_graph_metadata(
+    workspace_id: Optional[str] = None,
+    dataset_name: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Obtiene metadata del grafo: tipos de nodos y relaciones disponibles.
+    """
+    try:
+        db = get_graph_db()
+        params = {'account_id': current_user['account_id']}
+        
+        # Construir cláusula WHERE base
+        where_clauses = ["(n.account_id = $account_id OR n.account_id IS NULL)"]
+
+        if workspace_id and workspace_id.lower() != "all":
+            if workspace_id.lower() == "global_context":
+                where_clauses.append("n.workspace_id IS NULL")
+            else:
+                where_clauses.append("n.workspace_id = $workspace_id")
+                params['workspace_id'] = workspace_id
+
+        if dataset_name and dataset_name.lower() != "all":
+            where_clauses.append("n.dataset_name = $dataset_name")
+            params['dataset_name'] = dataset_name
+
+        where_statement = " WHERE " + " AND ".join(where_clauses)
+
+        # Query para tipos de nodos
+        node_query = f"""
+        MATCH (n)
+        {where_statement}
+        RETURN DISTINCT n.type as type, count(n) as count
+        ORDER BY count DESC
+        """
+
+        # Query para tipos de relaciones
+        # Nota: Para relaciones, verificamos que el nodo origen cumpla los filtros
+        edge_query = f"""
+        MATCH (n)-[r]->()
+        {where_statement}
+        RETURN DISTINCT type(r) as type, count(r) as count
+        ORDER BY count DESC
+        """
+        
+        node_results = await db.execute_query(node_query, params)
+        edge_results = await db.execute_query(edge_query, params)
+        
+        metadata = {
+            "nodeTypes": [
+                {"type": r["type"] or "Unknown", "count": r["count"]} 
+                for r in node_results
+            ],
+            "edgeTypes": [
+                {"type": r["type"] or "Unknown", "count": r["count"]} 
+                for r in edge_results
+            ]
+        }
+        
+        return GraphResponse(
+            success=True,
+            data=metadata,
+            message="Metadata del grafo obtenida exitosamente"
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo metadata del grafo: {e}", exc_info=True)
+        return GraphResponse(
+            success=False,
+            error=f"Error obteniendo metadata: {str(e)}"
         )
 
 # Modelos para análisis de calidad y tendencias

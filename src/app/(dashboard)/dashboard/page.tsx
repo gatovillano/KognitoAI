@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Bar, BarChart, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -149,6 +149,35 @@ export default function DashboardPage() {
         return <FileText className="h-5 w-5 text-primary" />;
     }
   };
+
+  const randomizedKnowledgeGaps = useMemo(() => {
+    const allGaps = analysisData
+      .filter(a => a.type === 'collection')
+      .flatMap(a => (a.full_data?.emergent_knowledge_gaps || a.result?.emergent_knowledge_gaps) || []);
+
+    // Fisher-Yates shuffle
+    for (let i = allGaps.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [allGaps[i], allGaps[j]] = [allGaps[j], allGaps[i]];
+    }
+
+    return allGaps.slice(0, 20);
+  }, [analysisData]);
+
+  const randomizedExplorationQuestions = useMemo(() => {
+    const allQuestions = analysisData
+      .filter(a => a.type === 'document')
+      .flatMap(a => (a.full_data?.knowledge_gaps || a.result?.knowledge_gaps) || [])
+      .map((gapObject: any) => (typeof gapObject === 'string' ? gapObject : gapObject.gap));
+
+    // Fisher-Yates shuffle
+    for (let i = allQuestions.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [allQuestions[i], allQuestions[j]] = [allQuestions[j], allQuestions[i]];
+    }
+
+    return allQuestions.slice(0, 20);
+  }, [analysisData]);
 
   return (
     <>
@@ -383,11 +412,7 @@ export default function DashboardPage() {
             <div className="grid gap-6 md:grid-cols-2 px-2">
               <QuestionSlider
                 title="Brechas de Conocimiento"
-                questions={analysisData
-                  .filter(a => a.type === 'collection')
-                  .flatMap(a => (a.full_data?.emergent_knowledge_gaps || a.result?.emergent_knowledge_gaps) || [])
-                  .slice(0, 10)
-                }
+                questions={randomizedKnowledgeGaps}
                 icon={<Search className="h-5 w-5 text-primary" />}
                 emptyMessage="No hay brechas de conocimiento disponibles. Es posible que no se hayan cargado datos de análisis de colecciones."
                 onReload={async () => {
@@ -409,12 +434,7 @@ export default function DashboardPage() {
               />
               <QuestionSlider
                 title="Preguntas para Explorar"
-                questions={analysisData
-                  .filter(a => a.type === 'document')
-                  .flatMap(a => (a.full_data?.knowledge_gaps || a.result?.knowledge_gaps) || [])
-                  .map((gapObject: any) => (typeof gapObject === 'string' ? gapObject : gapObject.gap)) // Handle both string and object
-                  .slice(0, 10)
-                }
+                questions={randomizedExplorationQuestions}
                 icon={<BrainCircuit className="h-5 w-5 text-primary" />}
                 emptyMessage="No hay preguntas para explorar disponibles. Es posible que no se hayan cargado datos de análisis de documentos individuales."
                 onReload={async () => {

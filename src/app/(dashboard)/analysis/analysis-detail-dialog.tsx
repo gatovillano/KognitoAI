@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Analysis, AnalysisType, Insight, Question, CollectionAnalysis, DocumentAnalysisResult as SingleTextAnalysis, CollectionConnection, ThemeReference, ThemeQuote, CodeAnalysisResultFrontend, NoteCollectionAnalysisResult, NoteAnalysisResult } from '@/lib/models';
-import { Lightbulb, Workflow, ScrollText, Megaphone, Target, BarChart3, TrendingUp, FlaskConical, Puzzle, Goal, LibraryBig, Bot, CircleCheck, Info, Sparkles, XCircle, FileWarning, HelpCircle, Brain, Network, Volume2, Loader2, Pause, Calendar, AlertTriangle, Expand, Atom, FileText, Settings, GitBranch } from 'lucide-react';
+import { Lightbulb, Workflow, ScrollText, Megaphone, Target, BarChart3, TrendingUp, FlaskConical, Puzzle, Goal, LibraryBig, Bot, CircleCheck, Info, Sparkles, XCircle, FileWarning, HelpCircle, Brain, Network, Volume2, Loader2, Pause, Calendar, AlertTriangle, Expand, Atom, FileText, Settings, GitBranch, Activity } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -132,6 +132,18 @@ const getAnalysisColorScheme = (type: AnalysisType) => {
         alertDesc: 'text-red-900/90 dark:text-red-200/90',
         hoverBorder: 'hover:border-red-200'
       };
+    case 'repository_update':
+      return {
+        color: 'teal',
+        cardBg: 'bg-teal-50/50 border-teal-100 dark:bg-teal-900/10 dark:border-teal-900/50',
+        cardTitle: 'text-teal-900 dark:text-teal-100',
+        icon: 'text-teal-600',
+        alertGradient: 'from-teal-50 to-cyan-50 border-teal-200 dark:from-teal-950/30 dark:to-cyan-950/30 dark:border-teal-800',
+        alertIcon: 'text-teal-600 dark:text-teal-400',
+        alertTitle: 'text-teal-800 dark:text-teal-300',
+        alertDesc: 'text-teal-900/90 dark:text-teal-200/90',
+        hoverBorder: 'hover:border-teal-200'
+      };
     default:
       return {
         color: 'gray',
@@ -170,6 +182,8 @@ const getAnalysisTypeBadgeColor = (type: AnalysisType) => {
       return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-100 border-purple-200 dark:border-purple-800';
     case 'custom_analysis':
       return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100 border-red-200 dark:border-red-800';
+    case 'repository_update':
+      return 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-100 border-teal-200 dark:border-teal-800';
     default:
       return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100 border-gray-200 dark:border-gray-700';
   }
@@ -280,6 +294,13 @@ const getAnalysisIcon = (type: AnalysisType) => {
     case 'proactive_insight_manual': return <Atom className="text-pink-500" />;
     case 'knowledge_graph_analysis': return <Network className="text-purple-500" />;
     case 'custom_analysis': return <FlaskConical className="text-red-500" />;
+    case 'repository_update': return <GitBranch className="text-teal-500" />;
+    case 'document': return <FileText className="text-blue-500" />;
+    case 'collection': return <LibraryBig className="text-green-500" />;
+    case 'semantic': return <Network className="text-indigo-500" />;
+    case 'semantic_summary': return <ScrollText className="text-indigo-500" />;
+    case 'note_analysis': return <FileText className="text-amber-500" />;
+    case 'note_collection_analysis': return <LibraryBig className="text-orange-500" />;
     default: return null;
   }
 };
@@ -308,6 +329,13 @@ const getAnalysisTypeLabel = (type: AnalysisType) => {
     case 'proactive_insight_manual': return 'Insight Proactivo Manual';
     case 'knowledge_graph_analysis': return 'Análisis de Grafo de Conocimiento';
     case 'custom_analysis': return 'Análisis Personalizado';
+    case 'repository_update': return 'Actualización de Repositorio';
+    case 'document': return 'Análisis de Documento';
+    case 'collection': return 'Análisis de Colección';
+    case 'semantic': return 'Análisis Semántico';
+    case 'semantic_summary': return 'Resumen Semántico';
+    case 'note_analysis': return 'Análisis de Nota';
+    case 'note_collection_analysis': return 'Análisis de Colección de Notas';
     default: return 'Análisis Desconocido';
   }
 };
@@ -538,6 +566,9 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
       case 'semantic':
       case 'semantic_summary':
         const semanticColors = getAnalysisColorScheme(analysis.type);
+        // Buscar datos en result o full_data (el backend envía en full_data para Semantic Topic Analysis)
+        const semanticData = analysis.result || analysis.full_data || {};
+
         return (
           <>
             <h3 className="text-xl font-bold mb-4">Detalle del Resumen Semántico - KAI Exocerebro</h3>
@@ -562,7 +593,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
               </Button>
             </div>
 
-            {analysis.full_data?.resumen_semantico && (
+            {(analysis.full_data?.resumen_semantico || semanticData?.resumen_semantico) && (
               <Card className={`mb-4 ${semanticColors.cardBg}`}>
                 <CardHeader className="pb-2">
                   <CardTitle className={`text-lg font-semibold ${semanticColors.cardTitle} flex items-center gap-2`}>
@@ -572,20 +603,20 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                 </CardHeader>
                 <CardContent>
                   <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysis.full_data.resumen_semantico}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysis.full_data?.resumen_semantico || semanticData?.resumen_semantico}</ReactMarkdown>
                   </div>
                 </CardContent>
               </Card>
             )}
 
-            {analysis.full_data?.temas_transversales && analysis.full_data.temas_transversales.length > 0 && (
+            {(analysis.full_data?.temas_transversales || semanticData?.temas_transversales) && (analysis.full_data?.temas_transversales?.length > 0 || semanticData?.temas_transversales?.length > 0) && (
               <div className="mb-4">
                 <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${semanticColors.icon}`}>
                   <Target className="w-5 h-5" />
                   Temas Transversales
                 </h4>
                 <div className="flex flex-wrap gap-2">
-                  {analysis.full_data.temas_transversales?.map((theme: ThemeReference, idx: number) => (
+                  {(analysis.full_data?.temas_transversales || semanticData?.temas_transversales)?.map((theme: ThemeReference, idx: number) => (
                     <Badge
                       key={idx}
                       className={`cursor-pointer text-sm transition-colors border ${getAnalysisTypeBadgeColor(analysis.type)}`}
@@ -598,100 +629,219 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
               </div>
             )}
 
-            {analysis.full_data?.patrones_semanticos && Object.keys(analysis.full_data.patrones_semanticos).length > 0 && (
+            {(analysis.full_data?.patrones_semanticos || semanticData?.patrones_semanticos) && Object.keys(analysis.full_data?.patrones_semanticos || semanticData?.patrones_semanticos || {}).length > 0 && (
               <div className="mb-4">
                 <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${semanticColors.icon}`}>
                   <BarChart3 className="w-5 h-5" />
                   Estadísticas del Análisis
                 </h4>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 text-center">
-                  {analysis.full_data.patrones_semanticos.total_documentos && (
+                  {(analysis.full_data?.patrones_semanticos?.total_documentos || semanticData?.patrones_semanticos?.total_documentos) && (
                     <div className="p-3 bg-muted rounded-md border border-border/50">
                       <div className={`text-2xl font-bold ${semanticColors.icon}`}>
-                        {analysis.full_data.patrones_semanticos.total_documentos}
+                        {analysis.full_data?.patrones_semanticos?.total_documentos || semanticData?.patrones_semanticos?.total_documentos}
                       </div>
                       <div className="text-xs text-muted-foreground">Documentos</div>
                     </div>
                   )}
-                  {analysis.full_data.patrones_semanticos.total_chunks_analizados && (
+                  {(analysis.full_data?.patrones_semanticos?.total_chunks_analizados || semanticData?.patrones_semanticos?.total_chunks_analizados) && (
                     <div className="p-3 bg-muted rounded-md border border-border/50">
                       <div className={`text-2xl font-bold ${semanticColors.icon}`}>
-                        {analysis.full_data.patrones_semanticos.total_chunks_analizados}
+                        {analysis.full_data?.patrones_semanticos?.total_chunks_analizados || semanticData?.patrones_semanticos?.total_chunks_analizados}
                       </div>
                       <div className="text-xs text-muted-foreground">Fragmentos</div>
                     </div>
                   )}
-                  {analysis.full_data.patrones_semanticos.temas_identificados && (
+                  {(analysis.full_data?.patrones_semanticos?.temas_identificados || semanticData?.patrones_semanticos?.temas_identificados) && (
                     <div className="p-3 bg-muted rounded-md border border-border/50">
                       <div className={`text-2xl font-bold ${semanticColors.icon}`}>
-                        {analysis.full_data.patrones_semanticos.temas_identificados}
+                        {analysis.full_data?.patrones_semanticos?.temas_identificados || semanticData?.patrones_semanticos?.temas_identificados}
                       </div>
                       <div className="text-xs text-muted-foreground">Temas</div>
                     </div>
                   )}
-                  <div className="p-3 bg-muted rounded-md border border-border/50">
-                    <div className={`text-2xl font-bold ${semanticColors.icon}`}>
-                      {analysis.full_data.conceptos_centrales.length}
+                  {(analysis.full_data?.conceptos_centrales || semanticData?.conceptos_centrales) && (
+                    <div className="p-3 bg-muted rounded-md border border-border/50">
+                      <div className={`text-2xl font-bold ${semanticColors.icon}`}>
+                        {(analysis.full_data?.conceptos_centrales || semanticData?.conceptos_centrales)?.length || 0}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Conceptos</div>
                     </div>
-                    <div className="text-xs text-muted-foreground">Conceptos</div>
-                  </div>
+                  )}
                 </div>
               </div>
             )}
 
-            {analysis.full_data?.brechas_conocimiento && analysis.full_data.brechas_conocimiento.length > 0 && (
+            {(analysis.full_data?.brechas_conocimiento || semanticData?.brechas_conocimiento) && (analysis.full_data?.brechas_conocimiento?.length > 0 || semanticData?.brechas_conocimiento?.length > 0) && (
               <div className="mb-4">
                 <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${semanticColors.icon}`}>
                   <AlertTriangle className="w-5 h-5" />
                   Brechas de Conocimiento
                 </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {analysis.full_data.brechas_conocimiento?.map((gap: string, idx: number) => (
+                  {(analysis.full_data?.brechas_conocimiento || semanticData?.brechas_conocimiento)?.map((gap: string, idx: number) => (
                     <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{gap}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {analysis.full_data?.problematic_areas && analysis.full_data.problematic_areas.length > 0 && (
+            {(analysis.full_data?.problematic_areas || semanticData?.problematic_areas) && (analysis.full_data?.problematic_areas?.length > 0 || semanticData?.problematic_areas?.length > 0) && (
               <div className="mb-4">
                 <h4 className="font-semibold text-lg mb-2 flex items-center gap-2 text-red-600">
                   <AlertTriangle className="w-5 h-5" />
                   Problemáticas
                 </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {analysis.full_data.problematic_areas?.map((area: string, idx: number) => (
+                  {(analysis.full_data?.problematic_areas || semanticData?.problematic_areas)?.map((area: string, idx: number) => (
                     <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{area}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {analysis.full_data?.exploration_questions && analysis.full_data.exploration_questions.length > 0 && (
+            {(analysis.full_data?.exploration_questions || semanticData?.exploration_questions) && (analysis.full_data?.exploration_questions?.length > 0 || semanticData?.exploration_questions?.length > 0) && (
               <div className="mb-4">
                 <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${semanticColors.icon}`}>
                   <HelpCircle className="w-5 h-5" />
                   Preguntas para Explorar
                 </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {analysis.full_data.exploration_questions?.map((question: string, idx: number) => (
+                  {(analysis.full_data?.exploration_questions || semanticData?.exploration_questions)?.map((question: string, idx: number) => (
                     <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{question}</ReactMarkdown></div></li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {analysis.full_data?.final_reflections && analysis.full_data.final_reflections.length > 0 && (
+            {(analysis.full_data?.final_reflections || semanticData?.final_reflections) && (analysis.full_data?.final_reflections?.length > 0 || semanticData?.final_reflections?.length > 0) && (
               <div className="mb-4">
                 <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${semanticColors.icon}`}>
                   <Sparkles className="w-5 h-5" />
                   Reflexiones Finales
                 </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {analysis.full_data.final_reflections?.map((reflection: string, idx: number) => (
+                  {(analysis.full_data?.final_reflections || semanticData?.final_reflections)?.map((reflection: string, idx: number) => (
                     <li key={idx}><div className="text-sm text-muted-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{reflection}</ReactMarkdown></div></li>
                   ))}
                 </ul>
+              </div>
+            )}
+
+            {/* Temas Agrupados (Semantic Analysis) - Buscar en ambos lugares */}
+            {(semanticData?.grouped_topics || analysis.result?.grouped_topics) && (semanticData?.grouped_topics?.length > 0 || analysis.result?.grouped_topics?.length > 0) && (
+              <div className="mb-4">
+                <h4 className={`font-semibold text-lg mb-3 flex items-center gap-2 ${semanticColors.icon}`}>
+                  <Network className="w-5 h-5" />
+                  Temas Agrupados por Clustering
+                </h4>
+                <div className="space-y-3">
+                  {(semanticData?.grouped_topics || analysis.result?.grouped_topics || []).map((groupedTopic: any, idx: number) => (
+                    <Card key={idx} className="border-l-4 border-l-indigo-500">
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-base font-semibold flex items-center gap-2">
+                            <Badge className={`${getAnalysisTypeBadgeColor(analysis.type)}`}>
+                              Cluster {groupedTopic.cluster_id !== undefined ? groupedTopic.cluster_id : idx}
+                            </Badge>
+                            {groupedTopic.topic}
+                          </CardTitle>
+                          <Badge variant="outline" className="text-xs">
+                            {groupedTopic.mentions} menciones
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="pt-0">
+                        {groupedTopic.description && (
+                          <p className="text-sm text-muted-foreground mb-2 italic">
+                            {groupedTopic.description}
+                          </p>
+                        )}
+                        {groupedTopic.topics && groupedTopic.topics.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {groupedTopic.topics.map((topic: string, topicIdx: number) => (
+                              <Badge key={topicIdx} variant="secondary" className="text-xs">
+                                {topic}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Clusters Detallados (Semantic Analysis) */}
+            {(semanticData?.detailed_clusters || analysis.result?.detailed_clusters) && (semanticData?.detailed_clusters?.length > 0 || analysis.result?.detailed_clusters?.length > 0) && (
+              <div className="mb-4">
+                <h4 className={`font-semibold text-lg mb-3 flex items-center gap-2 ${semanticColors.icon}`}>
+                  <BarChart3 className="w-5 h-5" />
+                  Análisis Detallado de Clusters
+                </h4>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {(semanticData?.detailed_clusters || analysis.result?.detailed_clusters || []).map((cluster: any, idx: number) => (
+                    <Card key={idx} className="bg-muted/30">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-semibold flex items-center justify-between">
+                          <span className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs">
+                              Cluster {cluster.cluster_id}
+                            </Badge>
+                            {cluster.representative_term}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {cluster.topic_count} temas
+                          </span>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="pt-0">
+                        <p className="text-xs text-muted-foreground mb-2">
+                          {cluster.description}
+                        </p>
+                        <div className="flex items-center gap-4 text-xs">
+                          <span className="flex items-center gap-1">
+                            <TrendingUp className="w-3 h-3" />
+                            {cluster.total_mentions} menciones
+                          </span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Métricas de Clustering (Semantic Analysis) */}
+            {(semanticData?.clustering_metrics || analysis.result?.clustering_metrics) && (
+              <div className="mb-4">
+                <h4 className={`font-semibold text-lg mb-3 flex items-center gap-2 ${semanticColors.icon}`}>
+                  <Activity className="w-5 h-5" />
+                  Métricas de Clustering
+                </h4>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div className="p-3 bg-muted rounded-md border border-border/50 text-center">
+                    <div className={`text-xl font-bold ${semanticColors.icon}`}>
+                      {(semanticData?.clustering_metrics || analysis.result?.clustering_metrics)?.optimal_k}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Clusters Óptimos</div>
+                  </div>
+                  <div className="p-3 bg-muted rounded-md border border-border/50 text-center">
+                    <div className={`text-xl font-bold ${semanticColors.icon}`}>
+                      {(((semanticData?.clustering_metrics || analysis.result?.clustering_metrics)?.silhouette_score || 0) * 100).toFixed(1)}%
+                    </div>
+                    <div className="text-xs text-muted-foreground">Silhouette Score</div>
+                  </div>
+                  {(semanticData?.clustering_metrics || analysis.result?.clustering_metrics)?.method && (
+                    <div className="p-3 bg-muted rounded-md border border-border/50 text-center col-span-2 sm:col-span-1">
+                      <Badge variant="outline" className="text-xs">
+                        {(semanticData?.clustering_metrics || analysis.result?.clustering_metrics)?.method}
+                      </Badge>
+                      <div className="text-xs text-muted-foreground mt-1">Método</div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1668,6 +1818,61 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                 </ul>
               </div>
             )}
+          </>
+        );
+      case 'repository_update':
+        const repoColors = getAnalysisColorScheme(analysis.type);
+        const repoResult = analysis.result || analysis.full_data || {};
+        const repoMessage = typeof repoResult === 'object' ? repoResult.message : repoResult;
+        const repoUrl = typeof repoResult === 'object' ? repoResult.repo_url : null;
+
+        return (
+          <>
+            <h3 className="text-xl font-bold mb-4">Actualización de Repositorio - KAI Exocerebro</h3>
+
+            {repoUrl && (
+              <Card className={`mb-4 ${repoColors.cardBg}`}>
+                <CardHeader className="pb-2">
+                  <CardTitle className={`text-lg font-semibold ${repoColors.cardTitle} flex items-center gap-2`}>
+                    <GitBranch className="w-5 h-5" />
+                    Repositorio
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2">
+                    <code className="text-sm bg-muted px-2 py-1 rounded">{repoUrl}</code>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {repoMessage && (
+              <Alert className={`mb-4 bg-gradient-to-r ${repoColors.alertGradient}`}>
+                <CircleCheck className={`h-5 w-5 ${repoColors.alertIcon}`} />
+                <AlertTitle className={`${repoColors.alertTitle} font-semibold mb-2`}>Resultado de la Actualización</AlertTitle>
+                <AlertDescription className={`${repoColors.alertDesc}`}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{typeof repoMessage === 'string' ? repoMessage : JSON.stringify(repoMessage)}</ReactMarkdown>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {analysis.summary && (
+              <Card className="mb-4 bg-muted/50 border-border/50">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                    <FileText className="w-5 h-5" />
+                    Detalles
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysis.summary}</ReactMarkdown>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            <AnalysisCommonFields analysis={analysis} processedOutput={processedOutput} />
           </>
         );
       case 'workflow_suggestion':

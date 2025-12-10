@@ -105,7 +105,6 @@ class CollectionUpdateRequest(BaseModel):
     new_topic: Optional[str] = None
     new_description: Optional[str] = None
     workspace_id: Optional[str] = None
-    team_id: Optional[str] = None
 
 @router.post("/update-collection", summary="Actualizar una colección existente")
 async def update_collection_endpoint(
@@ -114,9 +113,9 @@ async def update_collection_endpoint(
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Actualiza una colección existente (nombre, descripción, workspace_id o team_id).
+    Actualiza una colección existente (nombre, descripción, workspace_id).
     """
-    logger.info(f"API: update_collection - Actualizando colección para account_id: {current_account_id}, old_topic: {request.old_topic}, new_topic: {request.new_topic}, new_description: {request.new_description}, workspace_id: {request.workspace_id}, team_id: {request.team_id}")
+    logger.info(f"API: update_collection - Actualizando colección para account_id: {current_account_id}, old_topic: {request.old_topic}, new_topic: {request.new_topic}, new_description: {request.new_description}, workspace_id: {request.workspace_id}")
     
     try:
         # Importar la función de actualización
@@ -128,8 +127,7 @@ async def update_collection_endpoint(
             old_topic_name=request.old_topic,
             new_topic_name=request.new_topic,
             new_description=request.new_description,
-            workspace_id=request.workspace_id,
-            team_id=request.team_id
+            workspace_id=request.workspace_id
         )
         
         if not success:

@@ -57,8 +57,7 @@ async def list_all_user_documents(account_id: str, topic: Optional[str] = None):
                 "title": doc.file_path.split('/')[-1],
                 "author": None,
                 "document_id": f"github_{doc.id}",
-                "workspace_id": str(doc.workspace_id) if doc.workspace_id else None,
-                "team_id": None
+                "workspace_id": str(doc.workspace_id) if doc.workspace_id else None
             }
             for doc in github_docs
         ]

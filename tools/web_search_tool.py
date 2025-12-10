@@ -30,8 +30,7 @@ logger = logging.getLogger(__name__)
 class WebSearchInput(BaseModel):
     """Input schema para la herramienta de búsqueda web."""
     query: str = Field(
-        description="La consulta de búsqueda que se enviará al motor de búsqueda.",
-        json_schema_extra={"type": "string"}
+        description="La consulta de búsqueda que se enviará al motor de búsqueda. Debe ser una cadena de texto clara y específica sobre lo que quieres buscar."
     )
 
 class WebSearchTool(BaseTool):
@@ -46,13 +45,11 @@ class WebSearchTool(BaseTool):
     
     name: str = "web_search"
     description: str = (
-        "CUÁNDO USAR: Para realizar una investigación web exhaustiva sobre un tema. "
-        "Esta herramienta busca en la web, lee el contenido completo de los 10 resultados más relevantes y lo proporciona como contexto. "
-        "Úsala para responder preguntas que requieran conocimiento profundo y actualizado. "
-        "INSTRUCCIONES IMPORTANTES PARA TU RESPUESTA FINAL: "
-        "1. Debes generar una respuesta detallada y extensa, sintetizando la información de las fuentes. No te limites a un resumen corto. "
-        "2. Es OBLIGATORIO que cites las fuentes en el texto utilizando un formato similar a APA, incluyendo el título de la fuente y su identificador. Por ejemplo: (Título de la Fuente, [Fuente X]). "
-        "3. Al final de tu respuesta, debes incluir una sección de 'Referencias' (o 'Fuentes') listando las fuentes citadas en un formato similar a APA, incluyendo el título y la URL completa. Por ejemplo: 'Referencias:\n[1] Título de la Fuente 1. URL de la Fuente 1\n[2] Título de la Fuente 2. URL de la Fuente 2\n...'."
+        "Busca información actualizada en la web. "
+        "PARÁMETROS REQUERIDOS: 'query' (string) - La consulta de búsqueda. "
+        "EJEMPLO DE USO: {\"query\": \"últimas noticias sobre inteligencia artificial\"} "
+        "Esta herramienta busca en la web y lee el contenido completo de los 10 resultados más relevantes. "
+        "Úsala para responder preguntas que requieran conocimiento actualizado o información específica de internet."
     )
     args_schema: Type[BaseModel] = WebSearchInput
     return_direct: bool = False

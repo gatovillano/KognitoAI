@@ -452,19 +452,6 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
               </Link>
             )}
 
-            <Link href="/teams" passHref onClick={onLinkClick} title="Equipos">
-              <Button
-                variant={pathname?.startsWith('/teams') ? 'secondary' : 'ghost'}
-                className={cn(
-                  "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
-                  isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                  pathname?.startsWith('/teams') && "bg-primary/10 text-primary border border-primary/20"
-                )}
-              >
-                <Users className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")} />
-                {!isCollapsed && <span className="text-sm font-medium">Equipos</span>}
-              </Button>
-            </Link>
             <Link href="/workspaces" passHref onClick={onLinkClick} title="Workspaces">
               <Button
                 variant={pathname?.startsWith('/workspaces') ? 'secondary' : 'ghost'}

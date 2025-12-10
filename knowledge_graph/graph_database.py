@@ -1,10 +1,16 @@
 # knowledge_graph/graph_database.py
 
 import logging
+import time
+import random
 from neo4j import GraphDatabase, exceptions
 from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Constantes para reintentos
+MAX_RETRIES = 3
+INITIAL_DELAY = 0.5 # segundos
 
 class GraphDB:
     """
@@ -34,11 +40,21 @@ class GraphDB:
 
     def connect(self):
         """Establece la conexión con la base de datos."""
-        if self._driver is not None:
-            logger.warning("⚠️ La conexión a GraphDB ya existe. Reutilizando la conexión existente.")
-            return
+        # Si ya hay un driver y no está cerrado, lo reutilizamos.
+        if self._driver is not None and not getattr(self._driver, 'closed', False):
+            try:
+                self._driver.verify_connectivity()
+                logger.warning("⚠️ La conexión a GraphDB ya existe y está abierta y funcional. Reutilizando la conexión existente.")
+                return
+            except exceptions.ServiceUnavailable:
+                logger.warning("🔄 La conexión existente a GraphDB está inactiva. Intentando reconectar...")
+                self.close() # Forzar cierre del driver inactivo
+            except Exception as e:
+                logger.warning(f"🔄 Error al verificar la conexión existente a GraphDB: {e}. Intentando reconectar...")
+                self.close() # Forzar cierre del driver en caso de otros errores
+
+        # Intentar establecer una nueva conexión
         try:
-            # Conectar con o sin autenticación según la configuración
             if self.user and self.password:
                 self._driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
                 logger.info(f"✅ Conectado a Neo4j en {self.uri} con autenticación")
@@ -49,12 +65,15 @@ class GraphDB:
             logger.info("✅ Conexión a la base de datos de grafos Neo4j establecida exitosamente.")
         except exceptions.AuthError as e:
             logger.error(f"❌ Error de autenticación con Neo4j: {e}. Revisa tus credenciales en .env (NEO4J_USER, NEO4J_PASSWORD).")
+            self._driver = None # Asegurar que el driver se resetee
             raise
         except exceptions.ServiceUnavailable as e:
-            logger.error(f"❌ No se pudo conectar a Neo4j en {self.uri}: {e}. ¿Está el contenedor de Neo4j corriendo?")
+            logger.error(f"❌ No se pudo conectar a Neo4j en {self.uri}: {e}. ¿Está el contenedor de Neo4j corriendo? Reintentando...")
+            self._driver = None # Asegurar que el driver se resetee
             raise
         except Exception as e:
-            logger.error(f"❌ Ocurrió un error inesperado al conectar con Neo4j: {e}")
+            logger.error(f"❌ Ocurrió un error inesperado al conectar con Neo4j: {e}", exc_info=True)
+            self._driver = None # Asegurar que el driver se resetee
             raise
 
     def close(self):
@@ -66,7 +85,7 @@ class GraphDB:
 
     async def execute_query(self, query: str, parameters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
-        Ejecuta una consulta Cypher en la base de datos de forma asíncrona.
+        Ejecuta una consulta Cypher en la base de datos de forma asíncrona con reintentos.
 
         Args:
             query (str): La consulta Cypher a ejecutar.
@@ -75,23 +94,40 @@ class GraphDB:
         Returns:
             List[Dict[str, Any]]: Una lista de registros resultantes.
         """
-        if self._driver is None:
-            raise ConnectionError("No hay conexión a la base de datos. Llama a connect() primero.")
+        last_exception = None
+        for i in range(MAX_RETRIES):
+            try:
+                if self._driver is None or getattr(self._driver, 'closed', False):
+                    logger.warning(f"🔄 Driver no disponible o cerrado en intento {i+1}/{MAX_RETRIES}, intentando reconectar...")
+                    self.connect()
 
-        # Ejecutar en un thread pool para no bloquear el event loop
-        import asyncio
-        import concurrent.futures
+                # Ejecutar en un thread pool para no bloquear el event loop
+                import asyncio
+                import concurrent.futures
 
-        def _execute_sync():
-            with self._driver.session() as session:
-                logger.info(f"[_execute_sync] Query: {query}")
-                logger.info(f"[_execute_sync] Params: {parameters}")
-                result = session.run(query, parameters)
-                return [record.data() for record in result]
+                def _execute_sync():
+                    with self._driver.session() as session:
+                        logger.debug(f"[_execute_sync] Query: {query}")
+                        logger.debug(f"[_execute_sync] Params: {parameters}")
+                        result = session.run(query, parameters)
+                        return [record.data() for record in result]
 
-        loop = asyncio.get_event_loop()
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            return await loop.run_in_executor(executor, _execute_sync)
+                loop = asyncio.get_event_loop()
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    return await loop.run_in_executor(executor, _execute_sync)
+
+            except (exceptions.ServiceUnavailable, exceptions.TransientError) as e:
+                last_exception = e
+                self._driver = None  # Forzar reconexión en el siguiente intento
+                delay = INITIAL_DELAY * (2 ** i) + random.uniform(0, 0.1) # Retroceso exponencial con jitter
+                logger.warning(f"⚠️ Error de conexión a Neo4j: {e}. Reintentando en {delay:.2f} segundos... (Intento {i+1}/{MAX_RETRIES})")
+                time.sleep(delay)
+            except Exception as e:
+                logger.error(f"❌ Error inesperado al ejecutar consulta Cypher: {e}", exc_info=True)
+                raise # Re-lanzar otras excepciones inmediatamente
+
+        logger.error(f"❌ Fallaron todos los intentos de conectar y ejecutar consulta Cypher después de {MAX_RETRIES} reintentos.")
+        raise last_exception # Re-lanzar la última excepción de conexión/transitoria
 
     async def add_node(self, node_type: str, properties: Dict[str, Any]):
         """
