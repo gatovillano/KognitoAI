@@ -32,6 +32,7 @@ export interface Note {
   workspace_id?: string;
   workspace_name?: string; // NEW
   workspace_color?: string; // NEW
+  workspace_role?: string; // NEW: Role of the current user in this note's workspace
 }
 
 export default function NotesPage() {
@@ -59,6 +60,7 @@ export default function NotesPage() {
   const [hasMore, setHasMore] = useState(true);
   const [isFetchingMore, setIsFetchingMore] = useState(false); // Para evitar cargas múltiples
 
+
   const fetchNotes = async (newSkip: number, newLimit: number, append: boolean = false, selectedWorkspaceId: string | null = null) => {
     if (!append) {
       setIsLoading(true);
@@ -74,10 +76,26 @@ export default function NotesPage() {
       console.log("API Response Data:", response.data);
       const fetchedNotes = response.data.notes.sort((a: Note, b: Note) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
+      // Obtener roles de workspace para cada nota
+      const notesWithRoles = await Promise.all(
+        fetchedNotes.map(async (note: Note) => {
+          if (note.workspace_id) {
+            try {
+              const roleResponse = await apiClient.get(`/api/workspaces/${note.workspace_id}/my-role`);
+              return { ...note, workspace_role: roleResponse.data.role };
+            } catch (error) {
+              console.error(`Error fetching role for workspace ${note.workspace_id}:`, error);
+              return note;
+            }
+          }
+          return note;
+        })
+      );
+
       if (append) {
-        setNotes(prevNotes => [...prevNotes, ...fetchedNotes]);
+        setNotes(prevNotes => [...prevNotes, ...notesWithRoles]);
       } else {
-        setNotes(fetchedNotes);
+        setNotes(notesWithRoles);
       }
       setHasMore(fetchedNotes.length === newLimit);
       setSkip(newSkip + fetchedNotes.length); // Actualizar skip para la próxima carga
@@ -338,6 +356,9 @@ export default function NotesPage() {
       }),
     });
 
+    // Determinar si el usuario puede editar basándose en el rol del workspace
+    const canEdit = !note.workspace_id || note.workspace_role !== 'viewer';
+
     return (
       <motion.div
         ref={drag as any}
@@ -376,22 +397,26 @@ export default function NotesPage() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-[180px]">
-                  <DropdownMenuItem onClick={(e) => {
-                    e.stopPropagation();
-                    setEditingNote(note);
-                    setIsNoteDialogOpen(true);
-                  }}>
-                    <Edit className="mr-2 h-4 w-4" />
-                    Editar nota
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={(e) => {
-                    e.stopPropagation();
-                    setDeletingNote(note);
-                  }}>
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Eliminar nota
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
+                  {canEdit && (
+                    <>
+                      <DropdownMenuItem onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingNote(note);
+                        setIsNoteDialogOpen(true);
+                      }}>
+                        <Edit className="mr-2 h-4 w-4" />
+                        Editar nota
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={(e) => {
+                        e.stopPropagation();
+                        setDeletingNote(note);
+                      }}>
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Eliminar nota
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
                   <DropdownMenuItem onClick={(e) => {
                     e.stopPropagation();
                     onAnalyzeNote(note);

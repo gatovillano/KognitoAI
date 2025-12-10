@@ -63,79 +63,119 @@ class GraphIntegration:
         except Exception as e:
             logger.error(f"❌ Error creando índices full-text: {e}", exc_info=True)
 
-    async def process_documents(self, documents: List[Dict[str, Any]], dataset_name: str = "default", account_id: Optional[str] = None) -> Dict[str, Any]:
+    async def process_documents(self, documents: List[Dict[str, Any]], dataset_name: str = "default", account_id: Optional[str] = None, processing_mode: Literal["conceptual", "hybrid"] = "conceptual", topic: Optional[str] = None, workspace_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Procesa documentos usando un enfoque híbrido donde el LLM es el principal analista
-        para crear grafos conceptuales.
+        Procesa documentos usando un enfoque híbrido o conceptual.
 
         Args:
-            documents: Lista de documentos a procesar.
+            documents: Lista de documentos a procesar. Si está vacía, se buscarán documentos en la base de datos.
             dataset_name: Nombre del dataset.
             account_id: ID del usuario o cuenta propietaria de los documentos.
+            processing_mode: Modo de procesamiento ("conceptual" o "hybrid").
+            topic: Tema/colección para filtrar documentos si no se proporcionan.
+            workspace_id: ID del workspace para filtrar documentos si no se proporcionan.
 
         Returns:
-            Dict con el resultado del procesamiento conceptual.
+            Dict con el resultado del procesamiento.
         """
         await self._create_fulltext_indexes()
-        logger.info(f"🧠 Iniciando procesamiento conceptual (LLM-driven) para {len(documents)} documentos.")
+
+        # Si no se proporcionaron documentos, buscarlos en la base de datos
+        if not documents:
+            if not account_id:
+                raise ValueError("Se requiere account_id cuando no se proporcionan documentos")
+            logger.info(f"🔍 Buscando documentos en base de datos para account_id: {account_id}, topic: {topic}, workspace_id: {workspace_id}")
+            documents = await self._fetch_documents_from_db(account_id, topic, workspace_id)
+
+        logger.info(f"🧠 Iniciando procesamiento {processing_mode} para {len(documents)} documentos.")
 
         try:
             # Reconstruir contenido completo desde chunks vectorizados
             processed_documents = await self._reconstruct_document_content(documents, account_id=account_id)
 
             if not processed_documents:
-                raise ValueError("No se pudo reconstruir contenido de documentos para procesamiento conceptual.")
+                raise ValueError("No se pudo reconstruir contenido de documentos.")
 
-            # Inicializar procesador conceptual (que usa LLM)
-            from knowledge_graph.conceptual_graph_processor import ConceptualGraphProcessor
-            
-            llm = get_main_llm()
-            if not llm:
-                raise ValueError("LLM principal no disponible para procesamiento conceptual.")
+            if processing_mode == "hybrid":
+                # --- MODO HÍBRIDO (spaCy + Embeddings) ---
+                logger.info("⚙️ Ejecutando HybridGraphProcessor (spaCy + Embeddings)...")
+                
+                hybrid_result = await self.hybrid_processor.process_documents(
+                    processed_documents, 
+                    dataset_name=dataset_name,
+                    account_id=account_id,
+                    workspace_id=documents[0].get("metadata", {}).get("workspace_id") if documents else None
+                )
+                
+                # Guardar resultados en Neo4j usando el adaptador
+                stats = await self.hybrid_adapter.add_cognee_results_to_graph(
+                    hybrid_result["entities"], 
+                    hybrid_result["relationships"],
+                    workspace_id=documents[0].get("metadata", {}).get("workspace_id") if documents else None,
+                    account_id=account_id
+                )
+                
+                return {
+                    "success": True,
+                    "processing_type": "hybrid_spacy_embeddings",
+                    "entities_count": len(hybrid_result["entities"]),
+                    "relationships_count": len(hybrid_result["relationships"]),
+                    "neo4j_stats": stats,
+                    "metadata": hybrid_result.get("metadata", {})
+                }
 
-            conceptual_processor = ConceptualGraphProcessor(llm=llm)
+            else:
+                # --- MODO CONCEPTUAL (LLM-Driven) ---
+                # Inicializar procesador conceptual (que usa LLM)
+                from knowledge_graph.conceptual_graph_processor import ConceptualGraphProcessor
+                
+                llm = get_main_llm()
+                if not llm:
+                    raise ValueError("LLM principal no disponible para procesamiento conceptual.")
 
-            # Procesar documentos conceptualmente
-            conceptual_result = await conceptual_processor.process_documents_conceptually(
-                processed_documents, dataset_name
-            )
+                conceptual_processor = ConceptualGraphProcessor(llm=llm)
 
-            # Guardar en Neo4j usando el adaptador
-            if self.hybrid_adapter:
-                # Convertir formato conceptual a formato compatible con Neo4j
-                neo4j_data = await self._convert_conceptual_to_neo4j_format(conceptual_result)
+                # Procesar documentos conceptualmente
+                conceptual_result = await conceptual_processor.process_documents_conceptually(
+                    processed_documents, dataset_name
+                )
 
-                # Guardar nodos conceptuales
-                await self.hybrid_adapter.add_cognee_results_to_graph(neo4j_data["entities"], [])
-                logger.info(f"✅ {len(neo4j_data['entities'])} citas conceptuales guardadas.")
+                # Guardar en Neo4j usando el adaptador
+                if self.hybrid_adapter:
+                    # Convertir formato conceptual a formato compatible con Neo4j
+                    neo4j_data = await self._convert_conceptual_to_neo4j_format(conceptual_result)
 
-                # Guardar relaciones temáticas
-                await self.hybrid_adapter.add_cognee_results_to_graph([], neo4j_data["relationships"])
-                logger.info(f"✅ {len(neo4j_data['relationships'])} relaciones temáticas guardadas.")
+                    # Guardar nodos conceptuales
+                    await self.hybrid_adapter.add_cognee_results_to_graph(neo4j_data["entities"], [])
+                    logger.info(f"✅ {len(neo4j_data['entities'])} citas conceptuales guardadas.")
 
-                # Guardar perfiles de ideas como nodos especiales
-                if neo4j_data.get("profiles"):
-                    await self.hybrid_adapter.add_cognee_results_to_graph(neo4j_data["profiles"], [])
-                    logger.info(f"✅ {len(neo4j_data['profiles'])} perfiles de ideas guardados.")
+                    # Guardar relaciones temáticas
+                    await self.hybrid_adapter.add_cognee_results_to_graph([], neo4j_data["relationships"])
+                    logger.info(f"✅ {len(neo4j_data['relationships'])} relaciones temáticas guardadas.")
 
-                # Guardar relaciones de perfiles
-                if neo4j_data.get("profile_relationships"):
-                    await self.hybrid_adapter.add_cognee_results_to_graph([], neo4j_data["profile_relationships"])
-                    logger.info(f"✅ {len(neo4j_data['profile_relationships'])} relaciones de perfiles guardadas.")
+                    # Guardar perfiles de ideas como nodos especiales
+                    if neo4j_data.get("profiles"):
+                        await self.hybrid_adapter.add_cognee_results_to_graph(neo4j_data["profiles"], [])
+                        logger.info(f"✅ {len(neo4j_data['profiles'])} perfiles de ideas guardados.")
 
-            logger.info("🎉 Procesamiento conceptual LLM-driven completado exitosamente.")
+                    # Guardar relaciones de perfiles
+                    if neo4j_data.get("profile_relationships"):
+                        await self.hybrid_adapter.add_cognee_results_to_graph([], neo4j_data["profile_relationships"])
+                        logger.info(f"✅ {len(neo4j_data['profile_relationships'])} relaciones de perfiles guardadas.")
 
-            return {
-                "success": True,
-                "processing_type": "conceptual_llm_driven",
-                "conceptual_quotes": len(conceptual_result.get("conceptual_nodes", [])),
-                "thematic_relationships": len(conceptual_result.get("thematic_relationships", [])),
-                "idea_profiles": len(conceptual_result.get("idea_profiles", [])),
-                "metadata": conceptual_result.get("metadata", {})
-            }
+                logger.info("🎉 Procesamiento conceptual LLM-driven completado exitosamente.")
+
+                return {
+                    "success": True,
+                    "processing_type": "conceptual_llm_driven",
+                    "conceptual_quotes": len(conceptual_result.get("conceptual_nodes", [])),
+                    "thematic_relationships": len(conceptual_result.get("thematic_relationships", [])),
+                    "idea_profiles": len(conceptual_result.get("idea_profiles", [])),
+                    "metadata": conceptual_result.get("metadata", {})
+                }
 
         except Exception as e:
-            logger.error(f"❌ Error en procesamiento conceptual (LLM-driven): {e}", exc_info=True)
+            logger.error(f"❌ Error en procesamiento {processing_mode}: {e}", exc_info=True)
             # Fallback al procesamiento básico
             return await self._fallback_processing(documents, dataset_name)
 
@@ -170,6 +210,60 @@ class GraphIntegration:
             "processed_at": datetime.now().isoformat()
         }
 
+    async def _fetch_documents_from_db(self, account_id: str, topic: Optional[str] = None, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Busca documentos en la base de datos PostgreSQL."""
+        from core.database import get_db_session
+        import sqlalchemy
+
+        try:
+            async with get_db_session() as session:
+                # Construir filtros dinámicamente
+                filters = ["account_id = :account_id", "cmetadata->>'type' = 'document_chunk'"]
+
+                if workspace_id:
+                    filters.append("workspace_id::text = :workspace_id")
+                else:
+                    filters.append("workspace_id IS NULL")
+
+                if topic:
+                    filters.append("topic = :topic")
+
+                where_clause = " AND ".join(filters)
+
+                query = sqlalchemy.text(f"""
+                    SELECT DISTINCT ON (cmetadata->>'document_id')
+                           cmetadata->>'file_name' AS file_name,
+                           topic AS topic,
+                           cmetadata->>'title' AS title,
+                           cmetadata->>'author' AS author,
+                           cmetadata->>'document_id' AS document_id,
+                           workspace_id::text AS workspace_id,
+                           cmetadata AS metadata
+                    FROM langchain_pg_embedding
+                    WHERE {where_clause}
+                    ORDER BY cmetadata->>'document_id', id
+                    LIMIT 50;
+                """)
+
+                params = {'account_id': account_id}
+                if workspace_id:
+                    params['workspace_id'] = workspace_id
+                if topic:
+                    params['topic'] = topic
+
+                result = await session.execute(query, params)
+                documents = []
+                for row in result.fetchall():
+                    doc_dict = dict(row._mapping)
+                    documents.append(doc_dict)
+
+                logger.info(f"✅ Encontrados {len(documents)} documentos en base de datos")
+                return documents
+
+        except Exception as e:
+            logger.error(f"❌ Error buscando documentos en base de datos: {e}")
+            return []
+
     async def _reconstruct_document_content(self, documents: List[Dict[str, Any]], account_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Reconstruye el contenido completo de documentos desde chunks vectorizados."""
         processed_documents = []
@@ -183,8 +277,8 @@ class GraphIntegration:
             return []
 
         for i, doc in enumerate(documents):
-            # Obtener el nombre del archivo
-            file_name = doc.get("title") or doc.get("metadata", {}).get("file_name") or doc.get("file_name")
+            # Obtener el nombre del archivo (priorizar file_name sobre title)
+            file_name = doc.get("file_name") or doc.get("metadata", {}).get("file_name") or doc.get("title")
 
             if not file_name:
                 logger.warning(f"⚠️ Documento {i} sin nombre de archivo: {doc}")
@@ -264,7 +358,9 @@ class GraphIntegration:
                     }
 
                 raw_results = await self.graph_db.execute_query(cypher_query, parameters=params)
-                formatted_results = self._format_advanced_search_results(raw_results, return_type)
+                # Asegurar que return_type sea str
+                actual_return_type = return_type if return_type is not None else "summary"
+                formatted_results = self._format_advanced_search_results(raw_results, actual_return_type, dataset_name)
 
                 return {
                     "query": f"Advanced search: source={source_concept}, target={target_concept}, rels={relationship_types}, hops={max_hops}",
@@ -308,7 +404,9 @@ class GraphIntegration:
                     }
 
                 raw_results = await self.graph_db.execute_query(cypher_query, parameters=params)
-                formatted_results = self._format_advanced_search_results(raw_results, return_type)
+                # Asegurar que return_type sea str
+                actual_return_type = return_type if return_type is not None else "summary"
+                formatted_results = self._format_advanced_search_results(raw_results, actual_return_type, dataset_name)
 
                 if formatted_results:
                     return {
@@ -331,49 +429,8 @@ class GraphIntegration:
                         "summary": "No se encontraron elementos que coincidan con el patrón descrito."
                     }
 
-            # 3. Lógica para Insights Generales/Estadísticas
-            if "tematicas" in query.lower() or "insights" in query.lower() or "patrones" in query.lower() or return_type == "stats":
-                logger.info(f"📊 Ejecutando búsqueda de insights generales/estadísticas para: {query}")
-                
-                node_stats_query = f"""
-                MATCH (n:CONCEPTUAL_QUOTE {{dataset_name: $dataset_name}})
-                RETURN DISTINCT n.category AS category, COUNT(n) AS count
-                ORDER BY count DESC LIMIT 5
-                """
-                rels_stats_query = f"""
-                MATCH ()-[r]->() WHERE r.dataset_name = $dataset_name
-                RETURN DISTINCT type(r) AS rel_type, COUNT(r) AS count
-                ORDER BY count DESC LIMIT 5
-                """
-                
-                node_stats_raw = await self.graph_db.execute_query(node_stats_query, parameters={"dataset_name": dataset_name})
-                rels_stats_raw = await self.graph_db.execute_query(rels_stats_query, parameters={"dataset_name": dataset_name})
-
-                node_stats = [self._neo4j_record_to_dict(record) for record in node_stats_raw]
-                rels_stats = [self._neo4j_record_to_dict(record) for record in rels_stats_raw]
-
-                summary_items = []
-                if node_stats:
-                    summary_items.append({"type": "node_stats", "content": "Categorías de nodos más comunes:", "data": node_stats})
-                if rels_stats:
-                    summary_items.append({"type": "rel_stats", "content": "Tipos de relaciones más comunes:", "data": rels_stats})
-                
-                if summary_items:
-                    return {
-                        "query": query, "dataset_name": dataset_name, "results": summary_items,
-                        "status": "search_completed_general_insights", "method": "general_insights",
-                        "searched_at": datetime.now().isoformat(),
-                        "summary": "Se encontraron estadísticas generales del grafo."
-                    }
-                else:
-                     return {
-                        "query": query, "dataset_name": dataset_name, "results": [],
-                        "status": "search_completed_no_general_insights", "method": "general_insights",
-                        "searched_at": datetime.now().isoformat(),
-                        "summary": "No se encontraron estadísticas o patrones generales significativos en el grafo."
-                    }
-
-            # 4. Lógica de Búsqueda Full-Text (default)
+            # 3. Lógica para Búsqueda Full-Text (default)
+            # Esta será la opción principal si no se cumplen las condiciones anteriores
             logger.info(f"📝 Ejecutando búsqueda full-text para: {query}")
             cypher_query = """
             CALL db.index.fulltext.queryNodes('node_fulltext_index', $query) YIELD node AS n, score AS nodeScore
@@ -402,13 +459,57 @@ class GraphIntegration:
                 }
 
             search_results_raw = await self.graph_db.execute_query(cypher_query, parameters=params)
-            formatted_results = self._format_advanced_search_results(search_results_raw, return_type)
+            # Asegurar que return_type sea str
+            actual_return_type = return_type if return_type is not None else "summary"
+            formatted_results = self._format_advanced_search_results(search_results_raw, actual_return_type, dataset_name)
 
-            return {
-                "query": query, "dataset_name": dataset_name, "results": formatted_results,
-                "status": "search_completed", "method": "fulltext_cypher",
-                "searched_at": datetime.now().isoformat()
-            }
+            if formatted_results:
+                return {
+                    "query": query, "dataset_name": dataset_name, "results": formatted_results,
+                    "status": "search_completed", "method": "fulltext_cypher",
+                    "searched_at": datetime.now().isoformat()
+                }
+            else:
+                # Si la búsqueda full-text no da resultados, intentar con estadísticas generales
+                logger.info(f"📊 Búsqueda full-text sin resultados, intentando insights generales/estadísticas para: {query}")
+                node_stats_query = f"""
+                MATCH (n:CONCEPTUAL_QUOTE {{dataset_name: $dataset_name}})
+                RETURN DISTINCT n.category AS category, COUNT(n) AS count
+                ORDER BY count DESC LIMIT 5
+                """
+                rels_stats_query = f"""
+                MATCH ()-[r]->() WHERE r.dataset_name = $dataset_name
+                RETURN DISTINCT type(r) AS rel_type, COUNT(r) AS count
+                ORDER BY count DESC LIMIT 5
+                """
+                
+                node_stats_raw = await self.graph_db.execute_query(node_stats_query, parameters={"dataset_name": dataset_name})
+                rels_stats_raw = await self.graph_db.execute_query(rels_stats_query, parameters={"dataset_name": dataset_name})
+
+                node_stats = [self._neo4j_record_to_dict(record) for record in node_stats_raw]
+                rels_stats = [self._neo4j_record_to_dict(record) for record in rels_stats_raw]
+
+                summary_items = []
+                if node_stats:
+                    summary_items.append({"type": "node_stats", "content": "Categorías de nodos más comunes:", "data": node_stats})
+                if rels_stats:
+                    summary_items.append({"type": "rel_stats", "content": "Tipos de relaciones más comunes:", "data": rels_stats})
+                
+                if summary_items:
+                    return {
+                        "query": query, "dataset_name": dataset_name, "results": summary_items,
+                        "status": "search_completed_general_insights", "method": "general_insights_fallback",
+                        "searched_at": datetime.now().isoformat(),
+                        "summary": "No se encontraron resultados directos, pero se encontraron estadísticas generales del grafo."
+                    }
+                else:
+                    return {
+                        "query": query, "dataset_name": dataset_name, "results": [],
+                        "status": "search_completed_no_results", "method": "no_results",
+                        "searched_at": datetime.now().isoformat(),
+                        "summary": "No se encontraron resultados relevantes en el grafo de conocimiento."
+                    }
+
 
         except Exception as e:
             logger.error(f"❌ Error en búsqueda: {e}", exc_info=True)
@@ -571,11 +672,14 @@ class GraphIntegration:
 
     async def _convert_conceptual_to_neo4j_format(self, conceptual_result: Dict[str, Any]) -> Dict[str, Any]:
         """Convierte el resultado conceptual al formato compatible con Neo4j."""
+        dataset_name = conceptual_result.get("metadata", {}).get("dataset_name", "conceptual_dataset")
+
         entities = []
         conceptual_nodes = conceptual_result.get("conceptual_nodes", [])
         for quote in conceptual_nodes:
             entity = {
                 "type": "CONCEPTUAL_QUOTE",
+                "dataset_name": dataset_name,
                 "properties": {
                     "name": quote.get("concept", "Unknown"),
                     "cognee_id": quote["id"],
@@ -601,6 +705,7 @@ class GraphIntegration:
                 "source_type": "CONCEPTUAL_QUOTE",
                 "target_type": "CONCEPTUAL_QUOTE",
                 "type": rel["type"],
+                "dataset_name": dataset_name,
                 "confidence": rel["confidence"],
                 "cognee_id": rel["id"],
                 "properties": {
@@ -618,6 +723,7 @@ class GraphIntegration:
         for profile in idea_profiles:
             profile_entity = {
                 "type": "IDEA_PROFILE",
+                "dataset_name": dataset_name,
                 "properties": {
                     "name": profile["central_concept"],
                     "cognee_id": profile["id"],
@@ -641,6 +747,7 @@ class GraphIntegration:
                     "source_type": "IDEA_PROFILE",
                     "target_type": "CONCEPTUAL_QUOTE",
                     "type": "CONTAINS_IDEA",
+                    "dataset_name": dataset_name,
                     "confidence": 0.9,
                     "cognee_id": f"profile_contains_{profile['id']}_{quote_id}",
                     "properties": {
@@ -658,7 +765,7 @@ class GraphIntegration:
             "profile_relationships": profile_relationships
         }
 
-    def _format_advanced_search_results(self, raw_results: List[Dict[str, Any]], return_type: str) -> List[Dict[str, Any]]:
+    def _format_advanced_search_results(self, raw_results: List[Dict[str, Any]], return_type: str, dataset_name: str = "default") -> List[Dict[str, Any]]:
         """Formatea los resultados crudos de Cypher."""
         formatted_output = []
 
@@ -680,7 +787,9 @@ class GraphIntegration:
                     all_relationships[rel.element_id] = self._relationship_to_dict(rel)
             elif "n" in record and record["n"] is not None:
                 node = record["n"]
-                all_nodes[node.element_id] = self._node_to_dict(node)
+                # Asegurarse de que node_dict siempre contenga element_id, independientemente de si 'node' es un objeto o un dict.
+                node_dict = self._node_to_dict(node)
+                all_nodes[node_dict["element_id"]] = node_dict
             elif "r" in record and record["r"] is not None:
                 rel = record["r"]
                 all_relationships[rel.element_id] = self._relationship_to_dict(rel)
@@ -701,31 +810,134 @@ class GraphIntegration:
                     formatted_output.append(self._format_path(record["path"]))
             return formatted_output
         elif return_type == "summary" or return_type == "stats":
-            if formatted_output:
+            if formatted_output: # Si ya hay resultados formateados (ej. de una query que devuelve algo específico)
                 return formatted_output
-            else:
-                return {
+            
+            # Generar un resumen más descriptivo si no hay resultados específicos ya formateados
+            if all_nodes or all_relationships:
+                summary_text = f"Resultados encontrados en el grafo para el dataset '{dataset_name}':\n"
+                
+                if all_nodes:
+                    summary_text += f"- Nodos ({len(all_nodes)}): "
+                    node_summaries = []
+                    # Agrupar nodos por etiqueta y contar
+                    node_label_counts = {}
+                    for node in all_nodes.values():
+                        label = node.get('labels', ['Unknown'])[0]
+                        node_label_counts[label] = node_label_counts.get(label, 0) + 1
+                    
+                    # Añadir los 3 tipos de nodos más frecuentes
+                    sorted_node_labels = sorted(node_label_counts.items(), key=lambda item: item[1], reverse=True)[:3]
+                    for label, count in sorted_node_labels:
+                        node_summaries.append(f"{count} {label.replace('_', ' ').title()}")
+                    
+                    # Añadir ejemplos de nombres si no hay demasiados tipos
+                    if len(all_nodes) <= 5: # No más de 5 nodos para listar nombres individualmente
+                        node_names = [node.get('name', node.get('concept', 'Unnamed')) for node in all_nodes.values()]
+                        summary_text += f"{', '.join(node_names)}.\n"
+                    elif node_summaries:
+                        summary_text += f"Tipos principales: {', '.join(node_summaries)}.\n"
+                    else:
+                        summary_text += "Múltiples nodos de varios tipos.\n"
+
+                if all_relationships:
+                    summary_text += f"- Relaciones ({len(all_relationships)}): "
+                    rel_summaries = []
+                    # Agrupar relaciones por tipo y contar
+                    rel_type_counts = {}
+                    for rel in all_relationships.values():
+                        rel_type = rel.get('type', 'UNKNOWN_RELATIONSHIP')
+                        rel_type_counts[rel_type] = rel_type_counts.get(rel_type, 0) + 1
+                    
+                    # Añadir los 3 tipos de relaciones más frecuentes
+                    sorted_rel_types = sorted(rel_type_counts.items(), key=lambda item: item[1], reverse=True)[:3]
+                    for rel_type, count in sorted_rel_types:
+                        rel_summaries.append(f"{count} '{rel_type.replace('_', ' ').title()}'")
+                    
+                    if rel_summaries:
+                        summary_text += f"Tipos principales: {', '.join(rel_summaries)}.\n"
+                    else:
+                        summary_text += "Múltiples relaciones de varios tipos.\n"
+                
+                # Devolver el resumen como un resultado único
+                return [{
+                    "type": "summary_text_insight",
+                    "content": summary_text.strip(),
                     "node_count": len(all_nodes),
-                    "relationship_count": len(all_relationships),
-                    "total_records": len(raw_results)
-                }
+                    "relationship_count": len(all_relationships)
+                }]
+            else:
+                return [{
+                    "type": "no_results_summary",
+                    "content": "No se encontraron resultados relevantes en el grafo de conocimiento para la consulta.",
+                    "node_count": 0,
+                    "relationship_count": 0
+                }]
         
         return formatted_output if formatted_output else []
 
     def _node_to_dict(self, node: Any) -> Dict[str, Any]:
-        """Convierte un objeto Node de Neo4j a un diccionario serializable."""
-        properties = dict(node)
-        properties["labels"] = list(node.labels)
-        properties["element_id"] = node.element_id
+        """Convierte un objeto Node de Neo4j o un diccionario a un diccionario serializable."""
+        if hasattr(node, 'labels') and hasattr(node, 'element_id'): # Es un objeto Node de Neo4j
+            properties = dict(node)
+            properties["labels"] = list(node.labels)
+            properties["element_id"] = node.element_id
+
+            # Incluir propiedades clave para el LLM
+            properties["name"] = properties.get("name", properties.get("concept", "Unnamed Node"))
+            properties["description"] = properties.get("description", properties.get("full_text", ""))
+            properties["category"] = properties.get("category", "")
+
+        elif isinstance(node, dict): # Es un diccionario (posiblemente de un registro .data())
+            properties = {k: v for k, v in node.items() if k not in ["labels", "element_id"]} # Evitar duplicados
+            properties["labels"] = node.get("labels", ["Unknown"])
+            properties["element_id"] = node.get("element_id", str(node.get("id", "unknown_id")))
+
+            # Asegurar que 'id' exista y sea string para compatibilidad futura si se usa
+            if "id" not in properties:
+                properties["id"] = properties["element_id"]
+
+            # Incluir propiedades clave para el LLM desde el diccionario
+            properties["name"] = properties.get("name", properties.get("concept", "Unnamed Node"))
+            properties["description"] = properties.get("description", properties.get("full_text", ""))
+            properties["category"] = properties.get("category", "")
+        else:
+            # Manejar tipos inesperados de forma más robusta
+            error_msg = f"Tipo de nodo inesperado en _node_to_dict: {type(node)}."
+            logger.error(error_msg + f" Valor: {node}")
+            properties = {
+                "element_id": f"ERROR_NODE_{str(node)}", # Prefijo para identificar fácilmente
+                "labels": ["Error"],
+                "name": error_msg,
+                "original_value": str(node)
+            }
+
         return {k: self._neo4j_value_to_python(v) for k, v in properties.items()}
 
     def _relationship_to_dict(self, rel: Any) -> Dict[str, Any]:
-        """Convierte un objeto Relationship de Neo4j a un diccionario serializable."""
-        properties = dict(rel)
-        properties["type"] = rel.type
-        properties["element_id"] = rel.element_id
-        properties["start_node_element_id"] = rel.start_node.element_id
-        properties["end_node_element_id"] = rel.end_node.element_id
+        """Convierte un objeto Relationship de Neo4j o un diccionario a un diccionario serializable."""
+        if hasattr(rel, 'type') and hasattr(rel, 'element_id'): # Es un objeto Relationship de Neo4j
+            properties = dict(rel)
+            properties["type"] = rel.type
+            properties["element_id"] = rel.element_id
+            properties["start_node_element_id"] = rel.start_node.element_id
+            properties["end_node_element_id"] = rel.end_node.element_id
+        elif isinstance(rel, dict): # Es un diccionario
+            properties = rel.copy()
+            properties["type"] = rel.get("type", "UNKNOWN_RELATIONSHIP")
+            properties["element_id"] = rel.get("element_id", str(rel.get("id", "unknown_id")))
+            properties["start_node_element_id"] = rel.get("start_node_element_id", "unknown_start_node_id")
+            properties["end_node_element_id"] = rel.get("end_node_element_id", "unknown_end_node_id")
+        else:
+            # Manejar tipos inesperados de forma más robusta
+            error_msg = f"Tipo de relación inesperado en _relationship_to_dict: {type(rel)}."
+            logger.error(error_msg + f" Valor: {rel}")
+            properties = {
+                "element_id": f"ERROR_REL_{str(rel)}", # Prefijo para identificar fácilmente
+                "type": "ERROR_RELATIONSHIP",
+                "original_value": str(rel)
+            }
+
         return {k: self._neo4j_value_to_python(v) for k, v in properties.items()}
 
     def _neo4j_value_to_python(self, value: Any) -> Any:
@@ -744,7 +956,11 @@ class GraphIntegration:
 
     def _neo4j_record_to_dict(self, record: Any) -> Dict[str, Any]:
         """Convierte un objeto Record de Neo4j a un diccionario serializable."""
-        return {key: self._neo4j_value_to_python(record[key]) for key in record.keys()}
+        if isinstance(record, dict):
+            return {key: self._neo4j_value_to_python(record[key]) for key in record.keys()}
+        else:
+            logger.warning(f"Tipo de record inesperado en _neo4j_record_to_dict: {type(record)}. Valor: {record}")
+            return {"error": f"Tipo de record inesperado: {type(record)}", "original_value": str(record)}
 
     def _format_path(self, path_object: Any) -> Dict[str, Any]:
         """Convierte un objeto Path de Neo4j en un diccionario serializable."""

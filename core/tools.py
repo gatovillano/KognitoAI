@@ -197,6 +197,17 @@ async def get_tool_by_name(tool_name: str, account_id: str, telegram_id: Optiona
              logger.info(f"✅ Herramienta factory encontrada: WebSearchTool")
              return get_web_search_tool(account_id=account_id)
         
+        if tool_name == "deep_research_litellm":
+            from tools.deep_research_tool_litellm import create_deep_research_tool_litellm
+            from tools.add_web_to_rag_tool import AddWebToRAGTool
+            from tools.web_search_tool import get_web_search_tool
+            
+            logger.info(f"✅ Herramienta factory encontrada: DeepResearchToolLiteLLM")
+            return create_deep_research_tool_litellm(
+                web_search_tool=get_web_search_tool(account_id=account_id),
+                add_web_to_rag_tool=AddWebToRAGTool(account_id=account_id)
+            )
+        
         logger.error(f"❌ Herramienta '{tool_name}' no encontrada en tool_classes_to_instantiate")
         return None
 
@@ -320,6 +331,31 @@ async def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = 
     except Exception as e:
         logger.error(f"❌ Fallo al instanciar WebSearchTool: {e}", exc_info=True)
         failed_tools.append("WebSearchTool")
+
+    # --- Deep Research Tool (LiteLLM) ---
+    try:
+        from tools.deep_research_tool_litellm import create_deep_research_tool_litellm
+        from tools.add_web_to_rag_tool import AddWebToRAGTool
+        
+        # Necesitamos una instancia de AddWebToRAGTool
+        add_web_to_rag_instance = AddWebToRAGTool(account_id=account_id)
+        
+        # Reutilizamos la instancia de web_search_tool si ya existe, si no creamos una nueva
+        ws_tool = web_search_tool_instance if 'web_search_tool_instance' in locals() else get_web_search_tool(account_id=account_id)
+        
+        deep_research_instance = create_deep_research_tool_litellm(
+            web_search_tool=ws_tool,
+            add_web_to_rag_tool=add_web_to_rag_instance
+        )
+        
+        if deep_research_instance:
+            available_tools.append(deep_research_instance)
+            logger.info("✅ DeepResearchToolLiteLLM instanciada correctamente")
+        else:
+            logger.warning("⚠️ DeepResearchToolLiteLLM no disponible (módulo no encontrado)")
+    except Exception as e:
+        logger.error(f"❌ Fallo al instanciar DeepResearchToolLiteLLM: {e}", exc_info=True)
+        failed_tools.append("DeepResearchToolLiteLLM")
 
     logger.info(f"--- 🧰 Caja de Herramientas Ensamblada ({len(available_tools)} herramientas) ---")
     if failed_tools:

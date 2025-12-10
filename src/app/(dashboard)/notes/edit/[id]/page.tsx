@@ -19,7 +19,6 @@ export default function EditNotePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const noteId = (params?.id as string) || '';
-  const fromTeam = searchParams?.get('fromTeam');
 
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('');
@@ -27,8 +26,8 @@ export default function EditNotePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isShared, setIsShared] = useState(false);
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
-  const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
-  const [teams, setTeams] = useState<any[]>([]);
+  const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(null);
+  const [workspaces, setWorkspaces] = useState<any[]>([]);
   const { isRecording, isProcessingAudio, transcript, startRecording, stopRecording, clearTranscript } = useAudioRecorder();
   const insertContentRef = useRef<((text: string) => void) | null>(null);
 
@@ -51,24 +50,19 @@ export default function EditNotePage() {
       console.error('Error uploading image:', error);
     }
   };
-  
+
   useEffect(() => {
     const fetchNote = async () => {
       setIsLoading(true);
       if (noteId && noteId !== 'new') {
         try {
           let note;
-          if (fromTeam) {
-            const response = await apiClient.get(`/api/teams/${fromTeam}/shared-items`);
-            note = response.data.find((n: { id: number, type: string }) => n.id === parseInt(noteId) && n.type === 'note');
-          } else {
-            try {
-              const directResponse = await apiClient.get(`/api/notes/${noteId}`);
-              note = directResponse.data;
-            } catch (error) {
-              const fallbackResponse = await apiClient.post('/api/notes/list-notes', { search_term: '' });
-              note = fallbackResponse.data.notes.find((n: { id: number }) => n.id === parseInt(noteId));
-            }
+          try {
+            const directResponse = await apiClient.get(`/api/notes/${noteId}`);
+            note = directResponse.data;
+          } catch (error) {
+            const fallbackResponse = await apiClient.post('/api/notes/list-notes', { search_term: '' });
+            note = fallbackResponse.data.notes.find((n: { id: number }) => n.id === parseInt(noteId));
           }
           if (note) {
             setTitle(note.title || '');
@@ -95,7 +89,7 @@ export default function EditNotePage() {
       }
     };
     fetchNote();
-  }, [noteId, fromTeam]);
+  }, [noteId]);
 
   useEffect(() => {
     if (transcript && insertContentRef.current) {
@@ -103,7 +97,7 @@ export default function EditNotePage() {
       clearTranscript();
     }
   }, [transcript, clearTranscript]);
-  
+
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const autoSaveNote = useCallback(async (currentTitle: string, currentCategory: string, currentContent: string, isNewNote: boolean) => {
@@ -118,17 +112,8 @@ export default function EditNotePage() {
 
     let endpoint = '/api/update-note';
     let requestPayload;
-    if (fromTeam) {
-      endpoint = `/api/teams/${fromTeam}/shared-items/update`;
-      requestPayload = {
-        type: 'note',
-        itemId: noteId,
-        title: currentTitle,
-        content: currentContent,
-      };
-    } else {
-      requestPayload = payload;
-    }
+
+    requestPayload = payload;
 
     try {
       await apiClient.post(endpoint, requestPayload);
@@ -136,41 +121,32 @@ export default function EditNotePage() {
     } catch (error) {
       console.error("Error al auto-guardar la nota:", error);
     }
-  }, [noteId, fromTeam]);
+  }, [noteId]);
 
   const handleSave = async () => {
     const payload = {
-        note_id: noteId !== 'new' ? parseInt(noteId) : undefined,
-        title,
-        category,
-        content: content,
+      note_id: noteId !== 'new' ? parseInt(noteId) : undefined,
+      title,
+      category,
+      content: content,
     };
-    
+
     let endpoint = noteId === 'new' ? '/api/add-note' : '/api/update-note';
     let requestPayload;
-    if (fromTeam && noteId !== 'new') {
-      endpoint = `/api/teams/${fromTeam}/shared-items/update`;
-      requestPayload = {
-        type: 'note',
-        itemId: noteId,
-        title,
-        content: content,
-      };
-    } else {
-      requestPayload = payload;
-    }
+
+    requestPayload = payload;
     const toastId = toast.loading("Guardando nota...");
 
     try {
-        const response = await apiClient.post(endpoint, requestPayload);
-        toast.success("¡Nota guardada!", { id: toastId });
-        if (noteId === 'new' && response.data?.id) {
-          router.replace(`/notes/edit/${response.data.id}`);
-        } else {
-          router.push(fromTeam ? `/teams/${fromTeam}/dashboard` : '/notes');
-        }
+      const response = await apiClient.post(endpoint, requestPayload);
+      toast.success("¡Nota guardada!", { id: toastId });
+      if (noteId === 'new' && response.data?.id) {
+        router.replace(`/notes/edit/${response.data.id}`);
+      } else {
+        router.push('/notes');
+      }
     } catch (error) {
-        toast.error("Error al guardar la nota.", { id: toastId });
+      toast.error("Error al guardar la nota.", { id: toastId });
     }
   };
 
@@ -195,33 +171,36 @@ export default function EditNotePage() {
   const handleShare = async () => {
     if (noteId === 'new') return;
     try {
-      const response = await apiClient.get('/api/teams');
-      const teamsData = response.data;
-      if (teamsData.length === 0) {
-        toast.error("No tienes equipos para compartir.");
+      const response = await apiClient.get('/api/workspaces');
+      const workspacesData = response.data.workspaces;
+      if (workspacesData.length === 0) {
+        toast.error("No tienes espacios de trabajo para compartir.");
         return;
       }
-      setTeams(teamsData);
-      setSelectedTeam(teamsData[0].id);
+      setWorkspaces(workspacesData);
+      setSelectedWorkspace(workspacesData[0].id);
       setIsShareDialogOpen(true);
     } catch (error) {
-      toast.error("Error al cargar los equipos.");
+      toast.error("Error al cargar los espacios de trabajo.");
       console.error(error);
     }
   };
 
-  const handleShareWithTeam = async () => {
-    if (!selectedTeam || noteId === 'new') return;
+  const handleShareWithWorkspace = async () => {
+    if (!selectedWorkspace || noteId === 'new') return;
     try {
-      const toastId = toast.loading(`Compartiendo nota con equipo...`);
-      await apiClient.post(`/api/teams/${selectedTeam}/share/notes`, {
-        noteIds: [parseInt(noteId)]
+      const toastId = toast.loading(`Compartiendo nota con workspace...`);
+      // Aquí deberías implementar la lógica para compartir con workspace
+      // Por ahora, simplemente actualizamos el workspace_id de la nota
+      await apiClient.post('/api/update-note', {
+        note_id: parseInt(noteId),
+        workspace_id: selectedWorkspace
       });
-      toast.success(`Nota compartida con equipo!`, { id: toastId });
+      toast.success(`Nota compartida con workspace!`, { id: toastId });
       setIsShared(true);
       setIsShareDialogOpen(false);
     } catch (error) {
-      toast.error("Error al compartir la nota con el equipo.");
+      toast.error("Error al compartir la nota con el workspace.");
       console.error(error);
     }
   };
@@ -231,8 +210,8 @@ export default function EditNotePage() {
   return (
     <div className="flex flex-col h-screen">
       <header className="flex items-center justify-between p-4 bg-background z-10">
-        <Button variant="ghost" onClick={() => router.push(fromTeam ? `/teams/${fromTeam}/dashboard` : '/notes')}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> {fromTeam ? 'Volver a Equipo' : 'Volver a Notas'}
+        <Button variant="ghost" onClick={() => router.push('/notes')}>
+          <ArrowLeft className="mr-2 h-4 w-4" /> Volver a Notas
         </Button>
         <div className="flex gap-2">
           <Button
@@ -272,7 +251,6 @@ export default function EditNotePage() {
           <TiptapEditor
             content={content}
             onChange={setContent}
-            fromTeam={fromTeam ?? undefined}
             isRecording={isRecording}
             isProcessingAudio={isProcessingAudio}
             onStartRecording={startRecording}
@@ -298,27 +276,27 @@ export default function EditNotePage() {
       <AlertDialog open={isShareDialogOpen} onOpenChange={(open) => !open && setIsShareDialogOpen(false)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Compartir con Equipo</AlertDialogTitle>
+            <AlertDialogTitle>Compartir con Workspace</AlertDialogTitle>
             <AlertDialogDescription>
-              Selecciona el equipo con el que deseas compartir esta nota.
+              Selecciona el workspace con el que deseas compartir esta nota.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-4">
             <div className="flex flex-col gap-2">
-              {teams.map(team => (
+              {workspaces.map(workspace => (
                 <Button
-                  key={team.id}
-                  variant={selectedTeam === team.id ? "default" : "outline"}
-                  onClick={() => setSelectedTeam(team.id)}
+                  key={workspace.id}
+                  variant={selectedWorkspace === workspace.id ? "default" : "outline"}
+                  onClick={() => setSelectedWorkspace(workspace.id)}
                   className="w-full text-left justify-start"
                 >
-                  {team.name}
+                  {workspace.name}
                 </Button>
               ))}
             </div>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancelar</AlertDialogCancel>
-              <AlertDialogAction onClick={handleShareWithTeam}>Compartir</AlertDialogAction>
+              <AlertDialogAction onClick={handleShareWithWorkspace}>Compartir</AlertDialogAction>
             </AlertDialogFooter>
           </div>
         </AlertDialogContent>

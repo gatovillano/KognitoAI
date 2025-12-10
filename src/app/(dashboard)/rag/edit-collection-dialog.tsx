@@ -15,7 +15,6 @@ interface Collection {
   description?: string;
   document_count: number;
   workspace_id?: string; // Add workspace_id
-  team_id?: string;     // Add team_id
 }
 
 interface EditCollectionDialogProps {
@@ -83,7 +82,6 @@ export function EditCollectionDialog({ isOpen, onOpenChange, onEditSuccess, coll
         new_topic: topicName.trim() !== collection.topic ? topicName.trim() : undefined,
         new_description: description.trim() !== (collection.description || '') ? description.trim() : undefined,
         workspace_id: selectedWorkspaceId || undefined, // Send selected workspace
-        team_id: teamId           // Pass teamId
       });
 
       toast.success(`Colección "${topicName}" actualizada exitosamente.`);

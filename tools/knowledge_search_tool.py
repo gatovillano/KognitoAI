@@ -7,7 +7,7 @@ from langchain_core.tools import BaseTool
 
 class KnowledgeSearchInput(BaseModel):
     """Esquema de entrada para la herramienta de búsqueda de conocimiento."""
-    query: str = Field(..., description="La consulta de búsqueda")
+    query: Optional[str] = Field(None, description="La consulta de búsqueda")
     content_types: Optional[List[str]] = Field(None, description="Lista de tipos de contenido: user_memories, user_documents, etc.")
     filter_topics: Optional[List[str]] = Field(None, description="Lista de topics para filtrar")
     category: Optional[str] = Field(None, description="Categoría automática del LLM")
@@ -33,7 +33,7 @@ class KnowledgeSearchTool(BaseTool):
 
     def _run(
         self,
-        query: str,
+        query: Optional[str] = None,
         content_types: Optional[List[str]] = None,
         filter_topics: Optional[List[str]] = None,
         category: Optional[str] = None,
@@ -57,7 +57,7 @@ class KnowledgeSearchTool(BaseTool):
 
     async def _arun(
         self,
-        query: str,
+        query: Optional[str] = None,
         content_types: Optional[List[str]] = None,
         filter_topics: Optional[List[str]] = None,
         category: Optional[str] = None,
@@ -69,6 +69,13 @@ class KnowledgeSearchTool(BaseTool):
     ) -> str:
         """Versión asíncrona de la búsqueda de conocimiento."""
         try:
+            if not query:
+                return json.dumps({
+                    "status": "error",
+                    "error": "Por favor, proporciona una consulta de búsqueda (query).",
+                    "query": ""
+                }, ensure_ascii=False)
+
             explicit_document_ids = None
 
             if document_name:

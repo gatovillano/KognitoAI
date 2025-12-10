@@ -94,8 +94,7 @@ async def list_github_documents(
                 "title": doc.file_path.split('/')[-1],
                 "author": None,
                 "document_id": f"github_{doc.id}",
-                "workspace_id": str(doc.workspace_id) if doc.workspace_id else None,
-                "team_id": None
+                "workspace_id": str(doc.workspace_id) if doc.workspace_id else None
             }
             for doc in docs
         ]

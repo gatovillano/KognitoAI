@@ -29,7 +29,7 @@ async def get_interpreter_llm() -> ChatGoogleGenerativeAI:
     if _interpreter_llm is None:
         logger.info("🧠 Inicializando LLM para interpretación de consultas naturales...")
         _interpreter_llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             temperature=0.1,
             disable_streaming=True
         )

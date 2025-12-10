@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from core.llm_manager import get_main_llm
 from langchain_core.language_models.base import BaseLanguageModel
-from tools.deep_research_tool import DeepResearchTool
+from tools.deep_research_tool_litellm import create_deep_research_tool_litellm
 from tools.web_search_tool import get_web_search_tool # Importar la función de fábrica
 from tools.add_web_to_rag_tool import AddWebToRAGTool
 
@@ -35,12 +35,14 @@ async def run_deep_research(
         web_search_tool_instance = get_web_search_tool(account_id="deep_research_agent") # Asignar un account_id para la herramienta
         add_web_to_rag_tool_instance = AddWebToRAGTool(account_id="deep_research_agent")
 
-        # Instanciar DeepResearchTool, pasando la instancia del LLM directamente
-        deep_research_tool = DeepResearchTool(
-            llm_instance=llm_instance, # Pasar la instancia del LLM
+        # Instanciar DeepResearchToolLiteLLM
+        deep_research_tool = create_deep_research_tool_litellm(
             web_search_tool=web_search_tool_instance,
             add_web_to_rag_tool=add_web_to_rag_tool_instance
         )
+        
+        if not deep_research_tool:
+            raise HTTPException(status_code=503, detail="El módulo de Deep Research no está disponible.")
 
         # Ejecutar la investigación
         research_report = await deep_research_tool._run(request.query)

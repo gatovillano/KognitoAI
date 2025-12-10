@@ -166,6 +166,49 @@ export interface NoteCollectionAnalysisResult {
   kai_synthesis: string;
 }
 
+export interface GroupedTopic {
+  topic: string;
+  mentions: number;
+  cluster_id?: number;
+  description?: string;
+  topics?: string[];
+  quotes?: Array<{ document_title: string; quote: string }>;
+}
+
+export interface DetailedCluster {
+  cluster_id: number;
+  representative_term: string;
+  description: string;
+  topics: string[];
+  total_mentions: number;
+  topic_count: number;
+}
+
+export interface ClusteringMetrics {
+  optimal_k: number;
+  silhouette_score: number;
+  inertia: number;
+  all_scores?: number[];
+  all_inertias?: number[];
+  method?: string;
+  k_range_evaluated?: number[];
+}
+
+export interface SemanticAnalysisResult {
+  grouped_topics: GroupedTopic[];
+  detailed_clusters: DetailedCluster[];
+  clustering_metrics?: ClusteringMetrics;
+  tool_used?: string;
+  analysis_metadata?: {
+    tool_used?: string;
+    analysis_type?: string;
+    total_topics?: number;
+    clusters_count?: number;
+    max_terms_limit?: number;
+    created_at?: string;
+  };
+}
+
 export interface Analysis {
   id: string;
   type: AnalysisType;
@@ -185,7 +228,7 @@ export interface Analysis {
   file_name?: string;
   topic?: string;
   author?: string;
-  result?: DocumentAnalysisResult | CodeAnalysisResultFrontend | CollectionAnalysis | NoteAnalysisResult | NoteCollectionAnalysisResult | any;
+  result?: DocumentAnalysisResult | CodeAnalysisResultFrontend | CollectionAnalysis | NoteAnalysisResult | NoteCollectionAnalysisResult | SemanticAnalysisResult | any;
   full_data?: any; // Añadido para que coincida con la implementación existente
 }
 
@@ -217,4 +260,5 @@ export type AnalysisType =
   | 'note_analysis'
   | 'note_collection_analysis'
   | 'knowledge_graph_analysis'
-  | 'custom_analysis';
+  | 'custom_analysis'
+  | 'repository_update';

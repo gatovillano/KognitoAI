@@ -72,9 +72,25 @@ class EnhancedMemoryManager:
             # 2. Obtener contexto del grafo de conocimiento (si está habilitado)
             graph_context = {"type": "graph", "results": [], "reason": "Disabled"}
             if enable_graph_search:
-                graph_context = await self._get_graph_context(
-                    user_query, workspace_id, max_results
+                # 1. Buscar en el grafo de memorias del agente
+                agent_memory_dataset = f"agent_memories_{user_id.replace('-', '_')}"
+                agent_graph_context = await self._get_graph_context(
+                    user_query, agent_memory_dataset, max_results
                 )
+                
+                # 2. Buscar en el grafo de documentos (asumiendo un dataset por defecto o workspace)
+                # Esta parte puede necesitar un nombre de dataset de documentos más explícito si existe
+                document_dataset = f"workspace_documents_{workspace_id.replace('-', '_')}" if workspace_id else "default_documents"
+                document_graph_context = await self._get_graph_context(
+                    user_query, document_dataset, max_results
+                )
+
+                # Combinar ambos contextos de grafo
+                graph_context = {
+                    "type": "combined_knowledge_graph",
+                    "agent_memories": agent_graph_context,
+                    "document_insights": document_graph_context
+                }
             
             # 3. Combinar y enriquecer contextos
             enhanced_context = await self._combine_contexts(
@@ -120,17 +136,17 @@ class EnhancedMemoryManager:
     async def _get_graph_context(
         self,
         user_query: str,
-        workspace_id: Optional[str] = None,
+        dataset_name: str,
         max_results: int = 10
     ) -> Dict[str, Any]:
-        """Obtiene contexto del grafo de conocimiento."""
+        """Obtiene contexto del grafo de conocimiento para un dataset específico."""
         
         if not self.graph_db:
-            return {"type": "graph", "results": []}
+            return {"type": "graph", "results": [], "dataset": dataset_name}
         
         try:
-            # 1. Buscar entidades relacionadas con la consulta
-            entities = await self._find_relevant_entities(user_query, workspace_id)
+            # 1. Buscar entidades relacionadas con la consulta en el dataset específico
+            entities = await self._find_relevant_entities(user_query, dataset_name)
             
             # 2. Obtener relaciones de esas entidades
             relationships = await self._get_entity_relationships(entities)
@@ -138,10 +154,10 @@ class EnhancedMemoryManager:
             # 3. Construir contexto del grafo
             graph_context = {
                 "type": "knowledge_graph",
+                "dataset": dataset_name,
                 "entities": entities[:max_results],
                 "relationships": relationships,
-                "query": user_query,
-                "workspace_id": workspace_id
+                "query": user_query
             }
             
             return graph_context
@@ -150,32 +166,28 @@ class EnhancedMemoryManager:
             logger.error(f"❌ Error obteniendo contexto del grafo: {e}")
             return {"type": "graph", "results": []}
     
-    async def _find_relevant_entities(self, user_query: str, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Encuentra entidades relevantes en el grafo basadas en la consulta de forma más eficiente."""
+    async def _find_relevant_entities(self, user_query: str, dataset_name: str) -> List[Dict[str, Any]]:
+        """Encuentra entidades relevantes en el grafo para un dataset específico."""
         
         try:
-            # Extraer términos clave de la consulta, filtrar por longitud y limitar su número
-            query_terms = [term for term in user_query.lower().split() if len(term) > 3]
+            # Extraer términos clave de la consulta
+            query_terms = [term for term in user_query.lower().split() if len(term) > 3][:15]
             if not query_terms:
                 return []
 
-            # Limitar a los primeros 15 términos significativos para evitar sobrecarga
-            if len(query_terms) > 15:
-                logger.debug(f"Limitando la búsqueda en el grafo a los primeros 15 de {len(query_terms)} términos.")
-                query_terms = query_terms[:15]
-
-            # Query para buscar entidades usando una lista de términos con ANY
-            # Se busca en una lista de terminos para reducir las llamadas a la base de datos
+            # Query para buscar entidades que pertenezcan al dataset_name
             query = """
             MATCH (n)
-            WHERE ANY(term IN $query_terms WHERE toLower(n.name) CONTAINS term OR toLower(n.description) CONTAINS term)
-            RETURN n.id as id, n.name as name, n.type as type, 
+            WHERE n.dataset_name = $dataset_name
+              AND ANY(term IN $query_terms WHERE toLower(n.name) CONTAINS term OR toLower(n.description) CONTAINS term)
+            RETURN n.id as id, n.name as name, n.type as type,
                    n.description as description, n.confidence as confidence
             ORDER BY n.confidence DESC
             LIMIT 20
             """
             
-            result = await self.graph_db.execute_query(query, {"query_terms": query_terms})
+            params = {"query_terms": query_terms, "dataset_name": dataset_name}
+            result = await self.graph_db.execute_query(query, params)
             
             # Eliminar duplicados si los hubiera, manteniendo el orden de la base de datos
             unique_entities = {}
