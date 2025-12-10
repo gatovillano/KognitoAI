@@ -78,7 +78,7 @@ class AdvancedTextAnalyzer:
             logger.info("Inicializando modelo Gemini para análisis de texto avanzado...")
             # Aquí puedes poner el nombre del modelo que prefieras de tu config
             self._gemini_model = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 temperature=0.1,
                 disable_streaming=False  # Habilita streaming
             )

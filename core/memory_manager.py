@@ -81,7 +81,6 @@ async def _run_semantic_search(
     filter_topics: Optional[List[str]] = None,
     filter_document_ids: Optional[List[str]] = None,
     workspace_id: Optional[str] = None,
-    visibility_teams: Optional[List[str]] = None,
     content_types: Optional[List[str]] = None,
     category: Optional[str] = None,
     explicit_document_ids: Optional[List[str]] = None,
@@ -741,7 +740,7 @@ async def add_memory_to_vector_db(
                     collection_uuid=str(collection_obj.uuid),
                     file_name="memory",  # Identificador para memorias
                     account_id=account_id,
-                    content_type="user_memories",
+                    content_type=type,
                     topic=topic,
                     category=category,
                     workspace_id=workspace_id,
@@ -1696,8 +1695,7 @@ async def update_collection(
     old_topic_name: str,
     new_topic_name: Optional[str] = None,
     new_description: Optional[str] = None,
-    workspace_id: Optional[str] = None,
-    team_id: Optional[str] = None
+    workspace_id: Optional[str] = None
 ) -> bool:
     """
     Actualiza una colección existente (nombre, descripción, workspace_id o team_id).
@@ -1708,7 +1706,6 @@ async def update_collection(
         new_topic_name: Nuevo nombre de la colección (opcional).
         new_description: Nueva descripción de la colección (opcional).
         workspace_id: ID del workspace (opcional).
-        team_id: ID del team (opcional).
         
     Returns:
         True si la colección se actualizó exitosamente, False en caso contrario.
@@ -1717,19 +1714,17 @@ async def update_collection(
     decoded_old_topic_name = unquote(old_topic_name)
     decoded_new_topic_name = unquote(new_topic_name) if new_topic_name else None
     
-    logger.info(f"Actualizando colección '{decoded_old_topic_name}' para cuenta {account_id}. Nuevos datos: topic={decoded_new_topic_name}, description={new_description}, workspace_id={workspace_id}, team_id={team_id}")
+    logger.info(f"Actualizando colección '{decoded_old_topic_name}' para cuenta {account_id}. Nuevos datos: topic={decoded_new_topic_name}, description={new_description}, workspace_id={workspace_id}")
 
     async with DBSession(SessionLocal) as db:
         try:
-            # Buscar la colección
+            # Buscar la colección SOLO por account_id y nombre
+            # No filtrar por workspace_id aquí para permitir actualizar colecciones
+            # que originalmente no tienen workspace asignado
             collection_query = select(UserDocumentTopic).where(
                 UserDocumentTopic.account_id == uuid.UUID(account_id),
                 UserDocumentTopic.name == decoded_old_topic_name
             )
-            
-            # Agregar filtro de workspace si se proporciona
-            if workspace_id:
-                collection_query = collection_query.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
             
             collection = (await db.execute(collection_query)).scalars().first()
 
@@ -1753,18 +1748,68 @@ async def update_collection(
                     logger.warning(f"Ya existe una colección con el nombre '{decoded_new_topic_name}' para la cuenta {account_id}.")
                     return False
 
+
             # Actualizar los campos proporcionados
+            old_workspace_id = collection.workspace_id
             if decoded_new_topic_name:
                 collection.name = decoded_new_topic_name
             if new_description is not None:
                 collection.description = new_description
             if workspace_id:
                 collection.workspace_id = uuid.UUID(workspace_id)
-            if team_id:
-                collection.team_id = uuid.UUID(team_id)
             
             await db.commit()
             await db.refresh(collection)
+
+            # Actualizar los documentos asociados en langchain_pg_embedding
+            # si cambió el nombre de la colección o el workspace_id
+            if decoded_new_topic_name or workspace_id:
+                try:
+                    update_clauses = []
+                    update_params: Dict[str, Any] = {}
+                    
+                    if decoded_new_topic_name:
+                        update_clauses.append("topic = :new_topic")
+                        update_params["new_topic"] = decoded_new_topic_name
+                    
+                    if workspace_id:
+                        update_clauses.append("workspace_id = :new_workspace_id")
+                        update_params["new_workspace_id"] = workspace_id
+                    
+                    # Construir las condiciones WHERE para encontrar los documentos de la colección
+                    where_clauses = [
+                        "account_id = :account_id",
+                        "topic = :old_topic"
+                    ]
+                    where_params: Dict[str, Any] = {
+                        "account_id": account_id,
+                        "old_topic": decoded_old_topic_name
+                    }
+                    
+                    # Filtrar por el workspace_id original de la colección
+                    if old_workspace_id:
+                        where_clauses.append("workspace_id = :old_workspace_id")
+                        where_params["old_workspace_id"] = str(old_workspace_id)
+                    else:
+                        where_clauses.append("workspace_id IS NULL")
+                    
+                    # Combinar parámetros
+                    all_params = {**update_params, **where_params}
+                    
+                    # Ejecutar la actualización
+                    update_query = text(f"""
+                        UPDATE langchain_pg_embedding
+                        SET {", ".join(update_clauses)}
+                        WHERE {" AND ".join(where_clauses)}
+                    """)
+                    
+                    result = await db.execute(update_query, all_params)
+                    await db.commit()
+                    
+                    logger.info(f"✅ Actualizados {result.rowcount} chunks de documentos en langchain_pg_embedding.")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error al actualizar documentos en langchain_pg_embedding: {e}")
+                    # No fallar toda la operación si los documentos no se actualizan
 
             logger.info(f"✅ Colección '{decoded_old_topic_name}' actualizada exitosamente.")
             return True

@@ -68,6 +68,7 @@ export default function RagCollectionsPage() {
   // Estado para el diálogo de configuración de grafo
   const [isDatasetDialogOpen, setIsDatasetDialogOpen] = useState(false);
   const [processingTopic, setProcessingTopic] = useState<string | null>(null);
+  const [processingWorkspaceId, setProcessingWorkspaceId] = useState<string | null>(null);
 
   const router = useRouter();
 
@@ -216,12 +217,14 @@ export default function RagCollectionsPage() {
     setSelectedCollection(null);
   };
 
-  const handleProcessKnowledgeGraph = (topic?: string) => {
+  const handleProcessKnowledgeGraph = (topic?: string, workspaceId?: string) => {
+    console.log('🔍 handleProcessKnowledgeGraph called with:', { topic, workspaceId });
     if (isProcessingKnowledgeGraph) {
       toast.info("Ya hay un procesamiento de grafo en progreso.");
       return;
     }
     setProcessingTopic(topic || null);
+    setProcessingWorkspaceId(workspaceId || null);
     setIsDatasetDialogOpen(true);
   };
 
@@ -240,14 +243,16 @@ export default function RagCollectionsPage() {
         const payload = {
           tool_name: "cognee_knowledge_graph",
           action: "process_documents",
-          dataset_name: datasetName,
-          documents: []
+          dataset_name: datasetName,  // Nombre para organizar el grafo
+          topic: processingTopic || undefined,  // Nombre de la colección para filtrar documentos
+          documents: [],
+          workspace_id: processingWorkspaceId || undefined  // Workspace de la colección específica
         };
         await apiClient.post('/api/tools/run', payload);
       } else {
         // Modo Híbrido (Estándar): Llamar al endpoint optimizado
         await apiClient.post('/api/knowledge-graph/process-knowledge-graph-optimized', {
-          workspace_id: collections.length > 0 ? collections[0].workspace_id : undefined,
+          workspace_id: processingWorkspaceId || undefined,
           dataset_name: datasetName,
           topic: processingTopic || undefined,  // Filtrar por colección específica
           force_reprocess: true
@@ -264,6 +269,7 @@ export default function RagCollectionsPage() {
     } finally {
       setIsProcessingKnowledgeGraph(false);
       setProcessingTopic(null);
+      setProcessingWorkspaceId(null);
     }
   };
 

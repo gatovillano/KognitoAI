@@ -97,6 +97,10 @@ class Neo4jAdapter:
             Número de entidades agregadas
         """
         try:
+            if self.graph_db._driver is None or getattr(self.graph_db._driver, 'closed', False):
+                logger.warning("🔄 GraphDB no conectado en Neo4jAdapter, intentando reconectar...")
+                self.graph_db.connect()
+
             logger.info(f"📝 Agregando {len(entities)} entidades a Neo4j...")
             
             entities_added = 0
@@ -223,6 +227,10 @@ class Neo4jAdapter:
             Número de relaciones agregadas
         """
         try:
+            if self.graph_db._driver is None or getattr(self.graph_db._driver, 'closed', False):
+                logger.warning("🔄 GraphDB no conectado en Neo4jAdapter, intentando reconectar...")
+                self.graph_db.connect()
+
             logger.info(f"🔗 Agregando {len(relationships)} relaciones a Neo4j...")
             
             relationships_added = 0

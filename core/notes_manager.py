@@ -8,7 +8,7 @@ from sqlalchemy import select, update, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from core.database import Nota, TeamMember, ContactProfile, Workspace, NoteContactProfileAssociation, WorkspacePermission
+from core.database import Nota, ContactProfile, Workspace, NoteContactProfileAssociation, WorkspacePermission
 from utils.embeddings import get_embedding_model
 from utils.security import check_workspace_permission # Importar check_workspace_permission
 

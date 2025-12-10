@@ -49,8 +49,8 @@ class Config:
         self.llm_api_base: Optional[str] = os.getenv("LLM_API_BASE")
 
         # Mantener compatibilidad hacia atrás (deprecated)
-        self.google_main_model_name: str = os.getenv("GOOGLE_MAIN_MODEL_NAME", "gemini-2.0-flash")
-        self.google_summary_model_name: str = os.getenv("GOOGLE_SUMMARY_MODEL_NAME", "gemini-2.0-flash")
+        self.google_main_model_name: str = os.getenv("GOOGLE_MAIN_MODEL_NAME", "gemini-2.5-flash")
+        self.google_summary_model_name: str = os.getenv("GOOGLE_SUMMARY_MODEL_NAME", "gemini-2.5-flash")
         
         # El modelo de Vertex AI para la generación de imágenes (ej. Imagen 3).
         self.google_image_generation_model_name: str = os.getenv("GOOGLE_IMAGE_GENERATION_MODEL_NAME", "imagegeneration@006")
@@ -98,6 +98,8 @@ class Config:
         self.tavily_api_key: Optional[str] = os.getenv("TAVILY_API_KEY")
         # ¡NUEVA LÍNEA! Token de GitHub para importar repositorios privados.
         self.github_token: Optional[str] = os.getenv("GITHUB_TOKEN")
+        # ¡NUEVA LÍNEA! Clave de API para OpenRouter.
+        self.openrouter_api_key: Optional[str] = os.getenv("OPENROUTER_API_KEY")
 
         # ¡NUEVA LÍNEA! La URL de nuestro servidor API para que los clientes sepan a dónde llamar.
         self.api_server_url: str = os.getenv("API_SERVER_URL", "https://apibase.gatoslibres.art")

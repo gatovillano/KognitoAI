@@ -25,7 +25,6 @@ const formSchema = z.object({
   status: z.string().optional(),
   attendee_ids: z.array(z.string()).optional(),
   external_attendees: z.array(z.string()).optional(),
-  team_id: z.string().optional(),
   workspace_id: z.string().optional(),
 });
 
@@ -38,8 +37,6 @@ interface EventEditDialogProps {
 }
 
 export function EventEditDialog({ isOpen, onOpenChange, onSaveSuccess, onCloseDetails, event }: EventEditDialogProps) {
-  const [teams, setTeams] = useState<any[]>([]);
-  const [loadingTeams, setLoadingTeams] = useState(false);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
   const [isProfileSelectorOpen, setIsProfileSelectorOpen] = useState(false);
@@ -58,25 +55,11 @@ export function EventEditDialog({ isOpen, onOpenChange, onSaveSuccess, onCloseDe
       status: event?.status || 'Pendiente',
       attendee_ids: event?.attendee_ids || [],
       external_attendees: event?.external_attendees || [],
-      team_id: event?.team_id?.toString() || '',
       workspace_id: event?.workspace_id?.toString() || '',
     },
   });
 
   useEffect(() => {
-    const fetchTeams = async () => {
-      setLoadingTeams(true);
-      try {
-        const response = await apiClient.get('/api/teams');
-        setTeams(response.data);
-      } catch (error) {
-        console.error("Error fetching teams:", error);
-        toast.error('Error al cargar los equipos.');
-      } finally {
-        setLoadingTeams(false);
-      }
-    };
-
     const fetchWorkspaces = async () => {
       setLoadingWorkspaces(true);
       try {
@@ -113,7 +96,6 @@ export function EventEditDialog({ isOpen, onOpenChange, onSaveSuccess, onCloseDe
     };
 
     if (isOpen) {
-      fetchTeams();
       fetchWorkspaces();
       fetchLinkedProfiles();
     }
@@ -132,7 +114,6 @@ export function EventEditDialog({ isOpen, onOpenChange, onSaveSuccess, onCloseDe
         status: event.status || 'Pendiente',
         attendee_ids: event.attendee_ids || [],
         external_attendees: event.external_attendees || [],
-        team_id: event.team_id?.toString() || '',
         workspace_id: event.workspace_id?.toString() || '',
       });
     }
@@ -152,7 +133,6 @@ export function EventEditDialog({ isOpen, onOpenChange, onSaveSuccess, onCloseDe
         status: values.status,
         attendee_ids: values.attendee_ids,
         external_attendees: values.external_attendees,
-        team_id: values.team_id ? parseInt(values.team_id) : null,
         workspace_id: values.workspace_id || null,
       });
       toast.success('¡Evento actualizado!', { id: toastId });
@@ -246,27 +226,6 @@ export function EventEditDialog({ isOpen, onOpenChange, onSaveSuccess, onCloseDe
                     <option value="Pendiente">Pendiente</option>
                     <option value="En Progreso">En Progreso</option>
                     <option value="Hecho">Hecho</option>
-                  </select>
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="team_id" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Compartir con Equipo</FormLabel>
-                <FormControl>
-                  <select
-                    className="w-full border rounded-md p-2"
-                    onChange={field.onChange}
-                    value={field.value || ''}
-                    disabled={loadingTeams}
-                  >
-                    <option value="">{loadingTeams ? "Cargando equipos..." : "Seleccionar equipo (opcional)"}</option>
-                    {teams.map(team => (
-                      <option key={team.id} value={team.id.toString()}>
-                        {team.name}
-                      </option>
-                    ))}
                   </select>
                 </FormControl>
                 <FormMessage />

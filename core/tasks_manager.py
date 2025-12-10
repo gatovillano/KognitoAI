@@ -100,11 +100,43 @@ class TasksManager:
         """
         Lista las tareas de un usuario, opcionalmente filtradas por workspace,
         estado de completado y término de búsqueda.
+        Incluye tareas personales y de todos los workspaces a los que el usuario tiene acceso.
         """
-        stmt = select(Task).options(selectinload(Task.contact_profiles)).where(Task.account_id == uuid.UUID(account_id))
-
+        from sqlalchemy import or_
+        from core.database import WorkspacePermission
+        
+        account_uuid = uuid.UUID(account_id)
+        
         if workspace_id:
-            stmt = stmt.where(Task.workspace_id == uuid.UUID(workspace_id))
+            # Si se especifica un workspace específico, verificar permisos primero
+            from core.dependencies import check_workspace_permission
+            from fastapi import HTTPException
+            try:
+                await check_workspace_permission(db=self.db_session, workspace_id=uuid.UUID(workspace_id), account_id=account_uuid, required_roles=['owner', 'editor', 'viewer'])
+            except HTTPException as e:
+                logger.warning(f"Permission denied for account {account_id} on workspace {workspace_id}: {e.detail}")
+                return []
+
+            # Mostrar TODAS las tareas de ese workspace
+            # (no filtrar por account_id para permitir que los usuarios viewer vean tareas de otros)
+            stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
+                Task.workspace_id == uuid.UUID(workspace_id)
+            )
+        else:
+            # Si no se especifica workspace, obtener tareas personales y de todos los workspaces a los que tiene acceso
+            accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(
+                WorkspacePermission.account_id == account_uuid
+            )
+            result = await self.db_session.execute(accessible_workspaces_stmt)
+            accessible_workspace_ids = [row[0] for row in result.fetchall()]
+            
+            stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
+                or_(
+                    Task.account_id == account_uuid,  # Tareas personales del usuario
+                    Task.workspace_id.in_(accessible_workspace_ids)  # Tareas de workspaces compartidos
+                )
+            )
+        
         if is_completed is not None:
             stmt = stmt.where(Task.is_completed == is_completed)
         if status:
@@ -116,7 +148,7 @@ class TasksManager:
 
         result = await self.db_session.execute(stmt)
         tasks = result.scalars().all()
-        logger.info(f"Listadas {len(tasks)} tareas para account {account_id}.")
+        logger.info(f"Listadas {len(tasks)} tareas para account {account_id} (incluyendo workspaces compartidos).")
         return [self._task_to_dict(task) for task in tasks]
 
     async def update_task(
@@ -136,16 +168,33 @@ class TasksManager:
         """
         Actualiza una tarea existente.
         """
+        from core.dependencies import check_workspace_permission
+        from fastapi import HTTPException
+        
+        # Primero buscar la tarea sin filtrar por account_id
         stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
-            Task.id == task_id, # Usar task_id como uuid.UUID
-            Task.account_id == uuid.UUID(account_id)
+            Task.id == task_id
         )
         result = await self.db_session.execute(stmt)
         task = result.scalars().first()
 
         if not task:
-            logger.warning(f"Tarea {task_id} no encontrada o no pertenece a account {account_id}.")
+            logger.warning(f"Tarea {task_id} no encontrada.")
             return None
+        
+        # Verificar permisos: la tarea debe pertenecer al usuario O estar en un workspace al que tiene acceso con rol editor/owner
+        if task.workspace_id:
+            # Si la tarea pertenece a un workspace, verificar permisos de editor/owner
+            try:
+                await check_workspace_permission(db=self.db_session, workspace_id=task.workspace_id, account_id=uuid.UUID(account_id), required_roles=['owner', 'editor'])
+            except HTTPException as e:
+                logger.warning(f"Acceso denegado para actualizar la tarea {task.id} en workspace {task.workspace_id} para la cuenta {account_id}: {e.detail}")
+                return None
+        else:
+            # Si la tarea no pertenece a un workspace, debe pertenecer al usuario
+            if task.account_id != uuid.UUID(account_id):
+                logger.warning(f"Tarea {task_id} no pertenece a la cuenta {account_id} y no está en un workspace compartido.")
+                return None
 
         if summary is not None:
             task.summary = summary
@@ -192,16 +241,33 @@ class TasksManager:
         """
         Elimina una tarea.
         """
+        from core.dependencies import check_workspace_permission
+        from fastapi import HTTPException
+        
+        # Primero buscar la tarea sin filtrar por account_id
         stmt = select(Task).where(
-            Task.id == task_id, # Usar task_id como uuid.UUID
-            Task.account_id == uuid.UUID(account_id)
+            Task.id == task_id
         )
         result = await self.db_session.execute(stmt)
         task = result.scalars().first()
 
         if not task:
-            logger.warning(f"Tarea {task_id} no encontrada o no pertenece a account {account_id}.")
+            logger.warning(f"Tarea {task_id} no encontrada.")
             return False
+        
+        # Verificar permisos: la tarea debe pertenecer al usuario O estar en un workspace al que tiene acceso con rol owner/editor
+        if task.workspace_id:
+            # Si la tarea pertenece a un workspace, verificar permisos de owner/editor
+            try:
+                await check_workspace_permission(db=self.db_session, workspace_id=task.workspace_id, account_id=uuid.UUID(account_id), required_roles=['owner', 'editor'])
+            except HTTPException as e:
+                logger.warning(f"Acceso denegado para eliminar la tarea {task.id} en workspace {task.workspace_id} para la cuenta {account_id}: {e.detail}")
+                return False
+        else:
+            # Si la tarea no pertenece a un workspace, debe pertenecer al usuario
+            if task.account_id != uuid.UUID(account_id):
+                logger.warning(f"Tarea {task_id} no pertenece a la cuenta {account_id} y no está en un workspace compartido.")
+                return False
 
         await self.db_session.delete(task)
         await self.db_session.commit()
@@ -212,22 +278,60 @@ class TasksManager:
         """
         Obtiene una tarea por su ID.
         """
+        from core.dependencies import check_workspace_permission
+        from fastapi import HTTPException
+        
+        # Primero buscar la tarea sin filtrar por account_id
         stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
-            Task.id == task_id, # Usar task_id como uuid.UUID
-            Task.account_id == uuid.UUID(account_id)
+            Task.id == task_id
         )
         result = await self.db_session.execute(stmt)
         task = result.scalars().first()
+        
+        if not task:
+            logger.warning(f"Tarea {task_id} no encontrada.")
+            return None
+        
+        # Verificar permisos: la tarea debe pertenecer al usuario O estar en un workspace al que tiene acceso
+        if task.workspace_id:
+            # Si la tarea pertenece a un workspace, verificar permisos
+            try:
+                await check_workspace_permission(db=self.db_session, workspace_id=task.workspace_id, account_id=uuid.UUID(account_id), required_roles=['owner', 'editor', 'viewer'])
+            except HTTPException as e:
+                logger.warning(f"Acceso denegado a la tarea {task.id} en workspace {task.workspace_id} para la cuenta {account_id}: {e.detail}")
+                return None
+        else:
+            # Si la tarea no pertenece a un workspace, debe pertenecer al usuario
+            if task.account_id != uuid.UUID(account_id):
+                logger.warning(f"Tarea {task_id} no pertenece a la cuenta {account_id} y no está en un workspace compartido.")
+                return None
+        
         return task
         
     async def get_tasks_as_dicts(self, account_id: str, include_completed: bool = False) -> List[Dict[str, Any]]:
         """
         Recupera tareas de un usuario y las devuelve como una lista de diccionarios.
         Si include_completed es False (por defecto), solo recupera tareas no completadas.
+        Incluye tareas personales y de todos los workspaces a los que el usuario tiene acceso.
         """
+        from sqlalchemy import or_
+        from core.database import WorkspacePermission
+        
         async with DBSession(SessionLocal) as db:
+            account_uuid = uuid.UUID(account_id)
+            
+            # Obtener workspaces accesibles
+            accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(
+                WorkspacePermission.account_id == account_uuid
+            )
+            result = await db.execute(accessible_workspaces_stmt)
+            accessible_workspace_ids = [row[0] for row in result.fetchall()]
+            
             stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
-                Task.account_id == uuid.UUID(account_id)
+                or_(
+                    Task.account_id == account_uuid,  # Tareas personales del usuario
+                    Task.workspace_id.in_(accessible_workspace_ids)  # Tareas de workspaces compartidos
+                )
             )
             if not include_completed:
                 stmt = stmt.where(Task.is_completed == False)

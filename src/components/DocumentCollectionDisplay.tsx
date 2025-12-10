@@ -27,6 +27,7 @@ import UploadProgressIndicator, { UploadTask } from '@/components/UploadProgress
 import AnalysisProgressIndicator from '@/components/AnalysisProgressIndicator';
 import { ShareDocumentDialog } from '@/app/(dashboard)/rag/share-document-dialog';
 import { CustomAnalysisDialog } from '@/app/(dashboard)/rag/custom-analysis-dialog';
+import { DatasetNameDialog } from '@/app/(dashboard)/rag/dataset-name-dialog';
 
 import { Analysis, AnalysisType } from '@/lib/models';
 
@@ -95,6 +96,11 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
 
   // Estados para procesamiento de grafos de conocimiento
   const [isProcessingKnowledgeGraph, setIsProcessingKnowledgeGraph] = useState(false);
+
+  // Estado para el diálogo de configuración de grafo
+  const [isDatasetDialogOpen, setIsDatasetDialogOpen] = useState(false);
+  const [processingTopic, setProcessingTopic] = useState<string | null>(null);
+  const [processingWorkspaceId, setProcessingWorkspaceId] = useState<string | null>(null);
 
   const fetchPageData = useCallback(async () => {
     setIsLoading(true);
@@ -457,34 +463,59 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   };
 
   // --- Handler para Procesar Grafos de Conocimiento ---
-  const handleProcessKnowledgeGraph = async () => {
+  const handleProcessKnowledgeGraph = () => {
+    console.log('🔍 handleProcessKnowledgeGraph called with:', { topic, workspaceId });
     if (isProcessingKnowledgeGraph) {
       toast.info("Ya hay un procesamiento de grafo en progreso.");
       return;
     }
+    setProcessingTopic(topic);
+    setProcessingWorkspaceId(workspaceId || null);
+    setIsDatasetDialogOpen(true);
+  };
 
+  const handleConfirmProcessGraph = async (datasetName: string, mode: 'hybrid' | 'conceptual') => {
     setIsProcessingKnowledgeGraph(true);
-    const toastId = toast.loading(`Procesando grafo de conocimiento para "${collectionName || topic}"...`);
+    const toastId = toast.loading(
+      processingTopic
+        ? `Procesando grafo de conocimiento para "${processingTopic}" (Modo: ${mode === 'hybrid' ? 'Estándar' : 'Conceptual'})...`
+        : `Procesando grafo global (Modo: ${mode === 'hybrid' ? 'Estándar' : 'Conceptual'})...`
+    );
 
     try {
-      const payload = {
-        tool_name: "cognee_knowledge_graph",
-        action: "process_documents",
-        dataset_name: topic,
-        documents: [], // Se podría añadir lógica para obtener documentos si es necesario
-        ...(workspaceId && { workspace_id: workspaceId })
-      };
-
-      const response = await apiClient.post('/api/tools/run', payload);
+      // Determinar qué endpoint usar basado en el modo
+      if (mode === 'conceptual') {
+        // Modo Conceptual: Usar la herramienta de Cognee
+        const payload = {
+          tool_name: "cognee_knowledge_graph",
+          action: "process_documents",
+          dataset_name: datasetName,  // Nombre para organizar el grafo
+          topic: processingTopic || undefined,  // Nombre de la colección para filtrar documentos
+          documents: [],
+          workspace_id: processingWorkspaceId || undefined  // Workspace de la colección específica
+        };
+        await apiClient.post('/api/tools/run', payload);
+      } else {
+        // Modo Híbrido (Estándar): Llamar al endpoint optimizado
+        await apiClient.post('/api/knowledge-graph/process-knowledge-graph-optimized', {
+          workspace_id: processingWorkspaceId || undefined,
+          dataset_name: datasetName,
+          topic: processingTopic || undefined,  // Filtrar por colección específica
+          force_reprocess: true
+        });
+      }
 
       toast.success(
         `¡Creación de grafo iniciada!`,
         { id: toastId }
       );
     } catch (error) {
-      toast.error("Error al iniciar el procesamiento del grafo de conocimiento.", { id: toastId });
+      console.error(error);
+      toast.error("Error al iniciar el procesamiento del grafo.", { id: toastId });
     } finally {
       setIsProcessingKnowledgeGraph(false);
+      setProcessingTopic(null);
+      setProcessingWorkspaceId(null);
     }
   };
 
@@ -788,6 +819,13 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         }}
       />
 
+      <DatasetNameDialog
+        isOpen={isDatasetDialogOpen}
+        onOpenChange={setIsDatasetDialogOpen}
+        onConfirm={handleConfirmProcessGraph}
+        defaultTopic={processingTopic}
+        workspaceId={processingWorkspaceId || undefined}
+      />
 
     </>
   );

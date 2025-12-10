@@ -5,8 +5,9 @@ import uuid
 from datetime import datetime, timedelta # Importar timedelta
 import pytz
 import dateparser
-from typing import Tuple, List, Dict, Any, Optional
+from typing import Tuple, List, Dict, Any, Optional, cast # Importar cast
 import logging # Importar logging si no está ya
+import uuid # Importar uuid
 
 from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
@@ -15,8 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # Importaciones del proyecto
 from core.database import SessionLocal, Account, AgendaEvent, ContactProfile, Workspace, WorkspacePermission, Task
 from utils.db_session import DBSession
-from fastapi import HTTPException
-from utils.security import check_workspace_permission # Importar check_workspace_permission
+# from fastapi import HTTPException # Eliminado, ya no es necesario aquí
+from core.dependencies import check_workspace_permission # Importar check_workspace_permission desde core.dependencies
+from fastapi import HTTPException # Re-agregar para evitar el error de Pylance en el caso de que se necesite en otra parte del archivo.
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -67,7 +69,7 @@ async def schedule_event(
             # Verificar permisos de workspace si se proporciona uno
             if workspace_id:
                 try:
-                    await check_workspace_permission(account_id, workspace_id, db, required_roles=['admin', 'owner', 'member'])
+                    await check_workspace_permission(db=db, workspace_id=uuid.UUID(workspace_id), account_id=uuid.UUID(account_id), required_roles=['owner', 'editor'])
                 except HTTPException as e:
                     return False, e.detail, None
 
@@ -178,7 +180,7 @@ async def add_attendees_to_event(account_id: str, event_id: int, attendee_ids: O
 
             if event.workspace_id:
                 try:
-                    await check_workspace_permission(account_id, str(event.workspace_id), db, required_roles=['admin', 'owner', 'member'])
+                    await check_workspace_permission(db=db, workspace_id=event.workspace_id, account_id=uuid.UUID(account_id), required_roles=['owner', 'editor'])
                 except HTTPException as e:
                     return False, e.detail
 
@@ -227,7 +229,7 @@ async def remove_attendees_from_event(account_id: str, event_id: int, attendee_i
 
             if event.workspace_id:
                 try:
-                    await check_workspace_permission(account_id, str(event.workspace_id), db, required_roles=['admin', 'owner', 'member'])
+                    await check_workspace_permission(db=db, workspace_id=event.workspace_id, account_id=uuid.UUID(account_id), required_roles=['owner', 'editor'])
                 except HTTPException as e:
                     return False, e.detail
 
@@ -280,7 +282,7 @@ async def get_agenda_for_period(account_id: str, period_type: str, target_date: 
         # Verificar permisos de workspace si se proporciona uno
         if workspace_id:
             try:
-                await check_workspace_permission(account_id, workspace_id, db, required_roles=['admin', 'owner', 'member'])
+                await check_workspace_permission(db=db, workspace_id=uuid.UUID(workspace_id), account_id=uuid.UUID(account_id), required_roles=['owner', 'editor', 'viewer'])
             except HTTPException as e:
                 return e.detail
 
@@ -313,17 +315,17 @@ async def get_agenda_for_period(account_id: str, period_type: str, target_date: 
         stmt = (
             select(AgendaEvent)
             .where(
-                AgendaEvent.account_id == account_id,
                 AgendaEvent.is_active == True,
                 AgendaEvent.event_datetime_utc >= start_period_utc,
                 AgendaEvent.event_datetime_utc <= end_period_utc
             )
         )
         if workspace_id:
+            # Mostrar TODOS los eventos del workspace (no filtrar por account_id)
             stmt = stmt.where(AgendaEvent.workspace_id == uuid.UUID(workspace_id))
         else:
             # Si no se especifica un workspace, obtener eventos personales y de todos los workspaces a los que tiene acceso
-            accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == str(account_id))
+            accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == uuid.UUID(account_id))
             result = await db.execute(accessible_workspaces_stmt)
             accessible_workspace_ids = [row[0] for row in result.fetchall()]
             
@@ -397,6 +399,7 @@ async def update_event_db(
 
         if not event:
             return None
+        event = cast(AgendaEvent, event)
 
         # Actualizar campos básicos
         if summary is not None:
@@ -460,31 +463,33 @@ async def get_events_as_dicts(account_id: str, workspace_id: Optional[str] = Non
                 selectinload(AgendaEvent.workspace),
                 selectinload(AgendaEvent.attendees) # Cargar ansiosamente los asistentes
             )
-            .where(
-                AgendaEvent.account_id == account_id,
-                AgendaEvent.is_active == True
-            )
+            .where(AgendaEvent.is_active == True)
         )
 
         if workspace_id:
             # Si se especifica un workspace, verificar permisos
             try:
-                await check_workspace_permission(account_id, workspace_id, db, required_roles=['admin', 'owner', 'member', 'viewer'])
+                await check_workspace_permission(db=db, workspace_id=uuid.UUID(workspace_id), account_id=uuid.UUID(account_id), required_roles=['owner', 'editor', 'viewer'])
             except HTTPException as e:
                 logger.warning(f"Permission denied for account {account_id} on workspace {workspace_id}: {e.detail}")
                 # Si no tiene permiso, no devolver ningún evento de ese workspace
                 return []
+            
+            # Mostrar TODOS los eventos del workspace (no filtrar por account_id)
+            # Esto permite que los usuarios viewer vean eventos creados por otros usuarios
             stmt = stmt.where(AgendaEvent.workspace_id == uuid.UUID(workspace_id))
         else:
             # Si no se especifica un workspace, obtener eventos personales y de todos los workspaces a los que tiene acceso
-            accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == str(account_id))
+            accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == uuid.UUID(account_id))
             result = await db.execute(accessible_workspaces_stmt)
             accessible_workspace_ids = [row[0] for row in result.fetchall()]
             
+            # Lógica combinada: Eventos propios O eventos en workspaces accesibles O eventos donde soy asistente
             stmt = stmt.where(
                 or_(
-                    AgendaEvent.workspace_id.is_(None),
-                    AgendaEvent.workspace_id.in_(accessible_workspace_ids)
+                    AgendaEvent.account_id == uuid.UUID(account_id), # Eventos creados por mí (personales o en workspaces)
+                    AgendaEvent.workspace_id.in_(accessible_workspace_ids), # Eventos en workspaces donde tengo acceso
+                    AgendaEvent.attendees.any(Account.id == uuid.UUID(account_id)) # Eventos donde soy asistente
                 )
             )
         stmt = stmt.order_by(AgendaEvent.event_datetime_utc)
@@ -548,6 +553,7 @@ async def update_task_db(
 
         if not task:
             return None
+        task = cast(Task, task)
 
         # Actualizar campos básicos si no son None
         if summary is not None:
@@ -618,7 +624,7 @@ async def cancel_event(account_id: str, event_id: int, workspace_id: Optional[st
             if event_to_cancel:
                 # Verificar que el usuario tiene acceso al workspace
                 try:
-                    await check_workspace_permission(account_id, workspace_id, db, required_roles=['admin', 'owner', 'member'])
+                    await check_workspace_permission(db=db, workspace_id=uuid.UUID(workspace_id), account_id=uuid.UUID(account_id), required_roles=['owner', 'editor'])
                 except HTTPException as e:
                     return False, e.detail
             else:
@@ -663,7 +669,7 @@ async def link_profile_to_event(account_id: str, event_id: int, profile_id: str)
         # Verificar permisos de workspace si el evento pertenece a uno
         if event.workspace_id:
             try:
-                await check_workspace_permission(account_id, str(event.workspace_id), db, required_roles=['admin', 'owner', 'member'])
+                await check_workspace_permission(db=db, workspace_id=event.workspace_id, account_id=uuid.UUID(account_id), required_roles=['owner', 'editor'])
             except HTTPException as e:
                 logger.warning(f"Acceso denegado para vincular perfil al evento {event_id} en workspace {event.workspace_id} para la cuenta {account_id}: {e.detail}")
                 return False
@@ -703,7 +709,7 @@ async def unlink_profile_from_event(account_id: str, event_id: int, profile_id: 
         # Verificar permisos de workspace si el evento pertenece a uno
         if event.workspace_id:
             try:
-                await check_workspace_permission(account_id, str(event.workspace_id), db, required_roles=['admin', 'owner', 'member'])
+                await check_workspace_permission(db=db, workspace_id=event.workspace_id, account_id=uuid.UUID(account_id), required_roles=['owner', 'editor'])
             except HTTPException as e:
                 logger.warning(f"Acceso denegado para desvincular perfil del evento {event_id} en workspace {event.workspace_id} para la cuenta {account_id}: {e.detail}")
                 return False
@@ -727,27 +733,33 @@ async def get_event_by_id(account_id: str, event_id: int) -> Optional[Dict[str, 
     """
     logger.info(f"Consultando evento {event_id} para la cuenta {account_id}.")
     async with DBSession(SessionLocal) as db:
+        # Primero buscar el evento sin filtrar por account_id
         stmt = select(AgendaEvent).options(
             selectinload(AgendaEvent.contact_profiles),
             selectinload(AgendaEvent.workspace),
             selectinload(AgendaEvent.attendees) # Cargar ansiosamente los asistentes
         ).where(
-            AgendaEvent.id == event_id,
-            AgendaEvent.account_id == uuid.UUID(account_id)
+            AgendaEvent.id == event_id
         )
         result = await db.execute(stmt)
         event = result.scalars().first()
 
         if not event:
-            logger.warning(f"Evento {event_id} no encontrado o no pertenece a la cuenta {account_id}.")
+            logger.warning(f"Evento {event_id} no encontrado.")
             return None
         
-        # Verificar permisos de workspace si el evento pertenece a uno
+        # Verificar permisos: el evento debe pertenecer al usuario O estar en un workspace al que tiene acceso
         if event.workspace_id:
+            # Si el evento pertenece a un workspace, verificar permisos
             try:
-                await check_workspace_permission(account_id, str(event.workspace_id), db, required_roles=['admin', 'owner', 'member'])
+                await check_workspace_permission(db=db, workspace_id=event.workspace_id, account_id=uuid.UUID(account_id), required_roles=['owner', 'editor', 'viewer'])
             except HTTPException as e:
-                logger.warning(f"Acceso denegado al evento {event_id} en workspace {event.workspace_id} para la cuenta {account_id}: {e.detail}")
+                logger.warning(f"Acceso denegado al evento {event.id} en workspace {event.workspace_id} para la cuenta {account_id}: {e.detail}")
+                return None
+        else:
+            # Si el evento no pertenece a un workspace, debe pertenecer al usuario
+            if str(event.account_id) != account_id:
+                logger.warning(f"Evento {event_id} no pertenece a la cuenta {account_id} y no está en un workspace compartido.")
                 return None
         
         account = await db.get(Account, uuid.UUID(account_id))

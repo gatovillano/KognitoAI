@@ -87,7 +87,7 @@ services:
     restart: always
     ports:
       # Puerto para comunicación interna desde otros servicios. 
-      - "9090:9090"
+      - "9094:9090"
     depends_on:
       - core
     volumes:

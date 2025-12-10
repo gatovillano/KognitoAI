@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
 from sqlalchemy import select, desc, update, or_
 
-from core.database import SessionLocal, Account, TeamMember, AgendaEvent, Workspace, ContactProfile, WorkspacePermission # Import ContactProfile model, WorkspacePermission
+from core.database import SessionLocal, Account, AgendaEvent, Workspace, ContactProfile, WorkspacePermission # Import ContactProfile model, WorkspacePermission
 from core.dependencies import get_db_session
 from utils.security import get_current_account_id, check_workspace_permission
 from sqlalchemy.ext.asyncio import AsyncSession

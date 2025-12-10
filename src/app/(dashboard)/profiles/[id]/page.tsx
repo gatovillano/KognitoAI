@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Loader2, ArrowLeft, Edit, Mail, Phone, Tag, Calendar, ListTodo, FileText, Image as LucideImage, Info, MoreHorizontal } from 'lucide-react';
+import { Loader2, ArrowLeft, Edit, Mail, Phone, Tag, Calendar, ListTodo, FileText, Image as LucideImage, Info, MoreHorizontal, Album } from 'lucide-react';
 import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -405,7 +405,7 @@ export default function ProfileDetailsPage() {
                   <CardTitle className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <div className="h-10 w-10 rounded-lg bg-orange-500/10 flex items-center justify-center flex-shrink-0">
-                        <Image src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'%3E%3C/circle%3E%3C/svg%3E" className="h-5 w-5 text-orange-600" alt="Icono de álbum" />
+                        <Album className="h-5 w-5 text-orange-600" />
                       </div>
                       <span className="font-semibold text-lg truncate">{album.name}</span>
                     </div>
@@ -496,16 +496,16 @@ export default function ProfileDetailsPage() {
           isOpen={showViewEventDialog}
           onOpenChange={setShowViewEventDialog}
           onSaveSuccess={fetchProfileDetails} // Para refrescar los datos después de una actualización
-                    event={selectedEvent ? {                                           
-                      ...selectedEvent,
-                      id: String(selectedEvent.id), // Convertir id a string
-                      user_timezone: '', // Add a default value for user_timezone      
-                      team_shared: false,
-                      workspace_id: undefined,
-                      workspace_name: undefined,
-                      workspace_color: undefined,
-                      linked_profiles: [],
-                    } : null}
+          event={selectedEvent ? {
+            ...selectedEvent,
+            id: String(selectedEvent.id), // Convertir id a string
+            user_timezone: '', // Add a default value for user_timezone      
+            team_shared: false,
+            workspace_id: undefined,
+            workspace_name: undefined,
+            workspace_color: undefined,
+            linked_profiles: [],
+          } : null}
         />
       )}
 

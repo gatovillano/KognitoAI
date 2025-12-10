@@ -31,6 +31,7 @@ export default function AgendaPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [viewType, setViewType] = useState<'day' | 'week' | 'month'>('month'); // Nuevo estado para el tipo de vista
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null); // Nuevo estado para workspace_id
 
   const [isEventDialogOpen, setIsEventDialogOpen] = useState(false);
   const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false); // Nuevo estado para el diálogo de tareas
@@ -42,12 +43,29 @@ export default function AgendaPage() {
   const [isEventEditDialogOpen, setIsEventEditDialogOpen] = useState(false); // Nuevo estado para el diálogo de edición
   const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
 
+  // Detectar workspace_id desde la URL
+  useEffect(() => {
+    const pathSegments = window.location.pathname.split('/');
+    const workspacesIndex = pathSegments.indexOf('workspaces');
+    if (workspacesIndex !== -1 && pathSegments[workspacesIndex + 1]) {
+      setWorkspaceId(pathSegments[workspacesIndex + 1]);
+    }
+  }, []);
+
   const fetchEvents = async () => {
     setIsLoading(true);
     try {
+      const eventsPayload: { include_past: boolean; workspace_id?: string } = { include_past: true };
+      const tasksParams: { workspace_id?: string } = {};
+
+      if (workspaceId) {
+        eventsPayload.workspace_id = workspaceId;
+        tasksParams.workspace_id = workspaceId;
+      }
+
       const [eventsResponse, tasksResponse] = await Promise.all([
-        apiClient.post('/api/list-events', { include_past: true }),
-        apiClient.get('/api/tasks') // Nuevo endpoint para listar tareas
+        apiClient.post('/api/list-events', eventsPayload),
+        apiClient.get('/api/tasks', { params: tasksParams })
       ]);
       setAllEvents(eventsResponse.data);
       setAllTasks(tasksResponse.data); // Guardar las tareas
@@ -59,7 +77,7 @@ export default function AgendaPage() {
     }
   };
 
-  useEffect(() => { fetchEvents(); }, []);
+  useEffect(() => { fetchEvents(); }, [workspaceId]);
 
   const handleSaveSuccess = (updatedEvent: AgendaEvent) => {
     setAllEvents(prev => {
@@ -528,11 +546,13 @@ export default function AgendaPage() {
         onOpenChange={setIsEventDialogOpen}
         onSaveSuccess={handleSaveSuccess}
         initialDate={initialEventDate} // Pasar la fecha inicial
+        workspaceId={workspaceId || undefined} // Pasar el workspaceId
       />        <TaskDialog
         isOpen={isTaskDialogOpen}
         onOpenChange={setIsTaskDialogOpen}
         onSaveSuccess={handleTaskSaveSuccess}
         task={selectedTask} // Pasar la tarea seleccionada para edición
+        workspaceId={workspaceId || undefined} // Pasar el workspaceId
       />
       {selectedEvent && (
         <EventDetailsDialog

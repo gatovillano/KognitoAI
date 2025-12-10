@@ -35,3 +35,32 @@ export interface GraphVisualizationData {
   edges: GraphEdge[];
   summary?: string;
 }
+
+export interface GraphMetadata {
+  nodeTypes: Array<{
+    type: string;
+    count: number;
+    color?: string;
+  }>;
+  edgeTypes: Array<{
+    type: string;
+    count: number;
+  }>;
+  datasets?: Array<{
+    name: string;
+    nodeCount: number;
+  }>;
+}
+
+export interface GraphFilters {
+  nodeTypes: string[];
+  edgeTypes: string[];
+  datasetName: string;
+}
+
+export interface FilteredGraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  metadata: GraphMetadata;
+  appliedFilters: GraphFilters;
+}

@@ -31,7 +31,7 @@ class ConceptualGraphProcessor:
             sentence_transformer: Modelo para embeddings semánticos
         """
         self.llm = llm
-        self.sentence_transformer = sentence_transformer
+        self.embedding_model = sentence_transformer # Renamed to generic embedding_model
         self.initialized = False
         logger.info("🧠 ConceptualGraphProcessor inicializado")
     
@@ -43,9 +43,9 @@ class ConceptualGraphProcessor:
         logger.info("🚀 Inicializando modelos para procesamiento conceptual...")
         
         try:
-            # Inicializar SentenceTransformers si no se proporciona
-            if not self.sentence_transformer:
-                await self._initialize_sentence_transformers()
+            # Inicializar Embedding Model si no se proporciona
+            if not self.embedding_model:
+                await self._initialize_embedding_model()
             
             self.initialized = True
             logger.info("✅ Procesador conceptual inicializado correctamente")
@@ -54,28 +54,21 @@ class ConceptualGraphProcessor:
             logger.error(f"❌ Error inicializando procesador conceptual: {e}")
             raise
     
-    async def _initialize_sentence_transformers(self):
-        """Inicializa SentenceTransformers."""
+    async def _initialize_embedding_model(self):
+        """Inicializa el modelo de embeddings (Ollama/OpenAI/etc)."""
         try:
-            from sentence_transformers import SentenceTransformer
+            from utils.embeddings import get_embedding_model
             
-            # Usar modelo multilingüe optimizado para ideas conceptuales
-            model_name = "paraphrase-multilingual-mpnet-base-v2"  # Mejor para conceptos
-            logger.info(f"📥 Cargando modelo conceptual: {model_name}")
+            logger.info("📥 Cargando modelo de embeddings compartido...")
+            self.embedding_model = get_embedding_model()
             
-            import os
-            cache_dir = "/app/.cache/sentence_transformers"
-            os.makedirs(cache_dir, exist_ok=True)
-            
-            self.sentence_transformer = SentenceTransformer(
-                model_name,
-                cache_folder=cache_dir,
-                device='cpu'
-            )
-            logger.info(f"✅ Modelo conceptual cargado: {model_name}")
+            if not self.embedding_model:
+                 raise ValueError("No se pudo obtener el modelo de embeddings compartido.")
+
+            logger.info(f"✅ Modelo de embeddings cargado correctamente")
             
         except Exception as e:
-            logger.error(f"❌ Error inicializando SentenceTransformers: {e}")
+            logger.error(f"❌ Error inicializando modelo de embeddings: {e}")
             raise
     
     async def process_documents_conceptually(self, documents: List[Dict[str, Any]], dataset_name: str) -> Dict[str, Any]:
@@ -495,10 +488,18 @@ IMPORTANTE: Responde ÚNICAMENTE con el objeto JSON solicitado, sin ningún text
 
         # Crear embeddings para todas las citas
         quote_texts = [f"{quote['concept']}: {quote['text']}" for quote in quotes]
-        if self.sentence_transformer is None:
-            logger.error("❌ SentenceTransformer no está inicializado. No se pueden generar embeddings.")
-            raise RuntimeError("SentenceTransformer no está inicializado. Asegúrese de que la inicialización sea exitosa.")
-        embeddings = self.sentence_transformer.encode(quote_texts)
+        if self.embedding_model is None:
+            logger.error("❌ Modelo de embeddings no está inicializado.")
+            raise RuntimeError("Modelo de embeddings no está inicializado.")
+        
+        # Generar embeddings usando el modelo compartido (puede ser asíncrono o síncrono dependiendo de la implementación)
+        # LangChain embeddings suelen tener embed_documents
+        try:
+            embeddings = self.embedding_model.embed_documents(quote_texts)
+        except Exception as e:
+             logger.error(f"Error generando embeddings: {e}")
+             # Fallback o re-raise
+             raise
 
         # Analizar similitudes semánticas
         from sklearn.metrics.pairwise import cosine_similarity
@@ -776,7 +777,7 @@ IMPORTANTE: Responde ÚNICAMENTE con el objeto JSON solicitado, sin ningún text
 
         # Analizar conceptos centrales
         concepts = [quote.get("concept", "") for quote in cluster_quotes]
-        central_concept = self._identify_central_concept(concepts)
+        central_concept = await self._identify_central_concept(cluster_quotes)
 
         # Calcular puntuación de importancia
         importance_scores = [
@@ -787,12 +788,16 @@ IMPORTANTE: Responde ÚNICAMENTE con el objeto JSON solicitado, sin ningún text
 
         # Identificar categorías representadas
         categories = list(set(quote.get("category", "") for quote in cluster_quotes))
+        categories_str = ", ".join(categories) if categories else ""
 
         # Crear descripción del perfil
-        profile_description = self._generate_profile_description(central_concept, categories, len(cluster_quotes))
+        profile_description = await self._generate_profile_description(central_concept, categories, len(cluster_quotes), cluster_quotes)
 
+        # Generar un ID más robusto, usando un hash del concepto central y las categorías
+        profile_id_hash = hashlib.md5(f"{central_concept}_{categories_str}".encode('utf-8')).hexdigest()[:12]
+        
         profile = {
-            "id": f"profile_{len(cluster_ids)}_{central_concept.replace(' ', '_').lower()}",
+            "id": f"profile_{profile_id_hash}",
             "central_concept": central_concept,
             "description": profile_description,
             "quote_ids": cluster_ids,
@@ -806,30 +811,91 @@ IMPORTANTE: Responde ÚNICAMENTE con el objeto JSON solicitado, sin ningún text
 
         return profile
 
-    def _identify_central_concept(self, concepts: List[str]) -> str:
-        """Identifica el concepto central de un grupo de conceptos."""
+    async def _identify_central_concept(self, cluster_quotes: List[Dict[str, Any]]) -> str:
+        """Identifica el concepto central de un grupo de citas, usando LLM si está disponible."""
 
-        # Contar frecuencia de palabras en los conceptos
+        # Extraer conceptos para el LLM
+        concepts = [quote.get("concept", "") for quote in cluster_quotes if quote.get("concept")]
+        
+        if self.llm and concepts:
+            try:
+                combined_concepts = ", ".join(list(set(concepts)))
+                prompt = f"""Dado el siguiente conjunto de conceptos relacionados: "{combined_concepts}".
+                Identifica y genera un nombre descriptivo, altamente específico y UNICO que represente la categoría o idea principal que unifica estos conceptos.
+                El nombre debe ser conciso (máximo 10 palabras), claro y sonar como un título de tema o categoría principal.
+                Es CRÍTICO que el nombre sea lo más descriptivo posible y EVITE POR COMPLETO palabras genéricas como "Desarrollo conceptual", "Idea principal", "Concepto central", "Tema General", "Análisis". Enfócate en la esencia temática única que agrupa estos conceptos.
+                Responde ÚNICAMENTE con el nombre del concepto central."""
+                
+                response = await self.llm.ainvoke(prompt)
+                central_concept_llm = response.content.strip()
+                if central_concept_llm and len(central_concept_llm.split()) <= 10:
+                    logger.debug(f"🧠 LLM identificó concepto central: {central_concept_llm}")
+                    return central_concept_llm
+            except Exception as e:
+                logger.warning(f"⚠️ Falló la identificación de concepto central por LLM, usando fallback: {e}")
+
+        # Fallback a lógica basada en categorías y frecuencia de palabras
+        # 1. Priorizar categorías
+        category_freq = {}
+        for quote in cluster_quotes:
+            category = quote.get("category", "general")
+            category_freq[category] = category_freq.get(category, 0) + 1
+
+        sorted_categories = sorted(category_freq.items(), key=lambda x: x[1], reverse=True)
+
+        if sorted_categories:
+            most_common_category, _ = sorted_categories[0]
+            # Si la categoría más común no es "general" ni "desarrollo_conceptual", la usamos
+            if most_common_category != "general" and most_common_category != "desarrollo_conceptual":
+                return most_common_category.replace("_", " ").title()
+            
+            # Si la categoría más común es "general" o "desarrollo_conceptual", intentamos con la segunda si es más específica
+            if len(sorted_categories) > 1 and sorted_categories[1][0] != "general" and sorted_categories[1][0] != "desarrollo_conceptual":
+                 second_common_category, _ = sorted_categories[1]
+                 return second_common_category.replace("_", " ").title()
+
+        # 2. Fallback a palabras clave si no hay categorías claras o son muy diversas
+        #    Intentar construir un nombre más descriptivo a partir de los conceptos
         word_freq = {}
         for concept in concepts:
             words = concept.lower().split()
             for word in words:
-                if len(word) > 3:  # Solo palabras significativas
+                if len(word) > 3 and word not in ["general", "central", "concepto", "desarrollo", "ideas", "tema"]: # Evitar más palabras genéricas
                     word_freq[word] = word_freq.get(word, 0) + 1
 
-        # Encontrar palabras más frecuentes
         if word_freq:
             most_common_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:3]
             central_words = [word for word, freq in most_common_words]
-            return " ".join(central_words).title()
+            if central_words:
+                return "Perspectivas sobre " + " ".join(central_words).title()
+            
+        return "Conceptos Diversos No Clasificados"
 
-        return "Concepto Central"
-
-    def _generate_profile_description(self, central_concept: str, categories: List[str], quotes_count: int) -> str:
-        """Genera descripción de un perfil de ideas."""
+    async def _generate_profile_description(self, central_concept: str, categories: List[str], quotes_count: int, cluster_quotes: List[Dict[str, Any]]) -> str:
+        """Genera descripción de un perfil de ideas, usando LLM si está disponible."""
 
         categories_str = ", ".join(categories) if categories else "conceptos generales"
+        
+        if self.llm:
+            try:
+                # Usar LLM para una descripción más elaborada
+                quotes_texts = [q['text'] for q in cluster_quotes]
+                prompt = f"""El siguiente conjunto de {quotes_count} citas conceptuales se agrupa bajo el concepto central de '{central_concept}' y está relacionado con las categorías: {categories_str}.
+                Aquí están algunas de las citas clave:
+                {quotes_texts[:5]}
 
+                Genera una descripción concisa y clara (máximo 50 palabras) para este perfil de ideas, destacando su importancia y lo que unifica estas citas.
+                Responde ÚNICAMENTE con la descripción."""
+                
+                response = await self.llm.ainvoke(prompt)
+                profile_description_llm = response.content.strip()
+                if profile_description_llm:
+                    logger.debug(f"🧠 LLM generó descripción de perfil: {profile_description_llm}")
+                    return profile_description_llm
+            except Exception as e:
+                logger.warning(f"⚠️ Falló la generación de descripción de perfil por LLM, usando fallback: {e}")
+
+        # Fallback a descripción genérica
         return (f"Perfil de ideas centrado en '{central_concept}' que agrupa {quotes_count} "
                 f"citas conceptuales relacionadas con {categories_str}. "
                 f"Representa un núcleo temático coherente de conocimiento.")

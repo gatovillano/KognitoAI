@@ -24,6 +24,7 @@ from langchain_core.tools import BaseTool
 # Importa la función de lógica de negocio desde el gestor de memoria.
 from core.memory_manager import add_memory_to_vector_db
 from utils.proactive_knowledge_linker import proactive_knowledge_linker_trigger
+from knowledge_graph.memory_graph_processor import schedule_memory_graph_processing # NUEVA IMPORTACIÓN
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -124,7 +125,10 @@ class MemoryAddTool(BaseTool):
             }
             asyncio.create_task(proactive_knowledge_linker_trigger(new_entry))
             
-            return "La información ha sido añadida a tu memoria a largo plazo."
+            # NUEVO: Disparar la verificación para procesar el grafo de conocimiento
+            asyncio.create_task(schedule_memory_graph_processing(account_id=self.account_id))
+            
+            return "La información ha sido añadida a tu memoria a largo plazo y se está procesando para enriquecer tu grafo de conocimiento."
         except Exception as e:
             logger.error(f"Error en MemoryAddTool para la cuenta '{self.account_id}': {e}", exc_info=True)
             return f"Ocurrió un error al intentar guardar la información en tu memoria: {e}"

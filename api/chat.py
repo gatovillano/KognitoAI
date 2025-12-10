@@ -30,7 +30,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from core.database import SessionLocal, ChatThread, settings, Workspace
 from core.llm_manager import get_main_llm
-from tools.deep_research_tool import DeepResearchTool
 from tools.add_web_to_rag_tool import AddWebToRAGTool
 from tools.ddg_search_tool import create_ddg_search_tool
 from core.websocket_manager import send_personal_message

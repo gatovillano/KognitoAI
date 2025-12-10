@@ -12,12 +12,6 @@ import { toast } from 'sonner';
 
 import type { Document } from './columns';
 
-type Team = {
-  id: string;
-  name: string;
-  created_at: string;
-};
-
 interface ShareDocumentDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -26,38 +20,38 @@ interface ShareDocumentDialogProps {
 }
 
 export function ShareDocumentDialog({ isOpen, onOpenChange, onShareSuccess, document }: ShareDocumentDialogProps) {
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
-  const [isLoadingTeams, setIsLoadingTeams] = useState(false);
+  const [workspaces, setWorkspaces] = useState<any[]>([]);
+  const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(null);
+  const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
-      fetchTeams();
+      fetchWorkspaces();
     }
   }, [isOpen]);
 
-  const fetchTeams = async () => {
-    setIsLoadingTeams(true);
+  const fetchWorkspaces = async () => {
+    setIsLoadingWorkspaces(true);
     try {
-      const response = await apiClient.get('/api/teams');
-      setTeams(response.data);
+      const response = await apiClient.get('/api/workspaces');
+      setWorkspaces(response.data.workspaces);
     } catch (error) {
-      toast.error('Error al cargar los equipos.');
+      toast.error('Error al cargar los workspaces.');
     } finally {
-      setIsLoadingTeams(false);
+      setIsLoadingWorkspaces(false);
     }
   };
 
   const handleShare = async () => {
-    if (!document || !selectedTeam) return;
+    if (!document || !selectedWorkspace) return;
 
     setIsSharing(true);
     try {
-      await apiClient.post(`/api/teams/${selectedTeam}/share/documents`, {
-        documentIds: [document.file_name],
+      await apiClient.post(`/api/documents/${document.file_name}/share`, {
+        workspace_id: selectedWorkspace,
       });
-      toast.success(`Documento compartido con el equipo.`);
+      toast.success(`Documento compartido con el workspace.`);
       onShareSuccess();
       onOpenChange(false);
     } catch (error) {
@@ -74,26 +68,26 @@ export function ShareDocumentDialog({ isOpen, onOpenChange, onShareSuccess, docu
           <DialogTitle className="text-lg sm:text-xl">Compartir Documento</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <p>Seleccione un equipo para compartir el documento: <strong>{document?.file_name}</strong></p>
-          {isLoadingTeams ? (
+          <p>Seleccione un workspace para compartir el documento: <strong>{document?.file_name}</strong></p>
+          {isLoadingWorkspaces ? (
             <div className="flex justify-center items-center p-4">
               <Loader2 className="h-6 w-6 animate-spin" />
             </div>
-          ) : teams.length > 0 ? (
-            <Select value={selectedTeam || undefined} onValueChange={setSelectedTeam}>
+          ) : workspaces.length > 0 ? (
+            <Select value={selectedWorkspace || undefined} onValueChange={setSelectedWorkspace}>
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="Seleccione un equipo" />
+                <SelectValue placeholder="Seleccione un workspace" />
               </SelectTrigger>
               <SelectContent>
-                {teams.map((team) => (
-                  <SelectItem key={team.id} value={team.id}>
-                    {team.name}
+                {workspaces.map((workspace) => (
+                  <SelectItem key={workspace.id} value={workspace.id}>
+                    {workspace.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           ) : (
-            <p className="text-muted-foreground">No se encontraron equipos para compartir.</p>
+            <p className="text-muted-foreground">No se encontraron workspaces para compartir.</p>
           )}
         </div>
         <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
@@ -102,7 +96,7 @@ export function ShareDocumentDialog({ isOpen, onOpenChange, onShareSuccess, docu
           </Button>
           <Button
             onClick={handleShare}
-            disabled={!selectedTeam || isSharing || isLoadingTeams}
+            disabled={!selectedWorkspace || isSharing || isLoadingWorkspaces}
             className="w-full sm:w-auto"
           >
             {isSharing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}

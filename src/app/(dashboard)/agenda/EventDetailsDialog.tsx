@@ -20,8 +20,6 @@ interface EventDetailsDialogProps {
 }
 
 export function EventDetailsDialog({ isOpen, onOpenChange, onEditClick, onDeleteClick, event }: EventDetailsDialogProps) {
-  const [teams, setTeams] = useState<any[]>([]);
-  const [loadingTeams, setLoadingTeams] = useState(false);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
   const [isProfileSelectorOpen, setIsProfileSelectorOpen] = useState(false);
@@ -29,15 +27,10 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onEditClick, onDelete
 
   useEffect(() => {
     const fetchTeams = async () => {
-      setLoadingTeams(true);
       try {
-        const response = await apiClient.get('/api/teams');
-        setTeams(response.data);
       } catch (error) {
         console.error("Error fetching teams:", error);
-        toast.error('Error al cargar los equipos.');
       } finally {
-        setLoadingTeams(false);
       }
     };
 
@@ -154,7 +147,7 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onEditClick, onDelete
           </div>
           <div className="space-y-2">
             <p className="text-sm font-medium">Compartir con Equipo</p>
-            <p className="text-sm text-muted-foreground">{event?.team_shared ? (teams.find(t => t.id.toString() === event.team_shared)?.name || event.team_shared) : 'N/A'}</p>
+            <p className="text-sm text-muted-foreground">No</p>
           </div>
           <div className="space-y-2">
             <p className="text-sm font-medium">Asociar a Workspace</p>
