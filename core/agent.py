@@ -29,6 +29,7 @@ from typing import Optional, List, Any, cast, TypedDict, Dict
 import uuid
 import os
 import json # Importar el módulo json
+from pydantic import ValidationError
 
 # --- Langchain Core ---
 from langchain.agents import AgentExecutor
@@ -53,7 +54,7 @@ from core.database import SessionLocal, Account, ChatThread, Workspace
 from utils.db_session import DBSession
 #from utils.helpers import sanitize_html
 from core.config import settings
-from core.citation_models import ToolOutputWithSources, Source
+from core.citation_models import ToolOutputWithSources, Source, SourceType
 from core.llm_manager import get_main_llm, get_fast_llm
 from core.prompts import SUMMARIZATION_PROMPT, THREAD_TITLE_PROMPT
 from core.enhanced_memory_manager import EnhancedMemoryManager
@@ -66,6 +67,42 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from core.websocket_manager import send_personal_message # Importar aquí para evitar circular imports
+# --- Global singletons for shared dependencies ---
+_graph_db_instance = None
+_enhanced_memory_manager_instance = None
+
+async def get_shared_graph_dependencies():
+    """
+    Returns shared instances of GraphDB and EnhancedMemoryManager, initializing them if necessary.
+    """
+    global _graph_db_instance, _enhanced_memory_manager_instance
+    
+    if _graph_db_instance and _enhanced_memory_manager_instance:
+        return _graph_db_instance, _enhanced_memory_manager_instance
+
+    try:
+        if settings.neo4j_uri and settings.neo4j_user and settings.neo4j_password:
+            if not _graph_db_instance:
+                _graph_db_instance = GraphDB(
+                    uri=str(settings.neo4j_uri),
+                    user=str(settings.neo4j_user),
+                    password=str(settings.neo4j_password)
+                )
+                _graph_db_instance.connect()
+                logger.info("✅ Shared GraphDB instance created and connected.")
+            
+            if not _enhanced_memory_manager_instance:
+                _enhanced_memory_manager_instance = EnhancedMemoryManager(graph_db=_graph_db_instance)
+                logger.info("✅ Shared EnhancedMemoryManager instance created.")
+                
+            return _graph_db_instance, _enhanced_memory_manager_instance
+        else:
+            logger.warning("⚠️ Missing Neo4j credentials, graph-based enhanced memory will not be available.")
+            return None, None
+    except Exception as e:
+        logger.error(f"❌ Error initializing shared graph dependencies: {e}", exc_info=True)
+        return None, None
+
 
 def sanitize_json_content(content):
     """
@@ -99,6 +136,56 @@ def sanitize_json_content(content):
 logger = logging.getLogger(__name__)
 
 
+def convert_langchain_tools_to_openai_format(tools: List[Any]) -> List[Dict[str, Any]]:
+    """
+    Convierte herramientas de LangChain al formato de OpenAI function calling.
+    
+    Esto es necesario porque LiteLLM a veces no convierte correctamente
+    las herramientas cuando se usa bind_tools con modelos OpenAI/GPT.
+    
+    Compatible con Pydantic v1 y v2.
+    
+    Args:
+        tools: Lista de herramientas de LangChain
+        
+    Returns:
+        Lista de herramientas en formato OpenAI function calling
+    """
+    openai_tools = []
+    
+    for tool in tools:
+        try:
+            # Extraer el schema de argumentos de la herramienta
+            if hasattr(tool, 'args_schema') and tool.args_schema:
+                # Convertir el schema de Pydantic a JSON Schema
+                # Compatible con Pydantic v1 (schema()) y v2 (model_json_schema())
+                if hasattr(tool.args_schema, 'model_json_schema'):
+                    # Pydantic v2
+                    schema = tool.args_schema.model_json_schema()
+                elif hasattr(tool.args_schema, 'schema'):
+                    # Pydantic v1
+                    schema = tool.args_schema.schema()
+                else:
+                    logger.warning(f"⚠️ Herramienta '{tool.name}' tiene args_schema pero no se puede extraer el schema")
+                    continue
+                
+                # Formato OpenAI function calling
+                openai_tool = {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": schema
+                    }
+                }
+                openai_tools.append(openai_tool)
+                logger.debug(f"🔧 Herramienta '{tool.name}' convertida a formato OpenAI")
+            else:
+                logger.warning(f"⚠️ Herramienta '{tool.name}' no tiene args_schema, saltando conversión")
+        except Exception as e:
+            logger.error(f"❌ Error al convertir herramienta '{tool.name}' a formato OpenAI: {e}", exc_info=True)
+    
+    return openai_tools
 
 
 # ==============================================================================
@@ -125,9 +212,93 @@ class AgentState(TypedDict):
     task_id: Optional[str]
     # El ID del hilo de chat
     thread_id: Optional[str]
+    # Tracking de errores de herramientas para prevenir bucles infinitos
+    tool_error_counts: Optional[Dict[str, int]]
 
 # ==============================================================================
-# SECCIÓN 2: MANEJO DE CONTEXTO Y MEMORIA
+# SECCIÓN 2: VALIDACIÓN DE HERRAMIENTAS Y MANEJO DE ERRORES
+# ==============================================================================
+
+def format_validation_error_for_llm(error: ValidationError, tool_name: str, tool_args: dict) -> str:
+    """
+    Convierte un error de validación de Pydantic en un mensaje claro y útil para el LLM.
+    
+    Args:
+        error: El error de validación de Pydantic
+        tool_name: Nombre de la herramienta que falló
+        tool_args: Los argumentos que se intentaron pasar
+    
+    Returns:
+        Mensaje de error formateado para que el LLM lo entienda
+    """
+    errors = error.errors()
+    error_messages = []
+    
+    for err in errors:
+        field = err.get('loc', ['unknown'])[0]
+        error_type = err.get('type', 'unknown')
+        
+        if error_type == 'missing':
+            error_messages.append(f"- Falta el parámetro requerido '{field}'")
+        elif error_type == 'string_type':
+            error_messages.append(f"- El parámetro '{field}' debe ser una cadena de texto (string)")
+        elif error_type == 'int_parsing':
+            error_messages.append(f"- El parámetro '{field}' debe ser un número entero")
+        else:
+            error_messages.append(f"- Error en '{field}': {err.get('msg', 'error desconocido')}")
+    
+    # Construir mensaje completo
+    error_msg = f"""❌ Error al ejecutar la herramienta '{tool_name}':
+
+{chr(10).join(error_messages)}
+
+Argumentos recibidos: {json.dumps(tool_args, ensure_ascii=False, indent=2)}
+
+💡 INSTRUCCIONES PARA CORREGIR:
+1. Revisa la descripción de la herramienta '{tool_name}' para ver qué parámetros requiere
+2. Asegúrate de proporcionar TODOS los parámetros requeridos
+3. Verifica que los tipos de datos sean correctos (string, int, etc.)
+4. Si no estás seguro de cómo usar esta herramienta, intenta responder la pregunta del usuario sin usarla o usa una herramienta diferente
+
+Por favor, vuelve a intentar con los parámetros correctos."""
+    
+    return error_msg
+
+def should_stop_retrying_tool(tool_name: str, error_counts: Optional[Dict[str, int]], max_retries: int = 3) -> tuple[bool, str]:
+    """
+    Determina si se debe dejar de intentar ejecutar una herramienta después de múltiples fallos.
+    
+    Args:
+        tool_name: Nombre de la herramienta
+        error_counts: Diccionario con conteo de errores por herramienta
+        max_retries: Número máximo de reintentos permitidos
+    
+    Returns:
+        (should_stop, message): Tupla con booleano y mensaje para el LLM si debe detenerse
+    """
+    if not error_counts:
+        return False, ""
+    
+    count = error_counts.get(tool_name, 0)
+    
+    if count >= max_retries:
+        message = f"""🛑 LÍMITE DE REINTENTOS ALCANZADO para la herramienta '{tool_name}'.
+
+Has intentado usar esta herramienta {count} veces sin éxito. 
+
+💡 INSTRUCCIONES:
+1. NO vuelvas a intentar usar la herramienta '{tool_name}' en esta conversación
+2. Intenta responder la pregunta del usuario SIN usar esta herramienta
+3. Si necesitas buscar información, considera usar una herramienta DIFERENTE
+4. Si no puedes responder sin esta herramienta, explícale al usuario la situación
+
+Por favor, genera una respuesta útil para el usuario sin usar '{tool_name}'."""
+        return True, message
+    
+    return False, ""
+
+# ==============================================================================
+# SECCIÓN 3: MANEJO DE CONTEXTO Y MEMORIA
 # ==============================================================================
 
 async def summarize_history_in_background(
@@ -345,6 +516,28 @@ async def call_model_node(state: AgentState):
     """
     logger.info(f"--- (Grafo) Nodo: Llama al Modelo para cuenta {state['account_id']} ---")
     
+    # --- FIX: Sanitize messages from history to ensure tool_call_ids and names are present ---
+    # This prevents crashes if the DB contains messages with null IDs or empty names from previous bugs
+    for msg in state["messages"]:
+        if isinstance(msg, ToolMessage):
+            # Usar getattr para acceder de forma segura a tool_call_id y name
+            if not getattr(msg, 'tool_call_id', None):
+                logger.warning(f"Found ToolMessage with missing tool_call_id in history. Patching with random UUID.")
+                msg.tool_call_id = str(uuid.uuid4()) # type: ignore
+            if not getattr(msg, 'name', None):
+                logger.warning(f"Found ToolMessage with missing/empty name in history. Patching with 'unknown_tool'.")
+                msg.name = "unknown_tool" # type: ignore
+
+        if isinstance(msg, AIMessage) and getattr(msg, 'tool_calls', None):
+            for tc in msg.tool_calls:
+                if not tc.get("id"):
+                     logger.warning(f"Found AIMessage tool_call with missing id in history. Patching with random UUID.")
+                     tc["id"] = str(uuid.uuid4())
+                if not tc.get("name"):
+                     logger.warning(f"Found AIMessage tool_call with missing/empty name in history. Patching with 'unknown_tool'.")
+                     tc["name"] = "unknown_tool"
+    # --- END FIX ---
+
     # 1. Construir el prompt del sistema dinámicamente
     user_message = extract_text_content(state["messages"][-1].content)
     user_profile = await get_user_profile(state['account_id'])
@@ -377,6 +570,7 @@ async def call_model_node(state: AgentState):
         graph_db.connect()
         enhanced_memory_manager = EnhancedMemoryManager(graph_db=graph_db)
 
+        logger.info(f"🧠 Consultando EnhancedMemoryManager con la consulta: '{user_message}'")
         enhanced_context = await enhanced_memory_manager.get_enhanced_context(
             user_query=user_message,
             user_id=state['account_id'],
@@ -386,27 +580,36 @@ async def call_model_node(state: AgentState):
 
         all_sources_objects = []
         if enhanced_context:
+            logger.info("✅ Contexto enriquecido recibido del grafo de conocimiento.")
             traditional_sources_raw = enhanced_context.get('sources', {}).get('traditional_embeddings', {}).get('results', [])
+            if traditional_sources_raw:
+                logger.info(f"📚 {len(traditional_sources_raw)} fuentes RAG tradicionales (embeddings) recuperadas.")
             all_sources_objects.extend(traditional_sources_raw)
 
             insights = enhanced_context.get('enhanced_insights', [])
-            for insight in insights:
-                all_sources_objects.append(Source(
-                    id=f"insight_{uuid.uuid4().hex[:10]}",
-                    title=f"Insight del Grafo: {insight.get('type', 'Desconocido')}",
-                    snippet=insight.get('description', 'Sin descripción.'),
-                    type='graph', metadata=insight, url=f"graph://insight_{uuid.uuid4().hex[:10]}"
-                ))
+            if insights:
+                logger.info(f"🔍 {len(insights)} insights encontrados en el grafo:")
+                for i, insight in enumerate(insights):
+                    logger.info(f"  - Insight [{i+1}]: {insight.get('description', 'N/A')}")
+                    all_sources_objects.append(Source(
+                        id=f"insight_{uuid.uuid4().hex[:10]}",
+                        title=f"Insight del Grafo: {insight.get('type', 'Desconocido')}",
+                        snippet=insight.get('description', 'Sin descripción.'),
+                        type=SourceType.GRAPH, metadata=insight, url=f"graph://insight_{uuid.uuid4().hex[:10]}"
+                    ))
 
             paths = enhanced_context.get('reasoning_paths', [])
-            for path in paths:
-                steps_desc = "\\n".join([f" - {s.get('from', '?')} -> {s.get('to', '?')}" for s in path.get('steps', [])])
-                snippet = f"{path.get('description', 'Sin descripción.')}\\n{steps_desc}"
-                all_sources_objects.append(Source(
-                    id=f"path_{uuid.uuid4().hex[:10]}",
-                    title=f"Ruta de Razonamiento: {path.get('type', 'Desconocido')}",
-                    snippet=snippet, type='graph', metadata=path, url=f"graph://path_{uuid.uuid4().hex[:10]}"
-                ))
+            if paths:
+                logger.info(f"🗺️ {len(paths)} rutas de razonamiento encontradas en el grafo:")
+                for i, path in enumerate(paths):
+                    logger.info(f"  - Ruta [{i+1}]: {path.get('description', 'N/A')}")
+                    steps_desc = "\\n".join([f" - {s.get('from', '?')} -> {s.get('to', '?')}" for s in path.get('steps', [])])
+                    snippet = f"{path.get('description', 'Sin descripción.')}\\n{steps_desc}"
+                    all_sources_objects.append(Source(
+                        id=f"path_{uuid.uuid4().hex[:10]}",
+                        title=f"Ruta de Razonamiento: {path.get('type', 'Desconocido')}",
+                        snippet=snippet, type=SourceType.GRAPH, metadata=path, url=f"graph://path_{uuid.uuid4().hex[:10]}"
+                    ))
 
             # Re-indexar todas las fuentes con IDs numéricos secuenciales
             relevant_memories_parts = []
@@ -422,8 +625,9 @@ async def call_model_node(state: AgentState):
             relevant_memories_text = "\\n\\n".join(relevant_memories_parts)
             state['sources'] = final_sources_for_state # Actualizar el estado con las nuevas fuentes RAG
             logger.info(f"✅ {len(final_sources_for_state)} fuentes combinadas y re-indexadas añadidas al estado.")
+            logger.debug(f"📝 Contexto final inyectado en el prompt desde el grafo: \n{relevant_memories_text}")
         else:
-            logger.info("No se generó contexto enriquecido.")
+            logger.info("ℹ️ No se generó contexto enriquecido desde el grafo de conocimiento.")
     else:
         logger.info("Saltando la búsqueda RAG del agente porque es una vuelta de herramienta. Manteniendo fuentes existentes.")
         # Si ya hay fuentes en el estado (de tool_node), usarlas para el prompt
@@ -486,7 +690,62 @@ async def call_model_node(state: AgentState):
     logger.info(f"🤖 AGENT EXECUTION: Generando respuesta usando modelo: '{model_name}'")
 
     logger.debug(f"DEBUG (agent.py - call_model_node): System Prompt final antes de LLM: {system_prompt_content}")
-    llm_with_tools = cast(ChatGoogleGenerativeAI, llm).bind_tools(tools)
+    
+    # --- BINDING DE HERRAMIENTAS COMPATIBLE CON CUALQUIER LLM ---
+    # En lugar de hacer cast a ChatGoogleGenerativeAI, usamos bind_tools de forma genérica
+    # Esto funciona con Gemini, GPT, Claude, Kimi y otros LLMs compatibles con tool calling
+    try:
+        # Para la mayoría de modelos vía LiteLLM (OpenAI, Claude, OpenRouter, etc.), 
+        # funciona mejor convertir manualmente las herramientas al formato OpenAI function calling.
+        # Solo excluimos 'gemini' nativo si se comporta diferente, pero por seguridad aplicamos
+        # esta lógica a todo lo que NO sea explícitamente google-generative-ai nativo.
+        # Dado que usamos LiteLLM para todo, asumimos que 'functions' es el camino más seguro para no-Gemini.
+        
+        is_gemini = "gemini" in model_name.lower() or "google" in model_name.lower()
+        
+        if not is_gemini:
+            logger.info(f"🔧 Detectado modelo NO-Gemini ('{model_name}') - Convirtiendo herramientas a formato OpenAI function calling")
+            
+            # Importar el convertidor de LangChain
+            from langchain_core.utils.function_calling import convert_to_openai_function
+            
+            openai_functions = []
+            for tool in tools:
+                try:
+                    # Usar el convertidor oficial de LangChain
+                    openai_func = convert_to_openai_function(tool)
+                    openai_functions.append(openai_func)
+                    logger.debug(f"🔧 Herramienta '{tool.name}' convertida con convert_to_openai_function")
+                except Exception as e:
+                    logger.error(f"❌ Error al convertir herramienta '{tool.name}': {e}", exc_info=True)
+            
+            logger.info(f"✅ {len(openai_functions)} herramientas convertidas a formato OpenAI")
+            
+            # DEBUG: Mostrar el schema de la primera herramienta para verificar
+            if openai_functions:
+                first_func = openai_functions[0]
+                logger.info(f"🔍 DEBUG: Ejemplo de herramienta convertida (primera):")
+                logger.info(f"   Nombre: {first_func.get('name')}")
+                logger.info(f"   Schema completo: {json.dumps(first_func, indent=2, ensure_ascii=False)}")
+            
+            # Usar bind con functions en lugar de tools
+            # LiteLLM con OpenAI usa el parámetro 'functions' en lugar de 'tools'
+            llm_with_tools = llm.bind(functions=openai_functions)
+        else:
+            # Para otros modelos (Gemini, Claude, etc.), usar bind_tools estándar
+            if hasattr(llm, 'bind_tools'):
+                llm_with_tools = cast(BaseChatModel, llm).bind_tools(tools)
+            else:
+                logger.warning(f"⚠️ El LLM '{model_name}' no tiene el método 'bind_tools'. Usando llm.bind() como fallback.")
+                llm_with_tools = cast(Any, llm).bind(tools=tools) # type: ignore
+        
+        logger.info(f"✅ Herramientas vinculadas correctamente al LLM '{model_name}'")
+    except AttributeError as e:
+        logger.warning(f"⚠️ El LLM '{model_name}' no soporta bind_tools. Continuando sin herramientas: {e}")
+        llm_with_tools = llm
+    except Exception as e:
+        logger.error(f"❌ Error al vincular herramientas al LLM '{model_name}': {e}")
+        llm_with_tools = llm
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt_content),
@@ -525,6 +784,40 @@ async def call_model_node(state: AgentState):
             final_response_message = chunk
 
     logger.debug(f"DEBUG (agent.py - call_model_node): Respuesta cruda del LLM (acumulada): {full_ai_message_content}")
+    
+    # --- DEBUG: Log detallado de tool_calls ---
+    if tool_calls_from_llm:
+        logger.info(f"🔧 DEBUG: LLM generó {len(tool_calls_from_llm)} tool_calls")
+        for idx, tc in enumerate(tool_calls_from_llm):
+            logger.info(f"🔧 DEBUG: Tool call [{idx}] estructura completa: {json.dumps(tc, ensure_ascii=False, indent=2)}")
+            logger.info(f"🔧 DEBUG: Tool call [{idx}] - name: {tc.get('name')}, id: {tc.get('id')}, args: {tc.get('args')}, arguments: {tc.get('arguments')}")
+    # --- END DEBUG ---
+
+    # --- FIX: Ensure all tool calls have an ID and normalize arguments ---
+    valid_tool_calls = []
+    for tc in tool_calls_from_llm:
+        # Filtrar tool calls basura (sin nombre)
+        if not tc.get("name"):
+            logger.warning(f"⚠️ Ignorando tool call inválido (sin nombre): {tc}")
+            continue
+            
+        if not tc.get("id"):
+            logger.warning(f"Tool call {tc.get('name')} missing ID. Generating one.")
+            tc["id"] = str(uuid.uuid4())
+        
+        # Normalizar argumentos: algunos LLMs usan "arguments" en lugar de "args"
+        if "args" not in tc and "arguments" in tc:
+            logger.info(f"🔧 Normalizando: Tool call {tc.get('name')} usa 'arguments' en lugar de 'args'. Copiando...")
+            tc["args"] = tc["arguments"]
+        elif "args" not in tc and "arguments" not in tc:
+            logger.warning(f"⚠️ Tool call {tc.get('name')} no tiene ni 'args' ni 'arguments'. Inicializando como dict vacío.")
+            tc["args"] = {}
+            
+        valid_tool_calls.append(tc)
+    
+    tool_calls_from_llm = valid_tool_calls
+    # --- END FIX ---
+
     if final_response_message:
         final_ai_message = AIMessage(
             content=full_ai_message_content,
@@ -572,7 +865,8 @@ async def tool_node(state: AgentState):
         return {"messages": state["messages"]}
 
     agent_message = state["messages"][-1]
-    tool_calls = agent_message.tool_calls
+    # Asegurarse de que agent_message es un AIMessage antes de acceder a tool_calls
+    tool_calls = agent_message.tool_calls if isinstance(agent_message, AIMessage) else []
     
     if not tool_calls:
         return {"messages": state["messages"]}
@@ -590,7 +884,15 @@ async def tool_node(state: AgentState):
 
     for tool_call in tool_calls:
         tool_name = tool_call.get("name")
+        
+        # Normalizar argumentos: manejar tanto "args" como "arguments"
         tool_args = tool_call.get("args")
+        if tool_args is None:
+            tool_args = tool_call.get("arguments")
+        if tool_args is None:
+            tool_args = {}
+        
+        logger.info(f"🔧 Ejecutando tool_call: name={tool_name}, args={json.dumps(tool_args, ensure_ascii=False)}")
         
         # Enviar evento tool_start
         target_account_id = "telegram_bot_service" if state.get('telegram_id') else state['account_id']
@@ -615,7 +917,7 @@ async def tool_node(state: AgentState):
             logger.error(f"Herramienta '{tool_name}' no encontrada o falló al instanciarse.")
             tool_messages.append(ToolMessage(
                 content=f"Error: Herramienta '{tool_name}' no encontrada.",
-                tool_call_id=tool_call.get("id")
+                tool_call_id=tool_call.get("id") or str(uuid.uuid4())
             ))
             # Enviar evento tool_end con error
             await send_personal_message(target_account_id, {
@@ -637,6 +939,134 @@ async def tool_node(state: AgentState):
         if hasattr(selected_tool, 'thread_id'):
             selected_tool.thread_id = state['messages'][-1].additional_kwargs.get('thread_id')  # type: ignore
         # --- FIN INYECCIÓN ---
+
+        # --- TRACKING DE ERRORES Y PREVENCIÓN DE BUCLES ---
+        # Inicializar el contador de errores si no existe
+        if state.get('tool_error_counts') is None:
+            state['tool_error_counts'] = {}
+        
+        # Verificar si ya se alcanzó el límite de reintentos para esta herramienta
+        should_stop, stop_message = should_stop_retrying_tool(tool_name, state.get('tool_error_counts'))
+        if should_stop:
+            logger.warning(f"🛑 Límite de reintentos alcanzado para '{tool_name}'. Deteniendo ejecución.")
+            tool_messages.append(ToolMessage(
+                content=stop_message,
+                tool_call_id=tool_call.get("id") or str(uuid.uuid4())
+            ))
+            # Enviar evento tool_end con límite alcanzado
+            await send_personal_message(target_account_id, {
+                "type": "tool_end",
+                "taskId": state.get("task_id"),
+                "toolName": tool_name,
+                "status": "error",
+                "result": stop_message,
+                "error": True,
+                "sources": []
+            }, connection_type=conn_type)
+            continue
+        # --- FIN TRACKING ---
+
+        # --- VALIDACIÓN PRE-EJECUCIÓN DE ARGUMENTOS ---
+        # Validar argumentos ANTES de pasarlos a LangChain para evitar errores internos
+        if not tool_name or tool_name.strip() == "":
+            logger.error(f"❌ Nombre de herramienta vacío o inválido")
+            error_message = """❌ Error: El LLM intentó llamar una herramienta sin especificar su nombre.
+
+💡 INSTRUCCIONES:
+1. Debes especificar el nombre de la herramienta que quieres usar
+2. Revisa la lista de herramientas disponibles
+3. Asegúrate de usar el nombre exacto de la herramienta
+
+Por favor, intenta de nuevo especificando correctamente la herramienta."""
+            
+            tool_messages.append(ToolMessage(
+                content=error_message,
+                tool_call_id=tool_call.get("id") or str(uuid.uuid4())
+            ))
+            
+            await send_personal_message(target_account_id, {
+                "type": "tool_end",
+                "taskId": state.get("task_id"),
+                "toolName": tool_name or "unknown",
+                "status": "error",
+                "result": error_message,
+                "error": True,
+                "sources": []
+            }, connection_type=conn_type)
+            continue
+        
+        
+        # Validar que los argumentos no estén vacíos para herramientas que requieren parámetros
+        # Usar hasattr para verificar la existencia de args_schema
+        if hasattr(selected_tool, 'args_schema') and selected_tool.args_schema:
+            try:
+                # Acceder al args_schema de forma segura
+                args_schema_instance = selected_tool.args_schema
+                # Obtener los campos requeridos del schema (compatible con Pydantic v2)
+                # En Pydantic v2, model_fields es un atributo de clase
+                schema_fields = getattr(args_schema_instance, 'model_fields', {})
+                
+                required_fields = [
+                    field_name for field_name, field_info in schema_fields.items()
+                    if field_info.is_required() # type: ignore
+                ]
+                
+                # Verificar si faltan campos requeridos
+                missing_fields = []
+                if not tool_args or not isinstance(tool_args, dict):
+                    missing_fields = required_fields
+                else:
+                    missing_fields = [field for field in required_fields if field not in tool_args or tool_args[field] is None or tool_args[field] == ""]
+                
+                if missing_fields:
+                    logger.warning(f"⚠️ Argumentos faltantes detectados ANTES de ejecutar '{tool_name}': {missing_fields}")
+                    
+                    # Incrementar contador de errores
+                    if state.get('tool_error_counts') is None:
+                        state['tool_error_counts'] = {}
+                    state['tool_error_counts'][tool_name] = state['tool_error_counts'].get(tool_name, 0) + 1
+                    
+                    # Generar mensaje de error detallado
+                    error_message = f"""❌ Error al ejecutar la herramienta '{tool_name}':
+
+Faltan los siguientes parámetros requeridos:
+{chr(10).join([f"- {field}" for field in missing_fields])}
+
+Argumentos recibidos: {json.dumps(tool_args or {}, ensure_ascii=False, indent=2)}
+
+💡 INSTRUCCIONES PARA CORREGIR:
+1. La herramienta '{tool_name}' REQUIERE los siguientes parámetros: {', '.join(required_fields)}
+2. Debes proporcionar un valor válido para cada parámetro requerido
+3. Ejemplo de uso correcto:
+   {{
+     {', '.join([f'"{field}": "valor_apropiado"' for field in required_fields])}
+   }}
+
+⚠️ IMPORTANTE: Si no estás seguro de qué valor usar, o si has intentado varias veces sin éxito:
+- Intenta responder la pregunta del usuario SIN usar esta herramienta
+- O usa una herramienta DIFERENTE que pueda ayudar
+
+Por favor, vuelve a intentar con TODOS los parámetros requeridos."""
+                    
+                    tool_messages.append(ToolMessage(
+                        content=error_message,
+                        tool_call_id=tool_call.get("id") or str(uuid.uuid4())
+                    ))
+                    
+                    await send_personal_message(target_account_id, {
+                        "type": "tool_end",
+                        "taskId": state.get("task_id"),
+                        "toolName": tool_name,
+                        "status": "error",
+                        "result": error_message,
+                        "error": True,
+                        "sources": []
+                    }, connection_type=conn_type)
+                    continue
+            except Exception as validation_error:
+                # Si hay error en la validación pre-ejecución, solo loguearlo y continuar
+                logger.warning(f"⚠️ Error en validación pre-ejecución de '{tool_name}': {validation_error}")
+        # --- FIN VALIDACIÓN PRE-EJECUCIÓN ---
 
         try:
             logger.info(f"Ejecutando herramienta '{tool_name}' con argumentos: {tool_args}")
@@ -670,7 +1100,44 @@ async def tool_node(state: AgentState):
                             temp_sources.append(source)
                         context_content = "\\n".join(context_parts)
                         sources_list = temp_sources
-                    # Caso 2: Salida estándar con 'context_for_llm'
+                    # Caso 2: Salida de knowledge_graph con resumen textual
+                    elif tool_name == "knowledge_graph" and "results" in parsed_output and isinstance(parsed_output.get("results"), list) and parsed_output["results"]:
+                        logger.info(f"Procesando salida de knowledge_graph con resumen textual.")
+                        context_parts = []
+                        temp_sources = []
+                        for i, result in enumerate(parsed_output["results"], start=1):
+                            if isinstance(result, dict) and result.get("type") == "summary_text_insight":
+                                # Es un resumen textual del grafo
+                                summary_content = result.get('content', '')
+                                context_parts.append(f"Resumen del Grafo [{i}]:\\n{summary_content}\\n")
+                                source = Source(
+                                    id=i,
+                                    title=f"Resumen del Grafo de Conocimiento - {parsed_output.get('dataset', 'Desconocido')}",
+                                    url=f"graph://summary_{parsed_output.get('dataset', 'unknown')}",
+                                    snippet=summary_content,
+                                    type=SourceType.GRAPH,
+                                    metadata={
+                                        "dataset": parsed_output.get('dataset', ''),
+                                        "node_count": result.get('node_count', 0),
+                                        "relationship_count": result.get('relationship_count', 0)
+                                    }
+                                )
+                                temp_sources.append(source)
+                            else:
+                                # Otros tipos de resultados del grafo
+                                context_parts.append(f"Resultado del Grafo [{i}]:\\n{str(result)}\\n")
+                                source = Source(
+                                    id=i,
+                                    title=f"Resultado del Grafo - {parsed_output.get('dataset', 'Desconocido')}",
+                                    url=f"graph://result_{i}",
+                                    snippet=str(result),
+                                    type=SourceType.GRAPH,
+                                    metadata=result if isinstance(result, dict) else {}
+                                )
+                                temp_sources.append(source)
+                        context_content = "\\n".join(context_parts)
+                        sources_list = temp_sources
+                    # Caso 3: Salida estándar con 'context_for_llm'
                     elif "context_for_llm" in parsed_output:
                         logger.info(f"Procesando salida estándar de '{tool_name}' con 'context_for_llm'.")
                         context_content = parsed_output["context_for_llm"]
@@ -724,7 +1191,7 @@ async def tool_node(state: AgentState):
             
             tool_messages.append(ToolMessage(
                 content=tool_content_for_llm,
-                tool_call_id=tool_call.get("id")
+                tool_call_id=tool_call.get("id") or str(uuid.uuid4())
             ))
             
             # Enviar evento tool_end con éxito
@@ -738,11 +1205,48 @@ async def tool_node(state: AgentState):
                 "sources": tool_sources_to_add, # Enviar solo las fuentes generadas por esta herramienta
             }, connection_type=conn_type)
 
+
+        except ValidationError as e:
+            # Error de validación de Pydantic - argumentos incorrectos o faltantes
+            logger.error(f"❌ Error de validación en la herramienta {tool_name}: {e}", exc_info=True)
+            
+            # Incrementar contador de errores para esta herramienta
+            if state.get('tool_error_counts') is None:
+                state['tool_error_counts'] = {}
+            state['tool_error_counts'][tool_name] = state['tool_error_counts'].get(tool_name, 0) + 1
+            
+            # Formatear error para el LLM
+            error_message = format_validation_error_for_llm(e, tool_name, tool_args or {})
+            
+            tool_messages.append(ToolMessage(
+                content=error_message,
+                tool_call_id=tool_call.get("id") or str(uuid.uuid4())
+            ))
+            
+            # Enviar evento tool_end con error de validación
+            logger.debug(f"DEBUG (agent.py): Enviando tool_end (validation_error) para taskId {state.get('task_id')}, tool {tool_name}")
+            await send_personal_message(target_account_id, {
+                "type": "tool_end",
+                "taskId": state.get("task_id"),
+                "toolName": tool_name,
+                "status": "error",
+                "result": error_message,
+                "error": True,
+                "sources": []
+            }, connection_type=conn_type)
+            
         except Exception as e:
+            # Otros errores generales
             logger.error(f"Error al ejecutar la herramienta {tool_name}: {e}", exc_info=True)
+            
+            # Incrementar contador de errores para esta herramienta
+            if state.get('tool_error_counts') is None:
+                state['tool_error_counts'] = {}
+            state['tool_error_counts'][tool_name] = state['tool_error_counts'].get(tool_name, 0) + 1
+            
             tool_messages.append(ToolMessage(
                 content=f"Error: {e}",
-                tool_call_id=tool_call.get("id")
+                tool_call_id=tool_call.get("id") or str(uuid.uuid4())
             ))
             # Enviar evento tool_end con error
             logger.debug(f"DEBUG (agent.py): Enviando tool_end (error) para taskId {state.get('task_id')}, tool {tool_name}")
@@ -803,7 +1307,7 @@ def should_continue(state: AgentState) -> str:
     logger.info("--- (Grafo) Nodo: Enrutamiento ---")
     last_message = state["messages"][-1]
     
-    if isinstance(last_message, AIMessage) and last_message.tool_calls:
+    if isinstance(last_message, AIMessage) and getattr(last_message, 'tool_calls', None):
         logger.info("Decisión del enrutador: Llamar a herramienta.")
         return "continue"
     

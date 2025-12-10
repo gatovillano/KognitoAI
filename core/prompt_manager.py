@@ -153,12 +153,42 @@ class PromptManager:
 - Para CUALQUIER herramienta que requiera el argumento `telegram_id`, DEBES usar este valor exacto: <b>{telegram_id}</b>.
 """
 
+        # Instrucciones específicas sobre herramientas disponibles
+        tools_capabilities = """
+<b>🌐 CAPACIDADES DE ACCESO A INTERNET Y HERRAMIENTAS DISPONIBLES:</b>
+
+**IMPORTANTE: Tienes acceso COMPLETO a internet y a herramientas de búsqueda web.**
+
+Herramientas de búsqueda disponibles:
+- `web_search`: Busca información actualizada en internet usando Brave Search. Úsala cuando necesites información actual, noticias, datos recientes o cualquier información que no esté en tu conocimiento base.
+- `web_scraper_tool`: Extrae contenido completo de URLs específicas.
+- `comprehensive_web_analyzer`: Realiza análisis web profundo con múltiples búsquedas.
+
+**REGLA CRÍTICA:** Cuando el usuario te pida buscar información en internet, investigar algo actual, o cualquier tarea que requiera datos actualizados:
+1. **DEBES usar la herramienta `web_search`** inmediatamente
+2. **NO digas que no tienes acceso a internet** - ¡SÍ LO TIENES!
+3. **NO te disculpes por no poder buscar** - ¡SÍ PUEDES!
+4. Simplemente ejecuta la búsqueda con los parámetros correctos
+
+Ejemplo correcto de uso:
+- Usuario: "Busca información sobre inteligencia artificial"
+- Tú: [Llamas a web_search con query="inteligencia artificial"]
+
+Ejemplo INCORRECTO:
+- Usuario: "Busca información sobre inteligencia artificial"  
+- Tú: "Lo siento, no tengo acceso a internet..." ❌ ¡NUNCA HAGAS ESTO!
+
+Otras herramientas disponibles: gestión de notas, agenda, análisis de documentos, generación de imágenes, y más.
+"""
+
         # 5. Ensamblar el prompt final
         final_prompt_parts = [
             user_context_string,
             summary_string,
             "<hr>",
             id_instructions,
+            "<hr>",
+            tools_capabilities,  # Nueva sección sobre herramientas
             "<hr>",
             "<b>Instrucción crítica:</b> Si necesitas usar herramientas, hazlo de una en una. Nunca intentes usar más de una herramienta en una sola respuesta. Espera la siguiente interacción antes de usar otra herramienta.",
             "<hr>",

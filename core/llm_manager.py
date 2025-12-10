@@ -37,13 +37,28 @@ async def initialize_llms():
     
     try:
         logger.info(f"🛠️ Initializing main agent LLM (LiteLLM - {settings.llm_model})...")
-        main_llm = ChatLiteLLM(
-            model=settings.llm_model,
-            temperature=settings.llm_temperature,
-            streaming=True,
-            api_base=settings.llm_api_base, # Opcional, para Ollama/etc
-            verbose=True
-        )
+        
+        # Configuración base para el LLM
+        llm_kwargs = {
+            "model": settings.llm_model,
+            "temperature": settings.llm_temperature,
+            "streaming": True,
+            "verbose": True
+        }
+        
+        # Agregar api_base solo si está configurado
+        if settings.llm_api_base:
+            llm_kwargs["api_base"] = settings.llm_api_base
+        
+        # Configuración específica para modelos de OpenAI (GPT-4, GPT-5, etc.)
+        # Esto ayuda con el tool calling
+        if "gpt" in settings.llm_model.lower() or "openai" in settings.llm_model.lower():
+            logger.info("🔧 Detectado modelo OpenAI/GPT - Aplicando configuración optimizada para tool calling")
+            llm_kwargs["model_kwargs"] = {
+                "tool_choice": "auto",  # Permite al modelo decidir cuándo usar herramientas
+            }
+        
+        main_llm = ChatLiteLLM(**llm_kwargs)
         _main_agent_llm_instance = main_llm
         logger.info("✅ Main agent LLM initialized.")
     except Exception as e:

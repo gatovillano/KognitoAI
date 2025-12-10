@@ -206,18 +206,7 @@ class PlatformIdentity(Base):
         return f"<PlatformIdentity(platform='{self.platform}', platform_user_id='{self.platform_user_id}')>"
 
 
-# --- Modelos de Identidad de Equipos ---
-class Team(Base):
-    """
-    Representa un equipo en el sistema, permitiendo la memoria colectiva y la colaboración entre usuarios.
-    """
-    __tablename__ = "teams"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String(255), nullable=False, comment="Nombre del equipo.")
-    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
-    admin_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete='CASCADE'), nullable=False, comment="ID del administrador del equipo.")
-
+# --- Modelo de Espacio de Trabajo ---
 class Workspace(Base):
     """
     Representa un espacio de trabajo para separar proyectos y lógicas.
@@ -273,32 +262,6 @@ class WorkspacePermission(Base):
     def __repr__(self):
         return f"<WorkspacePermission(id={self.id}, workspace_id={self.workspace_id}, account_id={self.account_id}, role='{self.role}')>"
 
-
-class TeamMember(Base):
-    """
-    Representa la membresía de un usuario en un equipo.
-    """
-    __tablename__ = "team_members"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete='CASCADE'), nullable=False, index=True)
-    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete='CASCADE'), nullable=False, index=True)
-    role = Column(String(50), nullable=False, default="member", comment="Rol del miembro en el equipo (ej. admin, member).")
-    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
-    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
-
-    # Relaciones
-    team = relationship("Team", backref="members")
-    account = relationship("Account", backref="team_members")
-
-    __table_args__ = (
-        UniqueConstraint('team_id', 'account_id', name='_team_account_member_uc'),
-        Index('ix_team_member_team_id', team_id),
-        Index('ix_team_member_account_id', account_id),
-    )
-
-    def __repr__(self):
-        return f"<TeamMember(id={self.id}, team_id={self.team_id}, account_id={self.account_id}, role='{self.role}')>"
 
 class LangchainPgCollection(Base):
     """
@@ -380,7 +343,6 @@ class UserDocumentTopic(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=True, index=True)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete='SET NULL'), nullable=True, index=True) # NUEVA COLUMNA
 
     name = Column(String(255), nullable=False, comment="El nombre del tema/colección (corresponde al 'topic' en cmetadata).")
     description = Column(Text, nullable=True, comment="Descripción opcional de la colección.")
@@ -677,6 +639,7 @@ class AgendaEvent(Base):
     duration_minutes = Column(Integer, nullable=True)
     status = Column(String(50), nullable=False, default="Pendiente", comment="Estado del evento para tableros Kanban (ej. Pendiente, En Progreso, Completado).")
     end_date = Column(DateTime(timezone=True), nullable=True) # Nuevo campo para la fecha de finalización
+    is_private = Column(Boolean, default=False, nullable=False, comment="Indica si el evento es privado (solo visible para el creador).")
 
     contact_profiles = relationship(
         "ContactProfile",
@@ -704,9 +667,14 @@ class AgendaEvent(Base):
             workspace_name = self.workspace.name
             workspace_color = self.workspace.color
 
+        creator_name = "Desconocido"
+        if self.account:
+            creator_name = self.account.name or self.account.email or "Usuario"
+
         return {
             "id": self.id,
             "account_id": str(self.account_id),
+            "creator_name": creator_name, # Nuevo campo
             "workspace_id": str(self.workspace_id) if self.workspace_id else None,
             "workspace_name": workspace_name,
             "workspace_color": workspace_color,
@@ -715,9 +683,10 @@ class AgendaEvent(Base):
             "location": self.location,
             "event_datetime_utc": self.event_datetime_utc.isoformat(),
             "event_datetime_local": local_datetime.isoformat(),
-            "end_date": self.end_date.isoformat() if self.end_date else None, # Nuevo campo
+            "end_date": self.end_date.isoformat() if self.end_date else None,
             "user_timezone": str(user_tz),
             "is_active": self.is_active,
+            "is_private": self.is_private, # Nuevo campo
             "attendees": [str(att.id) for att in self.attendees],
             "external_attendees": self.external_attendees if self.external_attendees else [],
             "duration_minutes": self.duration_minutes,
@@ -1102,8 +1071,6 @@ async def delete_accounts_by_ids(db_session: AsyncSession, account_ids: list[uui
             if hasattr(model, 'account_id'):
                 await db_session.execute(delete(model).where(model.account_id.in_(account_ids)))
 
-        # Caso especial para Team (usa admin_id)
-        await db_session.execute(delete(Team).where(Team.admin_id.in_(account_ids)))
 
         # --- Fase 3: Eliminar la cuenta principal ---
         logger.info("Eliminando las cuentas principales...")

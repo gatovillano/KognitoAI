@@ -31,7 +31,7 @@ export default function RepositoryDetailPage() {
   const [documents, setDocuments] = useState<GitHubDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [repoUrl, setRepoUrl] = useState<string>('');
-  
+
   // Estados para diálogos
   const [documentToPreview, setDocumentToPreview] = useState<Document | null>(null);
   const [documentToEdit, setDocumentToEdit] = useState<Document | null>(null);
@@ -39,7 +39,7 @@ export default function RepositoryDetailPage() {
   const [documentToShare, setDocumentToShare] = useState<Document | null>(null);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isUpdateRepoOpen, setIsUpdateRepoOpen] = useState(false);
-  
+
   // Estados para análisis
   const [documentToAnalyze, setDocumentToAnalyze] = useState<Document | null>(null);
   const [selectedAnalysis, setSelectedAnalysis] = useState<any>(null);
@@ -188,7 +188,17 @@ export default function RepositoryDetailPage() {
         const response = await apiClient.get(`/api/get-analysis-result/${docPollingId}`);
         const { status, result, error } = response.data;
         if (status === 'completed') {
-          clearInterval(poller); setDocPollingId(null); setSelectedAnalysis(result);
+          clearInterval(poller); setDocPollingId(null);
+          // Construir objeto Analysis completo
+          const analysisObject = {
+            id: docPollingId,
+            type: 'document' as const,
+            title: documentToAnalyze?.file_name || 'Análisis de Documento',
+            summary: result?.executive_summary || 'Análisis completado',
+            result: result,
+            full_data: result
+          };
+          setSelectedAnalysis(analysisObject);
           setIsAnalysisDetailOpen(true); toast.success('Análisis de documento completado');
         } else if (status === 'failed') {
           clearInterval(poller); setDocPollingId(null); toast.error('El análisis del documento falló: ' + error);
@@ -206,7 +216,17 @@ export default function RepositoryDetailPage() {
         const response = await apiClient.get(`/api/get-analysis-result/${collectionPollingId}`);
         const { status, result, error } = response.data;
         if (status === 'completed') {
-          clearInterval(poller); setCollectionPollingId(null); setSelectedAnalysis(result);
+          clearInterval(poller); setCollectionPollingId(null);
+          // Construir objeto Analysis completo para análisis de código
+          const analysisObject = {
+            id: collectionPollingId,
+            type: 'code' as const,
+            title: `Análisis de Repositorio: ${repoName}`,
+            summary: result?.executive_summary || 'Análisis de código completado',
+            result: result,
+            full_data: result
+          };
+          setSelectedAnalysis(analysisObject);
           setIsAnalysisDetailOpen(true); toast.success('Análisis de repositorio completado');
           // Actualizar el historial de análisis
           window.dispatchEvent(new Event('updateAnalysisHistory'));
@@ -226,7 +246,17 @@ export default function RepositoryDetailPage() {
         const response = await apiClient.get(`/api/github/get-vectorization-result/${vectorizationPollingId}`);
         const { status, result, error } = response.data;
         if (status === 'completed') {
-          clearInterval(poller); setVectorizationPollingId(null); setSelectedAnalysis(result);
+          clearInterval(poller); setVectorizationPollingId(null);
+          // Construir objeto Analysis completo para vectorización
+          const analysisObject = {
+            id: vectorizationPollingId,
+            type: 'code' as const,
+            title: `Vectorización: ${repoName}`,
+            summary: result?.message || 'Vectorización completada',
+            result: result,
+            full_data: result
+          };
+          setSelectedAnalysis(analysisObject);
           setIsAnalysisDetailOpen(true); toast.success('Vectorización de repositorio completada');
         } else if (status === 'failed') {
           clearInterval(poller); setVectorizationPollingId(null); toast.error('La vectorización del repositorio falló: ' + error);
@@ -354,7 +384,7 @@ export default function RepositoryDetailPage() {
             </div>
           </div>
           <AccordionContent>
-            {Object.values(node.children).length > 0 && 
+            {Object.values(node.children).length > 0 &&
               Object.values(node.children).map(child => (
                 <React.Fragment key={child.path}>{renderFolder(child, level + 1)}</React.Fragment>
               ))
@@ -401,118 +431,129 @@ export default function RepositoryDetailPage() {
           </div>
         </div>
       )}
-    <div className="h-full flex flex-col p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 flex-wrap gap-2">
-        <div>
-          <Link href="/rag/repositories" className="flex items-center text-sm text-muted-foreground hover:text-foreground mb-1 sm:mb-2">
-            <ArrowLeft className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
-            Volver a Repositorios
-          </Link>
-          <h1 className="text-2xl sm:text-3xl font-bold break-all">{repoName}</h1>
-        </div>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
-          {/* MENÚ DE ACCIONES PARA EL REPOSITORIO */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="gap-2" disabled={!!docPollingId || !!collectionPollingId || !!vectorizationPollingId}>
-                <MoreHorizontal className="h-4 w-4" />
-                <span className="hidden sm:inline">Acciones</span>
-                <ChevronDown className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem onClick={() => setIsUpdateRepoOpen(true)}>
-                <RefreshCw className="mr-2 h-4 w-4" />
-                <span>Actualizar Repositorio</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleAnalyzeRepository} disabled={!!docPollingId || !!collectionPollingId}>
-                {collectionPollingId ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <ScanSearch className="mr-2 h-4 w-4" />
-                )}
-                <span>{collectionPollingId ? 'Analizando...' : 'Analizar Repositorio'}</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleVectorizeRepository} disabled={!!docPollingId || !!collectionPollingId || !!vectorizationPollingId}>
-                <FileText className="mr-2 h-4 w-4" />
-                <span>Vectorizar Repositorio</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-
-      {isLoading ? (
-        <div className="flex justify-center items-center h-full">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
-      ) : (
-        <>
-          <div className="flex-grow overflow-auto">
-            {Object.keys(folderTree.children).length > 0 || folderTree.files.length > 0 ? (
-              <Accordion type="multiple" className="w-full">
-                {renderFolder(folderTree)}
-              </Accordion>
-            ) : (
-              <p className="text-center text-muted-foreground py-8">No hay archivos en este repositorio.</p>
-            )}
+      <div className="h-full flex flex-col p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 flex-wrap gap-2">
+          <div>
+            <Link href="/rag/repositories" className="flex items-center text-sm text-muted-foreground hover:text-foreground mb-1 sm:mb-2">
+              <ArrowLeft className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+              Volver a Repositorios
+            </Link>
+            <h1 className="text-2xl sm:text-3xl font-bold break-all">{repoName}</h1>
           </div>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+            {/* MENÚ DE ACCIONES PARA EL REPOSITORIO */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="gap-2" disabled={!!docPollingId || !!collectionPollingId || !!vectorizationPollingId}>
+                  <MoreHorizontal className="h-4 w-4" />
+                  <span className="hidden sm:inline">Acciones</span>
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={() => setIsUpdateRepoOpen(true)}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  <span>Actualizar Repositorio</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleAnalyzeRepository} disabled={!!docPollingId || !!collectionPollingId}>
+                  {collectionPollingId ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <ScanSearch className="mr-2 h-4 w-4" />
+                  )}
+                  <span>{collectionPollingId ? 'Analizando...' : 'Analizar Repositorio'}</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleVectorizeRepository} disabled={!!docPollingId || !!collectionPollingId || !!vectorizationPollingId}>
+                  <FileText className="mr-2 h-4 w-4" />
+                  <span>Vectorizar Repositorio</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
 
-          <div className="mt-6 sm:mt-8 pt-4 sm:pt-6 border-t">
-            <h2 className="text-xl sm:text-2xl font-bold flex items-center gap-2 mb-3 sm:mb-4">
-              <History className="h-5 w-5 sm:h-6 sm:w-6" />
-              Historial de Análisis
-            </h2>
-            {savedAnalyses.length > 0 ? (
-              <div className="w-full max-h-[300px] overflow-y-auto">
-                <Accordion type="single" collapsible className="w-full">
-                  {savedAnalyses.map((analysis: any) => (
-                    <AccordionItem value={`item-${analysis.id}`} key={analysis.id}>
-                      <AccordionTrigger>
-                        <div className="flex items-center gap-2 text-left flex-1 min-w-0">
-                          {analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                          <span className="font-medium truncate">{analysis.file_name}</span>
-                          <span className="ml-auto text-xs text-muted-foreground pr-4">{new Date(analysis.created_at).toLocaleDateString()}</span>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <Button variant="link" className="p-0 h-auto text-xs sm:text-sm" onClick={() => {
-                          setSelectedAnalysis(analysis.result_payload);
-                          setIsAnalysisDetailOpen(true);
-                        }}>
-                          Ver Resultados Detallados
-                        </Button>
-                      </AccordionContent>
-                    </AccordionItem>
-                  ))}
+        {isLoading ? (
+          <div className="flex justify-center items-center h-full">
+            <Loader2 className="h-8 w-8 animate-spin" />
+          </div>
+        ) : (
+          <>
+            <div className="flex-grow overflow-auto">
+              {Object.keys(folderTree.children).length > 0 || folderTree.files.length > 0 ? (
+                <Accordion type="multiple" className="w-full">
+                  {renderFolder(folderTree)}
                 </Accordion>
-              </div>
-            ) : (
-              !isLoading && <p className="text-sm text-muted-foreground text-center py-4">No hay análisis guardados para este repositorio.</p>
-            )}
-          </div>
-        </>
-      )}
+              ) : (
+                <p className="text-center text-muted-foreground py-8">No hay archivos en este repositorio.</p>
+              )}
+            </div>
 
-      {/* Diálogos */}
-      <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
-      <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={() => {}} document={documentToEdit} />
-      <DeleteConfirmationDialog
-        isOpen={!!documentToDelete}
-        onOpenChange={(open) => !open && setDocumentToDelete(null)}
-        onDeleteSuccess={refreshDocuments}
-        document={documentToDelete}
-      />
-      <AnalysisDetailDialog isOpen={isAnalysisDetailOpen} onOpenChange={setIsAnalysisDetailOpen} analysis={selectedAnalysis} />
-      <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={() => {}} document={documentToShare} />
-      <UpdateRepositoryDialog
-        isOpen={isUpdateRepoOpen}
-        onOpenChange={setIsUpdateRepoOpen}
-        onSuccess={() => window.location.reload()}
-        repositoryUrl={repoUrl}
-        repositoryName={repoName}
-      />
-    </div>
+            <div className="mt-6 sm:mt-8 pt-4 sm:pt-6 border-t">
+              <h2 className="text-xl sm:text-2xl font-bold flex items-center gap-2 mb-3 sm:mb-4">
+                <History className="h-5 w-5 sm:h-6 sm:w-6" />
+                Historial de Análisis
+              </h2>
+              {savedAnalyses.length > 0 ? (
+                <div className="w-full max-h-[300px] overflow-y-auto">
+                  <Accordion type="single" collapsible className="w-full">
+                    {savedAnalyses.map((analysis: any) => (
+                      <AccordionItem value={`item-${analysis.id}`} key={analysis.id}>
+                        <AccordionTrigger>
+                          <div className="flex items-center gap-2 text-left flex-1 min-w-0">
+                            {analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                            <span className="font-medium truncate">{analysis.file_name}</span>
+                            <span className="ml-auto text-xs text-muted-foreground pr-4">{new Date(analysis.created_at).toLocaleDateString()}</span>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent>
+                          <Button variant="link" className="p-0 h-auto text-xs sm:text-sm" onClick={() => {
+                            // Construir un objeto Analysis completo para el diálogo
+                            const analysisObject = {
+                              id: analysis.id,
+                              type: 'code' as const, // Tipo de análisis de código
+                              title: analysis.file_name || 'Análisis de Código',
+                              summary: analysis.result_payload?.executive_summary || 'Análisis de repositorio',
+                              created_at: analysis.created_at,
+                              updated_at: analysis.updated_at,
+                              result: analysis.result_payload, // Los datos del análisis
+                              full_data: analysis.result_payload // También en full_data por compatibilidad
+                            };
+                            setSelectedAnalysis(analysisObject);
+                            setIsAnalysisDetailOpen(true);
+                          }}>
+                            Ver Resultados Detallados
+                          </Button>
+                        </AccordionContent>
+                      </AccordionItem>
+                    ))}
+                  </Accordion>
+                </div>
+              ) : (
+                !isLoading && <p className="text-sm text-muted-foreground text-center py-4">No hay análisis guardados para este repositorio.</p>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Diálogos */}
+        <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
+        <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={() => { }} document={documentToEdit} />
+        <DeleteConfirmationDialog
+          isOpen={!!documentToDelete}
+          onOpenChange={(open) => !open && setDocumentToDelete(null)}
+          onDeleteSuccess={refreshDocuments}
+          document={documentToDelete}
+        />
+        <AnalysisDetailDialog isOpen={isAnalysisDetailOpen} onOpenChange={setIsAnalysisDetailOpen} analysis={selectedAnalysis} />
+        <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={() => { }} document={documentToShare} />
+        <UpdateRepositoryDialog
+          isOpen={isUpdateRepoOpen}
+          onOpenChange={setIsUpdateRepoOpen}
+          onSuccess={() => window.location.reload()}
+          repositoryUrl={repoUrl}
+          repositoryName={repoName}
+        />
+      </div>
     </React.Fragment>
   );
 }

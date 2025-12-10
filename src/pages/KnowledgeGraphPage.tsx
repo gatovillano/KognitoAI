@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -45,6 +45,75 @@ export default function KnowledgeGraphPage() {
   const [maxNodes, setMaxNodes] = useState(50);
   const [maxHops, setMaxHops] = useState(2);
   const [searchResults, setSearchResults] = useState<any[]>([]);
+
+  // Filtrar los datos del grafo basándose en maxNodes y maxHops
+  const filteredGraphData = useMemo(() => {
+    if (!graphData || !graphData.nodes || !graphData.edges) {
+      return null;
+    }
+
+    // Si no hay límites, devolver todos los datos
+    if (maxNodes >= graphData.nodes.length) {
+      return graphData;
+    }
+
+    // Calcular el grado (número de conexiones) de cada nodo
+    const nodeDegrees = new Map<string, number>();
+    graphData.nodes.forEach(node => nodeDegrees.set(node.id, 0));
+
+    graphData.edges.forEach(edge => {
+      nodeDegrees.set(edge.source, (nodeDegrees.get(edge.source) || 0) + 1);
+      nodeDegrees.set(edge.target, (nodeDegrees.get(edge.target) || 0) + 1);
+    });
+
+    // Ordenar nodos por grado (más conectados primero) y tomar los primeros maxNodes
+    const sortedNodes = [...graphData.nodes].sort((a, b) =>
+      (nodeDegrees.get(b.id) || 0) - (nodeDegrees.get(a.id) || 0)
+    );
+
+    // Aplicar BFS desde los nodos más conectados para respetar maxHops
+    const selectedNodeIds = new Set<string>();
+    const queue: Array<{ id: string; depth: number }> = [];
+
+    // Comenzar con los nodos más conectados
+    const seedNodes = sortedNodes.slice(0, Math.min(10, maxNodes));
+    seedNodes.forEach(node => {
+      selectedNodeIds.add(node.id);
+      queue.push({ id: node.id, depth: 0 });
+    });
+
+    // BFS para expandir hasta maxHops
+    while (queue.length > 0 && selectedNodeIds.size < maxNodes) {
+      const current = queue.shift()!;
+
+      if (current.depth >= maxHops) continue;
+
+      // Encontrar vecinos
+      const neighbors = graphData.edges
+        .filter(edge => edge.source === current.id || edge.target === current.id)
+        .map(edge => edge.source === current.id ? edge.target : edge.source)
+        .filter(neighborId => !selectedNodeIds.has(neighborId));
+
+      // Agregar vecinos hasta alcanzar maxNodes
+      for (const neighborId of neighbors) {
+        if (selectedNodeIds.size >= maxNodes) break;
+        selectedNodeIds.add(neighborId);
+        queue.push({ id: neighborId, depth: current.depth + 1 });
+      }
+    }
+
+    // Filtrar nodos y aristas
+    const filteredNodes = graphData.nodes.filter(node => selectedNodeIds.has(node.id));
+    const filteredEdges = graphData.edges.filter(edge =>
+      selectedNodeIds.has(edge.source) && selectedNodeIds.has(edge.target)
+    );
+
+    return {
+      nodes: filteredNodes,
+      edges: filteredEdges,
+      metadata: graphData.metadata
+    };
+  }, [graphData, maxNodes, maxHops]);
 
   useEffect(() => {
     if (error) {
@@ -91,10 +160,10 @@ export default function KnowledgeGraphPage() {
       );
     }
 
-    if (graphData && graphData.nodes.length > 0) {
+    if (filteredGraphData && filteredGraphData.nodes.length > 0) {
       return (
         <div className="h-[70vh] min-h-[500px] w-full">
-          <GraphVisualization graphData={graphData} />
+          <GraphVisualization graphData={filteredGraphData} />
         </div>
       );
     }
@@ -181,7 +250,7 @@ export default function KnowledgeGraphPage() {
               </div>
             )}
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
             <div>
               <Label htmlFor="max-nodes" className="mb-2 block">Máximo de Nodos: {maxNodes}</Label>
@@ -191,7 +260,12 @@ export default function KnowledgeGraphPage() {
                 min={10}
                 max={200}
                 value={maxNodes}
-                onChange={(e) => setMaxNodes(parseInt(e.target.value))}
+                onChange={(e) => {
+                  const value = parseInt(e.target.value);
+                  if (!isNaN(value) && value >= 10 && value <= 200) {
+                    setMaxNodes(value);
+                  }
+                }}
                 className="w-full"
               />
             </div>
@@ -203,12 +277,26 @@ export default function KnowledgeGraphPage() {
                 min={1}
                 max={5}
                 value={maxHops}
-                onChange={(e) => setMaxHops(parseInt(e.target.value))}
+                onChange={(e) => {
+                  const value = parseInt(e.target.value);
+                  if (!isNaN(value) && value >= 1 && value <= 5) {
+                    setMaxHops(value);
+                  }
+                }}
                 className="w-full"
               />
             </div>
           </div>
-          
+
+          {graphData && filteredGraphData && (
+            <div className="bg-muted/50 p-3 rounded-lg mb-4 text-sm">
+              <p className="font-medium">
+                📊 Mostrando {filteredGraphData.nodes.length} de {graphData.nodes.length} nodos
+                {' '}y {filteredGraphData.edges.length} de {graphData.edges.length} relaciones
+              </p>
+            </div>
+          )}
+
           {renderGraphContent()}
         </CardContent>
       </Card>

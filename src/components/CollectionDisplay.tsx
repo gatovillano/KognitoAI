@@ -64,7 +64,7 @@ export const CollectionDisplay = ({
     if (type === 'list') {
       // Evitar la navegación si se hace clic en el menú desplegable
       if ((e.target as HTMLElement).closest('[data-dropdown-trigger]') ||
-          (e.target as HTMLElement).closest('[data-dropdown-content]')) {
+        (e.target as HTMLElement).closest('[data-dropdown-content]')) {
         return;
       }
       const url = `/rag/${encodeURIComponent(collection.topic)}`;
@@ -78,7 +78,7 @@ export const CollectionDisplay = ({
   const handleAction = (action: (topic: string, workspaceId?: string) => void) => {
     return (e: React.MouseEvent) => {
       e.stopPropagation(); // Evitar que el clic se propague al Card
-      action(collection.topic, workspaceId);
+      action(collection.topic, collection.workspace_id);
     };
   };
 
@@ -213,41 +213,41 @@ export const CollectionDisplay = ({
             </p>
           )}
         </CardContent>
-          <div className="flex items-center justify-between p-3 border-t border-border/50">
-            <span className="text-xs text-muted-foreground">
-              {collection.document_count !== undefined
-                ? `${collection.document_count} documento(s)`
-                : 'Calculando...'}
-            </span>
-            <div className="flex items-center gap-2">
-              {collection.workspace_name && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div
-                        className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full m-1"
-                        style={{
-                            backgroundColor: collection.workspace_color ? `${collection.workspace_color}20` : '#f3f4f6',
-                        }}
-                      >
-                        <span
-                            className="h-2 w-2 rounded-full"
-                            style={{ backgroundColor: collection.workspace_color || '#888888' }}
-                        ></span>
-                        <span style={{ color: collection.workspace_color || '#374151' }}>
-                            {collection.workspace_name}
-                        </span>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Workspace</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
+        <div className="flex items-center justify-between p-3 border-t border-border/50">
+          <span className="text-xs text-muted-foreground">
+            {collection.document_count !== undefined
+              ? `${collection.document_count} documento(s)`
+              : 'Calculando...'}
+          </span>
+          <div className="flex items-center gap-2">
+            {collection.workspace_name && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div
+                      className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full m-1"
+                      style={{
+                        backgroundColor: collection.workspace_color ? `${collection.workspace_color}20` : '#f3f4f6',
+                      }}
+                    >
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{ backgroundColor: collection.workspace_color || '#888888' }}
+                      ></span>
+                      <span style={{ color: collection.workspace_color || '#374151' }}>
+                        {collection.workspace_name}
+                      </span>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Workspace</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
 
-            </div>
           </div>
+        </div>
       </Card>
     </motion.div>
   );

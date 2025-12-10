@@ -21,7 +21,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from core.config import settings
 from api.tasks import list_tasks as get_tasks_from_api
 from api.agenda import _get_events_logic as get_events_from_api
-from core.dependencies import get_db_session # Importar dependencia centralizada
+from core.dependencies import get_db_session, check_workspace_permission # Importar dependencia centralizada y check_workspace_permission
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -29,31 +29,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # get_db eliminado en favor de core.dependencies.get_db_session
-
-
-async def check_workspace_permission(
-    db: AsyncSession,
-    workspace_id: uuid.UUID,
-    account_id: uuid.UUID,
-    required_roles: List[str]
-):
-    """
-    Verifica si un usuario tiene el permiso requerido en un workspace.
-    Lanza HTTPException 403 si el permiso es denegado.
-    """
-    stmt = select(WorkspacePermission).where(
-        WorkspacePermission.workspace_id == workspace_id,
-        WorkspacePermission.account_id == account_id
-    )
-    result = await db.execute(stmt)
-    permission = result.scalar_one_or_none()
-
-    if not permission or permission.role not in required_roles:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permiso denegado. No tienes acceso a este workspace o tu rol no es el adecuado."
-        )
-    return True
 
 
 # --- Modelos Pydantic para Workspaces ---
@@ -87,10 +62,38 @@ class PermissionResponse(BaseModel):
    email: Optional[str]
    role: str
 
+class UserRoleResponse(BaseModel):
+    role: Optional[str]
+    has_access: bool
+
 # --- Endpoints para Workspaces ---
 class PaginatedWorkspacesResponse(BaseModel):
    total: int
    workspaces: List[WorkspaceResponse]
+
+@router.get("/workspaces/{workspace_id}/my-role", response_model=UserRoleResponse, summary="Obtener el rol del usuario actual en un workspace")
+async def get_my_workspace_role(
+    workspace_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Devuelve el rol del usuario actual en el workspace especificado.
+    """
+    workspace_uuid = uuid.UUID(workspace_id)
+    account_uuid = uuid.UUID(current_account_id)
+
+    stmt = select(WorkspacePermission).where(
+        WorkspacePermission.workspace_id == workspace_uuid,
+        WorkspacePermission.account_id == account_uuid
+    )
+    result = await db.execute(stmt)
+    permission = result.scalar_one_or_none()
+
+    if not permission:
+        return UserRoleResponse(role=None, has_access=False)
+    
+    return UserRoleResponse(role=permission.role, has_access=True)
 
 @router.get("/workspaces", response_model=PaginatedWorkspacesResponse, summary="Listar workspaces del usuario con paginación")
 async def list_workspaces(

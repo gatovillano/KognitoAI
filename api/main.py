@@ -16,7 +16,6 @@ from api.chat import router as chat_router
 from api.documents import router as documents_router
 from api.notes import router as notes_router
 from api.agenda import router as agenda_router
-from api.teams import router as teams_router
 from api.knowledge_graph import router as knowledge_graph_router
 from api.search import router as search_router
 from api.forms import router as forms_router
@@ -39,9 +38,16 @@ from pydantic import BaseModel
 from sqlalchemy import select, func # Importar func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 logger.propagate = False # Evitar la duplicación de logs del logger principal
+
+# Configurar niveles de logging específicos para módulos ruidosos
+logging.getLogger('knowledge_graph.graph_database').setLevel(logging.WARNING)
+logging.getLogger('api.knowledge_graph').setLevel(logging.WARNING)
+logging.getLogger('utils.security').setLevel(logging.WARNING) # Silenciar logs de seguridad
+logging.getLogger('uvicorn.access').setLevel(logging.WARNING) # Silenciar logs de acceso de uvicorn
+logging.getLogger('uvicorn.error').setLevel(logging.WARNING) # Silenciar logs de error de uvicorn
 
 # Configurar logging detallado para LangChain y componentes del LLM
 from utils.llm_logging_config import setup_llm_detailed_logging, create_llm_log_filename, enable_verbose_langchain_logging, disable_noisy_loggers
@@ -73,24 +79,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 # Configuración de CORS
-origins = [
-    "http://localhost:8880",
-    "http://localhost:8000",
-    "https://kognito.gatoslibres.art",
-    "http://192.168.1.7:8880",
-    "http://192.168.1.7:18000",
-    "https://api.telegram.org",
-    "https://web.telegram.org",
-    "https://t.me",
-    "https://kognito.gatoslibres.art",
-    "https://apibase.gatoslibres.art",
-    "http://localhost:8880",
-    "http://192.168.1.7:8880",
-]
+# Configuración de CORS con Regex para mayor flexibilidad y seguridad
+# Permite: localhost, la IP local 192.168.1.7 (cualquier puerto), y los dominios de producción.
+origin_regex = r"^https?://(localhost|192\.168\.1\.7|kognito\.gatoslibres\.art|apibase\.gatoslibres\.art)(:\d+)?$"
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origin_regex=origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -255,7 +250,6 @@ app.include_router(agenda_router, prefix="/api", tags=["agenda"])
 from api.workspaces import router as workspaces_router
 from api.contact_profiles import router as contact_profiles_router
 
-app.include_router(teams_router, prefix="/api", tags=["teams"])
 app.include_router(workspaces_router, prefix="/api", tags=["workspaces"])
 app.include_router(contact_profiles_router, prefix="/api", tags=["contact-profiles"])
 from api.analysis import router as analysis_router
@@ -281,6 +275,9 @@ app.include_router(galleries_router, prefix="/api/galleries", tags=["galleries"]
 app.include_router(forms_router, prefix="/api", tags=["forms"])
 app.include_router(collections_router, prefix="/api", tags=["collections"])
 app.include_router(universal_search_router, prefix="/api", tags=["universal-search"])
+
+from api.tools import router as tools_router
+app.include_router(tools_router, prefix="/api/tools", tags=["tools"])
 
 class AdminMetricsResponse(BaseModel):
     total_users: int

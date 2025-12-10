@@ -14,12 +14,6 @@ interface Collection {
   document_count: number;
 }
 
-type Team = {
-  id: string;
-  name: string;
-  created_at: string;
-};
-
 interface ShareCollectionDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -28,39 +22,38 @@ interface ShareCollectionDialogProps {
 }
 
 export function ShareCollectionDialog({ isOpen, onOpenChange, onShareSuccess, collection }: ShareCollectionDialogProps) {
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
-  const [isLoadingTeams, setIsLoadingTeams] = useState(false);
+  const [workspaces, setWorkspaces] = useState<any[]>([]);
+  const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(null);
+  const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
-      fetchTeams();
-      setSelectedTeam(null);
+      fetchWorkspaces();
     }
   }, [isOpen]);
 
-  const fetchTeams = async () => {
-    setIsLoadingTeams(true);
+  const fetchWorkspaces = async () => {
+    setIsLoadingWorkspaces(true);
     try {
-      const response = await apiClient.get('/api/teams');
-      setTeams(response.data);
+      const response = await apiClient.get('/api/workspaces');
+      setWorkspaces(response.data.workspaces);
     } catch (error) {
-      toast.error('Error al cargar los equipos.');
+      toast.error('Error al cargar los workspaces.');
     } finally {
-      setIsLoadingTeams(false);
+      setIsLoadingWorkspaces(false);
     }
   };
 
   const handleShare = async () => {
-    if (!collection || !selectedTeam) return;
+    if (!collection || !selectedWorkspace) return;
 
     setIsSharing(true);
     try {
-      await apiClient.post(`/api/teams/${selectedTeam}/share/collections`, {
-        collection_topic: collection.topic,
+      await apiClient.post(`/api/collections/${collection.topic}/share`, {
+        workspace_id: selectedWorkspace,
       });
-      toast.success(`Colección "${collection.topic}" compartida con el equipo.`);
+      toast.success(`Colección "${collection.topic}" compartida con el workspace.`);
       onShareSuccess();
       onOpenChange(false);
     } catch (error) {
@@ -78,30 +71,30 @@ export function ShareCollectionDialog({ isOpen, onOpenChange, onShareSuccess, co
         </DialogHeader>
         <div className="space-y-4">
           <p>
-            Seleccione un equipo para compartir la colección: <strong>{collection?.topic}</strong>
+            Seleccione un workspace para compartir la colección: <strong>{collection?.topic}</strong>
           </p>
           <p className="text-sm text-muted-foreground">
-            Se compartirán todos los documentos de esta colección ({collection?.document_count || 0} documentos) con el equipo seleccionado.
+            Se compartirán todos los documentos de esta colección ({collection?.document_count || 0} documentos) con el workspace seleccionado.
           </p>
-          {isLoadingTeams ? (
+          {isLoadingWorkspaces ? (
             <div className="flex justify-center items-center p-4">
               <Loader2 className="h-6 w-6 animate-spin" />
             </div>
-          ) : teams.length > 0 ? (
-            <Select value={selectedTeam || undefined} onValueChange={setSelectedTeam}>
+          ) : workspaces.length > 0 ? (
+            <Select value={selectedWorkspace || undefined} onValueChange={setSelectedWorkspace}>
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="Seleccione un equipo" />
+                <SelectValue placeholder="Seleccione un workspace" />
               </SelectTrigger>
               <SelectContent>
-                {teams.map((team) => (
-                  <SelectItem key={team.id} value={team.id}>
-                    {team.name}
+                {workspaces.map((workspace) => (
+                  <SelectItem key={workspace.id} value={workspace.id}>
+                    {workspace.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           ) : (
-            <p className="text-muted-foreground">No se encontraron equipos para compartir.</p>
+            <p className="text-muted-foreground">No se encontraron workspaces para compartir.</p>
           )}
         </div>
         <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
@@ -110,7 +103,7 @@ export function ShareCollectionDialog({ isOpen, onOpenChange, onShareSuccess, co
           </Button>
           <Button
             onClick={handleShare}
-            disabled={!selectedTeam || isSharing || isLoadingTeams}
+            disabled={!selectedWorkspace || isSharing || isLoadingWorkspaces}
             className="w-full sm:w-auto"
           >
             {isSharing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}

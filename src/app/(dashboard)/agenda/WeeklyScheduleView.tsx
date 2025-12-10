@@ -1,6 +1,6 @@
 // src/app/(dashboard)/agenda/WeeklyScheduleView.tsx
 
-import React, { useState } from 'react';
+import React from 'react';
 import { format, addWeeks, subWeeks, startOfWeek, endOfWeek, eachDayOfInterval } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, Clock, Trash2, MoreHorizontal, CheckCircle2 } from 'lucide-react';
@@ -36,9 +36,6 @@ export function WeeklyScheduleView({
 
   const daysOfWeek = eachDayOfInterval({ start: startOfCurrentWeek, end: endOfCurrentWeek });
   const hours = Array.from({ length: 24 }, (_, i) => i);
-  const [showEarlyHours, setShowEarlyHours] = useState(false);
-  const visibleHours = showEarlyHours ? hours : hours.filter(h => h >= 6);
-  console.log('Rendering WeeklyScheduleView, showEarlyHours:', showEarlyHours, 'visibleHours length:', visibleHours.length);
 
   const handlePreviousWeek = () => {
     onDateChange(subWeeks(currentDate, 1));
@@ -46,32 +43,6 @@ export function WeeklyScheduleView({
 
   const handleNextWeek = () => {
     onDateChange(addWeeks(currentDate, 1));
-  };
-
-  // Función para filtrar eventos/tareas por día
-  const filterItemsByDay = (items: (AgendaEvent | TaskResponse)[], day: Date) => {
-    return items.filter(item => {
-      let itemDate: Date;
-      if ('event_datetime_local' in item) {
-        itemDate = new Date(item.event_datetime_local);
-      } else if ('end_date' in item && item.end_date) {
-        itemDate = new Date(item.end_date);
-      } else if ('start_date' in item && item.start_date) {
-        itemDate = new Date(item.start_date);
-      } else {
-        return false; // Si no hay fecha, no se usa para ordenamiento por día específico aquí
-      }
-
-      return (
-        itemDate.getDate() === day.getDate() &&
-        itemDate.getMonth() === day.getMonth() &&
-        itemDate.getFullYear() === day.getFullYear()
-      );
-    }).sort((a, b) => {
-      const dateA = 'event_datetime_local' in a ? new Date(a.event_datetime_local) : ('end_date' in a && a.end_date ? new Date(a.end_date) : new Date(0));
-      const dateB = 'event_datetime_local' in b ? new Date(b.event_datetime_local) : ('end_date' in b && b.end_date ? new Date(b.end_date) : new Date(0));
-      return dateA.getTime() - dateB.getTime();
-    });
   };
 
   // Función para filtrar eventos/tareas por día y hora
@@ -103,9 +74,17 @@ export function WeeklyScheduleView({
       const timeB = 'event_datetime_local' in b ? new Date(b.event_datetime_local).getTime() : ('end_date' in b && b.end_date ? new Date(b.end_date).getTime() : 0);
       return timeA - timeB;
     });
-    console.log(`Filtrando para ${format(day, 'yyyy-MM-dd')} hora ${hour}: ${filtered.length} elementos`);
     return filtered;
   };
+
+  // Calcular horas activas (que tienen al menos un evento o tarea en la semana)
+  const activeHours = hours.filter(hour => {
+    return daysOfWeek.some(day => {
+      const dayEvents = filterItemsByHour(events, day, hour);
+      const dayTasks = filterItemsByHour(tasks, day, hour);
+      return dayEvents.length > 0 || dayTasks.length > 0;
+    });
+  });
 
   return (
     <div className="flex flex-col h-full">
@@ -123,82 +102,93 @@ export function WeeklyScheduleView({
       </div>
 
       {/* Cuadrícula de la semana */}
-      <div className="mb-2">
-        <Button onClick={() => { console.log('Toggling showEarlyHours from', showEarlyHours, 'to', !showEarlyHours); setShowEarlyHours(!showEarlyHours); }} variant="outline" size="sm">
-          {showEarlyHours ? 'Ocultar horas de madrugada' : 'Mostrar horas de madrugada'}
-        </Button>
-      </div>
       <div className="flex-grow overflow-auto">
-        <table className="w-full border-collapse">
-          <thead>
-            <tr>
-              <th className="border p-2"></th>
-              {daysOfWeek.map(day => (
-                <th key={day.toISOString()} className="border p-2 text-center font-medium">
-                  {format(day, 'EEE d', { locale: es })}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {visibleHours.map(hour => (
-              <tr key={hour}>
-                <td className="border p-2 text-center font-medium">{hour}:00</td>
-                {daysOfWeek.map(day => {
-                  const dayEvents = filterItemsByHour(events, day, hour);
-                  const dayTasks = filterItemsByHour(tasks, day, hour);
-                  const allItems = [...dayEvents, ...dayTasks].sort((a, b) => {
-                    const timeA = 'event_datetime_local' in a ? new Date(a.event_datetime_local).getTime() : ('end_date' in a && a.end_date ? new Date(a.end_date).getTime() : 0);
-                    const timeB = 'event_datetime_local' in b ? new Date(b.event_datetime_local).getTime() : ('end_date' in b && b.end_date ? new Date(b.end_date).getTime() : 0);
-                    return timeA - timeB;
-                  });
-                  return (
-                    <td key={day.toISOString()} className="border p-2">
-                      <div className="space-y-2">
-                        {allItems.map(item => {
-                          if ('event_datetime_local' in item) {
-                            return (
-                              <div
-                                key={item.id}
-                                className="p-2 bg-blue-100 text-blue-800 rounded-md text-sm cursor-pointer hover:bg-blue-200 relative"
-                                onClick={() => onEditEvent(item)}
-                              >
-                                <p className="font-semibold">{item.summary}</p>
-                                <Button variant="ghost" size="icon" className="h-6 w-6 absolute bottom-0 right-0" onClick={(e) => { e.stopPropagation(); onDeleteEvent(item); }}>
-                                  <Trash2 className="h-3 w-3 text-destructive" />
-                                </Button>
-                              </div>
-                            );
-                          } else {
-                            return (
-                              <div
-                                key={item.id}
-                                className={`p-2 rounded-md text-sm ${(item as TaskResponse).is_completed ? 'bg-green-100 text-green-800 line-through' : 'bg-yellow-100 text-yellow-800'} cursor-pointer hover:opacity-80`}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <Checkbox
-                                    checked={(item as TaskResponse).is_completed}
-                                    onCheckedChange={() => onToggleTaskCompleted(item as TaskResponse)}
-                                    className="h-4 w-4"
-                                  />
-                                  <p className="font-semibold flex-grow" onClick={() => onEditTask(item as TaskResponse)}>{(item as TaskResponse).description}</p>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); onDeleteTask(item as TaskResponse); }}>
+        {activeHours.length > 0 ? (
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                <th className="border p-2 w-16"></th>
+                {daysOfWeek.map(day => (
+                  <th key={day.toISOString()} className="border p-2 text-center font-medium min-w-[120px]">
+                    {format(day, 'EEE d', { locale: es })}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {activeHours.map(hour => (
+                <tr key={hour}>
+                  <td className="border p-2 text-center font-medium text-sm text-muted-foreground">{hour}:00</td>
+                  {daysOfWeek.map(day => {
+                    const dayEvents = filterItemsByHour(events, day, hour);
+                    const dayTasks = filterItemsByHour(tasks, day, hour);
+                    const allItems = [...dayEvents, ...dayTasks].sort((a, b) => {
+                      const timeA = 'event_datetime_local' in a ? new Date(a.event_datetime_local).getTime() : ('end_date' in a && a.end_date ? new Date(a.end_date).getTime() : 0);
+                      const timeB = 'event_datetime_local' in b ? new Date(b.event_datetime_local).getTime() : ('end_date' in b && b.end_date ? new Date(b.end_date).getTime() : 0);
+                      return timeA - timeB;
+                    });
+                    return (
+                      <td key={day.toISOString()} className="border p-2 align-top h-24">
+                        <div className="space-y-2">
+                          {allItems.map(item => {
+                            if ('event_datetime_local' in item) {
+                              return (
+                                <div
+                                  key={item.id}
+                                  className="p-2 bg-blue-100 text-blue-800 rounded-md text-xs cursor-pointer hover:bg-blue-200 relative group transition-colors"
+                                  onClick={() => onEditEvent(item)}
+                                >
+                                  <p className="font-semibold truncate">{item.summary}</p>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-5 w-5 absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity bg-blue-100/50 hover:bg-blue-200"
+                                    onClick={(e) => { e.stopPropagation(); onDeleteEvent(item); }}
+                                  >
                                     <Trash2 className="h-3 w-3 text-destructive" />
                                   </Button>
                                 </div>
-                              </div>
-                            );
-                          }
-                        })}
-                        {allItems.length === 0 && <p className="text-xs text-muted-foreground text-center py-4">Sin elementos</p>}
-                      </div>
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                              );
+                            } else {
+                              return (
+                                <div
+                                  key={item.id}
+                                  className={`p-2 rounded-md text-xs ${(item as TaskResponse).is_completed ? 'bg-green-100 text-green-800 line-through' : 'bg-yellow-100 text-yellow-800'} cursor-pointer hover:opacity-80 transition-colors group relative`}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      checked={(item as TaskResponse).is_completed}
+                                      onCheckedChange={() => onToggleTaskCompleted(item as TaskResponse)}
+                                      className="h-3 w-3"
+                                    />
+                                    <p className="font-semibold truncate flex-grow" onClick={() => onEditTask(item as TaskResponse)}>{(item as TaskResponse).description}</p>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-5 w-5 absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity bg-yellow-100/50 hover:bg-yellow-200"
+                                      onClick={(e) => { e.stopPropagation(); onDeleteTask(item as TaskResponse); }}
+                                    >
+                                      <Trash2 className="h-3 w-3 text-destructive" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              );
+                            }
+                          })}
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+            <Clock className="h-12 w-12 mb-4 opacity-20" />
+            <p>No hay eventos ni tareas programadas para esta semana.</p>
+          </div>
+        )}
       </div>
     </div>
   );
