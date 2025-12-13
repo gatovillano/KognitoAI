@@ -210,7 +210,7 @@ class KnowledgeGraphTool(BaseTool):
 
                 logger.info(f"💡 Obteniendo insights para: {query} en dataset: {dataset_name_for_api}")
                 result = await graph_integration.search_knowledge_graph(
-                    query=f"insights and patterns about: {query}" if query else "", # Asegurarse de que query sea str
+                    query=query if query else "", # Asegurarse de que query sea str
                     dataset_name=dataset_name_for_api,
                     relationship_types=relationship_types,
                     source_concept=source_concept,
@@ -306,6 +306,44 @@ class KnowledgeGraphTool(BaseTool):
                         "description": "Resumen de estadísticas del grafo:",
                         "data": result["data"]
                     })
+                elif "n" in result or "r" in result:
+                    # Formato para resultados compuestos (n, r, m, score)
+                    item_desc = []
+                    
+                    # Procesar nodo origen (n)
+                    if "n" in result and result["n"]:
+                        n_props = result["n"].get("properties", result["n"])
+                        n_name = n_props.get("name", n_props.get("concept", "Unnamed"))
+                        n_label = result["n"].get("labels", ["Node"])[0] if isinstance(result["n"], dict) else "Node"
+                        item_desc.append(f"Entity: {n_name} ({n_label})")
+                        
+                        # Añadir descripción si existe y es relevante
+                        if "description" in n_props and n_props["description"]:
+                            desc = n_props["description"]
+                            if len(desc) > 100: desc = desc[:100] + "..."
+                            item_desc.append(f"  - Desc: {desc}")
+
+                    # Procesar relación (r)
+                    if "r" in result and result["r"]:
+                        r_props = result["r"].get("properties", result["r"])
+                        r_type = result["r"].get("type", "RELATED_TO") if isinstance(result["r"], dict) else "RELATED_TO"
+                        item_desc.append(f"  -> [{r_type}] ->")
+                        
+                        if "description" in r_props and r_props["description"]:
+                             item_desc.append(f"  ({r_props['description']})")
+
+                    # Procesar nodo destino (m)
+                    if "m" in result and result["m"]:
+                        m_props = result["m"].get("properties", result["m"])
+                        m_name = m_props.get("name", m_props.get("concept", "Unnamed"))
+                        m_label = result["m"].get("labels", ["Node"])[0] if isinstance(result["m"], dict) else "Node"
+                        item_desc.append(f"Entity: {m_name} ({m_label})")
+
+                    # Score
+                    if "score" in result:
+                        item_desc.append(f"[Score: {result['score']:.2f}]")
+
+                    formatted.append({"type": "graph_pattern", "content": " ".join(item_desc), "data": result})
                 else:
                     # Para otros resultados crudos que ya son diccionarios
                     formatted.append({"type": "raw_result", "content": result})

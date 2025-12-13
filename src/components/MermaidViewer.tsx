@@ -30,7 +30,12 @@ const MermaidViewer: React.FC<MermaidViewerProps> = ({ mermaidCode, trigger }) =
         mermaidContainerRef.current.innerHTML = svg;
       } catch (error) {
         console.error('Error rendering mermaid diagram:', error);
-        mermaidContainerRef.current.innerHTML = '<p>Error al renderizar el diagrama Mermaid.</p>';
+        mermaidContainerRef.current.innerHTML = `
+          <div class="p-4 border border-red-200 rounded bg-red-50 dark:bg-red-900/10 dark:border-red-800 w-full h-full overflow-auto">
+            <p class="text-red-600 dark:text-red-400 text-sm font-medium mb-2">Error al renderizar diagrama:</p>
+            <pre class="text-xs p-2 bg-gray-100 dark:bg-gray-800 rounded text-gray-700 dark:text-gray-300 whitespace-pre-wrap font-mono">${mermaidCode}</pre>
+          </div>
+        `;
       }
     }
   }, [mermaidCode, isOpen]);
