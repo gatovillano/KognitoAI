@@ -797,8 +797,7 @@ class GraphIntegration:
                     all_nodes[rel.start_node.element_id] = self._node_to_dict(rel.start_node)
                 if hasattr(rel, 'end_node') and rel.end_node:
                     all_nodes[rel.end_node.element_id] = self._node_to_dict(rel.end_node)
-            else:
-                formatted_output.append(self._neo4j_record_to_dict(record))
+            formatted_output.append(self._neo4j_record_to_dict(record))
 
         if return_type == "nodes":
             return list(all_nodes.values())
