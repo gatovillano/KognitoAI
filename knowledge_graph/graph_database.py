@@ -110,7 +110,7 @@ class GraphDB:
                         logger.debug(f"[_execute_sync] Query: {query}")
                         logger.debug(f"[_execute_sync] Params: {parameters}")
                         result = session.run(query, parameters)
-                        return [record.data() for record in result]
+                        return [dict(record) for record in result]
 
                 loop = asyncio.get_event_loop()
                 with concurrent.futures.ThreadPoolExecutor() as executor:

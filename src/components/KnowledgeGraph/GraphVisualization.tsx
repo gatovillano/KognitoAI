@@ -137,21 +137,21 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
         physics: {
           enabled: true,
           barnesHut: {
-            gravitationalConstant: -3000, // Más fuerte para acelerar
-            centralGravity: 0.5, // Más central para organizar más rápido
-            springLength: 80, // Más corto para menos espacio
-            springConstant: 0.08, // Más fuerte para movimientos más rápidos
-            damping: 0.15, // Más amortiguación para estabilizar más rápido
-            avoidOverlap: 0.3 // Menos énfasis en evitar overlaps inicialmente
+            gravitationalConstant: -2000,
+            centralGravity: 0.5,
+            springLength: 80,
+            springConstant: 0.08,
+            damping: 0.3,
+            avoidOverlap: 0.3
           },
           solver: 'barnesHut',
           stabilization: {
             enabled: true,
-            iterations: 50, // Reducido de 100 a 50 para más velocidad
-            updateInterval: 10, // Actualizar más frecuentemente
-            fit: false // No hacer zoom automático durante estabilización
+            iterations: 1000, // Aggressive stabilization to pre-calculate layout
+            updateInterval: 100, // Reduce rendering overhead during stabilization
+            fit: true // Fit view after stabilization
           },
-          timestep: 0.3, // Más grande para movimientos más rápidos
+          timestep: 0.5,
           adaptiveTimestep: true
         },
         interaction: { navigationButtons: true, keyboard: true, hover: true },
@@ -186,6 +186,11 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
           const nodeId = properties.nodes[0];
           onNodeDoubleClick(nodeId);
         }
+      });
+
+      // Disable physics after stabilization to keep graph static
+      networkRef.current.on("stabilizationIterationsDone", () => {
+        networkRef.current?.setOptions({ physics: { enabled: false } });
       });
     }
 
@@ -262,7 +267,7 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
 
   return (
     <div className="w-full h-full relative">
-      <div ref={visJsContainer} style={{ height: '600px', width: '100%' }} />
+      <div ref={visJsContainer} className="absolute inset-0 w-full h-full" />
       {metadata && <GraphLegend metadata={metadata} getNodeColor={getNodeColor} />}
     </div>
   );

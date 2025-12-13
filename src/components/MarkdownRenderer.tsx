@@ -374,7 +374,12 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
             staticMermaidSvg = svg;
           } catch (e) {
             console.error('Error rendering static mermaid diagram:', e);
-            staticMermaidSvg = '<div class="text-red-500">Error al renderizar el diagrama.</div>';
+            staticMermaidSvg = `
+              <div class="p-4 border border-red-200 rounded bg-red-50 dark:bg-red-900/10 dark:border-red-800">
+                <p class="text-red-600 dark:text-red-400 text-sm font-medium mb-2">Error al renderizar diagrama:</p>
+                <pre class="text-xs overflow-x-auto p-2 bg-gray-100 dark:bg-gray-800 rounded text-gray-700 dark:text-gray-300 whitespace-pre-wrap font-mono">${mermaidCode}</pre>
+              </div>
+            `;
           }
           const triggerContainer = document.createElement('div');
           block.parentNode?.insertBefore(triggerContainer, block);
@@ -401,6 +406,7 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
   useEffect(() => {
     mermaid.initialize({
       startOnLoad: false,
+      suppressErrorRendering: true,
       theme: 'dark',
       flowchart: { curve: 'basis' },
       securityLevel: 'loose',

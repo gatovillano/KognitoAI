@@ -110,7 +110,6 @@ Se han añadido logs detallados al `core/agent.py` para mejorar la visibilidad d
 ✅ Se ha mejorado significativamente la capacidad de depuración y observación del agente.
 ✅ Ahora es posible visualizar en los logs cada paso del proceso de enriquecimiento con el grafo de conocimiento, desde la consulta inicial hasta la inyección de contexto en el prompt final.
 
-
 ---
 
 ## 10-12-2025 Mejoras en la Gestión de Conexiones a Neo4j
@@ -129,7 +128,6 @@ Se implementaron mejoras significativas en la clase `GraphDB` (`knowledge_graph/
 ✅ El sistema de grafos es más resiliente a problemas de conectividad transitorios con la base de datos.
 ✅ Se mejora la estabilidad general y la fiabilidad de las operaciones del grafo de conocimiento.
 
-
 ---
 
 ## 10-12-2025 Mejoras en la Robustez del Procesamiento de Datos del Grafo de Conocimiento
@@ -147,7 +145,6 @@ Se implementaron mejoras en la robustez del procesamiento de datos en `knowledge
 ✅ Se ha mejorado la robustez del procesamiento de datos en la integración del grafo de conocimiento.
 ✅ Se reduce la probabilidad de errores causados por tipos de datos inesperados de Neo4j, como el error `slice(None, 10, None)`.
 ✅ La herramienta `knowledge_graph` es ahora más estable y confiable.
-
 
 ---
 
@@ -186,3 +183,45 @@ Se solucionó un error de validación `pydantic_core._pydantic_core.ValidationEr
 ✅ Se ha corregido el error de validación de Pydantic en la herramienta `knowledge_graph`.
 ✅ La herramienta ahora procesa correctamente los resúmenes del grafo sin fallar.
 ✅ Se mejora la estabilidad y fiabilidad del agente al interactuar con el grafo de conocimiento.
+
+---
+
+## 12-12-2025 Mejora en la Fiabilidad y Manejo de Errores de Diagramas Mermaid
+
+### Descripción general
+
+Se abordaron los problemas recurrentes de renderizado y sintaxis en los diagramas Mermaid generados por el agente. Se implementaron soluciones tanto en el frontend para mejorar la experiencia de usuario ante errores, como en el backend para mejorar la calidad del código generado.
+
+- **Modificación en `src/components/MarkdownRenderer.tsx` y `src/components/MermaidViewer.tsx`**:
+  - Se implementó un mecanismo de fallback que muestra el código Mermaid crudo en un bloque de código cuando falla el renderizado gráfico. Esto permite al usuario ver la estructura del diagrama incluso si hay errores de sintaxis.
+  - Se configuró `mermaid.initialize` con `suppressErrorRendering: true` para evitar que Mermaid inyecte su interfaz de error por defecto (el icono de la bomba), proporcionando una experiencia visual más limpia y controlada.
+
+- **Modificación en `core/prompts.py`**:
+  - Se añadieron instrucciones estrictas y ejemplos de mejores prácticas para la generación de código Mermaid en el prompt del sistema (`KAI_SYSTEM_PROMPT`). Esto incluye reglas sobre nombres de nodos seguros, dirección del grafo y manejo de caracteres especiales, con el objetivo de reducir la frecuencia de errores de sintaxis generados por el LLM.
+
+### Resultado
+
+✅ Se mejora significativamente la experiencia de usuario al fallar un diagrama: en lugar de un error genérico o intrusivo, se muestra el contenido útil.
+✅ Se espera una reducción en la tasa de errores de sintaxis gracias a las instrucciones explícitas en el prompt.
+✅ La interfaz se mantiene limpia al suprimir los mensajes de error por defecto de la librería.
+
+---
+
+## 12-12-2025 Mejora en la Fiabilidad y Manejo de Errores de Diagramas Mermaid
+
+### Descripción general
+
+Se abordaron los problemas recurrentes de renderizado y sintaxis en los diagramas Mermaid generados por el agente. Se implementaron soluciones tanto en el frontend para mejorar la experiencia de usuario ante errores, como en el backend para mejorar la calidad del código generado.
+
+- **Modificación en `src/components/MarkdownRenderer.tsx` y `src/components/MermaidViewer.tsx`**:
+  - Se implementó un mecanismo de fallback que muestra el código Mermaid crudo en un bloque de código cuando falla el renderizado gráfico. Esto permite al usuario ver la estructura del diagrama incluso si hay errores de sintaxis.
+  - Se configuró `mermaid.initialize` con `suppressErrorRendering: true` para evitar que Mermaid inyecte su interfaz de error por defecto (el icono de la bomba), proporcionando una experiencia visual más limpia y controlada.
+
+- **Modificación en `core/prompts.py`**:
+  - Se añadieron instrucciones estrictas y ejemplos de mejores prácticas para la generación de código Mermaid en el prompt del sistema (`KAI_SYSTEM_PROMPT`). Esto incluye reglas sobre nombres de nodos seguros, dirección del grafo y manejo de caracteres especiales, con el objetivo de reducir la frecuencia de errores de sintaxis generados por el LLM.
+
+### Resultado
+
+✅ Se mejora significativamente la experiencia de usuario al fallar un diagrama: en lugar de un error genérico o intrusivo, se muestra el contenido útil.
+✅ Se espera una reducción en la tasa de errores de sintaxis gracias a las instrucciones explícitas en el prompt.
+✅ La interfaz se mantiene limpia al suprimir los mensajes de error por defecto de la librería.
