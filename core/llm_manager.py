@@ -3,9 +3,13 @@
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
+import litellm # Importar litellm
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_community.chat_models import ChatLiteLLM
 from core.config import settings
+
+# Asegúrate de que litellm elimine parámetros no soportados globalmente
+litellm.drop_params = True
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +47,13 @@ async def initialize_llms():
             "model": settings.llm_model,
             "temperature": settings.llm_temperature,
             "streaming": True,
-            "verbose": True
+            "verbose": True,
+            "drop_params": True # Ya está aquí, pero lo mantenemos
         }
         
+        # Configuración para forzar la salida JSON
+        llm_kwargs["response_format"] = {"type": "json_object"}
+
         # Agregar api_base solo si está configurado
         if settings.llm_api_base:
             llm_kwargs["api_base"] = settings.llm_api_base
@@ -57,7 +65,19 @@ async def initialize_llms():
             llm_kwargs["model_kwargs"] = {
                 "tool_choice": "auto",  # Permite al modelo decidir cuándo usar herramientas
             }
-        
+        elif "gemini" in settings.llm_model.lower():
+            logger.info("🔧 Detectado modelo Gemini - Usando provider 'google_ai_studio' para evitar problemas con VertexAI y asegurando drop_params")
+            llm_kwargs["provider"] = "google_ai_studio"  # Usa Google AI Studio en lugar de VertexAI para mejor compatibilidad
+            # Aseguramos que no se pase tool_choice si se usa response_format
+            if "model_kwargs" in llm_kwargs and "tool_choice" in llm_kwargs["model_kwargs"]:
+                del llm_kwargs["model_kwargs"]["tool_choice"]
+            # Eliminar la configuración de response_format para Gemini, ya que causa problemas con el streaming
+            if "response_format" in llm_kwargs:
+                del llm_kwargs["response_format"]
+        else:
+            logger.info(f"🔧 Modelo '{settings.llm_model}' no es de OpenAI/GPT ni Gemini - Usando 'drop_params=True' para compatibilidad")
+            # drop_params ya está en llm_kwargs, no es necesario reasignar
+
         main_llm = ChatLiteLLM(**llm_kwargs)
         _main_agent_llm_instance = main_llm
         logger.info("✅ Main agent LLM initialized.")

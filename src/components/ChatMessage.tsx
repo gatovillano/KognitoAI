@@ -9,7 +9,7 @@ import { ChatAvatar } from './ChatAvatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
 import { ExternalLink } from 'lucide-react';
-import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon, Notebook } from 'lucide-react';
+import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon, Notebook, Network } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 
 export interface Source {
@@ -17,7 +17,7 @@ export interface Source {
   title: string;
   url: string;
   snippet: string;
-  type: 'web' | 'document' | 'memory' | 'code' | 'database' | 'note';
+  type: 'web' | 'document' | 'memory' | 'code' | 'database' | 'note' | 'graph';
   metadata?: Record<string, any>;
   name?: string; // Añadir esta línea para el nombre del documento/memoria
 }
@@ -79,6 +79,8 @@ export const SourceButton: React.FC<{ source: Source; citationNumber: number }> 
         </svg>;
       case 'note':
         return <Notebook className="h-3 w-3 mr-1" />;
+      case 'graph':
+        return <Network className="h-3 w-3 mr-1" />;
       default:
         return <FileIcon className="h-3 w-3 mr-1" />;
     }
@@ -123,7 +125,7 @@ export const SourceButton: React.FC<{ source: Source; citationNumber: number }> 
               Relevancia: {Math.round(source.metadata.similarity_score * 100)}%
             </div>
           )}
-          {source.url && (source.type === 'document' || source.type === 'memory' || source.type === 'code' || source.type === 'database' || source.type === 'note') && (
+          {source.url && (source.type === 'document' || source.type === 'memory' || source.type === 'code' || source.type === 'database' || source.type === 'note' || source.type === 'graph') && (
             <div className="text-xs text-muted-foreground mt-2 break-all">
               Fuente: {source.type === 'note' && source.url.startsWith('note://') ? (
                 <a href={`/notes/${source.url.replace('note://', '')}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">

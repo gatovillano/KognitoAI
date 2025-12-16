@@ -307,6 +307,7 @@ class UpdateMetadataRequest(BaseModel):
     file_name: str
     new_title: Optional[str] = None
     new_topic: Optional[str] = None
+    workspace_id: Optional[str] = None
 
 @router.post("/update-document-metadata")
 async def update_document_metadata_endpoint(
@@ -332,7 +333,7 @@ async def update_document_metadata_endpoint(
         request.file_name,
         request.new_title,
         request.new_topic,
-        workspace_id=request.workspace_id
+        workspace_id=request.workspace_id # Asegurarse de pasar el workspace_id
     )
     if not success:
         raise HTTPException(status_code=404, detail="Documento no encontrado o no actualizado.")

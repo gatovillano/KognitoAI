@@ -53,7 +53,7 @@ export function EditDocumentDialog({ document, isOpen, onOpenChange, onUpdateSuc
 
     toast.info('Actualizando metadatos...');
     try {
-      await apiClient.post('/api/update-document-metadata', payload);
+      await apiClient.post('/api/documents/update-document-metadata', payload);
       toast.success('¡Metadatos actualizados!');
       onUpdateSuccess();
       onOpenChange(false);

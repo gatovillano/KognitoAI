@@ -71,17 +71,24 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
   // Función para convertir nodos del backend al formato vis.js
   const convertNodesToVis = (backendNodes: any[]) => {
     return backendNodes.map(node => {
-      const fullLabel = node.label;
+      // Priorizar name o title de properties, luego node.label, y finalmente node.id
+      const fullLabel = node.properties?.name || node.properties?.title || node.label || String(node.id);
       const truncatedLabel = truncateText(fullLabel);
       const description = node.properties?.description || node.properties?.text || fullLabel;
+      
+      // Asegurarse de que el tipo sea 'Desconocido' si no está definido o es nulo
+      const nodeType = node.type || 'Desconocido';
+      const nodeColor = getNodeColor(nodeType);
+
+      console.log(`Node ID: ${node.id}, Type: ${nodeType}, Label: ${fullLabel}, Assigned Color: ${nodeColor}`);
 
       return {
         id: node.id,
         label: truncatedLabel,
         title: description.length > 100 ? `${truncateText(description, 100)}\n\nClic para ver detalles completos` : description,
         properties: node.properties,
-        type: node.type,
-        color: getNodeColor(node.type || 'Unknown'),
+        type: nodeType,
+        color: nodeColor,
         font: { color: '#000000', size: truncatedLabel.length > 20 ? 12 : 14 }
       };
     });
@@ -137,19 +144,19 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
         physics: {
           enabled: true,
           barnesHut: {
-            gravitationalConstant: -2000,
+            gravitationalConstant: -1000, // Reducir la fuerza de repulsión
             centralGravity: 0.5,
-            springLength: 80,
+            springLength: 100, // Aumentar la longitud de los resortes
             springConstant: 0.08,
-            damping: 0.3,
+            damping: 0.6, // Aumentar el amortiguamiento para un asentamiento más rápido
             avoidOverlap: 0.3
           },
           solver: 'barnesHut',
           stabilization: {
             enabled: true,
-            iterations: 1000, // Aggressive stabilization to pre-calculate layout
-            updateInterval: 100, // Reduce rendering overhead during stabilization
-            fit: true // Fit view after stabilization
+            iterations: 200, // Menos iteraciones para una estabilización más rápida
+            updateInterval: 200, // Reducir la frecuencia de actualización durante la estabilización
+            fit: true // Ajustar la vista después de la estabilización
           },
           timestep: 0.5,
           adaptiveTimestep: true

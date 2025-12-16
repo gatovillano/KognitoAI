@@ -70,6 +70,11 @@ class DeepResearchToolLiteLLM(BaseTool):
     _add_web_to_rag_tool: Optional[Any] = None
     _compiled_graph: Optional[Any] = None
 
+    # Atributos para la inyección de contexto desde el agente
+    account_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    telegram_id: Optional[int] = None
+
     def __init__(
         self,
         web_search_tool: Tool,
@@ -242,7 +247,7 @@ class DeepResearchToolLiteLLM(BaseTool):
         logger.warning(f"⚠️ No se pudo mapear el modelo '{litellm_model}', usando formato OpenAI")
         return f"openai:{litellm_model}"
 
-    async def _run(
+    async def _arun(
         self,
         query: str,
         max_iterations: int = 6,

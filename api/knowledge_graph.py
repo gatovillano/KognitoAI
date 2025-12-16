@@ -1111,22 +1111,37 @@ async def get_knowledge_graph_data(
 
             # Función auxiliar para obtener propiedades de forma segura
             def get_node_properties(node):
-                # Manejar si el nodo es un objeto o un diccionario
-                if hasattr(node, 'id'):
-                    node_id_str = str(node.id)
-                    node_label = getattr(node, 'name', getattr(node, 'label', node_id_str))
-                    node_type = getattr(node, 'type', 'Desconocido')
-                    node_name_for_title = getattr(node, 'name', getattr(node, 'label', ''))
-                    # Obtener todas las propiedades del nodo
-                    all_properties = dict(node) if isinstance(node, dict) or hasattr(node, 'items') else {}
-                else:
+                node_id_str = ""
+                node_label = ""
+                node_type = "Desconocido" # Valor por defecto
+                node_name_for_title = ""
+                all_properties = {}
+
+                if isinstance(node, dict):
                     node_id_str = str(node.get('id'))
                     node_label = node.get("name", node.get("label", node_id_str))
-                    node_type = node.get('type', 'Desconocido')
+                    node_type = node.get('type', 'Desconocido') # Preferir la propiedad 'type'
+                    if node_type == 'Desconocido' and node.get('labels'): # Si no hay propiedad 'type', intentar con las etiquetas de Neo4j
+                         node_type = node['labels'][0] if node['labels'] else 'Desconocido'
                     node_name_for_title = node.get('name', node.get('label', ''))
-                    # Obtener todas las propiedades del nodo
-                    all_properties = node if isinstance(node, dict) else {}
+                    all_properties = node
+                elif hasattr(node, 'id') and hasattr(node, 'labels') and hasattr(node, 'items'): # neo4j.graph.Node object
+                    node_id_str = str(node.id)
+                    # Tomar el primer label de Neo4j como el tipo principal
+                    if node.labels:
+                        node_type = list(node.labels)[0]
+                    else:
+                        node_type = getattr(node, 'type', 'Desconocido') # Fallback a la propiedad 'type' si no hay labels
 
+                    node_label = getattr(node, 'name', getattr(node, 'label', node_id_str))
+                    node_name_for_title = getattr(node, 'name', getattr(node, 'label', ''))
+                    all_properties = dict(node) # Convertir a dict para propiedades
+
+                # Lógica para generar etiquetas más descriptivas
+                if node_type == "IDEA_PROFILE":
+                    # Para IDEA_PROFILE, priorizar el central_concept
+                    node_label = all_properties.get("central_concept") or all_properties.get("name") or node_label
+                    node_name_for_title = node_label # Usar el label como nombre para el título
                 return {
                     "id": node_id_str,
                     "label": node_label,

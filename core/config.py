@@ -137,6 +137,17 @@ class Config:
 
         # Búsqueda Híbrida
         self.hybrid_search_bm25_weight: float = float(os.getenv("HYBRID_SEARCH_BM25_WEIGHT", 0.5))
+        
+        # --- Configuración de GLiNER (NER Mejorado) ---
+        # Activar GLiNER en lugar de spaCy para extracción de entidades
+        self.use_gliner: bool = os.getenv("USE_GLINER", "True").lower() in ('true', '1', 't')
+        # Modelo de GLiNER: small/base/large
+        self.gliner_model_size: str = os.getenv("GLINER_MODEL_SIZE", "small")  # small (~250MB), base (~500MB), large (~1GB)
+        # Usar modelo híbrido (spaCy + GLiNER) para balance velocidad/precisión
+        self.use_hybrid_ner: bool = os.getenv("USE_HYBRID_NER", "True").lower() in ('true', '1', 't')
+        # Umbral de confianza para GLiNER
+        self.gliner_threshold: float = float(os.getenv("GLINER_THRESHOLD", 0.6))
+
 
         # Loaders de Documentos Avanzados (APIs externas)
         self.datalab_marker_api_url: Optional[str] = os.getenv("DATALAB_MARKER_API_URL")
