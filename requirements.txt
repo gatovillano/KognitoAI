@@ -20,15 +20,14 @@ pydantic[email]>=2.0.0
 email-validator>=2.0.0
 
 # === LANGCHAIN Y LÓGICA DE IA ===
-langchain==0.3.27
-langchain-community>=0.3.0
-langchain-google-genai==2.1.12
+langchain
+langchain-community
+langchain-google-genai
 litellm
 langgraph>=0.2.0
 tavily-python>=0.5.0
-langchain-postgres==0.0.6
-langchain-google-vertexai==2.0.0
-langchain-mcp-adapters==0.1.9
+langchain-postgres
+langchain-google-vertexai
 
 
 # === AUTENTICACIÓN Y CREDENCIALES ===
@@ -56,6 +55,7 @@ distro==1.9.0
 fastuuid==0.14.0
 jiter==0.12.0
 openai==2.8.1
+tenacity>=8.2.0
 
 # === PROCESAMIENTO DE AUDIO Y DOCUMENTOS ===
 faster-whisper>=0.9.0
@@ -64,6 +64,7 @@ python-docx>=1.1.0
 
 # === PROCESAMIENTO DE TEXTO Y NLP ===
 spacy>=3.7.0
+gliner>=0.2.0  # Zero-shot NER (alternativa mejorada a spaCy)
 textblob>=0.17.0
 keybert>=0.8.0
 transformers>=4.30.0
