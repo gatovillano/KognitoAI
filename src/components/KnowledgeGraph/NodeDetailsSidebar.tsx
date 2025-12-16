@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { X, FileText, Calendar, Tag, Link, Info } from 'lucide-react';
+import { X, FileText, Calendar, Tag, Link, Info, Brain } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface NodeDetailsSidebarProps {
@@ -20,12 +20,6 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
     isOpen
 }) => {
     if (!isOpen || !node) return null;
-    console.log("NodeDetailsSidebar received node:", node); // Added for debugging
-
-    const truncateText = (text: string, maxLength: number = 100) => {
-        if (text.length <= maxLength) return text;
-        return text.substring(0, maxLength) + '...';
-    };
 
     const formatDate = (dateString: string) => {
         try {
@@ -55,21 +49,37 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                             </h4>
                             <div className="bg-muted p-3 rounded-md">
                                 <p className="text-sm leading-relaxed">
-                                    {properties.description || properties.text || node.label || 'No hay cita conceptual disponible.'}
+                                    {properties.full_text || properties.description || properties.text || node.label || 'No hay cita conceptual disponible.'}
                                 </p>
                             </div>
                         </div>
 
+                        {properties.extraction_method && (
+                            <div>
+                                <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+                                    <Tag className="h-4 w-4" />
+                                    Método de Extracción
+                                </h4>
+                                <p className="text-sm text-muted-foreground">
+                                    {properties.extraction_method}
+                                </p>
+                            </div>
+                        )}
+
                         {properties.concept && (
                             <div>
-                                <h4 className="font-semibold text-sm mb-2">Concepto Principal</h4>
+                                <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+                                    <Brain className="h-4 w-4" /> Concepto Principal
+                                </h4>
                                 <Badge variant="secondary">{properties.concept}</Badge>
                             </div>
                         )}
 
                         {properties.category && (
                             <div>
-                                <h4 className="font-semibold text-sm mb-2">Categoría</h4>
+                                <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+                                    <Tag className="h-4 w-4" /> Categoría
+                                </h4>
                                 <Badge variant="outline">{properties.category}</Badge>
                             </div>
                         )}
@@ -255,8 +265,10 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                     <ScrollArea className="h-[calc(100vh-120px)]">
                         <div className="space-y-6">
                             {/* Información básica */}
-                            <div>
-                                <h3 className="font-semibold text-base mb-2">{node.label}</h3>
+                            <div className="min-w-0"> {/* Añadido para evitar truncamiento del título */}
+                                <h3 className="font-semibold text-base mb-2 max-w-full">
+                                    <span style={{ wordBreak: 'break-all', whiteSpace: 'normal' }}>{node.label}</span>
+                                </h3>
                                 <Badge variant="secondary" className="mb-4">
                                     {node.type || 'Desconocido'}
                                 </Badge>
@@ -298,9 +310,44 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                                         <div className="space-y-3">
                                             {Object.entries(node.properties).map(([key, value]) => {
                                                 // Excluir propiedades internas que no son relevantes para el usuario
-                                                if (['id', 'type', 'label', 'concept', 'importance', 'category', 'source_document', 'confidence', 'extraction_method', 'created_at', 'description', 'central_concept', 'quotes_count', 'categories', 'importance_score', 'coherence_score', 'documents_span'].includes(key)) {
+                                                // Mostrar todas las propiedades por defecto, a menos que sean propiedades internas del nodo que se manejan aparte.
+                                                // Excluir propiedades internas y 'description' que ya se muestran de forma prominente.
+                                                // Excluir solo las propiedades básicas que ya se muestran de forma prominente.
+                                                // Esto asegura que otras propiedades como 'category' y 'categories' sean visibles.
+                                                // La propiedad 'description' se mostrará aquí aunque también aparezca arriba,
+                                                // para cumplir con la solicitud de mostrar "absolutamente todas" las propiedades
+                                                // si no está específicamente excluida por el usuario.
+                                                // Excluir solo las propiedades básicas que ya se muestran de forma prominente,
+                                                // incluyendo 'description' para evitar duplicidad según el feedback del usuario.
+                                                if (['id', 'type', 'label', 'description'].includes(key)) {
                                                     return null;
                                                 }
+
+                                                // Manejo especial para 'confidence' como barra de porcentaje
+                                                if (key === 'confidence' && typeof value === 'number') {
+                                                    return (
+                                                        <div key={key} className="flex flex-col space-y-1">
+                                                            <div className="flex items-center justify-between">
+                                                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                                                                    {key.replace(/_/g, ' ')}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="flex-1 bg-muted rounded-full h-2">
+                                                                    <div
+                                                                        className="bg-primary h-2 rounded-full"
+                                                                        style={{ width: `${value * 100}%` }}
+                                                                    />
+                                                                </div>
+                                                                <span className="text-xs text-muted-foreground">
+                                                                    {Math.round(value * 100)}%
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+
+                                                // Renderizado por defecto para otras propiedades
                                                 return (
                                                     <div key={key} className="flex flex-col space-y-1">
                                                         <div className="flex items-center justify-between">

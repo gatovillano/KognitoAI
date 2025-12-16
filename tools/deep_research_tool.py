@@ -1,81 +1,90 @@
+# tools/deep_research_tool.py
+
 import logging
-import traceback # Importar traceback para imprimir el stack trace
+import os
 from typing import Type, Optional
 from pydantic import BaseModel, Field
-
-from langchain_core.language_models.base import BaseLanguageModel
-from langchain_core.tools import BaseTool, Tool
-from core.llm_manager import get_main_llm, get_fast_llm
-from core.config import settings # Importar settings
-from tools.web_search_tool import get_web_search_tool
-from tools.add_web_to_rag_tool import AddWebToRAGTool # Tu herramienta para añadir a RAG
-
-try: # Importar DeepResearcher y ResearchConfig
-    from external_agents.open_deep_research.src.open_deep_research.deep_researcher import deep_researcher # Importar el ejecutable de LangGraph
-    from external_agents.open_deep_research.src.open_deep_research.configuration import Configuration as ResearchConfig # Importar Configuration como ResearchConfig
-except ImportError as e:
-    logging.error(f"Error importing deep_researcher: {e}. Make sure the open_deep_research module is correctly placed.")
-    traceback.print_exc() # Imprimir el stack trace completo
-    deep_researcher = None
-    ResearchConfig = None
+from langchain_core.tools import BaseTool
+from langchain_core.messages import HumanMessage
+from core.agents.deep_researcher import compile_deep_researcher_graph
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
+from google.api_core.exceptions import ResourceExhausted
+import httpx
 
 logger = logging.getLogger(__name__)
 
-class DeepResearchToolInput(BaseModel):
-    query: str = Field(description="The research query or topic to investigate.")
+class DeepResearchInput(BaseModel):
+    """Input for the Deep Research tool."""
+    query: str = Field(description="The research query to be investigated in-depth.")
 
 class DeepResearchTool(BaseTool):
-    name: str = "deep_research_tool"
-    description: str = "Performs a comprehensive deep research on a given query, leveraging multiple sources and generating a detailed report. Automatically adds relevant findings to RAG."
-    args_schema: Type[BaseModel] = DeepResearchToolInput
-    
-    _deep_researcher: Optional[any] = None
-    _web_search_tool: Tool
-    _add_web_to_rag_tool: AddWebToRAGTool
+    """
+    A tool to perform in-depth research on a given query using a specialized agent.
+    It compiles a detailed report by planning, executing research, and synthesizing findings.
+    """
+    name: str = "deep_research"
+    description: str = (
+        "Conduct deep research on complex topics. Provide a research query and get a comprehensive report. "
+        "Required parameter: query (string) - the research topic to investigate."
+    )
+    args_schema: Type[BaseModel] = DeepResearchInput
+    account_id: str
+    workspace_id: Optional[str] = None
+    telegram_id: Optional[str] = None
 
-    def __init__(self, web_search_tool: Tool, add_web_to_rag_tool: AddWebToRAGTool, **data):
-        super().__init__(**data)
-        self._web_search_tool = web_search_tool
-        self._add_web_to_rag_tool = add_web_to_rag_tool
-
-        if deep_researcher:
-            self._deep_researcher = deep_researcher
-            logger.info("✅ DeepResearchTool inicializado con el ejecutable de LangGraph 'deep_researcher'.")
-        else:
-            logger.warning("❌ El ejecutable 'deep_researcher' no pudo ser importado. La herramienta no funcionará.")
-
+    @retry(
+        wait=wait_exponential(multiplier=1, min=4, max=60), # Espera exponencial entre 4 y 60 segundos
+        stop=stop_after_attempt(5), # Reintentar un máximo de 5 veces
+        retry=(retry_if_exception_type(ResourceExhausted) | # Reintentar si es un error de cuota de Google
+               retry_if_exception_type(httpx.HTTPStatusError)), # Reintentar si es un error HTTP
+        reraise=True # Volver a lanzar la excepción si todos los reintentos fallan
+    )
     async def _run(self, query: str) -> str:
-        if not self._deep_researcher:
-            return "Error: DeepResearchTool no está inicializado correctamente."
-
-        logger.info(f"🚀 Iniciando investigación profunda para: {query}")
+        """Use the tool."""
+        logger.info(f"Executing Deep Research tool for query: '{query}' for account: {self.account_id}")
+        
         try:
-            # Preparar la configuración para la ejecución del grafo
-            # La configuración se pasa como un diccionario simple a .ainvoke()
-            main_llm = get_main_llm()
-            if not main_llm:
-                return "Error: El LLM principal no está inicializado."
-
-            run_config = {
-                "configurable": {
-                    "research_model": settings.google_main_model_name,
-                    "search_tool": self._web_search_tool,
-                }
+            # Compilar el grafo del agente de investigación profunda
+            graph = compile_deep_researcher_graph()
+            
+            # Configuración para la ejecución del grafo
+            config = {"configurable": {"account_id": self.account_id}}
+            
+            # Entradas para el grafo
+            inputs = {
+                "messages": [HumanMessage(content=query)],
+                "account_id": self.account_id
             }
-            
-            # El input para el grafo es un diccionario
-            inputs = {"messages": [("user", query)]}
-            
-            # invocar el grafo
-            research_result = await self._deep_researcher.ainvoke(inputs, config=run_config)
-            
-            # Extraer el informe final del resultado
-            research_report = research_result.get("final_report", "No se generó un informe final.")
-            
-            rag_result = await self._add_web_to_rag_tool._run(url="", content=research_report, title=f"Deep Research Report: {query}", topic=query)
-            logger.info(f"✅ Informe de investigación añadido a RAG: {rag_result}")
 
-            return research_report
+            logger.info("Invoking Deep Research graph...")
+            final_state = await graph.ainvoke(inputs, config=config)
+            
+            if final_state and "final_report" in final_state:
+                if final_state["final_report"] == "CLARIFICATION":
+                    logger.info("Deep research requires clarification from the user.")
+                    # The last message should be the clarification question
+                    return final_state["messages"][-1].content
+                
+                logger.info("Deep research completed successfully.")
+                return final_state["final_report"]
+            else:
+                logger.error("Deep research finished without a final report.")
+                return "Error: The deep research process finished, but no final report was generated."
+
+        except ResourceExhausted as e:
+            logger.warning(f"Rate limit exceeded for DeepResearchTool. Retrying... Details: {str(e)}")
+            raise # Re-lanzar para que tenacity lo capture
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                logger.warning(f"HTTP 429 (Too Many Requests) encountered for DeepResearchTool. Retrying... Details: {str(e)}")
+                raise # Re-lanzar para que tenacity lo capture
+            else:
+                logger.error(f"An HTTP error occurred in DeepResearchTool: {e}", exc_info=True)
+                return f"Error: An HTTP error occurred while trying to run the deep research. Details: {str(e)}"
         except Exception as e:
-            logger.error(f"❌ Error durante la investigación profunda: {e}")
-            return f"Error al realizar la investigación profunda: {e}"
+            logger.error(f"An unexpected error occurred in DeepResearchTool: {e}", exc_info=True)
+            return f"Error: An unexpected error occurred while trying to run the deep research. Details: {str(e)}"
+
+    async def _arun(self, query: str) -> str:
+        """Use the tool asynchronously."""
+        return await self._run(query)

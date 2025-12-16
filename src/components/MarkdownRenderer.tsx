@@ -371,7 +371,7 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
           try {
             const renderId = `mermaid-static-${Math.random().toString(36).substr(2, 9)}`;
             const { svg } = await mermaid.render(renderId, mermaidCode);
-            staticMermaidSvg = svg;
+            staticMermaidSvg = svg.replace('<svg', '<svg style="pointer-events: none;"');
           } catch (e) {
             console.error('Error rendering static mermaid diagram:', e);
             staticMermaidSvg = `

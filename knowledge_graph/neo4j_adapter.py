@@ -129,6 +129,8 @@ class Neo4jAdapter:
                     extraction_method = props.get("extraction_method") or entity.get("extraction_method", "hybrid")
                     entity_type = entity.get("type", "Entity")
                     dataset_name = entity.get("dataset_name")  # Obtener dataset_name si existe
+                    concept = props.get("concept") or entity.get("concept") # Extraer concept
+                    category = props.get("category") or entity.get("category") # Extraer category
 
                     entity_data = {
                         "id": entity_id,
@@ -138,14 +140,13 @@ class Neo4jAdapter:
                         "confidence": confidence,
                         "source": source,
                         "created_at": created_at,
-                        "extraction_method": extraction_method
+                        "extraction_method": extraction_method,
+                        "concept": concept, # Incluir concept
+                        "category": category # Incluir category
                     }
-                    if workspace_id:
-                        entity_data["workspace_id"] = workspace_id
-                    if account_id:
-                        entity_data["account_id"] = account_id
-                    if dataset_name:
-                        entity_data["dataset_name"] = dataset_name
+                    entity_data["workspace_id"] = workspace_id
+                    entity_data["account_id"] = account_id
+                    entity_data["dataset_name"] = dataset_name # Already extracted, default to None if not present
 
                     if j < 3:
                         logger.info(f"📝 DATOS MAPEADOS {j+1}:")
@@ -168,13 +169,8 @@ class Neo4jAdapter:
 
                 # Crear nodos por cada tipo específico
                 for entity_type, type_entities in entities_by_type.items():
-                    # Verificar si las entidades tienen workspace_id, account_id y dataset_name
-                    # (revisamos la primera entidad del batch como muestra)
-                    has_workspace_id = len(type_entities) > 0 and "workspace_id" in type_entities[0]
-                    has_account_id = len(type_entities) > 0 and "account_id" in type_entities[0]
-                    has_dataset_name = len(type_entities) > 0 and "dataset_name" in type_entities[0]
-                    
-                    # Query específica para cada tipo
+                    # Query estática para cada tipo, incluyendo todos los campos opcionales.
+                    # Neo4j manejará los valores nulos si no están presentes en la entidad.
                     type_query = f"""
                     UNWIND $entities AS entity
                     MERGE (n:{entity_type} {{id: entity.id}})
@@ -184,15 +180,12 @@ class Neo4jAdapter:
                         n.confidence = entity.confidence,
                         n.source = entity.source,
                         n.created_at = entity.created_at,
-                        n.extraction_method = entity.extraction_method
-                    """
-                    if has_workspace_id:
-                        type_query += """, n.workspace_id = entity.workspace_id"""
-                    if has_account_id:
-                        type_query += """, n.account_id = entity.account_id"""
-                    if has_dataset_name:
-                        type_query += """, n.dataset_name = entity.dataset_name"""
-                    type_query += """
+                        n.extraction_method = entity.extraction_method,
+                        n.workspace_id = entity.workspace_id,
+                        n.account_id = entity.account_id,
+                        n.dataset_name = entity.dataset_name,
+                        n.concept = entity.concept,
+                        n.category = entity.category
                     RETURN count(n) as created
                     """
 
@@ -282,12 +275,9 @@ class Neo4jAdapter:
                             "created_at": relationship.get("created_at", datetime.now().isoformat()),
                             "extraction_method": relationship.get("extraction_method", "hybrid")
                         }
-                        if workspace_id:
-                            rel_data["workspace_id"] = workspace_id
-                        if account_id:
-                            rel_data["account_id"] = account_id
-                        if dataset_name:
-                            rel_data["dataset_name"] = dataset_name
+                        rel_data["workspace_id"] = workspace_id
+                        rel_data["account_id"] = account_id
+                        rel_data["dataset_name"] = dataset_name # Already extracted, default to None if not present
                         batch_data.append(rel_data)
 
                         if j < 3:
@@ -306,16 +296,9 @@ class Neo4jAdapter:
 
                 # Crear relaciones por cada tipo específico
                 for rel_type, type_relationships in relationships_by_type.items():
-                    # Verificar si las relaciones tienen workspace_id, account_id y dataset_name
-                    has_workspace_id = len(type_relationships) > 0 and "workspace_id" in type_relationships[0]
-                    has_account_id = len(type_relationships) > 0 and "account_id" in type_relationships[0]
-                    has_dataset_name = len(type_relationships) > 0 and "dataset_name" in type_relationships[0]
-                    
-                    # Query específica para cada tipo de relación
-                    # Query específica para cada tipo de relación
-                    # Envolver rel_type en backticks para seguridad
                     safe_rel_type = f"`{rel_type}`"
                     
+                    # Query estática para cada tipo de relación, incluyendo todos los campos opcionales.
                     type_query = f"""
                     UNWIND $relationships AS rel
                     MATCH (source {{id: rel.source_id}})
@@ -326,16 +309,10 @@ class Neo4jAdapter:
                         r.source = rel.source,
                         r.created_at = rel.created_at,
                         r.extraction_method = rel.extraction_method,
-                        r.type = rel.type
-                    """
-                    if has_workspace_id:
-                        type_query += """, r.workspace_id = rel.workspace_id"""
-                    if has_account_id:
-                        type_query += """, r.account_id = rel.account_id"""
-                    if has_dataset_name:
-                        type_query += """, r.dataset_name = rel.dataset_name"""
-                    
-                    type_query += """
+                        r.type = rel.type,
+                        r.workspace_id = rel.workspace_id,
+                        r.account_id = rel.account_id,
+                        r.dataset_name = rel.dataset_name
                     RETURN count(r) as created
                     """
 

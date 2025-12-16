@@ -19,7 +19,7 @@ export const NODE_COLOR_PALETTE = [
 ];
 
 export function getNodeColor(type: string): string {
-    if (!type) return '#9CA3AF'; // gray-400 for unknown
+    if (!type || type.toLowerCase() === 'desconocido') return '#9CA3AF'; // gray-400 for unknown or 'desconocido'
 
     // Casos especiales
     if (type.toLowerCase() === 'desafío' || type.toLowerCase() === 'problem') return '#EF4444';

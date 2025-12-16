@@ -143,14 +143,15 @@ class ConceptualGraphProcessor:
             if self.llm:
                 llm_quotes = await self._extract_quotes_with_llm(content, doc)
                 conceptual_quotes.extend(llm_quotes)
+
+            # Estrategia 2: Extraer oraciones conceptualmente ricas (comentada temporalmente)
+            # sentence_quotes = await self._extract_rich_sentences(content, doc, doc_idx)
+            # conceptual_quotes.extend(sentence_quotes)
             
-            # Estrategia 2: Extraer oraciones conceptualmente ricas
-            sentence_quotes = await self._extract_rich_sentences(content, doc, doc_idx)
-            conceptual_quotes.extend(sentence_quotes)
-            
-            # Estrategia 3: Extraer párrafos con alta densidad conceptual
-            paragraph_quotes = await self._extract_conceptual_paragraphs(content, doc, doc_idx)
-            conceptual_quotes.extend(paragraph_quotes)
+            # Estrategia 3: Extraer párrafos con alta densidad conceptual (comentada temporalmente)
+            # paragraph_quotes = await self._extract_conceptual_paragraphs(content, doc, doc_idx)
+            # conceptual_quotes.extend(paragraph_quotes)
+
         
         # Eliminar duplicados y filtrar por calidad
         unique_quotes = await self._deduplicate_and_filter_quotes(conceptual_quotes)
@@ -165,7 +166,7 @@ class ConceptualGraphProcessor:
         
         try:
             prompt = f"""
-Analiza el siguiente texto y extrae las 5-10 citas más importantes que expresen ideas conceptuales completas y significativas.
+Analiza el siguiente texto y extrae las citas más importantes que expresen ideas conceptuales completas y significativas.
 
 Criterios para las citas:
 1. Deben expresar una idea completa y coherente
@@ -173,6 +174,7 @@ Criterios para las citas:
 3. Deben ser representativas del contenido
 4. Pueden ser oraciones o párrafos cortos
 5. Evita citas puramente descriptivas o factuales
+6. Deben ser categorizables
 
 Texto:
 {content[:3000]}
@@ -473,8 +475,7 @@ IMPORTANTE: Responde ÚNICAMENTE con el objeto JSON solicitado, sin ningún text
             x.get('confidence', 0)
         ), reverse=True)
         
-        # Limitar cantidad para evitar sobrecarga
-        return quality_quotes[:200]  # Máximo 200 citas conceptuales
+        return quality_quotes
 
     async def _analyze_thematic_relationships(self, quotes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Analiza relaciones temáticas entre citas conceptuales."""
@@ -821,84 +822,72 @@ IMPORTANTE: Responde ÚNICAMENTE con el objeto JSON solicitado, sin ningún text
             try:
                 combined_concepts = ", ".join(list(set(concepts)))
                 prompt = f"""Dado el siguiente conjunto de conceptos relacionados: "{combined_concepts}".
-                Identifica y genera un nombre descriptivo, altamente específico y UNICO que represente la categoría o idea principal que unifica estos conceptos.
-                El nombre debe ser conciso (máximo 10 palabras), claro y sonar como un título de tema o categoría principal.
-                Es CRÍTICO que el nombre sea lo más descriptivo posible y EVITE POR COMPLETO palabras genéricas como "Desarrollo conceptual", "Idea principal", "Concepto central", "Tema General", "Análisis". Enfócate en la esencia temática única que agrupa estos conceptos.
-                Responde ÚNICAMENTE con el nombre del concepto central."""
+                Tu tarea es identificar la idea principal o un concepto central **altamente granular y específico** que agrupe estos conceptos. Genera una frase o un título para este "Perfil de Idea" que sea lo más descriptivo posible.
+
+                Criterios para la frase/título del Perfil de Idea:
+                1.  **Altamente Descriptivo y Específico**: Debe capturar la esencia única del grupo de conceptos, indicando claramente qué está agrupando con el mayor detalle posible. Evita generalizaciones. Por ejemplo, en lugar de "Teoría", usa "Teoría de la Relatividad de Einstein" o "Mecanismos de Plasticidad Neuronal en el Aprendizaje".
+                2.  **Granular**: Profundiza en los detalles específicos que unifican los conceptos. Si los conceptos son "gestión de proyectos ágiles", "Scrum", "Kanban", un título granular sería "Metodologías Ágiles para la Gestión de Proyectos de Software" en lugar de solo "Gestión de Proyectos".
+                3.  **Informativo**: Debe reflejar la naturaleza o esencia de la idea, incorporando palabras clave relevantes.
+                4.  **Único y Distintivo**: Debe ser lo suficientemente específico para no confundirse con otros perfiles.
+                5.  **Evitar genéricos**: NO uses frases vagas como "Desarrollo conceptual", "Idea principal", "Concepto central", "Tema General", "Análisis", "Relación Conceptual", "Perspectivas sobre", "Conceptos diversos no clasificados". Enfócate en la esencia temática única y detallada que agrupa estos conceptos.
+                6.  **Formato**: Debe sonar como un título de tema o categoría principal, o una frase que resuma la idea principal.
+
+                Ejemplos de granularidad deseada:
+                - Input: "equidad de género, empoderamiento femenino, brecha salarial" -> Output: "Análisis de la Brecha Salarial y Estrategias de Empoderamiento Femenino en el Mercado Laboral"
+                - Input: "cambio climático, energías renovables, impacto ambiental" -> Output: "Innovaciones en Energías Renovables para Mitigar el Impacto del Cambio Climático Urbano"
+                - Input: "neurociencia, plasticidad cerebral, aprendizaje" -> Output: "Mecanismos Neuronales Subyacentes a la Plasticidad Cerebral y la Adquisición de Nuevas Habilidades"
+                - Input: "algoritmos de machine learning, redes neuronales, deep learning" -> Output: "Aplicaciones Avanzadas de Redes Neuronales Profundas en el Procesamiento de Lenguaje Natural"
+
+                Responde ÚNICAMENTE con la frase o título del concepto central altamente granular."""
                 
                 response = await self.llm.ainvoke(prompt)
                 central_concept_llm = response.content.strip()
-                if central_concept_llm and len(central_concept_llm.split()) <= 10:
-                    logger.debug(f"🧠 LLM identificó concepto central: {central_concept_llm}")
+                
+                if central_concept_llm:
+                    logger.debug(f"🧠 LLM identificó concepto central granular: {central_concept_llm}")
                     return central_concept_llm
+                else:
+                    logger.warning("⚠️ LLM devolvió un concepto central vacío.")
+                    return "Concepto Central No Identificado" # Fallback más informativo
             except Exception as e:
-                logger.warning(f"⚠️ Falló la identificación de concepto central por LLM, usando fallback: {e}")
+                logger.error(f"❌ Falló la identificación de concepto central por LLM: {e}")
+                raise
 
-        # Fallback a lógica basada en categorías y frecuencia de palabras
-        # 1. Priorizar categorías
-        category_freq = {}
-        for quote in cluster_quotes:
-            category = quote.get("category", "general")
-            category_freq[category] = category_freq.get(category, 0) + 1
-
-        sorted_categories = sorted(category_freq.items(), key=lambda x: x[1], reverse=True)
-
-        if sorted_categories:
-            most_common_category, _ = sorted_categories[0]
-            # Si la categoría más común no es "general" ni "desarrollo_conceptual", la usamos
-            if most_common_category != "general" and most_common_category != "desarrollo_conceptual":
-                return most_common_category.replace("_", " ").title()
-            
-            # Si la categoría más común es "general" o "desarrollo_conceptual", intentamos con la segunda si es más específica
-            if len(sorted_categories) > 1 and sorted_categories[1][0] != "general" and sorted_categories[1][0] != "desarrollo_conceptual":
-                 second_common_category, _ = sorted_categories[1]
-                 return second_common_category.replace("_", " ").title()
-
-        # 2. Fallback a palabras clave si no hay categorías claras o son muy diversas
-        #    Intentar construir un nombre más descriptivo a partir de los conceptos
-        word_freq = {}
-        for concept in concepts:
-            words = concept.lower().split()
-            for word in words:
-                if len(word) > 3 and word not in ["general", "central", "concepto", "desarrollo", "ideas", "tema"]: # Evitar más palabras genéricas
-                    word_freq[word] = word_freq.get(word, 0) + 1
-
-        if word_freq:
-            most_common_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:3]
-            central_words = [word for word, freq in most_common_words]
-            if central_words:
-                return "Perspectivas sobre " + " ".join(central_words).title()
-            
-        return "Conceptos Diversos No Clasificados"
+        raise ValueError("El LLM no está disponible o no se proporcionaron conceptos para identificar un concepto central.")
 
     async def _generate_profile_description(self, central_concept: str, categories: List[str], quotes_count: int, cluster_quotes: List[Dict[str, Any]]) -> str:
         """Genera descripción de un perfil de ideas, usando LLM si está disponible."""
 
         categories_str = ", ".join(categories) if categories else "conceptos generales"
         
-        if self.llm:
-            try:
-                # Usar LLM para una descripción más elaborada
-                quotes_texts = [q['text'] for q in cluster_quotes]
-                prompt = f"""El siguiente conjunto de {quotes_count} citas conceptuales se agrupa bajo el concepto central de '{central_concept}' y está relacionado con las categorías: {categories_str}.
-                Aquí están algunas de las citas clave:
-                {quotes_texts[:5]}
+        if not self.llm:
+            raise ValueError("El LLM no está disponible para generar la descripción del perfil.")
 
-                Genera una descripción concisa y clara (máximo 50 palabras) para este perfil de ideas, destacando su importancia y lo que unifica estas citas.
-                Responde ÚNICAMENTE con la descripción."""
-                
-                response = await self.llm.ainvoke(prompt)
-                profile_description_llm = response.content.strip()
-                if profile_description_llm:
-                    logger.debug(f"🧠 LLM generó descripción de perfil: {profile_description_llm}")
-                    return profile_description_llm
-            except Exception as e:
-                logger.warning(f"⚠️ Falló la generación de descripción de perfil por LLM, usando fallback: {e}")
+        try:
+            # Usar LLM para una descripción más elaborada
+            quotes_texts = [q['text'] for q in cluster_quotes]
+            prompt = f"""El siguiente conjunto de {quotes_count} citas conceptuales se agrupa bajo el concepto central de '{central_concept}' y está relacionado con las categorías: {categories_str}.
+            Aquí están algunas de las citas clave:
+            {quotes_texts[:5]}
 
-        # Fallback a descripción genérica
-        return (f"Perfil de ideas centrado en '{central_concept}' que agrupa {quotes_count} "
-                f"citas conceptuales relacionadas con {categories_str}. "
-                f"Representa un núcleo temático coherente de conocimiento.")
+            Genera una descripción detallada y completa (sin límite de palabras) para este perfil de ideas. La descripción debe:
+            1. Resaltar la importancia del concepto central.
+            2. Explicar qué unifica estas citas.
+            3. Mencionar brevemente las principales categorías involucradas.
+            4. Proporcionar un resumen coherente del conocimiento que este perfil representa.
+            Responde ÚNICAMENTE con la descripción."""
+            
+            response = await self.llm.ainvoke(prompt)
+            profile_description_llm = response.content.strip()
+            if profile_description_llm:
+                logger.debug(f"🧠 LLM generó descripción de perfil: {profile_description_llm}")
+                return profile_description_llm
+            else:
+                logger.error("❌ El LLM devolvió una descripción de perfil vacía.")
+                raise ValueError("El LLM no pudo generar una descripción de perfil válida.")
+        except Exception as e:
+            logger.error(f"❌ Falló la generación de descripción de perfil por LLM: {e}")
+            raise
 
     def _calculate_coherence_score(self, quotes: List[Dict[str, Any]]) -> float:
         """Calcula la puntuación de coherencia de un grupo de citas."""
