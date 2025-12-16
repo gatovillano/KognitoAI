@@ -22,6 +22,7 @@ class HybridGraphProcessor:
     
     def __init__(self):
         self.spacy_model = None
+        self.gliner_model = None  # NUEVO: Modelo GLiNER
         self.sentence_transformer = None
         self.initialized = False
         self._save_callback = None
@@ -35,10 +36,25 @@ class HybridGraphProcessor:
         logger.info("🚀 Inicializando modelos especializados...")
         
         try:
-            # Inicializar spaCy
-            await self._initialize_spacy()
+            from core.config import settings
             
-            # Inicializar SentenceTransformers
+            # Decidir qué modelos inicializar según configuración
+            if settings.use_hybrid_ner:
+                # Modo híbrido: ambos modelos
+                logger.info("⚙️ Modo híbrido NER activado: spaCy + GLiNER")
+                await self._initialize_spacy()
+                if settings.use_gliner:
+                    await self._initialize_gliner()
+            elif settings.use_gliner:
+                # Solo GLiNER
+                logger.info("⚙️ Modo GLiNER exclusivo activado")
+                await self._initialize_gliner()
+            else:
+                # Solo spaCy (fallback)
+                logger.info("⚙️ Modo spaCy exclusivo activado") 
+                await self._initialize_spacy()
+            
+            # Inicializar SentenceTransformers (siempre necesario)
             await self._initialize_sentence_transformers()
             
             self.initialized = True
@@ -82,6 +98,44 @@ class HybridGraphProcessor:
             except Exception as e2:
                 logger.error(f"❌ Error inicializando spaCy: {e2}")
                 raise
+    
+    async def _initialize_gliner(self):
+        """Inicializa el modelo GLiNER para NER mejorado con zero-shot."""
+        try:
+            from gliner import GLiNER
+            from core.config import settings
+            
+            # Mapeo de tamaños de modelo
+            model_map = {
+                "small": "urchade/gliner_small-v2.1",      # ~250MB, buena precisión
+                "base": "urchade/gliner_base",             # ~500MB, mejor precisión  
+                "large": "urchade/gliner_large-v2.1"       # ~1GB, máxima precisión
+            }
+            
+            model_size = settings.gliner_model_size.lower()
+            model_name = model_map.get(model_size, model_map["small"])
+            
+            logger.info(f"📥 Descargando modelo GLiNER: {model_name} (tamaño: {model_size})")
+            logger.info(f"⏳ Esto puede tomar un momento en la primera ejecución...")
+            
+            # Cargar modelo (se descarga automáticamente si no existe)
+            self.gliner_model = GLiNER.from_pretrained(model_name)
+            
+            logger.info(f"✅ GLiNER modelo cargado exitosamente: {model_name}")
+            logger.info(f"🎯 Características:")
+            logger.info(f"   - Zero-shot NER (sin reentrenamiento)")
+            logger.info(f"   - Tipos de entidades personalizables")
+            logger.info(f"   - Umbral de confianza: {settings.gliner_threshold}")
+            
+        except ImportError:
+            logger.error("❌ GLiNER no está instalado. Ejecuta: pip install gliner")
+            logger.warning("⚠️ Continuando sin GLiNER...")
+            self.gliner_model = None
+        except Exception as e:
+            logger.error(f"❌ Error inicializando GLiNER: {e}")
+            logger.warning("⚠️ Continuando sin GLiNER...")
+            self.gliner_model = None
+
     
     async def _initialize_sentence_transformers(self):
         """Inicializa el modelo de embeddings usando Ollama."""
@@ -143,11 +197,9 @@ class HybridGraphProcessor:
         if not texts:
             return np.array([])
         
-        # Generar embeddings de manera async
-        embeddings = []
-        for text in texts:
-            embedding = await self.sentence_transformer.aembed_query(text)
-            embeddings.append(embedding)
+        # Generar embeddings de manera async por lotes
+        # La API aembed_documents espera una lista de documentos (str), y devuelve una lista de listas de floats
+        embeddings = await self.sentence_transformer.aembed_documents(texts)
         
         return np.array(embeddings)
     
@@ -184,9 +236,13 @@ class HybridGraphProcessor:
         logger.info(f"   📦 Dataset: {dataset_name}")
         
         try:
-            # Fase 1: Extracción de entidades con spaCy
-            entities = await self._extract_entities_spacy(documents)
+            # Fase 1: Extracción de entidades (spaCy, GLiNER o híbrido)
+            entities = await self._extract_entities(documents)
             logger.info(f"✅ Fase 1 completada: {len(entities)} entidades extraídas")
+            
+            # Deduplicación inteligente basada en embeddings
+            entities = await self._deduplicate_entities(entities)
+            logger.info(f"✅ Deduplicación completada: {len(entities)} entidades únicas")
             
             # Fase 2: Análisis semántico con SentenceTransformers
             relationships = await self._extract_relationships_semantic(documents, entities)
@@ -272,9 +328,18 @@ class HybridGraphProcessor:
             raise
     
     async def _extract_entities_spacy(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Extrae entidades usando spaCy."""
+        """Extrae entidades usando spaCy con validaciones de calidad mejoradas."""
         entities = []
         entity_set = set()  # Para evitar duplicados
+        
+        # Lista de palabras genéricas a excluir
+        generic_words = {
+            'cosa', 'cosas', 'parte', 'partes', 'tipo', 'tipos', 'forma', 'formas',
+            'manera', 'maneras', 'ejemplo', 'ejemplos', 'caso', 'casos', 'vez', 'veces',
+            'tiempo', 'tiempos', 'momento', 'momentos', 'lugar', 'lugares', 'punto', 'puntos',
+            'área', 'áreas', 'aspecto', 'aspectos', 'elemento', 'elementos', 'factor', 'factores',
+            'thing', 'things', 'part', 'parts', 'type', 'types', 'way', 'ways', 'example', 'examples'
+        }
         
         for i, doc in enumerate(documents):
             content = doc.get('content', '')
@@ -286,18 +351,36 @@ class HybridGraphProcessor:
             # Procesar con spaCy
             spacy_doc = self.spacy_model(content[:10000])  # Limitar a 10k caracteres
             
-            # Extraer entidades nombradas
+            # Extraer entidades nombradas con validación mejorada
             for ent in spacy_doc.ents:
-                entity_key = f"{ent.text.lower()}_{ent.label_}"
-                if entity_key not in entity_set and len(ent.text.strip()) > 2:
+                entity_text = ent.text.strip()
+                entity_lower = entity_text.lower()
+                
+                # Validaciones de calidad
+                if (len(entity_text) < 3 or  # Longitud mínima 3 caracteres
+                    entity_lower in generic_words or  # No palabras genéricas
+                    not any(c.isalpha() for c in entity_text) or  # Debe contener letras
+                    entity_text.count(' ') > 5):  # Máximo 5 palabras
+                    continue
+                
+                # Filtrar entidades que son solo números o puntuación
+                if entity_text.replace(' ', '').replace('.', '').replace(',', '').isdigit():
+                    continue
+                
+                entity_key = f"{entity_lower}_{ent.label_}"
+                if entity_key not in entity_set:
                     entity_set.add(entity_key)
+                    
+                    # Calcular confianza basada en características de la entidad
+                    confidence = self._calculate_entity_confidence(ent)
+                    
                     entity_data = self._add_tenant_ids({
                         "id": f"entity_{len(entities)}",
-                        "name": ent.text.strip(),
+                        "name": entity_text,
                         "type": ent.label_,
-                        "description": f"{ent.label_}: {ent.text}",
+                        "description": f"{ent.label_}: {entity_text}",
                         "source_document": doc.get('title', f'doc_{i}'),
-                        "confidence": 0.9,  # spaCy es bastante confiable
+                        "confidence": confidence,
                         "extraction_method": "spacy_ner"
                     })
                     entities.append(entity_data)
@@ -306,6 +389,336 @@ class HybridGraphProcessor:
             await self._extract_semantic_concepts(spacy_doc, doc, i, entities, entity_set)
         
         return entities
+    
+    def _calculate_entity_confidence(self, entity) -> float:
+        """Calcula la confianza de una entidad basada en sus características."""
+        base_confidence = 0.9
+        
+        # Penalizar entidades muy cortas
+        if len(entity.text) < 4:
+            base_confidence -= 0.1
+        
+        # Bonificar entidades en mayúsculas (nombres propios)
+        if entity.text[0].isupper():
+            base_confidence += 0.05
+        
+        # Penalizar si contiene muchos números
+        num_digits = sum(c.isdigit() for c in entity.text)
+        if num_digits > len(entity.text) * 0.3:
+            base_confidence -= 0.1
+        
+        # Bonificar tipos importantes
+        important_types = ['PERSON', 'ORG', 'GPE', 'PRODUCT', 'EVENT', 'PER', 'LOC']
+        if entity.label_ in important_types:
+            base_confidence += 0.05
+        
+        return round(max(0.5, min(1.0, base_confidence)), 2)
+    
+    async def _extract_entities(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Dispatcher para extracción de entidades que decide qué modelo usar.
+        
+        Modos:
+        - spaCy solo: Rápido, bueno para entidades estándar
+        - GLiNER solo: Más preciso, tipos personalizados
+        - Híbrido: Combina ambos para mejor cobertura
+        """
+        from core.config import settings
+        
+        if settings.use_hybrid_ner and self.gliner_model and self.spacy_model:
+            # Modo híbrido: combinar spaCy (rápido) + GLiNER (preciso)
+            logger.info("🔄 Modo híbrido:spaCy + GLiNER activado")
+            
+            spacy_entities = await self._extract_entities_spacy(documents)
+            logger.info(f"   📊 spaCy extrajo: {len(spacy_entities)} entidades")
+            
+            gliner_entities = await self._extract_entities_gliner(documents)
+            logger.info(f"   📊 GLiNER extrajo: {len(gliner_entities)} entidades")
+            
+            # Combinar y marcar fuente
+            for ent in spacy_entities:
+                ent["extraction_method"] = f"{ent.get('extraction_method', 'spacy')}_hybrid"
+            for ent in gliner_entities:
+                ent["extraction_method"] = f"{ent.get('extraction_method', 'gliner')}_hybrid"
+            
+            combined = spacy_entities + gliner_entities
+            logger.info(f"   ✅ Total combinado: {len(combined)} entidades (antes de deduplicar)")
+            return combined
+            
+        elif self.gliner_model:
+            # Solo GLiNER
+            logger.info("🎯 Modo GLiNER exclusivo activado")
+            return await self._extract_entities_gliner(documents)
+            
+        else:
+            # Solo spaCy (fallback)
+            logger.info("⚡ Modo spaCy exclusivo activado")
+            return await self._extract_entities_spacy(documents)
+    
+    async def _extract_entities_gliner(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Extrae entidades usando GLiNER con tipos personalizados."""
+        from core.config import settings
+        
+        entities = []
+        entity_set = set()
+        
+        # Definir tipos de entidades (personalizables según tu dominio)
+        entity_labels = [
+            # Entidades básicas (compatibles con spaCy)
+            "person", "organization", "location", "product", "event", "date", "money",
+            
+            # Conceptos académicos/técnicos (NUEVO - poder de GLiNER)
+            "theory", "methodology", "concept", "technology", "research_area",
+            "institution", "publication", "dataset", "algorithm", "framework",
+            "scientific_term", "model", "technique", "approach", "system"
+        ]
+        
+        logger.info(f"🎯 GLiNER extraerá {len(entity_labels)} tipos de entidades")
+        
+        for i, doc in enumerate(documents):
+            content = doc.get('content', '')
+            if not content:
+                continue
+            
+            logger.debug(f"🔍 Procesando documento {i+1} con GLiNER...")
+            
+            # GLiNER funciona mejor con chunks de ~2000-5000 caracteres
+            max_length = 3000
+            chunks = []
+            for start in range(0, len(content), max_length - 500):  # Overlap de 500
+                chunk = content[start:start + max_length]
+                if chunk.strip():
+                    chunks.append(chunk)
+            
+            # Procesar máximo 10 chunks por documento (para no saturar)
+            for chunk_idx, chunk in enumerate(chunks[:10]):
+                try:
+                    # Predecir entidades con GLiNER
+                    predicted_entities = self.gliner_model.predict_entities(
+                        chunk,
+                        entity_labels,
+                        threshold=settings.gliner_threshold
+                    )
+                    
+                    for ent in predicted_entities:
+                        entity_text = ent['text'].strip()
+                        entity_lower = entity_text.lower()
+                        entity_label = ent['label']
+                        entity_score = ent['score']
+                        
+                        # Validaciones de calidad (similares a spaCy)
+                        if (len(entity_text) < 3 or
+                            not any(c.isalpha() for c in entity_text) or
+                            entity_text.count(' ') > 6):
+                            continue
+                        
+                        entity_key = f"{entity_lower}_{entity_label}"
+                        if entity_key not in entity_set:
+                            entity_set.add(entity_key)
+                            
+                            # Mapear labels de GLiNER a tipos compatibles
+                            entity_type = self._map_gliner_label_to_type(entity_label)
+                            
+                            entity_data = self._add_tenant_ids({
+                                "id": f"entity_gliner_{len(entities)}",
+                                "name": entity_text,
+                                "type": entity_type,
+                                "description": f"{entity_label}: {entity_text}",
+                                "source_document": doc.get('title', f'doc_{i}'),
+                                "confidence": round(entity_score, 2),
+                                "extraction_method": "gliner_zero_shot",
+                                "gliner_label": entity_label  # Guardar label original
+                            })
+                            entities.append(entity_data)
+                            
+                except Exception as e:
+                    logger.warning(f"⚠️ Error procesando chunk {chunk_idx} del doc {i}: {e}")
+                    continue
+        
+        logger.info(f"✅ GLiNER extrajo {len(entities)} entidades")
+        return entities
+    
+    def _map_gliner_label_to_type(self, gliner_label: str) -> str:
+        """Mapea labels de GLiNER a tipos compatibles con el sistema."""
+        label_map = {
+            # Básicas
+            "person": "PERSON",
+            "organization": "ORG",
+            "location": "LOC",
+            "product": "PRODUCT",
+            "event": "EVENT",
+            "date": "DATE",
+            "money": "MONEY",
+            
+            # Conceptos (convertir a nuestro sistema de tipos)
+            "theory": "CONCEPT_TECHNICAL",
+            "methodology": "CONCEPT_TECHNICAL",
+            "concept": "CONCEPT_PHRASE",
+            "technology": "CONCEPT_TECHNICAL",
+            "research_area": "CONCEPT_PHRASE",
+            "institution": "ORG",
+            "publication": "PRODUCT",
+            "dataset": "PRODUCT",
+            "algorithm": "CONCEPT_TECHNICAL",
+            "framework": "CONCEPT_TECHNICAL",
+            "scientific_term": "CONCEPT_TECHNICAL",
+            "model": "CONCEPT_TECHNICAL",
+            "technique": "CONCEPT_TECHNICAL",
+            "approach": "CONCEPT_PHRASE",
+            "system": "CONCEPT_TECHNICAL"
+        }
+        
+        return label_map.get(gliner_label.lower(), gliner_label.upper())
+
+    
+    async def _deduplicate_entities(self, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Detecta y fusiona entidades duplicadas o muy similares usando embeddings.
+        
+        Args:
+            entities: Lista de entidades extraídas
+            
+        Returns:
+            Lista de entidades deduplicadas
+        """
+        if len(entities) < 2:
+            return entities
+        
+        logger.info(f"🔄 Iniciando deduplicación de {len(entities)} entidades...")
+        
+        # Crear textos para embeddings (nombre + descripción)
+        entity_texts = [
+            f"{e.get('name', '')} {e.get('description', '')}"
+            for e in entities
+        ]
+        
+        # Generar embeddings
+        embeddings = await self._get_embeddings(entity_texts)
+        
+        # Calcular matriz de similitud
+        from sklearn.metrics.pairwise import cosine_similarity
+        similarities = cosine_similarity(embeddings)
+        
+        # Encontrar y fusionar duplicados
+        threshold = 0.92  # Muy similar (>92%)
+        processed = set()
+        deduplicated_entities = []
+        duplicates_found = 0
+        
+        for i, entity in enumerate(entities):
+            if i in processed:
+                continue
+            
+            # Encontrar todas las entidades muy similares a esta
+            similar_indices = []
+            for j in range(i + 1, len(entities)):
+                if j not in processed and similarities[i][j] > threshold:
+                    # Verificar también que sean del mismo tipo o tipos compatibles
+                    type_i = entity.get("type", "")
+                    type_j = entities[j].get("type", "")
+                    
+                    if self._are_compatible_types(type_i, type_j):
+                        similar_indices.append(j)
+                        processed.add(j)
+            
+            if similar_indices:
+                # Fusionar esta entidad con sus duplicados
+                to_merge = [entity] + [entities[idx] for idx in similar_indices]
+                merged = self._merge_entities(to_merge)
+                deduplicated_entities.append(merged)
+                duplicates_found += len(similar_indices)
+            else:
+                # Entidad única, mantener tal cual
+                deduplicated_entities.append(entity)
+            
+            processed.add(i)
+        
+        logger.info(f"✅ Deduplicación completada:")
+        logger.info(f"   📊 Entidades originales: {len(entities)}")
+        logger.info(f"   📊 Duplicados fusionados: {duplicates_found}")
+        logger.info(f"   📊 Entidades únicas: {len(deduplicated_entities)}")
+        
+        return deduplicated_entities
+    
+    def _are_compatible_types(self, type1: str, type2: str) -> bool:
+        """Verifica si dos tipos de entidades son compatibles para fusión."""
+        # Tipos exactamente iguales
+        if type1 == type2:
+            return True
+        
+        # Grupos de tipos compatibles
+        compatible_groups = [
+            {"PERSON", "PER"},  # Personas
+            {"ORG", "ORGANIZATION"},  # Organizaciones
+            {"LOC", "GPE", "LOCATION"},  # Lugares
+            {"CONCEPT_PHRASE", "CONCEPT_COMPOUND", "CONCEPT_TECHNICAL"},  # Conceptos
+        ]
+        
+        for group in compatible_groups:
+            if type1 in group and type2 in group:
+                return True
+        
+        return False
+    
+    def _merge_entities(self, entities: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Fusiona múltiples entidades duplicadas en una sola enriquecida.
+        
+        Args:
+            entities: Lista de entidades a fusionar
+            
+        Returns:
+            Entidad fusionada con metadatos consolidados
+        """
+        if not entities:
+            return {}
+        
+        # Tomar el nombre más largo/descriptivo
+        best_name = max([e.get("name", "") for e in entities], key=len)
+        
+        # Tomar la descripción más informativa
+        descriptions = [e.get("description", "") for e in entities if e.get("description")]
+        best_description = max(descriptions, key=len) if descriptions else ""
+        
+        # Tomar el tipo más específico (priorizar tipos no-CONCEPT)
+        types = [e.get("type", "") for e in entities]
+        non_concept_types = [t for t in types if "CONCEPT" not in t]
+        primary_type = non_concept_types[0] if non_concept_types else types[0]
+        
+        # Calcular confianza promedio ponderada
+        confidences = [e.get("confidence", 0.5) for e in entities]
+        avg_confidence = sum(confidences) / len(confidences)
+        
+        # Consolidar documentos fuente
+        source_docs = list(set(e.get("source_document", "") for e in entities if e.get("source_document")))
+        
+        # Consolidar métodos de extracción
+        methods = list(set(e.get("extraction_method", "") for e in entities if e.get("extraction_method")))
+        
+        # Crear entidad fusionada
+        merged_entity = {
+            "id": entities[0]["id"],  # Mantener el primer ID
+            "name": best_name,
+            "description": best_description,
+            "type": primary_type,
+            "confidence": round(min(0.99, avg_confidence + 0.05), 2),  # Bonus por fusión
+            "source_document": source_docs[0] if source_docs else "",
+            "extraction_method": "+".join(methods[:2]),  # Máximo 2 métodos
+            "merged_from": len(entities),
+            "merged_variants": [e.get("name", "") for e in entities if e.get("name") != best_name][:3]  # Hasta 3 variantes
+        }
+        
+        # Preservar metadatos adicionales del mejor candidato
+        for key in ["frequency", "dependency", "centrality_score"]:
+            values = [e.get(key) for e in entities if key in e]
+            if values:
+                if key == "frequency":
+                    merged_entity[key] = sum(values)  # Sumar frecuencias
+                else:
+                    merged_entity[key] = max(values)  # Tomar el mejor valor
+        
+        return merged_entity
+
     
     async def _extract_relationships_semantic(self, documents: List[Dict[str, Any]], entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Extrae relaciones semánticas más inteligentes entre conceptos."""
@@ -372,10 +785,10 @@ class HybridGraphProcessor:
 
             # OPTIMIZACIÓN: En lugar de iterar sobre TODAS las combinaciones,
             # solo tomamos las top-k más similares para cada concepto
-            threshold = 0.7
-            max_relations_per_concept = 5  # Limitar a las 5 relaciones más fuertes por concepto
+            threshold = 0.75  # AUMENTADO de 0.7 para mayor precisión
+            max_relations_per_concept = 3  # REDUCIDO de 5 a 3 para mayor selectividad
             
-            logger.info(f"⚡ Optimizando: buscando top-{max_relations_per_concept} relaciones por concepto")
+            logger.info(f"⚡ Optimizando: buscando top-{max_relations_per_concept} relaciones por concepto (umbral: {threshold})")
             
             for i, concept in enumerate(concepts):
                 # Obtener los índices de las entidades más similares para este concepto
@@ -427,10 +840,10 @@ class HybridGraphProcessor:
         similarities = cosine_similarity(embeddings)
 
         # OPTIMIZACIÓN: Limitar el número de relaciones por concepto
-        threshold = 0.75
-        max_relations_per_concept = 3  # Solo las 3 relaciones más fuertes
+        threshold = 0.80  # AUMENTADO de 0.75 para mayor precisión
+        max_relations_per_concept = 2  # REDUCIDO de 3 a 2 para mayor selectividad
         
-        logger.info(f"⚡ Optimizando: buscando top-{max_relations_per_concept} conceptos similares por concepto")
+        logger.info(f"⚡ Optimizando: buscando top-{max_relations_per_concept} conceptos similares por concepto (umbral: {threshold})")
         
         for i in range(len(all_concepts)):
             # Obtener los índices de los conceptos más similares (excluyendo el mismo)
@@ -484,8 +897,8 @@ class HybridGraphProcessor:
                 from sklearn.metrics.pairwise import cosine_similarity
                 similarities = cosine_similarity(source_embeddings, target_embeddings)
 
-                # Umbral más bajo para relaciones jerárquicas
-                threshold = 0.6
+                # Umbral más alto para relaciones jerárquicas de calidad
+                threshold = 0.70  # AUMENTADO de 0.6 para mayor precisión
                 for i, source_concept in enumerate(source_concepts):
                     for j, target_concept in enumerate(target_concepts):
                         similarity = similarities[i][j]
@@ -743,47 +1156,77 @@ class HybridGraphProcessor:
         Extrae conceptos semánticos más ricos que simples palabras.
 
         Incluye:
-        1. Frases nominales (noun phrases)
-        2. Conceptos compuestos
-        3. Términos técnicos
-        4. Expresiones clave
+        1. Frases nominales (noun phrases) - MEJORADO
+        2. Conceptos compuestos - MEJORADO
+        3. Términos técnicos - MEJORADO
+        4. Expresiones clave - MEJORADO
         """
+        
+        # Palabras vacías adicionales para conceptos
+        stop_words_extended = {
+            'cosa', 'cosas', 'parte', 'manera', 'forma', 'tipo', 'ejemplo', 'caso',
+            'thing', 'things', 'part', 'way', 'type', 'example', 'case',
+            'este', 'esta', 'esto', 'ese', 'esa', 'eso', 'aquel', 'aquella', 'aquello'
+        }
 
-        # 1. Extraer frases nominales (noun phrases)
+        # 1. Extraer frases nominales (noun phrases) - CON VALIDACIÓN MEJORADA
         for chunk in spacy_doc.noun_chunks:
-            # Filtrar frases nominales relevantes
-            if (len(chunk.text) > 5 and
-                len(chunk.text) < 100 and
-                not chunk.root.is_stop and
-                chunk.root.pos_ in ["NOUN", "PROPN"]):
+            chunk_text = chunk.text.strip()
+            chunk_lower = chunk_text.lower()
+            
+            # Validaciones más estrictas
+            if (len(chunk_text) < 8 or  # Mínimo 8 caracteres para frases
+                len(chunk_text) > 100 or  # Máximo 100
+                chunk.root.is_stop or  # Raíz no debe ser stop word
+                chunk.root.pos_ not in ["NOUN", "PROPN"] or  # Solo sustantivos
+                chunk_lower in stop_words_extended or  # No palabras vacías
+                chunk_text.count(' ') > 5):  # Máximo 5 palabras
+                continue
+            
+            # Validar que tenga contenido semántico real
+            words = chunk_text.split()
+            content_words = [w for w in words if len(w) > 2 and w.lower() not in stop_words_extended]
+            if len(content_words) < 2:  # Debe tener al menos 2 palabras con contenido
+                continue
 
-                concept_key = f"{chunk.text.lower()}_noun_phrase"
-                if concept_key not in entity_set:
-                    entity_set.add(concept_key)
-                    entities.append(self._add_tenant_ids({
-                        "id": f"concept_np_{len(entities)}",
-                        "name": chunk.text.strip(),
-                        "type": "CONCEPT_PHRASE",
-                        "description": f"Frase nominal: {chunk.text}",
-                        "source_document": doc.get('title', f'doc_{doc_index}'),
-                        "confidence": 0.8,
-                        "extraction_method": "spacy_noun_phrases"
-                    }))
+            concept_key = f"{chunk_lower}_noun_phrase"
+            if concept_key not in entity_set:
+                entity_set.add(concept_key)
+                
+                # Calcular confianza basada en complejidad
+                confidence = 0.75 + (min(len(content_words), 3) * 0.05)
+                
+                entities.append(self._add_tenant_ids({
+                    "id": f"concept_np_{len(entities)}",
+                    "name": chunk_text,
+                    "type": "CONCEPT_PHRASE",
+                    "description": f"Frase nominal: {chunk_text}",
+                    "source_document": doc.get('title', f'doc_{doc_index}'),
+                    "confidence": round(confidence, 2),
+                    "extraction_method": "spacy_noun_phrases"
+                }))
 
-        # 2. Extraer conceptos compuestos (adjetivo + sustantivo)
+        # 2. Extraer conceptos compuestos (adjetivo + sustantivo) - MEJORADO
         for i, token in enumerate(spacy_doc[:-1]):
             next_token = spacy_doc[i + 1]
 
             # Buscar patrones: adjetivo + sustantivo
             if (token.pos_ == "ADJ" and
                 next_token.pos_ in ["NOUN", "PROPN"] and
-                not token.is_stop and not next_token.is_stop):
+                not token.is_stop and not next_token.is_stop and
+                len(token.text) > 3 and len(next_token.text) > 3):  # Palabras más largas
 
                 compound_concept = f"{token.text} {next_token.text}"
-                concept_key = f"{compound_concept.lower()}_compound"
+                compound_lower = compound_concept.lower()
+                
+                # Validar que no sea genérico
+                if compound_lower in stop_words_extended:
+                    continue
+                
+                concept_key = f"{compound_lower}_compound"
 
                 if (concept_key not in entity_set and
-                    len(compound_concept) > 5 and
+                    len(compound_concept) > 8 and  # Mínimo 8 caracteres
                     len(compound_concept) < 50):
 
                     entity_set.add(concept_key)
@@ -793,62 +1236,81 @@ class HybridGraphProcessor:
                         "type": "CONCEPT_COMPOUND",
                         "description": f"Concepto compuesto: {compound_concept}",
                         "source_document": doc.get('title', f'doc_{doc_index}'),
-                        "confidence": 0.75,
+                        "confidence": 0.8,  # Mayor confianza para compuestos validados
                         "extraction_method": "spacy_compounds"
                     }))
 
-        # 3. Extraer términos técnicos (sustantivos con alta frecuencia)
+        # 3. Extraer términos técnicos (sustantivos con alta frecuencia) - UMBRAL MÁS ALTO
         noun_freq = {}
         for token in spacy_doc:
             if (token.pos_ in ["NOUN", "PROPN"] and
-                len(token.lemma_) > 3 and
+                len(token.lemma_) > 4 and  # Mínimo 5 caracteres
                 not token.is_stop and
-                token.is_alpha):
+                token.is_alpha and
+                token.lemma_.lower() not in stop_words_extended):
 
                 lemma = token.lemma_.lower()
                 noun_freq[lemma] = noun_freq.get(lemma, 0) + 1
 
-        # Agregar sustantivos frecuentes como conceptos técnicos
+        # Agregar solo sustantivos con frecuencia significativa
         for lemma, freq in noun_freq.items():
-            if freq >= 2:  # Aparece al menos 2 veces
+            if freq >= 3:  # Aumentar umbral a 3 apariciones
                 concept_key = f"{lemma}_technical"
                 if concept_key not in entity_set:
                     entity_set.add(concept_key)
+                    
+                    # Confianza más alta para términos muy frecuentes
+                    confidence = min(0.95, 0.7 + (freq * 0.08))
+                    
                     entities.append(self._add_tenant_ids({
                         "id": f"concept_tech_{len(entities)}",
                         "name": lemma.title(),
                         "type": "CONCEPT_TECHNICAL",
                         "description": f"Término técnico (freq: {freq}): {lemma}",
                         "source_document": doc.get('title', f'doc_{doc_index}'),
-                        "confidence": min(0.9, 0.6 + (freq * 0.1)),  # Confianza basada en frecuencia
-                        "extraction_method": "spacy_technical_terms"
+                        "confidence": round(confidence, 2),
+                        "extraction_method": "spacy_technical_terms",
+                        "frequency": freq  # Agregar metadato de frecuencia
                     }))
 
-        # 4. Extraer expresiones clave usando dependencias sintácticas
+        # 4. Extraer expresiones clave usando dependencias sintácticas - MEJORADO
         for token in spacy_doc:
             # Buscar patrones de dependencia interesantes
-            if token.dep_ in ["nsubj", "dobj", "pobj"] and token.head.pos_ == "VERB":
-                # Sujeto/objeto de verbo importante
-                if (len(token.text) > 3 and
-                    not token.is_stop and
-                    token.pos_ in ["NOUN", "PROPN"]):
+            if (token.dep_ in ["nsubj", "dobj", "pobj"] and 
+                token.head.pos_ == "VERB" and
+                len(token.text) > 4 and  # Palabras más largas
+                len(token.head.text) > 3 and  # Verbo significativo
+                not token.is_stop and
+                not token.head.is_stop and
+                token.pos_ in ["NOUN", "PROPN"]):
 
-                    expression = f"{token.text} {token.head.text}"
-                    concept_key = f"{expression.lower()}_expression"
+                expression = f"{token.text} {token.head.text}"
+                expression_lower = expression.lower()
+                
+                # Validar que no sea construcción genérica
+                if any(sw in expression_lower for sw in stop_words_extended):
+                    continue
+                
+                concept_key = f"{expression_lower}_expression"
 
-                    if (concept_key not in entity_set and
-                        len(expression) > 5 and
-                        len(expression) < 60):
+                if (concept_key not in entity_set and
+                    len(expression) > 10 and  # Mínimo 10 caracteres
+                    len(expression) < 60):
 
-                        entity_set.add(concept_key)
-                        entities.append(self._add_tenant_ids({
-                            "id": f"concept_expr_{len(entities)}",
-                            "name": expression.strip(),
-                            "type": "CONCEPT_EXPRESSION",
-                            "description": f"Expresión clave: {expression} (relación: {token.dep_})",
-                            "source_document": doc.get('title', f'doc_{doc_index}'),
-                            "confidence": 0.7,
-                            "extraction_method": "spacy_expressions"
-                        }))
+                    entity_set.add(concept_key)
+                    
+                    # Confianza basada en el tipo de dependencia
+                    confidence = 0.75 if token.dep_ == "nsubj" else 0.7
+                    
+                    entities.append(self._add_tenant_ids({
+                        "id": f"concept_expr_{len(entities)}",
+                        "name": expression.strip(),
+                        "type": "CONCEPT_EXPRESSION",
+                        "description": f"Expresión clave: {expression} (relación: {token.dep_})",
+                        "source_document": doc.get('title', f'doc_{doc_index}'),
+                        "confidence": confidence,
+                        "extraction_method": "spacy_expressions",
+                        "dependency": token.dep_  # Agregar metadato de dependencia
+                    }))
 
         logger.debug(f"✅ Conceptos semánticos extraídos del documento {doc_index + 1}")

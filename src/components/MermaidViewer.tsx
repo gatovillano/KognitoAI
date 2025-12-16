@@ -26,8 +26,12 @@ const MermaidViewer: React.FC<MermaidViewerProps> = ({ mermaidCode, trigger }) =
     if (mermaidContainerRef.current && mermaidCode && isOpen) {
       mermaidContainerRef.current.innerHTML = ''; // Limpiar contenido previo
       try {
-        const { svg } = await mermaid.render('mermaid-diagram', mermaidCode);
-        mermaidContainerRef.current.innerHTML = svg;
+        // Temporarily set test content to debug
+        mermaidContainerRef.current.innerHTML = '<div style="color: white; font-size: 20px; background: blue; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">Test content</div>';
+        // const { svg } = await mermaid.render('mermaid-diagram', mermaidCode);
+        // // Modificar el SVG para que ocupe todo el contenedor
+        // const modifiedSvg = svg.replace('<svg', '<svg style="width: 100%; height: 100%; display: block;"');
+        // mermaidContainerRef.current.innerHTML = modifiedSvg;
       } catch (error) {
         console.error('Error rendering mermaid diagram:', error);
         mermaidContainerRef.current.innerHTML = `
@@ -95,13 +99,12 @@ const MermaidViewer: React.FC<MermaidViewerProps> = ({ mermaidCode, trigger }) =
         >
           <div
             ref={mermaidContainerRef}
-            className="absolute top-0 left-0 flex items-center justify-center"
+            className="absolute inset-0"
             style={{
               transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
               transformOrigin: '0 0',
               cursor: isDragging ? 'grabbing' : 'grab',
-              width: '100%',
-              height: '100%',
+              background: 'red', // Debug: para verificar si el contenedor es visible
             }}
           >
             {/* El diagrama Mermaid se renderizará aquí */}

@@ -681,7 +681,7 @@ class GraphIntegration:
                 "type": "CONCEPTUAL_QUOTE",
                 "dataset_name": dataset_name,
                 "properties": {
-                    "name": quote.get("concept", "Unknown"),
+                    "name": quote["text"],
                     "cognee_id": quote["id"],
                     "description": quote["text"][:500] + "..." if len(quote["text"]) > 500 else quote["text"],
                     "full_text": quote["text"],
@@ -951,6 +951,12 @@ class GraphIntegration:
             return [self._neo4j_value_to_python(item) for item in value]
         if isinstance(value, dict):
             return {k: self._neo4j_value_to_python(v) for k, v in value.items()}
+        # Detectar objetos Node de Neo4j (duck typing)
+        if hasattr(value, 'labels') and hasattr(value, 'element_id'):
+            return self._node_to_dict(value)
+        # Detectar objetos Relationship de Neo4j (duck typing)
+        if hasattr(value, 'type') and hasattr(value, 'element_id') and hasattr(value, 'start_node'):
+            return self._relationship_to_dict(value)
         return value
 
     def _neo4j_record_to_dict(self, record: Any) -> Dict[str, Any]:
@@ -1014,7 +1020,8 @@ class GraphIntegration:
                 2. Identifica nodos de interés basados en la query.
                 3. Expande relaciones hasta max_hops.
                 4. Limita resultados a max_nodes.
-                5. Devuelve SOLO la consulta Cypher.
+                5. Para nodos de tipo CONCEPTUAL_QUOTE, asegúrate de devolver también n.concept y n.category.
+                6. Devuelve SOLO la consulta Cypher.
 
                 Pregunta: "{focus_query}"
                 Max Hops: {max_hops}
@@ -1036,7 +1043,7 @@ class GraphIntegration:
                 WHERE n.dataset_name = $dataset_name
                 OPTIONAL MATCH (n)-[r]-(m)
                 WHERE m.dataset_name = $dataset_name
-                RETURN DISTINCT n, r, m
+                RETURN DISTINCT n, r, m, n.concept AS concept, n.category AS category
                 LIMIT {max_nodes}
                 """
                 params = {"dataset_name": dataset_name}

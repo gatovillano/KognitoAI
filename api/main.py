@@ -277,7 +277,9 @@ app.include_router(collections_router, prefix="/api", tags=["collections"])
 app.include_router(universal_search_router, prefix="/api", tags=["universal-search"])
 
 from api.tools import router as tools_router
+from api.deep_research import router as deep_research_router
 app.include_router(tools_router, prefix="/api/tools", tags=["tools"])
+app.include_router(deep_research_router, prefix="/api", tags=["deep-research"])
 
 class AdminMetricsResponse(BaseModel):
     total_users: int

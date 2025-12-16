@@ -101,17 +101,23 @@ class PromptManager:
         ]
 
         if relevant_memories and "No se encontraron memorias relevantes" not in relevant_memories:
-            user_context_parts.append("\n--- Memorias y Documentos Relevantes (Base de Conocimiento) ---")
-            if has_explicit_rag_context:
-                doc_names_str = ", ".join(explicit_document_names) if explicit_document_names else "documentos específicos"
-                user_context_parts.append(f"**Instrucción de Contexto RAG:** Se te han proporcionado los siguientes {doc_names_str}. Prioriza la información de estos documentos para responder a la consulta del usuario. Si la información en estos documentos no es suficiente, puedes complementar con otras fuentes de conocimiento disponibles.")
-            else:
-                user_context_parts.append("**Instrucción de Contexto RAG:** Has recibido 'Memorias y Documentos Relevantes' que pueden ser cruciales para la solicitud del usuario. Asegúrate de integrar y comparar la información de TODAS las fuentes proporcionadas en esta sección para dar una respuesta completa y precisa, si es pertinente a la consulta.")
-            user_context_parts.append(escaped_relevant_memories) # Use the escaped version here
+            doc_names_str = ", ".join(explicit_document_names) if explicit_document_names else "documentos específicos"
+            rag_instruction = (
+                f"**Instrucción de Contexto RAG:** Se te han proporcionado los siguientes {doc_names_str}. "
+                "Prioriza la información de estos documentos para responder a la consulta del usuario. "
+                "Si la información en estos documentos no es suficiente, puedes complementar con otras fuentes de conocimiento disponibles."
+                if has_explicit_rag_context
+                else "**Instrucción de Contexto RAG:** Has recibido 'Memorias y Documentos Relevantes' que pueden ser cruciales para la solicitud del usuario. "
+                "Asegúrate de integrar y comparar la información de TODAS las fuentes proporcionadas en esta sección para dar una respuesta completa y precisa, si es pertinente a la consulta."
+            )
+            user_context_parts.extend([
+                "\n--- Memorias y Documentos Relevantes (Base de Conocimiento) ---",
+                rag_instruction,
+                escaped_relevant_memories
+            ])
         user_context_parts.append("---------------------------------------------------------")
         user_context_string = "\n".join(user_context_parts)
 
-        # 2. Construir el contenido del prompt del sistema
         # 2. Construir el contenido del prompt del sistema
         system_prompt_content = self.base_system_prompt
 
@@ -134,7 +140,7 @@ class PromptManager:
             system_prompt_content = system_prompt_content.format(
                 query=user_message,
                 web_summary="",
-                relevant_memories=escaped_relevant_memories, # Use the escaped version here
+                relevant_memories=escaped_relevant_memories,
             )
         except KeyError as e:
             logger.warning(f"No se pudo pre-formatear el prompt, puede contener placeholders desconocidos: {e}")
@@ -153,51 +159,36 @@ class PromptManager:
 - Para CUALQUIER herramienta que requiera el argumento `telegram_id`, DEBES usar este valor exacto: <b>{telegram_id}</b>.
 """
 
-        # Instrucciones específicas sobre herramientas disponibles
+        # Instrucciones específicas sobre herramientas disponibles (más concisas)
         tools_capabilities = """
-<b>🌐 CAPACIDADES DE ACCESO A INTERNET Y HERRAMIENTAS DISPONIBLES:</b>
+<b>🌐 CAPACIDADES Y HERRAMIENTAS:</b>
 
-**IMPORTANTE: Tienes acceso COMPLETO a internet y a herramientas de búsqueda web.**
+**Acceso a Internet:** Tienes acceso completo a internet. Usa `web_search` para información actual.
+**Regla Crítica:** Si el usuario pide buscar, **DEBES usar `web_search`**. Nunca digas que no puedes buscar.
 
-Herramientas de búsqueda disponibles:
-- `web_search`: Busca información actualizada en internet usando Brave Search. Úsala cuando necesites información actual, noticias, datos recientes o cualquier información que no esté en tu conocimiento base.
-- `web_scraper_tool`: Extrae contenido completo de URLs específicas.
-- `comprehensive_web_analyzer`: Realiza análisis web profundo con múltiples búsquedas.
-
-**REGLA CRÍTICA:** Cuando el usuario te pida buscar información en internet, investigar algo actual, o cualquier tarea que requiera datos actualizados:
-1. **DEBES usar la herramienta `web_search`** inmediatamente
-2. **NO digas que no tienes acceso a internet** - ¡SÍ LO TIENES!
-3. **NO te disculpes por no poder buscar** - ¡SÍ PUEDES!
-4. Simplemente ejecuta la búsqueda con los parámetros correctos
-
-Ejemplo correcto de uso:
-- Usuario: "Busca información sobre inteligencia artificial"
-- Tú: [Llamas a web_search con query="inteligencia artificial"]
-
-Ejemplo INCORRECTO:
-- Usuario: "Busca información sobre inteligencia artificial"  
-- Tú: "Lo siento, no tengo acceso a internet..." ❌ ¡NUNCA HAGAS ESTO!
-
-Otras herramientas disponibles: gestión de notas, agenda, análisis de documentos, generación de imágenes, y más.
+Herramientas clave:
+- `web_search(query: str)`: Búsqueda web con Brave Search.
+- `web_scraper_tool(url: str)`: Extrae contenido de URLs.
+- `comprehensive_web_analyzer(query: str)`: Análisis web profundo.
+- Otras: gestión de notas, agenda, documentos, imágenes, etc.
 """
 
-        # 5. Ensamblar el prompt final
         final_prompt_parts = [
             user_context_string,
             summary_string,
             "<hr>",
             id_instructions,
             "<hr>",
-            tools_capabilities,  # Nueva sección sobre herramientas
+            tools_capabilities,
             "<hr>",
-            "<b>Instrucción crítica:</b> Si necesitas usar herramientas, hazlo de una en una. Nunca intentes usar más de una herramienta en una sola respuesta. Espera la siguiente interacción antes de usar otra herramienta.",
+            "<b>Instrucción crítica:</b> Usa herramientas de una en una. No intentes usar más de una herramienta por respuesta. Espera la siguiente interacción.",
             "<hr>",
             system_prompt_content,
             "<hr>",
-            CITATION_SYSTEM_PROMPT, # Añadir las instrucciones de citación
+            CITATION_SYSTEM_PROMPT,
         ]
         final_prompt = "\n".join(final_prompt_parts)
-        logger.debug(f"DEBUG (PromptManager): Prompt final del sistema enviado al LLM:\n{final_prompt}") # Log para depuración
+        logger.debug(f"DEBUG (PromptManager): Prompt final del sistema enviado al LLM:\n{final_prompt}")
         return final_prompt
 
 

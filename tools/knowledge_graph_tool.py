@@ -80,28 +80,18 @@ class KnowledgeGraphTool(BaseTool):
     workspace_id: Optional[str] = None
     telegram_id: Optional[int] = None
     thread_id: Optional[str] = None
-    _graph_integration: Optional[GraphIntegration] = None
-    _graph_db: Optional[GraphDB] = None
+    _graph_integration: GraphIntegration
+    _graph_db: GraphDB
 
-    def __init__(self, graph_integration: Optional[GraphIntegration] = None, graph_db: Optional[GraphDB] = None, **data: Any):
+    def __init__(self, graph_integration: GraphIntegration, graph_db: GraphDB, **data: Any):
         super().__init__(**data)
+        if not graph_integration or not graph_db:
+            raise ValueError("GraphIntegration y GraphDB deben ser inyectados en KnowledgeGraphTool.")
         self._graph_integration = graph_integration
         self._graph_db = graph_db
-        
-        if self._graph_integration is None or self._graph_db is None:
-            logger.warning("⚠️ GraphIntegration o GraphDB no inyectados en KnowledgeGraphTool. Inicializando internamente.")
-            if not settings.neo4j_uri or not settings.neo4j_user or not settings.neo4j_password:
-                logger.error("❌ Configuración de Neo4j incompleta.")
-                raise ValueError("Configuración de Neo4j incompleta.")
-            
-            self._graph_db = GraphDB(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
-            self._graph_db.connect()
-            self._graph_integration = GraphIntegration(self._graph_db)
-            logger.info("✅ GraphIntegration y GraphDB inicializados internamente.")
+        logger.info("✅ KnowledgeGraphTool inicializada con dependencias inyectadas.")
 
     def _get_graph_integration(self) -> GraphIntegration:
-        if self._graph_integration is None:
-            raise ValueError("GraphIntegration no está inicializada.")
         return self._graph_integration
     
     async def _arun(

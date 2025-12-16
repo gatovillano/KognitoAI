@@ -214,6 +214,9 @@ class AgentState(TypedDict):
     thread_id: Optional[str]
     # Tracking de errores de herramientas para prevenir bucles infinitos
     tool_error_counts: Optional[Dict[str, int]]
+    # Instancias de grafo de conocimiento y gestor de memoria mejorada
+    graph_db: Optional[GraphDB]
+    enhanced_memory_manager: Optional[EnhancedMemoryManager]
 
 # ==============================================================================
 # SECCIÓN 2: VALIDACIÓN DE HERRAMIENTAS Y MANEJO DE ERRORES
@@ -560,23 +563,78 @@ async def call_model_node(state: AgentState):
     relevant_memories_text = ""
     final_sources_for_state = state.get('sources', []) # Mantener las fuentes existentes si las hay
 
-    if not is_after_tool_call:
-        logger.info("Ejecutando búsqueda RAG del agente (no es una vuelta de herramienta).")
-        graph_db = GraphDB(
-            uri=str(settings.neo4j_uri) if settings.neo4j_uri else "",
-            user=str(settings.neo4j_user) if settings.neo4j_user else "",
-            password=str(settings.neo4j_password) if settings.neo4j_password else ""
-        )
-        graph_db.connect()
-        enhanced_memory_manager = EnhancedMemoryManager(graph_db=graph_db)
+    # Nueva función para decidir si se debe realizar una búsqueda RAG
+    async def should_perform_rag_search(user_query: str, has_explicit_rag: bool, is_tool_return: bool) -> bool:
+        """
+        Heurística para decidir si se debe realizar una búsqueda RAG.
+        Considera la longitud del query, palabras clave y si ya hay contexto explícito.
+        """
+        if is_tool_return:
+            logger.info("❌ No RAG: Es una vuelta de herramienta.")
+            return False
+        if has_explicit_rag:
+            logger.info("✅ RAG: Hay contexto RAG explícito.")
+            return True
+        
+        # Heurística simple: longitud del query
+        if not user_query or len(user_query.strip()) < 5: # Queries muy cortos
+            logger.info(f"❌ No RAG: Query demasiado corto ({len(user_query.strip())} caracteres).")
+            return False
+        if len(user_query.strip().split()) > 50: # Queries muy largos pueden ser divagaciones
+            logger.info(f"❌ No RAG: Query demasiado largo ({len(user_query.strip().split())} palabras).")
+            return False
 
-        logger.info(f"🧠 Consultando EnhancedMemoryManager con la consulta: '{user_message}'")
-        enhanced_context = await enhanced_memory_manager.get_enhanced_context(
-            user_query=user_message,
-            user_id=state['account_id'],
-            workspace_id=state.get('workspace_id'),
-            explicit_document_ids=document_ids_for_rag
-        )
+        # Palabras clave que explícitamente activan RAG o indican necesidad de información
+        rag_keywords = ["qué es", "cómo funciona", "información sobre", "dime sobre", "explícame", "detalles de", "antecedentes de", "quién es", "cuándo fue", "dónde está", "por qué", "diferencias entre", "ejemplos de", "historia de", "características de", "propósito de"]
+        if any(keyword in user_query.lower() for keyword in rag_keywords):
+            logger.info(f"✅ RAG: Palabras clave RAG detectadas en el query: '{user_query}'")
+            return True
+
+        # Palabras clave que explícitamente desactivan RAG (conversacionales, personales)
+        no_rag_keywords = ["hola", "gracias", "cómo estás", "cuéntame un chiste", "qué hora es", "qué tal", "quién eres", "ayúdame a", "te quiero"]
+        if any(keyword in user_query.lower() for keyword in no_rag_keywords):
+            logger.info(f"❌ No RAG: Palabras clave conversacionales detectadas en el query: '{user_query}'")
+            return False
+
+        # Si el query es una pregunta (termina en '?') y tiene longitud razonable, es un buen candidato
+        if user_query.strip().endswith('?') and len(user_query.strip().split()) > 3:
+            logger.info(f"✅ RAG: Query parece una pregunta y tiene longitud razonable: '{user_query}'")
+            return True
+
+        # Fallback: Por defecto, no activar RAG si no hay señales claras
+        logger.info(f"❌ No RAG: No se detectaron señales claras para RAG en el query: '{user_query}'")
+        return False
+
+
+    if await should_perform_rag_search(user_message, has_explicit_rag_context, is_after_tool_call):
+        logger.info("Ejecutando búsqueda RAG del agente.")
+        
+        # Obtener instancias compartidas o inicializarlas si no están en el estado
+        graph_db = state.get('graph_db')
+        enhanced_memory_manager = state.get('enhanced_memory_manager')
+
+        if not graph_db or not enhanced_memory_manager:
+            graph_db, enhanced_memory_manager = await get_shared_graph_dependencies()
+            if graph_db and enhanced_memory_manager:
+                state['graph_db'] = graph_db
+                state['enhanced_memory_manager'] = enhanced_memory_manager
+            else:
+                logger.warning("⚠️ No se pudieron obtener las dependencias del grafo. La memoria mejorada no estará disponible.")
+                # Si no se pueden obtener, proceder sin ellas
+                state['graph_db'] = None
+                state['enhanced_memory_manager'] = None
+        
+        if enhanced_memory_manager:
+            logger.info(f"🧠 Consultando EnhancedMemoryManager con la consulta: '{user_message}'")
+            enhanced_context = await enhanced_memory_manager.get_enhanced_context(
+                user_query=user_message,
+                user_id=state['account_id'],
+                workspace_id=state.get('workspace_id'),
+                explicit_document_ids=document_ids_for_rag
+            )
+        else:
+            enhanced_context = None
+            logger.warning("⚠️ EnhancedMemoryManager no está disponible, saltando la consulta de contexto enriquecido.")
 
         all_sources_objects = []
         if enhanced_context:
@@ -629,8 +687,8 @@ async def call_model_node(state: AgentState):
         else:
             logger.info("ℹ️ No se generó contexto enriquecido desde el grafo de conocimiento.")
     else:
-        logger.info("Saltando la búsqueda RAG del agente porque es una vuelta de herramienta. Manteniendo fuentes existentes.")
-        # Si ya hay fuentes en el estado (de tool_node), usarlas para el prompt
+        logger.info("Saltando la búsqueda RAG del agente. Manteniendo fuentes existentes si las hay.")
+        # Si ya hay fuentes en el estado (de tool_node o de un RAG anterior), usarlas para el prompt
         if final_sources_for_state:
             relevant_memories_parts = []
             for i, source_dict in enumerate(final_sources_for_state, start=1):
@@ -692,53 +750,37 @@ async def call_model_node(state: AgentState):
     logger.debug(f"DEBUG (agent.py - call_model_node): System Prompt final antes de LLM: {system_prompt_content}")
     
     # --- BINDING DE HERRAMIENTAS COMPATIBLE CON CUALQUIER LLM ---
-    # En lugar de hacer cast a ChatGoogleGenerativeAI, usamos bind_tools de forma genérica
-    # Esto funciona con Gemini, GPT, Claude, Kimi y otros LLMs compatibles con tool calling
+    # Usar bind_tools como método estándar, que LiteLLM convierte automáticamente
+    # al formato apropiado para cada proveedor (tools para OpenRouter, functions para OpenAI, etc.)
     try:
-        # Para la mayoría de modelos vía LiteLLM (OpenAI, Claude, OpenRouter, etc.), 
-        # funciona mejor convertir manualmente las herramientas al formato OpenAI function calling.
-        # Solo excluimos 'gemini' nativo si se comporta diferente, pero por seguridad aplicamos
-        # esta lógica a todo lo que NO sea explícitamente google-generative-ai nativo.
-        # Dado que usamos LiteLLM para todo, asumimos que 'functions' es el camino más seguro para no-Gemini.
-        
-        is_gemini = "gemini" in model_name.lower() or "google" in model_name.lower()
-        
-        if not is_gemini:
-            logger.info(f"🔧 Detectado modelo NO-Gemini ('{model_name}') - Convirtiendo herramientas a formato OpenAI function calling")
-            
+        if hasattr(llm, 'bind_tools'):
+            logger.info(f"🔧 Usando bind_tools para '{model_name}' (formato moderno 'tools')")
+            llm_with_tools = cast(BaseChatModel, llm).bind_tools(tools)
+        else:
+            logger.warning(f"⚠️ El LLM '{model_name}' no soporta bind_tools, intentando formato legacy 'functions'")
             # Importar el convertidor de LangChain
             from langchain_core.utils.function_calling import convert_to_openai_function
-            
+
             openai_functions = []
             for tool in tools:
                 try:
-                    # Usar el convertidor oficial de LangChain
                     openai_func = convert_to_openai_function(tool)
                     openai_functions.append(openai_func)
                     logger.debug(f"🔧 Herramienta '{tool.name}' convertida con convert_to_openai_function")
                 except Exception as e:
                     logger.error(f"❌ Error al convertir herramienta '{tool.name}': {e}", exc_info=True)
-            
-            logger.info(f"✅ {len(openai_functions)} herramientas convertidas a formato OpenAI")
-            
+
+            logger.info(f"✅ {len(openai_functions)} herramientas convertidas a formato functions")
+
             # DEBUG: Mostrar el schema de la primera herramienta para verificar
             if openai_functions:
                 first_func = openai_functions[0]
                 logger.info(f"🔍 DEBUG: Ejemplo de herramienta convertida (primera):")
                 logger.info(f"   Nombre: {first_func.get('name')}")
                 logger.info(f"   Schema completo: {json.dumps(first_func, indent=2, ensure_ascii=False)}")
-            
-            # Usar bind con functions en lugar de tools
-            # LiteLLM con OpenAI usa el parámetro 'functions' en lugar de 'tools'
+
             llm_with_tools = llm.bind(functions=openai_functions)
-        else:
-            # Para otros modelos (Gemini, Claude, etc.), usar bind_tools estándar
-            if hasattr(llm, 'bind_tools'):
-                llm_with_tools = cast(BaseChatModel, llm).bind_tools(tools)
-            else:
-                logger.warning(f"⚠️ El LLM '{model_name}' no tiene el método 'bind_tools'. Usando llm.bind() como fallback.")
-                llm_with_tools = cast(Any, llm).bind(tools=tools) # type: ignore
-        
+
         logger.info(f"✅ Herramientas vinculadas correctamente al LLM '{model_name}'")
     except AttributeError as e:
         logger.warning(f"⚠️ El LLM '{model_name}' no soporta bind_tools. Continuando sin herramientas: {e}")
@@ -891,7 +933,37 @@ async def tool_node(state: AgentState):
             tool_args = tool_call.get("arguments")
         if tool_args is None:
             tool_args = {}
-        
+
+        # Asegurar que web_search siempre tenga un query válido
+        if tool_name == "web_search" and ("query" not in tool_args or not tool_args.get("query")):
+            # Inferir query del mensaje del usuario
+            user_query = None
+            for msg in reversed(state["messages"]):
+                if isinstance(msg, HumanMessage):
+                    user_query = extract_text_content(msg.content)
+                    break
+            if user_query:
+                tool_args["query"] = user_query
+                logger.info(f"🔧 Asignado query inferido para web_search: {user_query}")
+            else:
+                logger.warning("No se pudo encontrar mensaje de usuario para web_search, usando query por defecto")
+                tool_args["query"] = "información general"
+
+        # Asegurar que deep_research siempre tenga un query válido
+        if tool_name == "deep_research" and ("query" not in tool_args or not tool_args.get("query")):
+            # Inferir query del mensaje del usuario
+            user_query = None
+            for msg in reversed(state["messages"]):
+                if isinstance(msg, HumanMessage):
+                    user_query = extract_text_content(msg.content)
+                    break
+            if user_query:
+                tool_args["query"] = user_query
+                logger.info(f"🔧 Asignado query inferido para deep_research: {user_query}")
+            else:
+                logger.warning("No se pudo encontrar mensaje de usuario para deep_research, usando query por defecto")
+                tool_args["query"] = "información general"
+
         logger.info(f"🔧 Ejecutando tool_call: name={tool_name}, args={json.dumps(tool_args, ensure_ascii=False)}")
         
         # Enviar evento tool_start
@@ -904,13 +976,15 @@ async def tool_node(state: AgentState):
             "toolName": tool_name,
         }, connection_type=conn_type)
 
-        # Use get_tool_by_name to instantiate the tool on demand
-        from core.tools import get_tool_by_name
+        # Use get_tool_by_name from the new utils location
+        from core.utils.tool_utils import get_tool_by_name
         selected_tool = await get_tool_by_name(
             tool_name=tool_name,
             account_id=state['account_id'],
             telegram_id=state.get('telegram_id'),
-            thread_id=state['messages'][-1].additional_kwargs.get('thread_id')
+            thread_id=state['messages'][-1].additional_kwargs.get('thread_id'),
+            graph_db=state.get('graph_db'),  # Pasar GraphDB del estado
+            enhanced_memory_manager=state.get('enhanced_memory_manager') # Pasar EnhancedMemoryManager del estado
         )
 
         if not selected_tool:
