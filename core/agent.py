@@ -132,6 +132,8 @@ def sanitize_json_content(content):
         return content
 
 
+
+
 # --- Configuración del Logger ---
 logger = logging.getLogger(__name__)
 
@@ -750,47 +752,45 @@ async def call_model_node(state: AgentState):
     logger.debug(f"DEBUG (agent.py - call_model_node): System Prompt final antes de LLM: {system_prompt_content}")
     
     # --- BINDING DE HERRAMIENTAS COMPATIBLE CON CUALQUIER LLM ---
-    # Usar bind_tools como método estándar, que LiteLLM convierte automáticamente
-    # al formato apropiado para cada proveedor (tools para OpenRouter, functions para OpenAI, etc.)
+    # Usamos una conversión explícita a formato OpenAI (tools) porque es el estándar 
+    # más robusto para LiteLLM y OpenRouter, asegurando que los campos 'required' se mantengan.
     try:
-        if hasattr(llm, 'bind_tools'):
-            logger.info(f"🔧 Usando bind_tools para '{model_name}' (formato moderno 'tools')")
-            llm_with_tools = cast(BaseChatModel, llm).bind_tools(tools)
+        from langchain_core.utils.function_calling import convert_to_openai_tool
+        
+        openai_tools = []
+        for tool in tools:
+            try:
+                # convert_to_openai_tool es el método moderno que genera el formato {"type": "function", "function": {...}}
+                tool_dict = convert_to_openai_tool(tool)
+                openai_tools.append(tool_dict)
+            except Exception as e:
+                logger.error(f"❌ Error al convertir herramienta '{tool.name}': {e}")
+
+        logger.info(f"🔧 Vinculando {len(openai_tools)} herramientas al modelo '{model_name}'")
+        
+        # Usamos .bind(tools=...) que es lo que LiteLLM espera para casi todos los proveedores
+        # También pasamos 'functions' para modelos legacy de OpenRouter que lo prefieran
+        if openai_tools:
+            # Extraer solo la parte 'function' para el parámetro legacy 'functions'
+            openai_functions = [t["function"] for t in openai_tools]
+            llm_with_tools = llm.bind(tools=openai_tools, functions=openai_functions)
         else:
-            logger.warning(f"⚠️ El LLM '{model_name}' no soporta bind_tools, intentando formato legacy 'functions'")
-            # Importar el convertidor de LangChain
-            from langchain_core.utils.function_calling import convert_to_openai_function
-
-            openai_functions = []
-            for tool in tools:
-                try:
-                    openai_func = convert_to_openai_function(tool)
-                    openai_functions.append(openai_func)
-                    logger.debug(f"🔧 Herramienta '{tool.name}' convertida con convert_to_openai_function")
-                except Exception as e:
-                    logger.error(f"❌ Error al convertir herramienta '{tool.name}': {e}", exc_info=True)
-
-            logger.info(f"✅ {len(openai_functions)} herramientas convertidas a formato functions")
-
-            # DEBUG: Mostrar el schema de la primera herramienta para verificar
-            if openai_functions:
-                first_func = openai_functions[0]
-                logger.info(f"🔍 DEBUG: Ejemplo de herramienta convertida (primera):")
-                logger.info(f"   Nombre: {first_func.get('name')}")
-                logger.info(f"   Schema completo: {json.dumps(first_func, indent=2, ensure_ascii=False)}")
-
-            llm_with_tools = llm.bind(functions=openai_functions)
-
-        logger.info(f"✅ Herramientas vinculadas correctamente al LLM '{model_name}'")
-    except AttributeError as e:
-        logger.warning(f"⚠️ El LLM '{model_name}' no soporta bind_tools. Continuando sin herramientas: {e}")
-        llm_with_tools = llm
+            llm_with_tools = llm
+            
+        logger.info(f"✅ Herramientas vinculadas correctamente al LLM '{model_name}' (Binding Dual: tools + functions)")
     except Exception as e:
-        logger.error(f"❌ Error al vincular herramientas al LLM '{model_name}': {e}")
+        logger.error(f"❌ Error crítico al vincular herramientas al LLM '{model_name}': {e}", exc_info=True)
         llm_with_tools = llm
+
+    # --- REFUERZO DE INSTRUCCIONES PARA MODELOS NO-GEMINI ---
+    # Los modelos de OpenRouter a veces ignoran los argumentos si el prompt es largo.
+    # Añadimos un recordatorio justo al final del prompt del sistema.
+    final_system_content = system_prompt_content
+    if "gemini" not in model_name.lower():
+        final_system_content += "\n\n⚠️ **CRITICAL TECHNICAL REMINDER:** If you decide to use a tool, you MUST provide ALL required arguments in the 'args' field. Never send an empty 'args' object {{}} if the tool has required parameters."
 
     prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt_content),
+        ("system", final_system_content),
         MessagesPlaceholder(variable_name="messages"),
     ])
 
@@ -838,8 +838,9 @@ async def call_model_node(state: AgentState):
     # --- FIX: Ensure all tool calls have an ID and normalize arguments ---
     valid_tool_calls = []
     for tc in tool_calls_from_llm:
-        # Filtrar tool calls basura (sin nombre)
-        if not tc.get("name"):
+        # Filtrar tool calls basura (sin nombre o con nombre vacío)
+        tc_name = tc.get("name")
+        if not tc_name or (isinstance(tc_name, str) and not tc_name.strip()):
             logger.warning(f"⚠️ Ignorando tool call inválido (sin nombre): {tc}")
             continue
             
@@ -848,12 +849,19 @@ async def call_model_node(state: AgentState):
             tc["id"] = str(uuid.uuid4())
         
         # Normalizar argumentos: algunos LLMs usan "arguments" en lugar de "args"
-        if "args" not in tc and "arguments" in tc:
-            logger.info(f"🔧 Normalizando: Tool call {tc.get('name')} usa 'arguments' en lugar de 'args'. Copiando...")
-            tc["args"] = tc["arguments"]
-        elif "args" not in tc and "arguments" not in tc:
-            logger.warning(f"⚠️ Tool call {tc.get('name')} no tiene ni 'args' ni 'arguments'. Inicializando como dict vacío.")
-            tc["args"] = {}
+        # O envían una cadena JSON en lugar de un diccionario
+        args = tc.get("args")
+        if args is None:
+            args = tc.get("arguments")
+        
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except:
+                logger.warning(f"⚠️ No se pudo parsear argumentos como JSON para {tc_name}: {args}")
+                args = {}
+        
+        tc["args"] = args if isinstance(args, dict) else {}
             
         valid_tool_calls.append(tc)
     
@@ -978,11 +986,26 @@ async def tool_node(state: AgentState):
 
         # Use get_tool_by_name from the new utils location
         from core.utils.tool_utils import get_tool_by_name
+        
+        # Obtener todas las herramientas disponibles una vez por contexto
+        account_id = state['account_id']
+        telegram_id_int = state.get('telegram_id')
+        telegram_id_str = str(telegram_id_int) if telegram_id_int is not None else None
+        workspace_id = state.get('workspace_id')
+
+        all_tools = await get_all_langchain_tools(
+            account_id=account_id,
+            telegram_id=telegram_id_int,
+            thread_id=state['thread_id'], # Usamos thread_id del estado
+            workspace_id=workspace_id
+        )
+
         selected_tool = await get_tool_by_name(
             tool_name=tool_name,
-            account_id=state['account_id'],
-            telegram_id=state.get('telegram_id'),
-            thread_id=state['messages'][-1].additional_kwargs.get('thread_id'),
+            all_tools=all_tools, # Pasar la lista de todas las herramientas
+            account_id=account_id,
+            telegram_id=telegram_id_str,
+            workspace_id=workspace_id,
             graph_db=state.get('graph_db'),  # Pasar GraphDB del estado
             enhanced_memory_manager=state.get('enhanced_memory_manager') # Pasar EnhancedMemoryManager del estado
         )
@@ -1076,21 +1099,21 @@ Por favor, intenta de nuevo especificando correctamente la herramienta."""
             try:
                 # Acceder al args_schema de forma segura
                 args_schema_instance = selected_tool.args_schema
-                # Obtener los campos requeridos del schema (compatible con Pydantic v2)
-                # En Pydantic v2, model_fields es un atributo de clase
-                schema_fields = getattr(args_schema_instance, 'model_fields', {})
-                
-                required_fields = [
-                    field_name for field_name, field_info in schema_fields.items()
-                    if field_info.is_required() # type: ignore
-                ]
+                # Obtener los campos requeridos del schema (Pydantic v2 nativo)
+                required_fields = []
+                if hasattr(args_schema_instance, 'model_fields'):
+                    schema_fields = args_schema_instance.model_fields
+                    required_fields = [
+                        field_name for field_name, field_info in schema_fields.items()
+                        if field_info.is_required() # type: ignore
+                    ]
                 
                 # Verificar si faltan campos requeridos
                 missing_fields = []
                 if not tool_args or not isinstance(tool_args, dict):
                     missing_fields = required_fields
                 else:
-                    missing_fields = [field for field in required_fields if field not in tool_args or tool_args[field] is None or tool_args[field] == ""]
+                    missing_fields = [field for field in required_fields if field not in tool_args or tool_args[field] is None or (isinstance(tool_args[field], str) and tool_args[field].strip() == "")]
                 
                 if missing_fields:
                     logger.warning(f"⚠️ Argumentos faltantes detectados ANTES de ejecutar '{tool_name}': {missing_fields}")
@@ -1100,31 +1123,13 @@ Por favor, intenta de nuevo especificando correctamente la herramienta."""
                         state['tool_error_counts'] = {}
                     state['tool_error_counts'][tool_name] = state['tool_error_counts'].get(tool_name, 0) + 1
                     
-                    # Generar mensaje de error detallado
-                    error_message = f"""❌ Error al ejecutar la herramienta '{tool_name}':
-
-Faltan los siguientes parámetros requeridos:
-{chr(10).join([f"- {field}" for field in missing_fields])}
-
-Argumentos recibidos: {json.dumps(tool_args or {}, ensure_ascii=False, indent=2)}
-
-💡 INSTRUCCIONES PARA CORREGIR:
-1. La herramienta '{tool_name}' REQUIERE los siguientes parámetros: {', '.join(required_fields)}
-2. Debes proporcionar un valor válido para cada parámetro requerido
-3. Ejemplo de uso correcto:
-   {{
-     {', '.join([f'"{field}": "valor_apropiado"' for field in required_fields])}
-   }}
-
-⚠️ IMPORTANTE: Si no estás seguro de qué valor usar, o si has intentado varias veces sin éxito:
-- Intenta responder la pregunta del usuario SIN usar esta herramienta
-- O usa una herramienta DIFERENTE que pueda ayudar
-
-Por favor, vuelve a intentar con TODOS los parámetros requeridos."""
+                    # Generar mensaje de error detallado y conciso
+                    error_message = f"ERROR: Faltan parámetros obligatorios para '{tool_name}': {', '.join(missing_fields)}. Por favor, vuelve a llamar a la herramienta incluyendo estos campos."
                     
                     tool_messages.append(ToolMessage(
                         content=error_message,
-                        tool_call_id=tool_call.get("id") or str(uuid.uuid4())
+                        tool_call_id=tool_call.get("id") or str(uuid.uuid4()),
+                        name=tool_name # Crucial para OpenRouter/OpenAI
                     ))
                     
                     await send_personal_message(target_account_id, {
@@ -1419,13 +1424,17 @@ def create_langgraph_agent():
     workflow = StateGraph(AgentState)
 
     # Añadir los nodos al grafo
+    workflow.add_node("proactive_memory", proactive_memory_node) # NUEVO
     workflow.add_node("agent", call_model_node)
     workflow.add_node("action", tool_node)
     workflow.add_node("generateResponse", generate_response_node) # El nombre coincide con lo que espera api/chat.py
 
     # Definir las aristas (el flujo de trabajo)
-    workflow.set_entry_point("agent")
+    workflow.set_entry_point("proactive_memory") # NUEVO PUNTO DE ENTRADA
     
+    # El nodo de memoria proactiva siempre pasa al agente principal
+    workflow.add_edge("proactive_memory", "agent")
+
     workflow.add_conditional_edges(
         "agent",
         should_continue,
@@ -1441,3 +1450,112 @@ def create_langgraph_agent():
     # Compilar el grafo
     # memory = MemorySaver() # Se añadirá cuando se integre el historial
     return workflow.compile()
+
+async def ensure_graph_dependencies(state: AgentState):
+    """
+    Asegura que las instancias de GraphDB y EnhancedMemoryManager estén disponibles en el estado.
+    Si no lo están, las inicializa y las añade al estado.
+    """
+    if state.get('graph_db') and state.get('enhanced_memory_manager'):
+        return state
+    
+    graph_db, enhanced_memory_manager = await get_shared_graph_dependencies()
+    if graph_db and enhanced_memory_manager:
+        state['graph_db'] = graph_db
+        state['enhanced_memory_manager'] = enhanced_memory_manager
+        logger.info("✅ Dependencias del grafo inicializadas y añadidas al estado.")
+    else:
+        logger.warning("⚠️ No se pudieron obtener las dependencias del grafo. La memoria mejorada no estará disponible.")
+        state['graph_db'] = None
+        state['enhanced_memory_manager'] = None
+    
+    return state
+
+from core.prompts import PROACTIVE_MEMORY_PROMPT
+import json
+
+async def proactive_memory_node(state: AgentState):
+    """
+    Este nodo se ejecuta después de la entrada del usuario para analizar proactivamente
+    y guardar memorias sin esperar a que el agente principal lo haga.
+    Utiliza un LLM rápido para extraer hechos y los guarda en la base de datos vectorial.
+    """
+    logger.info("--- (Grafo) Nodo: Memoria Proactiva ---")
+    
+    # 1. Validar que el último mensaje sea del usuario y no esté vacío
+    last_message = state["messages"][-1]
+    if not isinstance(last_message, HumanMessage):
+        logger.info("Saltando memoria proactiva: el último mensaje no es del usuario.")
+        return state
+
+    user_content = extract_text_content(last_message.content)
+    if not user_content or len(user_content.strip()) < 10:
+        logger.info("Saltando memoria proactiva: contenido del usuario muy corto o vacío.")
+        return state
+
+    # 2. Preparar el LLM y el prompt
+    llm = get_fast_llm()
+    if not llm:
+        logger.warning("No hay un LLM rápido disponible para la memoria proactiva. Saltando nodo.")
+        return state
+
+    # Formatear historial para el prompt (últimos 4 mensajes)
+    history_for_prompt = "\n".join([f"{'Usuario' if isinstance(m, HumanMessage) else 'Asistente'}: {extract_text_content(m.content)}" for m in state["messages"][-5:-1]])
+
+
+    prompt = f"""{PROACTIVE_MEMORY_PROMPT}
+---
+**Conversación:**
+{history_for_prompt}
+
+**Último mensaje del usuario:** "{user_content}"
+
+**Tu salida JSON (solo el JSON, nada más):**
+"""
+
+    try:
+        # 3. Invocar al LLM para extraer memorias
+        logger.info("Invocando LLM para extracción de memoria proactiva...")
+        response = await llm.ainvoke(prompt)
+        response_content = response.content if hasattr(response, 'content') else str(response)
+        
+        # Limpiar la respuesta para asegurar que sea un JSON válido
+        json_str = response_content.strip()
+        if json_str.startswith("```json"):
+            json_str = json_str[7:]
+        if json_str.endswith("```"):
+            json_str = json_str[:-3]
+        
+        extracted_data = json.loads(json_str)
+        memories_to_save = extracted_data.get("memories", [])
+
+        if not memories_to_save:
+            logger.info("No se extrajeron memorias proactivas.")
+            return state
+
+        logger.info(f"Se extrajeron {len(memories_to_save)} memorias proactivas: {memories_to_save}")
+
+        # 4. Guardar cada memoria extraída
+        for memory_content in memories_to_save:
+            await add_memory_to_vector_db(
+                account_id=state['account_id'],
+                content=memory_content,
+                type="user_memory_proactive_llm", # Nuevo tipo para diferenciar
+                workspace_id=state.get('workspace_id'),
+                telegram_id=str(state.get('telegram_id')) if state.get('telegram_id') else None,
+                thread_id=state.get('thread_id')
+            )
+            logger.info(f"Memoria proactiva guardada para la cuenta {state['account_id']}: '{memory_content}'")
+
+        # 5. Disparar el procesamiento del grafo de conocimiento (una sola vez)
+        if state.get('account_id'):
+            from knowledge_graph.memory_graph_processor import schedule_memory_graph_processing
+            asyncio.create_task(schedule_memory_graph_processing(account_id=state['account_id']))
+            logger.info(f"Procesamiento del grafo de conocimiento programado tras memoria proactiva para la cuenta {state['account_id']}.")
+
+    except json.JSONDecodeError:
+        logger.error(f"Error de decodificación JSON en memoria proactiva. Respuesta del LLM no fue un JSON válido: {response_content}")
+    except Exception as e:
+        logger.error(f"Error en el nodo de memoria proactiva: {e}", exc_info=True)
+
+    return state

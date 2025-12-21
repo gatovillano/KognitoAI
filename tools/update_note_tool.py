@@ -4,7 +4,7 @@ import logging
 from typing import Type, Optional, Any, Union
 
 from langchain_core.tools import BaseTool
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 
 from core.database import SessionLocal
 from core.notes_manager import NotesManager

@@ -16,7 +16,7 @@ ya que el agente deberá solicitar este ID si el usuario no lo proporciona.
 import logging
 from typing import Type, Any, Optional
 
-from pydantic.v1 import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de agenda.

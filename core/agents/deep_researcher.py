@@ -53,14 +53,7 @@ logger = logging.getLogger(__name__)
 
 # --- Helper Functions ---
 
-async def get_all_tools(config: RunnableConfig):
-    """Fetches all available research tools."""
-    # For now, we only have web_search and knowledge_search
-    account_id = str(config.get("configurable", {}).get("account_id"))
-    web_search = await get_tool_by_name("web_search", account_id)
-    knowledge_search = await get_tool_by_name("knowledge_search", account_id)
-    tools = [t for t in [web_search, knowledge_search] if t]
-    return tools
+
 
 def get_notes_from_tool_calls(messages: list) -> list[str]:
     """Extracts notes from tool calls, especially from 'think_tool'."""
@@ -84,13 +77,12 @@ async def execute_tool_safely(tool, args, config):
 # --- Main Graph Nodes ---
 
 async def clarify_with_user(state: AgentState, config: RunnableConfig) -> dict:
-    logger.info("--- [DeepResearcher] Clarifying with user ---")
+    logger.info("--- [DeepResearcher] Node: clarify_with_user ---")
     cfg = Configuration.from_runnable_config(config)
     clarification_model = get_main_llm().with_retry(
         stop_after_attempt=cfg.max_structured_output_retries
     )
     
-    # Asegúrate de que messages sea una lista de BaseMessage
     current_messages: list[BaseMessage] = []
     for msg in state.get("messages", []):
         if isinstance(msg, BaseMessage):
@@ -102,27 +94,31 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> dict:
     response = await clarification_model.ainvoke([HumanMessage(content=prompt)], response_format={"type": "json_object"})
     try:
         data = json.loads(response.content)
-        return {"research_brief": data["research_brief"]}
-    except json.JSONDecodeError as e:
-        logger.error(f"Error decoding JSON from clarification model: {e}. Response content: {response.content}")
-        # Devuelve un research_brief predeterminado o un mensaje de error si el JSON es inválido
-        return {"research_brief": "Error: Invalid JSON response from clarification model."}
+        research_brief = data.get("research_brief", "No brief generated.")
+        logger.info(f"📝 [DeepResearcher] Generated research_brief: '{research_brief}'")
+        return {"research_brief": research_brief}
+    except (json.JSONDecodeError, KeyError) as e:
+        logger.error(f"Error processing clarification model response: {e}. Response: {response.content}")
+        return {"research_brief": "Error: Could not generate a valid research brief."}
+
 
 async def write_research_brief(state: AgentState, config: RunnableConfig) -> dict:
-    logger.info("--- [DeepResearcher] Writing research brief ---")
-    # For now, just return the research_brief as is
+    logger.info("--- [DeepResearcher] Node: write_research_brief ---")
+    # This node is currently a pass-through. The brief is generated in the previous step.
+    logger.info(f"📋 [DeepResearcher] Proceeding with research_brief: '{state.get('research_brief')}'")
     return {}
 
 async def final_report_generation(state: AgentState, config: RunnableConfig) -> dict:
     """Generates the final comprehensive research report."""
-    logger.info("--- [DeepResearcher] Generating final report ---")
+    logger.info("--- [DeepResearcher] Node: final_report_generation ---")
     cfg = Configuration.from_runnable_config(config)
     notes = state.get("notes", [])
-    findings = "\n".join(notes)
+    findings = "\n\n".join(notes)
+    logger.info(f"📝 [DeepResearcher] Generating final report based on {len(notes)} notes/findings.")
+    logger.debug(f"Findings for final report: {findings}")
     
     writer_model = get_main_llm()
 
-    # Asegúrate de que messages sea una lista de BaseMessage
     current_messages_list: list[BaseMessage] = []
     for msg in state.get("messages", []):
         if isinstance(msg, BaseMessage):
@@ -139,7 +135,7 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
     
     final_report = await writer_model.ainvoke([HumanMessage(content=final_report_prompt)])
     
-    logger.info("--- [DeepResearcher] Final report generated ---")
+    logger.info(f"📄 [DeepResearcher] Final report generated. Preview: {str(final_report.content)[:300]}...")
     return {
         "final_report": final_report.content,
         "messages": [final_report],
@@ -149,38 +145,49 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
 
 async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
     """Plans research strategy and delegates to researchers."""
-    logger.info("--- [DeepResearcher] Planning research ---")
+    logger.info("--- [DeepResearcher] Node: supervisor ---")
     cfg = Configuration.from_runnable_config(config)
     llm = get_main_llm()
 
-    # think_tool is a special tool for reflection, not a standard tool
-    think_tool = {"name": "think_tool", "description": "Reflect on the research plan and progress.", "args": {"reflection": "string"}}
+    # Forceful prompt to ensure the LLM calls a tool
+    forceful_prompt = """You are a research director. Your only purpose is to choose the next action in a research plan.
+You MUST call one of the following tools:
+1. `ConductResearch`: If the research is not yet complete and there are more topics to investigate.
+2. `ResearchComplete`: If you have sufficient information to answer the user's query.
 
+Do NOT under any circumstances respond with plain text. You must call a tool.
+Based on the research so far, what is the next step?
+"""
+
+    think_tool = {"name": "think_tool", "description": "Reflect on the research plan and progress.", "args": {"reflection": "string"}}
     lead_researcher_tools = [ConductResearch, ResearchComplete, think_tool]
 
-    # Asegurarse de que el LLM devuelto por get_main_llm() tenga el método bind_tools
-    # y que los mensajes sean de tipo BaseMessage.
-    # Si 'llm' no es de tipo ChatLiteLLM, esto podría fallar.
-    # Asumimos que get_main_llm() ya devuelve un ChatLiteLLM o similar.
-    research_model = llm.bind_tools(lead_researcher_tools).with_retry( # type: ignore
+    # Force the model to use a tool
+    research_model = llm.bind_tools(
+        lead_researcher_tools,
+        tool_choice="auto" # Use 'auto' for broader compatibility with VertexAI
+    ).with_retry(
         stop_after_attempt=cfg.max_structured_output_retries
     )
 
-    messages: list[BaseMessage] = [SystemMessage(content=lead_researcher_prompt)]
+    messages: list[BaseMessage] = [SystemMessage(content=forceful_prompt)]
     if not state["supervisor_messages"]:
+        logger.info("First supervisor run. Planning initial research.")
         messages.append(HumanMessage(content=f"Plan research for: {state.get('research_brief', '')}"))
     else:
-        # Asegurarse de que los mensajes existentes sean de tipo BaseMessage
-        for msg in state["supervisor_messages"]:
-            if isinstance(msg, (HumanMessage, AIMessage, SystemMessage, ToolMessage)):
-                messages.append(msg)
-            else:
-                # Convertir a HumanMessage si no es un tipo conocido
-                messages.append(HumanMessage(content=str(msg)))
+        logger.info(f"Supervisor continuing with {len(state['supervisor_messages'])} previous messages.")
+        # Add previous messages to the context
+        messages.extend(state["supervisor_messages"])
 
-    # Añadir un HumanMessage al final para satisfacer el requisito del LLM
-    messages.append(HumanMessage(content="What is the next step in the research plan, or is the research complete?"))
+    # This final message prompts the LLM to make its mandatory tool call
+    messages.append(HumanMessage(content="Based on the provided context, decide the next step. You must call a tool."))
     response = await research_model.ainvoke(messages)
+
+    if hasattr(response, 'tool_calls') and response.tool_calls:
+        for tool_call in response.tool_calls:
+            logger.info(f"📋 [Supervisor] LLM decided to call tool: {tool_call['name']} with args: {tool_call['args']}")
+    else:
+        logger.warning("[Supervisor] LLM did not generate any tool calls, despite being forced. This indicates a potential issue with the model or prompt.")
 
     return {
         "supervisor_messages": state["supervisor_messages"] + [response],
@@ -189,23 +196,24 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
 
 async def supervisor_tools(state: SupervisorState, config: RunnableConfig, researcher_subgraph: Pregel) -> dict:
     """Executes tools called by the supervisor."""
-    logger.info("--- [Supervisor] Executing tools ---")
+    logger.info("--- [DeepResearcher] Node: supervisor_tools ---")
     cfg = Configuration.from_runnable_config(config)
     most_recent_message = state["supervisor_messages"][-1]
     
-    # Verificar si most_recent_message es un AIMessage y tiene tool_calls
     if not isinstance(most_recent_message, AIMessage) or not getattr(most_recent_message, 'tool_calls', None):
+        logger.warning("[Supervisor Tools] No tool calls in the last message. Checking iteration count.")
         if state["research_iterations"] > cfg.max_researcher_iterations:
+            logger.info("[Supervisor Tools] Max iterations reached. Ending research.")
             return {"notes": get_notes_from_tool_calls(state["supervisor_messages"])}
         else:
-            # Si no hay tool_calls y no hemos excedido las iteraciones, el supervisor debe continuar
+            logger.info("[Supervisor Tools] Not at max iterations. Returning to supervisor.")
             return {"supervisor_messages": state["supervisor_messages"]}
-
 
     all_tool_messages = []
     update_payload = {}
 
     conduct_research_calls = [tc for tc in getattr(most_recent_message, 'tool_calls', []) if tc["name"] == "ConductResearch"]
+    logger.info(f"[Supervisor Tools] Found {len(conduct_research_calls)} 'ConductResearch' tool calls.")
 
     if conduct_research_calls:
         research_tasks = [
@@ -216,12 +224,15 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
             }, config)
             for tc in conduct_research_calls[:cfg.max_concurrent_research_units]
         ]
-
+        logger.info(f"🚀 [Supervisor Tools] Starting {len(research_tasks)} parallel research tasks.")
         tool_results = await asyncio.gather(*research_tasks)
+        logger.info("✅ [Supervisor Tools] All parallel research tasks completed.")
 
         for observation, tool_call in zip(tool_results, conduct_research_calls):
+            compressed_result = observation.get("compressed_research", "Error: No compressed research found.")
+            logger.info(f"📝 [Supervisor Tools] Result for '{tool_call['args']['research_topic']}': '{compressed_result[:200]}...'")
             all_tool_messages.append(ToolMessage(
-                content=observation.get("compressed_research", "Error in research."),
+                content=compressed_result,
                 name=tool_call["name"],
                 tool_call_id=tool_call["id"],
             ))
@@ -237,20 +248,41 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
 
 async def researcher(state: ResearcherState, config: RunnableConfig) -> dict:
     """Conducts focused research on a specific topic."""
-    logger.info(f"--- [Researcher] Researching topic: {state['research_topic']} ---")
+    logger.info(f"--- [DeepResearcher] Node: researcher ---")
+    logger.info(f"🔍 [Researcher] Researching topic: '{state['research_topic']}'")
     cfg = Configuration.from_runnable_config(config)
-    tools = await get_all_tools(config)
-    if not tools:
+    
+    # Obtener todas las herramientas disponibles una vez por contexto
+    account_id = str(config.get("configurable", {}).get("account_id"))
+    telegram_id_int = config.get("configurable", {}).get("telegram_id")
+    telegram_id_str = str(telegram_id_int) if telegram_id_int is not None else None
+    workspace_id = str(config.get("configurable", {}).get("workspace_id")) if config.get("configurable", {}).get("workspace_id") else None
+
+    all_tools = await get_all_langchain_tools(
+        account_id=account_id,
+        telegram_id=telegram_id_int,
+        thread_id=workspace_id, # Usamos workspace_id como thread_id si no hay otro
+        workspace_id=workspace_id
+    )
+    
+    if not all_tools:
+        logger.error("[Researcher] No tools found for research. Aborting.")
         raise ValueError("No tools found for research.")
 
     llm = get_main_llm()
     researcher_prompt = research_system_prompt.format(mcp_prompt="", date=get_today_str())
-    research_model = llm.bind_tools(tools).with_retry( # type: ignore
+    research_model = llm.bind_tools(all_tools).with_retry( # type: ignore
         stop_after_attempt=cfg.max_structured_output_retries
     )
     
     messages = [SystemMessage(content=researcher_prompt)] + state["researcher_messages"]
     response = await research_model.ainvoke(messages)
+    
+    if hasattr(response, 'tool_calls') and response.tool_calls:
+        for tool_call in response.tool_calls:
+            logger.info(f"🛠️ [Researcher] LLM decided to call tool: {tool_call['name']} with args: {tool_call['args']}")
+    else:
+        logger.warning("[Researcher] LLM did not generate any tool calls for this step.")
     
     return {
         "researcher_messages": [response],
@@ -259,32 +291,46 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> dict:
 
 async def researcher_tools(state: ResearcherState, config: RunnableConfig) -> dict:
     """Executes tools called by the researcher."""
-    logger.info("--- [Researcher] Executing tools ---")
-    cfg = Configuration.from_runnable_config(config)
+    logger.info("--- [DeepResearcher] Node: researcher_tools ---")
     most_recent_message = state["researcher_messages"][-1]
 
-    if not getattr(most_recent_message, 'tool_calls', None):
+    if not hasattr(most_recent_message, 'tool_calls') or not most_recent_message.tool_calls:
+        logger.warning("[Researcher Tools] No tool calls in the last message. Skipping tool execution.")
         return {}
 
-    tools = await get_all_tools(config)
-    tools_by_name = {tool.name: tool for tool in tools}
+    # Obtener todas las herramientas disponibles una vez por contexto
+    account_id = str(config.get("configurable", {}).get("account_id"))
+    telegram_id_int = config.get("configurable", {}).get("telegram_id")
+    telegram_id_str = str(telegram_id_int) if telegram_id_int is not None else None
+    workspace_id = str(config.get("configurable", {}).get("workspace_id")) if config.get("configurable", {}).get("workspace_id") else None
+
+    all_tools = await get_all_langchain_tools(
+        account_id=account_id,
+        telegram_id=telegram_id_int,
+        thread_id=workspace_id, # Usamos workspace_id como thread_id si no hay otro
+        workspace_id=workspace_id
+    )
+    
+    tools_by_name = {tool.name: tool for tool in all_tools}
 
     tool_execution_tasks = [
         execute_tool_safely(tools_by_name[tc["name"]], tc["args"], config)
-        for tc in getattr(most_recent_message, 'tool_calls', [])
+        for tc in most_recent_message.tool_calls
     ]
+    logger.info(f"🚀 [Researcher Tools] Executing {len(tool_execution_tasks)} tool(s) in parallel.")
     observations = await asyncio.gather(*tool_execution_tasks)
-    
-    tool_outputs = [
-        ToolMessage(content=str(obs), name=tc["name"], tool_call_id=tc["id"])
-        for obs, tc in zip(observations, getattr(most_recent_message, 'tool_calls', []))
-    ]
-    
+    logger.info("✅ [Researcher Tools] All tools executed.")
+
+    tool_outputs = []
+    for obs, tc in zip(observations, most_recent_message.tool_calls):
+        logger.info(f"🔧 [Researcher Tools] Result for '{tc['name']}': '{str(obs)[:200]}...'")
+        tool_outputs.append(ToolMessage(content=str(obs), name=tc["name"], tool_call_id=tc["id"]))
+
     return {"researcher_messages": tool_outputs}
 
 async def compress_research(state: ResearcherState, config: RunnableConfig) -> dict:
     """Compresses and synthesizes research findings."""
-    logger.info("--- [Researcher] Compressing research ---")
+    logger.info("--- [DeepResearcher] Node: compress_research ---")
     cfg = Configuration.from_runnable_config(config)
     synthesizer_model = get_main_llm()
 
@@ -292,31 +338,14 @@ async def compress_research(state: ResearcherState, config: RunnableConfig) -> d
     
     compression_prompt = compress_research_system_prompt.format(date=get_today_str())
     messages = [SystemMessage(content=compression_prompt)] + researcher_messages
-    
-    @retry(
-        wait=wait_exponential(multiplier=1, min=4, max=60), # Espera exponencial entre 4 y 60 segundos
-        stop=stop_after_attempt(5), # Reintentar un máximo de 5 veces
-        retry=(retry_if_exception_type(ResourceExhausted) | # Reintentar si es un error de cuota de Google
-               retry_if_exception_type(httpx.HTTPStatusError)), # Reintentar si es un error HTTP
-        reraise=True # Volver a lanzar la excepción si todos los reintentos fallan
-    )
-    async def _invoke_synthesizer_model():
-        try:
-            return await synthesizer_model.ainvoke(messages)
-        except ResourceExhausted as e:
-            logger.warning(f"Rate limit exceeded in compress_research. Retrying... Details: {str(e)}")
-            raise # Re-lanzar para que tenacity lo capture
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429:
-                logger.warning(f"HTTP 429 (Too Many Requests) encountered in compress_research. Retrying... Details: {str(e)}")
-                raise # Re-lanzar para que tenacity lo capture
-            else:
-                raise # Re-lanzar otras excepciones HTTP
 
-    response = await _invoke_synthesizer_model()
-    
+    logger.info(f"📚 [Compress Research] Compressing {len(researcher_messages)} messages.")
+    response = await synthesizer_model.ainvoke(messages)
+
     raw_notes_content = "\n".join([str(m.content) for m in filter_messages(researcher_messages, include_types=["tool", "ai"])])
-    
+
+    logger.info(f"📦 [Compress Research] Compressed research output preview: '{str(response.content)[:200]}...'")
+
     return {
         "compressed_research": str(response.content),
         "raw_notes": [raw_notes_content],
@@ -333,10 +362,15 @@ def create_researcher_graph() -> Pregel:
     
     researcher_builder.add_edge(START, "researcher")
     researcher_builder.add_edge("researcher", "researcher_tools")
-    researcher_builder.add_conditional_edges(
-        "researcher_tools",
-        lambda s: "compress_research" if s["tool_call_iterations"] >= s.get("max_react_tool_calls", 3) else "researcher",
-    )
+    
+    def should_continue_research(state: ResearcherState) -> Literal["researcher", "compress_research"]:
+        if state["tool_call_iterations"] >= state.get("max_react_tool_calls", 3):
+            logger.info("[Researcher Edge] Max tool calls reached. Compressing research.")
+            return "compress_research"
+        logger.info("[Researcher Edge] Continuing research.")
+        return "researcher"
+        
+    researcher_builder.add_conditional_edges("researcher_tools", should_continue_research)
     researcher_builder.add_edge("compress_research", END)
     
     return researcher_builder.compile()
@@ -346,7 +380,6 @@ def create_supervisor_graph(researcher_subgraph: Pregel, max_researcher_iteratio
     supervisor_builder = StateGraph(SupervisorState)
     supervisor_builder.add_node("supervisor", supervisor)
 
-    # Define an async wrapper for supervisor_tools
     async def supervisor_tools_node(state: SupervisorState, config: RunnableConfig) -> dict:
         return await supervisor_tools(state, config, researcher_subgraph)
 
@@ -354,19 +387,24 @@ def create_supervisor_graph(researcher_subgraph: Pregel, max_researcher_iteratio
 
     supervisor_builder.add_edge(START, "supervisor")
     supervisor_builder.add_edge("supervisor", "supervisor_tools")
-    supervisor_builder.add_conditional_edges(
-        "supervisor_tools",
-        lambda s: END if (s["supervisor_messages"] and s["supervisor_messages"][-1].tool_calls and any(tc["name"] == "ResearchComplete" for tc in s["supervisor_messages"][-1].tool_calls)) or s.get("research_iterations", 0) > max_researcher_iterations else "supervisor",
-    )
+    
+    def should_continue_supervision(state: SupervisorState) -> Literal["supervisor", "__end__"]:
+        if state["supervisor_messages"] and state["supervisor_messages"][-1].tool_calls and any(tc["name"] == "ResearchComplete" for tc in state["supervisor_messages"][-1].tool_calls):
+            logger.info("[Supervisor Edge] 'ResearchComplete' called. Ending supervision.")
+            return END
+        if state.get("research_iterations", 0) > max_researcher_iterations:
+            logger.info("[Supervisor Edge] Max supervisor iterations reached. Ending supervision.")
+            return END
+        logger.info("[Supervisor Edge] Continuing supervision.")
+        return "supervisor"
+
+    supervisor_builder.add_conditional_edges("supervisor_tools", should_continue_supervision)
     return supervisor_builder.compile()
 
 def compile_deep_researcher_graph() -> Pregel:
     """Compiles and returns the full Deep Researcher graph."""
     researcher_subgraph = create_researcher_graph()
-    # Obtener el valor de max_researcher_iterations de la configuración
-    # Se asume que la configuración se obtiene en el momento de la compilación del grafo principal
-    # para que esté disponible al crear el subgrafo del supervisor.
-    cfg = Configuration() # Instanciar Configuration para obtener el valor por defecto
+    cfg = Configuration()
     supervisor_subgraph = create_supervisor_graph(researcher_subgraph, cfg.max_researcher_iterations)
 
     deep_researcher_builder = StateGraph(AgentState)
@@ -377,10 +415,15 @@ def compile_deep_researcher_graph() -> Pregel:
     deep_researcher_builder.add_node("final_report_generation", final_report_generation)
     
     deep_researcher_builder.add_edge(START, "clarify_with_user")
-    deep_researcher_builder.add_conditional_edges(
-        "clarify_with_user",
-        lambda s: "write_research_brief" if s.get("final_report") != "CLARIFICATION" else END,
-    )
+    
+    def should_start_research(state: AgentState) -> Literal["write_research_brief", "__end__"]:
+        if state.get("final_report") == "CLARIFICATION" or "Error:" in state.get("research_brief", ""):
+            logger.warning(f"[Main Graph Edge] Clarification needed or error in brief. Ending graph. Brief: {state.get('research_brief')}")
+            return END
+        logger.info("[Main Graph Edge] Brief is clear. Proceeding to research.")
+        return "write_research_brief"
+
+    deep_researcher_builder.add_conditional_edges("clarify_with_user", should_start_research)
     deep_researcher_builder.add_edge("write_research_brief", "research_supervisor")
     deep_researcher_builder.add_edge("research_supervisor", "final_report_generation")
     deep_researcher_builder.add_edge("final_report_generation", END)

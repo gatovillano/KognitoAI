@@ -21,7 +21,7 @@ interface ChatMessage {
   text: string;
   sender: 'user' | 'ai';
   created_at: string;
-  image_base64?: string;
+  images_base64?: string[];
   document_url?: string;
 }
 
@@ -32,8 +32,8 @@ interface ChatInputBarProps {
   isProcessingAudio?: boolean;
   isUploadingFile?: boolean;
   isVectorizingFile?: boolean; // Nueva prop para indicar la vectorización
-  isUploadingImage?: boolean;
-  uploadedImagePreview?: string | null;
+  isUploadingImages?: boolean;
+  uploadedImagePreviews?: string[] | null;
   isKnowledgeAnalysisActive: boolean;
   isWebSearchActive: boolean;
   isComprehensiveAnalysisActive: boolean;
@@ -52,7 +52,7 @@ interface ChatInputBarProps {
   onStopRecording?: () => void;
   onFileUpload?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onImageUpload?: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onRemoveImage?: () => void;
+  onRemoveImage?: (index: number) => void;
   onPaste?: (e: ClipboardEvent) => void;
   currentContext: SelectedContextItem[];
   onRemoveContextItem?: (item: SelectedContextItem) => void;
@@ -70,8 +70,8 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   isProcessingAudio = false,
   isUploadingFile = false,
   isVectorizingFile = false, // Nueva prop
-  isUploadingImage = false,
-  uploadedImagePreview = null,
+  isUploadingImages = false,
+  uploadedImagePreviews = null,
   isKnowledgeAnalysisActive,
   isWebSearchActive,
   isComprehensiveAnalysisActive,
@@ -171,7 +171,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (!isResponding && (newMessage.trim() || currentContext.length > 0 || uploadedImagePreview)) {
+      if (!isResponding && (newMessage.trim() || currentContext.length > 0 || (uploadedImagePreviews && uploadedImagePreviews.length > 0))) {
         const form = (e.target as HTMLTextAreaElement).form;
         if (form) {
           form.requestSubmit();
@@ -247,22 +247,26 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                 ))}
               </div>
             )}
-            {uploadedImagePreview && (
-              <div className="relative w-24 h-24 mb-2">
-                <Image
-                  src={uploadedImagePreview}
-                  alt="Previsualización de imagen"
-                  layout="fill"
-                  objectFit="cover"
-                  className="rounded-md"
-                />
-                <button
-                  type="button"
-                  onClick={onRemoveImage}
-                  className="absolute top-1 right-1 bg-gray-900/50 text-white rounded-full p-1 hover:bg-gray-900/75 transition-colors"
-                >
-                  <X className="h-3 w-3" />
-                </button>
+            {uploadedImagePreviews && uploadedImagePreviews.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {uploadedImagePreviews.map((preview, index) => (
+                  <div key={index} className="relative w-24 h-24">
+                    <Image
+                      src={preview}
+                      alt={`Previsualización de imagen ${index + 1}`}
+                      layout="fill"
+                      objectFit="cover"
+                      className="rounded-md"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => onRemoveImage(index)}
+                      className="absolute top-1 right-1 bg-gray-900/50 text-white rounded-full p-1 hover:bg-gray-900/75 transition-colors"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
             <Textarea
@@ -283,7 +287,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                   isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
                   isDeepResearchActive={isDeepResearchActive}
                   isUploadingFile={isUploadingFile || isVectorizingFile}
-                  isUploadingImage={isUploadingImage}
+                  isUploadingImage={isUploadingImages}
                   onToggleWebSearch={onToggleWebSearch}
                   onToggleComprehensiveAnalysis={onToggleComprehensiveAnalysis}
                   onToggleDeepResearch={onToggleDeepResearch}
@@ -328,7 +332,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                 <Button
                   type="submit"
                   size="icon"
-                  disabled={isResponding || isUploadingFile || isVectorizingFile || (!newMessage.trim() && currentContext.length === 0 && !uploadedImagePreview)}
+                  disabled={isResponding || isUploadingFile || isVectorizingFile || (!newMessage.trim() && currentContext.length === 0 && (!uploadedImagePreviews || uploadedImagePreviews.length === 0))}
                   className="rounded-full"
                 >
                   {(isResponding || isUploadingFile || isVectorizingFile) ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}

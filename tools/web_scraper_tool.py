@@ -20,7 +20,7 @@ import logging
 import asyncio
 from typing import Any, Type, List, Optional
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from langchain_core.documents import Document
 

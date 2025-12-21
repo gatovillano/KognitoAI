@@ -17,7 +17,7 @@ sea consistente con los chunks del documento.
 import logging
 from typing import Any, Type, Optional
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importación de la lógica de negocio para actualizar metadatos

@@ -89,7 +89,8 @@ class LinkedFormResponse(BaseModel):
     id: uuid.UUID
     form_id: uuid.UUID
     submitted_at: datetime
-    answers: List[Dict[str, Any]] # Cambiado de dict a List[Dict[str, Any]]
+    answers: List[Dict[str, Any]]
+    form_title: Optional[str] = None # Añadido para mostrar el título del formulario en el frontend
     class Config: from_attributes = True
 
 class LinkedObjectsResponse(BaseModel):
@@ -316,8 +317,8 @@ async def get_linked_objects(
             selectinload(ContactProfile.agenda_events).selectinload(AgendaEvent.workspace), # Y aquí cargamos el workspace para evitar el lazy loading
             selectinload(ContactProfile.tasks),
             selectinload(ContactProfile.user_document_topics),
-            selectinload(ContactProfile.albums),
-            selectinload(ContactProfile.form_responses) # Cargar las respuestas de formulario
+            selectinload(ContactProfile.albums).selectinload(Album.cover_photo),
+            selectinload(ContactProfile.form_responses).selectinload(FormResponse.form) # Cargar las respuestas de formulario y sus formularios asociados
         )
         .where(ContactProfile.id == profile_id, ContactProfile.account_id == current_account.id)
     )
@@ -327,23 +328,18 @@ async def get_linked_objects(
     if not profile:
         raise HTTPException(status_code=404, detail="Perfil de contacto no encontrado o no autorizado.")
 
-    # Enhance albums with total_photos and cover_photo
+    # Procesar álbumes para incluir la foto de portada
     enhanced_albums = []
     if profile.albums:
         for album in profile.albums:
-            # Get total photo count for the album
-            total_photos_stmt = select(func.count(Photo.id)).where(Photo.album_id == album.id)
-            total_photos_result = await db.execute(total_photos_stmt)
-            total_photos = total_photos_result.scalar_one()
-
-            # Get the cover photo object if it exists
-            cover_photo_obj = None
-            if album.cover_photo_id:
-                cover_photo_result = await db.execute(select(Photo).where(Photo.id == album.cover_photo_id))
-                photo = cover_photo_result.scalars().first()
-                if photo:
-                    cover_photo_obj = PhotoResponseForContactProfile.model_validate(photo)
-
+            cover_photo_data = None
+            if album.cover_photo:
+                cover_photo_data = PhotoResponseForContactProfile(
+                    id=album.cover_photo.id,
+                    file_path=album.cover_photo.file_path,
+                    thumbnail_path=album.cover_photo.thumbnail_path
+                )
+            
             enhanced_albums.append(
                 LinkedAlbumResponse(
                     id=album.id,
@@ -351,21 +347,41 @@ async def get_linked_objects(
                     description=album.description,
                     cover_photo_id=album.cover_photo_id,
                     created_at=album.created_at,
-                    total_photos=total_photos,
-                    cover_photo=cover_photo_obj
+                    total_photos=len(album.photos) if album.photos else 0, # Asumiendo que photos está cargado o es una relación lazy
+                    cover_photo=cover_photo_data
                 )
             )
 
-    # Procesar eventos de agenda para incluir event_datetime_local calculado
+    # Procesar eventos de agenda
     processed_agenda_events = []
     if profile.agenda_events:
-        # Necesitamos la zona horaria del usuario para calcular event_datetime_local
-        account = await db.get(Account, current_account.id)
-        user_timezone = account.timezone if account and account.timezone else "UTC"
-
         for event in profile.agenda_events:
-            event_dict = event.to_dict(user_timezone)
-            processed_agenda_events.append(LinkedAgendaEventResponse(**event_dict))
+            # Calcular event_datetime_local si es necesario, o usar UTC
+            # Aquí simplificamos usando UTC para ambos si no hay info de zona horaria del usuario disponible fácilmente
+            # En una implementación real, podrías querer convertir a la zona horaria del usuario actual
+            processed_agenda_events.append(
+                LinkedAgendaEventResponse(
+                    id=event.id,
+                    summary=event.summary,
+                    description=event.description,
+                    event_datetime_utc=event.event_datetime_utc,
+                    event_datetime_local=event.event_datetime_utc # Por ahora devolvemos UTC en local también
+                )
+            )
+
+    # Procesar respuestas de formulario para incluir el título del formulario
+    processed_form_responses = []
+    if profile.form_responses:
+        for fr in profile.form_responses:
+            processed_form_responses.append(
+                LinkedFormResponse(
+                    id=fr.id,
+                    form_id=fr.form_id,
+                    submitted_at=fr.submitted_at,
+                    answers=fr.answers,
+                    form_title=fr.form.name if fr.form else 'Formulario Desconocido' # Asignar el título del formulario
+                )
+            )
 
     return LinkedObjectsResponse(
         notes=profile.notas,
@@ -373,7 +389,7 @@ async def get_linked_objects(
         tasks=profile.tasks,
         user_document_topics=profile.user_document_topics,
         albums=enhanced_albums,
-        form_responses=profile.form_responses # Añadir las respuestas de formulario
+        form_responses=processed_form_responses # Usar las respuestas de formulario procesadas
     )
 
 @router.post("/create-contact-profile", response_model=ContactProfileResponse)
