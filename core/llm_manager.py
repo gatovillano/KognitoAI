@@ -1,10 +1,15 @@
 # core/llm_manager.py
 
 import logging
-from typing import Optional, Dict, Any
+import time
+import asyncio
+from collections import deque
+from threading import Lock
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 import litellm # Importar litellm
 from langchain_core.language_models.base import BaseLanguageModel
+from langchain_core.rate_limiters import BaseRateLimiter
 from langchain_community.chat_models import ChatLiteLLM
 from core.config import settings
 
@@ -13,8 +18,86 @@ litellm.drop_params = True
 
 logger = logging.getLogger(__name__)
 
+# --- Rate Limiter Implementation ---
+
+class RateLimiter(BaseRateLimiter):
+    """
+    A thread-safe, asyncio-compatible rate limiter that adheres to the interface
+    expected by LangChain's `rate_limiter` parameter. It ensures that no more
+    than a specified number of requests are made per minute.
+    """
+    _instance = None
+    _lock = Lock()
+
+    def __new__(cls, *args, **kwargs):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+                cls._instance.max_requests = kwargs.get('max_requests', 5)
+                cls._instance.per_seconds = kwargs.get('per_seconds', 60)
+                cls._instance.request_timestamps = deque()
+                logger.info(
+                    f"RateLimiter initialized: {cls._instance.max_requests} requests per {cls._instance.per_seconds} seconds."
+                )
+            return cls._instance
+
+    def __init__(self, max_requests: int = 5, per_seconds: int = 60):
+        pass # State is managed by the singleton __new__
+
+    async def aacquire(self, **kwargs: Any) -> None:
+        """
+        Asynchronously waits if the rate limit is about to be exceeded.
+        This method's signature matches what LangChain's async LLM calls expect.
+        """
+        with self._lock:
+            now = time.monotonic()
+            # Prune old timestamps
+            while self.request_timestamps and self.request_timestamps[0] <= now - self.per_seconds:
+                self.request_timestamps.popleft()
+
+            wait_time = 0
+            if len(self.request_timestamps) >= self.max_requests:
+                oldest_request_time = self.request_timestamps[0]
+                time_since_oldest = now - oldest_request_time
+                wait_time = self.per_seconds - time_since_oldest
+
+                if wait_time > 0:
+                    logger.warning(
+                        f"Rate limit of {self.max_requests}/{self.per_seconds}s reached. "
+                        f"Async waiting for {wait_time:.2f} seconds."
+                    )
+        
+        if wait_time > 0:
+            await asyncio.sleep(wait_time)
+
+        with self._lock:
+            self.request_timestamps.append(time.monotonic())
+
+    def acquire(self, **kwargs: Any) -> None:
+        """
+        Synchronously waits if the rate limit is about to be exceeded.
+        This method's signature matches what LangChain's sync LLM calls expect.
+        """
+        with self._lock:
+            now = time.monotonic()
+            while self.request_timestamps and self.request_timestamps[0] <= now - self.per_seconds:
+                self.request_timestamps.popleft()
+
+            wait_time = 0
+            if len(self.request_timestamps) >= self.max_requests:
+                oldest_request_time = self.request_timestamps[0]
+                time_since_oldest = now - oldest_request_time
+                wait_time = self.per_seconds - time_since_oldest
+                if wait_time > 0:
+                    logger.warning(f"Rate limit reached. Sync waiting for {wait_time:.2f}s.")
+                    time.sleep(wait_time)
+            
+            self.request_timestamps.append(time.monotonic())
+
+# Initialize the global rate limiter
+gemini_rate_limiter = RateLimiter(max_requests=5, per_seconds=61) # 61 to be safe
+
 # --- Global LLM Instances ---
-# These are initialized by `initialize_llms` when the server starts.
 _main_agent_llm_instance: Optional[BaseLanguageModel] = None
 _fast_task_llm_instance: Optional[BaseLanguageModel] = None
 
@@ -32,70 +115,57 @@ async def _invoke_llm_cached(llm: BaseLanguageModel, prompt: str) -> Any:
 
 async def initialize_llms():
     """
-    Initializes the global instances of the LLMs (main and fast task).
-    This function is called once when the web_server starts.
+    Initializes the global instances of the LLMs (main and fast task)
+    with a compliant rate limiter.
     """
     global _main_agent_llm_instance, _fast_task_llm_instance
     
-    global _main_agent_llm_instance, _fast_task_llm_instance
-    
     try:
-        logger.info(f"🛠️ Initializing main agent LLM (LiteLLM - {settings.llm_model})...")
+        logger.info(f"🛠️ Initializing main agent LLM with rate limiting (LiteLLM - {settings.llm_model})...")
         
-        # Configuración base para el LLM
         llm_kwargs = {
             "model": settings.llm_model,
             "temperature": settings.llm_temperature,
             "streaming": True,
             "verbose": True,
-            "drop_params": True # Ya está aquí, pero lo mantenemos
+            "drop_params": True,
+            "max_retries": 0, # We handle rate limiting, so disable litellm's retries for this
+            "timeout": 120,
+            "rate_limiter": gemini_rate_limiter, # Pass the compliant rate limiter
         }
         
-        # Configuración para forzar la salida JSON
-        llm_kwargs["response_format"] = {"type": "json_object"}
-
-        # Agregar api_base solo si está configurado
         if settings.llm_api_base:
             llm_kwargs["api_base"] = settings.llm_api_base
         
-        # Configuración específica para modelos de OpenAI (GPT-4, GPT-5, etc.)
-        # Esto ayuda con el tool calling
         if "gpt" in settings.llm_model.lower() or "openai" in settings.llm_model.lower():
-            logger.info("🔧 Detectado modelo OpenAI/GPT - Aplicando configuración optimizada para tool calling")
-            llm_kwargs["model_kwargs"] = {
-                "tool_choice": "auto",  # Permite al modelo decidir cuándo usar herramientas
-            }
+            logger.info("🔧 Applying OpenAI/GPT specific config for tool calling.")
+            llm_kwargs["model_kwargs"] = {"tool_choice": "auto"}
         elif "gemini" in settings.llm_model.lower():
-            logger.info("🔧 Detectado modelo Gemini - Usando provider 'google_ai_studio' para evitar problemas con VertexAI y asegurando drop_params")
-            llm_kwargs["provider"] = "google_ai_studio"  # Usa Google AI Studio en lugar de VertexAI para mejor compatibilidad
-            # Aseguramos que no se pase tool_choice si se usa response_format
-            if "model_kwargs" in llm_kwargs and "tool_choice" in llm_kwargs["model_kwargs"]:
-                del llm_kwargs["model_kwargs"]["tool_choice"]
-            # Eliminar la configuración de response_format para Gemini, ya que causa problemas con el streaming
-            if "response_format" in llm_kwargs:
-                del llm_kwargs["response_format"]
-        else:
-            logger.info(f"🔧 Modelo '{settings.llm_model}' no es de OpenAI/GPT ni Gemini - Usando 'drop_params=True' para compatibilidad")
-            # drop_params ya está en llm_kwargs, no es necesario reasignar
+            logger.info("🔧 Applying Gemini specific config.")
+            llm_kwargs["provider"] = "google_ai_studio"
 
         main_llm = ChatLiteLLM(**llm_kwargs)
         _main_agent_llm_instance = main_llm
-        logger.info("✅ Main agent LLM initialized.")
+        logger.info("✅ Main agent LLM initialized with rate limiting.")
     except Exception as e:
         logger.error(f"❌ FATAL: Failed to initialize the main LLM: {e}", exc_info=True)
         raise
 
     try:
-        logger.info(f"🛠️ Initializing fast task LLM (LiteLLM - {settings.fast_llm_model})...")
+        logger.info(f"🛠️ Initializing fast task LLM with rate limiting (LiteLLM - {settings.fast_llm_model})...")
         fast_llm = ChatLiteLLM(
             model=settings.fast_llm_model,
             temperature=0.0,
             streaming=True,
             api_base=settings.llm_api_base,
-            verbose=True
+            verbose=True,
+            drop_params=True,
+            max_retries=0,
+            timeout=120,
+            rate_limiter=gemini_rate_limiter, # Use the same rate limiter instance
         )
         _fast_task_llm_instance = fast_llm
-        logger.info("✅ Fast task LLM initialized.")
+        logger.info("✅ Fast task LLM initialized with rate limiting.")
     except Exception as e:
         logger.warning(f"⚠️ Failed to initialize the fast task LLM. The main LLM will be used as a fallback: {e}")
         _fast_task_llm_instance = _main_agent_llm_instance

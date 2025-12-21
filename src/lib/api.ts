@@ -6,7 +6,7 @@ const apiClient = axios.create({
   // Usar variable de entorno o fallback a desarrollo local
   baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000', // Cambiado a localhost para desarrollo
   headers: {
-    'Content-Type': 'application/json',
+    // 'Content-Type': 'application/json', // Removed to allow axios to handle FormData correctly
   },
   // Timeout aumentado para operaciones largas del LLM (15 minutos)
   timeout: 900000, // 15 minutos en milisegundos

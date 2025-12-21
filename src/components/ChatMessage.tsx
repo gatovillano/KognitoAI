@@ -41,6 +41,7 @@ interface ChatMessageProps {
     text: string;
     sender: 'user' | 'ai';
     image_base64?: string;
+    images_base64?: string[];
     document_url?: string;
     artifact?: Artifact;
     ragContext?: any[];
@@ -323,16 +324,33 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                 </div>
               )}
 
-              {msg.image_base64 && (
+              {(msg.image_base64 || (msg.images_base64 && msg.images_base64.length > 0)) && (
                 <div className="mt-3">
-                  <Image
-                    src={msg.image_base64}
-                    alt="Imagen adjunta"
-                    className="max-w-full h-auto rounded-2xl cursor-pointer shadow-sm"
-                    onClick={() => window.open(msg.image_base64, '_blank')}
-                    width={500} // Asumiendo un ancho razonable
-                    height={500} // Asumiendo una altura razonable
-                  />
+                  {msg.image_base64 && (
+                    <Image
+                      src={msg.image_base64}
+                      alt="Imagen adjunta"
+                      className="max-w-full h-auto rounded-2xl cursor-pointer shadow-sm"
+                      onClick={() => window.open(msg.image_base64, '_blank')}
+                      width={500} // Asumiendo un ancho razonable
+                      height={500} // Asumiendo una altura razonable
+                    />
+                  )}
+                  {msg.images_base64 && msg.images_base64.length > 0 && (
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      {msg.images_base64.map((image, index) => (
+                        <Image
+                          key={index}
+                          src={image}
+                          alt={`Imagen adjunta ${index + 1}`}
+                          className="w-full h-auto rounded-2xl cursor-pointer shadow-sm"
+                          onClick={() => window.open(image, '_blank')}
+                          width={500}
+                          height={500}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
               {msg.document_url && (

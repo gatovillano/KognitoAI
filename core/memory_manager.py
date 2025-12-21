@@ -552,8 +552,10 @@ async def _update_embedding_columns_after_insert(
                 thread_id = :thread_id
             WHERE
                 collection_id = :collection_uuid
-                AND cmetadata->>'file_name' = :file_name
-                AND cmetadata->>'type' = 'document_chunk'
+                AND (
+                    (cmetadata->>'file_name' = :file_name AND cmetadata->>'type' = 'document_chunk') OR
+                    (cmetadata->>'type' = 'user_memory_proactive_llm' OR cmetadata->>'type' = 'thread_summary' OR cmetadata->>'type' = 'enhanced_episodic' OR cmetadata->>'type' = 'general_memory')
+                )
         """
 
         # Procesar FieldInfo para workspace_id, telegram_id, thread_id

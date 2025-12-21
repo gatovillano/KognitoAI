@@ -16,6 +16,7 @@ import asyncio
 import sys
 import uvicorn
 from contextlib import asynccontextmanager
+from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -33,6 +34,7 @@ from telegram_client.handlers.message_handlers import register_message_handlers
 from telegram_client.handlers.callback_query_handler import register_callback_query_handler
 from telegram_client.handlers.document_handlers import register_document_handlers
 from telegram_client.handlers.admin_handlers import register_admin_handlers
+from telegram_client.handlers.workspace_handler import register_workspace_handlers
 from telegram_client.websocket_client import start_telegram_ws_client, stop_telegram_ws_client
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -74,6 +76,7 @@ async def lifespan(app: FastAPI):
     register_message_handlers(ptb_app)
     register_command_handlers(ptb_app)
     register_callback_query_handler(ptb_app)
+    register_workspace_handlers(ptb_app)
     
     # 3. Inicializar la aplicación. Prepara el bot, el dispatcher, etc.
     await ptb_app.initialize()
@@ -211,8 +214,9 @@ class StoreUserDataRequest(BaseModel):
 
 class BotCreateThreadRequest(BaseModel):
     """Define la estructura de datos para una solicitud de creación de hilo de bot."""
+    account_id: str
     chat_id: int
-    thread_name: str
+    workspace_id: Optional[str] = None
 
 @internal_api.post("/internal/store-user-data")
 async def store_user_data_endpoint(request: StoreUserDataRequest):
@@ -246,10 +250,24 @@ async def bot_create_thread_endpoint(request: BotCreateThreadRequest):
     if bot_instance is None:
         raise HTTPException(status_code=503, detail="El bot de Telegram no está inicializado.")
     try:
-        # Aquí se implementaría la lógica para crear un hilo de conversación en Telegram
-        # Por ahora, solo registramos la solicitud y devolvemos un estado de éxito simulado
-        logger.info(f"Creando hilo de conversación en chat {request.chat_id} con nombre {request.thread_name}")
-        return {"status": "ok", "thread_id": f"thread_{request.chat_id}_{request.thread_name}"}
+        from core.database import ChatThread, SessionLocal
+        from utils.db_session import DBSession
+        import uuid
+
+        async with DBSession(SessionLocal) as session:
+            new_thread = ChatThread(
+                account_id=uuid.UUID(request.account_id),
+                workspace_id=uuid.UUID(request.workspace_id) if request.workspace_id else None,
+                title=f"Chat de Telegram - {request.chat_id}",
+                platform="telegram"
+            )
+            session.add(new_thread)
+            await session.commit()
+            await session.refresh(new_thread)
+            
+            logger.info(f"Nuevo hilo {new_thread.id} creado para la cuenta {request.account_id} en el workspace {request.workspace_id}")
+            return {"status": "ok", "id": str(new_thread.id)}
+
     except Exception as e:
         logger.error(f"Error en endpoint interno /bot-create-thread: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error al crear hilo de conversación.")

@@ -44,7 +44,7 @@ interface ChatMessageType {
   text: string;
   sender: 'user' | 'ai';
   created_at: string;
-  image_base64?: string;
+  images_base64?: string[];
   document_url?: string;
   ragContext?: SelectedContextItem[];
   sources?: Source[];
@@ -144,8 +144,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [isComprehensiveAnalysisActive, setIsComprehensiveAnalysisActive] = useState(false);
   const [isDeepResearchActive, setIsDeepResearchActive] = useState(false);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
-  const [isUploadingImage, setIsUploadingImage] = useState(false);
-  const [uploadedImage, setUploadedImage] = useState<{ preview: string; base64: string } | null>(null);
+  const [isUploadingImages, setIsUploadingImages] = useState(false);
+  const [uploadedImages, setUploadedImages] = useState<{ preview: string; base64: string }[]>([]);
   const [backgroundTasks, setBackgroundTasks] = useState<{ taskId: string; type: string }[]>([]);
   const [isProcessingAudio, setIsProcessingAudio] = useState(false);
   const [isVectorizingFile, setIsVectorizingFile] = useState(false); // Added isVectorizingFile
@@ -356,7 +356,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     async (e?: React.FormEvent, messageTextFromInput?: string) => {
       if (e) e.preventDefault();
       const messageToProcess = messageTextFromInput || newMessageRef.current;
-      if ((!messageToProcess.trim() && selectedContext.length === 0 && !uploadedImage) || isRespondingRef.current) return;
+      if ((!messageToProcess.trim() && selectedContext.length === 0 && uploadedImages.length === 0) || isRespondingRef.current) return;
 
       if (!user?.id) {
         toast.error('Error: Usuario no autenticado.');
@@ -377,10 +377,12 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           if (selectedContext.length > 0) {
             formData.append('rag_context', JSON.stringify(selectedContext.map(item => ({ type: item.type, id: item.id }))));
           }
-          if (uploadedImage) {
-            formData.append('image_base64', uploadedImage.base64);
+          if (uploadedImages.length > 0) {
+            uploadedImages.forEach(image => {
+              formData.append('images_base64', image.base64);
+            });
           }
-          await apiClient.post('/api/chat', formData); // CORRECTED ENDPOINT
+          await apiClient.post('/api/chat-form', formData); // CORRECTED ENDPOINT
 
           const newSearchParams = new URLSearchParams();
           if (selectedContext.length > 0) {
@@ -393,9 +395,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           setIsResponding(false);
         }
         setNewMessage('');
-        if (uploadedImage) {
-          URL.revokeObjectURL(uploadedImage.preview);
-          setUploadedImage(null);
+        if (uploadedImages.length > 0) {
+          uploadedImages.forEach(img => URL.revokeObjectURL(img.preview));
+          setUploadedImages([]);
         }
         return;
       }
@@ -405,14 +407,14 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         sender: 'user',
         created_at: new Date().toISOString(),
         ragContext: selectedContext.length > 0 ? selectedContext : undefined,
-        image_base64: uploadedImage?.base64,
+        images_base64: uploadedImages.map(img => img.base64),
       };
       setMessages((prev) => [...prev, userMessage]);
       requestAnimationFrame(() => scrollToBottom(true));
       setNewMessage('');
-      if (uploadedImage) {
-        URL.revokeObjectURL(uploadedImage.preview);
-        setUploadedImage(null);
+      if (uploadedImages.length > 0) {
+        uploadedImages.forEach(img => URL.revokeObjectURL(img.preview));
+        setUploadedImages([]);
       }
       setIsResponding(true);
 
@@ -424,10 +426,12 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         if (selectedContext.length > 0) {
           formData.append('rag_context', JSON.stringify(selectedContext.map(item => ({ type: item.type, id: item.id }))));
         }
-        if (uploadedImage) {
-          formData.append('image_base64', uploadedImage.base64);
+        if (uploadedImages.length > 0) {
+          uploadedImages.forEach(image => {
+            formData.append('images_base64', image.base64);
+          });
         }
-        const response = await apiClient.post('/api/chat', formData); // CORRECTED ENDPOINT
+        const response = await apiClient.post('/api/chat-form', formData); // CORRECTED ENDPOINT
         const responseTaskId = response.data?.taskId; // Captura el taskId de la respuesta
 
         if (responseTaskId) {
@@ -441,44 +445,53 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         setIsResponding(false);
       }
     },
-    [user, threadId, selectedContext, router, scrollToBottom, setNewMessage, uploadedImage]
+    [user, threadId, selectedContext, router, scrollToBottom, setNewMessage, uploadedImages]
   );
 
   const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
-    setIsUploadingImage(true);
-    toast.info(`Cargando imagen: ${file.name}`);
+    setIsUploadingImages(true);
+    toast.info(`Cargando ${files.length} imagen(es)...`);
+
+    const imagePromises = Array.from(files).map(file => {
+      return new Promise<{ preview: string; base64: string }>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64String = reader.result as string;
+          resolve({
+            preview: URL.createObjectURL(file),
+            base64: base64String,
+          });
+        };
+        reader.onerror = () => {
+          reject(new Error(`Error al leer el archivo de imagen: ${file.name}`));
+        };
+        reader.readAsDataURL(file);
+      });
+    });
 
     try {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64String = reader.result as string;
-        setUploadedImage({
-          preview: URL.createObjectURL(file),
-          base64: base64String,
-        });
-        setIsUploadingImage(false);
-        toast.success(`Imagen '${file.name}' lista para enviar.`);
-      };
-      reader.onerror = () => {
-        toast.error("Error al leer el archivo de imagen.");
-        setIsUploadingImage(false);
-      };
-      reader.readAsDataURL(file);
-    } catch (error) {
-      toast.error("Error al procesar la imagen.");
-      setIsUploadingImage(false);
+      const newImages = await Promise.all(imagePromises);
+      setUploadedImages(prevImages => [...prevImages, ...newImages]);
+      setIsUploadingImages(false);
+      toast.success(`${files.length} imagen(es) lista(s) para enviar.`);
+    } catch (error: any) {
+      toast.error(error.message);
+      setIsUploadingImages(false);
     }
   }, []);
 
-  const handleRemoveImage = useCallback(() => {
-    if (uploadedImage) {
-      URL.revokeObjectURL(uploadedImage.preview);
-      setUploadedImage(null);
-    }
-  }, [uploadedImage]);
+  const handleRemoveImage = useCallback((index: number) => {
+    setUploadedImages(prevImages => {
+      const imageToRemove = prevImages[index];
+      if (imageToRemove) {
+        URL.revokeObjectURL(imageToRemove.preview);
+      }
+      return prevImages.filter((_, i) => i !== index);
+    });
+  }, []);
 
   const handleStartRecording = useCallback(async () => {
     try {
@@ -595,7 +608,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         formData.append('rag_context', JSON.stringify(selectedContext.map(item => ({ type: item.type, id: item.id }))));
       }
 
-      await apiClient.post('/api/chat', formData);
+      await apiClient.post('/api/chat-form', formData);
     } catch (error: any) {
       console.error('Error retrying message:', error);
       toast.error('Error al reenviar el mensaje');
@@ -812,8 +825,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       isRecording={isRecording}
       isProcessingAudio={isProcessingAudio}
       isUploadingFile={isUploadingFile}
-      isUploadingImage={isUploadingImage}
-      uploadedImagePreview={uploadedImage?.preview}
+      isUploadingImages={isUploadingImages}
+      uploadedImagePreviews={uploadedImages.map(img => img.preview)}
       isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
       isWebSearchActive={isWebSearchActive}
       isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
@@ -854,7 +867,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                     msg={{
                       text: msg.text,
                       sender: msg.sender,
-                      image_base64: msg.image_base64 || '',
+                      images_base64: msg.images_base64 || [],
                       document_url: msg.document_url || '',
                       ragContext: msg.ragContext,
                       sources: msg.sources,
@@ -898,8 +911,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               isProcessingAudio={isProcessingAudio}
               currentContext={selectedContext}
               isUploadingFile={isUploadingFile}
-              isUploadingImage={isUploadingImage}
-              uploadedImagePreview={uploadedImage?.preview}
+              isUploadingImages={isUploadingImages}
+              uploadedImagePreviews={uploadedImages.map(img => img.preview)}
               isKnowledgeAnalysisActive={selectedContext.length > 0}
               isWebSearchActive={isWebSearchActive}
               isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
@@ -932,18 +945,4 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       </div>
     </div>
   );
-}
-
-// Modificar la definición de ChatMessageType para incluir taskId
-interface ChatMessageType {
-  text: string;
-  sender: 'user' | 'ai';
-  created_at: string;
-  image_base64?: string;
-  document_url?: string;
-  ragContext?: SelectedContextItem[];
-  sources?: Source[];
-  chunks?: string[];
-  tool_code?: string;
-  taskId?: string; // Añadir taskId
 }

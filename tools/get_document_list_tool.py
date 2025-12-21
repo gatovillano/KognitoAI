@@ -20,7 +20,7 @@ import logging
 import asyncio
 from typing import Any, List, Dict, Type, Optional, Union
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importaciones de la lógica de negocio y gestión de estado

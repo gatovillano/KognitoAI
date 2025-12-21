@@ -3,7 +3,7 @@
 import logging
 import asyncio
 from typing import Type, Any, Optional
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 

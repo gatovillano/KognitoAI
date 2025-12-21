@@ -4,7 +4,7 @@ import logging
 import asyncio
 from typing import Any, Optional, Type
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importamos la INSTANCIA del analizador, no la función.
