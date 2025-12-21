@@ -60,9 +60,11 @@ class ChatRequest(BaseModel):
     telegram_id: Optional[int] = None  # Hacemos telegram_id opcional
     user_message: str
     image_base64: Optional[str] = None
+    images_base64: Optional[List[str]] = None
     document_url: Optional[str] = None  # Campo para URL de documentos
     mode: Optional[str] = None
     rag_context: Optional[str] = None # Contexto RAG: [{'type': 'document', 'id': '...'}, {'type': 'collection', 'id': '...'}]
+    workspace_id: Optional[str] = None  # Campo para el ID del workspace
 
 class ToolExecutionRequest(BaseModel):
     tool_name: str
@@ -84,6 +86,7 @@ class Message(BaseModel):
     sender: str
     created_at: datetime # Cambiado a datetime
     image_base64: Optional[str] = None
+    images_base64: Optional[List[str]] = None
     document_url: Optional[str] = None
     sources: Optional[List[Source]] = None # Añadido para incluir las fuentes
 
@@ -243,7 +246,7 @@ async def get_messages_for_thread(
         for msg in all_messages:
             if not (hasattr(msg, 'additional_kwargs') and msg.additional_kwargs.get("role") == "summary"):
                 text_content = ""
-                image_content = None
+                image_contents = []
                 
                 if isinstance(msg.content, list):
                     # Handle multimodal content
@@ -254,12 +257,12 @@ async def get_messages_for_thread(
                             elif part.get("type") == "image_url":
                                 image_url_data = part.get("image_url")
                                 if isinstance(image_url_data, dict):
-                                    image_content = image_url_data.get("url")
+                                    image_contents.append(image_url_data.get("url"))
                         else:
                             text_content += str(part)
                 else:
                     text_content = str(msg.content)
-
+                
                 # Extraer sources si existen en additional_kwargs
                 message_sources = msg.additional_kwargs.get("sources", [])
                 
@@ -267,7 +270,8 @@ async def get_messages_for_thread(
                     text=text_content,
                     sender="user" if isinstance(msg, HumanMessage) else "ai",
                     created_at=msg.additional_kwargs.get("created_at", datetime.now(timezone.utc)),
-                    image_base64=image_content,
+                    image_base64=image_contents[0] if image_contents else None,
+                    images_base64=image_contents if len(image_contents) > 1 else None,
                     sources=message_sources # Asignar las fuentes extraídas
                 ))
 
@@ -645,19 +649,23 @@ async def handle_chat(
         except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"Error al parsear rag_context: {e}")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Formato de rag_context inválido.")
-
+    
     logger.info(f"Petición de chat recibida de la cuenta: {request.account_id} con modo: {request.mode}. Task ID: {task_id}")
     
-    thread = await db.scalar(select(ChatThread).where(
-        ChatThread.id == uuid.UUID(request.thread_id),
-        ChatThread.account_id == uuid.UUID(current_account_id)
-    ))
-    if not thread:
-        logger.warning(f"No se encontró el hilo {request.thread_id} para la cuenta {current_account_id}.")
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Hilo de chat con id {request.thread_id} no encontrado.")
-
-    workspace_id = str(thread.workspace_id) if thread.workspace_id else None
-
+    # Obtener el workspace_id del payload si está presente, de lo contrario obtenerlo del hilo
+    workspace_id = request.workspace_id if request.workspace_id else None
+    
+    if not workspace_id:
+        # Si no se proporcionó workspace_id en el payload, obtenerlo del hilo
+        thread = await db.scalar(select(ChatThread).where(
+            ChatThread.id == uuid.UUID(request.thread_id),
+            ChatThread.account_id == uuid.UUID(current_account_id)
+        ))
+        if not thread:
+            logger.warning(f"No se encontró el hilo {request.thread_id} para la cuenta {current_account_id}.")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Hilo de chat con id {request.thread_id} no encontrado.")
+        workspace_id = str(thread.workspace_id) if thread.workspace_id else None
+    
     logger.debug(f"DEBUG (api/chat.py): Llamando create_and_run_agent_streaming con thread_id: {request.thread_id}") # <--- NUEVO LOG
     # Añadir la ejecución del agente como una tarea en segundo plano
     background_tasks.add_task(
@@ -668,15 +676,87 @@ async def handle_chat(
         telegram_id=request.telegram_id,
         user_message=request.user_message,
         image_base64=request.image_base64,
+        images_base64=request.images_base64,
         document_url=request.document_url,
         mode=request.mode,
         rag_context=parsed_rag_context,
         background_tasks=background_tasks,
         workspace_id=workspace_id
     )
-
+    
     # Devolver una respuesta inmediata
     return {"thread_id": request.thread_id, "taskId": task_id}
+
+@router.post("/chat-form", status_code=status.HTTP_202_ACCEPTED, summary="Procesar Mensaje de Chat con FormData")
+async def handle_chat_form(
+    background_tasks: BackgroundTasks,
+    thread_id: str = Form(...),
+    account_id: str = Form(...),
+    telegram_id: Optional[int] = Form(None),
+    user_message: str = Form(...),
+    image_base64: Optional[str] = Form(None),
+    images_base64: Optional[List[str]] = Form(None),
+    document_url: Optional[str] = Form(None),
+    mode: Optional[str] = Form(None),
+    rag_context: Optional[str] = Form(None),
+    workspace_id: Optional[str] = Form(None),
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Acepta una solicitud de chat con FormData, inicia una tarea en segundo plano para procesarla
+    y devuelve inmediatamente una respuesta 202 Accepted. Los resultados se envían
+    a través de WebSocket.
+    """
+    task_id = str(uuid.uuid4())
+    
+    # Parse rag_context if provided
+    parsed_rag_context = None
+    if rag_context:
+        try:
+            parsed_rag_context = json.loads(rag_context)
+            if not isinstance(parsed_rag_context, list):
+                raise ValueError("rag_context no es una lista válida.")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Error al parsear rag_context: {e}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Formato de rag_context inválido.")
+    
+    logger.info(f"Petición de chat recibida de la cuenta: {account_id} con modo: {mode}. Task ID: {task_id}")
+    
+    # Obtener el workspace_id del payload si está presente, de lo contrario obtenerlo del hilo
+    final_workspace_id = workspace_id if workspace_id else None
+    
+    if not final_workspace_id:
+        # Si no se proporcionó workspace_id en el payload, obtenerlo del hilo
+        thread = await db.scalar(select(ChatThread).where(
+            ChatThread.id == uuid.UUID(thread_id),
+            ChatThread.account_id == uuid.UUID(current_account_id)
+        ))
+        if not thread:
+            logger.warning(f"No se encontró el hilo {thread_id} para la cuenta {current_account_id}.")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Hilo de chat con id {thread_id} no encontrado.")
+        final_workspace_id = str(thread.workspace_id) if thread.workspace_id else None
+    
+    logger.debug(f"DEBUG (api/chat.py): Llamando create_and_run_agent_streaming con thread_id: {thread_id}") # <--- NUEVO LOG
+    # Añadir la ejecución del agente como una tarea en segundo plano
+    background_tasks.add_task(
+        create_and_run_agent_streaming,
+        account_id=account_id,
+        thread_id=thread_id,
+        task_id=task_id,
+        telegram_id=telegram_id,
+        user_message=user_message,
+        image_base64=image_base64,
+        images_base64=images_base64,
+        document_url=document_url,
+        mode=mode,
+        rag_context=parsed_rag_context,
+        background_tasks=background_tasks,
+        workspace_id=final_workspace_id
+    )
+    
+    # Devolver una respuesta inmediata
+    return {"thread_id": thread_id, "taskId": task_id}
 
 
 async def create_and_run_agent_streaming(
@@ -686,6 +766,7 @@ async def create_and_run_agent_streaming(
     telegram_id: Optional[int],
     user_message: str,
     image_base64: Optional[str] = None,
+    images_base64: Optional[List[str]] = None,
     document_url: Optional[str] = None,
     mode: Optional[str] = None,
     rag_context: Optional[List[Dict[str, str]]] = None,
@@ -743,6 +824,13 @@ async def create_and_run_agent_streaming(
                 "type": "image_url",
                 "image_url": {"url": image_base64},
             })
+        if images_base64:
+            logger.info(f"Adjuntando {len(images_base64)} imágenes al mensaje para el LLM.")
+            for image in images_base64:
+                content_parts.append({
+                    "type": "image_url",
+                    "image_url": {"url": image},
+                })
         
         initial_human_message = HumanMessage(content=content_parts)
         # --- Fin Construcción ---

@@ -261,7 +261,8 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
                 }
                 create_payload = {
                     'account_id': account_id_str,
-                    'chat_id': str(chat_id)
+                    'chat_id': str(chat_id),
+                    'workspace_id': context.chat_data.get('current_workspace_id')
                 }
                 async with httpx.AsyncClient() as client:
                     response = await client.post(create_thread_url, headers=internal_headers, json=create_payload, timeout=10)
@@ -311,7 +312,8 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
                     }
                     create_payload = {
                         'account_id': account_id_str,
-                        'chat_id': str(chat_id)
+                        'chat_id': str(chat_id),
+                        'workspace_id': context.chat_data.get('current_workspace_id')
                     }
                     async with httpx.AsyncClient() as client:
                         response = await client.post(create_thread_url, headers=internal_headers, json=create_payload, timeout=10)
@@ -354,6 +356,11 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
         }
         if image_base64:
             api_payload["image_base64"] = image_base64
+        
+        # Añadir workspace_id si está disponible
+        if 'current_workspace_id' in context.chat_data:
+            api_payload["workspace_id"] = context.chat_data['current_workspace_id']
+
         if current_thread_id:
             try:
                 # Verificar si current_thread_id es un UUID válido

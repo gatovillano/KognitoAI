@@ -8,7 +8,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, User, Edit, Trash2, MoreHorizontal, Info, Mail, Phone, Search } from 'lucide-react'; // Importar Search
+import { Plus, User, Edit, Trash2, MoreHorizontal, Info, Mail, Phone, Search, ExternalLink } from 'lucide-react'; // Importar Search y ExternalLink
 import { motion, AnimatePresence } from 'framer-motion';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -17,6 +17,7 @@ import { useDrag, useDrop } from 'react-dnd';
 
 import { useRouter } from 'next/navigation';
 import { ProfileDialog } from './profile-dialog';
+import { ProfileDetailDialog } from './profile-detail-dialog';
 
 export interface ContactProfile {
   id: string;
@@ -40,6 +41,8 @@ export default function ProfilesPage() {
   const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false);
   const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
   const [searchTerm, setSearchTerm] = useState(''); // Estado para el término de búsqueda
+  const [viewingProfileId, setViewingProfileId] = useState<string | null>(null);
+  const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
 
   const fetchProfiles = async () => {
     setIsLoading(true);
@@ -113,8 +116,8 @@ export default function ProfilesPage() {
           className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full min-h-[200px]"
           style={{ opacity: isDragging ? 0.5 : 1 }}
           onClick={() => {
-            console.log(`Navigating to /profiles/${profile.id}`);
-            router.push(`/profiles/${profile.id}`);
+            setViewingProfileId(profile.id);
+            setIsDetailDialogOpen(true);
           }}
         >
           <CardHeader className="pb-3">
@@ -134,6 +137,15 @@ export default function ProfilesPage() {
                   title="Editar perfil"
                 >
                   <Edit className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0 hover:bg-primary hover:text-primary-foreground"
+                  onClick={(e) => { e.stopPropagation(); router.push(`/profiles/${profile.id}`); }}
+                  title="Ver página completa"
+                >
+                  <ExternalLink className="h-4 w-4" />
                 </Button>
                 <Button
                   variant="ghost"
@@ -311,7 +323,18 @@ export default function ProfilesPage() {
           profile={editingProfile}
           onSaveSuccess={handleSaveSuccess}
         />
-        
+
+        <ProfileDetailDialog
+          isOpen={isDetailDialogOpen}
+          onOpenChange={setIsDetailDialogOpen}
+          profileId={viewingProfileId}
+          onEdit={(profile) => {
+            setIsDetailDialogOpen(false);
+            setEditingProfile(profile);
+            setIsProfileDialogOpen(true);
+          }}
+        />
+
         <AlertDialog open={!!deletingProfile} onOpenChange={(open) => !open && setDeletingProfile(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>

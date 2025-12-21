@@ -8,7 +8,7 @@ Esta versión es "pura": interactúa con el core pero no con la lógica de entre
 import logging
 from typing import Type, Any, Optional
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 import dateparser
 

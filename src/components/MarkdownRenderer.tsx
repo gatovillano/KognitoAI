@@ -154,7 +154,7 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
             highlightedCode = Prism.highlight(text, finalLanguage, language);
           }
         } catch (e) { /* Suppress errors */ }
-        return `<pre data-language="${language}"><code class="language-${language}">${highlightedCode}</code></pre>`;
+        return `<pre data-language="${language}" style="white-space: pre-wrap; word-break: break-all;"><code class="language-${language}">${highlightedCode}</code></pre>`;
       };
       marked.setOptions({ gfm: true, breaks: true, renderer: renderer });
 

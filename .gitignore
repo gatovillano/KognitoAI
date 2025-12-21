@@ -26,4 +26,4 @@ config/neo4j/neo4j.conf
 .gemini_interpreter_history
 kogniterm_history.json
 llm_context.md
-.kogniterm/history.json
+.kogniterm

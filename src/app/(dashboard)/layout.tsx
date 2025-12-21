@@ -12,6 +12,7 @@ import { Toaster } from '@/components/ui/sonner';
 import Image from 'next/image';
 
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
+import { ProactiveInsightNotifier } from '@/components/ProactiveInsightNotifier';
 
 export default function DashboardLayout({
   children,
@@ -41,6 +42,7 @@ export default function DashboardLayout({
   return (
     <WorkspaceProvider>
       <WebSocketProvider>
+        <ProactiveInsightNotifier />
         <DndProvider backend={HTML5Backend}>
           <WorkspaceTitleProvider>
             <AppShell>

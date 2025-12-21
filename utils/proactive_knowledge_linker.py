@@ -444,7 +444,29 @@ async def store_proactive_insight(insight_data: Dict[str, Any]):
             )
             db.add(pi)
             await db.commit()
+            await db.refresh(pi) # Asegurarse de que el ID está cargado
             logger.info(f"Insight guardado en DB con id={pi.id}.")
+
+            # Enviar notificación al frontend via WebSocket AHORA que tenemos el ID
+            try:
+                from core.dependencies import get_websocket_manager
+                manager = get_websocket_manager()
+                
+                payload = {
+                    "type": "proactive_insight",
+                    "content": pi.insight_message,
+                    "insight_type": pi.type,
+                    "confidence": pi.confidence_score,
+                    "action_suggestion": pi.action_suggestion,
+                    "insight_id": str(pi.id)
+                }
+                
+                await manager.send_personal_message(payload, str(pi.account_id))
+                logger.info(f"Notificación de insight {pi.id} enviada a la cuenta {pi.account_id} via WebSocket.")
+
+            except Exception as e:
+                logger.error(f"Error enviando la notificación WebSocket para el insight {pi.id}: {e}", exc_info=True)
+
     except Exception as e:
         logger.error(f"Error guardando insight en BBDD: {e}", exc_info=True)
 

@@ -24,13 +24,14 @@ import httpx
 import json
 
 from telegram import Update, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import Application, CommandHandler, CallbackContext
+from telegram.ext import Application, CommandHandler, CallbackContext, CallbackQueryHandler
 
 # Importaciones de la nueva arquitectura y del proyecto
 from core.config import settings
 from core.database import SessionLocal
 from core.repositories.account_repository import AccountRepository
 from utils.db_session import DBSession
+from core.database import Workspace, SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +234,82 @@ async def open_conversation(update: Update, context: CallbackContext) -> None:
         logger.error(f"Error en el handler /abrir_conversacion para el usuario {user.id}: {e}", exc_info=True)
         await update.message.reply_text("Lo siento, ocurrió un error al procesar tu solicitud. Por favor, intenta de nuevo.")
 
+async def switch_workspace(update: Update, context: CallbackContext) -> None:
+    """
+    Manejador para el comando /workspace.
+    Permite al usuario cambiar el workspace activo.
+    """
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    logger.info(f"Comando /workspace recibido de {user.id} ({user.first_name})")
+
+    try:
+        async with DBSession(SessionLocal) as session:
+            repo = AccountRepository(session)
+            account, _ = await repo.get_or_create_account_from_platform_id(
+                platform='telegram',
+                platform_user_id=str(user.id),
+                first_name=user.first_name,
+                last_name=user.last_name,
+                username=user.username,
+            )
+
+            if not account:
+                await update.message.reply_text("No pude encontrar tu cuenta. Intenta con /start primero.")
+                return
+
+            # Lógica para obtener workspaces (esto podría ser una llamada a la API interna en el futuro)
+            from core.database import Workspace, WorkspacePermission
+            from sqlalchemy.future import select
+
+            permission_stmt = select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == account.id)
+            stmt = select(Workspace).where(Workspace.id.in_(permission_stmt)).order_by(Workspace.name)
+            
+            result = await session.execute(stmt)
+            workspaces = result.scalars().all()
+
+            if not workspaces:
+                await update.message.reply_text("No tienes acceso a ningún workspace todavía. Puedes crear uno desde el panel web.")
+                return
+
+            keyboard = [
+                [InlineKeyboardButton(ws.name, callback_data=f"workspace_select_{ws.id}")]
+                for ws in workspaces
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await update.message.reply_text("Elige el workspace al que quieres cambiar:", reply_markup=reply_markup)
+
+    except Exception as e:
+        logger.error(f"Error en el handler /workspace para el usuario {user.id}: {e}", exc_info=True)
+        await update.message.reply_text("Lo siento, ocurrió un error al intentar cambiar de workspace.")
+
+
+async def workspace_callback_handler(update: Update, context: CallbackContext) -> None:
+    """Maneja la selección de un workspace desde el teclado inline."""
+    query = update.callback_query
+    await query.answer()
+
+    if not query.data or not query.data.startswith("workspace_select_"):
+        return
+
+    workspace_id = query.data.split("workspace_select_")[1]
+    
+    context.chat_data['current_workspace_id'] = workspace_id
+
+    from core.database import Workspace
+    from sqlalchemy.future import select
+    
+    async with DBSession(SessionLocal) as session:
+        workspace = await session.get(Workspace, workspace_id)
+        if workspace:
+            await query.edit_message_text(text=f"Workspace cambiado a: {workspace.name}")
+        else:
+            await query.edit_message_text(text="Error: No se pudo encontrar el workspace seleccionado.")
+
+
 def register_command_handlers(application: Application, group: int = 2):
     """
     Registra todos los manejadores de comandos en la aplicación de Telegram.
@@ -245,4 +322,6 @@ def register_command_handlers(application: Application, group: int = 2):
     application.add_handler(CommandHandler("help", help_command), group=group)
     application.add_handler(CommandHandler("documentos", open_documents_panel), group=group)
     application.add_handler(CommandHandler("abrir_conversacion", open_conversation), group=group)
+    application.add_handler(CommandHandler("workspace", switch_workspace), group=group)
+    application.add_handler(CallbackQueryHandler(workspace_callback_handler, pattern="^workspace_select_"), group=group)
     logger.info("✅ Handlers de comandos registrados.")

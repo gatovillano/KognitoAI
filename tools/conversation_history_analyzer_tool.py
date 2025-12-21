@@ -11,7 +11,7 @@ el perfil del usuario con esta información para personalización a largo plazo.
 
 import logging
 from typing import Any, Dict, Optional, Type, List
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession

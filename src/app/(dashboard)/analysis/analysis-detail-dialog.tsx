@@ -574,24 +574,24 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
             <h3 className="text-xl font-bold mb-4">Detalle del Resumen Semántico - KAI Exocerebro</h3>
 
             {/* Botón de texto a voz */}
-            <div className="mb-4 flex items-center gap-2">
-              <Button
-                onClick={handlePlayPause}
-                variant="outline"
-                size="sm"
-                className="gap-2"
-                disabled={isCurrentlyLoading}
-              >
-                {isCurrentlyLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : isCurrentlyPlaying ? (
-                  <Pause className="h-4 w-4" />
-                ) : (
-                  <Volume2 className="h-4 w-4" />
-                )}
-                {isCurrentlyLoading ? 'Cargando...' : isCurrentlyPlaying ? 'Pausar' : 'Escuchar'}
-              </Button>
-            </div>
+           <div className="mb-4 flex items-center gap-2">
+             <Button
+               onClick={() => play(textToRead)}
+               variant="outline"
+               size="sm"
+               className="gap-2"
+               disabled={isLoading}
+             >
+               {isLoading ? (
+                 <Loader2 className="h-4 w-4 animate-spin" />
+               ) : isPlaying ? (
+                 <Pause className="h-4 w-4" />
+               ) : (
+                 <Volume2 className="h-4 w-4" />
+               )}
+               {isLoading ? 'Cargando...' : isPlaying ? 'Pausar' : 'Escuchar'}
+             </Button>
+           </div>
 
             {(analysis.full_data?.resumen_semantico || semanticData?.resumen_semantico) && (
               <Card className={`mb-4 ${semanticColors.cardBg}`}>
@@ -599,6 +599,22 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                   <CardTitle className={`text-lg font-semibold ${semanticColors.cardTitle} flex items-center gap-2`}>
                     <ScrollText className="w-5 h-5" />
                     Resumen Semántico
+                    <Button
+                      onClick={() => play(analysis.full_data?.resumen_semantico || semanticData?.resumen_semantico)}
+                      variant="outline"
+                      size="sm"
+                      className="gap-2 ml-auto"
+                      disabled={isLoading}
+                    >
+                      {isLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : isPlaying ? (
+                        <Pause className="h-4 w-4" />
+                      ) : (
+                        <Volume2 className="h-4 w-4" />
+                      )}
+                      {isLoading ? 'Cargando...' : isPlaying ? 'Pausar' : 'Escuchar'}
+                    </Button>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -614,6 +630,22 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                 <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${semanticColors.icon}`}>
                   <Target className="w-5 h-5" />
                   Temas Transversales
+                  <Button
+                    onClick={() => play((analysis.full_data?.temas_transversales || semanticData?.temas_transversales)?.map((t: ThemeReference) => t.theme).join(', '))}
+                    variant="outline"
+                    size="sm"
+                    className="gap-2 ml-auto"
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : isPlaying ? (
+                      <Pause className="h-4 w-4" />
+                    ) : (
+                      <Volume2 className="h-4 w-4" />
+                    )}
+                    {isLoading ? 'Cargando...' : isPlaying ? 'Pausar' : 'Escuchar'}
+                  </Button>
                 </h4>
                 <div className="flex flex-wrap gap-2">
                   {(analysis.full_data?.temas_transversales || semanticData?.temas_transversales)?.map((theme: ThemeReference, idx: number) => (
@@ -677,6 +709,22 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                 <h4 className={`font-semibold text-lg mb-2 flex items-center gap-2 ${semanticColors.icon}`}>
                   <AlertTriangle className="w-5 h-5" />
                   Brechas de Conocimiento
+                  <Button
+                    onClick={() => play((analysis.full_data?.brechas_conocimiento || semanticData?.brechas_conocimiento)?.join(', '))}
+                    variant="outline"
+                    size="sm"
+                    className="gap-2 ml-auto"
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : isPlaying ? (
+                      <Pause className="h-4 w-4" />
+                    ) : (
+                      <Volume2 className="h-4 w-4" />
+                    )}
+                    {isLoading ? 'Cargando...' : isPlaying ? 'Pausar' : 'Escuchar'}
+                  </Button>
                 </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                   {(analysis.full_data?.brechas_conocimiento || semanticData?.brechas_conocimiento)?.map((gap: string, idx: number) => (
@@ -691,6 +739,22 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                 <h4 className="font-semibold text-lg mb-2 flex items-center gap-2 text-red-600">
                   <AlertTriangle className="w-5 h-5" />
                   Problemáticas
+                  <Button
+                    onClick={() => play((analysis.full_data?.problematic_areas || semanticData?.problematic_areas)?.join(', '))}
+                    variant="outline"
+                    size="sm"
+                    className="gap-2 ml-auto"
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : isPlaying ? (
+                      <Pause className="h-4 w-4" />
+                    ) : (
+                      <Volume2 className="h-4 w-4" />
+                    )}
+                    {isLoading ? 'Cargando...' : isPlaying ? 'Pausar' : 'Escuchar'}
+                  </Button>
                 </h4>
                 <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                   {(analysis.full_data?.problematic_areas || semanticData?.problematic_areas)?.map((area: string, idx: number) => (
@@ -860,6 +924,22 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                   <CardTitle className={`text-lg font-semibold ${insightColors.cardTitle} flex items-center gap-2`}>
                     <Lightbulb className="w-5 h-5" />
                     Resumen del Insight
+                    <Button
+                      onClick={() => play(analysis.summary || '')}
+                      variant="outline"
+                      size="sm"
+                      className="gap-2 ml-auto"
+                      disabled={isLoading}
+                    >
+                      {isLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : isPlaying ? (
+                        <Pause className="h-4 w-4" />
+                      ) : (
+                        <Volume2 className="h-4 w-4" />
+                      )}
+                      {isLoading ? 'Cargando...' : isPlaying ? 'Pausar' : 'Escuchar'}
+                    </Button>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -877,6 +957,22 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                 <AlertDescription className={`${insightColors.alertDesc}`}>
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysis.action_suggestion}</ReactMarkdown>
                 </AlertDescription>
+                <Button
+                  onClick={() => play(analysis.action_suggestion || '')}
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 ml-auto"
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : isPlaying ? (
+                    <Pause className="h-4 w-4" />
+                  ) : (
+                    <Volume2 className="h-4 w-4" />
+                  )}
+                  {isLoading ? 'Cargando...' : isPlaying ? 'Pausar' : 'Escuchar'}
+                </Button>
               </Alert>
             )}
 
@@ -941,6 +1037,22 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                   <CardTitle className={`text-lg font-semibold ${colColors.cardTitle} flex items-center gap-2`}>
                     <ScrollText className="w-5 h-5" />
                     Resumen de la Colección
+                    <Button
+                      onClick={() => play(collectionData.collection_summary || '')}
+                      variant="outline"
+                      size="sm"
+                      className="gap-2 ml-auto"
+                      disabled={isLoading}
+                    >
+                      {isLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : isPlaying ? (
+                        <Pause className="h-4 w-4" />
+                      ) : (
+                        <Volume2 className="h-4 w-4" />
+                      )}
+                      {isLoading ? 'Cargando...' : isPlaying ? 'Pausar' : 'Escuchar'}
+                    </Button>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -958,6 +1070,22 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                 <AlertDescription className={`${colColors.alertDesc} italic`}>
                   "{collectionData.kai_synthesis}"
                 </AlertDescription>
+                <Button
+                  onClick={() => play(collectionData.kai_synthesis || '')}
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 ml-auto"
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : isPlaying ? (
+                    <Pause className="h-4 w-4" />
+                  ) : (
+                    <Volume2 className="h-4 w-4" />
+                  )}
+                  {isLoading ? 'Cargando...' : isPlaying ? 'Pausar' : 'Escuchar'}
+                </Button>
               </Alert>
             )}
 

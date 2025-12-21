@@ -238,6 +238,7 @@ class GraphIntegration:
                            cmetadata->>'author' AS author,
                            cmetadata->>'document_id' AS document_id,
                            workspace_id::text AS workspace_id,
+                           account_id AS account_id,
                            cmetadata AS metadata
                     FROM langchain_pg_embedding
                     WHERE {where_clause}
@@ -270,11 +271,17 @@ class GraphIntegration:
 
         # Si no se proporciona account_id, intentar extraerlo del primer documento
         if not account_id and documents:
-            account_id = documents[0].get("metadata", {}).get("account_id")
+            # Intentar obtenerlo del campo directo primero
+            account_id = documents[0].get("account_id")
+            # Si no está ahí, intentar en metadata
+            if not account_id:
+                account_id = documents[0].get("metadata", {}).get("account_id")
 
         if not account_id:
             logger.error("❌ No se encontró account_id ni en los parámetros ni en los documentos")
             return []
+
+        logger.info(f"🔑 Usando account_id: {account_id} para reconstrucción de contenido")
 
         for i, doc in enumerate(documents):
             # Obtener el nombre del archivo (priorizar file_name sobre title)

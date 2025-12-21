@@ -101,7 +101,7 @@ async def get_graph_status(
                 SELECT COUNT(DISTINCT cmetadata->>'file_name') as document_count
                 FROM langchain_pg_embedding
                 WHERE account_id = :account_id
-                  AND cmetadata->>'type' = 'document_chunk'
+                  AND (cmetadata->>'type' = 'document_chunk' OR cmetadata->>'type' = 'user_memory_proactive_llm' OR cmetadata->>'type' = 'thread_summary')
                   {f"AND workspace_id::text = '{workspace_id}'" if workspace_id else "AND workspace_id IS NULL"}
             """
             
@@ -511,7 +511,7 @@ async def get_graph_stats(
                     AVG(LENGTH(document)) as avg_chunk_length
                 FROM langchain_pg_embedding
                 WHERE account_id = :account_id
-                  AND cmetadata->>'type' = 'document_chunk'
+                  AND (cmetadata->>'type' = 'document_chunk' OR cmetadata->>'type' = 'user_memory_proactive_llm' OR cmetadata->>'type' = 'thread_summary')
                   {f"AND workspace_id::text = '{workspace_id}'" if workspace_id else ""}
             """
             

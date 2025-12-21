@@ -60,7 +60,7 @@ from tools.search_notes_tool import SearchNotesTool
 # Lista de todas las clases de herramientas a instanciar directamente.
 tool_classes_to_instantiate = [
     AddNoteTool, AddWebToRAGTool, AnalyzeCodeForInsightsTool, AnalyzeTextForInsightsTool,
-    CancelEventTool, ConceptualProcessingTool, KnowledgeGraphTool, DeepResearchTool,
+    CancelEventTool, ConceptualProcessingTool, KnowledgeGraphTool,
     InsightGenerationTool, ComprehensiveWebAnalysisTool, ConversationContextAnalyzerTool,
     ConversationHistoryAnalyzerTool, DeleteDocumentTool, DeleteNoteTool, DocumentRAGTool,
     ExtractDocumentTitlesTool, GetAgendaTool, GetAnalysisResultsTool, GetDocumentContentTool,
@@ -113,6 +113,7 @@ async def _instantiate_tool(
     account_id: str,
     telegram_id: Optional[int] = None,
     thread_id: Optional[str] = None,
+    workspace_id: Optional[str] = None, # Añadir workspace_id aquí
     graph_db: Optional[Any] = None,
     enhanced_memory_manager: Optional[Any] = None
 ) -> Optional[Tool]:
@@ -135,6 +136,8 @@ async def _instantiate_tool(
                 }
                 if telegram_id is not None:
                     tool_kwargs['telegram_id'] = str(telegram_id)
+                if workspace_id is not None: # Pasar workspace_id a herramientas de grafo
+                    tool_kwargs['workspace_id'] = workspace_id
                 tool_instance = ToolClass(**tool_kwargs)
             else:
                 logger.warning(f"Skipping {tool_name} due to missing graph dependencies.")
@@ -150,6 +153,8 @@ async def _instantiate_tool(
                 github_kwargs["telegram_id"] = str(telegram_id)
             if thread_id is not None:
                 github_kwargs["thread_id"] = thread_id
+            if workspace_id is not None: # Pasar workspace_id a GitHubRepoTool
+                github_kwargs["workspace_id"] = workspace_id
             tool_instance = ToolClass(**github_kwargs)
 
         # --- Standard Tools ---
@@ -158,9 +163,10 @@ async def _instantiate_tool(
             if 'telegram_id' in ToolClass.model_fields and telegram_id is not None:
                 tool_kwargs['telegram_id'] = str(telegram_id)
             if 'thread_id' in ToolClass.model_fields and thread_id is not None:
-                tool_instance = ToolClass(**tool_kwargs, thread_id=thread_id)
-            else:
-                tool_instance = ToolClass(**tool_kwargs)
+                tool_kwargs['thread_id'] = thread_id # Pasar thread_id a herramientas estándar
+            if 'workspace_id' in ToolClass.model_fields and workspace_id is not None:
+                tool_kwargs['workspace_id'] = workspace_id # Pasar workspace_id a herramientas estándar
+            tool_instance = ToolClass(**tool_kwargs)
         
         # --- No-Args Tools ---
         else:
@@ -171,7 +177,12 @@ async def _instantiate_tool(
         logger.error(f"❌ Failed to instantiate tool '{ToolClass.__name__}': {e}", exc_info=True)
         return None
 
-async def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = None, thread_id: Optional[str] = None) -> List[Tool]:
+async def get_all_langchain_tools(
+    account_id: str,
+    telegram_id: Optional[int] = None,
+    thread_id: Optional[str] = None,
+    workspace_id: Optional[str] = None # Añadir workspace_id aquí
+) -> List[Tool]:
     """
     Recoge, instancia y devuelve una lista de todas las herramientas LangChain disponibles.
     """
@@ -183,7 +194,7 @@ async def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = 
 
     for ToolClass in tool_classes_to_instantiate:
         tool_name = getattr(ToolClass, 'name', ToolClass.__name__)
-        tool_instance = await _instantiate_tool(ToolClass, account_id, telegram_id, thread_id)
+        tool_instance = await _instantiate_tool(ToolClass, account_id, telegram_id, thread_id, workspace_id) # Pasar workspace_id
         if tool_instance:
             available_tools.append(tool_instance)
         else:
@@ -198,27 +209,25 @@ async def get_all_langchain_tools(account_id: str, telegram_id: Optional[int] = 
         failed_tools.append("DuckDuckGoSearchTool")
 
     try:
-        from tools.web_search_tool import get_web_search_tool
-        web_search_tool_instance = get_web_search_tool(account_id=account_id)
-        available_tools.append(web_search_tool_instance)
-    except Exception as e:
-        failed_tools.append("WebSearchTool")
-        
-    try:
-        from tools.deep_research_tool_litellm import create_deep_research_tool_litellm
+        from tools.deep_research_tool import DeepResearchTool
         from tools.add_web_to_rag_tool import AddWebToRAGTool
         
         add_web_to_rag_instance = AddWebToRAGTool(account_id=account_id)
         ws_tool = next((t for t in available_tools if t.name == "web_search"), None)
         if ws_tool:
-            deep_research_instance = create_deep_research_tool_litellm(
+            deep_research_instance = DeepResearchTool(
                 web_search_tool=ws_tool,
-                add_web_to_rag_tool=add_web_to_rag_instance
+                add_web_to_rag_tool=add_web_to_rag_instance,
+                account_id=account_id,
+                telegram_id=telegram_id,
+                thread_id=thread_id,
+                workspace_id=workspace_id
             )
             if deep_research_instance:
                 available_tools.append(deep_research_instance)
     except Exception as e:
-        failed_tools.append("DeepResearchToolLiteLLM")
+        failed_tools.append("DeepResearchTool")
+
 
     logger.info(f"--- 🧰 Toolbox Assembled ({len(available_tools)} tools) ---")
     if failed_tools:
