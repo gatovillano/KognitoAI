@@ -16,7 +16,7 @@ correcto, asegurando que el perfil se actualice en la cuenta correcta.
 import logging
 from typing import Any, Dict, Optional, Type
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de memoria.

@@ -12,7 +12,7 @@ import logging
 import asyncio
 import datetime
 from typing import Any, Dict, List, Optional, Type
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importar utilidades necesarias para el análisis de contexto

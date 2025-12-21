@@ -10,8 +10,8 @@ import logging
 import uuid
 from typing import Type, Optional, Any
 
-from pydantic.v1 import BaseModel, Field
-from pydantic.v1.fields import FieldInfo
+from pydantic import BaseModel, Field
+from pydantic.fields import FieldInfo
 from langchain_core.tools import BaseTool
 
 # Importa las dependencias necesarias para interactuar con la base de datos y el LLM.

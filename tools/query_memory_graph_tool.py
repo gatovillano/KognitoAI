@@ -7,7 +7,7 @@ Herramienta para que el agente consulte explícitamente su propio grafo de memor
 import logging
 from typing import Optional, Type
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 from knowledge_graph.graph_database import GraphDB

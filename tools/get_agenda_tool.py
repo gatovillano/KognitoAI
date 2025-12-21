@@ -14,7 +14,7 @@ depender de la plataforma desde la que se realiza la consulta.
 import logging
 from typing import Type, Any, Optional
 
-from pydantic.v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 # Importa la función de lógica de negocio desde el gestor de agenda.

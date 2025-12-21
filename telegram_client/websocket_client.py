@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import websockets
+import base64
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 import jwt
@@ -60,8 +61,9 @@ class TelegramWebSocketClient:
 
                 data = json.loads(message)
                 await self.handle_message(data)
-        except websockets.exceptions.ConnectionClosed:
-            logger.warning("La conexión WebSocket se cerró. Se intentará reconectar.")
+        except websockets.exceptions.ConnectionClosed as e:
+            logger.warning("La conexión WebSocket se cerró. Lanzando excepción para reconexión.")
+            raise e # Lanzar la excepción para que el bucle principal en connect() la maneje
 
     async def handle_message(self, data: Dict[str, Any]):
         """Procesa los mensajes recibidos del WebSocket."""
@@ -176,7 +178,7 @@ class TelegramWebSocketClient:
 
 # Instancia única del cliente WebSocket para el bot
 # Se inicializará en run_telegram_bot.py
-telegram_ws_client: "TelegramWebSocketClient" = None
+telegram_ws_client: Optional["TelegramWebSocketClient"] = None
 
 def _create_bot_jwt() -> str:
     """Crea un token JWT para el servicio del bot."""
