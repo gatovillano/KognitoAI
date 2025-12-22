@@ -17,6 +17,12 @@ class ConductResearch(BaseModel):
 class ResearchComplete(BaseModel):
     """Call this tool to indicate that the research is complete."""
 
+class Summary(BaseModel):
+    """Research summary with key findings."""
+    
+    summary: str
+    key_excerpts: str
+
 class ClarifyWithUser(BaseModel):
     """Model for user clarification requests."""
     need_clarification: bool = Field(
