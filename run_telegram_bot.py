@@ -20,6 +20,15 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+
+
+
+# Límite máximo para el tamaño de la imagen en base64 (5MB)
+# Aproximadamente, 5MB de texto base64 equivalen a ~3.6MB de datos binarios.
+# Este límite ayuda a prevenir el consumo excesivo de recursos por imágenes muy grandes.
+MAX_IMAGE_BASE64_SIZE_MB = 5
+MAX_IMAGE_BASE64_BYTES = MAX_IMAGE_BASE64_SIZE_MB * 1024 * 1024
+
 from telegram.ext import Application
 
 from core.config import settings
@@ -37,8 +46,9 @@ from telegram_client.handlers.admin_handlers import register_admin_handlers
 from telegram_client.handlers.workspace_handler import register_workspace_handlers
 from telegram_client.websocket_client import start_telegram_ws_client, stop_telegram_ws_client
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=settings.log_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+# Mantener httpx en WARNING para evitar ruido excesivo de librerías de terceros
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
@@ -120,65 +130,47 @@ async def lifespan(app: FastAPI):
         polling_task.add_done_callback(done_callback)
         logger.info("✅ Tarea de polling de Telegram iniciada.")
         
-        # Iniciar dispatcher y añadir el callback síncrono.
-        dispatcher_task = asyncio.create_task(ptb_app.start())
-        dispatcher_task.add_done_callback(done_callback)
-        logger.info("✅ Tarea del dispatcher de PTB iniciada.")
-        
         # Iniciar cliente WebSocket
         await start_telegram_ws_client(ptb_app) # Pasar la instancia de ptb_app
         logger.info("✅ Cliente WebSocket de Telegram iniciado.")
 
-        # Guardar las tareas para poder cancelarlas al apagar.
-        app.state.background_tasks = [polling_task, dispatcher_task]
+        # Guardar la tarea de polling para poder cancelarla al apagar.
+        app.state.background_tasks = [polling_task]
         
-        # Configurar reintentos para errores de red
-        async def retry_on_network_error():
-            while True:
-                if not ptb_app.updater.running:
-                    try:
-                        await ptb_app.updater.start_polling(drop_pending_updates=True, error_callback=done_callback)
-                        logger.info("✅ Polling reiniciado con éxito.")
-                        break
-                    except Exception as e:
-                        logger.error(f"❌ Error de red en polling, reintentando en 5 segundos: {e}", exc_info=True)
-                        await asyncio.sleep(5)
-                else:
-                    logger.info("✅ Updater ya está corriendo, no se necesita reintento.")
-                    break
-
-        # Iniciar tarea de reintento si es necesario
-        app.state.retry_task = asyncio.create_task(retry_on_network_error())
 
     yield # La API y el bot están ahora activos.
 
     # --- Lógica de Apagado ---
     logger.info("🔌 Apagando el cliente de Telegram...")
+    if app.state.ptb_app.updater:
+        logger.info("Deteniendo polling de Telegram...")
+        await app.state.ptb_app.updater.stop()
+        logger.info("Polling de Telegram detenido.")
     
-    # Detener cliente WebSocket
-    stop_telegram_ws_client()
-    logger.info("✅ Cliente WebSocket de Telegram detenido.")
+    if app.state.background_tasks:
+        for task in app.state.background_tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*app.state.background_tasks, return_exceptions=True)
+        logger.info("Tareas en segundo plano canceladas.")
 
-    ptb_to_shutdown = app.state.ptb_app
-    if ptb_to_shutdown:
-        if ptb_to_shutdown.running:
-            await ptb_to_shutdown.stop()
-            logger.info("✅ Dispatcher detenido.")
-        
-        if ptb_to_shutdown.updater and ptb_to_shutdown.updater.running:
-            await ptb_to_shutdown.updater.stop()
-            logger.info("✅ Polling detenido.")
-            
-        # Cancelar las tareas de fondo explícitamente.
-        for task in getattr(app.state, "background_tasks", []):
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass # Es esperado
+    await stop_telegram_ws_client()
+    logger.info("Cliente WebSocket de Telegram detenido.")
+    if app.state.ptb_app.updater:
+        logger.info("Deteniendo polling de Telegram...")
+        await app.state.ptb_app.updater.stop()
+        logger.info("Polling de Telegram detenido.")
+    
+    if app.state.background_tasks:
+        for task in app.state.background_tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*app.state.background_tasks, return_exceptions=True)
+        logger.info("Tareas en segundo plano canceladas.")
 
-        await ptb_to_shutdown.shutdown()
-        logger.info("✅ Cliente de Telegram completamente apagado.")
+    await stop_telegram_ws_client()
+    logger.info("Cliente WebSocket de Telegram detenido.")
+
 
 internal_api = FastAPI(lifespan=lifespan)
 
@@ -226,6 +218,10 @@ async def store_user_data_endpoint(request: StoreUserDataRequest):
     if not bot_manager.is_initialized():
         raise HTTPException(status_code=503, detail="El cliente de Telegram no está listo.")
     try:
+        if len(request.data) > MAX_IMAGE_BASE64_BYTES:
+            logger.warning(f"Intento de almacenar imagen demasiado grande para el usuario {request.user_id}. Tamaño: {len(request.data)} bytes.")
+            raise HTTPException(status_code=413, detail=f"La imagen excede el tamaño máximo permitido de {MAX_IMAGE_BASE64_SIZE_MB}MB.")
+
         import base64
         from io import BytesIO
         user_data = bot_manager.get_user_data(request.user_id)

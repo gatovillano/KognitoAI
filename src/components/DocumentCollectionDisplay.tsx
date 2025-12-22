@@ -486,15 +486,14 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
       // Determinar qué endpoint usar basado en el modo
       if (mode === 'conceptual') {
         // Modo Conceptual: Usar la herramienta de Cognee
-        const payload = {
+        await apiClient.post('/api/tools/run', {
           tool_name: "cognee_knowledge_graph",
           action: "process_documents",
           dataset_name: datasetName,  // Nombre para organizar el grafo
           topic: processingTopic || undefined,  // Nombre de la colección para filtrar documentos
-          documents: [],
+          document_titles: documents.map(doc => doc.file_name), // Pasa los títulos de los documentos
           workspace_id: processingWorkspaceId || undefined  // Workspace de la colección específica
-        };
-        await apiClient.post('/api/tools/run', payload);
+        });
       } else {
         // Modo Híbrido (Estándar): Llamar al endpoint optimizado
         await apiClient.post('/api/knowledge-graph/process-knowledge-graph-optimized', {

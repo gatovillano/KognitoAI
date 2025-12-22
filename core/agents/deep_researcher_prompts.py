@@ -194,12 +194,13 @@ Only these fully comprehensive cleaned findings are going to be returned to the 
 </Task>
 
 <Guidelines>
-1. Your output findings should be fully comprehensive and include ALL of the information and sources that the researcher has gathered from tool calls and web searches. It is expected that you repeat key information verbatim.
-2. This report can be as long as necessary to return ALL of the information that the researcher has gathered.
-3. In your report, you should return inline citations for each source that the researcher found.
-4. You should include a "Sources" section at the end of the report that lists all of the sources the researcher found with corresponding citations, cited against statements in the report.
-5. Make sure to include ALL of the sources that the researcher gathered in the report, and how they were used to answer the question!
+1. Your output findings MUST be fully comprehensive and include ABSOLUTELY ALL of the information and sources that the researcher has gathered from tool calls and web searches. It is CRITICAL that you repeat key information verbatim and do NOT summarize or omit anything.
+2. This report MUST be as long as necessary to return ABSOLUTELY ALL of the information that the researcher has gathered. There are NO length constraints. Aim for maximum detail and verbosity.
+3. In your report, you MUST return inline citations for each source that the researcher found.
+4. You MUST include a "Sources" section at the end of the report that lists all of the sources the researcher found with corresponding citations, cited against statements in the report.
+5. You MUST include ALL of the sources that the researcher gathered in the report, and clearly explain how each was used to answer the question!
 6. It's really important not to lose any sources. A later LLM will be used to merge this report with others, so having all of the sources is critical.
+7. DO NOT summarize, paraphrase, or abbreviate any information. Present the raw, detailed findings in a clean, organized, and EXTREMELY EXTENSIVE format. The user explicitly requires reports that are NOT summarized.
 </Guidelines>
 
 <Output Format>
@@ -245,12 +246,13 @@ Here are the findings from the research that you conducted:
 {findings}
 </Findings>
 
-Please create a detailed answer to the overall research brief that:
-1. Is well-organized with proper headings (# for title, ## for sections, ### for subsections)
-2. Includes specific facts and insights from the research
-3. References relevant sources using [Title](URL) format
-4. Provides a balanced, thorough analysis. Be as comprehensive as possible, and include all information that is relevant to the overall research question. People are using you for deep research and will expect detailed, comprehensive answers.
-5. Includes a "Sources" section at the end with all referenced links
+Please create an EXTREMELY DETAILED, COMPREHENSIVE, AND EXTENSIVE answer to the overall research brief that:
+1. Is exceptionally well-organized with proper headings (# for title, ## for sections, ### for subsections)
+2. Includes ALL specific facts and ALL insights from the research, leaving nothing out.
+3. References ALL relevant sources using [Title](URL) format for every piece of information derived from them.
+4. Provides an exhaustive, in-depth, and thorough analysis. Be as comprehensive and verbose as humanly possible, and include absolutely all information that is even remotely relevant to the overall research question. People are using you for deep research and EXPECT incredibly detailed, extensive, and comprehensive answers, NOT summaries.
+5. Includes a "Sources" section at the end with ALL referenced links, ensuring no source is omitted.
+6. AVOID ANY summarization or abbreviation. The goal is maximum detail and length.
 
 You can structure your report in a number of different ways. Here are some examples:
 
@@ -286,8 +288,8 @@ For each section of the report, do the following:
 - Use ## for section title (Markdown format) for each section of the report
 - Do NOT ever refer to yourself as the writer of the report. This should be a professional report without any self-referential language. 
 - Do not say what you are doing in the report. Just write the report without any commentary from yourself.
-- Each section should be as long as necessary to deeply answer the question with the information you have gathered. It is expected that sections will be fairly long and verbose. You are writing a deep research report, and users will expect a thorough answer.
-- Use bullet points to list out information when appropriate, but by default, write in paragraph form.
+- Each section MUST be as long as necessary to deeply and exhaustively answer the question with ALL the information you have gathered. It is CRITICALLY expected that sections will be EXTREMELY LONG and HIGHLY VERBOSE. You are writing a deep research report, and users EXPECT a thorough, exhaustive, and non-summarized answer.
+- Use bullet points to list out information when appropriate, but by default, write in extensive paragraph form, elaborating on every detail.
 
 REMEMBER:
 The brief and research may be in English, but you need to translate this information to the right language when writing the final answer.

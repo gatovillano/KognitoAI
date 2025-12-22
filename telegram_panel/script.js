@@ -15,10 +15,7 @@ document.addEventListener('DOMContentLoaded', function () {
         iconButtons: document.querySelectorAll('.icon-button'),
         backButtons: document.querySelectorAll('.back-button'),
         
-        // Personalización
-        promptInput: document.getElementById('system-prompt-input'),
-        restoreButton: document.getElementById('restore-default-button'),
-        personalizationLoader: document.getElementById('personalization-loader'),
+    // (Personalización eliminada)
         
         // Documentos
         uploadForm: document.getElementById('upload-form'),
@@ -55,7 +52,18 @@ document.addEventListener('DOMContentLoaded', function () {
         noteTitleInput: document.getElementById('note-title-input'),
         noteContentInput: document.getElementById('note-content-input'),
         noteCategoryInput: document.getElementById('note-category-input'),
+    // Tareas
+    taskListContainer: document.getElementById('task-list-container'),
+    taskListLoader: document.getElementById('task-list-loader'),
+    noTasksMessage: document.getElementById('no-tasks-message'),
+    addTaskBtn: document.getElementById('add-task-btn'),
+    // Contactos
+    contactListContainer: document.getElementById('contact-list-container'),
+    contactListLoader: document.getElementById('contact-list-loader'),
+    noContactsMessage: document.getElementById('no-contacts-message'),
+    addContactBtn: document.getElementById('add-contact-btn'),
         llmOutput: document.getElementById('llm-output'), // Nuevo elemento para la respuesta del LLM
+        chatContainer: document.getElementById('chat-container'), // Contenedor para las burbujas de chat
     };
 
     // --- 3. GESTIÓN DE WEBSOCKETS ---
@@ -77,7 +85,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
         websocket.onopen = function(event) {
             console.log("WebSocket conectado:", event);
-            elements.llmOutput.innerHTML = "Conectado al LLM. Esperando respuesta...";
+            // Limpiar output anterior y añadir un mensaje de conexión como burbuja del bot
+            elements.chatContainer.innerHTML = '';
+            appendChatMessage("Conectado al LLM. Esperando respuesta...", 'bot');
             currentLlmResponse = "";
         };
 
@@ -88,21 +98,22 @@ document.addEventListener('DOMContentLoaded', function () {
             switch (message.type) {
                 case "llm_start":
                     currentLlmResponse = "";
-                    elements.llmOutput.innerHTML = "El agente está pensando...";
+                    appendChatMessage("El agente está pensando...", 'bot', true); // Se añade como "thinking" bubble
                     break;
                 case "llm_chunk":
+                    // Actualizar el contenido de la última burbuja del bot
+                    updateLastBotBubble(message.chunk);
                     currentLlmResponse += message.chunk;
-                    elements.llmOutput.innerHTML = currentLlmResponse;
                     break;
                 case "llm_end":
-                    elements.llmOutput.innerHTML = currentLlmResponse + "<br>Respuesta completada.";
-                    // Aquí podrías manejar tool_code y sources si los necesitas en el frontend
+                    // Marcar la última burbuja del bot como completa
+                    updateLastBotBubble("Respuesta completada.", false, true);
                     break;
                 case "llm_error":
-                    elements.llmOutput.innerHTML = `Error del LLM: ${message.message}`;
+                    appendChatMessage(`Error del LLM: ${message.message}`, 'bot');
                     break;
                 case "llm_status":
-                    elements.llmOutput.innerHTML = message.message;
+                    appendChatMessage(message.message, 'bot');
                     break;
                 case "tool_code":
                     // Mostrar el código de la herramienta si es relevante para el usuario
@@ -119,15 +130,48 @@ document.addEventListener('DOMContentLoaded', function () {
 
         websocket.onclose = function(event) {
             console.log("WebSocket desconectado:", event);
-            elements.llmOutput.innerHTML = "WebSocket desconectado. Reconectando en 5 segundos...";
+            appendChatMessage("WebSocket desconectado. Reconectando en 5 segundos...", 'bot');
             setTimeout(connectWebSocket, 5000); // Intentar reconectar
         };
 
         websocket.onerror = function(error) {
             console.error("WebSocket error:", error);
-            elements.llmOutput.innerHTML = "Error en la conexión WebSocket.";
+            appendChatMessage("Error en la conexión WebSocket.", 'bot');
             websocket.close();
         };
+    }
+
+    // --- Nuevas funciones para la gestión de burbujas de chat ---
+    function appendChatMessage(message, sender, isThinking = false) {
+        const messageWrapper = document.createElement('div');
+        messageWrapper.classList.add('chat-bubble', `chat-bubble-${sender}`);
+        if (isThinking) {
+            messageWrapper.classList.add('thinking-bubble');
+            messageWrapper.innerHTML = `<div class="chat-sender">${sender === 'user' ? 'Tú' : 'Agente'}</div><div class="chat-content">...</div>`;
+        } else {
+            messageWrapper.innerHTML = `<div class="chat-sender">${sender === 'user' ? 'Tú' : 'Agente'}</div><div class="chat-content">${message}</div>`;
+        }
+        elements.chatContainer.appendChild(messageWrapper);
+        elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight; // Auto-scroll
+    }
+
+    function updateLastBotBubble(chunk, append = true, isEnd = false) {
+        const botBubbles = elements.chatContainer.querySelectorAll('.chat-bubble-bot');
+        if (botBubbles.length > 0) {
+            const lastBotBubble = botBubbles[botBubbles.length - 1];
+            const chatContent = lastBotBubble.querySelector('.chat-content');
+            if (chatContent) {
+                if (append) {
+                    chatContent.innerHTML += chunk;
+                } else {
+                    chatContent.innerHTML = chunk;
+                }
+                if (isEnd) {
+                    lastBotBubble.classList.remove('thinking-bubble');
+                }
+                elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight; // Auto-scroll
+            }
+        }
     }
 
     let initialPrompt = '';
@@ -161,32 +205,49 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- 5. LÓGICA DE NAVEGACIÓN ---
     function showView(viewId) {
-        // tg.showAlert("Mostrando vista: " + viewId); // Comentado para reducir alertas
-        elements.views.forEach(view => {
-            view.classList.toggle('active', view.id === viewId);
-            // tg.showAlert("Vista " + view.id + " activa: " + view.classList.contains('active')); // Comentado para reducir alertas
+        // Buscar dinámicamente todas las vistas en el DOM
+        const allViews = document.querySelectorAll('.view');
+        console.log('showView: encontradas', allViews.length, 'vistas, buscando:', viewId);
+        allViews.forEach(view => {
+            const shouldBeActive = view.id === viewId;
+            view.classList.toggle('active', shouldBeActive);
+            console.log('  vista', view.id, '-> active:', shouldBeActive);
         });
         updateMainButton(viewId);
 
-        if (viewId === 'personalization-screen') loadPrompt();
+        // removed personalization-screen handler
         if (viewId === 'upload-screen') loadDocuments();
         if (viewId === 'agenda-screen') loadEvents();
         if (viewId === 'notes-screen') loadNotes();
+        if (viewId === 'tasks-screen') loadTasks();
+        if (viewId === 'contacts-screen') loadContacts();
+        console.log('showView ->', viewId);
     }
-    console.log("Adjuntando eventListeners a iconButtons");
-    elements.iconButtons.forEach(button => {
-        button.addEventListener('click', () => showView(button.dataset.targetView));
-    });
-    elements.backButtons.forEach(button => {
-        button.addEventListener('click', () => showView('home-screen'));
-    });
+    if (elements.iconButtons && elements.iconButtons.length) {
+        console.log("Adjuntando eventListeners a iconButtons (count=", elements.iconButtons.length, ")");
+        elements.iconButtons.forEach(button => {
+        // make icon buttons accessible
+        button.setAttribute('role', 'button');
+        button.setAttribute('tabindex', '0');
+        button.style.cursor = 'pointer';
+        button.addEventListener('click', (ev) => { console.log('icon-button clicked, targetView=', button.dataset.targetView); showView(button.dataset.targetView); });
+        button.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); showView(button.dataset.targetView); } });
+        });
+    } else {
+        console.warn('No se encontraron iconButtons en el DOM');
+    }
+    if (elements.backButtons && elements.backButtons.length) {
+        elements.backButtons.forEach(button => {
+            button.addEventListener('click', () => showView('home-screen'));
+        });
+    } else {
+        console.warn('No se encontraron backButtons en el DOM');
+    }
 
     // --- 6. LÓGICA DEL BOTÓN PRINCIPAL DE TELEGRAM ---
     function updateMainButton(currentViewId) {
         tg.MainButton.hide();
-        if (currentViewId === 'personalization-screen' && elements.promptInput.value.trim() !== initialPrompt.trim()) {
-            tg.MainButton.setText('Guardar Personalidad').show();
-        } else if (currentViewId === 'upload-screen' && elements.uploadForm.checkValidity()) {
+        if (currentViewId === 'upload-screen' && elements.uploadForm && elements.uploadForm.checkValidity()) {
             tg.MainButton.setText(`Subir ${elements.fileInput.files.length} archivo(s)`).show();
         }
     }
@@ -194,47 +255,8 @@ document.addEventListener('DOMContentLoaded', function () {
     tg.onEvent('mainButtonClicked', function() {
         const activeView = document.querySelector('.view.active');
         if (!activeView) return;
-        if (activeView.id === 'personalization-screen') handleSavePrompt();
         if (activeView.id === 'upload-screen') handleUpload();
     });
-
-    // --- 7. FUNCIONALIDAD DE PERSONALIZACIÓN ---
-    async function loadPrompt() {
-        elements.personalizationLoader.classList.remove('hidden');
-        elements.restoreButton.classList.add('hidden');
-        try {
-            // Usar apiFetch para GET
-            const data = await apiFetch('/api/get-system-prompt', 'POST'); // Cambiado a POST según api/auth.py
-            elements.promptInput.value = data.prompt;
-            initialPrompt = data.prompt;
-            elements.restoreButton.classList.toggle('hidden', !data.is_custom);
-        } catch (e) { tg.showAlert(e.message); }
-        finally { elements.personalizationLoader.classList.add('hidden'); }
-    }
-
-    async function handleSavePrompt() {
-        tg.MainButton.showProgress();
-        try {
-            const formData = new FormData();
-            formData.append('system_prompt', elements.promptInput.value);
-            // Usar apiPost para POST
-            await apiPost('/api/save-system-prompt', formData);
-            await loadPrompt();
-            tg.showAlert('Prompt guardado.');
-            updateMainButton('personalization-screen');
-        } catch (e) { tg.showAlert(e.message); }
-        finally { tg.MainButton.hideProgress(); }
-    }
-    
-    elements.restoreButton.addEventListener('click', () => {
-        tg.showConfirm("¿Restaurar el prompt por defecto?", async (confirmed) => {
-            if (confirmed) {
-                elements.promptInput.value = '';
-                await handleSavePrompt();
-            }
-        });
-    });
-    elements.promptInput.addEventListener('input', () => updateMainButton('personalization-screen'));
 
     // --- 8. FUNCIONALIDAD DEL GESTOR DE DOCUMENTOS ---
     function updateFileListUI() {
@@ -397,6 +419,204 @@ document.addEventListener('DOMContentLoaded', function () {
         elements.addEventModal.classList.remove('hidden');
         document.body.classList.add('modal-open');
     }
+
+    // --- 10. FUNCIONALIDAD DE TAREAS ---
+    async function loadTasks() {
+        elements.taskListLoader.classList.remove('hidden');
+        elements.taskListContainer.innerHTML = '';
+        elements.noTasksMessage.classList.add('hidden');
+        try {
+            const tasks = await apiFetch('/api/tasks');
+            if (!tasks || tasks.length === 0) {
+                elements.noTasksMessage.classList.remove('hidden');
+                return;
+            }
+            tasks.forEach(t => {
+                const el = document.createElement('div');
+                el.className = 'task-item';
+                el.innerHTML = `
+                    <div class="task-left">
+                        <input type="checkbox" class="task-complete" data-id="${t.id}" ${t.is_completed ? 'checked' : ''}>
+                    </div>
+                    <div class="task-body">
+                        <div class="task-desc">${t.description}</div>
+                        <div class="task-meta">${t.end_date ? new Date(t.end_date).toLocaleString() : ''}</div>
+                    </div>
+                    <div class="task-actions">
+                        <button class="task-edit" data-id="${t.id}">✎</button>
+                        <button class="task-delete" data-id="${t.id}">🗑</button>
+                    </div>
+                `;
+                el.querySelector('.task-complete').addEventListener('change', handleToggleTask);
+                el.querySelector('.task-edit').addEventListener('click', () => handleEditTask(t));
+                el.querySelector('.task-delete').addEventListener('click', () => handleDeleteTask(t.id));
+                elements.taskListContainer.appendChild(el);
+            });
+        } catch (e) { tg.showAlert('Error al cargar tareas: ' + e.message); }
+        finally { elements.taskListLoader.classList.add('hidden'); }
+    }
+
+    async function handleToggleTask(e) {
+        const id = e.currentTarget.dataset.id;
+        const completed = e.currentTarget.checked;
+        try {
+            await apiFetch(`/api/tasks/${id}`, 'PUT', { is_completed: completed });
+            await loadTasks();
+        } catch (err) { tg.showAlert('Error al actualizar la tarea: ' + err.message); }
+    }
+
+    // Modal wiring for tasks
+    const taskModal = document.getElementById('task-modal');
+    const taskForm = document.getElementById('task-form');
+    const taskIdInput = document.getElementById('task-id-input');
+    const taskDescInput = document.getElementById('task-desc-input');
+    const taskDueInput = document.getElementById('task-due-input');
+    const closeTaskModalBtn = document.getElementById('close-task-modal-btn');
+
+    function openTaskModal(task) {
+        if (task) {
+            taskIdInput.value = task.id;
+            taskDescInput.value = task.description || '';
+            taskDueInput.value = task.end_date ? new Date(task.end_date).toISOString().slice(0,16) : '';
+            document.getElementById('task-modal-title').innerText = 'Editar Tarea';
+        } else {
+            taskIdInput.value = '';
+            taskDescInput.value = '';
+            taskDueInput.value = '';
+            document.getElementById('task-modal-title').innerText = 'Añadir Tarea';
+        }
+        taskModal.classList.remove('hidden');
+        document.body.classList.add('modal-open');
+    }
+
+    function closeTaskModal() {
+        taskModal.classList.add('hidden');
+        document.body.classList.remove('modal-open');
+    }
+
+    closeTaskModalBtn.addEventListener('click', closeTaskModal);
+
+    taskForm.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const id = taskIdInput.value;
+        const payload = { description: taskDescInput.value };
+        if (taskDueInput.value) payload.end_date = new Date(taskDueInput.value).toISOString();
+        try {
+            if (id) {
+                await apiFetch(`/api/tasks/${id}`, 'PUT', payload);
+            } else {
+                await apiFetch('/api/tasks', 'POST', payload);
+            }
+            closeTaskModal();
+            await loadTasks();
+        } catch (e) { tg.showAlert('Error al guardar tarea: ' + e.message); }
+    });
+
+    elements.addTaskBtn && elements.addTaskBtn.addEventListener('click', () => openTaskModal(null));
+
+    async function handleEditTask(task) { openTaskModal(task); }
+
+    async function handleDeleteTask(taskId) {
+        if (!confirm('¿Eliminar tarea?')) return;
+        try {
+            await fetch(`/api/tasks/${taskId}`, { method: 'DELETE', headers: { 'X-Telegram-Init-Data': tg.initData } });
+            await loadTasks();
+        } catch (e) { tg.showAlert('Error al eliminar tarea: ' + e.message); }
+    }
+
+    // --- 11. FUNCIONALIDAD DE CONTACTOS ---
+    async function loadContacts() {
+        elements.contactListLoader.classList.remove('hidden');
+        elements.contactListContainer.innerHTML = '';
+        elements.noContactsMessage.classList.add('hidden');
+        try {
+            const contacts = await apiFetch('/api/list-contact-profiles', 'POST', {});
+            if (!contacts || contacts.length === 0) {
+                elements.noContactsMessage.classList.remove('hidden');
+                return;
+            }
+            contacts.forEach(c => {
+                const el = document.createElement('div');
+                el.className = 'contact-item';
+                el.innerHTML = `
+                    <div class="contact-left">
+                        <div class="contact-name">${c.name || 'Sin nombre'}</div>
+                        <div class="contact-meta">${c.email || ''} ${c.phone ? '· ' + c.phone : ''}</div>
+                    </div>
+                    <div class="contact-actions">
+                        <button class="contact-edit" data-id="${c.id}">✎</button>
+                        <button class="contact-delete" data-id="${c.id}">🗑</button>
+                    </div>
+                `;
+                el.querySelector('.contact-edit').addEventListener('click', () => handleEditContact(c));
+                el.querySelector('.contact-delete').addEventListener('click', () => handleDeleteContact(c.id));
+                elements.contactListContainer.appendChild(el);
+            });
+        } catch (e) { tg.showAlert('Error al cargar contactos: ' + e.message); }
+        finally { elements.contactListLoader.classList.add('hidden'); }
+    }
+
+    // Modal wiring for contacts
+    const contactModal = document.getElementById('contact-modal');
+    const contactForm = document.getElementById('contact-form');
+    const contactIdInput = document.getElementById('contact-id-input');
+    const contactNameInput = document.getElementById('contact-name-input');
+    const contactEmailInput = document.getElementById('contact-email-input');
+    const contactPhoneInput = document.getElementById('contact-phone-input');
+    const closeContactModalBtn = document.getElementById('close-contact-modal-btn');
+
+    function openContactModal(contact) {
+        if (contact) {
+            contactIdInput.value = contact.id;
+            contactNameInput.value = contact.name || '';
+            contactEmailInput.value = contact.email || '';
+            contactPhoneInput.value = contact.phone || '';
+            document.getElementById('contact-modal-title').innerText = 'Editar Contacto';
+        } else {
+            contactIdInput.value = '';
+            contactNameInput.value = '';
+            contactEmailInput.value = '';
+            contactPhoneInput.value = '';
+            document.getElementById('contact-modal-title').innerText = 'Añadir Contacto';
+        }
+        contactModal.classList.remove('hidden');
+        document.body.classList.add('modal-open');
+    }
+
+    function closeContactModal() {
+        contactModal.classList.add('hidden');
+        document.body.classList.remove('modal-open');
+    }
+
+    closeContactModalBtn.addEventListener('click', closeContactModal);
+
+    contactForm.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const id = contactIdInput.value;
+        const payload = { name: contactNameInput.value, email: contactEmailInput.value, phone: contactPhoneInput.value };
+        try {
+            if (id) {
+                await apiFetch(`/api/update-contact-profile/${id}`, 'POST', payload);
+            } else {
+                await apiFetch('/api/create-contact-profile', 'POST', payload);
+            }
+            closeContactModal();
+            await loadContacts();
+        } catch (e) { tg.showAlert('Error al guardar contacto: ' + e.message); }
+    });
+
+    elements.addContactBtn && elements.addContactBtn.addEventListener('click', () => openContactModal(null));
+
+    async function handleEditContact(contact) { openContactModal(contact); }
+
+    async function handleDeleteContact(contactId) {
+        if (!confirm('¿Eliminar perfil de contacto?')) return;
+        try {
+            await apiFetch('/api/delete-contact-profile', 'POST', { profile_id: contactId });
+            await loadContacts();
+        } catch (e) { tg.showAlert('Error al eliminar contacto: ' + e.message); }
+    }
+
 
     function closeAddEventModal() {
         elements.addEventModal.classList.add('hidden');

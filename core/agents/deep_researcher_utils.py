@@ -6,17 +6,18 @@ import os
 import time
 import warnings
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional, Sequence, cast
 
 import aiohttp
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
+    BaseMessage, # Import BaseMessage
     HumanMessage,
     MessageLikeRepresentation,
     filter_messages,
 )
-from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables import RunnableConfig, Runnable
 from langchain_core.tools import (
     BaseTool,
     InjectedToolArg,
@@ -30,7 +31,7 @@ from core.agents.deep_researcher_config import Configuration, SearchAPI
 from core.agents.deep_researcher_prompts import summarize_webpage_prompt
 from core.agents.deep_researcher_state import ResearchComplete, Summary
 from core.llm_manager import get_main_llm
-from core.utils.llm_utils import is_token_limit_exceeded, remove_up_to_last_ai_message
+from core.utils.llm_utils import is_token_limit_exceeded, remove_up_to_last_ai_message # Removed get_model_token_limit
 from core.utils.tool_utils import get_tool_by_name as get_langchain_tool_by_name
 
 logger = logging.getLogger(__name__)
@@ -54,9 +55,9 @@ TAVILY_SEARCH_DESCRIPTION = (
 @tool(description=TAVILY_SEARCH_DESCRIPTION)
 async def tavily_search(
     queries: List[str],
-    max_results: Annotated[int, InjectedToolArg] = 5,
+    max_results: Annotated[int, InjectedToolArg] = 20,
     topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
-    config: Optional[RunnableConfig] = None
+    config: Optional[RunnableConfig] = None # Changed to Optional
 ) -> str:
     """Fetch and summarize search results from Tavily search API."""
     search_results = await tavily_search_async(
@@ -77,9 +78,14 @@ async def tavily_search(
     cfg = Configuration.from_runnable_config(config)
     max_char_to_include = cfg.max_content_length
     
-    summarization_model = get_main_llm().with_structured_output(Summary).with_retry(
-        stop_after_attempt=cfg.max_structured_output_retries
-    )
+    summarization_llm = get_main_llm()
+    if not summarization_llm:
+        raise ValueError("Main LLM not initialized for summarization.")
+
+    summarization_model = cast(Runnable[Sequence[BaseMessage], Summary],
+                               summarization_llm.with_structured_output(Summary).with_retry(
+                                   stop_after_attempt=cfg.max_structured_output_retries
+                               ))
     
     async def noop():
         return None
@@ -122,10 +128,10 @@ async def tavily_search(
 @time_function
 async def tavily_search_async(
     search_queries,
-    max_results: int = 5,
+    max_results: int = 20,
     topic: Literal["general", "news", "finance"] = "general",
     include_raw_content: bool = True,
-    config: Optional[RunnableConfig] = None
+    config: Optional[RunnableConfig] = None # Changed to Optional
 ):
     """Execute multiple Tavily search queries asynchronously."""
     tavily_api_key = get_tavily_api_key(config)
@@ -148,7 +154,7 @@ async def tavily_search_async(
     return search_results
 
 @time_function
-async def summarize_webpage(model: BaseChatModel, webpage_content: str) -> str:
+async def summarize_webpage(model: Runnable[Sequence[BaseMessage], Summary], webpage_content: str) -> str:
     """Summarize webpage content using AI model with timeout protection."""
     try:
         prompt_content = summarize_webpage_prompt.format(
@@ -156,10 +162,7 @@ async def summarize_webpage(model: BaseChatModel, webpage_content: str) -> str:
             date=get_today_str()
         )
         
-        summary = await asyncio.wait_for(
-            model.ainvoke([HumanMessage(content=prompt_content)]),
-            timeout=60.0
-        )
+        summary: Summary = await model.ainvoke([HumanMessage(content=prompt_content)])
         
         formatted_summary = (
             f"<summary>\n{summary.summary}\n</summary>\n\n"
@@ -184,7 +187,7 @@ def think_tool(reflection: str) -> str:
 
 # Tool Utils
 
-async def get_search_tool(search_api: SearchAPI, config: Optional[RunnableConfig]):
+async def get_search_tool(search_api: SearchAPI, config: Optional[RunnableConfig]): # Changed to Optional
     """Configure and return search tools based on the specified API provider."""
     if search_api == SearchAPI.TAVILY:
         tavily_api_key = get_tavily_api_key(config)
@@ -200,12 +203,12 @@ async def get_search_tool(search_api: SearchAPI, config: Optional[RunnableConfig
         return [search_tool]
     return []
 
-async def get_all_tools(config: Optional[RunnableConfig]):
+async def get_all_tools(config: Optional[RunnableConfig]): # Changed to Optional
     """Assemble complete toolkit including research and search tools."""
     tools = [think_tool]
     
     cfg = Configuration.from_runnable_config(config)
-    search_api = SearchAPI(get_config_value(cfg.search_api))_config_value(cfg.search_api))
+    search_api = SearchAPI(get_config_value(cfg.search_api))
     search_tools = await get_search_tool(search_api, config)
     tools.extend(search_tools)
     
@@ -240,7 +243,7 @@ def get_config_value(value):
     else:
         return value.value
 
-def get_tavily_api_key(config: RunnableConfig):
+def get_tavily_api_key(config: Optional[RunnableConfig]): # Changed to Optional
     """Get Tavily API key from environment or config."""
     configurable = config.get("configurable", {}) if config else {}
     api_key = configurable.get("tavily_api_key")
@@ -248,7 +251,7 @@ def get_tavily_api_key(config: RunnableConfig):
         return api_key
     return os.getenv("TAVILY_API_KEY")
 
-async def execute_tool_safely(tool, args, config):
+async def execute_tool_safely(tool, args, config: Optional[RunnableConfig]): # Changed to Optional
     """Safely execute a tool with error handling."""
     try:
         return await tool.ainvoke(args, config)

@@ -532,10 +532,6 @@ export default function AnalysisPage() {
               <Plus className="h-4 w-4" />
               Generar Insight Manual
             </Button>
-            <Button onClick={() => router.push('/analysis/graph')} className="gap-2">
-              <Network className="h-4 w-4" />
-              Grafos de Conocimiento
-            </Button>
           </div>
 
         </div>

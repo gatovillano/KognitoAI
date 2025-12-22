@@ -165,15 +165,29 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
         max_researcher_iterations=cfg.max_researcher_iterations
     )
 
-    messages: list[BaseMessage] = [SystemMessage(content=supervisor_system_prompt)]
+    messages: list[BaseMessage] = []
+    initial_human_message_content = f"Plan research for: {state.get('research_brief', '')}"
+    
     if not state.get("supervisor_messages"):
         logger.info("First supervisor run. Planning initial research.")
-        messages.append(HumanMessage(content=f"Plan research for: {state.get('research_brief', '')}"))
+        # Combine system prompt with the initial human message
+        messages.append(HumanMessage(content=f"{supervisor_system_prompt}\n\n{initial_human_message_content}"))
     else:
         logger.info(f"Supervisor continuing with {len(state['supervisor_messages'])} previous messages.")
-        # Ensure messages are BaseMessage instances before extending
         valid_messages = [cast(BaseMessage, msg) for msg in state["supervisor_messages"] if isinstance(msg, (AIMessage, HumanMessage, SystemMessage, ToolMessage))]
-        messages.extend(valid_messages)
+        
+        # Prepend system prompt to the first HumanMessage if it exists, otherwise create one.
+        if valid_messages and isinstance(valid_messages[0], HumanMessage):
+            valid_messages[0].content = f"{supervisor_system_prompt}\n\n{valid_messages[0].content}"
+            messages.extend(valid_messages)
+        elif valid_messages and isinstance(valid_messages[0], (AIMessage, ToolMessage)):
+            # If the first message from history is not Human, inject a HumanMessage with system prompt
+            messages.append(HumanMessage(content=supervisor_system_prompt))
+            messages.extend(valid_messages)
+        else:
+            # If no valid messages or first is not human, create one with system prompt
+            messages.append(HumanMessage(content=supervisor_system_prompt))
+            messages.extend(valid_messages)
 
     response: AIMessage = await research_model.ainvoke(messages)
 
@@ -262,7 +276,27 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> dict:
                               stop_after_attempt=cfg.max_structured_output_retries
                           ))
     
-    messages = [SystemMessage(content=researcher_prompt)] + [cast(BaseMessage, msg) for msg in state["researcher_messages"]]
+    messages = [cast(BaseMessage, msg) for msg in state["researcher_messages"]]
+    
+    # Prepend system prompt to the first HumanMessage if it exists, otherwise create one.
+    if messages and isinstance(messages[0], HumanMessage):
+        messages[0].content = f"{researcher_prompt}\n\n{messages[0].content}"
+    elif messages and isinstance(messages[0], (AIMessage, ToolMessage)):
+        # If the first message from history is not Human, inject a HumanMessage with system prompt
+        messages.insert(0, HumanMessage(content=researcher_prompt))
+    else:
+        # If no messages or first is not human, create one with system prompt
+        messages.insert(0, HumanMessage(content=researcher_prompt))
+    
+    # Ensure the conversation always ends with a HumanMessage for Vertex AI compatibility
+    if not messages or not isinstance(messages[-1], HumanMessage):
+        if messages and messages[-1].type == "ai":
+            messages.append(HumanMessage(content=f"Continue research based on the previous AI response for topic: {state['research_topic']}"))
+        elif messages and messages[-1].type == "tool":
+            messages.append(HumanMessage(content=f"Process the tool output and continue research for topic: {state['research_topic']}"))
+        else:
+            messages.append(HumanMessage(content=f"Continue research for topic: {state['research_topic']}"))
+
     response: AIMessage = await research_model.ainvoke(messages)
     
     if response.tool_calls:

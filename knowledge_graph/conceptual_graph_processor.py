@@ -14,12 +14,20 @@ logger = logging.getLogger(__name__)
 
 class ConceptualGraphProcessor:
     """
-    Procesador que crea grafos basados en ideas conceptuales extraídas como citas.
+    Procesador especializado en extracción y análisis conceptual usando LLM.
+    
+    Responsabilidades:
+    - Extracción de citas conceptuales de alta calidad usando LLM
+    - Análisis de relaciones temáticas entre ideas conceptuales
+    - Identificación de perfiles de ideas centrales interrelacionadas
+    - Procesamiento específico del dominio conceptual (no híbrido)
     
     Filosofía:
     - Cada nodo = Una cita que expresa una idea completa
     - Las relaciones = Conexiones temáticas entre ideas
     - Perfiles = Clusters de ideas centrales interrelacionadas
+    
+    Nota: Todos los métodos son privados excepto process_documents_conceptually e initialize.
     """
     
     def __init__(self, llm=None, sentence_transformer=None):
@@ -129,7 +137,16 @@ class ConceptualGraphProcessor:
             raise
     
     async def _extract_conceptual_quotes(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Extrae citas que expresan ideas conceptuales completas."""
+        """
+        Método privado: Extrae citas conceptuales usando múltiples estrategias.
+        
+        Estrategias utilizadas:
+        1. LLM para contenido largo (>500 chars)
+        2. Análisis de oraciones conceptualmente ricas
+        3. Extracción de párrafos con alta densidad conceptual
+        
+        Elimina duplicados y filtra por calidad (confidence >= 0.6).
+        """
 
         conceptual_quotes = []
 
@@ -237,42 +254,36 @@ IMPORTANTE: Solo el JSON solicitado.
             except json.JSONDecodeError:
                 logger.warning("⚠️ Error parseando respuesta JSON del LLM. Intentando extraer JSON válido de la respuesta...")
                 
-                # Intentar limpiar la respuesta para aislar el JSON
-                cleaned_response_text = response_text.strip()
+                # Usar método mejorado de validación y limpieza
+                cleaned_response = self._validate_and_clean_llm_response(response_text)
                 
-                # Encontrar el índice del primer '{' y el último '}'
-                first_brace = cleaned_response_text.find('{')
-                last_brace = cleaned_response_text.rfind('}')
+                if not cleaned_response:
+                    logger.warning(f"⚠️ Respuesta vacía o inválida del LLM para extracción de citas")
+                    return []
                 
-                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-                    # Extraer lo que está entre el primer '{' y el último '}'
-                    potential_json = cleaned_response_text[first_brace : last_brace + 1]
-                    try:
-                        parsed = json.loads(potential_json)
-                        quotes_data = parsed.get("quotes", [])
-                        quotes = []
-                        for quote_data in quotes_data:
-                            quote = {
-                                "id": self._generate_quote_id(quote_data.get("text", "")),
-                                "text": quote_data.get("text", ""),
-                                "concept": quote_data.get("concept", ""),
-                                "importance": quote_data.get("importance", "media"),
-                                "category": quote_data.get("category", "general"),
-                                "source_document": doc.get('title', 'documento'),
-                                "extraction_method": "llm_conceptual",
-                                "confidence": 0.9 if quote_data.get("importance") == "alta" else 0.7,
-                                "type": "CONCEPTUAL_QUOTE"
-                            }
-                            quotes.append(quote)
-                        
-                        # Almacenar en caché
-                        self.llm_cache[cache_key] = quotes
-                        return quotes
-                    except Exception as e2:
-                        logger.error(f"❌ Error parseando JSON limpiado: {e2}")
-                        return []
-                else:
-                    logger.warning("⚠️ No se encontró un bloque JSON válido después de limpiar la respuesta del LLM.")
+                try:
+                    parsed = json.loads(cleaned_response)
+                    quotes_data = parsed.get("quotes", [])
+                    quotes = []
+                    for quote_data in quotes_data:
+                        quote = {
+                            "id": self._generate_quote_id(quote_data.get("text", "")),
+                            "text": quote_data.get("text", ""),
+                            "concept": quote_data.get("concept", ""),
+                            "importance": quote_data.get("importance", "media"),
+                            "category": quote_data.get("category", "general"),
+                            "source_document": doc.get('title', 'documento'),
+                            "extraction_method": "llm_conceptual",
+                            "confidence": 0.9 if quote_data.get("importance") == "alta" else 0.7,
+                            "type": "CONCEPTUAL_QUOTE"
+                        }
+                        quotes.append(quote)
+                    
+                    # Almacenar en caché
+                    self.llm_cache[cache_key] = quotes
+                    return quotes
+                except Exception as e2:
+                    logger.error(f"❌ Error parseando JSON limpiado: {e2}")
                     return []
         except Exception as e:
             logger.error(f"❌ Error extrayendo citas con LLM: {e}")
@@ -532,7 +543,18 @@ IMPORTANTE: Solo el JSON solicitado.
         return quality_quotes
 
     async def _analyze_thematic_relationships(self, quotes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Analiza relaciones temáticas entre citas conceptuales, usando un enfoque por lotes para eficiencia."""
+        """
+        Método privado: Analiza relaciones temáticas usando embeddings y LLM por lotes.
+        
+        Proceso:
+        1. Calcula embeddings para todas las citas
+        2. Identifica pares candidatos (similitud > 0.7)
+        3. Procesa en lotes con LLM (10 pares por llamada)
+        4. Genera relaciones basadas en categorías y estructura
+        5. Crea relaciones estructurales (mismo documento/categoría)
+        
+        Cachea resultados para optimizar llamadas al LLM.
+        """
 
         if len(quotes) < 2:
             return []
@@ -975,17 +997,19 @@ IMPORTANTE: Solo el JSON solicitado.
 
                 Responde ÚNICAMENTE con la frase o título del concepto central altamente granular."""
                 
-                response = await self.llm.ainvoke(prompt)
-                central_concept_llm = response.content.strip()
+                # Usar método de llamada robusta al LLM
+                response_text = await self._call_llm_safely(prompt, cache_key)
                 
-                if central_concept_llm:
+                if response_text and response_text.strip():
+                    central_concept_llm = response_text.strip()
                     logger.debug(f"🧠 LLM identificó concepto central granular: {central_concept_llm}")
                     # Almacenar en caché
                     self.llm_cache[cache_key] = central_concept_llm
                     return central_concept_llm
                 else:
-                    logger.warning("⚠️ LLM devolvió un concepto central vacío.")
-                    return "Concepto Central No Identificado" # Fallback más informativo
+                    logger.warning("⚠️ LLM devolvió un concepto central vacío o inválido.")
+                    # Usar fallback inteligente basado en conceptos disponibles
+                    return self._generate_fallback_central_concept(concepts)
             except Exception as e:
                 logger.error(f"❌ Falló la identificación de concepto central por LLM: {e}")
                 raise
@@ -1085,8 +1109,150 @@ IMPORTANTE: Solo el JSON solicitado.
                     batch_results.append(self.llm_cache[cache_key])
                     continue
                 
+                # Usar el método mejorado de llamada al LLM con validación y reintentos
+                result = await self._call_llm_with_retry_and_validation(
+                    quote1, quote2, similarity, cache_key, quote1_idx, quote2_idx
+                )
+                
+                if result:
+                    batch_results.append(result)
+                    
+            except Exception as e:
+                logger.error(f"❌ Error procesando par de citas {quote1_idx}-{quote2_idx} en el lote: {e}")
+                continue
+        
+        return batch_results
+    
+    async def _call_llm_with_retry_and_validation(self, quote1: Dict, quote2: Dict, similarity: float, 
+                                                cache_key: str, quote1_idx: int, quote2_idx: int) -> Optional[Dict[str, Any]]:
+        """
+        Llamada al LLM con validación mejorada, reintentos y manejo robusto de errores.
+        
+        Args:
+            quote1: Primera cita
+            quote2: Segunda cita
+            similarity: Puntuación de similitud
+            cache_key: Clave para el caché
+            quote1_idx: Índice de la primera cita
+            quote2_idx: Índice de la segunda cita
+            
+        Returns:
+            Resultado procesado o None si falla completamente
+        """
+        import json
+        import re
+        import time
+        
+        max_retries = 3
+        retry_delay = 1.0  # segundos
+        
+        for attempt in range(max_retries):
+            try:
                 # Crear prompt para el LLM
-                prompt = f"""
+                prompt = self._build_relationship_prompt(quote1, quote2, similarity)
+                
+                logger.debug(f"🤖 Llamando LLM para par {quote1_idx}-{quote2_idx} (intento {attempt + 1}/{max_retries})")
+                
+                response = await asyncio.wait_for(
+                    self.llm.ainvoke(prompt), 
+                    timeout=30.0  # Timeout de 30 segundos
+                )
+                response_text = response.content if hasattr(response, 'content') else str(response)
+                
+                # Log de la respuesta para debugging
+                logger.debug(f"📝 Respuesta LLM para par {quote1_idx}-{quote2_idx}: '{response_text[:200]}{'...' if len(response_text) > 200 else ''}'")
+                
+                # Validar y limpiar la respuesta
+                cleaned_response = self._validate_and_clean_response(response_text)
+                
+                if not cleaned_response:
+                    logger.warning(f"⚠️ Respuesta vacía o inválida del LLM para par {quote1_idx}-{quote2_idx} (intento {attempt + 1})")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay * (2 ** attempt))  # Backoff exponencial
+                        continue
+                    else:
+                        # Usar valores por defecto después de todos los intentos
+                        return self._create_default_relationship(quote1_idx, quote2_idx, similarity)
+                
+                # Parsear respuesta JSON
+                try:
+                    parsed = json.loads(cleaned_response)
+                    
+                    # Validar estructura de la respuesta
+                    if not isinstance(parsed, dict) or "type" not in parsed:
+                        raise ValueError("Respuesta JSON no tiene la estructura esperada")
+                    
+                    relationship_type = parsed.get("type", "RELACION_TEMATICA")
+                    description = parsed.get("description", "Las ideas están temáticamente relacionadas (LLM)")
+                    confidence_str = parsed.get("confidence", "media")
+                    
+                    # Convertir confianza a valor numérico
+                    confidence_map = {"alta": 0.9, "media": 0.7, "baja": 0.5}
+                    confidence = confidence_map.get(confidence_str.lower(), 0.7)
+                    
+                    result = {
+                        "original_pair": {
+                            "quote1_idx": quote1_idx,
+                            "quote2_idx": quote2_idx,
+                            "similarity": similarity
+                        },
+                        "type": relationship_type,
+                        "description": description,
+                        "confidence": confidence
+                    }
+                    
+                    # Almacenar en caché
+                    self.llm_cache[cache_key] = result
+                    logger.debug(f"✅ LLM respondió correctamente para par {quote1_idx}-{quote2_idx}")
+                    return result
+                    
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.warning(f"⚠️ Error parseando JSON del LLM para par {quote1_idx}-{quote2_idx}: {e}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay * (2 ** attempt))
+                        continue
+                    else:
+                        # Intentar extraer JSON manualmente de la respuesta
+                        extracted_result = self._extract_json_from_text(response_text, quote1_idx, quote2_idx, similarity)
+                        if extracted_result:
+                            self.llm_cache[cache_key] = extracted_result
+                            return extracted_result
+                        else:
+                            return self._create_default_relationship(quote1_idx, quote2_idx, similarity)
+                
+            except asyncio.TimeoutError:
+                logger.warning(f"⏰ Timeout en llamada LLM para par {quote1_idx}-{quote2_idx} (intento {attempt + 1})")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay * (2 ** attempt))
+                    continue
+                else:
+                    return self._create_default_relationship(quote1_idx, quote2_idx, similarity)
+                    
+            except Exception as e:
+                logger.error(f"❌ Error inesperado en llamada LLM para par {quote1_idx}-{quote2_idx}: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay * (2 ** attempt))
+                    continue
+                else:
+                    return self._create_default_relationship(quote1_idx, quote2_idx, similarity)
+        
+        # Si llegamos aquí, todos los intentos fallaron
+        logger.error(f"❌ Todos los intentos fallaron para par {quote1_idx}-{quote2_idx}, usando valores por defecto")
+        return self._create_default_relationship(quote1_idx, quote2_idx, similarity)
+    
+    def _build_relationship_prompt(self, quote1: Dict, quote2: Dict, similarity: float) -> str:
+        """
+        Construye el prompt para el análisis de relaciones temáticas.
+        
+        Args:
+            quote1: Primera cita
+            quote2: Segunda cita
+            similarity: Puntuación de similitud
+            
+        Returns:
+            Prompt formateado para el LLM
+        """
+        return f"""
 Analiza las siguientes dos citas conceptuales y determina la relación temática entre ellas:
 
 Cita 1: {quote1['text']}
@@ -1115,58 +1281,235 @@ Instrucciones:
    - CONVERGENCIA_TEMATICA
    - RELACION_TEMATICA
 
-Responde en formato JSON:
+Responde ÚNICAMENTE con un objeto JSON válido:
 {{
     "type": "tipo_de_relacion",
     "description": "descripción detallada de la relación",
-    "confidence": "alta/media/baja"
+    "confidence": "alta"
 }}
 
-IMPORTANTE: Responde ÚNICAMENTE con el objeto JSON solicitado, sin ningún texto adicional antes o después.
-"""
+NO incluyas texto adicional, solo el JSON."""
+    
+    def _validate_and_clean_response(self, response_text: str) -> Optional[str]:
+        """
+        Valida y limpia la respuesta del LLM antes de parsear JSON.
+        
+        Args:
+            response_text: Texto de respuesta del LLM
+            
+        Returns:
+            Texto limpio o None si la respuesta es inválida
+        """
+        if not response_text or not response_text.strip():
+            return None
+        
+        # Limpiar la respuesta
+        cleaned = response_text.strip()
+        
+        # Remover caracteres de control y normalizar
+        cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x84\x86-\x9f]', '', cleaned)
+        
+        # Buscar JSON en la respuesta
+        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', cleaned)
+        if json_match:
+            return json_match.group(0)
+        
+        # Si no se encuentra JSON válido, devolver None
+        return None
+    
+    def _extract_json_from_text(self, text: str, quote1_idx: int, quote2_idx: int, similarity: float) -> Optional[Dict[str, Any]]:
+        """
+        Intenta extraer información JSON manualmente del texto de respuesta.
+        
+        Args:
+            text: Texto de respuesta
+            quote1_idx: Índice de la primera cita
+            quote2_idx: Índice de la segunda cita
+            similarity: Puntuación de similitud
+            
+        Returns:
+            Resultado extraído o None si falla
+        """
+        import re
+        
+        try:
+            # Buscar patrones de tipo de relación
+            type_patterns = {
+                "CONCEPTOS_RELACIONADOS": r"conceptos?\s+relacionados?",
+                "MARCOS_TEORICOS_AFINES": r"marcos?\s+te[oó]ricos?\s+afines?",
+                "ENFOQUES_METODOLOGICOS": r"enfoques?\s+metodol[oó]gicos?",
+                "HALLAZGOS_CONVERGENTES": r"hallazgos?\s+convergentes?",
+                "FUNDAMENTACION_TEORICA": r"fundamentaci[oó]n\s+te[oó]rica",
+                "APLICACION_METODOLOGICA": r"aplicaci[oó]n\s+metodol[oó]gica",
+                "VALIDACION_EMPIRICA": r"validaci[oó]n\s+emp[ií]rica",
+                "CONFIRMACION_CONCEPTUAL": r"confirmaci[oó]n\s+conceptual",
+                "ALTA_CONVERGENCIA_TEMATICA": r"alta\s+convergencia\s+tem[aá]tica",
+                "CONVERGENCIA_TEMATICA": r"convergencia\s+tem[aá]tica",
+                "RELACION_TEMATICA": r"relaci[oó]n\s+tem[aá]tica"
+            }
+            
+            text_lower = text.lower()
+            detected_type = "RELACION_TEMATICA"
+            
+            for rel_type, pattern in type_patterns.items():
+                if re.search(pattern, text_lower):
+                    detected_type = rel_type
+                    break
+            
+            # Extraer descripción
+            description_match = re.search(r"descripci[oó]n\s*:?\s*([^{}\"]+)", text_lower)
+            description = description_match.group(1).strip() if description_match else "Las ideas están temáticamente relacionadas"
+            
+            # Detectar confianza
+            confidence = 0.7  # default
+            if any(word in text_lower for word in ["alta", "high", "strong"]):
+                confidence = 0.9
+            elif any(word in text_lower for word in ["baja", "low", "weak"]):
+                confidence = 0.5
+            
+            return {
+                "original_pair": {
+                    "quote1_idx": quote1_idx,
+                    "quote2_idx": quote2_idx,
+                    "similarity": similarity
+                },
+                "type": detected_type,
+                "description": description,
+                "confidence": confidence
+            }
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Error extrayendo JSON manualmente: {e}")
+            return None
+    
+    def _create_default_relationship(self, quote1_idx: int, quote2_idx: int, similarity: float) -> Dict[str, Any]:
+        """
+        Crea una relación por defecto cuando el LLM falla completamente.
+        
+        Args:
+            quote1_idx: Índice de la primera cita
+            quote2_idx: Índice de la segunda cita
+            similarity: Puntuación de similitud
+            
+        Returns:
+            Relación por defecto
+        """
+        # Determinar tipo de relación basado en similitud
+        if similarity > 0.85:
+            rel_type = "ALTA_CONVERGENCIA_TEMATICA"
+        elif similarity > 0.75:
+            rel_type = "CONVERGENCIA_TEMATICA"
+        else:
+            rel_type = "RELACION_TEMATICA"
+        
+        return {
+            "original_pair": {
+                "quote1_idx": quote1_idx,
+                "quote2_idx": quote2_idx,
+                "similarity": similarity
+            },
+            "type": rel_type,
+            "description": f"Relación temática basada en similitud ({similarity:.2f})",
+            "confidence": 0.6  # Confianza reducida para relaciones por defecto
+        }
+    
+    def _validate_and_clean_llm_response(self, response_text: str) -> Optional[str]:
+        """
+        Valida y limpia la respuesta del LLM para extracción de citas.
+        
+        Args:
+            response_text: Texto de respuesta del LLM
+            
+        Returns:
+            Texto limpio o None si la respuesta es inválida
+        """
+        if not response_text or not response_text.strip():
+            return None
+        
+        # Limpiar la respuesta
+        cleaned = response_text.strip()
+        
+        # Remover caracteres de control y normalizar
+        cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x84\x86-\x9f]', '', cleaned)
+        
+        # Buscar JSON en la respuesta
+        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', cleaned)
+        if json_match:
+            return json_match.group(0)
+        
+        # Si no se encuentra JSON válido, devolver None
+        return None
+    
+    async def _call_llm_safely(self, prompt: str, cache_key: str) -> Optional[str]:
+        """
+        Llamada segura al LLM con reintentos y manejo de errores.
+        
+        Args:
+            prompt: Prompt para el LLM
+            cache_key: Clave para el caché
+            
+        Returns:
+            Respuesta del LLM o None si falla
+        """
+        max_retries = 2
+        retry_delay = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                logger.debug(f"🤖 Llamada segura LLM (intento {attempt + 1}/{max_retries})")
                 
-                response = await self.llm.ainvoke(prompt)
+                response = await asyncio.wait_for(
+                    self.llm.ainvoke(prompt), 
+                    timeout=20.0
+                )
+                
                 response_text = response.content if hasattr(response, 'content') else str(response)
                 
-                # Parsear respuesta JSON
-                import json
-                try:
-                    parsed = json.loads(response_text)
-                    relationship_type = parsed.get("type", "RELACION_TEMATICA")
-                    description = parsed.get("description", "Las ideas están temáticamente relacionadas (LLM)")
-                    confidence_str = parsed.get("confidence", "media")
+                if response_text and response_text.strip():
+                    logger.debug(f"✅ LLM respondió correctamente")
+                    return response_text
+                else:
+                    logger.warning(f"⚠️ LLM respondió con contenido vacío (intento {attempt + 1})")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay * (2 ** attempt))
+                        continue
                     
-                    # Convertir confianza a valor numérico
-                    confidence_map = {"alta": 0.9, "media": 0.7, "baja": 0.5}
-                    confidence = confidence_map.get(confidence_str.lower(), 0.7)
-                    
-                    result = {
-                        "original_pair": pair,
-                        "type": relationship_type,
-                        "description": description,
-                        "confidence": confidence
-                    }
-                    
-                    # Almacenar en caché
-                    self.llm_cache[cache_key] = result
-                    batch_results.append(result)
-                    
-                except json.JSONDecodeError as e:
-                    logger.error(f"❌ Error parseando respuesta JSON del LLM para el par {quote1_idx}-{quote2_idx}: {e}")
-                    # Usar valores por defecto si falla el parsing
-                    result = {
-                        "original_pair": pair,
-                        "type": "RELACION_TEMATICA",
-                        "description": "Las ideas están temáticamente relacionadas (LLM)",
-                        "confidence": 0.7
-                    }
-                    
-                    # Almacenar en caché
-                    self.llm_cache[cache_key] = result
-                    batch_results.append(result)
+            except asyncio.TimeoutError:
+                logger.warning(f"⏰ Timeout en llamada LLM (intento {attempt + 1})")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay * (2 ** attempt))
+                    continue
                     
             except Exception as e:
-                logger.error(f"❌ Error procesando par de citas {quote1_idx}-{quote2_idx} en el lote: {e}")
-                continue
+                logger.error(f"❌ Error en llamada LLM: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay * (2 ** attempt))
+                    continue
         
-        return batch_results
+        logger.error(f"❌ Todos los intentos fallaron para llamada LLM")
+        return None
+    
+    def _generate_fallback_central_concept(self, concepts: List[str]) -> str:
+        """
+        Genera un concepto central de fallback cuando el LLM falla.
+        
+        Args:
+            concepts: Lista de conceptos disponibles
+            
+        Returns:
+            Concepto central generado
+        """
+        if not concepts:
+            return "Concepto Central No Identificado"
+        
+        # Eliminar duplicados y limpiar
+        unique_concepts = list(set(concept.strip() for concept in concepts if concept.strip()))
+        
+        if len(unique_concepts) == 1:
+            return unique_concepts[0]
+        elif len(unique_concepts) == 2:
+            return f"{unique_concepts[0]} y {unique_concepts[1]}"
+        elif len(unique_concepts) <= 5:
+            return ", ".join(unique_concepts[:-1]) + f" y {unique_concepts[-1]}"
+        else:
+            return ", ".join(unique_concepts[:3]) + f" y {len(unique_concepts)-3} conceptos relacionados"

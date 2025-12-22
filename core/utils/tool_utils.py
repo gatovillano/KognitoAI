@@ -1,6 +1,6 @@
 # core/utils/tool_utils.py
 import logging
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any, Dict, List, Sequence
 from langchain_core.tools import BaseTool
 
 logger = logging.getLogger(__name__)
@@ -11,7 +11,7 @@ _individual_tool_cache: Dict[str, BaseTool] = {}
 
 async def get_tool_by_name(
     tool_name: str,
-    all_tools: List[BaseTool], # Ahora recibe la lista completa de herramientas
+    all_tools: Sequence[BaseTool], # Ahora recibe la lista completa de herramientas
     account_id: str, # Mantener para la clave de caché
     telegram_id: Optional[str] = None, # Mantener para la clave de caché
     workspace_id: Optional[str] = None, # Mantener para la clave de caché

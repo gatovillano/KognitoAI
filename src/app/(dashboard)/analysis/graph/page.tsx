@@ -276,10 +276,15 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     if (!query) return [];
     try {
       const response = await apiClient.post('/api/search-graph', { query });
-      return response.data.results || [];
+      // Verificar si la respuesta es exitosa
+      if (response.data.success) {
+        return response.data.data?.results || [];
+      } else {
+        throw new Error(response.data.error || 'Error en la búsqueda');
+      }
     } catch (err) {
       console.error('Error buscando en el grafo:', err);
-      return [];
+      throw err; // Re-lanzar el error para que el componente padre lo maneje
     }
   }, []);
 
@@ -372,6 +377,8 @@ export default function KnowledgeGraphPage() {
     updateFilteredNodeId, // Get setter function from hook
   } = useKnowledgeGraph(maxNodes, maxHops, selectedDataset, filters, processingMode);
   const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   const filterGraphByNode = useCallback((nodeId: string | number) => {
     console.log("🔍 filterGraphByNode llamado con nodeId:", nodeId);
@@ -390,10 +397,26 @@ export default function KnowledgeGraphPage() {
   const handleSearchGraph = useCallback(async () => {
     if (!graphQuery.trim()) {
       setSearchResults([]);
+      setSearchError(null);
       return;
     }
-    const results = await searchGraph(graphQuery);
-    setSearchResults(results);
+    
+    setIsSearching(true);
+    setSearchError(null);
+    
+    try {
+      const results = await searchGraph(graphQuery);
+      setSearchResults(results);
+      if (results.length === 0) {
+        setSearchError('No se encontraron resultados para tu búsqueda.');
+      }
+    } catch (err: any) {
+      console.error('Error en búsqueda:', err);
+      setSearchError(err.message || 'Error al realizar la búsqueda');
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
   }, [graphQuery, searchGraph]);
 
   const handleProcessGraph = useCallback(async () => {
@@ -527,6 +550,9 @@ export default function KnowledgeGraphPage() {
               </Button>
               <Button variant="ghost" size="sm" onClick={() => {
                 updateFilteredNodeId(null); // Limpiar filtro de nodo
+                setSearchResults([]); // Limpiar resultados de búsqueda
+                setGraphQuery(''); // Limpiar query de búsqueda
+                setSearchError(null); // Limpiar error de búsqueda
                 graphVisualizationRef.current?.fitView(); // Ajustar la vista del grafo
               }}>
                 <GitGraph className="h-4 w-4 mr-2" /> Vista Completa
@@ -541,24 +567,49 @@ export default function KnowledgeGraphPage() {
                 placeholder="Buscar entidades en el grafo..."
                 value={graphQuery}
                 onChange={(e) => setGraphQuery(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSearchGraph()}
+                onKeyDown={(e) => e.key === 'Enter' && !isSearching && handleSearchGraph()}
                 className="flex-grow"
+                disabled={isSearching}
               />
-              <Button onClick={handleSearchGraph}>
-                <Search className="h-4 w-4 mr-2" /> Buscar
+              <Button onClick={handleSearchGraph} disabled={isSearching || !graphQuery.trim()}>
+                {isSearching ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Search className="h-4 w-4 mr-2" />
+                )}
+                {isSearching ? 'Buscando...' : 'Buscar'}
               </Button>
             </div>
-            {searchResults.length > 0 && (
+            {(searchResults.length > 0 || searchError) && (
               <div className="bg-muted p-3 rounded-md max-h-40 overflow-y-auto">
-                <p className="text-sm font-semibold mb-2">Resultados de la búsqueda:</p>
-                {searchResults.map((result) => (
-                  <div key={result.id} className="flex items-center justify-between text-sm py-1">
-                    <span>{result.label} ({result.type})</span>
-                    <Button variant="link" size="sm" className="h-auto p-0">
-                      <ExternalLink className="h-3 w-3 mr-1" /> Ver
-                    </Button>
+                {searchError ? (
+                  <div className="text-sm text-destructive">
+                    <p className="font-semibold mb-1">Error en la búsqueda:</p>
+                    <p>{searchError}</p>
                   </div>
-                ))}
+                ) : (
+                  <>
+                    <p className="text-sm font-semibold mb-2">Resultados de la búsqueda ({searchResults.length}):</p>
+                    {searchResults.map((result) => (
+                      <div key={result.id} className="flex items-center justify-between text-sm py-1 hover:bg-background rounded px-1">
+                        <span className="flex-1">
+                          {result.label || result.name} ({result.type})
+                        </span>
+                        <Button 
+                          variant="link" 
+                          size="sm" 
+                          className="h-auto p-0 text-primary"
+                          onClick={() => {
+                            // Por ahora solo mostrar en consola, se puede implementar enfoque después
+                            console.log('Nodo seleccionado:', result);
+                          }}
+                        >
+                          <ExternalLink className="h-3 w-3 mr-1" /> Seleccionar
+                        </Button>
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
             )}
           </div>

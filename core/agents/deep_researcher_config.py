@@ -46,19 +46,19 @@ class Configuration(BaseModel):
 
     # Model Configuration
     # We can define different models for different tasks
-    summarization_model: str = Field(default="gpt-4o-mini")
+    summarization_model: str = Field(default="gemini-2.5-flash")
     summarization_model_max_tokens: int = Field(default=8192)
-    
-    research_model: str = Field(default="gpt-4o")
+
+    research_model: str = Field(default="gemini-2.5-flash")
     research_model_max_tokens: int = Field(default=8192)
-    
-    compression_model: str = Field(default="gpt-4o")
+
+    compression_model: str = Field(default="gemini-2.5-flash")
     compression_model_max_tokens: int = Field(default=8192)
-    
-    final_report_model: str = Field(default="gpt-4o")
+
+    final_report_model: str = Field(default="gemini-2.5-flash")
     final_report_model_max_tokens: int = Field(default=8192)
     
-    max_content_length: int = Field(default=50000)
+    max_content_length: int = Field(default=100000)
 
     # MCP server configuration
     mcp_config: Optional[MCPConfig] = Field(default=None)

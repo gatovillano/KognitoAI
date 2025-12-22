@@ -30,7 +30,7 @@ import asyncio
 import uuid
 import json
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Dict, Optional, Tuple, List, AsyncIterator
 import pytz
 from sqlalchemy.dialects.postgresql import JSONB, UUID, ARRAY, TSVECTOR
 
@@ -44,7 +44,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 try:
-    from sqlalchemy.inspect import inspect
+    from sqlalchemy import inspect
 except ImportError:
     from sqlalchemy.inspection import inspect # Para compatibilidad con versiones anteriores
 
@@ -1008,7 +1008,7 @@ async def create_tables():
                 logger.error("❌ ERROR CRÍTICO: No se pudieron crear las tablas de la base de datos después de varios reintentos.")
                 raise
 
-async def get_db_session() -> AsyncSession:
+async def get_db_session() -> AsyncIterator[AsyncSession]:
     """
     Dependencia de FastAPI para obtener una sesión de base de datos asíncrona.
     Este es el patrón estándar para la inyección de dependencias de sesiones en FastAPI.
@@ -1039,8 +1039,8 @@ async def delete_accounts_by_ids(db_session: AsyncSession, account_ids: list[uui
         # Eliminar WorkspacePermissions antes que Workspaces
         await db_session.execute(delete(WorkspacePermission).where(WorkspacePermission.account_id.in_(account_ids)))
         
-        # Eliminar TeamMembers antes que Teams
-        await db_session.execute(delete(TeamMember).where(TeamMember.account_id.in_(account_ids)))
+        # La tabla TeamMember ha sido eliminada.
+        # await db_session.execute(delete(TeamMember).where(TeamMember.account_id.in_(account_ids)))
 
         # Eliminar FormResponses (que pueden depender de la cuenta o del formulario)
         form_ids_stmt = select(Form.id).where(Form.account_id.in_(account_ids))

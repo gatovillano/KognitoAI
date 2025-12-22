@@ -35,5 +35,8 @@
   "reportConstantRedefinition": "none",
   "reportIncompatibleMethodOverride": "warning",
   "reportIncompatibleVariableOverride": "warning",
-  "reportOverlappingOverloads": "warning"
+  "reportOverlappingOverloads": "warning",
+  "extraPaths": [
+    "core"
+  ]
 }

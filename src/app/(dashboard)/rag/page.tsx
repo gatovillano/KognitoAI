@@ -421,6 +421,12 @@ export default function RagCollectionsPage() {
             <span className="text-xs sm:text-sm">Análisis</span>
           </Button>
 
+          {/* Botón de Grafos de Conocimiento */}
+          <Button size="sm" className="bg-primary hover:bg-primary/90 gap-1 sm:gap-2 w-full sm:w-auto" onClick={() => router.push('/analysis/graph')}>
+            <Network className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+            <span className="text-xs sm:text-sm">Grafos</span>
+          </Button>
+
           {/* Botón Principal */}
           <Button size="sm" className="bg-primary hover:bg-primary/90 gap-1 sm:gap-2 w-full sm:w-auto" onClick={() => setIsUploadOpen(true)}>
             <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
