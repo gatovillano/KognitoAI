@@ -64,7 +64,7 @@ class ConceptualGraphProcessor:
             self.embedding_model = get_embedding_model()
             
             if not self.embedding_model:
-                 raise ValueError("No se pudo obtener el modelo de embeddings compartido.")
+                raise ValueError("No se pudo obtener el modelo de embeddings compartido.")
 
             logger.info(f"✅ Modelo de embeddings cargado correctamente")
             
@@ -267,69 +267,6 @@ IMPORTANTE: Solo el JSON solicitado.
                         
                         # Almacenar en caché
                         self.llm_cache[cache_key] = quotes
-                        return quotes
-                    except Exception as e2:
-                        logger.error(f"❌ Error parseando JSON limpiado: {e2}")
-                        return []
-                else:
-                    logger.warning("⚠️ No se encontró un bloque JSON válido después de limpiar la respuesta del LLM.")
-                    return []
-        except Exception as e:
-            logger.error(f"❌ Error extrayendo citas con LLM: {e}")
-            return []
-            
-            # Parsear respuesta JSON
-            import json
-            try:
-                parsed = json.loads(response_text)
-                quotes_data = parsed.get("quotes", [])
-                
-                quotes = []
-                for quote_data in quotes_data:
-                    quote = {
-                        "id": self._generate_quote_id(quote_data.get("text", "")),
-                        "text": quote_data.get("text", ""),
-                        "concept": quote_data.get("concept", ""),
-                        "importance": quote_data.get("importance", "media"),
-                        "category": quote_data.get("category", "general"),
-                        "source_document": doc.get('title', 'documento'),
-                        "extraction_method": "llm_conceptual",
-                        "confidence": 0.9 if quote_data.get("importance") == "alta" else 0.7,
-                        "type": "CONCEPTUAL_QUOTE"
-                    }
-                    quotes.append(quote)
-                
-                return quotes
-            except json.JSONDecodeError:
-                logger.warning("⚠️ Error parseando respuesta JSON del LLM. Intentando extraer JSON válido de la respuesta...")
-                
-                # Intentar limpiar la respuesta para aislar el JSON
-                cleaned_response_text = response_text.strip()
-                
-                # Encontrar el índice del primer '{' y el último '}'
-                first_brace = cleaned_response_text.find('{')
-                last_brace = cleaned_response_text.rfind('}')
-                
-                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-                    # Extraer lo que está entre el primer '{' y el último '}'
-                    potential_json = cleaned_response_text[first_brace : last_brace + 1]
-                    try:
-                        parsed = json.loads(potential_json)
-                        quotes_data = parsed.get("quotes", [])
-                        quotes = []
-                        for quote_data in quotes_data:
-                            quote = {
-                                "id": self._generate_quote_id(quote_data.get("text", "")),
-                                "text": quote_data.get("text", ""),
-                                "concept": quote_data.get("concept", ""),
-                                "importance": quote_data.get("importance", "media"),
-                                "category": quote_data.get("category", "general"),
-                                "source_document": doc.get('title', 'documento'),
-                                "extraction_method": "llm_conceptual",
-                                "confidence": 0.9 if quote_data.get("importance") == "alta" else 0.7,
-                                "type": "CONCEPTUAL_QUOTE"
-                            }
-                            quotes.append(quote)
                         return quotes
                     except Exception as e2:
                         logger.error(f"❌ Error parseando JSON limpiado: {e2}")
@@ -615,8 +552,18 @@ IMPORTANTE: Solo el JSON solicitado.
             logger.error(f"Error generando embeddings: {e}")
             raise
 
-        from sklearn.metrics.pairwise import cosine_similarity
-        similarities = cosine_similarity(embeddings)
+        try:
+            from sklearn.metrics.pairwise import cosine_similarity
+        except ImportError:
+            logger.warning("⚠️ sklearn no está instalado. Usando cálculo manual de similitud coseno.")
+            # Fallback: calcular similitud coseno manualmente
+            import numpy as np
+            embeddings_array = np.array(embeddings)
+            norms = np.linalg.norm(embeddings_array, axis=1, keepdims=True)
+            normalized = embeddings_array / norms
+            similarities = np.dot(normalized, normalized.T)
+        else:
+            similarities = cosine_similarity(embeddings)
 
         # Identificar pares candidatos para análisis
         candidate_pairs = []
@@ -1064,7 +1011,7 @@ IMPORTANTE: Solo el JSON solicitado.
                 return self.llm_cache[cache_key]
             
             # Usar LLM para una descripción más elaborada
-            prompt = f"""El siguiente conjunto de {quotes_count} citas conceptuales se agrupa bajo el concepto central de '{central_concept}' y está relacionado con las categorías: {categories_str}.
+            prompt = f"""El siguiente conjunto de {quotes_count} citas conceptuales se agrupa bajo el concepto central de
             Aquí están algunas de las citas clave:
             {quotes_texts[:5]}
 
