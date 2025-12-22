@@ -1,9 +1,35 @@
 # core/agents/deep_researcher_config.py
 
+import os
+from enum import Enum
 from typing import Any, List, Optional
 
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
+
+class SearchAPI(Enum):
+    """Enumeration of available search API providers."""
+    
+    ANTHROPIC = "anthropic"
+    OPENAI = "openai"
+    TAVILY = "tavily"
+    NONE = "none"
+
+class MCPConfig(BaseModel):
+    """Configuration for Model Context Protocol (MCP) servers."""
+    
+    url: Optional[str] = Field(
+        default=None,
+        description="The URL of the MCP server"
+    )
+    tools: Optional[List[str]] = Field(
+        default=None,
+        description="The tools to make available to the LLM"
+    )
+    auth_required: Optional[bool] = Field(
+        default=False,
+        description="Whether the MCP server requires authentication"
+    )
 
 class Configuration(BaseModel):
     """Main configuration class for the Deep Research agent."""
@@ -14,18 +40,29 @@ class Configuration(BaseModel):
     max_concurrent_research_units: int = Field(default=3)
 
     # Research Configuration
+    search_api: SearchAPI = Field(default=SearchAPI.TAVILY)
     max_researcher_iterations: int = Field(default=3)
     max_react_tool_calls: int = Field(default=5)
 
     # Model Configuration
     # We can define different models for different tasks
-    research_model: str = Field(default="main_llm")
-    compression_model: str = Field(default="main_llm")
-    final_report_model: str = Field(default="main_llm")
+    summarization_model: str = Field(default="gpt-4o-mini")
+    summarization_model_max_tokens: int = Field(default=8192)
     
+    research_model: str = Field(default="gpt-4o")
     research_model_max_tokens: int = Field(default=8192)
-    compression_model_max_tokens: int = Field(default=4096)
+    
+    compression_model: str = Field(default="gpt-4o")
+    compression_model_max_tokens: int = Field(default=8192)
+    
+    final_report_model: str = Field(default="gpt-4o")
     final_report_model_max_tokens: int = Field(default=8192)
+    
+    max_content_length: int = Field(default=50000)
+
+    # MCP server configuration
+    mcp_config: Optional[MCPConfig] = Field(default=None)
+    mcp_prompt: Optional[str] = Field(default=None)
 
     # Retry Configuration for LLM calls to handle RateLimitError
     llm_retry_exponential_multiplier: int = Field(default=1000) # milliseconds
@@ -34,8 +71,12 @@ class Configuration(BaseModel):
     def from_runnable_config(cls, config: Optional[RunnableConfig] = None) -> "Configuration":
         """Create a Configuration instance from a RunnableConfig."""
         configurable = config.get("configurable", {}) if config else {}
-        # Simple implementation: we can expand this to read from env vars or other sources
-        return cls(**configurable)
+        field_names = list(cls.model_fields.keys())
+        values: dict[str, Any] = {
+            field_name: os.environ.get(field_name.upper(), configurable.get(field_name))
+            for field_name in field_names
+        }
+        return cls(**{k: v for k, v in values.items() if v is not None})
 
     class Config:
         """Pydantic configuration."""
