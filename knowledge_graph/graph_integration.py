@@ -14,6 +14,8 @@ import re
 import json
 
 from core.config import settings
+from core.database import SessionLocal
+from utils.db_session import DBSession
 from knowledge_graph.graph_database import GraphDB
 from core.llm_manager import get_main_llm, get_fast_llm
 from utils.embeddings import get_embedding_model
@@ -24,12 +26,25 @@ from knowledge_graph.neo4j_adapter import Neo4jAdapter
 logger = logging.getLogger(__name__)
 
 class GraphIntegration:
+    """
+    Integración de bajo nivel con Neo4j y orquestación de procesadores de grafo.
+    
+    Responsabilidades:
+    - Integración directa con Neo4j (creación de índices, consultas Cypher)
+    - Orquestación entre HybridGraphProcessor y ConceptualGraphProcessor
+    - Conversión de formatos entre diferentes procesadores y Neo4j
+    - Búsquedas avanzadas y análisis temporal en el grafo
+    - Generación de datos para visualización
+    
+    Nota: Los métodos con prefijo _ son privados y solo para uso interno.
+    """
+    
     def __init__(self, graph_db: GraphDB):
         """
-        Integración para procesamiento semántico avanzado de grafos.
+        Inicializa la integración con Neo4j y procesadores de grafo.
         
         Args:
-            graph_db (GraphDB): Una instancia de la clase GraphDB.
+            graph_db (GraphDB): Instancia configurada de GraphDB para Neo4j.
         """
         self.graph_db = graph_db
         self.hybrid_processor = HybridGraphProcessor()
@@ -38,7 +53,12 @@ class GraphIntegration:
         logger.info("✅ GraphIntegration inicializada con Neo4jAdapter y HybridGraphProcessor")
 
     async def _create_fulltext_indexes(self):
-        """Asegura que los índices full-text necesarios existan en Neo4j."""
+        """
+        Método privado: Crea índices full-text en Neo4j para búsquedas eficientes.
+        
+        Solo se ejecuta cuando es necesario para optimizar búsquedas de texto completo
+        en nodos CONCEPTUAL_QUOTE e IDEA_PROFILE, y relaciones THEMATIC_RELATIONSHIP.
+        """
         try:
             logger.info("🔍 Verificando y creando índices full-text en Neo4j...")
 
@@ -212,11 +232,16 @@ class GraphIntegration:
 
     async def _fetch_documents_from_db(self, account_id: str, topic: Optional[str] = None, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Busca documentos en la base de datos PostgreSQL."""
-        from core.database import get_db_session
+        from core.dependencies import get_db_session
         import sqlalchemy
+        from urllib.parse import unquote
 
         try:
-            async with get_db_session() as session:
+            # Decodificar el topic para convertir de formato URL-encoded a texto legible
+            decoded_topic = unquote(topic) if topic else None
+            logger.info(f"🔍 Buscando documentos con topic: '{topic}' (decodificado: '{decoded_topic}')")
+            
+            async with DBSession(SessionLocal) as session:
                 # Construir filtros dinámicamente
                 filters = ["account_id = :account_id", "cmetadata->>'type' = 'document_chunk'"]
 
@@ -225,7 +250,7 @@ class GraphIntegration:
                 else:
                     filters.append("workspace_id IS NULL")
 
-                if topic:
+                if decoded_topic:
                     filters.append("topic = :topic")
 
                 where_clause = " AND ".join(filters)
@@ -249,8 +274,8 @@ class GraphIntegration:
                 params = {'account_id': account_id}
                 if workspace_id:
                     params['workspace_id'] = workspace_id
-                if topic:
-                    params['topic'] = topic
+                if decoded_topic:
+                    params['topic'] = decoded_topic
 
                 result = await session.execute(query, params)
                 documents = []
@@ -278,8 +303,8 @@ class GraphIntegration:
                 account_id = documents[0].get("metadata", {}).get("account_id")
 
         if not account_id:
-            logger.error("❌ No se encontró account_id ni en los parámetros ni en los documentos")
-            return []
+            # Levantar un error si no se encuentra el account_id para detener el proceso.
+            raise ValueError("No se encontró account_id ni en los parámetros ni en los documentos. El procesamiento no puede continuar.")
 
         logger.info(f"🔑 Usando account_id: {account_id} para reconstrucción de contenido")
 
@@ -1034,7 +1059,8 @@ class GraphIntegration:
                 Max Hops: {max_hops}
                 Max Nodes: {max_nodes}
                 """
-                generated_cypher_query = fast_llm.invoke(cypher_generation_prompt).content.strip()
+                generated_cypher_query_result = fast_llm.invoke(cypher_generation_prompt).content
+                generated_cypher_query = "".join(str(item) for item in generated_cypher_query_result).strip()
                 
                 cypher_match = re.search(r"```(?:cypher)?\s*(.*?)\s*```", generated_cypher_query, re.DOTALL)
                 if cypher_match:
@@ -1094,7 +1120,8 @@ class GraphIntegration:
                 Resume brevemente la estructura del grafo visualizado ({len(nodes_data)} nodos, {len(edges_data)} relaciones).
                 Foco: '{focus_query}'
                 """
-                summary = fast_llm.invoke(summary_prompt).content.strip()
+                summary_result = fast_llm.invoke(summary_prompt).content
+                summary = "".join(str(item) for item in summary_result).strip()
 
             return {
                 "nodes": nodes_data,

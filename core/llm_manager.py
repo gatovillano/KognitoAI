@@ -5,12 +5,13 @@ import time
 import asyncio
 from collections import deque
 from threading import Lock
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from datetime import datetime
 import litellm # Importar litellm
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.rate_limiters import BaseRateLimiter
 from langchain_community.chat_models import ChatLiteLLM
+from langchain_core.messages import BaseMessage, HumanMessage # Importar BaseMessage y HumanMessage
 from core.config import settings
 
 # Asegúrate de que litellm elimine parámetros no soportados globalmente
@@ -117,9 +118,18 @@ def get_fast_llm() -> Optional[ChatLiteLLM]: # More specific return type
     """Returns the initialized fast task LLM instance, or the main one as a fallback."""
     return _fast_task_llm_instance or _main_agent_llm_instance
 
-async def _invoke_llm_cached(llm: BaseLanguageModel, prompt: str) -> Any:
-    """Función wrapper para invocar el LLM."""
-    return await llm.ainvoke(prompt)
+async def _invoke_llm_cached(llm: BaseLanguageModel, prompt: Union[str, List[BaseMessage]]) -> Any:
+    """Función wrapper para invocar el LLM, asegurando el formato de mensaje correcto."""
+    if isinstance(prompt, str):
+        # Envuelve el prompt de cadena en un HumanMessage para cumplir con las expectativas del modelo
+        messages = [HumanMessage(content=prompt)]
+    elif isinstance(prompt, list) and all(isinstance(msg, BaseMessage) for msg in prompt):
+        # Si ya es una lista de BaseMessage, úsalo directamente
+        messages = prompt
+    else:
+        raise TypeError("El prompt debe ser una cadena o una lista de objetos BaseMessage.")
+    
+    return await llm.ainvoke(messages)
 
 async def initialize_llms():
     """

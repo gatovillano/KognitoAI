@@ -485,8 +485,11 @@ async def get_relevant_memories(
 
         # Reranking
         if reranking:
+            logger.info(f"✨ Iniciando reranking de {len(final_retrieved_docs)} documentos para la consulta: '{query[:50]}...'")
             reranker = Reranker() # Asegúrate de que se instancia correctamente
+            logger.info("Reranker instanciado. Ejecutando rerank...")
             final_retrieved_docs = await reranker.rerank(query, final_retrieved_docs) # Removed top_n
+            logger.info(f"✅ Reranking completado. Documentos finales después de rerank: {len(final_retrieved_docs)}")
         
         # Convertir a ToolOutputWithSources (ya implementado)
         final_content_list = []
