@@ -76,24 +76,10 @@ WebScraperTool = _import_tool_class("web_scraper_tool", "WebScraperTool")
 ScheduleToolExecutionTool = _import_tool_class("schedule_tool_execution", "ScheduleToolExecutionTool")
 ListScheduledToolsTool = _import_tool_class("schedule_tool_execution", "ListScheduledToolsTool")
 SearchNotesTool = _import_tool_class("search_notes_tool", "SearchNotesTool")
+WebSearchTool = _import_tool_class("web_search_tool", "WebSearchTool")
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
-
-# Lista de todas las clases de herramientas a instanciar directamente.
-tool_classes_to_instantiate = [
-    AddNoteTool, AddWebToRAGTool, AnalyzeCodeForInsightsTool, AnalyzeTextForInsightsTool,
-    CancelEventTool, ConceptualProcessingTool, KnowledgeGraphTool,
-    InsightGenerationTool, ComprehensiveWebAnalysisTool, ConversationContextAnalyzerTool,
-    ConversationHistoryAnalyzerTool, DeleteDocumentTool, DeleteNoteTool, DocumentRAGTool,
-    ExtractDocumentTitlesTool, GetAgendaTool, GetAnalysisResultsTool, GetDocumentContentTool,
-    GetDocumentListTool, GetNotesTool, GetFormResponsesTool, GetProactiveInsightsTool,
-    GitHubRepoTool, ImageBackgroundEraserTool, ImageGenerationTool, InternalKnowledgeSearchTool,
-    MemoryAddTool, KnowledgeSearchTool, MindmapGeneratorTool, MultiQuerySearchTool,
-    NaturalQueryInterpreterTool, ScheduleEventTool, ScopedRagAnalysisTool, SearchNotesTool,
-    SetReminderTool, UpdateDocumentMetadataTool, UpdateNoteTool, UpdateProfileTool,
-    WebScraperTool, ScheduleToolExecutionTool, ListScheduledToolsTool, ContactProfileTool,
-]
 
 # Global singletons for shared dependencies
 _graph_db_instance = None
@@ -148,18 +134,28 @@ async def _instantiate_tool(
         tool_name = getattr(ToolClass, 'name', ToolClass.__name__)
 
         # --- Dependency Injection for Graph Tools ---
-        if ToolClass in [KnowledgeGraphTool, ConceptualProcessingTool]:
+        if ToolClass == KnowledgeGraphTool:
+            _graph_db, _ = await get_shared_dependencies()
+            if _graph_db:
+                tool_kwargs = {
+                    'account_id': account_id,
+                    'graph_db': _graph_db
+                }
+                if workspace_id is not None:
+                    tool_kwargs['workspace_id'] = workspace_id
+                tool_instance = ToolClass(**tool_kwargs)
+            else:
+                logger.warning(f"Skipping {tool_name} due to missing graph dependencies.")
+                return None
+        elif ToolClass == ConceptualProcessingTool:
             _graph_db, _graph_integration = await get_shared_dependencies()
-
             if _graph_db and _graph_integration:
                 tool_kwargs = {
                     'account_id': account_id,
                     'graph_integration': _graph_integration,
                     'graph_db': _graph_db
                 }
-                if telegram_id is not None:
-                    tool_kwargs['telegram_id'] = str(telegram_id)
-                if workspace_id is not None: # Pasar workspace_id a herramientas de grafo
+                if workspace_id is not None:
                     tool_kwargs['workspace_id'] = workspace_id
                 tool_instance = ToolClass(**tool_kwargs)
             else:
@@ -204,109 +200,90 @@ async def get_all_langchain_tools(
     account_id: str,
     telegram_id: Optional[int] = None,
     thread_id: Optional[str] = None,
-    workspace_id: Optional[str] = None # Añadir workspace_id aquí
+    workspace_id: Optional[str] = None
 ) -> List[Tool]:
     """
-    Recoge, instancia y devuelve una lista de todas las herramientas LangChain disponibles.
+    Recoge, instancia y devuelve una lista de todas las herramientas LangChain disponibles,
+    asegurando que no haya duplicados.
     """
     logger.info("⚙️ Assembling agent toolbox...")
-    available_tools: List[Tool] = []
+    
+    # Lista completa de todas las clases de herramientas que se deben intentar instanciar.
+    full_tool_classes_to_instantiate = [
+        AddNoteTool, AddWebToRAGTool, AnalyzeCodeForInsightsTool, AnalyzeTextForInsightsTool,
+        CancelEventTool, ConceptualProcessingTool, KnowledgeGraphTool,
+        InsightGenerationTool, ComprehensiveWebAnalysisTool, ConversationContextAnalyzerTool,
+        ConversationHistoryAnalyzerTool, DeleteDocumentTool, DeleteNoteTool, DocumentRAGTool,
+        ExtractDocumentTitlesTool, GetAgendaTool, GetAnalysisResultsTool, GetDocumentContentTool,
+        GetDocumentListTool, GetNotesTool, GetFormResponsesTool, GetProactiveInsightsTool,
+        GitHubRepoTool, ImageBackgroundEraserTool, ImageGenerationTool, InternalKnowledgeSearchTool,
+        MemoryAddTool, KnowledgeSearchTool, MindmapGeneratorTool, MultiQuerySearchTool,
+        NaturalQueryInterpreterTool, ScheduleEventTool, ScopedRagAnalysisTool, SearchNotesTool,
+        SetReminderTool, UpdateDocumentMetadataTool, UpdateNoteTool, UpdateProfileTool,
+        WebScraperTool, ScheduleToolExecutionTool, ListScheduledToolsTool, ContactProfileTool,
+        WebSearchTool,
+    ]
+
+    all_instantiated_tools: List[Tool] = []
     failed_tools: List[str] = []
 
     await get_shared_dependencies()
 
-    for ToolClass in tool_classes_to_instantiate:
-        tool_name = getattr(ToolClass, 'name', ToolClass.__name__)
-        tool_instance = await _instantiate_tool(ToolClass, account_id, telegram_id, thread_id, workspace_id) # Pasar workspace_id
+    # 1. Instanciar todas las herramientas estándar de la lista.
+    for ToolClass in full_tool_classes_to_instantiate:
+        tool_instance = await _instantiate_tool(ToolClass, account_id, telegram_id, thread_id, workspace_id)
         if tool_instance:
-            available_tools.append(tool_instance)
+            all_instantiated_tools.append(tool_instance)
         else:
-            failed_tools.append(tool_name)
+            failed_tools.append(getattr(ToolClass, 'name', ToolClass.__name__))
 
-    # Instantiate factory tools
+    # 2. Instanciar herramientas de fábrica (factory tools).
     try:
-        # duckduckgo search tool: use dynamic import (require tools package on PYTHONPATH)
-        try:
-            ddg_module = importlib.import_module("tools.ddg_search_tool")
-            create_ddg_search_tool = getattr(ddg_module, "create_ddg_search_tool", None)
-            if create_ddg_search_tool is None:
-                raise AttributeError("create_ddg_search_tool not found in tools.ddg_search_tool")
-            ddg_search_tool_instance = create_ddg_search_tool(account_id=account_id)
-            available_tools.append(ddg_search_tool_instance)
-        except Exception as inner_e:
-            # Provide a clearer log than a bare ImportError; falls back to the outer except
-            logger.error("DuckDuckGoSearchTool import/create failed: %s", inner_e, exc_info=True)
-            raise
+        ddg_module = importlib.import_module("tools.ddg_search_tool")
+        create_ddg_search_tool = getattr(ddg_module, "create_ddg_search_tool")
+        ddg_search_tool_instance = create_ddg_search_tool(account_id=account_id)
+        all_instantiated_tools.append(ddg_search_tool_instance)
     except Exception as e:
         logger.error("Failed to import/create DuckDuckGoSearchTool: %s", e, exc_info=True)
         failed_tools.append("DuckDuckGoSearchTool")
 
     try:
-        # deep research tool: use absolute import (require tools package on PYTHONPATH)
         DeepResearchToolClass = _import_tool_class("deep_research_tool", "DeepResearchTool")
-
-        # Reutilizar la instancia de AddWebToRAGTool ya creada en el loop anterior
-        add_web_to_rag_instance = next((t for t in available_tools if getattr(t, "name", None) == "add_web_to_rag"), None)
-
-        # Si no existe, crearla (esto no debería ocurrir normalmente)
-        if not add_web_to_rag_instance:
-            logger.warning("AddWebToRAGTool no encontrada en available_tools, intentando crear nueva instancia vía _instantiate_tool.")
-            # Use the module-level AddWebToRAGTool class and the helper to ensure proper args are passed.
-            if 'AddWebToRAGTool' in globals() and AddWebToRAGTool is not None:
-                add_web_to_rag_instance = await _instantiate_tool(
-                    AddWebToRAGTool,
-                    account_id=account_id,
-                    telegram_id=telegram_id,
-                    thread_id=thread_id,
-                    workspace_id=workspace_id
-                )
-                if add_web_to_rag_instance:
-                    available_tools.append(add_web_to_rag_instance)
-                else:
-                    logger.warning("Fallo al instanciar AddWebToRAGTool vía _instantiate_tool; DeepResearchTool no será creado.")
-            else:
-                logger.warning("Clase AddWebToRAGTool no disponible en globals(); DeepResearchTool no será creado.")
-                add_web_to_rag_instance = None
         
-        # ahora buscar la herramienta de web_search (ws_tool)
-        ws_tool = next((t for t in available_tools if getattr(t, "name", None) == "web_search"), None)
-        if ws_tool and add_web_to_rag_instance:
+        # Localizar dependencias ya instanciadas
+        web_search_tool = next((t for t in all_instantiated_tools if getattr(t, "name", None) == "web_search"), None)
+        add_web_to_rag_tool = next((t for t in all_instantiated_tools if getattr(t, "name", None) == "add_web_to_rag"), None)
+
+        if web_search_tool and add_web_to_rag_tool:
             deep_research_instance = DeepResearchToolClass(
-                web_search_tool=ws_tool,
-                add_web_to_rag_tool=add_web_to_rag_instance,
+                web_search_tool=web_search_tool,
+                add_web_to_rag_tool=add_web_to_rag_tool,
                 account_id=account_id,
                 telegram_id=telegram_id,
                 thread_id=thread_id,
                 workspace_id=workspace_id
             )
-            if deep_research_instance:
-                available_tools.append(deep_research_instance)
+            all_instantiated_tools.append(deep_research_instance)
         else:
-            if not ws_tool:
-                logger.warning("web_search tool no encontrada; omitiendo creación de DeepResearchTool.")
-            if not add_web_to_rag_instance:
-                logger.warning("add_web_to_rag tool no disponible; omitiendo creación de DeepResearchTool.")
+            logger.warning("Could not create DeepResearchTool due to missing dependencies (web_search or add_web_to_rag).")
+
     except Exception as e:
         logger.error("Failed to import/create DeepResearchTool: %s", e, exc_info=True)
         failed_tools.append("DeepResearchTool")
 
-    # --- DEDUPLICATION: Ensure no duplicate tool names ---
-    seen_tool_names = set()
-    deduplicated_tools = []
-    for tool in available_tools:
-        tool_name = tool.name if hasattr(tool, 'name') else str(tool)
-        if tool_name not in seen_tool_names:
-            deduplicated_tools.append(tool)
-            seen_tool_names.add(tool_name)
+    # 3. Paso de deduplicación final y definitivo.
+    final_tools: List[Tool] = []
+    seen_names = set()
+    for tool in all_instantiated_tools:
+        if tool.name not in seen_names:
+            final_tools.append(tool)
+            seen_names.add(tool.name)
         else:
-            logger.warning(f"⚠️ Duplicate tool detected and removed: '{tool_name}'")
-    
-    if len(deduplicated_tools) < len(available_tools):
-        logger.info(f"🔧 Deduplication: Removed {len(available_tools) - len(deduplicated_tools)} duplicate tool(s)")
-        available_tools = deduplicated_tools
-
-    logger.info(f"--- 🧰 Toolbox Assembled ({len(available_tools)} tools) ---")
+            logger.warning(f"⚠️ Duplicate tool '{tool.name}' removed during final deduplication.")
+            
+    logger.info(f"--- 🧰 Toolbox Assembled ({len(final_tools)} tools) ---")
+    logger.info(f"Final tool list: {[tool.name for tool in final_tools]}")
     if failed_tools:
         logger.warning(f"⚠️ Failed to instantiate ({len(failed_tools)}): {', '.join(failed_tools)}")
     
-    return available_tools
+    return final_tools

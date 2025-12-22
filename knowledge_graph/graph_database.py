@@ -36,7 +36,54 @@ class GraphDB:
         self.user = user
         self.password = password
         self._driver = None
+        self.schema: Optional[str] = None # Caché para el schema
         logger.info("GraphDB inicializado con la configuración de Neo4j.")
+
+    async def refresh_schema(self):
+        """
+        Refresca el schema de la base de datos (tipos de nodos, relaciones, propiedades)
+        y lo guarda en la caché interna.
+        """
+        logger.info("🔄 Refrescando el schema del grafo de conocimiento...")
+        try:
+            # Obtener todos los labels de nodos
+            node_labels_query = "CALL db.labels()"
+            node_labels_result = await self.execute_query(node_labels_query)
+            node_labels = [record["label"] for record in node_labels_result]
+
+            # Obtener todos los tipos de relaciones
+            rel_types_query = "CALL db.relationshipTypes()"
+            rel_types_result = await self.execute_query(rel_types_query)
+            rel_types = [record["relationshipType"] for record in rel_types_result]
+
+            # Obtener propiedades para cada tipo de nodo
+            schema_parts = []
+            for label in node_labels:
+                props_query = f"MATCH (n:`{label}`) WITH n LIMIT 1 RETURN keys(n) as props"
+                props_result = await self.execute_query(props_query)
+                props = props_result[0]['props'] if props_result else []
+                schema_parts.append(f"Nodo '{label}' con propiedades: {props}")
+
+            # Obtener estructura de las relaciones
+            for rel_type in rel_types:
+                rel_schema_query = f"""
+                MATCH (n)-[r:`{rel_type}`]->(m)
+                WITH n, m LIMIT 1
+                RETURN labels(n) as from_labels, labels(m) as to_labels
+                """
+                rel_schema_result = await self.execute_query(rel_schema_query)
+                if rel_schema_result:
+                    from_labels = rel_schema_result[0]['from_labels']
+                    to_labels = rel_schema_result[0]['to_labels']
+                    schema_parts.append(f"Relación ':{rel_type}' conecta ({':'.join(from_labels)}) con ({':'.join(to_labels)})")
+
+            self.schema = "\n".join(schema_parts)
+            logger.info("✅ Schema del grafo refrescado y cacheado exitosamente.")
+            logger.debug(f"Schema detectado:\n{self.schema}")
+
+        except Exception as e:
+            logger.error(f"❌ Error al refrescar el schema del grafo: {e}", exc_info=True)
+            self.schema = None # Invalidar schema en caso de error
 
     def connect(self):
         """Establece la conexión con la base de datos."""

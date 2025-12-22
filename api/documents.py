@@ -24,7 +24,7 @@ from core.database import SessionLocal, LangchainPgCollection, UploadTask, GitHu
 from utils.security import get_current_account_id, check_workspace_permission
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.document_parser import extract_text_and_metadata_from_document
-from core.memory_manager import process_document_for_rag, list_user_documents, list_user_documents_all_teams, delete_document_chunks, get_full_document_content, update_document_metadata, list_user_collections, link_profile_to_collection, unlink_profile_from_collection, get_user_document_topic_by_name, update_collection_workspace, create_empty_collection
+from core.memory_manager import process_document_for_rag, list_user_documents, list_user_documents_all_teams, delete_document_chunks, get_full_document_content, update_document_metadata, link_profile_to_collection, unlink_profile_from_collection, get_user_document_topic_by_name, update_collection_workspace, create_empty_collection
 from utils.db_session import DBSession
 from core.dependencies import get_db_session
 from tools.add_web_to_rag_tool import AddWebToRAGTool
@@ -45,58 +45,7 @@ def decoded_topic(topic: str = Path(..., description="El tema de la colección, 
 
 
 
-@router.post("/collections/{topic}/link-profile", summary="Vincular perfil a una colección")
-async def link_profile_to_collection_endpoint(
-    profile_link_request: ProfileLinkRequest,
-    topic: str = Depends(decoded_topic),
-    current_account_id: str = Depends(get_current_account_id),
-    workspace_id: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db_session)
-    # team_id: Optional[str] = Query(None) # Eliminado, ya no se usa team_id
-):
-    """
-    Vincula un perfil de contacto a una colección de documentos.
-    """
-    # Verificar permisos de workspace si se proporciona
-    if workspace_id:
-        if not await check_workspace_permission(current_account_id, workspace_id, db, required_roles=["owner", "editor"]):
-            raise HTTPException(status_code=403, detail="No tienes permiso para vincular perfiles a colecciones en este workspace.")
 
-
-    success = await link_profile_to_collection(
-        account_id=current_account_id,
-        topic_name=topic,
-        profile_id=str(profile_link_request.profile_id), # Convertir a str
-        workspace_id=workspace_id
-    )
-    if not success:
-        raise HTTPException(status_code=404, detail="Colección o perfil no encontrado, o no autorizado.")
-    return {"message": f"Perfil {profile_link_request.profile_id} vinculado a la colección {topic} correctamente."}
-
-@router.post("/collections/{topic}/unlink-profile", summary="Desvincular perfil de una colección")
-async def unlink_profile_from_collection_endpoint(
-    profile_link_request: ProfileLinkRequest,
-    topic: str = Depends(decoded_topic),
-    current_account_id: str = Depends(get_current_account_id),
-    workspace_id: Optional[str] = Query(None)
-):
-    """
-    Desvincula un perfil de contacto de una colección de documentos.
-    """
-    # Verificar permisos de workspace si se proporciona
-    if workspace_id:
-        if not await check_workspace_permission(current_account_id, workspace_id, db, required_roles=["owner", "editor"]):
-            raise HTTPException(status_code=403, detail="No tienes permiso para desvincular perfiles de colecciones en este workspace.")
-
-    success = await unlink_profile_from_collection(
-        account_id=current_account_id,
-        topic_name=topic,
-        profile_id=str(profile_link_request.profile_id), # Convertir a str
-        workspace_id=workspace_id
-    )
-    if not success:
-        raise HTTPException(status_code=404, detail="Vínculo no encontrado, o colección/perfil no autorizado.")
-    return {"message": f"Perfil {profile_link_request.profile_id} desvinculado de la colección {topic} correctamente."}
 
 
 @router.post("/upload-document")
