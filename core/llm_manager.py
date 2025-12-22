@@ -28,6 +28,10 @@ class RateLimiter(BaseRateLimiter):
     """
     _instance = None
     _lock = Lock()
+    
+    max_requests: int
+    per_seconds: int
+    request_timestamps: deque
 
     def __new__(cls, *args, **kwargs):
         with cls._lock:
@@ -42,6 +46,10 @@ class RateLimiter(BaseRateLimiter):
             return cls._instance
 
     def __init__(self, max_requests: int = 5, per_seconds: int = 60):
+        # Initialize attributes for pylint/pylance
+        self.max_requests = max_requests
+        self.per_seconds = per_seconds
+        self.request_timestamps = deque()
         pass # State is managed by the singleton __new__
 
     async def aacquire(self, **kwargs: Any) -> None:
@@ -98,14 +106,14 @@ class RateLimiter(BaseRateLimiter):
 gemini_rate_limiter = RateLimiter(max_requests=5, per_seconds=61) # 61 to be safe
 
 # --- Global LLM Instances ---
-_main_agent_llm_instance: Optional[BaseLanguageModel] = None
-_fast_task_llm_instance: Optional[BaseLanguageModel] = None
+_main_agent_llm_instance: Optional[ChatLiteLLM] = None
+_fast_task_llm_instance: Optional[ChatLiteLLM] = None
 
-def get_main_llm() -> Optional[BaseLanguageModel]:
+def get_main_llm() -> Optional[ChatLiteLLM]: # More specific return type
     """Returns the initialized main agent LLM instance."""
     return _main_agent_llm_instance
 
-def get_fast_llm() -> Optional[BaseLanguageModel]:
+def get_fast_llm() -> Optional[ChatLiteLLM]: # More specific return type
     """Returns the initialized fast task LLM instance, or the main one as a fallback."""
     return _fast_task_llm_instance or _main_agent_llm_instance
 
@@ -124,13 +132,11 @@ async def initialize_llms():
         logger.info(f"🛠️ Initializing main agent LLM with rate limiting (LiteLLM - {settings.llm_model})...")
         
         llm_kwargs = {
-            "model": settings.llm_model,
+            "model_name": settings.llm_model,
             "temperature": settings.llm_temperature,
             "streaming": True,
             "verbose": True,
-            "drop_params": True,
             "max_retries": 0, # We handle rate limiting, so disable litellm's retries for this
-            "timeout": 120,
             "rate_limiter": gemini_rate_limiter, # Pass the compliant rate limiter
         }
         
@@ -154,14 +160,12 @@ async def initialize_llms():
     try:
         logger.info(f"🛠️ Initializing fast task LLM with rate limiting (LiteLLM - {settings.fast_llm_model})...")
         fast_llm = ChatLiteLLM(
-            model=settings.fast_llm_model,
+            model_name=settings.fast_llm_model,
             temperature=0.0,
             streaming=True,
             api_base=settings.llm_api_base,
             verbose=True,
-            drop_params=True,
             max_retries=0,
-            timeout=120,
             rate_limiter=gemini_rate_limiter, # Use the same rate limiter instance
         )
         _fast_task_llm_instance = fast_llm
@@ -205,7 +209,8 @@ async def get_enhanced_llm_response(
             raise ValueError("LLM no inicializado")
 
         # Log del modelo en uso
-        model_name = getattr(llm, 'model', 'unknown')
+        # Try the common attribute names for the underlying model identifier
+        model_name = getattr(llm, 'model_name', getattr(llm, 'model', 'unknown'))
         logger.info(f"🤖 ENHANCED RESPONSE: Usando modelo '{model_name}' para generar respuesta.")
 
         logger.info(f"📝 Prompt enviado al LLM: {enriched_prompt[:1000]}...") # Log del prompt

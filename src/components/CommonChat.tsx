@@ -1,3 +1,4 @@
+
 'use client';
 import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -83,18 +84,23 @@ interface CommonChatProps {
 function LoadingIndicator({
   isComprehensiveAnalysisActive = false,
   isKnowledgeAnalysisActive = false,
+  isDeepResearchActive = false, // Added isDeepResearchActive
   toolName,
   reactState,
 }: {
   isComprehensiveAnalysisActive?: boolean;
   isKnowledgeAnalysisActive?: boolean;
+  isDeepResearchActive?: boolean; // Added isDeepResearchActive
   toolName?: string;
   reactState?: string;
 }) {
   let text = 'Kognito está pensando';
   let Icon = Bot;
 
-  if (isComprehensiveAnalysisActive) {
+  if (isDeepResearchActive) {
+    text = 'Realizando investigación profunda';
+    Icon = BrainCircuit; // O un icono más adecuado para investigación
+  } else if (isComprehensiveAnalysisActive) {
     text = 'Realizando análisis comprensivo';
     Icon = BrainCircuit;
   } else if (isKnowledgeAnalysisActive) {
@@ -157,12 +163,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [reactState, setReactState] = useState<string | undefined>(undefined);
   const [recordingMimeType, setRecordingMimeType] = useState<string>('');
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
-  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
-  const audioStreamRef = useRef<MediaStream | null>(null); // Para almacenar el stream del micrófono
-  const currentAudioRef = useRef<HTMLAudioElement | null>(null); // Para almacenar la instancia del objeto Audio
-  const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
-  const [isAudioLoading, setIsAudioLoading] = useState(false);
-  const [isAudioPaused, setIsAudioPaused] = useState(false);
 
   // Refs to hold latest values for stable callbacks
   const isRespondingRef = useRef(isResponding);

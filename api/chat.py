@@ -21,7 +21,7 @@ from datetime import datetime, timezone # Importar datetime y timezone
 # Usamos el nombre del servicio Docker y el puerto interno correcto.
 TTS_SERVICE_URL = "http://openai-edge-tts:5050/v1/audio/speech"
 
-from sqlalchemy import update, Integer, cast, func # Added cast # Added Integer # Added func
+from sqlalchemy import update, Integer, cast, func, text
 
 
 from utils.audio_transcriber import transcribe_audio_file, StreamingTranscriber, get_whisper_model
