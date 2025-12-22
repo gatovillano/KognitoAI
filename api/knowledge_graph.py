@@ -15,6 +15,7 @@ from knowledge_graph.graph_database import GraphDB
 from knowledge_graph.entity_quality_reviewer import EntityQualityReviewer
 from knowledge_graph.trend_analyzer import TrendAnalyzer
 from utils.security import get_current_user
+from utils.knowledge_graph_service import KnowledgeGraphService
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,11 @@ def get_graph_integration():
     return graph_integration
 
 
+def get_knowledge_graph_service():
+    """Obtiene la instancia de KnowledgeGraphService, creándola si es necesario."""
+    return KnowledgeGraphService(get_graph_db(), get_graph_integration())
+
+
 
 
 
@@ -134,21 +140,25 @@ async def get_graph_status(
 @router.post("/search-graph", response_model=GraphResponse)
 async def search_graph(
     request: SearchGraphRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    kg_service: KnowledgeGraphService = Depends(get_knowledge_graph_service) # Added dependency
 ):
     """
     Busca entidades en el grafo de conocimiento.
     """
     try:
-        # Implementar búsqueda en el grafo
-        # Por ahora devolvemos resultados vacíos
-        
+        results = await kg_service.search_graph_flow(
+            query=request.query,
+            workspace_id=request.workspace_id,
+            limit=request.limit,
+            account_id=current_user['account_id']
+        )
         return GraphResponse(
             success=True,
             data={
-                "results": [],
+                "results": results,
                 "query": request.query,
-                "total": 0
+                "total": len(results)
             }
         )
         
@@ -162,21 +172,25 @@ async def search_graph(
 @router.post("/entity-connections", response_model=GraphResponse)
 async def get_entity_connections(
     request: EntityConnectionsRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    kg_service: KnowledgeGraphService = Depends(get_knowledge_graph_service) # Added dependency
 ):
     """
     Obtiene las conexiones de una entidad específica.
     """
     try:
-        # Implementar búsqueda de conexiones
-        # Por ahora devolvemos conexiones vacías
-        
+        connections = await kg_service.get_entity_connections_flow(
+            entity_id=request.entity_id,
+            workspace_id=request.workspace_id,
+            depth=request.depth,
+            account_id=current_user['account_id']
+        )
         return GraphResponse(
             success=True,
             data={
                 "entity_id": request.entity_id,
-                "connections": [],
-                "depth": request.max_depth
+                "connections": connections,
+                "depth": request.depth
             }
         )
         
@@ -189,36 +203,19 @@ async def get_entity_connections(
 
 @router.post("/test-neo4j-connection", response_model=GraphResponse)
 async def test_neo4j_connection(
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    kg_service: KnowledgeGraphService = Depends(get_knowledge_graph_service)
 ):
     """
     Prueba la conexión con Neo4j y muestra estadísticas básicas.
     """
     try:
-        # Probar conexión básica
-        db = get_graph_db()
-        test_query = "RETURN 'Neo4j conectado correctamente' as message"
-        result = await db.execute_query(test_query)
-
-        # Obtener estadísticas
-        stats_query = """
-        MATCH (n)
-        OPTIONAL MATCH ()-[r]-()
-        RETURN count(DISTINCT n) as nodes, count(DISTINCT r) as relationships
-        """
-        stats_result = await db.execute_query(stats_query)
-
-        stats = stats_result[0] if stats_result else {"nodes": 0, "relationships": 0}
-
+        result = await kg_service.test_neo4j_connection_flow(
+            account_id=current_user['account_id']
+        )
         return GraphResponse(
             success=True,
-            data={
-                "connection": "OK",
-                "message": result[0]["message"] if result else "Conectado",
-                "stats": stats,
-                "neo4j_uri": settings.neo4j_uri,
-                "neo4j_user": settings.neo4j_user
-            },
+            data=result,
             message="Conexión con Neo4j exitosa"
         )
 
@@ -235,145 +232,24 @@ async def process_knowledge_graph_optimized(
     request: ProcessGraphRequest,
     background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    kg_service: KnowledgeGraphService = Depends(get_knowledge_graph_service)
 ):
     """
     Procesa documentos con el pipeline OPTIMIZADO (sin Fase 3 pesada).
     Garantiza que el procesamiento complete exitosamente.
     """
     try:
-        logger.info(f"⚡ Iniciando procesamiento OPTIMIZADO para workspace: {request.workspace_id}")
-
-        # Obtener documentos del workspace
-        # Query para obtener documentos únicos del workspace
-        # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
-        # Construir filtros dinámicamente
-        filters = ["account_id = :account_id", "cmetadata->>'type' = 'document_chunk'"]
-        
-        if request.workspace_id:
-            filters.append(f"workspace_id::text = '{request.workspace_id}'")
-        else:
-            filters.append("workspace_id IS NULL")
-        
-        # NUEVO: Filtrar por topic si se especifica
-        if request.topic:
-            filters.append(f"topic = :topic")
-        
-        where_clause = " AND ".join(filters)
-        
-        query = text(f"""
-            SELECT DISTINCT ON (cmetadata->>'document_id')
-                   cmetadata->>'file_name' AS file_name,
-                   topic AS topic,
-                   cmetadata->>'title' AS title,
-                   cmetadata->>'author' AS author,
-                   cmetadata->>'document_id' AS document_id,
-                   workspace_id::text AS workspace_id,
-                   document AS content
-            FROM langchain_pg_embedding
-            WHERE {where_clause}
-            ORDER BY cmetadata->>'document_id', id
-            LIMIT 100;
-        """)
-
-        params = {'account_id': current_user['account_id']}
-        if request.topic:
-            params['topic'] = request.topic
-        
-        result = await db.execute(query, params)
-
-        documents = []
-        for row in result.fetchall():
-            doc_dict = dict(row._mapping)
-            # Agregar contenido si está disponible
-            if doc_dict.get('content'):
-                doc_dict['content'] = doc_dict['content']
-            else:
-                doc_dict['content'] = f"Documento: {doc_dict.get('title', 'Sin título')}"
-            documents.append(doc_dict)
- 
-        if not documents:
-            detail_msg = "No se encontraron documentos en este workspace" if request.workspace_id else "No se encontraron documentos en el contexto general"
-            return GraphResponse(
-                success=False,
-                error=detail_msg
-            )
- 
-        context_desc = f"colección '{request.topic}'" if request.topic else (f"workspace {request.workspace_id}" if request.workspace_id else "contexto general")
-        logger.info(f"📄 Encontrados {len(documents)} documentos para procesamiento optimizado en {context_desc}")
- 
-        # Determinar el modo de procesamiento
-        processing_mode = request.processing_mode or "hybrid"
-
-        if processing_mode == "conceptual":
-            # Procesar con pipeline conceptual
-            logger.info("🧠 Procesando con modo conceptual...")
-
-            # Inicializar integración
-            graph_integration = get_graph_integration()
-
-            # Usar dataset_name proporcionado o generar uno por defecto
-            if request.dataset_name:
-                dataset_name = request.dataset_name
-            else:
-                dataset_name = f"workspace_{request.workspace_id}_conceptual" if request.workspace_id else "global_context_conceptual"
-
-            # Procesar documentos conceptualmente
-            result = await graph_integration.process_documents(
-                documents=documents,
-                dataset_name=dataset_name,
-                account_id=current_user['account_id'],
-                processing_mode="conceptual"
-            )
-
-            logger.info(f"✅ Procesamiento conceptual completado para {'workspace ' + request.workspace_id if request.workspace_id else 'contexto general'}")
-
-            return GraphResponse(
-                success=True,
-                data=result,
-                message=f"Grafo procesado conceptualmente: {result.get('conceptual_quotes', 0)} citas conceptuales, {result.get('thematic_relationships', 0)} relaciones temáticas, {result.get('idea_profiles', 0)} perfiles de ideas"
-            )
-
-        else:
-            # Procesar con pipeline híbrido optimizado (modo por defecto)
-            logger.info("⚙️ Procesando con modo híbrido...")
-
-            from knowledge_graph.hybrid_graph_processor import HybridGraphProcessor
-
-            processor = HybridGraphProcessor()
-            await processor.initialize()
-
-            # Usar dataset_name proporcionado o generar uno por defecto
-            if request.dataset_name:
-                dataset_name = request.dataset_name
-            else:
-                dataset_name = f"workspace_{request.workspace_id}_hybrid" if request.workspace_id else "global_context_hybrid"
-
-            graph_data = await processor.process_documents(
-                documents,
-                dataset_name,
-                account_id=current_user['account_id'],
-                workspace_id=request.workspace_id
-            )
-
-            # Guardar en Neo4j
-            from knowledge_graph.neo4j_adapter import Neo4jAdapter
-            db = get_graph_db()
-            adapter = Neo4jAdapter(db)
-
-            await adapter.add_cognee_results_to_graph(
-                graph_data.get('entities', []),
-                graph_data.get('relationships', []),
-                workspace_id=request.workspace_id, # Pasar workspace_id
-                account_id=current_user['account_id']
-            )
- 
-        logger.info(f"✅ Procesamiento optimizado completado para {'workspace ' + request.workspace_id if request.workspace_id else 'contexto general'}")
- 
+        result = await kg_service.process_documents_flow(
+            request=request,
+            account_id=current_user['account_id'],
+            background_tasks=background_tasks,
+            db_session=db
+        )
         return GraphResponse(
             success=True,
-            data=graph_data,
-            message=f"Grafo procesado con pipeline optimizado: {len(graph_data.get('entities', []))} entidades, {len(graph_data.get('relationships', []))} relaciones"
+            data=result,
+            message="Procesamiento de grafo iniciado exitosamente."
         )
 
     except Exception as e:
@@ -387,104 +263,25 @@ async def process_knowledge_graph_optimized(
 async def process_knowledge_graph_with_cooccurrence(
     request: ProcessGraphRequest,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+    kg_service: KnowledgeGraphService = Depends(get_knowledge_graph_service)
 ):
     """
     Procesa documentos con co-ocurrencias OPTIMIZADAS.
     Más lento pero más completo que la versión optimizada básica.
     """
     try:
-        logger.info(f"🔗 Iniciando procesamiento CON co-ocurrencias optimizadas para workspace: {request.workspace_id}")
-
-        # Obtener documentos del workspace
-        async with get_db_session() as session:
-            # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
-            query = """
-                SELECT DISTINCT ON (cmetadata->>'document_id')
-                       cmetadata->>'file_name' AS file_name,
-                       topic AS topic,
-                       cmetadata->>'title' AS title,
-                       cmetadata->>'author' AS author,
-                       cmetadata->>'document_id' AS document_id,
-                       workspace_id::text AS workspace_id,
-                       NULL::text AS team_id,
-                       false AS team_shared,
-                       document AS content
-                FROM langchain_pg_embedding
-                WHERE account_id = :account_id
-                  AND cmetadata->>'type' = 'document_chunk'
-                  {f"AND workspace_id::text = '{request.workspace_id}'" if request.workspace_id else "AND workspace_id IS NULL"}
-                ORDER BY cmetadata->>'document_id', id
-                LIMIT 50;
-            """
- 
-            result = await session.execute(query, {'account_id': current_user['account_id']})
- 
-            documents = []
-            for row in result.fetchall():
-                doc_dict = dict(row)
-                if doc_dict.get('content'):
-                    doc_dict['content'] = doc_dict['content']
-                else:
-                    doc_dict['content'] = f"Documento: {doc_dict.get('title', 'Sin título')}"
-                documents.append(doc_dict)
- 
-        if not documents:
-            detail_msg = "No se encontraron documentos en este workspace" if request.workspace_id else "No se encontraron documentos en el contexto general"
-            return GraphResponse(
-                success=False,
-                error=detail_msg
-            )
- 
-        logger.info(f"📄 Encontrados {len(documents)} documentos para procesamiento con co-ocurrencias en {'workspace ' + request.workspace_id if request.workspace_id else 'contexto general'}")
- 
-        # Procesar con pipeline híbrido + co-ocurrencias optimizadas
-        from knowledge_graph.hybrid_graph_processor import HybridGraphProcessor
- 
-        processor = HybridGraphProcessor()
-        await processor.initialize()
- 
-        # Configurar callback para guardar después de Fase 2
-        from knowledge_graph.neo4j_adapter import Neo4jAdapter
-        db = get_graph_db()
-        adapter = Neo4jAdapter(db)
- 
-        async def save_after_phase2(entities, relationships):
-            logger.info("💾 Guardando después de Fase 2...")
-            # Aquí también debemos pasar el workspace_id y account_id al adapter
-            await adapter.add_cognee_results_to_graph(
-                entities,
-                relationships,
-                workspace_id=request.workspace_id,
-                account_id=current_user['account_id']
-            )
-            logger.info(f"✅ Guardado Fase 2: {len(entities)} entidades, {len(relationships)} relaciones")
- 
-        processor.set_save_callback(save_after_phase2)
- 
-        dataset_name = f"workspace_{request.workspace_id}_with_cooccurrence" if request.workspace_id else "global_context_with_cooccurrence"
-        # Procesar documentos
-        graph_data = await processor.process_documents(
-            documents,
-            dataset_name,
+        result = await kg_service.process_documents_flow( # Assuming process_documents_flow handles co-occurrence
+            request=request,
             account_id=current_user['account_id'],
-            workspace_id=request.workspace_id
+            background_tasks=background_tasks,
+            db_session=db
         )
- 
-        # Guardar resultado final también
-        await adapter.add_cognee_results_to_graph(
-            graph_data.get('entities', []),
-            graph_data.get('relationships', []),
-            workspace_id=request.workspace_id,
-            account_id=current_user['account_id']
-        )
- 
-        logger.info(f"✅ Procesamiento con co-ocurrencias completado para {'workspace ' + request.workspace_id if request.workspace_id else 'contexto general'}")
- 
         return GraphResponse(
             success=True,
-            data=graph_data,
-            message=f"Grafo procesado con co-ocurrencias optimizadas: {len(graph_data.get('entities', []))} entidades, {len(graph_data.get('relationships', []))} relaciones"
+            data=result,
+            message="Procesamiento de grafo con co-ocurrencias iniciado exitosamente."
         )
 
     except Exception as e:
@@ -497,41 +294,22 @@ async def process_knowledge_graph_with_cooccurrence(
 @router.get("/stats", response_model=GraphResponse)
 async def get_graph_stats(
     workspace_id: Optional[str] = None,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    kg_service: KnowledgeGraphService = Depends(get_knowledge_graph_service)
 ):
     """
     Obtiene estadísticas del grafo de conocimiento para un workspace específico o el contexto general.
     """
     try:
-        async with get_db_session() as session:
-            query = f"""
-                SELECT
-                    COUNT(DISTINCT cmetadata->>'file_name') as document_count,
-                    COUNT(*) as chunk_count,
-                    AVG(LENGTH(document)) as avg_chunk_length
-                FROM langchain_pg_embedding
-                WHERE account_id = :account_id
-                  AND (cmetadata->>'type' = 'document_chunk' OR cmetadata->>'type' = 'user_memory_proactive_llm' OR cmetadata->>'type' = 'thread_summary')
-                  {f"AND workspace_id::text = '{workspace_id}'" if workspace_id else ""}
-            """
-            
-            result = await session.execute(query, {'account_id': current_user['account_id']})
-            
-            row = result.fetchone()
-            
-            stats = {
-                "document_count": row[0] if row else 0,
-                "chunk_count": row[1] if row else 0,
-                "avg_chunk_length": round(row[2]) if row and row[2] else 0,
-                "workspace_id": workspace_id, # Puede ser None
-                "last_updated": datetime.now().isoformat()
-            }
-        
+        stats = await kg_service.get_graph_stats_flow(
+            workspace_id=workspace_id,
+            account_id=current_user['account_id']
+        )
         return GraphResponse(
             success=True,
             data=stats
         )
- 
+
     except Exception as e:
         logger.error(f"❌ Error obteniendo estadísticas del grafo: {e}")
         return GraphResponse(
@@ -544,56 +322,25 @@ async def get_graph_stats(
 @router.post("/clear-neo4j", response_model=GraphResponse)
 async def clear_neo4j(
     request: ClearGraphRequest = ClearGraphRequest(),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    kg_service: KnowledgeGraphService = Depends(get_knowledge_graph_service)
 ):
     """
     Limpia la base de datos Neo4j.
-    
+
     - Si se proporciona `workspace_id`, solo elimina los nodos de ese workspace.
     - Si NO se proporciona `workspace_id`, requiere `confirm_delete_all=True` para eliminar TODO.
     """
     try:
-        db = get_graph_db()
-        
-        if request.workspace_id:
-            logger.info(f"🧹 Iniciando limpieza de Neo4j para workspace: {request.workspace_id}...")
-            # Eliminar solo nodos del workspace
-            clear_query = "MATCH (n) WHERE n.workspace_id = $workspace_id DETACH DELETE n"
-            await db.execute_query(clear_query, {"workspace_id": request.workspace_id})
-            message = f"Datos del workspace {request.workspace_id} eliminados"
-            
-        else:
-            if not request.confirm_delete_all:
-                raise HTTPException(
-                    status_code=400, 
-                    detail="Para eliminar TODA la base de datos, debes establecer confirm_delete_all=True"
-                )
-                
-            logger.info("🧹 Iniciando limpieza COMPLETA de Neo4j...")
-            # Eliminar todo
-            clear_query = "MATCH (n) DETACH DELETE n"
-            await db.execute_query(clear_query)
-            message = "Neo4j limpiado completamente (todos los datos)"
-
-        # Verificar nodos restantes (global o por workspace)
-        if request.workspace_id:
-            count_query = "MATCH (n) WHERE n.workspace_id = $workspace_id RETURN count(n) as total"
-            result = await db.execute_query(count_query, {"workspace_id": request.workspace_id})
-        else:
-            count_query = "MATCH (n) RETURN count(n) as total"
-            result = await db.execute_query(count_query)
-            
-        total_nodes = result[0]["total"] if result else 0
-
-        logger.info(f"✅ Limpieza completada. Nodos restantes: {total_nodes}")
-
+        result = await kg_service.clear_graph_flow(
+            workspace_id=request.workspace_id,
+            confirm_delete_all=request.confirm_delete_all,
+            account_id=current_user['account_id']
+        )
         return GraphResponse(
             success=True,
-            data={
-                "nodes_deleted": "workspace" if request.workspace_id else "all",
-                "remaining_nodes": total_nodes
-            },
-            message=message
+            data=result,
+            message="Limpieza de Neo4j completada."
         )
 
     except Exception as e:
@@ -601,6 +348,37 @@ async def clear_neo4j(
         return GraphResponse(
             success=False,
             error=f"Error limpiando Neo4j: {str(e)}"
+        )
+
+# New endpoint for memories, as per instructions
+@router.post("/memories", response_model=GraphResponse)
+async def fetch_user_memories(
+    request: dict, # Assuming a request body for filtering, etc.
+    current_user: dict = Depends(get_current_user),
+    kg_service: KnowledgeGraphService = Depends(get_knowledge_graph_service)
+):
+    """
+    Obtiene las memorias del usuario.
+    """
+    try:
+        # Extract parameters from request body as needed by fetch_memories_flow
+        # For now, assuming it might take workspace_id and optionally other filters
+        workspace_id: Optional[str] = request.get("workspace_id")
+        memories = await kg_service.fetch_memories_flow(
+            workspace_id=workspace_id,
+            account_id=current_user['account_id']
+            # Add other parameters as needed by fetch_memories_flow
+        )
+        return GraphResponse(
+            success=True,
+            data=memories,
+            message="Memorias del usuario obtenidas exitosamente."
+        )
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo memorias del usuario: {e}")
+        return GraphResponse(
+            success=False,
+            error=str(e)
         )
 
 @router.post("/enhanced-chat", response_model=GraphResponse)
@@ -1299,23 +1077,18 @@ class TrendAnalysisRequest(BaseModel):
 @router.post("/review-entities")
 async def review_entities(
     workspace_id: Optional[str] = None,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    kg_service: KnowledgeGraphService = Depends(get_knowledge_graph_service)
 ):
     """
     Revisa la calidad de las entidades en el grafo y sugiere correcciones.
     Detecta entidades mal clasificadas, duplicados y anomalías.
     """
     try:
-        db = get_graph_db()
-        # Inicializar LLM (necesario para validación contextual)
-        from core.llm_manager import LLMManager
-        llm_manager = LLMManager()
-        # Usar un modelo rápido para validación
-        llm = llm_manager.get_llm(model_name="gemini-1.5-flash") 
-        
-        reviewer = EntityQualityReviewer(db, llm)
-        results = await reviewer.review_all_entities(workspace_id)
-        
+        results = await kg_service.review_entities_flow(
+            workspace_id=workspace_id,
+            account_id=current_user['account_id']
+        )
         return GraphResponse(
             success=True,
             data=results,
@@ -1331,16 +1104,18 @@ async def review_entities(
 @router.post("/apply-entity-corrections")
 async def apply_entity_corrections(
     request: ApplyCorrectionsRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    kg_service: KnowledgeGraphService = Depends(get_knowledge_graph_service)
 ):
     """
     Aplica las correcciones sugeridas a las entidades.
     """
     try:
-        db = get_graph_db()
-        reviewer = EntityQualityReviewer(db)
-        
-        results = await reviewer.apply_corrections(request.corrections, request.auto_apply)
+        results = await kg_service.apply_corrections_flow(
+            corrections=request.corrections,
+            auto_apply=request.auto_apply,
+            account_id=current_user['account_id']
+        )
         
         return GraphResponse(
             success=True,

@@ -87,17 +87,19 @@ async def list_collections(current_account_id: str = Depends(get_current_account
 @router.post("/collections", status_code=status.HTTP_201_CREATED, summary="Crear una nueva colección")
 async def create_collection(request: CollectionCreateRequest, current_account_id: str = Depends(get_current_account_id), db: "AsyncSession" = Depends(get_db_session)):
     logger.info(f"API: create_collection - Petición para crear colección: {request.topic}, description: {request.description}, workspaceId: {request.workspaceId}, account: {current_account_id}")
-    success = await create_empty_collection(
-        account_id=current_account_id,
-        topic_name=request.topic,
-        description=request.description,
-        workspace_id=request.workspaceId
-    )
-    if not success:
-        logger.error(f"API: create_collection - No se pudo crear la colección o ya existe: {request.topic}")
-        raise HTTPException(status_code=400, detail="No se pudo crear la colección o ya existe.")
-    logger.info(f"API: create_collection - Colección '{request.topic}' creada y asociada al workspace {request.workspaceId if request.workspaceId else 'global'} con éxito.")
-    return {"message": f"Colección '{request.topic}' creada y lista para ser usada en el workspace {request.workspaceId if request.workspaceId else 'global'}."}
+    
+    # Crear la colección usando create_empty_collection
+    try:
+        collection = await create_empty_collection(
+            account_id=current_account_id,
+            topic_name=request.topic,
+            workspace_id=request.workspaceId
+        )
+        logger.info(f"API: create_collection - Colección '{request.topic}' creada y asociada al workspace {request.workspaceId if request.workspaceId else 'global'} con éxito.")
+        return {"message": f"Colección '{request.topic}' creada y lista para ser usada en el workspace {request.workspaceId if request.workspaceId else 'global'}."}
+    except Exception as e:
+        logger.error(f"API: create_collection - Error al crear la colección '{request.topic}': {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"No se pudo crear la colección: {str(e)}")
 
 # --- Modelo Pydantic para Actualizar Colección ---
 class CollectionUpdateRequest(BaseModel):

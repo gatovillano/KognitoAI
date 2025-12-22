@@ -61,7 +61,7 @@ input[type="file"] { display: none; }
 .file-size { color: var(--tg-theme-hint-color); flex-shrink: 0; }
 
 .loader { display: none; margin-top: 15px; text-align: center; color: var(--tg-theme-hint-color); }
-#personalization-controls { display: flex; justify-content: space-between; align-items: center; margin-top: 15px; }
+#personalization-controls { display: none; }
 .status-message { font-size: 0.9em; color: var(--tg-theme-hint-color); }
 .secondary-button { display: none; background: none; border: none; color: var(--tg-theme-link-color); cursor: pointer; font-size: 0.9em; font-weight: 600; }
 .hidden { display: none !important; }
@@ -105,6 +105,67 @@ body.modal-open { overflow: hidden; }
 .note-category { font-size: 12px; font-weight: 500; padding: 3px 8px; border-radius: 12px; background-color: var(--tg-theme-button-color); color: var(--tg-theme-button-text-color); flex-shrink: 0; margin-left: 10px; }
 .note-content { font-size: 14px; color: var(--tg-theme-hint-color); white-space: pre-wrap; word-wrap: break-word; max-height: 100px; overflow: hidden; text-overflow: ellipsis; }
 .note-actions { display: flex; gap: 10px; margin-top: 15px; }
+
+/* Estilos para Burbujas de Chat */
+.chat-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.chat-bubble {
+    max-width: 80%;
+    padding: 10px 15px;
+    border-radius: 18px;
+    line-height: 1.4;
+    word-wrap: break-word;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.chat-bubble-user {
+    align-self: flex-end;
+    background-color: var(--tg-theme-link-color); /* Color de Telegram */
+    color: var(--tg-theme-button-text-color); /* Texto blanco para contraste */
+    border-bottom-right-radius: 4px; /* Pequeña muesca en la esquina inferior derecha */
+}
+
+.chat-bubble-bot {
+    align-self: flex-start;
+    background-color: var(--tg-theme-secondary-bg-color); /* Fondo secundario de Telegram */
+    color: var(--tg-theme-text-color);
+    border-bottom-left-radius: 4px; /* Pequeña muesca en la esquina inferior izquierda */
+}
+
+/* Estilo para el nombre del remitente en burbujas */
+.chat-sender {
+    font-size: 0.8em;
+    font-weight: 600;
+    margin-bottom: 5px;
+    opacity: 0.7;
+}
+
+/* Ajustes para el contenedor de salida del LLM */
+#llm-output {
+    margin-top: 15px;
+    padding: 10px;
+    border-radius: 12px;
+    background-color: var(--tg-theme-secondary-bg-color);
+    min-height: 50px; /* Para que siempre tenga un tamaño visible */
+    display: flex; /* Usar flexbox para las burbujas */
+    flex-direction: column; /* Apilar las burbujas */
+    gap: 10px; /* Espacio entre burbujas */
+}
+
+/* Estilos para Tareas y Contactos */
+.task-item, .contact-item { background-color: var(--tg-theme-bg-color); border-radius: 12px; padding: 12px; display: flex; align-items: center; gap: 10px; }
+.task-left { width: 40px; }
+.task-body { flex-grow: 1; }
+.task-desc { font-weight: 600; }
+.task-actions button, .contact-actions button { background: none; border: none; font-size: 18px; cursor: pointer; padding: 6px; }
+.contact-left { flex-grow: 1; }
+.contact-name { font-weight: 600; }
+.contact-meta { font-size: 13px; color: var(--tg-theme-hint-color); }
 
 /* Estilos para resaltar que el título y la categoría son editables en el panel de Telegram. */
 .doc-title.editable, .doc-topic.editable {

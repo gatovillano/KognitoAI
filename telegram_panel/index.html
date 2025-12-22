@@ -14,17 +14,20 @@
         <section id="home-screen" class="view active">
             <h1>Panel de KognitoBot</h1>
             <div class="icon-grid">
-                <div class="icon-button" data-target-view="personalization-screen">
-                    <div class="icon-bubble">🤖</div><span class="icon-label">Personalidad</span>
-                </div>
                 <div class="icon-button" data-target-view="upload-screen">
-                    <div class="icon-bubble">📚</div><span class="icon-label">Documentos</span>
+                    <div class="icon-bubble">📚</div><span class="icon-label">Conocimientos</span>
                 </div>
                 <div class="icon-button" data-target-view="agenda-screen">
                     <div class="icon-bubble">🗓️</div><span class="icon-label">Agenda</span>
                 </div>
                 <div class="icon-button" data-target-view="notes-screen">
                     <div class="icon-bubble">📝</div><span class="icon-label">Notas</span>
+                </div>
+                <div class="icon-button" data-target-view="tasks-screen">
+                    <div class="icon-bubble">✅</div><span class="icon-label">Tareas</span>
+                </div>
+                <div class="icon-button" data-target-view="contacts-screen">
+                    <div class="icon-bubble">👥</div><span class="icon-label">Perfiles</span>
                 </div>
             </div>
             <div id="llm-response-container" class="llm-response-container">
@@ -33,34 +36,16 @@
             </div>
         </section>
 
-        <!-- VISTA 2: Personalización -->
-        <section id="personalization-screen" class="view">
-            <div class="view-header">
-                <button class="back-button">←</button>
-                <h2>Configurar Personalidad</h2>
-            </div>
-            <div class="card-content">
-                <p class="description">Modifica el prompt de sistema para definir el tono o la personalidad del Bot. Puedes darle detalles como el estilo de habla, o entregarle alguna especialidad. Ejemplo: "Eres un experto en la medicina", o "eres un asistente de negocios". "Te expresas con un estilo de habla formal" , o "Hablas con jerga coloquial chilena". Etc. Todo lo que se te ocurra</p>
-                <div class="form-group">
-                    <label for="system-prompt-input">Prompt de Sistema:</label>
-                    <textarea id="system-prompt-input" rows="10"></textarea>
-                </div>
-                <div id="personalization-loader" class="loader hidden">Cargando/Guardando...</div>
-                <div id="personalization-controls">
-                    <div id="personalization-status" class="status-message"></div>
-                    <button id="restore-default-button" class="secondary-button hidden">Restaurar por defecto</button>
-                </div>
-            </div>
-        </section>
         
-        <!-- VISTA 3: Subida y Gestión de Documentos -->
-        <section id="upload-screen" class="view">
+        
+    <!-- VISTA 3: Subida y Gestión de Conocimientos -->
+    <section id="upload-screen" class="view">
             <div class="view-header">
                 <button class="back-button">←</button>
-                <h2>Gestor de Documentos</h2>
+        <h2>Gestor de Conocimientos</h2>
             </div>
             <div class="card-content">
-                 <p class="description">Sube uno o varios archivos para añadirlos a tu base de conocimiento y poder usarlos en tu conversación. Puedes subir documentos complejos, informes, libros, y consultar cualquier tema sobre éstos con el Bot. Formular resúmenes, solicitar tesis o conceptos centrales, relacionar entre distintos conceptos y documentos,etc. </p>
+         <p class="description">Sube uno o varios archivos para añadirlos a tu base de conocimientos y poder usarlos en tus conversaciones con el Bot. Puedes subir informes, libros y otros recursos para que el agente los consulte y resuma.</p>
                  <form id="upload-form">
                      <div class="form-group">
                          <label for="file-input" class="file-upload-button">Seleccionar Archivos</label>
@@ -108,6 +93,36 @@
                 <div id="note-list-loader" class="loader">Cargando notas...</div>
                 <div id="note-list-container"></div>
                 <p id="no-notes-message" class="hint hidden">Aún no tienes notas guardadas.</p>
+            </div>
+        </section>
+
+        <!-- VISTA 6: Tareas -->
+        <section id="tasks-screen" class="view">
+            <div class="view-header">
+                <button class="back-button">←</button>
+                <h2>Gestor de Tareas</h2>
+                <button id="add-task-btn" class="add-btn">+</button>
+            </div>
+            <div class="card-content">
+                <p class="description">Crea y gestiona tus tareas. Puedes marcar como completadas, editar y eliminar.</p>
+                <div id="task-list-loader" class="loader">Cargando tareas...</div>
+                <div id="task-list-container"></div>
+                <p id="no-tasks-message" class="hint hidden">No tienes tareas aún.</p>
+            </div>
+        </section>
+
+        <!-- VISTA 7: Contactos -->
+        <section id="contacts-screen" class="view">
+            <div class="view-header">
+                <button class="back-button">←</button>
+                <h2>Perfiles</h2>
+                <button id="add-contact-btn" class="add-btn">+</button>
+            </div>
+            <div class="card-content">
+                <p class="description">Gestiona perfiles de contacto: nombres, email, teléfono y etiquetas.</p>
+                <div id="contact-list-loader" class="loader">Cargando perfiles...</div>
+                <div id="contact-list-container"></div>
+                <p id="no-contacts-message" class="hint hidden">No tienes perfiles de contacto.</p>
             </div>
         </section>
     </main>
@@ -170,6 +185,54 @@
         </div>
     </div>
     
+    <!-- Modal para Añadir/Editar Tarea -->
+    <div id="task-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="task-modal-title">Añadir Tarea</h2>
+                <button id="close-task-modal-btn" class="close-btn">×</button>
+            </div>
+            <form id="task-form">
+                <input type="hidden" id="task-id-input">
+                <div class="form-group">
+                    <label for="task-desc-input">Descripción</label>
+                    <input type="text" id="task-desc-input" required>
+                </div>
+                <div class="form-group">
+                    <label for="task-due-input">Fecha de vencimiento</label>
+                    <input type="datetime-local" id="task-due-input">
+                </div>
+                <button type="submit" class="modal-submit-btn">Guardar Tarea</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal para Añadir/Editar Contacto -->
+    <div id="contact-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="contact-modal-title">Añadir Contacto</h2>
+                <button id="close-contact-modal-btn" class="close-btn">×</button>
+            </div>
+            <form id="contact-form">
+                <input type="hidden" id="contact-id-input">
+                <div class="form-group">
+                    <label for="contact-name-input">Nombre</label>
+                    <input type="text" id="contact-name-input" required>
+                </div>
+                <div class="form-group">
+                    <label for="contact-email-input">Email</label>
+                    <input type="email" id="contact-email-input">
+                </div>
+                <div class="form-group">
+                    <label for="contact-phone-input">Teléfono</label>
+                    <input type="text" id="contact-phone-input">
+                </div>
+                <button type="submit" class="modal-submit-btn">Guardar Contacto</button>
+            </form>
+        </div>
+    </div>
+
     <script src="script.js?v=NOTES_FINAL_COMPLETE"></script>
 </body>
 </html>

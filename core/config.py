@@ -249,6 +249,7 @@ class Config:
         self.jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "supersecretkey")
         self.jwt_expiry_days: int = int(os.getenv("JWT_EXPIRY_DAYS", 7))
         self.debug_mode: bool = os.getenv("DEBUG_MODE", "False").lower() in ('true', '1', 't')
+        self.log_level: str = os.getenv("LOG_LEVEL", "INFO").upper() # Nuevo: Nivel de logging configurable
 
         # Realizar validación al final de la inicialización.
         self._validate_config()

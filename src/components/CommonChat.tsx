@@ -1,4 +1,3 @@
-
 'use client';
 import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -163,6 +162,12 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [reactState, setReactState] = useState<string | undefined>(undefined);
   const [recordingMimeType, setRecordingMimeType] = useState<string>('');
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
+  const audioStreamRef = useRef<MediaStream | null>(null); // Para almacenar el stream del micrófono
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null); // Para almacenar la instancia del objeto Audio
+  const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
+  const [isAudioLoading, setIsAudioLoading] = useState(false);
+  const [isAudioPaused, setIsAudioPaused] = useState(false);
 
   // Refs to hold latest values for stable callbacks
   const isRespondingRef = useRef(isResponding);
@@ -181,7 +186,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef(null);
   const justRestoredScrollRef = useRef(false);
-  const prevScrollHeightRef = useRef<number | null>(null);
+  const prevScrollHeightRef = useRef<number | null>(null); // Initialize with current value
 
   const scrollToBottom = useCallback((smooth: boolean) => {
     if (scrollAreaRef.current) {
@@ -272,6 +277,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             setIsThinking(false);
             setToolName(undefined); // Reset toolName on stream end
             setReactState(undefined); // Reset reactState on stream end
+            setIsDeepResearchActive(false); // Reset deep research active state
             if (taskId && messageIndex !== -1) {
               const finalMessage = updatedMessages[messageIndex];
               updatedMessages[messageIndex] = {
@@ -285,6 +291,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
           case 'tool_start': {
             const toolStartMessage = data as ToolStatusMessage;
+            if (toolStartMessage.tool_name === 'deep_research') { // Asumiendo que 'deep_research' es el nombre de la herramienta
+              setIsDeepResearchActive(true);
+            }
             setToolName(toolStartMessage.tool_name);
             setReactState('ejecutando');
             setIsThinking(true); // Keep thinking indicator active while tool is running
@@ -311,6 +320,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
           case 'tool_end': {
             const toolEndMessage = data as ToolStatusMessage;
+            if (toolEndMessage.tool_name === 'deep_research') {
+              setIsDeepResearchActive(false);
+            }
             setToolName(undefined);
             setReactState(undefined); // Reset reactState on tool end
             if (toolEndMessage.task_id) {
@@ -889,6 +901,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                   <LoadingIndicator
                     isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
                     isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+                    isDeepResearchActive={isDeepResearchActive} // Pass new prop
                     toolName={toolName}
                     reactState={reactState}
                   />

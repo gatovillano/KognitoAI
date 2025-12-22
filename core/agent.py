@@ -59,6 +59,7 @@ from core.llm_manager import get_main_llm, get_fast_llm
 from core.prompts import SUMMARIZATION_PROMPT, THREAD_TITLE_PROMPT
 from core.enhanced_memory_manager import EnhancedMemoryManager
 from knowledge_graph.graph_database import GraphDB
+from knowledge_graph.graph_reasoning_node import GraphReasoningNode # NUEVO
 
 # --- Claves para estado temporal ---
 from utils.image_generation import GENERATED_IMAGE_KEY
@@ -219,6 +220,11 @@ class AgentState(TypedDict):
     # Instancias de grafo de conocimiento y gestor de memoria mejorada
     graph_db: Optional[GraphDB]
     enhanced_memory_manager: Optional[EnhancedMemoryManager]
+    # Salida del nuevo nodo de razonamiento del grafo
+    graph_context: Optional[str] = None
+    graph_sources: Optional[List[Dict[str, Any]]] = None
+    mermaid_diagram: Optional[str] = None
+    turn_count: int = 0  # Nuevo: Contador de turnos para la memoria proactiva
 
 # ==============================================================================
 # SECCIÓN 2: VALIDACIÓN DE HERRAMIENTAS Y MANEJO DE ERRORES
@@ -394,7 +400,7 @@ async def update_thread_title_if_needed(thread_id: str, messages: list):
         try:
             logger.info(f"[TÍTULO] Solicitando título para hilo {thread_id} con {len(messages)} mensajes...")
             response = await llm.ainvoke(prompt)
-            new_title = response.content.strip() if hasattr(response, 'content') else str(response).strip()
+            new_title = str(response.content).strip() if hasattr(response, 'content') else str(response).strip()
             logger.info(f"[TÍTULO] Título generado para hilo {thread_id}: '{new_title}'")
             async with DBSession(SessionLocal) as db:
                 await db.execute(update(ChatThread).where(ChatThread.id == uuid.UUID(thread_id)).values(title=new_title))
@@ -439,7 +445,7 @@ async def force_update_thread_title(thread_id: str):
         try:
             logger.info(f"Forzando la generación de título para el hilo {thread_id}...")
             response = await llm.ainvoke(prompt)
-            new_title = response.content.strip() if hasattr(response, 'content') else str(response).strip()
+            new_title = str(response.content).strip() if hasattr(response, 'content') else str(response).strip()
             logger.info(f"Nuevo título generado para el hilo {thread_id}: '{new_title}'")
             
             # Obtener account_id para la notificación ANTES de hacer commit
@@ -484,7 +490,7 @@ async def force_update_all_thread_titles(account_id: str):
         # Crear tareas para actualizar títulos en paralelo
         tasks = [force_update_thread_title(str(thread.id)) for thread in threads]
         # Usar asyncio.gather para ejecutar las tareas concurrentemente
-        await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks, return_exceptions=False)
 
     logger.info(f"Actualización de títulos completada para la cuenta {account_id}.")
 
@@ -533,7 +539,7 @@ async def call_model_node(state: AgentState):
                 logger.warning(f"Found ToolMessage with missing/empty name in history. Patching with 'unknown_tool'.")
                 msg.name = "unknown_tool" # type: ignore
 
-        if isinstance(msg, AIMessage) and getattr(msg, 'tool_calls', None):
+        if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls:
             for tc in msg.tool_calls:
                 if not tc.get("id"):
                      logger.warning(f"Found AIMessage tool_call with missing id in history. Patching with random UUID.")
@@ -565,146 +571,49 @@ async def call_model_node(state: AgentState):
     relevant_memories_text = ""
     final_sources_for_state = state.get('sources', []) # Mantener las fuentes existentes si las hay
 
-    # Nueva función para decidir si se debe realizar una búsqueda RAG
-    async def should_perform_rag_search(user_query: str, has_explicit_rag: bool, is_tool_return: bool) -> bool:
-        """
-        Heurística para decidir si se debe realizar una búsqueda RAG.
-        Considera la longitud del query, palabras clave y si ya hay contexto explícito.
-        """
-        if is_tool_return:
-            logger.info("❌ No RAG: Es una vuelta de herramienta.")
-            return False
-        if has_explicit_rag:
-            logger.info("✅ RAG: Hay contexto RAG explícito.")
-            return True
+    # --- FIN DE LA LÓGICA DE MANEJO DE FUENTES ---
         
-        # Heurística simple: longitud del query
-        if not user_query or len(user_query.strip()) < 5: # Queries muy cortos
-            logger.info(f"❌ No RAG: Query demasiado corto ({len(user_query.strip())} caracteres).")
-            return False
-        if len(user_query.strip().split()) > 50: # Queries muy largos pueden ser divagaciones
-            logger.info(f"❌ No RAG: Query demasiado largo ({len(user_query.strip().split())} palabras).")
-            return False
-
-        # Palabras clave que explícitamente activan RAG o indican necesidad de información
-        rag_keywords = ["qué es", "cómo funciona", "información sobre", "dime sobre", "explícame", "detalles de", "antecedentes de", "quién es", "cuándo fue", "dónde está", "por qué", "diferencias entre", "ejemplos de", "historia de", "características de", "propósito de"]
-        if any(keyword in user_query.lower() for keyword in rag_keywords):
-            logger.info(f"✅ RAG: Palabras clave RAG detectadas en el query: '{user_query}'")
-            return True
-
-        # Palabras clave que explícitamente desactivan RAG (conversacionales, personales)
-        no_rag_keywords = ["hola", "gracias", "cómo estás", "cuéntame un chiste", "qué hora es", "qué tal", "quién eres", "ayúdame a", "te quiero"]
-        if any(keyword in user_query.lower() for keyword in no_rag_keywords):
-            logger.info(f"❌ No RAG: Palabras clave conversacionales detectadas en el query: '{user_query}'")
-            return False
-
-        # Si el query es una pregunta (termina en '?') y tiene longitud razonable, es un buen candidato
-        if user_query.strip().endswith('?') and len(user_query.strip().split()) > 3:
-            logger.info(f"✅ RAG: Query parece una pregunta y tiene longitud razonable: '{user_query}'")
-            return True
-
-        # Fallback: Por defecto, no activar RAG si no hay señales claras
-        logger.info(f"❌ No RAG: No se detectaron señales claras para RAG en el query: '{user_query}'")
-        return False
-
-
-    if await should_perform_rag_search(user_message, has_explicit_rag_context, is_after_tool_call):
-        logger.info("Ejecutando búsqueda RAG del agente.")
+    # INICIO: Integración del contexto del nuevo nodo de razonamiento del grafo
+    if state.get("graph_context"):
+        logger.info("🧠 Integrando contexto del GraphReasoningNode en el prompt.")
+        # Combina el contexto RAG tradicional con el del grafo
+        relevant_memories_text += "\n\n--- Análisis del Grafo de Conocimiento ---\n"
         
-        # Obtener instancias compartidas o inicializarlas si no están en el estado
-        graph_db = state.get('graph_db')
-        enhanced_memory_manager = state.get('enhanced_memory_manager')
-
-        if not graph_db or not enhanced_memory_manager:
-            graph_db, enhanced_memory_manager = await get_shared_graph_dependencies()
-            if graph_db and enhanced_memory_manager:
-                state['graph_db'] = graph_db
-                state['enhanced_memory_manager'] = enhanced_memory_manager
-            else:
-                logger.warning("⚠️ No se pudieron obtener las dependencias del grafo. La memoria mejorada no estará disponible.")
-                # Si no se pueden obtener, proceder sin ellas
-                state['graph_db'] = None
-                state['enhanced_memory_manager'] = None
+        # Asegurarse de que state["graph_context"] no sea None antes de concatenar
+        graph_context_val = state.get("graph_context")
+        if graph_context_val:
+            relevant_memories_text += graph_context_val
         
-        if enhanced_memory_manager:
-            logger.info(f"🧠 Consultando EnhancedMemoryManager con la consulta: '{user_message}'")
-            enhanced_context = await enhanced_memory_manager.get_enhanced_context(
-                user_query=user_message,
-                user_id=state['account_id'],
-                workspace_id=state.get('workspace_id'),
-                explicit_document_ids=document_ids_for_rag
-            )
-        else:
-            enhanced_context = None
-            logger.warning("⚠️ EnhancedMemoryManager no está disponible, saltando la consulta de contexto enriquecido.")
-
-        all_sources_objects = []
-        if enhanced_context:
-            logger.info("✅ Contexto enriquecido recibido del grafo de conocimiento.")
-            traditional_sources_raw = enhanced_context.get('sources', {}).get('traditional_embeddings', {}).get('results', [])
-            if traditional_sources_raw:
-                logger.info(f"📚 {len(traditional_sources_raw)} fuentes RAG tradicionales (embeddings) recuperadas.")
-            all_sources_objects.extend(traditional_sources_raw)
-
-            insights = enhanced_context.get('enhanced_insights', [])
-            if insights:
-                logger.info(f"🔍 {len(insights)} insights encontrados en el grafo:")
-                for i, insight in enumerate(insights):
-                    logger.info(f"  - Insight [{i+1}]: {insight.get('description', 'N/A')}")
-                    all_sources_objects.append(Source(
-                        id=f"insight_{uuid.uuid4().hex[:10]}",
-                        title=f"Insight del Grafo: {insight.get('type', 'Desconocido')}",
-                        snippet=insight.get('description', 'Sin descripción.'),
-                        type=SourceType.GRAPH, metadata=insight, url=f"graph://insight_{uuid.uuid4().hex[:10]}"
-                    ))
-
-            paths = enhanced_context.get('reasoning_paths', [])
-            if paths:
-                logger.info(f"🗺️ {len(paths)} rutas de razonamiento encontradas en el grafo:")
-                for i, path in enumerate(paths):
-                    logger.info(f"  - Ruta [{i+1}]: {path.get('description', 'N/A')}")
-                    steps_desc = "\\n".join([f" - {s.get('from', '?')} -> {s.get('to', '?')}" for s in path.get('steps', [])])
-                    snippet = f"{path.get('description', 'Sin descripción.')}\\n{steps_desc}"
-                    all_sources_objects.append(Source(
-                        id=f"path_{uuid.uuid4().hex[:10]}",
-                        title=f"Ruta de Razonamiento: {path.get('type', 'Desconocido')}",
-                        snippet=snippet, type=SourceType.GRAPH, metadata=path, url=f"graph://path_{uuid.uuid4().hex[:10]}"
-                    ))
-
-            # Re-indexar todas las fuentes con IDs numéricos secuenciales
-            relevant_memories_parts = []
-            final_sources_for_state = [] # Reiniciar si se encontraron nuevas fuentes RAG
-            for i, source_obj in enumerate(all_sources_objects, start=1):
-                relevant_memories_parts.append(f"[{i}] {source_obj.snippet}")
-                source_dict = source_obj.dict()
-                if hasattr(source_obj, 'id'):
-                    source_dict['original_id'] = source_obj.id
-                source_dict['id'] = i
-                final_sources_for_state.append(source_dict)
+        # Añadir las fuentes del grafo a las fuentes finales, evitando duplicados
+        if state.get("graph_sources"):
+            # Inicializar final_sources_for_state si es None
+            if final_sources_for_state is None:
+                final_sources_for_state = []
             
-            relevant_memories_text = "\\n\\n".join(relevant_memories_parts)
-            state['sources'] = final_sources_for_state # Actualizar el estado con las nuevas fuentes RAG
-            logger.info(f"✅ {len(final_sources_for_state)} fuentes combinadas y re-indexadas añadidas al estado.")
-            logger.debug(f"📝 Contexto final inyectado en el prompt desde el grafo: \n{relevant_memories_text}")
-        else:
-            logger.info("ℹ️ No se generó contexto enriquecido desde el grafo de conocimiento.")
-    else:
-        logger.info("Saltando la búsqueda RAG del agente. Manteniendo fuentes existentes si las hay.")
-        # Si ya hay fuentes en el estado (de tool_node o de un RAG anterior), usarlas para el prompt
-        if final_sources_for_state:
-            relevant_memories_parts = []
-            for i, source_dict in enumerate(final_sources_for_state, start=1):
-                relevant_memories_parts.append(f"[{i}] {source_dict.get('snippet', '')}")
-            relevant_memories_text = "\\n\\n".join(relevant_memories_parts)
+            existing_urls = {s['url'] for s in final_sources_for_state if 'url' in s}
+            
+            graph_sources_val = state.get("graph_sources")
+            if graph_sources_val:
+                new_graph_sources = [s for s in graph_sources_val if s.get('url') not in existing_urls]
+                final_sources_for_state.extend(new_graph_sources)
+                logger.info(f"Añadidas {len(new_graph_sources)} nuevas fuentes desde el grafo.")
+    # FIN: Integración del contexto
     # --- FIN DE LA LÓGICA DE MANEJO DE FUENTES ---
         
     from core.prompt_manager import PromptManager
     prompt_manager = PromptManager(settings={"default_system_prompt": settings.default_system_prompt})
         
-    tools = await get_all_langchain_tools(
-        account_id=state['account_id'],
-        telegram_id=state.get('telegram_id')
-    )
+    # Obtener herramientas si no están en el estado
+    if "tools" not in state:
+        tools = await get_all_langchain_tools(
+            account_id=state['account_id'],
+            telegram_id=state.get('telegram_id'),
+            thread_id=state['thread_id'],
+            workspace_id=state.get('workspace_id')
+        )
+        state["tools"] = tools
+    else:
+        tools = state["tools"]
     
     workspace_prompt = None
     system_prompt_content = prompt_manager.build_system_prompt(
@@ -712,7 +621,7 @@ async def call_model_node(state: AgentState):
         relevant_memories=relevant_memories_text,
         summary_string="",
         custom_prompt_from_profile=str(user_profile.system_prompt) if user_profile and user_profile.system_prompt else None,
-        workspace_prompt=None,
+        workspace_prompt=None, # Este se rellena después
         tools=tools,
         account_id=state['account_id'],
         telegram_id=state.get('telegram_id'),
@@ -732,7 +641,7 @@ async def call_model_node(state: AgentState):
                 relevant_memories=relevant_memories_text,
                 summary_string="",
                 custom_prompt_from_profile=str(user_profile.system_prompt) if user_profile and user_profile.system_prompt else None,
-                workspace_prompt=workspace_prompt,
+                workspace_prompt=workspace_prompt, # Ahora sí se usa
                 tools=tools,
                 account_id=state['account_id'],
                 telegram_id=state.get('telegram_id'),
@@ -744,40 +653,48 @@ async def call_model_node(state: AgentState):
     llm = get_main_llm()
     if not llm:
         raise ValueError("El LLM principal no está disponible.")
-        
+         
     # Log del modelo en uso para confirmación visual
-    model_name = getattr(llm, 'model', settings.llm_model)
+    model_name = getattr(llm, 'model_name', getattr(llm, 'model', settings.llm_model))
     logger.info(f"🤖 AGENT EXECUTION: Generando respuesta usando modelo: '{model_name}'")
 
     logger.debug(f"DEBUG (agent.py - call_model_node): System Prompt final antes de LLM: {system_prompt_content}")
     
     # --- BINDING DE HERRAMIENTAS COMPATIBLE CON CUALQUIER LLM ---
-    # Usamos una conversión explícita a formato OpenAI (tools) porque es el estándar 
+    # Usamos una conversión explícita a formato OpenAI (tools) porque es el estándar
     # más robusto para LiteLLM y OpenRouter, asegurando que los campos 'required' se mantengan.
     try:
         from langchain_core.utils.function_calling import convert_to_openai_tool
         
         openai_tools = []
+        seen_tool_names = set()
         for tool in tools:
             try:
                 # convert_to_openai_tool es el método moderno que genera el formato {"type": "function", "function": {...}}
                 tool_dict = convert_to_openai_tool(tool)
-                openai_tools.append(tool_dict)
+                tool_name = tool_dict["function"]["name"]
+                if tool_name not in seen_tool_names:
+                    openai_tools.append(tool_dict)
+                    seen_tool_names.add(tool_name)
+                else:
+                    logger.warning(f"⚠️ Herramienta duplicada detectada y eliminada: '{tool_name}'")
             except Exception as e:
                 logger.error(f"❌ Error al convertir herramienta '{tool.name}': {e}")
 
         logger.info(f"🔧 Vinculando {len(openai_tools)} herramientas al modelo '{model_name}'")
+        logger.debug(f"HERRAMIENTAS A VINCULAR: {[t['function']['name'] for t in openai_tools]}")
         
         # Usamos .bind(tools=...) que es lo que LiteLLM espera para casi todos los proveedores
         # También pasamos 'functions' para modelos legacy de OpenRouter que lo prefieran
         if openai_tools:
             # Extraer solo la parte 'function' para el parámetro legacy 'functions'
-            openai_functions = [t["function"] for t in openai_tools]
-            llm_with_tools = llm.bind(tools=openai_tools, functions=openai_functions)
+            # The 'functions' parameter is for legacy models and can cause duplication with modern APIs like Gemini.
+            # We will only use the 'tools' parameter which is the modern standard.
+            llm_with_tools = llm.bind(tools=openai_tools)
         else:
             llm_with_tools = llm
             
-        logger.info(f"✅ Herramientas vinculadas correctamente al LLM '{model_name}' (Binding Dual: tools + functions)")
+        logger.info(f"✅ Herramientas vinculadas correctamente al LLM '{model_name}'")
     except Exception as e:
         logger.error(f"❌ Error crítico al vincular herramientas al LLM '{model_name}': {e}", exc_info=True)
         llm_with_tools = llm
@@ -916,7 +833,7 @@ async def tool_node(state: AgentState):
 
     agent_message = state["messages"][-1]
     # Asegurarse de que agent_message es un AIMessage antes de acceder a tool_calls
-    tool_calls = agent_message.tool_calls if isinstance(agent_message, AIMessage) else []
+    tool_calls = agent_message.tool_calls if isinstance(agent_message, AIMessage) and hasattr(agent_message, 'tool_calls') else []
     
     if not tool_calls:
         return {"messages": state["messages"]}
@@ -972,6 +889,21 @@ async def tool_node(state: AgentState):
                 logger.warning("No se pudo encontrar mensaje de usuario para deep_research, usando query por defecto")
                 tool_args["query"] = "información general"
 
+        # Asegurar que knowledge_graph siempre tenga un natural_language_query válido
+        if tool_name == "knowledge_graph" and ("natural_language_query" not in tool_args or not tool_args.get("natural_language_query")):
+            # Inferir query del mensaje del usuario
+            user_query = None
+            for msg in reversed(state["messages"]):
+                if isinstance(msg, HumanMessage):
+                    user_query = extract_text_content(msg.content)
+                    break
+            if user_query:
+                tool_args["natural_language_query"] = user_query
+                logger.info(f"🔧 Asignado natural_language_query inferido para knowledge_graph: {user_query}")
+            else:
+                logger.warning("No se pudo encontrar mensaje de usuario para knowledge_graph, usando query por defecto")
+                tool_args["natural_language_query"] = "información general"
+
         logger.info(f"🔧 Ejecutando tool_call: name={tool_name}, args={json.dumps(tool_args, ensure_ascii=False)}")
         
         # Enviar evento tool_start
@@ -987,22 +919,27 @@ async def tool_node(state: AgentState):
         # Use get_tool_by_name from the new utils location
         from core.utils.tool_utils import get_tool_by_name
         
-        # Obtener todas las herramientas disponibles una vez por contexto
+        # Utilizar herramientas del estado si están disponibles
+        # --- FIX: definir account_id y telegram_id_str ANTES de la rama para evitar uso antes de asignación ---
         account_id = state['account_id']
         telegram_id_int = state.get('telegram_id')
         telegram_id_str = str(telegram_id_int) if telegram_id_int is not None else None
         workspace_id = state.get('workspace_id')
 
-        all_tools = await get_all_langchain_tools(
-            account_id=account_id,
-            telegram_id=telegram_id_int,
-            thread_id=state['thread_id'], # Usamos thread_id del estado
-            workspace_id=workspace_id
-        )
+        if "tools" in state:
+            all_tools = state["tools"]
+        else:
+            all_tools = await get_all_langchain_tools(
+                account_id=account_id,
+                telegram_id=telegram_id_int,
+                thread_id=state['thread_id'], # Usamos thread_id del estado
+                workspace_id=workspace_id
+            )
+            state["tools"] = all_tools
 
         selected_tool = await get_tool_by_name(
             tool_name=tool_name,
-            all_tools=all_tools, # Pasar la lista de todas las herramientas
+            all_tools=all_tools,
             account_id=account_id,
             telegram_id=telegram_id_str,
             workspace_id=workspace_id,
@@ -1101,12 +1038,19 @@ Por favor, intenta de nuevo especificando correctamente la herramienta."""
                 args_schema_instance = selected_tool.args_schema
                 # Obtener los campos requeridos del schema (Pydantic v2 nativo)
                 required_fields = []
+                # Si es una instancia de Pydantic v2
                 if hasattr(args_schema_instance, 'model_fields'):
                     schema_fields = args_schema_instance.model_fields
                     required_fields = [
                         field_name for field_name, field_info in schema_fields.items()
-                        if field_info.is_required() # type: ignore
+                        if field_info.is_required()
                     ]
+                # Si es un diccionario (JSON Schema)
+                elif isinstance(args_schema_instance, dict):
+                    required_fields = args_schema_instance.get('required', [])
+                # Si no es Pydantic v2 ni un diccionario, no hay campos requeridos conocidos
+                else:
+                    required_fields = []
                 
                 # Verificar si faltan campos requeridos
                 missing_fields = []
@@ -1397,6 +1341,7 @@ def should_continue(state: AgentState) -> str:
 
 # Global cache for the compiled agent graph (singleton pattern)
 _compiled_agent_graph = None
+_graph_reasoning_node_instance = None # NUEVO: Singleton para el nodo de razonamiento
 
 def get_langgraph_agent():
     """
@@ -1424,16 +1369,27 @@ def create_langgraph_agent():
     workflow = StateGraph(AgentState)
 
     # Añadir los nodos al grafo
-    workflow.add_node("proactive_memory", proactive_memory_node) # NUEVO
+    workflow.add_node("proactive_memory", proactive_memory_node)
+    workflow.add_node("graph_reasoning", graph_reasoning_node) # NUEVO NODO
     workflow.add_node("agent", call_model_node)
     workflow.add_node("action", tool_node)
-    workflow.add_node("generateResponse", generate_response_node) # El nombre coincide con lo que espera api/chat.py
+    workflow.add_node("generateResponse", generate_response_node)
 
     # Definir las aristas (el flujo de trabajo)
-    workflow.set_entry_point("proactive_memory") # NUEVO PUNTO DE ENTRADA
+    workflow.set_entry_point("proactive_memory")
     
-    # El nodo de memoria proactiva siempre pasa al agente principal
-    workflow.add_edge("proactive_memory", "agent")
+    # Decidir si ir al nodo del grafo o directamente al agente
+    workflow.add_conditional_edges(
+        "proactive_memory",
+        should_use_graph_reasoning, # NUEVO enrutador
+        {
+            "continue_to_graph": "graph_reasoning",
+            "continue_to_agent": "agent",
+        }
+    )
+
+    # El nodo del grafo siempre pasa al agente principal después
+    workflow.add_edge("graph_reasoning", "agent")
 
     workflow.add_conditional_edges(
         "agent",
@@ -1448,7 +1404,6 @@ def create_langgraph_agent():
     workflow.add_edge("generateResponse", END)
 
     # Compilar el grafo
-    # memory = MemorySaver() # Se añadirá cuando se integre el historial
     return workflow.compile()
 
 async def ensure_graph_dependencies(state: AgentState):
@@ -1471,8 +1426,127 @@ async def ensure_graph_dependencies(state: AgentState):
     
     return state
 
+
+async def graph_reasoning_node(state: AgentState):
+    """
+    Ejecuta el nodo de razonamiento del grafo para enriquecer el contexto.
+    """
+    global _graph_reasoning_node_instance
+    
+    # 1. Asegurarse de que las dependencias del grafo existan
+    state = await ensure_graph_dependencies(state)
+    graph_db = state.get('graph_db')
+    
+    if not graph_db:
+        logger.warning("Saltando nodo de razonamiento del grafo: GraphDB no está disponible.")
+        return state
+
+    # 2. Inicializar el nodo de razonamiento si es necesario (singleton)
+    if _graph_reasoning_node_instance is None:
+        _graph_reasoning_node_instance = GraphReasoningNode(graph_db)
+        logger.info("✅ Instancia de GraphReasoningNode creada.")
+
+    # 3. Invocar el nodo y obtener el contexto enriquecido
+    graph_output = await _graph_reasoning_node_instance.ainvoke(cast(dict, state))
+
+    # 4. Actualizar el estado con la salida del nodo
+    if graph_output:
+        state['graph_context'] = graph_output.get('graph_context')
+        state['graph_sources'] = graph_output.get('graph_sources')
+        state['mermaid_diagram'] = graph_output.get('mermaid_diagram')
+        logger.info("Estado actualizado con la salida del GraphReasoningNode.")
+
+    return state
+
+
+def should_use_graph_reasoning(state: AgentState) -> str:
+    """
+    Decide si se debe pasar por el nodo de razonamiento del grafo.
+    """
+    user_message = ""
+    last_message = state["messages"][-1] if state["messages"] else None
+    if isinstance(last_message, HumanMessage):
+        user_message = str(last_message.content)
+
+    # Palabras clave que sugieren una consulta al grafo
+    graph_keywords = [
+        "relación entre", "conecta con", "vinculado a", "grafo de conocimiento",
+        "cómo se relaciona", "qué sabes sobre", "dame un resumen de", "explícame"
+    ]
+
+    if any(keyword in user_message.lower() for keyword in graph_keywords):
+        logger.info("Enrutador -> 'graph_reasoning': Se detectó palabra clave para el grafo.")
+        return "continue_to_graph"
+    
+    logger.info("Enrutador -> 'agent': No se necesita razonamiento del grafo.")
+    return "continue_to_agent"
+
 from core.prompts import PROACTIVE_MEMORY_PROMPT
 import json
+
+async def _process_proactive_memory_task(
+    account_id: str,
+    workspace_id: Optional[str],
+    telegram_id: Optional[int],
+    thread_id: Optional[str],
+    user_content: str,
+    history_for_prompt: str,
+    llm: BaseChatModel
+):
+    """
+    Tarea en segundo plano para invocar al LLM y guardar memorias proactivas.
+    """
+    logger.info("Iniciando tarea en segundo plano para memoria proactiva...")
+    prompt = f"""{PROACTIVE_MEMORY_PROMPT}
+---
+**Conversación:**
+{history_for_prompt}
+
+**Último mensaje del usuario:** "{user_content}"
+
+**Tu salida JSON (solo el JSON, nada más):**
+"""
+    try:
+        logger.info("Invocando LLM para extracción de memoria proactiva (en segundo plano)...")
+        response = await llm.ainvoke(prompt)
+        response_content = response.content if hasattr(response, 'content') else str(response)
+        
+        json_str = str(response_content).strip()
+        if json_str.startswith("```json"):
+            json_str = json_str[7:]
+        if json_str.endswith("```"):
+            json_str = json_str[:-3]
+        
+        extracted_data = json.loads(json_str)
+        memories_to_save = extracted_data.get("memories", [])
+
+        if not memories_to_save:
+            logger.info("No se extrajeron memorias proactivas (en segundo plano).")
+            return
+
+        logger.info(f"Se extrajeron {len(memories_to_save)} memorias proactivas (en segundo plano): {memories_to_save}")
+
+        for memory_content in memories_to_save:
+            await add_memory_to_vector_db(
+                account_id=account_id,
+                content=memory_content,
+                type="user_memory_proactive_llm",
+                workspace_id=workspace_id,
+                telegram_id=str(telegram_id) if telegram_id else None,
+                thread_id=thread_id
+            )
+            logger.info(f"Memoria proactiva guardada (en segundo plano) para la cuenta {account_id}: '{memory_content}'")
+
+        if account_id:
+            from knowledge_graph.memory_graph_processor import schedule_memory_graph_processing
+            asyncio.create_task(schedule_memory_graph_processing(account_id=account_id))
+            logger.info(f"Procesamiento del grafo de conocimiento programado (en segundo plano) tras memoria proactiva para la cuenta {account_id}.")
+
+    except json.JSONDecodeError:
+        logger.error(f"Error de decodificación JSON en memoria proactiva (en segundo plano). Respuesta del LLM no fue un JSON válido: {response_content}")
+    except Exception as e:
+        logger.error(f"Error en la tarea de memoria proactiva en segundo plano: {e}", exc_info=True)
+
 
 async def proactive_memory_node(state: AgentState):
     """
@@ -1486,76 +1560,48 @@ async def proactive_memory_node(state: AgentState):
     last_message = state["messages"][-1]
     if not isinstance(last_message, HumanMessage):
         logger.info("Saltando memoria proactiva: el último mensaje no es del usuario.")
+        # Incrementar turn_count incluso si no es HumanMessage, para mantener el ciclo
+        state['turn_count'] = state.get('turn_count', 0) + 1
         return state
 
     user_content = extract_text_content(last_message.content)
     if not user_content or len(user_content.strip()) < 10:
         logger.info("Saltando memoria proactiva: contenido del usuario muy corto o vacío.")
+        state['turn_count'] = state.get('turn_count', 0) + 1
         return state
 
-    # 2. Preparar el LLM y el prompt
+    # 2. Incrementar el contador de turnos
+    current_turn_count = state.get('turn_count', 0) + 1
+    state['turn_count'] = current_turn_count
+    logger.info(f"Contador de turnos: {current_turn_count}")
+
+    # 3. Decidir si es momento de procesar la memoria proactiva (cada 5 turnos)
+    if current_turn_count % 5 != 0:
+        logger.info("Saltando memoria proactiva: no es un turno de procesamiento.")
+        return state
+
+    # 4. Preparar el LLM
     llm = get_fast_llm()
     if not llm:
         logger.warning("No hay un LLM rápido disponible para la memoria proactiva. Saltando nodo.")
         return state
 
-    # Formatear historial para el prompt (últimos 4 mensajes)
-    history_for_prompt = "\n".join([f"{'Usuario' if isinstance(m, HumanMessage) else 'Asistente'}: {extract_text_content(m.content)}" for m in state["messages"][-5:-1]])
+    # 5. Formatear historial para el prompt (últimos 10 mensajes)
+    # Excluimos el mensaje actual del usuario para no duplicar en "Último mensaje del usuario"
+    history_for_prompt = "\n".join([f"{'Usuario' if isinstance(m, HumanMessage) else 'Asistente'}: {extract_text_content(m.content)}" for m in state["messages"][-11:-1]]) # Últimos 10 mensajes excluyendo el actual
 
-
-    prompt = f"""{PROACTIVE_MEMORY_PROMPT}
----
-**Conversación:**
-{history_for_prompt}
-
-**Último mensaje del usuario:** "{user_content}"
-
-**Tu salida JSON (solo el JSON, nada más):**
-"""
-
-    try:
-        # 3. Invocar al LLM para extraer memorias
-        logger.info("Invocando LLM para extracción de memoria proactiva...")
-        response = await llm.ainvoke(prompt)
-        response_content = response.content if hasattr(response, 'content') else str(response)
-        
-        # Limpiar la respuesta para asegurar que sea un JSON válido
-        json_str = response_content.strip()
-        if json_str.startswith("```json"):
-            json_str = json_str[7:]
-        if json_str.endswith("```"):
-            json_str = json_str[:-3]
-        
-        extracted_data = json.loads(json_str)
-        memories_to_save = extracted_data.get("memories", [])
-
-        if not memories_to_save:
-            logger.info("No se extrajeron memorias proactivas.")
-            return state
-
-        logger.info(f"Se extrajeron {len(memories_to_save)} memorias proactivas: {memories_to_save}")
-
-        # 4. Guardar cada memoria extraída
-        for memory_content in memories_to_save:
-            await add_memory_to_vector_db(
-                account_id=state['account_id'],
-                content=memory_content,
-                type="user_memory_proactive_llm", # Nuevo tipo para diferenciar
-                workspace_id=state.get('workspace_id'),
-                telegram_id=str(state.get('telegram_id')) if state.get('telegram_id') else None,
-                thread_id=state.get('thread_id')
-            )
-            logger.info(f"Memoria proactiva guardada para la cuenta {state['account_id']}: '{memory_content}'")
-
-        # 5. Disparar el procesamiento del grafo de conocimiento (una sola vez)
-        if state.get('account_id'):
-            from knowledge_graph.memory_graph_processor import schedule_memory_graph_processing
-            asyncio.create_task(schedule_memory_graph_processing(account_id=state['account_id']))
-            logger.info(f"Procesamiento del grafo de conocimiento programado tras memoria proactiva para la cuenta {state['account_id']}.")
-
-    except json.JSONDecodeError:
-        logger.error(f"Error de decodificación JSON en memoria proactiva. Respuesta del LLM no fue un JSON válido: {response_content}")
-    except Exception as e:
-        logger.error(f"Error en el nodo de memoria proactiva: {e}", exc_info=True)
+    # 6. Programar la tarea de procesamiento de memoria en segundo plano
+    asyncio.create_task(
+        _process_proactive_memory_task(
+            account_id=state['account_id'],
+            workspace_id=state.get('workspace_id'),
+            telegram_id=state.get('telegram_id'),
+            thread_id=state.get('thread_id'),
+            user_content=user_content,
+            history_for_prompt=history_for_prompt,
+            llm=llm
+        )
+    )
+    logger.info("Tarea de memoria proactiva programada en segundo plano. El grafo continuará su ejecución.")
 
     return state
