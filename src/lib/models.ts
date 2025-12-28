@@ -26,6 +26,8 @@ export interface CollectionAnalysis {
   collection_insights: string[];
   methodological_notes: string[];
   kai_synthesis?: string;
+  general_analysis?: string;
+  authorial_tone?: string;
   patrones_semanticos?: {
     total_documentos?: number;
     total_chunks_analizados?: number;
@@ -164,6 +166,8 @@ export interface NoteCollectionAnalysisResult {
   strategic_recommendations: string[];
   knowledge_gaps: string[];
   kai_synthesis: string;
+  general_analysis?: string;
+  authorial_tone?: string;
 }
 
 export interface GroupedTopic {
@@ -209,6 +213,31 @@ export interface SemanticAnalysisResult {
   };
 }
 
+export interface DeepResearchAnalysisResult {
+  final_report: string;
+  sources: Array<{
+    id: number;
+    title: string;
+    url: string;
+    snippet: string;
+    type: string;
+  }>;
+  recommendations: string[];
+}
+
+export interface ProactiveInsightResult {
+  type: 'duplicidad' | 'sinergia' | 'evolucion' | 'contradiccion';
+  insight_message: string;
+  confidence_score: number;
+  action_suggestion: string;
+  related_items: any[];
+  kai_synthesis?: string;
+}
+
+export type ComprehensiveWebAnalysisResult = string;
+export type ScopedRagAnalysisResult = string;
+
+
 export interface Analysis {
   id: string;
   type: AnalysisType;
@@ -228,8 +257,10 @@ export interface Analysis {
   file_name?: string;
   topic?: string;
   author?: string;
-  result?: DocumentAnalysisResult | CodeAnalysisResultFrontend | CollectionAnalysis | NoteAnalysisResult | NoteCollectionAnalysisResult | SemanticAnalysisResult | any;
+  result?: DocumentAnalysisResult | CodeAnalysisResultFrontend | CollectionAnalysis | NoteAnalysisResult | NoteCollectionAnalysisResult | SemanticAnalysisResult | DeepResearchAnalysisResult | ProactiveInsightResult | ComprehensiveWebAnalysisResult | ScopedRagAnalysisResult | any;
   full_data?: any; // Añadido para que coincida con la implementación existente
+  status?: 'pending' | 'in_progress' | 'completed' | 'failed';
+  error_message?: string;
 }
 
 export type AnalysisType =
@@ -261,4 +292,9 @@ export type AnalysisType =
   | 'note_collection_analysis'
   | 'knowledge_graph_analysis'
   | 'custom_analysis'
-  | 'repository_update';
+  | 'repository_update'
+  | 'gap_development'
+  | 'comprehensive_web_analysis'
+  | 'scoped_rag_analysis'
+  | 'deep_research'
+  | 'proactive_insight';

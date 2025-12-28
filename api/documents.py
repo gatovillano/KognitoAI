@@ -31,6 +31,10 @@ from tools.add_web_to_rag_tool import AddWebToRAGTool
 from core.websocket_manager import send_personal_message
 from core.tasks import process_upload_task, extract_titles_and_update_metadata, process_knowledge_graph
 from utils.knowledge_graph_analysis import start_knowledge_graph_analysis
+from langchain_community.chat_message_histories import PostgresChatMessageHistory
+from langchain_core.messages import AIMessage
+from core.config import settings
+from datetime import datetime, timezone
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -130,7 +134,9 @@ async def upload_document_endpoint(
 async def upload_chat_document_endpoint(
     current_account_id: str = Depends(get_current_account_id),
     file: UploadFile = File(...),
+
     workspace_id: Optional[str] = Form(None),
+    thread_id: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
@@ -163,6 +169,29 @@ async def upload_chat_document_endpoint(
         )
 
         logger.info(f"Documento '{file_name}' (ID: {document_id}) subido al chat del workspace '{workspace_id}' por la cuenta {current_account_id}.")
+
+        # Si se proporciona thread_id, inyectar un mensaje en el historial del chat
+        if thread_id:
+            try:
+                db_sync_url = settings.database_url.replace("+psycopg", "")
+                chat_message_history = PostgresChatMessageHistory(
+                    connection_string=db_sync_url,
+                    session_id=thread_id,
+                    table_name="langchain_chat_history",
+                )
+                
+                system_notification = f"Sistema: El usuario ha subido el archivo '{file_name}' (ID: {document_id}) al contexto del chat."
+                
+                # Crear un AIMessage para guardar en el historial
+                ai_message = AIMessage(
+                    content=system_notification,
+                    additional_kwargs={"created_at": datetime.now(timezone.utc).isoformat(), "role": "system_notification"}
+                )
+                await chat_message_history.aadd_messages([ai_message])
+                logger.info(f"Notificación de subida de archivo guardada en el hilo {thread_id}: {system_notification}")
+            except Exception as e:
+                logger.error(f"Error al guardar notificación de subida en el historial del chat: {e}")
+                # No fallamos la request completa si esto falla, solo logueamos el error
 
         # Devolver la información necesaria para el frontend
         return {
@@ -326,6 +355,7 @@ async def get_document_content_endpoint(
 class ExtractTitleRequest(BaseModel):
     topic: Optional[str] = None
     file_name: Optional[str] = None
+    workspace_id: Optional[str] = None
 
 class UpdateCollectionRequest(BaseModel):
     """Define la estructura para actualizar una colección específica."""
@@ -472,7 +502,7 @@ async def extract_titles_endpoint(request: ExtractTitleRequest, background_tasks
             extract_titles_and_update_metadata,
             account_id=current_account_id,
             topic=request.topic,
-            workspace_id=None,
+            workspace_id=request.workspace_id,
             file_name=request.file_name
         )
         return {"message": "El proceso de extracción de títulos ha comenzado en segundo plano. Recibirás una actualización una vez que finalice."}

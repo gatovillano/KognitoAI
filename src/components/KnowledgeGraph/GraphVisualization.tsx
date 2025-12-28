@@ -1,7 +1,7 @@
 // src/components/KnowledgeGraph/GraphVisualization.tsx
 'use client';
 
-import React, { useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
+import React, { useRef, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react';
 import { Network, DataSet } from 'vis-network/standalone';
 import { getNodeColor } from '@/utils/graphUtils';
 import { GraphLegend } from './GraphLegend';
@@ -16,7 +16,12 @@ interface VisGraphNode {
   id: string | number;
   label: string;
   title?: string;
-  color?: string;
+  color?: string | {
+    background?: string;
+    border?: string;
+    highlight?: string | { background?: string; border?: string };
+    hover?: string | { background?: string; border?: string };
+  };
   size?: number;
   type?: string;
   properties?: any; // Mantenemos properties por si acaso
@@ -44,7 +49,8 @@ interface GraphVisualizationProps {
   error?: string | null;
   onNodeClick?: (node: VisGraphNode) => void;
   onNodeDoubleClick?: (nodeId: string | number) => void; // Nuevo prop para doble clic
-  // onEdgeClick?: (edge: GraphEdge) => void; // Puedes añadir si necesitas interactividad con aristas
+  onEdgeClick?: (edge: VisGraphEdge) => void; // Handler para clic en aristas
+  savedNodeIds?: Set<string | number>; // IDs de nodos guardados
 }
 
 export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationProps>(({
@@ -54,6 +60,8 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
   error = null,
   onNodeClick,
   onNodeDoubleClick, // Desestructurar el nuevo prop
+  onEdgeClick, // Desestructurar el prop para aristas
+  savedNodeIds = new Set(),
 }, ref) => {
   const nodes = React.useMemo(() => graphData?.nodes || [], [graphData?.nodes]);
   const edges = React.useMemo(() => graphData?.edges || [], [graphData?.edges]);
@@ -69,13 +77,14 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
   };
 
   // Función para convertir nodos del backend al formato vis.js
-  const convertNodesToVis = (backendNodes: any[]) => {
+  const convertNodesToVis = useCallback((backendNodes: any[]) => {
     return backendNodes.map(node => {
+      const isSaved = savedNodeIds.has(node.id);
       // Priorizar name o title de properties, luego node.label, y finalmente node.id
       const fullLabel = node.properties?.name || node.properties?.title || node.label || String(node.id);
       const truncatedLabel = truncateText(fullLabel);
       const description = node.properties?.description || node.properties?.text || fullLabel;
-      
+
       // Asegurarse de que el tipo sea 'Desconocido' si no está definido o es nulo
       const nodeType = node.type || 'Desconocido';
       const nodeColor = getNodeColor(nodeType);
@@ -88,23 +97,58 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
         title: description.length > 100 ? `${truncateText(description, 100)}\n\nClic para ver detalles completos` : description,
         properties: node.properties,
         type: nodeType,
-        color: nodeColor,
-        font: { color: '#000000', size: truncatedLabel.length > 20 ? 12 : 14 }
+        color: isSaved ? {
+          background: '#FACC15', // Gold/Yellow
+          border: '#EAB308',
+          highlight: { background: '#FDE047', border: '#CA8A04' }
+        } : nodeColor,
+        borderWidth: isSaved ? 4 : 2,
+        size: isSaved ? 20 : 15,
+        shadow: isSaved ? { enabled: true, color: 'rgba(234, 179, 8, 0.5)', size: 10 } : false,
+        font: {
+          color: '#000000',
+          size: truncatedLabel.length > 20 ? 12 : 14,
+          bold: isSaved
+        }
       };
     });
-  };
+  }, [savedNodeIds]);
 
   // Función para convertir edges del backend al formato vis.js
   const convertEdgesToVis = (backendEdges: any[]) => {
     return backendEdges.map(edge => {
       const e = edge as any;
+
+      // Si no hay propiedades, crear un objeto properties con todos los campos disponibles
+      let edgeProperties = e.properties || {};
+
+      // Si properties está vacío pero hay otros campos, incluirlos
+      if (Object.keys(edgeProperties).length === 0) {
+        edgeProperties = {
+          id: e.id,
+          type: e.type,
+          label: e.label,
+          from: e.from || e.source,
+          to: e.to || e.target,
+          description: e.description,
+          confidence: e.confidence,
+          weight: e.weight,
+          source_document: e.source_document,
+          extraction_method: e.extraction_method,
+          context: e.context,
+          position: e.position,
+          // Incluir cualquier otro campo que no esté ya incluido
+          ...Object.fromEntries(Object.entries(e).filter(([key]) => !['id', 'type', 'label', 'from', 'to', 'source', 'target'].includes(key)))
+        };
+      }
+
       return {
         id: e.id,
         from: e.from || e.source,
         to: e.to || e.target,
-        label: e.label,
-        title: e.properties?.description || e.label,
-        properties: e.properties,
+        label: '', // Ocultar etiqueta por defecto
+        title: e.properties?.description || e.description || e.label, // Mostrar al pasar el mouse
+        properties: edgeProperties,
         type: e.type,
         arrows: 'to',
         color: { color: '#475569', highlight: '#1e293b', hover: '#1e293b' },
@@ -144,19 +188,45 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
         physics: {
           enabled: true,
           barnesHut: {
-            gravitationalConstant: -1000, // Reducir la fuerza de repulsión
-            centralGravity: 0.5,
-            springLength: 100, // Aumentar la longitud de los resortes
-            springConstant: 0.08,
-            damping: 0.6, // Aumentar el amortiguamiento para un asentamiento más rápido
-            avoidOverlap: 0.3
+            gravitationalConstant: -2000,
+            centralGravity: 0.3,
+            springLength: 95,
+            springConstant: 0.04,
+            damping: 0.9,
+            avoidOverlap: 0
           },
+          forceAtlas2Based: {
+            gravitationalConstant: -50,
+            centralGravity: 0.01,
+            springConstant: 0.08,
+            springLength: 100,
+            damping: 0.9,
+            avoidOverlap: 0
+          },
+          repulsion: {
+            centralGravity: 0.2,
+            springLength: 200,
+            springConstant: 0.05,
+            nodeDistance: 100,
+            damping: 0.9
+          },
+          hierarchicalRepulsion: {
+            centralGravity: 0.0,
+            springLength: 100,
+            springConstant: 0.01,
+            nodeDistance: 120,
+            damping: 0.9,
+            avoidOverlap: 0
+          },
+          maxVelocity: 50,
+          minVelocity: 0.1,
           solver: 'barnesHut',
           stabilization: {
             enabled: true,
-            iterations: 200, // Menos iteraciones para una estabilización más rápida
-            updateInterval: 200, // Reducir la frecuencia de actualización durante la estabilización
-            fit: true // Ajustar la vista después de la estabilización
+            iterations: 2500,
+            updateInterval: 25,
+            onlyDynamicEdges: false,
+            fit: true
           },
           timestep: 0.5,
           adaptiveTimestep: true
@@ -195,9 +265,41 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
         }
       });
 
+      // Evento de clic en arista
+      networkRef.current.on("click", (properties) => {
+        // Si se hizo clic en una arista (edge)
+        if (properties.edges.length > 0 && properties.nodes.length === 0 && onEdgeClick && edgesDatasetRef.current) {
+          const edgeId = properties.edges[0];
+          const rawClickedEdge = edgesDatasetRef.current.get(edgeId);
+          let clickedEdge: VisGraphEdge | undefined;
+
+          if (Array.isArray(rawClickedEdge)) {
+            clickedEdge = rawClickedEdge[0] as VisGraphEdge;
+          } else {
+            clickedEdge = rawClickedEdge as VisGraphEdge;
+          }
+
+          if (clickedEdge) {
+            onEdgeClick(clickedEdge);
+          }
+        }
+      });
+
       // Disable physics after stabilization to keep graph static
       networkRef.current.on("stabilizationIterationsDone", () => {
         networkRef.current?.setOptions({ physics: { enabled: false } });
+      });
+
+      // Enable physics during drag for smooth movement
+      networkRef.current.on("dragStart", () => {
+        networkRef.current?.setOptions({ physics: { enabled: true } });
+      });
+
+      networkRef.current.on("dragEnd", () => {
+        // Disable physics after a short delay to allow settling
+        setTimeout(() => {
+          networkRef.current?.setOptions({ physics: { enabled: false } });
+        }, 500); // 500ms delay
       });
     }
 
@@ -242,7 +344,7 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
       // Si se necesita un ajuste inicial, se puede considerar añadirlo solo en la primera carga.
     }
 
-  }, [nodes, edges, isLoading, error, onNodeClick, onNodeDoubleClick]);
+  }, [nodes, edges, isLoading, error, onNodeClick, onNodeDoubleClick, onEdgeClick, convertNodesToVis]);
 
   useImperativeHandle(ref, () => ({
     fitView: () => {

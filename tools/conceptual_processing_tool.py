@@ -1,9 +1,3 @@
-# tools/conceptual_processing_tool.py
-"""
-Herramienta para procesar documentos conceptualmente usando GraphIntegration.
-Reemplaza la herramienta anterior basada en Cognee.
-"""
-
 import logging
 import asyncio
 import os
@@ -24,6 +18,7 @@ from knowledge_graph.graph_integration import GraphIntegration
 from utils.knowledge_graph_service import KnowledgeGraphService
 from core.memory_manager import get_full_document_content
 from tools.background_task_manager import BackgroundTaskManager
+from core.database import SessionLocal, DBSession
 
 logger = logging.getLogger(__name__)
 
@@ -59,40 +54,51 @@ class ConceptualProcessingTool(BaseTool):
     workspace_id: Optional[str] = None
     telegram_id: Optional[str] = None
     thread_id: Optional[str] = None
-    _graph_integration: Optional[GraphIntegration] = None
-    _graph_db: Optional[GraphDB] = None
-    _knowledge_graph_service: Optional[KnowledgeGraphService] = None
     
-    # Sistema de background processing usando BackgroundTaskManager
-    _executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="conceptual_processing")
+    # Dependencies are stored as private attributes to avoid pydantic serialization issues
+    # These are not part of the pydantic model and will be lazy-loaded when needed
 
     def __init__(self, graph_integration: Optional[GraphIntegration] = None, graph_db: Optional[GraphDB] = None, knowledge_graph_service: Optional[KnowledgeGraphService] = None, **data: Any):
         super().__init__(**data)
-        self._graph_integration = graph_integration
-        self._graph_db = graph_db
-        self._knowledge_graph_service = knowledge_graph_service
         
-        if self._knowledge_graph_service is None:
-            logger.info("🚀 Inicializando KnowledgeGraphService en ConceptualProcessingTool.")
+        # Store dependencies as private attributes to avoid pydantic serialization issues
+        # These are not part of the pydantic model schema
+        object.__setattr__(self, '_graph_integration', graph_integration)
+        object.__setattr__(self, '_graph_db', graph_db)
+        object.__setattr__(self, '_knowledge_graph_service', knowledge_graph_service)
+        object.__setattr__(self, '_executor', None)  # Will be lazy-initialized
+        
+        logger.info("🚀 ConceptualProcessingTool inicializada con dependencias privadas para evitar problemas de serialización.")
+
+    def _get_graph_integration(self) -> Optional[GraphIntegration]:
+        if getattr(self, '_graph_integration', None) is None:
+            logger.info("🔄 Lazy loading GraphIntegration...")
+            from core.tools import get_shared_dependencies
+            import asyncio
+            
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             try:
-                self._knowledge_graph_service = KnowledgeGraphService()
+                _graph_db, _graph_integration = loop.run_until_complete(get_shared_dependencies())
+                if _graph_integration:
+                    object.__setattr__(self, '_graph_integration', _graph_integration)
+                    if _graph_db:
+                        object.__setattr__(self, '_graph_db', _graph_db)
+                else:
+                    raise ValueError("No se pudo inicializar GraphIntegration desde dependencias compartidas.")
+            finally:
+                loop.close()
+        return getattr(self, '_graph_integration', None)
+    
+    def _get_knowledge_graph_service(self) -> Optional[KnowledgeGraphService]:
+        if getattr(self, '_knowledge_graph_service', None) is None:
+            logger.info("🔄 Lazy loading KnowledgeGraphService...")
+            try:
+                object.__setattr__(self, '_knowledge_graph_service', KnowledgeGraphService())
             except Exception as e:
                 logger.error(f"❌ Error inicializando KnowledgeGraphService: {e}")
-                # Fallback al método anterior si no se puede inicializar el servicio
-                if self._graph_integration is None or self._graph_db is None:
-                    logger.warning("⚠️ GraphIntegration o GraphDB no inyectados. Inicializando internamente.")
-                    if not settings.neo4j_uri or not settings.neo4j_user or not settings.neo4j_password:
-                        logger.error("❌ Configuración de Neo4j incompleta.")
-                        raise ValueError("Configuración de Neo4j incompleta.")
-                    
-                    self._graph_db = GraphDB(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
-                    self._graph_db.connect()
-                    self._graph_integration = GraphIntegration(self._graph_db)
-
-    def _get_graph_integration(self) -> GraphIntegration:
-        if self._graph_integration is None:
-            raise ValueError("GraphIntegration no está inicializada.")
-        return self._graph_integration
+                raise
+        return getattr(self, '_knowledge_graph_service', None)
 
     async def _prepare_documents(self, account_id: str, document_info_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         prepared_documents = []
@@ -141,26 +147,33 @@ class ConceptualProcessingTool(BaseTool):
 
             
             # Usar el KnowledgeGraphService para obtener y procesar documentos
-            if self._knowledge_graph_service:
-                logger.info(f"🧠 Usando KnowledgeGraphService para procesar topic: {target_topic}")
-                
-                # El KnowledgeGraphService puede manejar la búsqueda de documentos internamente
-                result = await self._knowledge_graph_service.process_documents_flow(
-                    documents=None,  # Dejar que el servicio busque documentos
-                    dataset_name=dataset_name_with_account,
-                    account_id=self.account_id,
-                    processing_mode="conceptual",
-                    topic=target_topic,
-                    workspace_id=self.workspace_id
-                )
-                
-                return {
-                    "status": "completed",
-                    "processed_documents_count": result.get("conceptual_quotes", 0),
-                    "results": [result]
-                }
+            if target_topic:
+                try:
+                    knowledge_graph_service = self._get_knowledge_graph_service()
+                    logger.info(f"🧠 Usando KnowledgeGraphService para procesar topic: {target_topic}")
+                    
+                    async with DBSession(SessionLocal) as db_session:
+                        result = await knowledge_graph_service.process_documents_flow(
+                            db_session=db_session,
+                            documents=None,  # Dejar que el servicio busque documentos
+                            dataset_name=dataset_name_with_account,
+                            account_id=self.account_id,
+                            processing_mode="conceptual",
+                            topic=target_topic,
+                            workspace_id=self.workspace_id,
+                            task_id=kwargs.get("task_id") # Pasar task_id si existe
+                        )
+                    
+                    return {
+                        "status": "completed",
+                        "processed_documents_count": result.get("conceptual_quotes", 0),
+                        "results": [result]
+                    }
+                except Exception as e:
+                    logger.error(f"❌ Error usando KnowledgeGraphService: {e}")
+                    return {"error": f"KnowledgeGraphService no está disponible: {e}", "status": "error"}
             else:
-                return {"error": "KnowledgeGraphService no está disponible", "status": "error"}
+                return {"error": "Se requiere un 'topic' cuando no se proporcionan documentos", "status": "error"}
 
 
         try:
@@ -178,23 +191,31 @@ class ConceptualProcessingTool(BaseTool):
                     return {"error": "No se pudieron preparar los documentos", "status": "error"}
 
                 # Usar KnowledgeGraphService para procesar los documentos preparados
-                if self._knowledge_graph_service:
+                try:
+                    knowledge_graph_service = self._get_knowledge_graph_service()
+                    if not knowledge_graph_service:
+                        return {"error": "KnowledgeGraphService no está disponible", "status": "error"}
+                    
                     logger.info(f"🧠 Procesando {len(prepared_documents)} documentos con KnowledgeGraphService")
                     
-                    result = await self._knowledge_graph_service.process_documents_flow(
-                        documents=prepared_documents,
-                        dataset_name=dataset_name_with_account,
-                        account_id=self.account_id,
-                        processing_mode="conceptual"
-                    )
+                    async with DBSession(SessionLocal) as db_session:
+                        result = await knowledge_graph_service.process_documents_flow(
+                            db_session=db_session,
+                            documents=prepared_documents,
+                            dataset_name=dataset_name_with_account,
+                            account_id=self.account_id,
+                            processing_mode="conceptual",
+                            task_id=kwargs.get("task_id") # Pasar task_id si existe
+                        )
                     
                     return {
                         "status": "completed",
                         "processed_documents_count": len(prepared_documents),
                         "results": [result]
                     }
-                else:
-                    return {"error": "KnowledgeGraphService no está disponible", "status": "error"}
+                except Exception as e:
+                    logger.error(f"❌ Error usando KnowledgeGraphService: {e}")
+                    return {"error": f"KnowledgeGraphService no está disponible: {e}", "status": "error"}
             else:
                 # Esta rama ya se manejó arriba, pero por consistencia
                 return {"error": "Se requiere 'documents', 'document_titles' o 'topic'", "status": "error"}
@@ -241,33 +262,47 @@ class ConceptualProcessingTool(BaseTool):
             # Si no hay documentos explícitos, usar topic
             if not prepared_documents and kwargs.get("topic"):
                 target_topic = kwargs.get("topic")
-                if self._knowledge_graph_service:
+                try:
+                    knowledge_graph_service = self._get_knowledge_graph_service()
+                    if not knowledge_graph_service:
+                        raise ValueError("KnowledgeGraphService no está disponible")
+                    
                     logger.info(f"🧠 Procesando topic: {target_topic} en background")
-                    result = await self._knowledge_graph_service.process_documents_flow(
-                        documents=None,
-                        dataset_name=dataset_name_with_account,
-                        account_id=self.account_id,
-                        processing_mode="conceptual",
-                        topic=target_topic,
-                        workspace_id=self.workspace_id
-                    )
-                else:
-                    raise ValueError("KnowledgeGraphService no está disponible")
+                    async with DBSession(SessionLocal) as db_session:
+                        result = await knowledge_graph_service.process_documents_flow(
+                            db_session=db_session,
+                            documents=None,
+                            dataset_name=dataset_name_with_account,
+                            account_id=self.account_id,
+                            processing_mode="conceptual",
+                            topic=target_topic,
+                            workspace_id=self.workspace_id,
+                            task_id=task_id # Usar el task_id de la tarea en background
+                        )
+                except Exception as e:
+                    raise ValueError(f"KnowledgeGraphService no está disponible: {e}")
             else:
                 # Procesar documentos preparados
                 if not prepared_documents:
                     raise ValueError("No se pudieron preparar los documentos")
                 
-                if self._knowledge_graph_service:
+                try:
+                    knowledge_graph_service = self._get_knowledge_graph_service()
+                    if not knowledge_graph_service:
+                        raise ValueError("KnowledgeGraphService no está disponible")
+                    
                     logger.info(f"🧠 Procesando {len(prepared_documents)} documentos en background")
-                    result = await self._knowledge_graph_service.process_documents_flow(
-                        documents=prepared_documents,
-                        dataset_name=dataset_name_with_account,
-                        account_id=self.account_id,
-                        processing_mode="conceptual"
-                    )
-                else:
-                    raise ValueError("KnowledgeGraphService no está disponible")
+                    async with DBSession(SessionLocal) as db_session:
+                        result = await knowledge_graph_service.process_documents_flow(
+                            db_session=db_session,
+                            documents=prepared_documents,
+                            dataset_name=dataset_name_with_account,
+                            account_id=self.account_id,
+                            processing_mode="conceptual",
+                            task_id=task_id # Usar el task_id de la tarea en background
+                        )
+                except Exception as e:
+                    raise ValueError(f"KnowledgeGraphService no está disponible: {e}")
             
             # Actualizar estado como completado
             BackgroundTaskManager.update_task(task_id, status="completed", result=result, message="Procesamiento conceptual completado")
@@ -331,19 +366,26 @@ class ConceptualProcessingTool(BaseTool):
             loop.close()
 
     def __del__(self):
-        if self._graph_db:
+        # Cerrar GraphDB si existe
+        graph_db = getattr(self, '_graph_db', None)
+        if graph_db:
             try:
-                self._graph_db.close()
+                graph_db.close()
             except:
                 pass
         
         # Cerrar también la conexión del KnowledgeGraphService si existe
-        if self._knowledge_graph_service and hasattr(self._knowledge_graph_service, 'graph_db'):
+        knowledge_graph_service = getattr(self, '_knowledge_graph_service', None)
+        if knowledge_graph_service and hasattr(knowledge_graph_service, 'graph_db'):
             try:
-                self._knowledge_graph_service.graph_db.close()
+                knowledge_graph_service.graph_db.close()
             except:
                 pass
         
         # Cerrar el executor
-        if hasattr(self, '_executor'):
-            self._executor.shutdown(wait=False)
+        executor = getattr(self, '_executor', None)
+        if executor:
+            try:
+                executor.shutdown(wait=False)
+            except:
+                pass

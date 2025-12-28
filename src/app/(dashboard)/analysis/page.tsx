@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 import { Network } from 'lucide-react';
-import { Loader2, Info, Filter, ChevronDown, Search, BarChart3, FileText, FolderKanban, Lightbulb, Code, Calendar, Eye, Plus, TrendingUp, AlertTriangle, HelpCircle, CheckCircle, Clock, XCircle, ArrowLeft, StickyNote, TrendingDown, Users, Activity, Target, PieChart, Sparkle } from 'lucide-react'; // Añadidos iconos para el dashboard
+import { Loader2, Info, Filter, ChevronDown, Search, BarChart3, FileText, FolderKanban, Lightbulb, Code, Calendar, Eye, Plus, TrendingUp, AlertTriangle, HelpCircle, CheckCircle, Clock, XCircle, ArrowLeft, StickyNote, TrendingDown, Users, Activity, Target, PieChart, Sparkles, RefreshCcw, Zap } from 'lucide-react'; // Añadidos iconos para el dashboard
 
 import { toast } from 'sonner';
 
@@ -43,6 +43,7 @@ import { KeyTopicSlider } from '@/components/KeyTopicSlider'; // Importar KeyTop
 import { KeyTopicDetailDialog } from '@/components/KeyTopicDetailDialog'; // Importar KeyTopicDetailDialog
 
 import { AnalysisDetailDialog } from './analysis-detail-dialog'; // Importar AnalysisDetailDialog
+import { DeepResearchDetailDialog } from './deep-research-detail-dialog'; // Importar DeepResearchDetailDialog
 
 
 const getAnalysisIcon = (type: string) => {
@@ -63,6 +64,12 @@ const getAnalysisIcon = (type: string) => {
       return <StickyNote className="h-5 w-5 text-amber-500" />;
     case 'note_collection_analysis':
       return <FolderKanban className="h-5 w-5 text-orange-500" />;
+    case 'gap_development':
+      return <Zap className="h-5 w-5 text-fuchsia-500" />;
+    case 'deep_research':
+      return <Search className="h-5 w-5 text-blue-500" />;
+    case 'comprehensive_web_analysis':
+      return <Network className="h-5 w-5 text-cyan-500" />;
     default:
       return <FileText className="h-5 w-5 text-gray-500" />;
   }
@@ -91,6 +98,12 @@ const getAnalysisTypeLabel = (type: string) => {
       return 'Nota';
     case 'note_collection_analysis':
       return 'Colección de Notas';
+    case 'gap_development':
+      return 'Desarrollo de Brecha';
+    case 'deep_research':
+      return 'Investigación Profunda';
+    case 'comprehensive_web_analysis':
+      return 'Análisis Web Integral';
     default:
       return 'Análisis';
   }
@@ -114,6 +127,12 @@ const getAnalysisTypeBadgeColor = (type: string) => {
       return 'bg-amber-100 text-amber-800 border-amber-200';
     case 'note_collection_analysis':
       return 'bg-orange-100 text-orange-800 border-orange-200';
+    case 'gap_development':
+      return 'bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200';
+    case 'deep_research':
+      return 'bg-blue-100 text-blue-800 border-blue-200';
+    case 'comprehensive_web_analysis':
+      return 'bg-cyan-100 text-cyan-800 border-cyan-200';
     default:
       return 'bg-gray-100 text-gray-800 border-gray-200';
   }
@@ -138,6 +157,12 @@ const getAnalysisTypeColor = (type: string) => {
       return 'bg-amber-500';
     case 'note_collection_analysis':
       return 'bg-red-500';
+    case 'gap_development':
+      return 'bg-fuchsia-500';
+    case 'deep_research':
+      return 'bg-blue-500';
+    case 'comprehensive_web_analysis':
+      return 'bg-cyan-500';
     default:
       return 'bg-gray-500';
   }
@@ -161,6 +186,12 @@ const getAnalysisTypeProgressColor = (type: string) => {
       return 'bg-amber-500';
     case 'note_collection_analysis':
       return 'bg-red-500';
+    case 'gap_development':
+      return 'bg-fuchsia-500';
+    case 'deep_research':
+      return 'bg-blue-500';
+    case 'comprehensive_web_analysis':
+      return 'bg-cyan-500';
     default:
       return 'bg-gray-500';
   }
@@ -172,7 +203,6 @@ export default function AnalysisPage() {
   const { user, token } = useAuth();
 
   console.log('AnalysisPage: user', user);
-
   console.log('AnalysisPage: token', token);
 
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
@@ -180,6 +210,12 @@ export default function AnalysisPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [topicKeywords, setTopicKeywords] = useState<string>(''); // Nuevo estado para palabras clave
+
+  // Estados para debounce de búsqueda
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [debouncedTopicKeywords, setDebouncedTopicKeywords] = useState('');
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const keywordsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
 
@@ -201,826 +237,465 @@ export default function AnalysisPage() {
 
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
+  const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date()); // Estado para trackear última actualización
 
 
-  const fetchAnalyses = useCallback(async (reset = false) => {
 
-    console.log('fetchAnalyses: Iniciando', { reset, selectedType, searchQuery, topicKeywords }); // Añadir topicKeywords al log
+
+  // Función fetchAnalyses sin dependencias problemáticas
+  const fetchAnalyses = useCallback(async (reset = false, searchQuery?: string, keywords?: string) => {
+    console.log('fetchAnalyses: Iniciando', { reset, selectedType, searchQuery, keywords });
 
     if (reset) {
-
       setIsLoading(true);
-
       offsetRef.current = 0;
-
       setAnalyses([]);
-
     } else {
-
       setIsLoadingMore(true);
-
     }
 
-
-
     try {
-
       const currentOffset = offsetRef.current;
-      const keywordsArray = topicKeywords ? topicKeywords.split(',').map(keyword => keyword.trim()) : undefined; // Convertir string a array
+      const keywordsArray = keywords ? keywords.split(',').map(keyword => keyword.trim()) : undefined;
 
       const response = await apiClient.post('/api/get-all-analysis', {
-
         limit: 20,
-
         offset: currentOffset,
-
         analysis_type: selectedType,
-
         search_query: searchQuery || undefined,
-        topic_keywords: keywordsArray // Enviar las palabras clave
-
+        topic_keywords: keywordsArray
       });
 
-
-
       const data: AnalysisResponse = response.data;
-
       console.log('fetchAnalyses: Datos recibidos', data);
 
-
-
       if (reset) {
-
         setAnalyses(data.analysis);
-
       } else {
-
         setAnalyses(prev => [...prev, ...data.analysis]);
-
       }
-
-
 
       if (data.has_more && data.analysis.length === 0) {
-
         setHasMore(false);
-
-      }
-
-      else {
-
+      } else {
         setHasMore(!!data.has_more);
-
       }
-
-
 
       offsetRef.current = currentOffset + data.analysis.length;
 
     } catch (error) {
-
       toast.error('Error al cargar los análisis');
-
       console.error('fetchAnalyses: Error al cargar análisis', error);
-
       setHasMore(false);
-
     } finally {
-
       setIsLoading(false);
-
       setIsLoadingMore(false);
-
       console.log('fetchAnalyses: Finalizado', { isLoading: false, isLoadingMore: false });
-
     }
-
-  }, [selectedType, searchQuery, topicKeywords]); // Añadir topicKeywords a las dependencias de useCallback
-
-
-
-
+  }, [selectedType]);
 
   const fetchDashboardData = useCallback(async () => {
-
     console.log('fetchDashboardData: Iniciando');
-
-
-
     console.log('fetchDashboardData: user?.account_id', user?.account_id);
 
-
-
     if (!user?.account_id) {
-
       console.log('fetchDashboardData: No user account ID, returning early but setting loading to false');
-
-      setIsLoadingDashboard(false); // Asegurarse de que el estado de carga se desactive
-
+      setIsLoadingDashboard(false);
       return;
-
     }
-
-
 
     setIsLoadingDashboard(true);
 
-
-
     try {
-
       const response = await apiClient.post<DashboardInsightsResponse>('/api/dashboard-insights', {});
-
-
-
       console.log('fetchDashboardData: Datos recibidos', response.data);
 
-
-
       setDashboardData(response.data);
-
-
+      setLastUpdateTime(new Date()); // Actualizar timestamp
 
     } catch (error) {
-
       toast.error('Error al cargar los datos del dashboard');
-
       console.error('fetchDashboardData: Error al cargar datos del dashboard', error);
-
     } finally {
-
       setIsLoadingDashboard(false);
-
       console.log('fetchDashboardData: Finalizado', { isLoadingDashboard: false });
-
     }
-
   }, [user?.account_id]);
 
+  // Función para actualizar datos manualmente
+  const handleRefreshDashboard = useCallback(() => {
+    fetchDashboardData();
+    toast.success('Datos del dashboard actualizados');
+  }, [fetchDashboardData]);
 
+  // Función para actualizar búsqueda con debounce Y búsqueda automática
+  const updateSearchQuery = useCallback((query: string) => {
+    setSearchQuery(query);
 
-
-
-
-
-
-
-  useEffect(() => {
-
-    console.log('useEffect: user, token, selectedType, searchQuery changed', { user: !!user, token: !!token, selectedType, searchQuery });
-
-    if (user && token) {
-
-      fetchAnalyses(true);
-
-      fetchDashboardData(); // Cargar datos del dashboard al inicio
-
+    // Limpiar timeout anterior
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
     }
 
-  }, [user, token, selectedType, searchQuery, topicKeywords, fetchAnalyses, fetchDashboardData]);
+    // Establecer nuevo timeout
+    searchTimeoutRef.current = setTimeout(() => {
+      setDebouncedSearchQuery(query);
+      // Ejecutar búsqueda automáticamente después del debounce
+      if (user && token) {
+        fetchAnalyses(true, query, debouncedTopicKeywords);
+      }
+    }, 500); // 500ms de delay
+  }, [user, token, fetchAnalyses, debouncedTopicKeywords]);
 
+  // Función para actualizar palabras clave con debounce Y búsqueda automática
+  const updateTopicKeywords = useCallback((keywords: string) => {
+    setTopicKeywords(keywords);
 
+    // Limpiar timeout anterior
+    if (keywordsTimeoutRef.current) {
+      clearTimeout(keywordsTimeoutRef.current);
+    }
+
+    // Establecer nuevo timeout
+    keywordsTimeoutRef.current = setTimeout(() => {
+      setDebouncedTopicKeywords(keywords);
+      // Ejecutar búsqueda automáticamente después del debounce
+      if (user && token) {
+        fetchAnalyses(true, debouncedSearchQuery, keywords);
+      }
+    }, 500); // 500ms de delay
+  }, [user, token, fetchAnalyses, debouncedSearchQuery]);
+
+  // useEffect solo para carga inicial y cambios de filtros (no búsqueda de texto)
+  useEffect(() => {
+    console.log('useEffect inicial: user, token, selectedType changed', {
+      user: !!user,
+      token: !!token,
+      selectedType
+    });
+    if (user && token) {
+      fetchAnalyses(true, debouncedSearchQuery, debouncedTopicKeywords);
+      fetchDashboardData();
+    }
+  }, [user, token, selectedType]);
+
+  // useEffect separado para cambios en valores debounced (solo dashboard)
+  useEffect(() => {
+    if (user && token) {
+      // Solo actualizar dashboard, NO fetchAnalyses aquí
+      fetchDashboardData();
+    }
+  }, [user, token, fetchDashboardData]);
+
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+      if (keywordsTimeoutRef.current) {
+        clearTimeout(keywordsTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleSearch = (e: React.FormEvent) => {
-
     e.preventDefault();
-
-    fetchAnalyses(true);
-
+    fetchAnalyses(true, debouncedSearchQuery, debouncedTopicKeywords);
   };
-
-
 
   const handleViewDetails = (analysis: Analysis) => {
-
     console.log('handleViewDetails: Abriendo diálogo para tipo de análisis:', analysis.type, analysis);
-
     setSelectedAnalysis(analysis);
-
   };
-
-
 
   const handleLoadMore = () => {
-
     if (!isLoadingMore && hasMore) {
-
-      fetchAnalyses(false);
-
+      fetchAnalyses(false, debouncedSearchQuery, debouncedTopicKeywords);
     }
-
   };
 
-
+  // Función para manejar la eliminación de análisis
+  const handleAnalysisDeleted = useCallback((deletedAnalysisId: string) => {
+    console.log('handleAnalysisDeleted: Eliminando análisis con ID:', deletedAnalysisId);
+    // Remover el análisis de la lista
+    setAnalyses(prev => prev.filter(analysis => analysis.id !== deletedAnalysisId));
+    // Mostrar mensaje de éxito
+    toast.success('Análisis eliminado correctamente');
+  }, []);
 
   const formatDate = (dateString: string) => {
-
     return new Date(dateString).toLocaleDateString('es-ES', {
-
       year: 'numeric',
-
       month: 'short',
-
       day: 'numeric',
-
       hour: '2-digit',
-
       minute: '2-digit'
-
     });
-
   };
 
-
-
   const analysisTypes = [
-
     { value: null, label: 'Todos los tipos' },
-
     { value: 'document', label: 'Documentos' },
-
     { value: 'collection', label: 'Colecciones' },
-
-    { value: 'insight', label: 'Insights Proactivos' }, // Cambiado el label
-
-    { value: 'proactive_insight_manual', label: 'Insights Manuales' }, // Nuevo tipo
-
+    { value: 'insight', label: 'Insights Proactivos' },
+    { value: 'proactive_insight_manual', label: 'Insights Manuales' },
     { value: 'code', label: 'Código' },
-
     { value: 'semantic', label: 'Semántico' },
-
-    { value: 'semantic_summary', label: 'Resumen Semántico' }
-
+    { value: 'semantic_summary', label: 'Resumen Semántico' },
+    { value: 'gap_development', label: 'Desarrollo de Brecha' },
+    { value: 'deep_research', label: 'Investigación Profunda' },
+    { value: 'comprehensive_web_analysis', label: 'Análisis Web Integral' }
   ];
 
-
-
   const chartData = useMemo(() => {
-
     if (!dashboardData?.analysis_stats_by_type) return [];
-
     return dashboardData.analysis_stats_by_type.map(stat => ({
-
       name: getAnalysisTypeLabel(stat.type),
-
       Completados: stat.completed,
-
       Fallidos: stat.failed,
-
     }));
-
   }, [dashboardData]);
 
+  // Calcular estadísticas adicionales
+  const systemStats = useMemo(() => {
+    if (!dashboardData) return null;
 
+    const totalProcessed = dashboardData.analysis_stats_by_type?.reduce((acc, stat) => acc + stat.completed + stat.failed, 0) || 0;
+    const successRate = totalProcessed > 0 ? (dashboardData.analysis_stats_by_type?.reduce((acc, stat) => acc + stat.completed, 0) || 0) / totalProcessed * 100 : 0;
+
+    return {
+      totalProcessed,
+      successRate: Math.round(successRate),
+      activeInsights: dashboardData.total_proactive_insights || 0,
+      lastUpdate: lastUpdateTime
+    };
+  }, [dashboardData, lastUpdateTime]);
 
   if (isLoading || isLoadingDashboard) {
-
     return (
-
       <div className="flex h-screen w-full items-center justify-center">
-
         <div className="flex flex-col items-center gap-2">
-
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-
           <p className="text-muted-foreground">Cargando análisis...</p>
-
         </div>
-
       </div>
-
     );
-
   }
 
-
-
   return (
-
     <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden space-y-8">
-
       {/* Header y título */}
-
       <div className="spacing-component">
-
         <div className="flex items-center justify-between gap-2">
-
           <div className="flex items-center gap-2">
-
             <Button variant="ghost" size="icon" onClick={() => router.push('/rag')} className="h-8 w-8 text-muted-foreground">
-
               <ArrowLeft className="h-5 w-5" />
-
             </Button>
-
             <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
-
               Centro de Análisis
-
             </h1>
-
             <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
-
               <Info className="h-5 w-5" />
-
             </Button>
-
           </div>
-
           <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleRefreshDashboard} disabled={isLoadingDashboard}>
+              <RefreshCcw className={`h-4 w-4 mr-2 ${isLoadingDashboard ? 'animate-spin' : ''}`} />
+              Actualizar
+            </Button>
             <Button onClick={() => setShowInsightFormModal(true)} className="gap-2">
               <Plus className="h-4 w-4" />
               Generar Insight Manual
             </Button>
           </div>
-
         </div>
-
       </div>
 
-
       {/* Sección de Dashboard/Resumen */}
+      {dashboardData && systemStats && (
+        <>
+          {/* Tarjetas principales de estadísticas */}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {/* Tarjeta 1: Total de Análisis */}
+            <Card className="relative overflow-hidden">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total de Análisis</CardTitle>
+                <BarChart3 className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{dashboardData.total_analysis_tasks}</div>
+                <p className="text-xs text-muted-foreground">
+                  {dashboardData.total_proactive_insights} insights proactivos
+                </p>
+                <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-purple-500"></div>
+              </CardContent>
+            </Card>
 
+            {/* Tarjeta 2: Estado del Sistema */}
+            <Card className="relative overflow-hidden">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Estado del Sistema</CardTitle>
+                <Activity className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  <span className="text-sm font-medium">Sistema Activo</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {systemStats.successRate}% tasa de éxito
+                </p>
+                <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 to-emerald-500"></div>
+              </CardContent>
+            </Card>
 
+            {/* Tarjeta 3: Documentos Procesados */}
+            <Card className="relative overflow-hidden">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Documentos Procesados</CardTitle>
+                <FileText className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {dashboardData.analysis_stats_by_type?.reduce((acc, stat) => acc + stat.completed + stat.failed, 0) || 0}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {dashboardData.analysis_stats_by_type?.filter(stat => stat.type === 'document').reduce((acc, stat) => acc + stat.completed, 0) || 0} documentos analizados
+                </p>
+                <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 to-red-500"></div>
+              </CardContent>
+            </Card>
 
+            {/* Tarjeta 4: Insights Activos */}
+            <Card className="relative overflow-hidden">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Insights Activos</CardTitle>
+                <Sparkles className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{systemStats.activeInsights}</div>
+                <p className="text-xs text-muted-foreground">
+                  Generados automáticamente
+                </p>
+                <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-yellow-500 to-amber-500"></div>
+              </CardContent>
+            </Card>
+          </div>
 
-      {dashboardData && (
-
-
-        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-3">
-
-
-          {/* Tarjeta 1: Resumen General de Análisis */}
-
-          <Card>
-
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-
-              <CardTitle className="text-sm font-medium">Total de Análisis</CardTitle>
-
-              <BarChart3 className="h-4 w-4 text-muted-foreground" />
-
-            </CardHeader>
-
-            <CardContent>
-
-              <div className="text-2xl font-bold">{dashboardData.total_analysis_tasks}</div>
-
-              <p className="text-xs text-muted-foreground">
-
-                {dashboardData.total_proactive_insights} insights proactivos
-
-              </p>
-
-            </CardContent>
-
-          </Card>
-
-
-          {/* Tarjeta 2: Brechas de Conocimiento */}
-
-
-
-          {dashboardData.emergent_knowledge_gaps && dashboardData.emergent_knowledge_gaps.length > 0 ? (
-
+          {/* Tarjetas de información dinámica */}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {/* Tarjeta: Brechas de Conocimiento */}
             <QuestionSlider
-
               title="Brechas de Conocimiento"
-
-              questions={dashboardData.emergent_knowledge_gaps}
-
+              questions={dashboardData.emergent_knowledge_gaps || []}
               icon={<AlertTriangle className="h-5 w-5 text-muted-foreground" />}
-
               emptyMessage="No se detectaron brechas recientes."
-
               autoSlide={true}
-
               slideInterval={5000}
-
+              showCounter={false}
+              onDevelopClick={() => { }}
             />
 
-          ) : (
-
-            <Card>
-
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-
-                <CardTitle className="text-sm font-medium">Brechas de Conocimiento</CardTitle>
-
-                <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-
-              </CardHeader>
-
-              <CardContent>
-
-                <p className="text-sm text-muted-foreground">No se detectaron brechas recientes.</p>
-
-              </CardContent>
-
-            </Card>
-
-          )}
-
-
-
-
-
-
-
-
-
-          {/* Tarjeta 4: Temas Clave */}
-
-
-
-
-
-
-
-          {dashboardData.key_topics && dashboardData.key_topics.length > 0 ? (
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+            {/* Tarjeta: Temas Clave */}
             <KeyTopicSlider
-
-
-
-
-
-
-
-
               title="Temas Clave"
-
-
-
-
-
-
-
-
-              keyTopics={dashboardData.key_topics}
-
-
-
-
-
-
-
-
+              keyTopics={dashboardData.key_topics || []}
               icon={<TrendingUp className="h-5 w-5 text-muted-foreground" />}
-
-
-
-
-
-
-
-
               emptyMessage="No hay temas clave recientes."
-
-
-
-
-
-
-
-
               autoSlide={true}
-
-
-
-
-
-
-
-
               slideInterval={7000}
-
-
-
-
-
-
-
-
               onKeyTopicClick={(topic) => {
-
-
-
-
-
-
-
-
                 setSelectedKeyTopic(topic);
-
-
-
-
-
-
-
-
                 setIsKeyTopicDetailDialogOpen(true);
-
-
-
-
-
-
-
-
               }}
-
-
-
-
-
-
-
-
             />
 
-
-
-
-
-
-
-
-          ) : (
-
-
-
-
-
-
-
-
-            <Card>
-
-
-
-
-
-
-
-
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-
-
-
-
-
-
-
-
-                <CardTitle className="text-sm font-medium">Temas Clave</CardTitle>
-
-
-
-
-
-
-
-
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-
-
-
-
-
-
-
-
-              </CardHeader>
-
-
-
-
-
-
-
-
-              <CardContent>
-
-
-
-
-
-
-
-
-                <p className="text-sm text-muted-foreground">No hay temas clave recientes.</p>
-
-
-
-
-
-
-
-
-              </CardContent>
-
-
-
-
-
-
-
-
-            </Card>
-
-
-
-
-
-
-
-
-          )}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        </div>
-
+            {/* Tarjeta: Preguntas para Explorar */}
+            <QuestionSlider
+              title="Preguntas para Explorar"
+              questions={dashboardData.exploration_questions || []}
+              icon={<HelpCircle className="h-5 w-5 text-muted-foreground" />}
+              emptyMessage="No hay preguntas para explorar recientes."
+              autoSlide={true}
+              slideInterval={6000}
+              onDevelopClick={() => { }}
+            />
+          </div>
+        </>
       )}
-
 
       {/* Estadísticas por tipo de análisis */}
-
       {dashboardData && dashboardData.analysis_stats_by_type.length > 0 && (
-
         <Card>
-
           <CardHeader>
-
             <CardTitle>Estadísticas por Tipo de Análisis</CardTitle>
-
             <CardDescription>Resumen de la actividad de análisis por categoría.</CardDescription>
-
           </CardHeader>
-
           <CardContent>
-
             <ResponsiveContainer width="100%" height={300}>
-
               <BarChart
-
                 data={chartData}
-
                 margin={{
-
                   top: 20, right: 30, left: 20, bottom: 5,
-
                 }}
-
               >
-
                 <XAxis dataKey="name" />
-
                 <YAxis />
-
                 <Tooltip />
-
                 <Legend />
-
                 <Bar dataKey="Completados" stackId="a" fill="#82ca9d" />
-
                 <Bar dataKey="Fallidos" stackId="a" fill="#fa8072" />
-
               </BarChart>
-
             </ResponsiveContainer>
-
           </CardContent>
-
         </Card>
-
       )}
 
-
       {/* --- SECCIÓN DE LISTA DE ANÁLISIS EXISTENTE --- */}
-
       <>
-
         {/* Filtros y búsqueda */}
-
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-
           <form onSubmit={handleSearch} className="flex gap-2 flex-1">
-
             <div className="relative flex-1">
-
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-
               <Input
-
                 placeholder="Buscar en análisis..."
-
                 value={searchQuery}
-
-                onChange={(e) => setSearchQuery(e.target.value)}
-
+                onChange={(e) => updateSearchQuery(e.target.value)}
                 className="pl-10"
-
               />
-
             </div>
-
             <Input
               placeholder="Palabras clave (separadas por comas)"
               value={topicKeywords}
-              onChange={(e) => setTopicKeywords(e.target.value)}
+              onChange={(e) => updateTopicKeywords(e.target.value)}
               className="flex-1"
             />
-
             <Button type="submit" variant="outline">
-
               Buscar
-
             </Button>
-
           </form>
 
-
           <DropdownMenu>
-
             <DropdownMenuTrigger asChild>
-
               <Button variant="outline" className="gap-2">
-
                 <Filter className="h-4 w-4" />
-
                 {selectedType ? getAnalysisTypeLabel(selectedType) : 'Filtrar por tipo'}
-
                 <ChevronDown className="h-4 w-4" />
-
               </Button>
-
             </DropdownMenuTrigger>
-
             <DropdownMenuContent align="end">
-
               {analysisTypes.map((type) => (
-
                 <DropdownMenuItem
-
                   key={type.value || 'all'}
-
                   onClick={() => setSelectedType(type.value)}
-
                 >
-
                   {type.label}
-
                 </DropdownMenuItem>
-
               ))}
-
             </DropdownMenuContent>
-
           </DropdownMenu>
-
         </div>
 
         {/* Lista de análisis */}
@@ -1118,63 +793,35 @@ export default function AnalysisPage() {
                           </div>
                         )}
                         <div className="flex items-center justify-between">
-
                           <div className="flex items-center gap-1">
-
                             <Calendar className="h-3 w-3" />
-
                             <TooltipProvider>
-
                               <UITooltip>
-
                                 <TooltipTrigger asChild>
-
                                   <span className="truncate">Creado: {analysis.created_at ? formatDate(analysis.created_at) : 'N/A'}</span>
-
                                 </TooltipTrigger>
-
                                 <TooltipContent>
-
                                   <p>Fecha de creación del análisis.</p>
-
                                 </TooltipContent>
-
                               </UITooltip>
-
                             </TooltipProvider>
-
                           </div>
-
                         </div>
 
                         {analysis.updated_at !== analysis.created_at && (
-
                           <div className="flex items-center gap-1">
-
                             <Calendar className="h-3 w-3" />
-
                             <TooltipProvider>
-
                               <UITooltip>
-
                                 <TooltipTrigger asChild>
-
                                   <span className="truncate">Actualizado: {analysis.updated_at ? formatDate(analysis.updated_at) : 'N/A'}</span>
-
                                 </TooltipTrigger>
-
                                 <TooltipContent>
-
                                   <p>Última actualización del análisis.</p>
-
                                 </TooltipContent>
-
                               </UITooltip>
-
                             </TooltipProvider>
-
                           </div>
-
                         )}
                       </div>
                     </CardContent>
@@ -1208,9 +855,17 @@ export default function AnalysisPage() {
       </>
 
       {/* DIÁLOGOS DE RESULTADOS DE ANÁLISIS */}
-
-      {selectedAnalysis && (
+      {selectedAnalysis && selectedAnalysis.type !== 'deep_research' && (
         <AnalysisDetailDialog
+          analysis={selectedAnalysis}
+          isOpen={!!selectedAnalysis}
+          onOpenChange={(open) => !open && setSelectedAnalysis(null)}
+          onAnalysisDeleted={handleAnalysisDeleted}
+        />
+      )}
+
+      {selectedAnalysis && selectedAnalysis.type === 'deep_research' && (
+        <DeepResearchDetailDialog
           analysis={selectedAnalysis}
           isOpen={!!selectedAnalysis}
           onOpenChange={(open) => !open && setSelectedAnalysis(null)}
@@ -1257,6 +912,7 @@ export default function AnalysisPage() {
               <li><strong>Estadísticas Generales:</strong> Obtén un resumen visual de la actividad de análisis, incluyendo el total de tareas y la distribución por tipo.</li>
               <li><strong>Brechas de Conocimiento:</strong> Identifica automáticamente áreas donde tu información es incompleta o requiere mayor exploración.</li>
               <li><strong>Temas Clave:</strong> Descubre los temas más relevantes y recurrentes en tu base de conocimiento.</li>
+              <li><strong>Preguntas para Explorar:</strong> Sugerencias de preguntas que pueden ayudar a profundizar en el conocimiento y generar nuevos insights.</li>
             </ul>
 
             <p><strong>Interacción con IA:</strong></p>
@@ -1281,7 +937,5 @@ export default function AnalysisPage() {
         </SheetContent>
       </Sheet>
     </div>
-
   );
-
 }

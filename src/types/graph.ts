@@ -55,6 +55,8 @@ export interface GraphMetadata {
 export interface GraphFilters {
   nodeTypes: string[];
   edgeTypes: string[];
+  excludedNodeTypes?: string[];
+  excludedEdgeTypes?: string[];
   datasetName: string;
 }
 

@@ -33,6 +33,13 @@ class ThemeReference(BaseModel):
     related_quotes: List[ThemeQuote] = Field(description="Lista de citas o fragmentos de los documentos relacionados con este tema.Cuida que las citas sean parrafos y oraciones completas y no fragmentos cortados arbitrariamente")
 
 
+class KnowledgeGap(BaseModel):
+    """Define una brecha de conocimiento identificada en el texto con explicación detallada."""
+    gap_title: str = Field(description="El título o nombre de la brecha de conocimiento identificada.")
+    explanation: str = Field(description="Explicación detallada de la brecha, por qué existe, qué implicaciones tiene y por qué es importante abordarla. Debe ser más explicativo que una simple pregunta.")
+    related_context: str = Field(description="Contexto del texto donde se identifica esta brecha y por qué surge de la lectura.")
+
+
 class SingleTextAnalysis(BaseModel):
     """Define la estructura de salida para el análisis de un único texto."""
     executive_summary: str = Field(description="Un resumen conciso que captura la esencia y las conclusiones principales del texto.")
@@ -41,7 +48,7 @@ class SingleTextAnalysis(BaseModel):
     central_concepts: List[str] = Field(description="Una lista de hasta 8 conceptos centrales del texto en el formato 'CONCEPTO: DEFINICIÓN DETALLADA CON CONTEXTO Y EJEMPLOS'.")
     discipline: List[str] = Field(description="El area, disciplina o campo al que refiere el documento. Por ejemplo si es un documémico y de qué área, o si es un documento técnico, etc.').")
     authorial_tone: str = Field(description="El tono o la voz del autor (ej. 'Formal y Académico', 'Informal y Conversacional', 'Urgente y Directo', 'Escéptico y Crítico').")
-    knowledge_gaps: List[str] = Field(description="Una lista de 5 a 8 preguntas inteligentes y abiertas que el texto inspira pero no responde. Deben ser preguntas, no afirmaciones.")
+    knowledge_gaps: List[KnowledgeGap] = Field(description="Una lista de 5 a 8 brechas de conocimiento identificadas en el texto, cada una con explicación detallada de por qué existe esta brecha y qué implicaciones tiene.")
     exploration_questions: List[str] = Field(description="Una lista de 5 a 8 preguntas adicionales para explorar a partir del texto, que el texto inspira pero no responde directamente.")
     problematic_areas: List[str] = Field(description="Una lista de 3 a 5 áreas problemáticas, desafíos o puntos de controversia identificados en el texto.")
     final_reflections: List[str] = Field (description="Una lista de 3 a 5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
@@ -50,11 +57,13 @@ class SingleTextAnalysis(BaseModel):
 class CollectionAnalysis(BaseModel):
     """Define la estructura de salida para el análisis de una colección de textos."""
     collection_summary: str = Field(description="Un resumen analítico que sintetiza la información de TODOS los documentos como un todo. Debe ser comprehensivo y detallado (200-300 palabras)")
+    general_analysis: str = Field(description="Un análisis general extenso de la colección que profundiza en el contexto, metodología, argumentos principales, implicaciones y relevancia de los documentos en conjunto (500-1000 palabras). Utiliza separación de parrafos para facilitar la lectura.")
+    authorial_tone: str = Field(description="El tono o la voz predominante en la colección de documentos (ej. 'Formal y Académico', 'Informal y Conversacional', 'Urgente y Directo', 'Escéptico y Crítico').")
     cross_cutting_themes: List[ThemeReference] = Field(description="Lista de hasta 10 temas recurrentes de los documentos que puedes identificar, cada uno con citas relacionadas de los documentos. Puedes agruparlos en algún concepto que los englobe cuando hay similitud semántica")
     central_concepts: List[str] = Field(description="Una lista de hasta 8 conceptos, ideas o tesis centrales de la colección en el formato 'CONCEPTO: DEFINICIÓN DETALLADA'. Destaca con negrita el nombre de los conceptos")
     concept_relationships: List[str] = Field(description="Una lista de hasta 8 descripciones detalladas de cómo los conceptos centrales se relacionan entre sí en la colección.")
     identified_connections: List[CollectionConnection] = Field(description="Lista de insights específicos que conectan dos o más documentos. Incluye sinergias, evoluciones, contradicciones o complementariedades.")
-    emergent_knowledge_gaps: List[str] = Field(description="Lista de 5-8 preguntas inteligentes o áreas que la colección en su conjunto no responde o deja abiertas.")
+    emergent_knowledge_gaps: List[KnowledgeGap] = Field(description="Lista de 5-8 brechas de conocimiento emergentes de la colección en su conjunto, cada una con explicación detallada de por qué existe esta brecha y qué implicaciones tiene.")
     exploration_questions: List[str] = Field(description="Lista de 5-8 preguntas adicionales para explorar a partir de la colección, que el texto inspira pero no responde directamente.")
     problematic_areas: List[str] = Field(description="Una lista de 3 a 5 áreas problemáticas o desafíos comunes/emergentes identificados a través de la colección de documentos.")
     final_reflections: List[str] = Field(description="3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
@@ -169,7 +178,13 @@ class AdvancedTextAnalyzer:
 
         6. **Tono del autor**: Descripción precisa del estilo y enfoque
 
-        7. **Brechas de conocimiento**: 5-8 preguntas inteligentes y abiertas que el texto inspira
+        7. **Brechas de conocimiento**: 5-8 brechas de conocimiento identificadas. ESTRUCTURA REQUERIDA para cada brecha:
+           {{
+             "gap_title": "Nombre descriptivo de la brecha",
+             "explanation": "Explicación detallada de por qué existe esta brecha, qué implicaciones tiene y por qué es importante abordarla",
+             "related_context": "Contexto específico del texto donde se identifica esta brecha"
+           }}
+           - Cada brecha debe tener explicación detallada, no solo preguntas
 
         8. **Preguntas para explorar**: 5-8 preguntas adicionales para explorar a partir del texto, que el texto inspira pero no responde directamente.
 
@@ -188,6 +203,8 @@ class AdvancedTextAnalyzer:
         Para los temas clave y conceptos centrales, utiliza nombres precisos y relevantes al contexto del texto, priorizando términos específicos del dominio o categorías reconocibles por el usuario.
 
         IMPORTANTE: Los temas clave deben seguir EXACTAMENTE la estructura JSON mostrada arriba, con "theme" y "related_quotes" como campos obligatorios.
+        
+        IMPORTANTE: Las brechas de conocimiento deben seguir EXACTAMENTE la estructura JSON mostrada arriba, con "gap_title", "explanation" y "related_context" como campos obligatorios.
 
         Texto a analizar:
         ---
@@ -229,11 +246,30 @@ class AdvancedTextAnalyzer:
         Tu tarea es generar un análisis exhaustivo de la colección de documentos, asegurándote de incluir TODOS los siguientes campos en tu respuesta JSON, siguiendo las descripciones y formatos indicados. Todo el contenido generado debe estar en español:
 
         1.  **collection_summary**: Un resumen analítico que sintetiza la información de TODOS los documentos como un todo. Debe ser comprehensivo y detallado (200-300 palabras).
-        2.  **cross_cutting_themes**: Una lista de hasta 10 temas recurrentes que identificas entre los documentos. Cada tema debe incluir citas relevantes de los documentos que lo ilustren. Agrupa conceptos similares semánticamente.
+        2.  **general_analysis**: EXTENSO y profundo (500-1000 palabras) redactado en varios párrafos separados para facilitar la lectura, que incluya:
+           - Contexto histórico, teórico o práctico de la colección
+           - Metodología o enfoque común en los documentos
+           - Argumentos principales y su estructura lógica en conjunto
+           - Implicaciones teóricas y prácticas de la colección
+           - Relevancia en el campo de conocimiento
+           - Conexiones con otros temas o disciplinas
+           - Evaluación crítica del contenido de la colección
+           - Fortalezas y debilidades de la colección
+           - Audiencia objetivo y propósito de la colección
+           - Contribuciones originales o innovadoras de la colección
+           - Limitaciones o sesgos identificados en la colección
+        3.  **authorial_tone**: El tono o la voz predominante en la colección de documentos (ej. 'Formal y Académico', 'Informal y Conversacional', 'Urgente y Directo', 'Escéptico y Crítico').
+        4.  **cross_cutting_themes**: Una lista de hasta 10 temas recurrentes que identificas entre los documentos. Cada tema debe incluir citas relevantes de los documentos que lo ilustren. Puedes agruparlos en algún concepto que los englobe cuando hay similitud semántica.
         3.  **central_concepts**: Una lista de hasta 8 conceptos, ideas o tesis centrales de la colección. Cada uno debe estar en el formato 'CONCEPTO: DEFINICIÓN DETALLADA'. Destaca el nombre del concepto en negrita.
         4.  **concept_relationships**: Una lista de hasta 8 descripciones detalladas de cómo los conceptos centrales se relacionan entre sí dentro de la colección.
         5.  **identified_connections**: Una lista de insights específicos que conectan dos o más documentos. Incluye sinergias, evoluciones, contradicciones o complementariedades. Cada conexión debe especificar los títulos de los documentos involucrados y una descripción del insight.
-        6.  **emergent_knowledge_gaps**: Una lista de 5-8 preguntas inteligentes o áreas que la colección en su conjunto no responde o deja abiertas.
+        6.  **emergent_knowledge_gaps**: Una lista de 5-8 brechas de conocimiento emergentes. ESTRUCTURA REQUERIDA para cada brecha:
+           {{
+             "gap_title": "Nombre descriptivo de la brecha emergente",
+             "explanation": "Explicación detallada de por qué esta brecha emerge de la colección y qué implicaciones tiene",
+             "related_context": "Contexto de la colección donde se identifica esta brecha"
+           }}
+           - Cada brecha emergente debe tener explicación detallada, no solo preguntas
         7.  **exploration_questions**: Una lista de 5-8 preguntas adicionales para explorar a partir de la colección, que el texto inspira pero no responde directamente.
         8.  **problematic_areas**: Una lista de 3 a 5 áreas problemáticas o desafíos comunes/emergentes identificados a través de la colección de documentos.
         9.  **final_reflections**: 3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales, puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión.

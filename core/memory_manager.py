@@ -111,11 +111,17 @@ async def _run_semantic_search(
             }
 
             filter_clauses = []
-            if workspace_id:
+            # Lógica para workspace_id:
+            # - Si workspace_id es un UUID válido (string no vacío), filtrar por ese workspace_id.
+            # - Si workspace_id es explícitamente None, filtrar por workspace_id IS NULL (memorias personales).
+            # - Si workspace_id no se proporciona (o es una cadena vacía), NO filtrar por workspace_id,
+            #   lo que significa que se buscarán memorias tanto con como sin workspace_id.
+            if workspace_id is not None and workspace_id != "":
                 filter_clauses.append("workspace_id = :workspace_id")
                 query_params["workspace_id"] = workspace_id
-            else:
+            elif workspace_id == "": # Caso en que se pasa explícitamente una cadena vacía para buscar NULLs
                 filter_clauses.append("workspace_id IS NULL")
+            # Si workspace_id es None (el valor por defecto), no se añade ninguna cláusula de filtro para workspace_id.
             
             if filter_topics:
                 filter_clauses.append("topic = ANY(:filter_topics)")
@@ -142,10 +148,14 @@ async def _run_semantic_search(
             query_params["k"] = k
 
             if db_session:
+                logger.info(f"DEBUG SQL (Semantic Search): Query: {sql_query}") # Nuevo log
+                logger.info(f"DEBUG SQL (Semantic Search): Params: {query_params}") # Nuevo log
                 results = await db_session.execute(text(sql_query), query_params)
                 rows = results.fetchall()
             else:
                 async with DBSession(SessionLocal) as session:
+                    logger.info(f"DEBUG SQL (Semantic Search): Query: {sql_query}") # Nuevo log
+                    logger.info(f"DEBUG SQL (Semantic Search): Params: {query_params}") # Nuevo log
                     results = await session.execute(text(sql_query), query_params)
                     rows = results.fetchall()
 
@@ -173,10 +183,14 @@ async def _run_semantic_search(
             ).order_by("similarity_score").limit(k)
             
             if db_session:
+                logger.info(f"DEBUG SQL (Notes Semantic Search): Query: {note_query}") # Nuevo log
+                logger.info(f"DEBUG SQL (Notes Semantic Search): Params: {note_query.compile().params}") # Nuevo log
                 note_results = await db_session.execute(note_query)
                 note_rows = note_results.all()
             else:
                 async with DBSession(SessionLocal) as session:
+                    logger.info(f"DEBUG SQL (Notes Semantic Search): Query: {note_query}") # Nuevo log
+                    logger.info(f"DEBUG SQL (Notes Semantic Search): Params: {note_query.compile().params}") # Nuevo log
                     note_results = await session.execute(note_query)
                     note_rows = note_results.all()
 
@@ -274,10 +288,14 @@ async def _run_fts_search(
             query_params["k"] = k
 
             if db_session:
+                logger.info(f"DEBUG SQL (FTS Search): Query: {sql_query}") # Nuevo log
+                logger.info(f"DEBUG SQL (FTS Search): Params: {query_params}") # Nuevo log
                 results = await db_session.execute(text(sql_query), query_params)
                 rows = results.fetchall()
             else:
                 async with DBSession(SessionLocal) as session:
+                    logger.info(f"DEBUG SQL (FTS Search): Query: {sql_query}") # Nuevo log
+                    logger.info(f"DEBUG SQL (FTS Search): Params: {query_params}") # Nuevo log
                     results = await session.execute(text(sql_query), query_params)
                     rows = results.fetchall()
 
@@ -310,10 +328,14 @@ async def _run_fts_search(
             ).order_by(text("rank_score DESC")).limit(k)
 
             if db_session:
+                logger.info(f"DEBUG SQL (Notes FTS Search): Query: {note_query}") # Nuevo log
+                logger.info(f"DEBUG SQL (Notes FTS Search): Params: {note_query.compile().params}") # Nuevo log
                 note_results = await db_session.execute(note_query)
                 note_rows = note_results.all()
             else:
                 async with DBSession(SessionLocal) as session:
+                    logger.info(f"DEBUG SQL (Notes FTS Search): Query: {note_query}") # Nuevo log
+                    logger.info(f"DEBUG SQL (Notes FTS Search): Params: {note_query.compile().params}") # Nuevo log
                     note_results = await session.execute(note_query)
                     note_rows = note_results.all()
 
@@ -1164,6 +1186,7 @@ async def get_full_document_content(
     file_name: Optional[str] = None,
     document_id: Optional[str] = None,
     workspace_id: Optional[str] = None,
+    topic: Optional[str] = None,
 ) -> Optional[str]:
     """
     Reconstruye y devuelve el contenido completo de un documento desde sus chunks.
@@ -1175,6 +1198,7 @@ async def get_full_document_content(
         file_name: El nombre del archivo a reconstruir.
         document_id: El ID único del documento a reconstruir.
         workspace_id: El ID del workspace (UUID en formato string) para buscar en la colección del workspace, si aplica.
+        topic: El topic específico para filtrar los documentos (opcional).
     Returns:
         El contenido completo del documento como una cadena, o None si no se encuentra.
     """
@@ -1185,6 +1209,7 @@ async def get_full_document_content(
     logger.info(
         f"📄 Recuperando contenido completo (OPTIMIZADO) de {log_identifier} para la cuenta {account_id}"
         f" (Workspace: {workspace_id if workspace_id else 'N/A'})"
+        f" (Topic: {topic if topic else 'ALL'})"
     )
 
     try:
@@ -1204,6 +1229,11 @@ async def get_full_document_content(
             elif document_id:
                 clauses.append("cmetadata->>'document_id' = :document_id")
                 params["document_id"] = str(document_id)
+            
+            # Filtro por topic si se especifica
+            if topic:
+                clauses.append("topic = :topic")
+                params["topic"] = topic
 
             # Manejo de workspace_id: Asegurarse de que sea un string UUID válido
             processed_workspace_id = None
@@ -1241,10 +1271,8 @@ async def get_full_document_content(
                 clauses.append("workspace_id = :workspace_id")
                 params["workspace_id"] = processed_workspace_id
             else:
-                # Si no se proporciona un workspace_id específico, buscar documentos sin workspace_id
-                # o con cualquier workspace_id, ya que no se está realizando un filtro específico.
-                # NO AÑADIMOS NINGUNA CLÁUSULA DE WORKSPACE_ID, permitiendo que la búsqueda sea más amplia.
-                pass
+                # Si processed_workspace_id es None, buscar documentos con workspace_id IS NULL
+                clauses.append("workspace_id IS NULL")
 
             # Consulta para obtener todos los chunks del documento
             select_sql = text(f"""
@@ -1274,7 +1302,7 @@ async def get_full_document_content(
 
     except Exception as e:
         logger.error(
-            f"❌ Error recuperando contenido optimizado de '{file_name}' (workspace {workspace_id}): {e}", exc_info=True
+            f"❌ Error recuperando contenido optimizado de '{file_name}' (workspace {workspace_id}, topic {topic}): {e}", exc_info=True
         )
         return None
 
@@ -1317,19 +1345,20 @@ async def list_user_documents(
             # --- Fin Lógica de Filtro de Contexto ---
             else:
                 # --- Lógica de Filtro General (si no hay contexto explícito) ---
+                # Siempre filtrar por account_id por seguridad
+                base_clauses.append("account_id = :account_id")
+                params["account_id"] = account_id
+                
                 # Si el topic es 'all_documents', no aplicar filtro de topic
                 if topic == "all_documents":
                     logger.info("📎 Topic es 'all_documents', no se aplicará filtro de topic.")
                 else:
+                    # NUEVO: Solo filtrar por workspace_id si se proporciona explícitamente
+                    # Si no se proporciona, buscar en TODOS los workspaces del usuario
                     if isinstance(workspace_id, str) and workspace_id:
-                        # Si se especifica workspace, mostrar TODOS los documentos del workspace
+                        # Si se especifica workspace, mostrar documentos del workspace
                         base_clauses.append("workspace_id = :workspace_id")
                         params["workspace_id"] = workspace_id
-                    else:
-                        # Si no hay workspace, filtrar por account_id y workspace NULL
-                        base_clauses.append("account_id = :account_id")
-                        base_clauses.append("workspace_id IS NULL")
-                        params["account_id"] = account_id
 
                     if topic: # Filtro de compatibilidad
                         base_clauses.append("topic = :topic")
@@ -1464,7 +1493,7 @@ async def update_document_metadata(
         try:
             # Construir filtros usando las nuevas columnas directamente
             clauses = [
-                "account_id = :account_id",
+                "account_id = CAST(:account_id AS UUID)",
                 "cmetadata->>'file_name' = :file_name",
                 "cmetadata->>'type' = 'document_chunk'"
             ]
@@ -1474,7 +1503,7 @@ async def update_document_metadata(
             }
 
             if workspace_id:
-                clauses.append("workspace_id = :workspace_id")
+                clauses.append("workspace_id = CAST(:workspace_id AS UUID)")
                 params["workspace_id"] = workspace_id
 
             # Primero, obtener el cmetadata actual de un chunk para no sobrescribir otros metadatos
@@ -1597,18 +1626,22 @@ async def list_user_collections(account_id: str, workspace_id: Optional[str] = N
             # 2. Para cada colección, contar documentos desde langchain_pg_embedding
             for topic in user_topics:
                 # Contar documentos en langchain_pg_embedding para esta colección
+                # NUEVO: Contar por topic y account_id, permitiendo cualquier workspace_id
                 count_clauses = [
                     "cmetadata->>'type' = 'document_chunk'",
-                    "topic = :topic_name"
+                    "topic = :topic_name",
+                    "account_id = :account_id"
                 ]
                 count_params: Dict[str, Any] = {
-                    "topic_name": topic.name
+                    "topic_name": topic.name,
+                    "account_id": str(topic.account_id)
                 }
+                
+                # Si la colección tiene workspace_id, filtrar por ese workspace
+                # Si no tiene workspace_id, contar documentos de CUALQUIER workspace del usuario
                 if topic.workspace_id:
                     count_clauses.append("workspace_id = :workspace_id")
                     count_params["workspace_id"] = str(topic.workspace_id)
-                else:
-                    count_clauses.append("workspace_id IS NULL")
 
                 count_query = text(f"""
                     SELECT COUNT(DISTINCT cmetadata->>'document_id')

@@ -25,6 +25,7 @@ export const KeyTopicSlider: React.FC<KeyTopicSliderProps> = ({
   onKeyTopicClick, // Usar la nueva prop
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isHovered, setIsHovered] = useState(false);
 
   const handleNext = useCallback(() => {
     setCurrentIndex((prevIndex) => (prevIndex + 1) % keyTopics.length);
@@ -43,15 +44,17 @@ export const KeyTopicSlider: React.FC<KeyTopicSliderProps> = ({
 
   if (keyTopics.length === 0) {
     return (
-      <Card className="modern-card border-0 shadow-medium h-full flex flex-col">
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-3">
+      <Card className="modern-card h-full relative overflow-hidden group hover-lift transition-all duration-300">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
             {icon || <LibraryBig className="h-5 w-5 text-primary" />}
-            <CardTitle className="text-lg font-semibold">{title}</CardTitle>
-          </div>
+            {title}
+          </CardTitle>
         </CardHeader>
-        <CardContent className="flex-grow flex items-center justify-center">
-          <p className="text-muted-foreground text-center">{emptyMessage}</p>
+        <CardContent className="flex flex-col justify-center items-center h-48">
+          <p className="text-sm text-muted-foreground mb-4 text-center">
+            {emptyMessage}
+          </p>
         </CardContent>
       </Card>
     );
@@ -60,10 +63,13 @@ export const KeyTopicSlider: React.FC<KeyTopicSliderProps> = ({
   const currentTopic = keyTopics[currentIndex];
 
   return (
-    <Card
-      className="modern-card border-0 shadow-medium h-full flex flex-col cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20"
-      onClick={() => onKeyTopicClick && onKeyTopicClick(currentTopic)} // Hacer la Card cliqueable
-    >
+    <>
+      <Card
+        className="modern-card h-full relative overflow-hidden group hover-lift cursor-pointer transition-all duration-300 hover:scale-105"
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        onClick={() => onKeyTopicClick && onKeyTopicClick(currentTopic)}
+      >
       <CardHeader className="pb-3">
         <div className="flex items-center gap-3">
           {icon || <LibraryBig className="h-5 w-5 text-primary" />}
@@ -100,6 +106,7 @@ export const KeyTopicSlider: React.FC<KeyTopicSliderProps> = ({
           </Button>
         </div>
       </CardContent>
-    </Card>
+      </Card>
+    </>
   );
 };

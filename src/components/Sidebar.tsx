@@ -24,6 +24,7 @@ import { WebSocketMessage } from '@/hooks/useWebSocket';
 interface SidebarProps {
   isCollapsed: boolean;
   onLinkClick?: () => void;
+  showToolText?: boolean; // New prop to control tool text visibility
 }
 
 interface ChatThread {
@@ -35,7 +36,7 @@ interface ChatThread {
   created_at: string;
 }
 
-export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
+export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed }: SidebarProps) {
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [pinnedThreads, setPinnedThreads] = useState<ChatThread[]>([]);
   const [isToolsCollapsed, setIsToolsCollapsed] = useState(false);
@@ -363,8 +364,8 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                   pathname?.startsWith('/dashboard') && "bg-primary/10 text-primary border border-primary/20"
                 )}
               >
-                <FolderKanban className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")} />
-                {!isCollapsed && <span className="text-sm font-medium">Escritorio</span>}
+                <FolderKanban className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
+                {showToolText && <span className="text-sm font-medium">Escritorio</span>}
               </Button>
             </Link>
             <Link href="/rag" passHref onClick={onLinkClick} title="Gestión de Conocimientos">
@@ -376,8 +377,8 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                   pathname?.startsWith('/rag') && "bg-primary/10 text-primary border border-primary/20"
                 )}
               >
-                <BookMarked className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")} />
-                {!isCollapsed && <span className="text-sm font-medium">Conocimientos</span>}
+                <BookMarked className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
+                {showToolText && <span className="text-sm font-medium">Conocimientos</span>}
               </Button>
             </Link>
             <Link href="/agenda" passHref onClick={onLinkClick} title="Agenda">
@@ -389,8 +390,8 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                   pathname?.startsWith('/agenda') && "bg-primary/10 text-primary border border-primary/20"
                 )}
               >
-                <Calendar className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")} />
-                {!isCollapsed && <span className="text-sm font-medium">Agenda</span>}
+                <Calendar className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
+                {showToolText && <span className="text-sm font-medium">Agenda</span>}
               </Button>
             </Link>
             <Link href="/notes" passHref onClick={onLinkClick} title="Notas">
@@ -402,8 +403,8 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                   pathname?.startsWith('/notes') && "bg-primary/10 text-primary border border-primary/20"
                 )}
               >
-                <Notebook className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")} />
-                {!isCollapsed && <span className="text-sm font-medium">Notas</span>}
+                <Notebook className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
+                {showToolText && <span className="text-sm font-medium">Notas</span>}
               </Button>
             </Link>
             {settings?.profiles_enabled && (
@@ -416,8 +417,8 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                     pathname?.startsWith('/profiles') && "bg-primary/10 text-primary border border-primary/20"
                   )}
                 >
-                  <User className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")} />
-                  {!isCollapsed && <span className="text-sm font-medium">Perfiles</span>}
+                  <User className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
+                  {showToolText && <span className="text-sm font-medium">Perfiles</span>}
                 </Button>
               </Link>
             )}
@@ -431,8 +432,8 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                     pathname?.startsWith('/galleries') && "bg-primary/10 text-primary border border-primary/20"
                   )}
                 >
-                  <ImageIcon className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")} />
-                  {!isCollapsed && <span className="text-sm font-medium">Galerías</span>}
+                  <ImageIcon className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
+                  {showToolText && <span className="text-sm font-medium">Galerías</span>}
                 </Button>
               </Link>
             )}
@@ -446,8 +447,8 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                     pathname?.startsWith('/forms') && "bg-primary/10 text-primary border border-primary/20"
                   )}
                 >
-                  <ClipboardList className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")} />
-                  {!isCollapsed && <span className="text-sm font-medium">Formularios</span>}
+                  <ClipboardList className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
+                  {showToolText && <span className="text-sm font-medium">Formularios</span>}
                 </Button>
               </Link>
             )}
@@ -461,8 +462,8 @@ export function Sidebar({ isCollapsed, onLinkClick }: SidebarProps) {
                   pathname?.startsWith('/workspaces') && "bg-primary/10 text-primary border border-primary/20"
                 )}
               >
-                <Bot className={cn("h-4 w-4 transition-transform group-hover:scale-110", !isCollapsed && "mr-2")} />
-                {!isCollapsed && <span className="text-sm font-medium">Workspaces</span>}
+                <Bot className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
+                {showToolText && <span className="text-sm font-medium">Workspaces</span>}
               </Button>
             </Link>
           </nav>

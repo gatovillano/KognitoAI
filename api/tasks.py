@@ -186,10 +186,16 @@ async def get_linked_profiles_to_task_endpoint(
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada o no autorizada.")
     
-    # The task object returned by get_task_by_id is already a dict,
-    # and it should contain 'linked_profiles' if loaded with selectinload.
-    # So, we just need to return that part.
-    return task.get("linked_profiles", [])
+    # Serializar los perfiles de contacto vinculados a un formato JSON amigable
+    return [
+        {
+            "id": str(profile.id),
+            "name": profile.name,
+            "email": profile.email,
+            "phone": profile.phone,
+        }
+        for profile in task.contact_profiles
+    ]
 
 @router.put("/tasks/{task_id}", response_model=TaskResponse, summary="Actualizar una tarea existente")
 async def update_task(

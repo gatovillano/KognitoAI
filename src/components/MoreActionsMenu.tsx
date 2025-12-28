@@ -121,12 +121,13 @@ export function MoreActionsMenu({
         }}
         disabled={isUploadingFile}
       />
-      {/* Hidden file input for images */}
+      {/* Hidden file input for images - unlimited size support */}
       <input
         id="image-upload-menu"
         type="file"
         accept="image/*"
         className="hidden"
+        data-unlimited-size="true"
         onChange={(e) => {
           onImageUpload(e);
           if (e.target) e.target.value = '';

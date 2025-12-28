@@ -17,6 +17,9 @@ from core.config import settings
 # Asegúrate de que litellm elimine parámetros no soportados globalmente
 litellm.drop_params = True
 
+# Disable debug mode for LiteLLM to reduce logging
+# litellm._turn_on_debug()
+
 logger = logging.getLogger(__name__)
 
 # --- Rate Limiter Implementation ---
@@ -38,7 +41,7 @@ class RateLimiter(BaseRateLimiter):
         with cls._lock:
             if cls._instance is None:
                 cls._instance = super().__new__(cls)
-                cls._instance.max_requests = kwargs.get('max_requests', 5)
+                cls._instance.max_requests = kwargs.get('max_requests', 20)
                 cls._instance.per_seconds = kwargs.get('per_seconds', 60)
                 cls._instance.request_timestamps = deque()
                 logger.info(
@@ -46,7 +49,7 @@ class RateLimiter(BaseRateLimiter):
                 )
             return cls._instance
 
-    def __init__(self, max_requests: int = 5, per_seconds: int = 60):
+    def __init__(self, max_requests: int = 20, per_seconds: int = 60):
         # Initialize attributes for pylint/pylance
         self.max_requests = max_requests
         self.per_seconds = per_seconds
@@ -104,7 +107,7 @@ class RateLimiter(BaseRateLimiter):
             self.request_timestamps.append(time.monotonic())
 
 # Initialize the global rate limiter
-gemini_rate_limiter = RateLimiter(max_requests=5, per_seconds=61) # 61 to be safe
+gemini_rate_limiter = RateLimiter(max_requests=20, per_seconds=61) # 61 to be safe
 
 # --- Global LLM Instances ---
 _main_agent_llm_instance: Optional[ChatLiteLLM] = None
@@ -117,6 +120,28 @@ def get_main_llm() -> Optional[ChatLiteLLM]: # More specific return type
 def get_fast_llm() -> Optional[ChatLiteLLM]: # More specific return type
     """Returns the initialized fast task LLM instance, or the main one as a fallback."""
     return _fast_task_llm_instance or _main_agent_llm_instance
+
+def get_fallback_llm() -> Optional[ChatLiteLLM]:
+    """Returns a fallback LLM instance using a different provider when OpenRouter fails."""
+    try:
+        # Try to use Gemini as fallback if the main model is OpenRouter
+        if "openrouter" in settings.llm_model.lower():
+            logger.info("🔄 Switching to Gemini as fallback for OpenRouter context limit issues.")
+            fallback_llm = ChatLiteLLM(
+                model_name="gemini/gemini-2.0-flash-exp",
+                temperature=0.0,
+                streaming=True,
+                verbose=False,
+                max_retries=0,
+                rate_limiter=gemini_rate_limiter,
+            )
+            return fallback_llm
+        else:
+            # If main model is not OpenRouter, use it as fallback
+            return get_main_llm()
+    except Exception as e:
+        logger.error(f"❌ Failed to create fallback LLM: {e}")
+        return None
 
 async def _invoke_llm_cached(llm: BaseLanguageModel, prompt: Union[str, List[BaseMessage]]) -> Any:
     """Función wrapper para invocar el LLM, asegurando el formato de mensaje correcto."""
@@ -145,9 +170,10 @@ async def initialize_llms():
             "model_name": settings.llm_model,
             "temperature": settings.llm_temperature,
             "streaming": True,
-            "verbose": True,
+            "verbose": False,
             "max_retries": 0, # We handle rate limiting, so disable litellm's retries for this
             "rate_limiter": gemini_rate_limiter, # Pass the compliant rate limiter
+            "max_tokens": 8192, # Allow for massive reports
         }
         
         if settings.llm_api_base:
@@ -159,6 +185,9 @@ async def initialize_llms():
         elif "gemini" in settings.llm_model.lower():
             logger.info("🔧 Applying Gemini specific config.")
             llm_kwargs["provider"] = "google_ai_studio"
+        elif "openrouter" in settings.llm_model.lower():
+            logger.info("🔧 Applying OpenRouter specific config.")
+            llm_kwargs["provider"] = "openai"  # OpenRouter acts as OpenAI proxy
 
         main_llm = ChatLiteLLM(**llm_kwargs)
         _main_agent_llm_instance = main_llm
@@ -169,15 +198,23 @@ async def initialize_llms():
 
     try:
         logger.info(f"🛠️ Initializing fast task LLM with rate limiting (LiteLLM - {settings.fast_llm_model})...")
-        fast_llm = ChatLiteLLM(
-            model_name=settings.fast_llm_model,
-            temperature=0.0,
-            streaming=True,
-            api_base=settings.llm_api_base,
-            verbose=True,
-            max_retries=0,
-            rate_limiter=gemini_rate_limiter, # Use the same rate limiter instance
-        )
+        fast_llm_kwargs = {
+            "model_name": settings.fast_llm_model,
+            "temperature": 0.0,
+            "streaming": True,
+            "verbose": False,
+            "max_retries": 0,
+            "rate_limiter": gemini_rate_limiter, # Use the same rate limiter instance
+        }
+
+        if settings.llm_api_base:
+            fast_llm_kwargs["api_base"] = settings.llm_api_base
+
+        if "openrouter" in settings.fast_llm_model.lower():
+            logger.info("🔧 Applying OpenRouter specific config for fast LLM.")
+            fast_llm_kwargs["provider"] = "openai"  # OpenRouter acts as OpenAI proxy
+
+        fast_llm = ChatLiteLLM(**fast_llm_kwargs)
         _fast_task_llm_instance = fast_llm
         logger.info("✅ Fast task LLM initialized with rate limiting.")
     except Exception as e:

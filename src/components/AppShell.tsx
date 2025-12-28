@@ -17,6 +17,7 @@ import { UniversalSearchInput } from './UniversalSearchInput';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
 import { Badge } from '@/components/ui/badge';
 import { Wifi, WifiOff, AlertTriangle } from 'lucide-react';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -35,20 +36,16 @@ export function AppShell({ children }: AppShellProps) {
 
   // Estado de conexión WebSocket
   const { isConnected, connectionError, reconnect } = useWebSocketContext();
-  
+
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(false); // New state for right panel
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [sidebarSize, setSidebarSize] = useState(22); // Track sidebar size in percentage
   
   // Detectar si estamos en un chat de workspace
   const workspaceMatch = pathname?.match(/\/workspaces\/([a-f0-9-]+)\/chat\/([a-f0-9-]+)/);
   const isWorkspaceChat = !!workspaceMatch;
   const workspaceId = workspaceMatch?.[1];
-
-  const toggleSidebar = () => {
-    setIsSidebarCollapsed(!isSidebarCollapsed);
-  };
 
   const toggleRightPanel = () => { // New toggle function for right panel
     setIsRightPanelOpen(!isRightPanelOpen);
@@ -81,16 +78,26 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <LoadingProvider>
       <SearchProvider>
-        <div className="flex h-screen bg-background overflow-x-hidden">
+        <div className="h-screen bg-background overflow-x-hidden">
+          <PanelGroup direction="horizontal" className="h-full">
             {/* Sidebar para desktop (visible en md y superior) */}
-            <div
-              className={`hidden md:block bg-card/80 backdrop-blur-xl transition-all duration-500 ease-in-out ${isSidebarCollapsed ? 'w-16' : 'w-80'} h-full overflow-y-auto shadow-medium border-border/20`}
+            <Panel
+              defaultSize={22} // 22% por defecto
+              minSize={4}
+              maxSize={35}
+              onResize={setSidebarSize}
+              className="hidden md:block"
             >
-              <Sidebar isCollapsed={isSidebarCollapsed} />
-            </div>
+              <div className="h-full bg-card/80 backdrop-blur-xl shadow-medium border-border/20">
+                <Sidebar isCollapsed={sidebarSize < 12} showToolText={sidebarSize > 8} />
+              </div>
+            </Panel>
+
+            <PanelResizeHandle className="hidden md:flex w-1 bg-border hover:bg-primary/20 transition-colors cursor-col-resize" />
 
             {/* Contenido principal */}
-            <div className={`flex flex-col flex-1 transition-all duration-500 ease-in-out`}>
+            <Panel defaultSize={78} minSize={50}>
+              <div className={`flex flex-col h-full`}>
               <header className="flex h-16 items-center gap-4 bg-card/80 backdrop-blur-xl px-4 md:px-6 shrink-0 shadow-soft border-border/20">
                 {/* Botón de menú para móvil (visible hasta md) */}
                 <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
@@ -104,19 +111,10 @@ export function AppShell({ children }: AppShellProps) {
                     </Button>
                   </SheetTrigger>
                   <SheetContent side="left" className="flex flex-col p-0 w-72 border-r-0 bg-card/95 backdrop-blur-xl">
-                    <Sidebar isCollapsed={false} onLinkClick={() => setIsMobileMenuOpen(false)} />
+                    <Sidebar isCollapsed={false} showToolText={true} onLinkClick={() => setIsMobileMenuOpen(false)} />
                   </SheetContent>
                 </Sheet>
 
-                {/* Botón para colapsar/expandir sidebar en desktop */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={toggleSidebar}
-                  className="hidden md:flex rounded-xl hover:bg-primary/10 hover:text-primary transition-all duration-200"
-                >
-                  {isSidebarCollapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
-                </Button>
                 
                 {/* Título del Workspace o Logo */}
                 <div className="flex items-center gap-3">
@@ -189,6 +187,8 @@ export function AppShell({ children }: AppShellProps) {
                 {children}
               </main>
             </div>
+            </Panel>
+          </PanelGroup>
         </div>
       </SearchProvider>
     </LoadingProvider>

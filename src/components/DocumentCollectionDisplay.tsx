@@ -28,6 +28,7 @@ import AnalysisProgressIndicator from '@/components/AnalysisProgressIndicator';
 import { ShareDocumentDialog } from '@/app/(dashboard)/rag/share-document-dialog';
 import { CustomAnalysisDialog } from '@/app/(dashboard)/rag/custom-analysis-dialog';
 import { DatasetNameDialog } from '@/app/(dashboard)/rag/dataset-name-dialog';
+import { CollectionSearch } from '@/components/CollectionSearch';
 
 import { Analysis, AnalysisType } from '@/lib/models';
 
@@ -76,6 +77,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null);
   const [documentToShare, setDocumentToShare] = useState<Document | null>(null);
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const [highlightText, setHighlightText] = useState<string | undefined>(undefined);
 
   // Estados para análisis
   const [documentToAnalyze, setDocumentToAnalyze] = useState<Document | null>(null);
@@ -253,6 +255,31 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     ));
   }, []);
 
+  const onKnowledgeGraphProgress = useCallback((data: any) => {
+    if (!data) return;
+
+    setAnalysisProgress(data.progress_percent);
+    setAnalysisText(data.message);
+
+    if (data.is_complete || data.has_error) {
+      setIsProcessingKnowledgeGraph(false);
+      // Limpiar el progreso después de un momento
+      setTimeout(() => {
+        setAnalysisProgress(null);
+        setAnalysisText("");
+      }, 3000);
+
+      if (data.is_complete) {
+        toast.success("Procesamiento de grafo completado");
+        fetchPageData();
+      } else {
+        toast.error(`Error en procesamiento de grafo: ${data.error}`);
+      }
+    } else {
+      setIsProcessingKnowledgeGraph(true);
+    }
+  }, [fetchPageData]);
+
 
 
 
@@ -290,6 +317,9 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         case 'document_processing_failed':
           onDocumentProcessingFailed(message);
           break;
+        case 'knowledge_graph_progress':
+          onKnowledgeGraphProgress(message.data);
+          break;
       }
     };
 
@@ -305,6 +335,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     onUploadFailed,
     onUploadProgress,
     onUploadStarted,
+    onKnowledgeGraphProgress,
   ]);
 
   useEffect(() => {
@@ -512,7 +543,6 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
       console.error(error);
       toast.error("Error al iniciar el procesamiento del grafo.", { id: toastId });
     } finally {
-      setIsProcessingKnowledgeGraph(false);
       setProcessingTopic(null);
       setProcessingWorkspaceId(null);
     }
@@ -630,7 +660,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         </div>
       </div>
 
-      {(docPollingId || collectionPollingId) && (
+      {(docPollingId || collectionPollingId || isProcessingKnowledgeGraph) && (
         <AnalysisProgressIndicator progress={analysisProgress} text={analysisText} />
       )}
 
@@ -639,6 +669,25 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
       )}
 
       <div className="space-y-6">
+        {/* Componente de búsqueda */}
+        <CollectionSearch
+          topic={topic}
+          accountId={user?.id || ''}
+          workspaceId={workspaceId}
+          onResultClick={(result) => {
+            // Buscar el documento completo en la lista de documentos
+            const doc = documents.find(d => d.file_name === result.file_name);
+            if (doc) {
+              setDocumentToPreview(doc);
+              setHighlightText(result.content); // Establecer el texto a resaltar
+            } else {
+              toast.info(`Documento: ${result.file_name}`, {
+                description: result.content.substring(0, 200) + '...'
+              });
+            }
+          }}
+        />
+
         <Card>
           <CardHeader>
             <CardTitle>Documentos en la Colección</CardTitle>
@@ -795,7 +844,17 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         defaultTopic={topic}
         workspaceId={workspaceId}
       />
-      <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
+      <PreviewDocumentDialog
+        isOpen={!!documentToPreview}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDocumentToPreview(null);
+            setHighlightText(undefined);
+          }
+        }}
+        document={documentToPreview}
+        highlightText={highlightText}
+      />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchPageData} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />
       <AnalysisDetailDialog

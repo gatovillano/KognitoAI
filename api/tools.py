@@ -141,7 +141,7 @@ async def run_tool(
             if "tool_name" in args:
                 del args["tool_name"]
             
-            result = await tool._arun(**args)
+            result = await tool._arun(db_session=db, **args)
             return {"result": result, "status": "success"}
 
         else:
