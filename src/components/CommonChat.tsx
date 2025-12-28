@@ -17,6 +17,7 @@ import { EmptyChat } from '@/components/EmptyChat';
 import { ContextSelectorButton } from '@/components/ContextSelectorButton';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
 import { WebSocketMessage } from '@/hooks/useWebSocket'; // Importar WebSocketMessage
+import DeepResearchVisualizer from '@/components/DeepResearchVisualizer';
 
 // ... (interfaces remain the same) ...
 interface ToolStatusMessage {
@@ -168,6 +169,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
   const [isAudioPaused, setIsAudioPaused] = useState(false);
+  const [researchProgress, setResearchProgress] = useState(0);
+  const [researchStatus, setResearchStatus] = useState('Iniciando investigación...');
 
   // Refs to hold latest values for stable callbacks
   const isRespondingRef = useRef(isResponding);
@@ -352,6 +355,15 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             }
             break;
 
+          case 'progress':
+            if (data.progress !== undefined) {
+              setResearchProgress(data.progress);
+            }
+            if (data.message) {
+              setResearchStatus(data.message);
+            }
+            break;
+
           default:
             console.log('[CommonChat] Unhandled message type:', type);
         }
@@ -464,6 +476,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
+    // Note: No size limits for image uploads - unlimited file sizes supported
     setIsUploadingImages(true);
     toast.info(`Cargando ${files.length} imagen(es)...`);
 
@@ -739,6 +752,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           formData.append('workspace_id', workspaceId);
           formData.append('topic', 'General'); // Usar un topic genérico para documentos de chat
         }
+        if (threadId) {
+          formData.append('thread_id', threadId);
+        }
 
         const response = await apiClient.post('/api/documents/upload-chat-document', formData, {
           headers: {
@@ -852,7 +868,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       onStopRecording={handleStopRecording}
       onFileUpload={handleFileUpload}
       onImageUpload={handleImageUpload}
-      onRemoveImage={handleRemoveImage}
+      onRemoveImage={() => handleRemoveImage(0)}
       onRemoveContextItem={handleRemoveContextItem}
       onPaste={() => { }}
       workspaceId={workspaceId}
@@ -898,13 +914,20 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               ))}
               {(isResponding || toolName) && (
                 <div className="-mt-4">
-                  <LoadingIndicator
-                    isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
-                    isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
-                    isDeepResearchActive={isDeepResearchActive} // Pass new prop
-                    toolName={toolName}
-                    reactState={reactState}
-                  />
+                  {isDeepResearchActive ? (
+                    <DeepResearchVisualizer
+                      progress={researchProgress}
+                      statusText={researchStatus}
+                    />
+                  ) : (
+                    <LoadingIndicator
+                      isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+                      isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+                      isDeepResearchActive={isDeepResearchActive}
+                      toolName={toolName}
+                      reactState={reactState}
+                    />
+                  )}
                 </div>
               )}
               {backgroundTasks.map((task) => (
@@ -941,7 +964,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               onStopRecording={handleStopRecording}
               onFileUpload={handleFileUpload}
               onImageUpload={handleImageUpload}
-              onRemoveImage={handleRemoveImage}
+              onRemoveImage={() => handleRemoveImage(0)}
               onRemoveContextItem={handleRemoveContextItem}
               onPaste={() => { }}
               isFixedPosition={false}

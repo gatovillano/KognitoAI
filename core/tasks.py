@@ -149,7 +149,7 @@ async def extract_titles_and_update_metadata(account_id: str, topic: Optional[st
     async with DBSession(SessionLocal) as db:
         try:
             clauses = [
-                "account_id = :account_id",
+                "account_id = CAST(:account_id AS UUID)",
                 "cmetadata->>'type' = 'document_chunk'"
             ]
             params: Dict[str, Any] = {"account_id": account_id}
@@ -158,10 +158,10 @@ async def extract_titles_and_update_metadata(account_id: str, topic: Optional[st
                 clauses.append("topic = :topic")
                 params["topic"] = topic
             if workspace_id:
-                clauses.append("workspace_id = :workspace_id")
+                clauses.append("workspace_id = CAST(:workspace_id AS UUID)")
                 params["workspace_id"] = workspace_id
             if team_id:
-                clauses.append("team_id = :team_id")
+                clauses.append("team_id = CAST(:team_id AS UUID)")
                 params["team_id"] = team_id
             if file_name:
                 clauses.append("cmetadata->>'file_name' = :file_name")
@@ -172,43 +172,96 @@ async def extract_titles_and_update_metadata(account_id: str, topic: Optional[st
             chunks = result.mappings().all()
 
             if not chunks:
-                logger.info("No se encontraron fragmentos de documentos para procesar.")
+                logger.info(f"No se encontraron fragmentos de documentos para procesar para la cuenta {account_id}.")
                 return 0
+
+            logger.info(f"Se encontraron {len(chunks)} fragmentos para procesar.")
 
             documents = {}
             for chunk in chunks:
-                file_name = chunk['cmetadata'].get('file_name')
-                if file_name:
-                    if file_name not in documents:
-                        documents[file_name] = []
-                    documents[file_name].append(chunk)
+                file_name_chunk = chunk['cmetadata'].get('file_name')
+                if file_name_chunk:
+                    if file_name_chunk not in documents:
+                        documents[file_name_chunk] = []
+                    documents[file_name_chunk].append(chunk)
+            
+            logger.info(f"Documentos identificados: {list(documents.keys())}")
 
-            for file_name, doc_chunks in documents.items():
-                full_content = "".join([c['document'] for c in sorted(doc_chunks, key=lambda x: x['cmetadata'].get('chunk_index', 0))])
+            for file_name_doc, doc_chunks in documents.items():
+                logger.info(f"Procesando documento: {file_name_doc} con {len(doc_chunks)} fragmentos.")
+                # Ordenar chunks por índice para reconstruir el inicio del documento
+                sorted_chunks = sorted(doc_chunks, key=lambda x: x['cmetadata'].get('chunk_index', 0))
+                full_content = "".join([c['document'] for c in sorted_chunks])
+                
                 new_title = None
                 if full_content:
-                    lines = [line.strip() for line in full_content.split('\n') if line.strip()]
-                    if lines:
-                        first_line = lines[0]
-                        if 5 < len(first_line) < 100:
-                            new_title = first_line
-                        else:
-                            for line in lines[:5]:
-                                if len(line) > 10 and len(line) < 150 and line.isupper() and line.count(' ') < len(line)/3:
-                                    new_title = line.title()
-                                    break
-                        if not new_title and len(lines) > 1:
-                            combined_lines = " ".join(lines[:2])
-                            if 10 < len(combined_lines) < 150:
-                                new_title = combined_lines
+                    # Usar el LLM para una extracción inteligente como método principal
+                    logger.info(f"Iniciando extracción inteligente con LLM para '{file_name_doc}'...")
+                    try:
+                        from core.llm_manager import get_fast_llm, _invoke_llm_cached
+                        llm = get_fast_llm()
+                        if llm:
+                            # Tomar una muestra significativa del inicio del documento (aprox 3000 caracteres para más contexto)
+                            sample_text = full_content[:3000]
+                            prompt = f"""Analiza el siguiente fragmento de un documento y determina su título real, formal y representativo.
+Instrucciones:
+1. El título debe ser corto (máximo 10 palabras).
+2. Debe ser el título oficial que aparece en el documento, no un resumen.
+3. Si el documento no tiene un título claro, usa el nombre del archivo como base para crear uno limpio: {file_name_doc}
+4. Solo devuelve el título, sin explicaciones, sin comillas y sin prefijos como 'Título:'.
 
-                if new_title and new_title != doc_chunks[0]['cmetadata'].get('title'):
-                    if file_name: # Asegurarse de que file_name no sea None
-                        success = await update_document_metadata(account_id, file_name, new_title=new_title, new_topic=None, workspace_id=workspace_id)
+Fragmento del documento:
+---
+{sample_text}
+---
+"""
+                            response = await _invoke_llm_cached(llm, prompt)
+                            if response and hasattr(response, 'content'):
+                                extracted_title = response.content.strip().strip('"').strip("'").strip()
+                                if extracted_title and len(extracted_title) > 2:
+                                    new_title = extracted_title
+                                    logger.info(f"✅ Título extraído por LLM para '{file_name_doc}': {new_title}")
+                    except Exception as llm_err:
+                        logger.error(f"Error al usar LLM para extraer título de '{file_name_doc}': {llm_err}")
+                
+                # Si el LLM falla por completo, usamos el nombre del archivo como último recurso
+                if not new_title:
+                    new_title = file_name_doc
+                    logger.info(f"⚠️ Usando nombre de archivo como título para '{file_name_doc}' (LLM falló).")
+
+                current_title = doc_chunks[0]['cmetadata'].get('title')
+                logger.info(f"Título actual: '{current_title}', Título nuevo propuesto: '{new_title}'")
+
+                if new_title and new_title != current_title:
+                    if file_name_doc: # Asegurarse de que file_name no sea None
+                        logger.info(f"Intentando actualizar metadatos para '{file_name_doc}' con título '{new_title}'")
+                        success = await update_document_metadata(account_id, file_name_doc, new_title=new_title, new_topic=None, workspace_id=workspace_id)
                         if success:
                             updated_count += 1
+                            logger.info(f"✅ Documento '{file_name_doc}' actualizado exitosamente.")
+                            
+                            # Notificar al frontend vía WebSocket para actualización en tiempo real
+                            try:
+                                target_account_id = str(account_id)
+                                logger.info(f"Enviando notificación WebSocket a la cuenta {target_account_id} para el archivo '{file_name_doc}'")
+                                await send_personal_message(
+                                    target_account_id,
+                                    {
+                                        "type": "title_updated",
+                                        "file_name": file_name_doc,
+                                        "new_title": new_title,
+                                        "workspace_id": workspace_id
+                                    }
+                                )
+                                logger.info(f"✅ Notificación WebSocket enviada exitosamente.")
+                            except Exception as ws_err:
+                                logger.error(f"❌ Error al enviar notificación WebSocket: {ws_err}", exc_info=True)
+                        else:
+                            logger.warning(f"❌ Falló la actualización de metadatos para '{file_name_doc}'.")
                     else:
                         logger.warning(f"No se pudo actualizar el título para un documento sin nombre de archivo.")
+                else:
+                    logger.info(f"No se requiere actualización para '{file_name_doc}' (título igual o no detectado).")
         except Exception as e:
             logger.error(f"Error en la tarea de extracción de títulos {account_id}: {e}", exc_info=True)
             # Manejo de errores, notificaciones, etc.

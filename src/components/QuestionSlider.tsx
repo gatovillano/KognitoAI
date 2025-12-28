@@ -16,6 +16,8 @@ interface QuestionSliderProps {
   isLoading?: boolean;
   autoSlide?: boolean;
   slideInterval?: number;
+  showCounter?: boolean;
+  onDevelopClick?: () => void;
 }
 
 export function QuestionSlider({
@@ -26,7 +28,9 @@ export function QuestionSlider({
   onReload,
   isLoading = false,
   autoSlide = true,
-  slideInterval = 4000
+  slideInterval = 4000,
+  showCounter = true,
+  onDevelopClick
 }: QuestionSliderProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
@@ -57,7 +61,7 @@ export function QuestionSlider({
 
   if (questions.length === 0) {
     return (
-      <Card className="modern-card h-full">
+      <Card className="modern-card h-full relative overflow-hidden group hover-lift transition-all duration-300">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             {icon}
@@ -68,23 +72,6 @@ export function QuestionSlider({
           <p className="text-sm text-muted-foreground mb-4 text-center">
             {emptyMessage}
           </p>
-          {onReload && (
-            <Button 
-              variant="outline" 
-              onClick={onReload}
-              disabled={isLoading}
-              className="hover:bg-muted/80 transition-colors"
-            >
-              {isLoading ? (
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  Cargando...
-                </div>
-              ) : (
-                'Recargar Datos'
-              )}
-            </Button>
-          )}
         </CardContent>
       </Card>
     );
@@ -122,12 +109,10 @@ export function QuestionSlider({
               transition={{ duration: 0.3, ease: "easeInOut" }}
               className="absolute inset-0 flex items-center"
             >
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                {questions[currentIndex]}
-              </p>
-              <div className="mt-4 text-xs text-primary/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1">
-                <Expand className="h-3 w-3" />
-                Haz clic para ver en grande
+              <div>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  {questions[currentIndex]}
+                </p>
               </div>
             </motion.div>
           </AnimatePresence>
@@ -200,7 +185,7 @@ export function QuestionSlider({
         )}
 
         {/* Question Counter */}
-        {questions.length > 1 && (
+        {showCounter && questions.length > 1 && (
           <div className="absolute top-4 left-4 text-xs text-muted-foreground bg-muted/20 px-2 py-1 rounded-full">
             {currentIndex + 1} de {questions.length}
           </div>
@@ -213,6 +198,7 @@ export function QuestionSlider({
       onOpenChange={setIsDialogOpen}
       questions={questions}
       title={title}
+      onDevelopClick={onDevelopClick}
     />
   </>
   );

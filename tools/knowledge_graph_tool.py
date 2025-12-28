@@ -32,7 +32,7 @@ class KnowledgeGraphTool(BaseTool):
     )
     
     args_schema: Type[BaseModel] = KnowledgeGraphToolInput
-    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
+    account_id: Optional[str] = Field(None, description="El ID de cuenta del usuario, inyectado automáticamente.")
     workspace_id: Optional[str] = None
     telegram_id: Optional[int] = None
     thread_id: Optional[str] = None

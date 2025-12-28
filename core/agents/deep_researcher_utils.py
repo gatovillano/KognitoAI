@@ -30,7 +30,7 @@ from tavily import AsyncTavilyClient
 from core.agents.deep_researcher_config import Configuration, SearchAPI
 from core.agents.deep_researcher_prompts import summarize_webpage_prompt
 from core.agents.deep_researcher_state import ResearchComplete, Summary
-from core.llm_manager import get_main_llm
+from core.llm_manager import get_fast_llm, get_main_llm
 from core.utils.llm_utils import is_token_limit_exceeded, remove_up_to_last_ai_message # Removed get_model_token_limit
 from core.utils.tool_utils import get_tool_by_name as get_langchain_tool_by_name
 
@@ -55,11 +55,17 @@ TAVILY_SEARCH_DESCRIPTION = (
 @tool(description=TAVILY_SEARCH_DESCRIPTION)
 async def tavily_search(
     queries: List[str],
-    max_results: Annotated[int, InjectedToolArg] = 20,
+    max_results: Annotated[int, InjectedToolArg] = 5,
     topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
     config: Optional[RunnableConfig] = None # Changed to Optional
 ) -> str:
-    """Fetch and summarize search results from Tavily search API."""
+    """Fetch and summarize search results from Tavily search API.
+    
+    Note: The Tavily search operation itself (via AsyncTavilyClient) does not
+    directly use a local LLM. The 'fast LLM' (get_fast_llm()) is specifically
+    utilized for the summarization of web page content, ensuring that any
+    LLM-dependent processing within this tool leverages the designated fast model.
+    """
     search_results = await tavily_search_async(
         queries,
         max_results=max_results,
@@ -78,7 +84,7 @@ async def tavily_search(
     cfg = Configuration.from_runnable_config(config)
     max_char_to_include = cfg.max_content_length
     
-    summarization_llm = get_main_llm()
+    summarization_llm = get_fast_llm() # pylint: disable=undefined-variable
     if not summarization_llm:
         raise ValueError("Main LLM not initialized for summarization.")
 
@@ -101,34 +107,59 @@ async def tavily_search(
     
     summaries = await asyncio.gather(*summarization_tasks)
     
-    summarized_results = {
-        url: {
-            'title': result['title'], 
-            'content': result['content'] if summary is None else summary
-        }
-        for url, result, summary in zip(
-            unique_results.keys(), 
-            unique_results.values(), 
-            summaries
-        )
-    }
-    
-    if not summarized_results:
+    # Pair results with summaries, handling potential None summaries
+    summarized_data = []
+    for url, result, summary in zip(unique_results.keys(), unique_results.values(), summaries):
+        # Determine the content to use:
+        # 1. If summary is a Summary object, use its summary and key_excerpts.
+        # 2. If summary is None (failed summarization or noop), use the original result content.
+        # 3. Otherwise (e.g., if summary is a string from a previous error handling), use it directly.
+        content_to_use = result['content']
+        if isinstance(summary, Summary):
+            content_to_use = summary.summary + "\n" + summary.key_excerpts
+        elif summary is not None: # This covers cases where summary might be a string from older error handling
+            content_to_use = str(summary)
+
+        summarized_data.append({
+            'url': url,
+            'title': result['title'],
+            'content': content_to_use
+        })
+
+    if not summarized_data:
         return "No valid search results found. Please try different search queries or use a different search API."
     
     formatted_output = "Search results: \n\n"
-    for i, (url, result) in enumerate(summarized_results.items()):
-        formatted_output += f"\n\n--- SOURCE {i+1}: {result['title']} ---\n"
-        formatted_output += f"URL: {url}\n\n"
-        formatted_output += f"SUMMARY:\n{result['content']}\n\n"
-        formatted_output += "\n\n" + "-" * 80 + "\n"
+    current_char_count = len(formatted_output)
+    
+    # Use research_model_max_tokens as a guide, with a buffer for other prompt elements
+    # Assuming ~4 chars per token, and leaving 4000 chars (approx 1000 tokens) for other prompt parts.
+    max_aggregated_output_chars = (cfg.research_model_max_tokens - 1000) * 4
+    if max_aggregated_output_chars < 0: # Ensure it's not negative
+        max_aggregated_output_chars = 10000 # Fallback to a safe minimum
+
+
+    for i, data in enumerate(summarized_data):
+        single_result_str = (
+            f"\n\n--- SOURCE {i+1}: {data['title']} ---\n"
+            f"URL: {data['url']}\n\n"
+            f"SUMMARY:\n{data['content']}\n\n"
+            f"\n\n" + "-" * 80 + "\n"
+        )
+        
+        if current_char_count + len(single_result_str) > max_aggregated_output_chars:
+            formatted_output += f"\n\n--- Additional results omitted due to character limit ({max_aggregated_output_chars} chars). ---\n"
+            break
+        
+        formatted_output += single_result_str
+        current_char_count += len(single_result_str)
     
     return formatted_output
 
 @time_function
 async def tavily_search_async(
     search_queries,
-    max_results: int = 20,
+    max_results: int = 5,
     topic: Literal["general", "news", "finance"] = "general",
     include_raw_content: bool = True,
     config: Optional[RunnableConfig] = None # Changed to Optional
@@ -147,14 +178,14 @@ async def tavily_search_async(
             include_raw_content=include_raw_content,
             search_depth="advanced"
         )
-        for query in search_queries
+        for query in search_queries[:3]
     ]
     
     search_results = await asyncio.gather(*search_tasks)
     return search_results
 
 @time_function
-async def summarize_webpage(model: Runnable[Sequence[BaseMessage], Summary], webpage_content: str) -> str:
+async def summarize_webpage(model: Runnable[Sequence[BaseMessage], Summary], webpage_content: str) -> Optional[Summary]:
     """Summarize webpage content using AI model with timeout protection."""
     try:
         prompt_content = summarize_webpage_prompt.format(
@@ -163,26 +194,22 @@ async def summarize_webpage(model: Runnable[Sequence[BaseMessage], Summary], web
         )
         
         summary: Summary = await model.ainvoke([HumanMessage(content=prompt_content)])
-        
-        formatted_summary = (
-            f"<summary>\n{summary.summary}\n</summary>\n\n"
-            f"<key_excerpts>\n{summary.key_excerpts}\n</key_excerpts>"
-        )
-        
-        return formatted_summary
+        return summary
         
     except asyncio.TimeoutError:
-        logger.warning("Summarization timed out after 60 seconds, returning original content")
-        return webpage_content
+        logger.warning("Summarization timed out after 60 seconds, returning None")
+        return None
     except Exception as e:
-        logger.warning(f"Summarization failed with error: {str(e)}, returning original content")
-        return webpage_content
+        logger.warning(f"Summarization failed with error: {str(e)}, returning None")
+        return None
 
 # Reflection Tool Utils
 
-@tool(description="Strategic reflection tool for research planning")
-def think_tool(reflection: str) -> str:
-    """Tool for strategic reflection on research progress and decision-making."""
+@tool(description="Strategic reflection tool for research planning. Use this ONLY to plan your next ConductResearch calls or to assess findings. DO NOT use this tool as a substitute for actual research delegation.")
+def deep_research_think_tool(reflection: str) -> str:
+    """Tool for strategic reflection on research progress and decision-making.
+    This tool records your thoughts but does not perform any research.
+    """
     return f"Reflection recorded: {reflection}"
 
 # Tool Utils
@@ -205,7 +232,40 @@ async def get_search_tool(search_api: SearchAPI, config: Optional[RunnableConfig
 
 async def get_all_tools(config: Optional[RunnableConfig]): # Changed to Optional
     """Assemble complete toolkit including research and search tools."""
-    tools = [think_tool]
+    from tools.web_scraper_tool import WebScraperTool
+    from tools.knowledge_search_tool import KnowledgeSearchTool
+    from tools.knowledge_graph_tool import KnowledgeGraphTool
+    from tools.graph_cypher_generator_tool import GraphCypherGeneratorTool
+    from tools.comprehensive_web_analysis_tool import ComprehensiveWebAnalysisTool
+
+    # Extract account_id and workspace_id from config
+    configurable = config.get("configurable", {}) if config else {}
+    account_id = configurable.get("account_id")
+    workspace_id = configurable.get("workspace_id")
+
+    # Initialize tools without account_id first
+    web_scraper = WebScraperTool()
+    knowledge_graph = KnowledgeGraphTool()
+    graph_cypher = GraphCypherGeneratorTool()
+    knowledge_search = KnowledgeSearchTool()
+    comprehensive_analyzer = ComprehensiveWebAnalysisTool()
+
+    # Inject dependencies if account_id is available
+    if account_id:
+        graph_cypher.account_id = account_id
+        knowledge_search.account_id = account_id
+        knowledge_search.workspace_id = workspace_id
+    else:
+        logger.warning("⚠️ account_id no encontrado en la configuración del runnable. Las herramientas que lo requieran fallarán.")
+
+    tools = [
+        deep_research_think_tool,
+        web_scraper,
+        knowledge_search,
+        knowledge_graph,
+        graph_cypher,
+        comprehensive_analyzer,
+    ]
     
     cfg = Configuration.from_runnable_config(config)
     search_api = SearchAPI(get_config_value(cfg.search_api))
@@ -220,7 +280,7 @@ def get_notes_from_tool_calls(messages: list[MessageLikeRepresentation]):
     for msg in messages:
         if isinstance(msg, AIMessage) and msg.tool_calls:
             for tool_call in msg.tool_calls:
-                if tool_call["name"] == "think_tool":
+                if tool_call["name"] == "deep_research_think_tool":
                     reflection_note = tool_call["args"].get("reflection")
                     if reflection_note:
                         notes.append(reflection_note)

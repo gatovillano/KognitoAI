@@ -10,11 +10,33 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { useUserSettings } from '@/contexts/UserSettingsContext';
+import apiClient from '@/lib/api'; // Importar apiClient
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Plus, Edit, Trash2, Eye, Calendar, User } from 'lucide-react';
+
+interface Memory {
+  id: string;
+  title: string;
+  content: string;
+  type: string;
+  created_at: string;
+  updated_at: string;
+  user_id: string;
+}
 
 const SettingsPage: React.FC = () => {
   const { settings, loading, error, getSettings, updateSettings } = useUserSettings();
   const [activeTab, setActiveTab] = useState('personal-data');
   const [localSettings, setLocalSettings] = useState(settings);
+  const [memories, setMemories] = useState<Memory[]>([]);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [showAddMemory, setShowAddMemory] = useState(false);
+  const [newMemory, setNewMemory] = useState({
+    title: '',
+    content: '',
+    type: 'general'
+  });
 
   useEffect(() => {
     getSettings();
@@ -23,6 +45,67 @@ const SettingsPage: React.FC = () => {
   useEffect(() => {
     setLocalSettings(settings);
   }, [settings]);
+
+  useEffect(() => {
+    if (activeTab === 'memories' && !memories.length) {
+      fetchMemories();
+    }
+  }, [activeTab]);
+
+  const fetchMemories = async () => {
+    setMemoryLoading(true);
+    try {
+      const response = await apiClient.get('/api/memories'); // Usar apiClient
+      setMemories(response.data || []); // El endpoint devuelve directamente la lista de memorias
+    } catch (error) {
+      toast.error('No se pudieron cargar las memorias');
+    } finally {
+      setMemoryLoading(false);
+    }
+  };
+
+  const addMemory = async () => {
+    if (!newMemory.title || !newMemory.content) {
+      toast.error('Por favor, completa el título y el contenido');
+      return;
+    }
+
+    try {
+      await apiClient.post('/api/memories', { // Usar apiClient
+        title: newMemory.title,
+        content: newMemory.content,
+        type: newMemory.type
+      });
+
+      toast.success('Memoria añadida exitosamente');
+      setNewMemory({ title: '', content: '', type: 'general' });
+      setShowAddMemory(false);
+      fetchMemories();
+    } catch (error) {
+      toast.error('No se pudo añadir la memoria');
+    }
+  };
+
+  const deleteMemory = async (memoryId: string) => {
+    try {
+      // Necesitaremos un endpoint DELETE para memorias si queremos esta funcionalidad
+      // Por ahora, solo loguearemos que no está implementado
+      toast.info('La eliminación de memorias aún no está implementada.');
+      console.warn(`Intento de eliminar memoria con ID: ${memoryId}. Funcionalidad no implementada.`);
+      // const response = await fetch(`/api/memories/${memoryId}`, { // Esto sería el futuro endpoint
+      //   method: 'DELETE',
+      // });
+
+      // if (response.ok) {
+      //   toast.success('Memoria eliminada exitosamente');
+      //   fetchMemories();
+      // } else {
+      //   throw new Error('Error al eliminar memoria');
+      // }
+    } catch (error) {
+      toast.error('No se pudo eliminar la memoria');
+    }
+  };
 
   if (error) {
     toast.error(error);
@@ -95,6 +178,7 @@ const SettingsPage: React.FC = () => {
         <TabsList className="mb-4">
           <TabsTrigger value="personal-data">Datos Personales</TabsTrigger>
           <TabsTrigger value="modules-preferences">Módulos y Preferencias</TabsTrigger>
+          <TabsTrigger value="memories">Memorias</TabsTrigger>
         </TabsList>
         <TabsContent value="personal-data">
             <h2 className="text-xl font-semibold mb-3">Datos Personales</h2>
@@ -213,6 +297,122 @@ const SettingsPage: React.FC = () => {
                 {loading ? 'Guardando...' : 'Guardar Preferencias'}
               </Button>
             </form>
+        </TabsContent>
+        <TabsContent value="memories">
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-semibold mb-3">Memorias Guardadas</h2>
+              <Button onClick={() => setShowAddMemory(true)} className="flex items-center gap-2">
+                <Plus className="h-4 w-4" />
+                Añadir Memoria
+              </Button>
+            </div>
+
+            {showAddMemory && (
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle>Añadir Nueva Memoria</CardTitle>
+                  <CardDescription>Registra una nueva memoria manualmente</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid w-full max-w-sm items-center gap-1.5">
+                    <Label htmlFor="memory-title">Título</Label>
+                    <Input
+                      id="memory-title"
+                      placeholder="Título de la memoria"
+                      value={newMemory.title}
+                      onChange={(e) => setNewMemory({...newMemory, title: e.target.value})}
+                    />
+                  </div>
+                  <div className="grid w-full max-w-sm items-center gap-1.5">
+                    <Label htmlFor="memory-type">Tipo</Label>
+                    <Select value={newMemory.type} onValueChange={(value) => setNewMemory({...newMemory, type: value})}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="general">General</SelectItem>
+                        <SelectItem value="personal">Personal</SelectItem>
+                        <SelectItem value="work">Trabajo</SelectItem>
+                        <SelectItem value="study">Estudio</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid w-full gap-1.5">
+                    <Label htmlFor="memory-content">Contenido</Label>
+                    <Textarea
+                      id="memory-content"
+                      placeholder="Escribe el contenido de tu memoria..."
+                      value={newMemory.content}
+                      onChange={(e) => setNewMemory({...newMemory, content: e.target.value})}
+                      rows={6}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={addMemory}>Guardar Memoria</Button>
+                    <Button variant="outline" onClick={() => setShowAddMemory(false)}>Cancelar</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {memoryLoading ? (
+              <div>Cargando memorias...</div>
+            ) : memories.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                No tienes memorias guardadas aún. ¡Comienza añadiendo tu primera memoria!
+              </div>
+            ) : (
+              <div className="grid gap-4">
+                {memories.map((memory) => (
+                  <Card key={memory.id}>
+                    <CardHeader>
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            {memory.title}
+                            <Badge variant="secondary">{memory.type}</Badge>
+                          </CardTitle>
+                          <CardDescription className="flex items-center gap-4 text-sm">
+                            <span className="flex items-center gap-1">
+                              <Calendar className="h-4 w-4" />
+                              Creada: {new Date(memory.created_at).toLocaleDateString()}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <User className="h-4 w-4" />
+                              Actualizada: {new Date(memory.updated_at).toLocaleDateString()}
+                            </span>
+                          </CardDescription>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" className="flex items-center gap-2">
+                            <Eye className="h-4 w-4" />
+                            Ver
+                          </Button>
+                          <Button variant="outline" size="sm" className="flex items-center gap-2">
+                            <Edit className="h-4 w-4" />
+                            Editar
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            className="flex items-center gap-2"
+                            onClick={() => deleteMemory(memory.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Eliminar
+                          </Button>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-gray-700 whitespace-pre-wrap">{memory.content}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
         </TabsContent>
       </Tabs>
     </div>

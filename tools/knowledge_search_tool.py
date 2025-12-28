@@ -1,63 +1,33 @@
-from typing import Union, Type, Optional, List
-from pydantic import BaseModel, Field
-import asyncio
+from typing import Optional, List, Any
 import json
-from core.memory_manager import get_relevant_memories
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
+from core.memory_manager import get_relevant_memories
+import logging
+
+logger = logging.getLogger(__name__)
 
 class KnowledgeSearchInput(BaseModel):
-    """Esquema de entrada para la herramienta de búsqueda de conocimiento."""
-    query: Optional[str] = Field(None, description="La consulta de búsqueda")
-    content_types: Optional[List[str]] = Field(None, description="Lista de tipos de contenido: user_memories, user_documents, etc.")
-    filter_topics: Optional[List[str]] = Field(None, description="Lista de topics para filtrar")
-    category: Optional[str] = Field(None, description="Categoría automática del LLM")
-    k: Optional[int] = Field(10, description="Número máximo de resultados a devolver")
-    hybrid_search: bool = Field(True, description="Usar búsqueda híbrida (semántica + texto completo)")
-    reranking: bool = Field(True, description="Usar reranking para mejorar la relevancia")
-    document_name: Optional[str] = Field(None, description="El nombre exacto de un documento específico (ej: 'Reporte Anual 2023.pdf') para buscar solo en él.")
-    document_id: Optional[str] = Field(None, description="El ID único de un documento específico (UUID) para buscar solo en él.")
+    query: str = Field(description="La consulta de búsqueda para encontrar información relevante.")
+    content_types: Optional[List[str]] = Field(None, description="Lista de tipos de contenido para filtrar la búsqueda (ej. 'document', 'note').")
+    filter_topics: Optional[List[str]] = Field(None, description="Lista de temas para filtrar la búsqueda.")
+    category: Optional[str] = Field(None, description="Categoría para filtrar la búsqueda.")
+    k: int = Field(10, description="Número de resultados a devolver.")
+    hybrid_search: bool = Field(True, description="Si se debe utilizar la búsqueda híbrida (semántica y de palabras clave).")
+    reranking: bool = Field(True, description="Si se deben reordenar los resultados para mejorar la relevancia.")
+    document_name: Optional[str] = Field(None, description="Nombre exacto de un documento para focalizar la búsqueda.")
+    document_id: Optional[str] = Field(None, description="ID único de un documento para focalizar la búsqueda.")
 
 class KnowledgeSearchTool(BaseTool):
     name: str = "knowledge_search"
-    description: str = (
-        "🧠 BÚSQUEDA AVANZADA EN BASE DE CONOCIMIENTO - Úsala para responder preguntas buscando en notas, documentos y conversaciones del usuario. "
-        "Es ideal para consultas complejas que requieren encontrar información específica y relevante. "
-        "Permite filtrar por tipo de contenido, temas y categorías para resultados más precisos. "
-        "Puedes especificar un documento por su nombre exacto (ej. 'Reporte Anual 2023.pdf') o por su ID único si lo conoces para focalizar la búsqueda."
-    )
-    args_schema: Type[BaseModel] = KnowledgeSearchInput
-    account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")
-    workspace_id: Optional[str] = Field(None, description="ID del workspace (NULL = General), inyectado automáticamente.")
-    team_id: Optional[str] = Field(None, description="ID del team propietario, inyectado automáticamente.")
-    telegram_id: Optional[int] = Field(None, description="ID de Telegram del usuario, inyectado automáticamente.")
-
-    def _run(
-        self,
-        query: Optional[str] = None,
-        content_types: Optional[List[str]] = None,
-        filter_topics: Optional[List[str]] = None,
-        category: Optional[str] = None,
-        k: int = 10,
-        hybrid_search: bool = True,
-        reranking: bool = True,
-        document_name: Optional[str] = None,
-        document_id: Optional[str] = None,
-    ) -> str:
-        return asyncio.run(self._arun(
-            query=query,
-            content_types=content_types,
-            filter_topics=filter_topics,
-            category=category,
-            k=k,
-            hybrid_search=hybrid_search,
-            reranking=reranking,
-            document_name=document_name,
-            document_id=document_id,
-        ))
+    description: str = """🧠 BÚSQUEDA AVANZADA EN BASE DE CONOCIMIENTO - Úsala para responder preguntas buscando en notas, documentos y conversaciones del usuario. Es ideal para consultas complejas que requieren encontrar información específica y relevante. Permite filtrar por tipo de contenido, temas y categorías para resultados más precisos. Puedes especificar un documento por su nombre exacto (ej. 'Reporte Anual 2023.pdf') o por su ID único si lo conoces para focalizar la búsqueda."""
+    args_schema: type[BaseModel] = KnowledgeSearchInput
+    account_id: Optional[str] = None
+    workspace_id: Optional[str] = None
 
     async def _arun(
         self,
-        query: Optional[str] = None,
+        query: str,
         content_types: Optional[List[str]] = None,
         filter_topics: Optional[List[str]] = None,
         category: Optional[str] = None,
@@ -67,14 +37,9 @@ class KnowledgeSearchTool(BaseTool):
         document_name: Optional[str] = None,
         document_id: Optional[str] = None,
     ) -> str:
-        """Versión asíncrona de la búsqueda de conocimiento."""
         try:
-            if not query:
-                return json.dumps({
-                    "status": "error",
-                    "error": "Por favor, proporciona una consulta de búsqueda (query).",
-                    "query": ""
-                }, ensure_ascii=False)
+            if not self.account_id:
+                raise ValueError("El 'account_id' es requerido para la búsqueda en la base de conocimiento, pero no fue proporcionado.")
 
             explicit_document_ids = None
 
@@ -106,7 +71,7 @@ class KnowledgeSearchTool(BaseTool):
                 reranking=reranking,
                 explicit_document_ids=explicit_document_ids,
             )
-            
+
             formatted_results = []
             if results and results.sources:
                 for i, source in enumerate(results.sources):
@@ -121,7 +86,7 @@ class KnowledgeSearchTool(BaseTool):
                         "metadata": source.metadata,
                     }
                     formatted_results.append(formatted_result)
-            
+
             return json.dumps({
                 "status": "success",
                 "query": query,
@@ -131,7 +96,6 @@ class KnowledgeSearchTool(BaseTool):
                     "filter_topics": filter_topics,
                     "category": category,
                     "workspace_id": self.workspace_id,
-                    "team_id": self.team_id,
                     "hybrid_search": hybrid_search,
                     "reranking": reranking,
                     "document_name": document_name,
@@ -139,10 +103,14 @@ class KnowledgeSearchTool(BaseTool):
                 },
                 "results": formatted_results
             }, ensure_ascii=False, indent=2)
-            
+
         except Exception as e:
+            logger.error(f"Error en KnowledgeSearchTool: {e}", exc_info=True)
             return json.dumps({
                 "status": "error",
                 "error": str(e),
                 "query": query
             }, ensure_ascii=False)
+
+    def _run(self, *args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError("KnowledgeSearchTool no soporta ejecución síncrona.")

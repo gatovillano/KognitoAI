@@ -11,6 +11,9 @@ import importlib
 
 from langchain_core.tools import Tool
 
+# Configuración del logger para este módulo.
+logger = logging.getLogger(__name__)
+
 # --- TOOL IMPORTS (from tools/ directory) ---
 
 def _import_tool_class(module_name: str, class_name: str):
@@ -61,7 +64,6 @@ ImageBackgroundEraserTool = _import_tool_class("image_background_eraser_tool", "
 ImageGenerationTool = _import_tool_class("image_generation_tool", "ImageGenerationTool")
 InternalKnowledgeSearchTool = _import_tool_class("internal_knowledge_search_tool", "InternalKnowledgeSearchTool")
 MemoryAddTool = _import_tool_class("memory_add_tool", "MemoryAddTool")
-KnowledgeSearchTool = _import_tool_class("knowledge_search_tool", "KnowledgeSearchTool")
 MindmapGeneratorTool = _import_tool_class("mindmap_generator_tool", "MindmapGeneratorTool")
 MultiQuerySearchTool = _import_tool_class("multi_query_search_tool", "MultiQuerySearchTool")
 NaturalQueryInterpreterTool = _import_tool_class("natural_query_interpreter_tool", "NaturalQueryInterpreterTool")
@@ -77,27 +79,31 @@ ScheduleToolExecutionTool = _import_tool_class("schedule_tool_execution", "Sched
 ListScheduledToolsTool = _import_tool_class("schedule_tool_execution", "ListScheduledToolsTool")
 SearchNotesTool = _import_tool_class("search_notes_tool", "SearchNotesTool")
 WebSearchTool = _import_tool_class("web_search_tool", "WebSearchTool")
-
-# Configuración del logger para este módulo.
-logger = logging.getLogger(__name__)
+GraphCypherGeneratorTool = _import_tool_class("graph_cypher_generator_tool", "GraphCypherGeneratorTool")
 
 # Global singletons for shared dependencies
 _graph_db_instance = None
 _graph_integration_instance = None
+_knowledge_graph_service_instance = None
 
 async def get_shared_dependencies():
     """
     Returns shared instances of GraphDB and GraphIntegration, initializing them if necessary.
     """
-    global _graph_db_instance, _graph_integration_instance
+    global _graph_db_instance, _graph_integration_instance, _knowledge_graph_service_instance
     
-    if _graph_db_instance and _graph_integration_instance:
-        return _graph_db_instance, _graph_integration_instance
+    if _graph_db_instance and _graph_integration_instance and _knowledge_graph_service_instance:
+        return _graph_db_instance, _graph_integration_instance, _knowledge_graph_service_instance
 
     try:
         from knowledge_graph.graph_database import GraphDB
         from knowledge_graph.graph_integration import GraphIntegration
         from core.config import settings
+
+        logger.debug(f"DEBUG: Neo4j URI: {settings.neo4j_uri}")
+        logger.debug(f"DEBUG: Neo4j User: {settings.neo4j_user}")
+        logger.debug(f"DEBUG: Neo4j Password: {'*' * len(settings.neo4j_password) if settings.neo4j_password else 'None'}")
+
 
         if settings.neo4j_uri and settings.neo4j_user and settings.neo4j_password:
             if not _graph_db_instance:
@@ -108,14 +114,19 @@ async def get_shared_dependencies():
             if not _graph_integration_instance:
                 _graph_integration_instance = GraphIntegration(_graph_db_instance)
                 logger.info("✅ Shared GraphIntegration instance created.")
+
+            if not _knowledge_graph_service_instance:
+                from utils.knowledge_graph_service import KnowledgeGraphService
+                _knowledge_graph_service_instance = KnowledgeGraphService()
+                logger.info("✅ Shared KnowledgeGraphService instance created.")
                 
-            return _graph_db_instance, _graph_integration_instance
+            return _graph_db_instance, _graph_integration_instance, _knowledge_graph_service_instance
         else:
-            logger.warning("⚠️ Missing Neo4j credentials, graph tools will not be initialized.")
-            return None, None
+            logger.warning("⚠️ Faltan credenciales de Neo4j, las herramientas del grafo no se inicializarán.")
+            return None, None, None
     except Exception as e:
         logger.error(f"❌ Error initializing shared dependencies: {e}", exc_info=True)
-        return None, None
+        return None, None, None
 
 async def _instantiate_tool(
     ToolClass,
@@ -135,11 +146,11 @@ async def _instantiate_tool(
 
         # --- Dependency Injection for Graph Tools ---
         if ToolClass == KnowledgeGraphTool:
-            _graph_db, _ = await get_shared_dependencies()
-            if _graph_db:
+            _graph_db, _, _knowledge_graph_service = await get_shared_dependencies()
+            if _graph_db and _knowledge_graph_service:
                 tool_kwargs = {
                     'account_id': account_id,
-                    'graph_db': _graph_db
+                    'knowledge_graph_service': _knowledge_graph_service # Pasar el servicio
                 }
                 if workspace_id is not None:
                     tool_kwargs['workspace_id'] = workspace_id
@@ -148,12 +159,25 @@ async def _instantiate_tool(
                 logger.warning(f"Skipping {tool_name} due to missing graph dependencies.")
                 return None
         elif ToolClass == ConceptualProcessingTool:
-            _graph_db, _graph_integration = await get_shared_dependencies()
+            _graph_db, _graph_integration, _ = await get_shared_dependencies()
             if _graph_db and _graph_integration:
                 tool_kwargs = {
                     'account_id': account_id,
                     'graph_integration': _graph_integration,
                     'graph_db': _graph_db
+                }
+                if workspace_id is not None:
+                    tool_kwargs['workspace_id'] = workspace_id
+                tool_instance = ToolClass(**tool_kwargs)
+            else:
+                logger.warning(f"Skipping {tool_name} due to missing graph dependencies.")
+                return None
+        elif ToolClass == GraphCypherGeneratorTool:
+            _, _, _knowledge_graph_service = await get_shared_dependencies()
+            if _knowledge_graph_service:
+                tool_kwargs = {
+                    'account_id': account_id,
+                    '_cognee_integration': _knowledge_graph_service.graph_integration # Usar la integración de grafo
                 }
                 if workspace_id is not None:
                     tool_kwargs['workspace_id'] = workspace_id
@@ -211,13 +235,13 @@ async def get_all_langchain_tools(
     # Lista completa de todas las clases de herramientas que se deben intentar instanciar.
     full_tool_classes_to_instantiate = [
         AddNoteTool, AddWebToRAGTool, AnalyzeCodeForInsightsTool, AnalyzeTextForInsightsTool,
-        CancelEventTool, ConceptualProcessingTool, KnowledgeGraphTool,
+        CancelEventTool, ConceptualProcessingTool, KnowledgeGraphTool, GraphCypherGeneratorTool,
         InsightGenerationTool, ComprehensiveWebAnalysisTool, ConversationContextAnalyzerTool,
         ConversationHistoryAnalyzerTool, DeleteDocumentTool, DeleteNoteTool, DocumentRAGTool,
         ExtractDocumentTitlesTool, GetAgendaTool, GetAnalysisResultsTool, GetDocumentContentTool,
         GetDocumentListTool, GetNotesTool, GetFormResponsesTool, GetProactiveInsightsTool,
         GitHubRepoTool, ImageBackgroundEraserTool, ImageGenerationTool, InternalKnowledgeSearchTool,
-        MemoryAddTool, KnowledgeSearchTool, MindmapGeneratorTool, MultiQuerySearchTool,
+        MemoryAddTool, MindmapGeneratorTool, MultiQuerySearchTool,
         NaturalQueryInterpreterTool, ScheduleEventTool, ScopedRagAnalysisTool, SearchNotesTool,
         SetReminderTool, UpdateDocumentMetadataTool, UpdateNoteTool, UpdateProfileTool,
         WebScraperTool, ScheduleToolExecutionTool, ListScheduledToolsTool, ContactProfileTool,

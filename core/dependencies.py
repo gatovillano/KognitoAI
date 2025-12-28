@@ -9,8 +9,9 @@ en todos los endpoints de la API, garantizando consistencia y reutilización.
 
 import logging
 from typing import AsyncGenerator, List
+from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.database import SessionLocal, WorkspacePermission, Workspace, Account # Importar WorkspacePermission, Workspace, Account
+from core.database import SessionLocal, WorkspacePermission, Workspace, Account, get_db_session # Importar get_db_session
 from utils.db_session import DBSession
 from fastapi import HTTPException, status # Importar HTTPException y status
 from sqlalchemy import select # Importar select
@@ -18,23 +19,8 @@ import uuid # Importar uuid
 
 logger = logging.getLogger(__name__)
 
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Dependencia de FastAPI que proporciona una sesión de base de datos
-    utilizando el patrón DBSession para manejo automático de transacciones.
-    
-    Esta dependencia debe ser utilizada en todos los endpoints de la API
-    para garantizar un manejo consistente de las sesiones de base de datos.
-    
-    Yields:
-        AsyncSession: Sesión de base de datos con manejo automático de commit/rollback
-    """
-    async with DBSession(SessionLocal) as session:
-        try:
-            yield session
-        except Exception as e:
-            logger.error(f"Error en sesión de base de datos: {e}", exc_info=True)
-            raise
+# get_db_session eliminada de aquí porque ahora se importa directamente de core.database
+# para evitar el error de _AsyncGeneratorContextManager y mantener consistencia.
 
 async def check_workspace_permission(
     db: AsyncSession,

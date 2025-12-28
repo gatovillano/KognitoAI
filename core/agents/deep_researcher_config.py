@@ -38,11 +38,12 @@ class Configuration(BaseModel):
     max_structured_output_retries: int = Field(default=3)
     allow_clarification: bool = Field(default=True)
     max_concurrent_research_units: int = Field(default=3)
+    max_clarification_attempts: int = Field(default=3) # Added this line
 
     # Research Configuration
     search_api: SearchAPI = Field(default=SearchAPI.TAVILY)
-    max_researcher_iterations: int = Field(default=3)
-    max_react_tool_calls: int = Field(default=5)
+    max_researcher_iterations: int = Field(default=10)
+    max_react_tool_calls: int = Field(default=8)
 
     # Model Configuration
     # We can define different models for different tasks
@@ -58,7 +59,10 @@ class Configuration(BaseModel):
     final_report_model: str = Field(default="gemini-2.5-flash")
     final_report_model_max_tokens: int = Field(default=8192)
     
-    max_content_length: int = Field(default=100000)
+    max_content_length: int = Field(default=10000)
+
+    # Context window management
+    max_input_tokens: int = Field(default=150000) # More conservative limit to prevent context overflow
 
     # MCP server configuration
     mcp_config: Optional[MCPConfig] = Field(default=None)

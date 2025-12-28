@@ -5,19 +5,25 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { X, FileText, Calendar, Tag, Link, Info, Brain } from 'lucide-react';
+import { X, FileText, Calendar, Tag, Link, Info, Brain, Bookmark, BookmarkCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface NodeDetailsSidebarProps {
     node: any;
     onClose: () => void;
     isOpen: boolean;
+    onToggleSave?: (node: any) => void;
+    isSaved?: boolean;
 }
 
 export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
     node,
     onClose,
-    isOpen
+    isOpen,
+    onToggleSave,
+    isSaved = false
 }) => {
     if (!isOpen || !node) return null;
 
@@ -47,10 +53,10 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                                 <FileText className="h-4 w-4" />
                                 Cita Conceptual
                             </h4>
-                            <div className="bg-muted p-3 rounded-md">
-                                <p className="text-sm leading-relaxed">
+                            <div className="bg-muted p-3 rounded-md text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                     {properties.full_text || properties.description || properties.text || node.label || 'No hay cita conceptual disponible.'}
-                                </p>
+                                </ReactMarkdown>
                             </div>
                         </div>
 
@@ -134,10 +140,10 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                                 <Info className="h-4 w-4" />
                                 Perfil de Ideas
                             </h4>
-                            <div className="bg-muted p-3 rounded-md">
-                                <p className="text-sm leading-relaxed">
+                            <div className="bg-muted p-3 rounded-md text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                     {properties.description || node.label}
-                                </p>
+                                </ReactMarkdown>
                             </div>
                         </div>
 
@@ -211,9 +217,11 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                     <div className="space-y-4">
                         <div>
                             <h4 className="font-semibold text-sm mb-2">Descripción</h4>
-                            <p className="text-sm text-muted-foreground">
-                                {properties.description || node.title || 'Sin descripción disponible'}
-                            </p>
+                            <div className="text-sm text-muted-foreground prose prose-sm dark:prose-invert max-w-none">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                    {properties.description || node.title || 'Sin descripción disponible'}
+                                </ReactMarkdown>
+                            </div>
                         </div>
 
                         {properties.source_document && (
@@ -257,9 +265,22 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                         <Info className="h-5 w-5" />
                         Detalles del Nodo
                     </CardTitle>
-                    <Button variant="ghost" size="icon" onClick={onClose}>
-                        <X className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        {onToggleSave && (
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => onToggleSave(node)}
+                                className={isSaved ? "text-primary" : "text-muted-foreground"}
+                                title={isSaved ? "Quitar de la lista" : "Guardar en la lista"}
+                            >
+                                {isSaved ? <BookmarkCheck className="h-5 w-5 fill-current" /> : <Bookmark className="h-5 w-5" />}
+                            </Button>
+                        )}
+                        <Button variant="ghost" size="icon" onClick={onClose}>
+                            <X className="h-4 w-4" />
+                        </Button>
+                    </div>
                 </CardHeader>
                 <CardContent>
                     <ScrollArea className="h-[calc(100vh-120px)]">
@@ -355,8 +376,10 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                                                                 {key.replace(/_/g, ' ')}
                                                             </span>
                                                         </div>
-                                                        <div className="text-sm bg-muted/50 p-3 rounded text-foreground break-words">
-                                                            {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+                                                        <div className="text-sm bg-muted/50 p-3 rounded text-foreground break-words prose prose-sm dark:prose-invert max-w-none">
+                                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                                {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+                                                            </ReactMarkdown>
                                                         </div>
                                                     </div>
                                                 );

@@ -25,6 +25,7 @@ export function getNodeColor(type: string): string {
     if (type.toLowerCase() === 'desafío' || type.toLowerCase() === 'problem') return '#EF4444';
     if (type.toLowerCase() === 'solución' || type.toLowerCase() === 'solution') return '#22C55E';
     if (type.toLowerCase() === 'conceptual_quote') return '#3B82F6';
+    if (type.toLowerCase() === 'document') return '#64748B'; // slate-500 for documents
 
     const hash = type.split('').reduce((acc, char) =>
         char.charCodeAt(0) + ((acc << 5) - acc), 0);

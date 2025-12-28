@@ -10,7 +10,7 @@ from langchain_core.language_models import BaseLanguageModel # Importar el tipo 
 # Importar tu gestor de LLMs
 from core.llm_manager import get_fast_llm
 # Importar tu integración con Cognee/Neo4j
-from knowledge_graph.cognee_integration import CogneeIntegration
+from knowledge_graph.graph_integration import GraphIntegration
 
 logger = logging.getLogger(__name__)
 
@@ -29,21 +29,28 @@ class GraphCypherGeneratorTool(BaseTool):
     description: str = "Generador Inteligente de Consultas Cypher para Grafos de Conocimiento. Traduce tu pregunta en lenguaje natural a una consulta Cypher optimizada, la ejecuta y devuelve los resultados."
     args_schema: Type[BaseModel] = GraphCypherGeneratorToolInput
 
-    account_id: str # Se inyecta automáticamente
-    _cognee_integration: Optional[CogneeIntegration] = None
+    account_id: Optional[str] = None # Se inyecta después de la instanciación
+    _cognee_integration: Optional[GraphIntegration] = None
     _fast_llm: Optional[BaseLanguageModel] = None # Tipo para el LLM rápido
 
-    def _get_cognee_integration(self) -> CogneeIntegration:
+    def _get_graph_integration(self) -> GraphIntegration:
         if self._cognee_integration is None:
-            self._cognee_integration = CogneeIntegration()
+            # This assumes GraphIntegration can be initialized without arguments.
+            # If it needs the graph_db, this will need to be refactored.
+            from knowledge_graph.graph_database import GraphDB
+            graph_db = GraphDB()
+            self._cognee_integration = GraphIntegration(graph_db=graph_db)
         return self._cognee_integration
-    
+
     def _get_fast_llm_instance(self) -> BaseLanguageModel: # Renombrado para evitar conflicto con la función global
         if self._fast_llm is None:
             self._fast_llm = get_fast_llm()
             if not self._fast_llm:
                 raise ValueError("Fast LLM no está inicializado. Asegúrate de que initialize_llms() se ha ejecutado.")
         return self._fast_llm
+
+    def _run(self, *args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError("GraphCypherGeneratorTool no soporta ejecución síncrona.")
 
     async def _arun(
         self,
@@ -53,7 +60,7 @@ class GraphCypherGeneratorTool(BaseTool):
         run_manager: Optional[Any] = None,
         **kwargs
     ) -> str:
-        cognee_integration = self._get_cognee_integration()
+        graph_integration = self._get_graph_integration()
         fast_llm = self._get_fast_llm_instance() # Usar el método de la clase
         dataset_name_with_account = f"{dataset_name}_{self.account_id.replace('-', '_')}"
 
@@ -105,10 +112,11 @@ class GraphCypherGeneratorTool(BaseTool):
                 return f"Consulta Cypher generada:\n```cypher\n{generated_cypher_query}\n```"
 
             # Ejecutar la consulta en Neo4j
-            raw_results = await cognee_integration.graph_db.execute_query(generated_cypher_query)
+            raw_results = await graph_integration.graph_db.execute_query(generated_cypher_query)
 
             # --- PASO 3: Formateo de Resultados ---
-            formatted_results = cognee_integration._format_advanced_search_results(raw_results, return_type)
+            formatted_results = graph_integration._format_advanced_search_results(raw_results, return_type)
+
 
             if not formatted_results and return_type != "summary":
                 return f"No se encontraron resultados en el grafo para la consulta: '{natural_language_query}'."

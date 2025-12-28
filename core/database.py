@@ -70,6 +70,9 @@ engine = create_async_engine(
     echo=False,  # Poner en True para depurar las queries SQL
     pool_pre_ping=True,
     pool_recycle=3600,  # Recicla conexiones cada hora
+    pool_size=10,       # Aumentar el número de conexiones persistentes
+    max_overflow=20,    # Aumentar el número de conexiones adicionales
+    pool_timeout=60,    # Aumentar el tiempo de espera para adquirir una conexión
     json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
     json_deserializer=json.loads
 )
@@ -177,6 +180,7 @@ class Account(Base):
     tasks = relationship("Task", back_populates="account", cascade="all, delete-orphan")
     forms = relationship("Form", back_populates="account", cascade="all, delete-orphan")
     workspace_permissions = relationship("WorkspacePermission", back_populates="account", cascade="all, delete-orphan") # NUEVA RELACIÓN
+    gap_development_analysis = relationship("GapDevelopmentAnalysis", back_populates="account", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Account(id={self.id}, name='{self.name}')>"
@@ -968,10 +972,36 @@ class AnalyzedPair(Base):
         return f"<AnalyzedPair(account_id={self.account_id}, doc_a={self.document_id_a}, doc_b={self.document_id_b})>"
 
 
+class GapDevelopmentAnalysis(Base):
+    """
+    Almacena los resultados de las investigaciones profundas sobre brechas de conocimiento.
+    """
+    __tablename__ = "gap_development_analysis"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    gap_id = Column(UUID(as_uuid=True), nullable=False, index=True, comment="ID de la brecha de conocimiento")
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    
+    status = Column(String(50), nullable=False, default="pending", index=True,
+                   comment="Estado de la investigación: pending, processing, completed, failed")
+    
+    report = Column(JSONB, nullable=True, comment="Informe estructurado con hallazgos, fuentes y recomendaciones")
+    
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+    # Relación con Account
+    account = relationship("Account", back_populates="gap_development_analysis")
+
+    def __repr__(self):
+        return f"<GapDevelopmentAnalysis(id={self.id}, gap_id={self.gap_id}, status='{self.status}')>"
+
+
 # ==============================================================================
 # SECCIÓN 2: FUNCIONES AUXILIARES DE LA BASE DE DATOS
 # ==============================================================================
 from contextlib import asynccontextmanager
+import logging
 
 
 async def create_tables():
@@ -1016,8 +1046,14 @@ async def get_db_session() -> AsyncIterator[AsyncSession]:
     session = SessionLocal()
     try:
         yield session
+        await session.commit()
+    except Exception as e:
+        logger.error(f"Error en la sesión de la base de datos: {e}", exc_info=True)
+        await session.rollback()
+        raise
     finally:
         await session.close()
+        await log_pool_status()
 
 
 
@@ -1065,7 +1101,7 @@ async def delete_accounts_by_ids(db_session: AsyncSession, account_ids: list[uui
             AgendaEvent, Recordatorio, ProactiveInsight, VerificationCode,
             AnalysisTask, MindmapTask, UploadTask, Task, GitHubDocument,
             UserDocumentTopic, ChatThread, LangchainPgEmbedding, Workspace,
-            AnalyzedPair
+            AnalyzedPair, GapDevelopmentAnalysis
         ]
         for model in direct_dependents:
             if hasattr(model, 'account_id'):
@@ -1175,3 +1211,15 @@ async def get_or_create_account_from_platform_id(
             logger.error(f"Error en get_or_create_account_from_platform_id: {e}", exc_info=True)
             await db_session.rollback()
             return None
+
+async def log_pool_status():
+    """
+    Registra el estado actual del pool de conexiones para monitorear su uso.
+    """
+    # NOTE: `engine.pool.status()` es un método síncrono, por lo que **no** debe usarse con `await`.
+    # Mantener la función como async permite llamarla desde código async sin bloquear el bucle de eventos.
+    try:
+        pool_status = engine.pool.status()
+        logger.debug(f"Estado del pool de conexiones: {pool_status}")
+    except Exception as e:
+        logger.error(f"Error al obtener el estado del pool: {e}", exc_info=True)
