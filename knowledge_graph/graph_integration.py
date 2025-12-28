@@ -13,6 +13,8 @@ import asyncio
 import re
 import json
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from core.config import settings
 from core.database import SessionLocal
 from utils.db_session import DBSession
@@ -47,10 +49,16 @@ class GraphIntegration:
             graph_db (GraphDB): Instancia configurada de GraphDB para Neo4j.
         """
         self.graph_db = graph_db
-        self.hybrid_processor = HybridGraphProcessor()
+        # Inicializar con LLMs para permitir enriquecimiento de relaciones
+        self.llm = get_main_llm()
+        self.fast_llm = get_fast_llm()
+        self.hybrid_processor = HybridGraphProcessor(
+            llm=self.llm,
+            fast_llm=self.fast_llm
+        )
         self.hybrid_adapter = Neo4jAdapter(graph_db)
         
-        logger.info("✅ GraphIntegration inicializada con Neo4jAdapter y HybridGraphProcessor")
+        logger.info("✅ GraphIntegration inicializada con Neo4jAdapter y HybridGraphProcessor (LLM enabled)")
 
     async def _create_fulltext_indexes(self):
         """
@@ -65,8 +73,8 @@ class GraphIntegration:
             # Índice para nodos (CONCEPTUAL_QUOTE y IDEA_PROFILE)
             node_index_query = """
             CREATE FULLTEXT INDEX node_fulltext_index IF NOT EXISTS
-            FOR (n:CONCEPTUAL_QUOTE | IDEA_PROFILE)
-            ON EACH [n.name, n.description, n.concept, n.full_text, n.category]
+            FOR (n:CONCEPTUAL_QUOTE | IDEA_PROFILE | DOCUMENT | PERSON | ORGANIZATION | EVENT | LOCATION | PRODUCT | TOPIC | CHAT_MESSAGE | USER_MEMORY)
+            ON EACH [n.name, n.title, n.description, n.concept, n.full_text, n.category, n.summary, n.content]
             """
             await self.graph_db.execute_query(node_index_query)
             logger.info("✅ Índice 'node_fulltext_index' para nodos asegurado.")
@@ -83,48 +91,164 @@ class GraphIntegration:
         except Exception as e:
             logger.error(f"❌ Error creando índices full-text: {e}", exc_info=True)
 
-    async def process_documents(self, documents: List[Dict[str, Any]], dataset_name: str = "default", account_id: Optional[str] = None, processing_mode: Literal["conceptual", "hybrid"] = "conceptual", topic: Optional[str] = None, workspace_id: Optional[str] = None) -> Dict[str, Any]:
+    async def process_documents(self, db_session: AsyncSession, documents: List[Dict[str, Any]], dataset_name: str = "default", account_id: Optional[str] = None, processing_mode: Literal["conceptual", "hybrid"] = "conceptual", topic: Optional[str] = None, workspace_id: Optional[str] = None, task_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Procesa documentos usando un enfoque híbrido o conceptual.
 
         Args:
+            db_session: Sesión de base de datos asíncrona inyectada por FastAPI.
             documents: Lista de documentos a procesar. Si está vacía, se buscarán documentos en la base de datos.
             dataset_name: Nombre del dataset.
             account_id: ID del usuario o cuenta propietaria de los documentos.
             processing_mode: Modo de procesamiento ("conceptual" o "hybrid").
             topic: Tema/colección para filtrar documentos si no se proporcionan.
             workspace_id: ID del workspace para filtrar documentos si no se proporcionan.
+            task_id: ID opcional de tarea para rastreo de progreso.
 
         Returns:
             Dict con el resultado del procesamiento.
         """
+        # Importar y crear tracker de progreso
+        from knowledge_graph.progress_tracker import (
+            create_progress_tracker, 
+            ProcessingPhase
+        )
+        
+        # Determinar número de fases según el modo
+        total_phases = 6 if processing_mode == "hybrid" else 5
+        
+        # Crear tracker de progreso
+        tracker = create_progress_tracker(
+            task_id=task_id,
+            processing_mode=processing_mode,
+            total_phases=total_phases
+        )
+        
+        # Configurar callback de progreso para enviar mensajes vía WebSocket
+        if account_id:
+            from core.websocket_manager import send_personal_message
+            import asyncio
+            
+            # Obtener el loop actual al crear el tracker
+            try:
+                main_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                main_loop = None
+            
+            def on_progress_callback(status):
+                # Crear una tarea asíncrona para enviar el mensaje sin bloquear
+                try:
+                    message = {
+                        "type": "knowledge_graph_progress",
+                        "data": status
+                    }
+                    
+                    if main_loop and main_loop.is_running():
+                        main_loop.call_soon_threadsafe(
+                            lambda: asyncio.create_task(send_personal_message(
+                                account_id=account_id,
+                                message=message
+                            ))
+                        )
+                    else:
+                        # Fallback: intentar obtener el loop actual (si estamos en un thread con loop)
+                        try:
+                            current_loop = asyncio.get_event_loop()
+                            if current_loop.is_running():
+                                current_loop.create_task(send_personal_message(
+                                    account_id=account_id,
+                                    message=message
+                                ))
+                        except Exception:
+                            logger.error(f"No se pudo obtener un loop de asyncio para enviar progreso")
+                except Exception as e:
+                    logger.error(f"Error enviando progreso de grafo vía WebSocket: {e}")
+            
+            tracker.on_progress = on_progress_callback
+        
+        logger.info(f"📊 Tracker de progreso creado: {tracker.task_id}")
+        
         await self._create_fulltext_indexes()
+
+        # ═══════════════════════════════════════════════════════════════
+        # FASE INICIAL: Obtener documentos
+        # ═══════════════════════════════════════════════════════════════
+        tracker.update_phase(
+            ProcessingPhase.INITIALIZING,
+            "🚀 Inicializando procesamiento de grafo de conocimiento...",
+            2
+        )
 
         # Si no se proporcionaron documentos, buscarlos en la base de datos
         if not documents:
             if not account_id:
+                tracker.set_error("Se requiere account_id cuando no se proporcionan documentos")
                 raise ValueError("Se requiere account_id cuando no se proporcionan documentos")
+            
+            tracker.update_phase(
+                ProcessingPhase.FETCHING_DOCUMENTS,
+                f"🔍 Buscando documentos en base de datos...",
+                5
+            )
+            
             logger.info(f"🔍 Buscando documentos en base de datos para account_id: {account_id}, topic: {topic}, workspace_id: {workspace_id}")
-            documents = await self._fetch_documents_from_db(account_id, topic, workspace_id)
+            documents = await self._fetch_documents_from_db(db_session, account_id, topic, workspace_id)
+            
+            tracker.update_phase(
+                ProcessingPhase.FETCHING_DOCUMENTS,
+                f"✅ Encontrados {len(documents)} documentos",
+                8,
+                {"documents_processed": len(documents)}
+            )
 
         logger.info(f"🧠 Iniciando procesamiento {processing_mode} para {len(documents)} documentos.")
 
         try:
+            # ═══════════════════════════════════════════════════════════════
+            # FASE: Reconstruir contenido
+            # ═══════════════════════════════════════════════════════════════
+            tracker.update_phase(
+                ProcessingPhase.RECONSTRUCTING_CONTENT,
+                f"📄 Reconstruyendo contenido de {len(documents)} documentos...",
+                10
+            )
+            
             # Reconstruir contenido completo desde chunks vectorizados
-            processed_documents = await self._reconstruct_document_content(documents, account_id=account_id)
+            processed_documents = await self._reconstruct_document_content(documents, account_id=account_id, topic=topic)
 
             if not processed_documents:
+                tracker.set_error("No se pudo reconstruir contenido de documentos.")
                 raise ValueError("No se pudo reconstruir contenido de documentos.")
+            
+            tracker.update_phase(
+                ProcessingPhase.RECONSTRUCTING_CONTENT,
+                f"✅ {len(processed_documents)} documentos reconstruidos",
+                15,
+                {"documents_processed": len(processed_documents)}
+            )
 
             if processing_mode == "hybrid":
-                # --- MODO HÍBRIDO (spaCy + Embeddings) ---
+                # ═══════════════════════════════════════════════════════════════
+                # MODO HÍBRIDO (spaCy + Embeddings)
+                # ═══════════════════════════════════════════════════════════════
                 logger.info("⚙️ Ejecutando HybridGraphProcessor (spaCy + Embeddings)...")
                 
+                # Crear nodos DOCUMENT (común a ambos modos para visualización)
+                from knowledge_graph.conceptual_graph_processor import ConceptualGraphProcessor
+                conceptual_processor = ConceptualGraphProcessor(
+                    llm=self.llm, 
+                    fast_llm=self.fast_llm, 
+                    neo4j_adapter=self.hybrid_adapter
+                )
+                workspace_id = documents[0].get("metadata", {}).get("workspace_id") if documents else None
+                await conceptual_processor._create_document_nodes(processed_documents, workspace_id, account_id, dataset_name)
+
                 hybrid_result = await self.hybrid_processor.process_documents(
                     processed_documents, 
                     dataset_name=dataset_name,
                     account_id=account_id,
-                    workspace_id=documents[0].get("metadata", {}).get("workspace_id") if documents else None
+                    workspace_id=workspace_id,
+                    progress_tracker=tracker
                 )
                 
                 # Guardar resultados en Neo4j usando el adaptador
@@ -135,29 +259,46 @@ class GraphIntegration:
                     account_id=account_id
                 )
                 
+                # Marcar como completado
+                tracker.complete(
+                    f"🎉 Procesamiento híbrido completado: {len(hybrid_result['entities'])} entidades, {len(hybrid_result['relationships'])} relaciones"
+                )
+                
                 return {
                     "success": True,
                     "processing_type": "hybrid_spacy_embeddings",
                     "entities_count": len(hybrid_result["entities"]),
                     "relationships_count": len(hybrid_result["relationships"]),
                     "neo4j_stats": stats,
-                    "metadata": hybrid_result.get("metadata", {})
+                    "metadata": hybrid_result.get("metadata", {}),
+                    "task_id": tracker.task_id  # Incluir task_id en respuesta
                 }
 
             else:
-                # --- MODO CONCEPTUAL (LLM-Driven) ---
-                # Inicializar procesador conceptual (que usa LLM)
+                # ═══════════════════════════════════════════════════════════════
+                # MODO CONCEPTUAL (LLM-Driven)
+                # ═══════════════════════════════════════════════════════════════
                 from knowledge_graph.conceptual_graph_processor import ConceptualGraphProcessor
                 
                 llm = get_main_llm()
                 if not llm:
+                    tracker.set_error("LLM principal no disponible para procesamiento conceptual.")
                     raise ValueError("LLM principal no disponible para procesamiento conceptual.")
+                
+                logger.info(f"💡 LLM principal disponible: {llm is not None}, Fast LLM disponible: {get_fast_llm() is not None} antes de instanciar ConceptualGraphProcessor.")
+                conceptual_processor = ConceptualGraphProcessor(
+                    llm=llm, 
+                    fast_llm=get_fast_llm(),
+                    neo4j_adapter=self.hybrid_adapter,
+                    progress_tracker=tracker
+                )
 
-                conceptual_processor = ConceptualGraphProcessor(llm=llm)
 
                 # Procesar documentos conceptualmente
                 conceptual_result = await conceptual_processor.process_documents_conceptually(
-                    processed_documents, dataset_name
+                    processed_documents, 
+                    dataset_name,
+                    progress_tracker=tracker
                 )
 
                 # Guardar en Neo4j usando el adaptador
@@ -184,6 +325,11 @@ class GraphIntegration:
                         logger.info(f"✅ {len(neo4j_data['profile_relationships'])} relaciones de perfiles guardadas.")
 
                 logger.info("🎉 Procesamiento conceptual LLM-driven completado exitosamente.")
+                
+                # Marcar como completado
+                tracker.complete(
+                    f"🎉 Procesamiento conceptual completado: {len(conceptual_result.get('conceptual_nodes', []))} citas, {len(conceptual_result.get('thematic_relationships', []))} relaciones"
+                )
 
                 return {
                     "success": True,
@@ -191,11 +337,13 @@ class GraphIntegration:
                     "conceptual_quotes": len(conceptual_result.get("conceptual_nodes", [])),
                     "thematic_relationships": len(conceptual_result.get("thematic_relationships", [])),
                     "idea_profiles": len(conceptual_result.get("idea_profiles", [])),
-                    "metadata": conceptual_result.get("metadata", {})
+                    "metadata": conceptual_result.get("metadata", {}),
+                    "task_id": tracker.task_id  # Incluir task_id en respuesta
                 }
 
         except Exception as e:
             logger.error(f"❌ Error en procesamiento {processing_mode}: {e}", exc_info=True)
+            tracker.set_error(str(e))
             # Fallback al procesamiento básico
             return await self._fallback_processing(documents, dataset_name)
 
@@ -230,9 +378,8 @@ class GraphIntegration:
             "processed_at": datetime.now().isoformat()
         }
 
-    async def _fetch_documents_from_db(self, account_id: str, topic: Optional[str] = None, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def _fetch_documents_from_db(self, db_session: AsyncSession, account_id: str, topic: Optional[str] = None, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Busca documentos en la base de datos PostgreSQL."""
-        from core.dependencies import get_db_session
         import sqlalchemy
         from urllib.parse import unquote
 
@@ -241,56 +388,55 @@ class GraphIntegration:
             decoded_topic = unquote(topic) if topic else None
             logger.info(f"🔍 Buscando documentos con topic: '{topic}' (decodificado: '{decoded_topic}')")
             
-            async with DBSession(SessionLocal) as session:
-                # Construir filtros dinámicamente
-                filters = ["account_id = :account_id", "cmetadata->>'type' = 'document_chunk'"]
+            # Construir filtros dinámicamente
+            filters = ["account_id = :account_id", "cmetadata->>'type' = 'document_chunk'"]
 
-                if workspace_id:
-                    filters.append("workspace_id::text = :workspace_id")
-                else:
-                    filters.append("workspace_id IS NULL")
+            if workspace_id:
+                filters.append("workspace_id::text = :workspace_id")
+            else:
+                filters.append("workspace_id IS NULL")
 
-                if decoded_topic:
-                    filters.append("topic = :topic")
+            if decoded_topic:
+                filters.append("topic = :topic")
 
-                where_clause = " AND ".join(filters)
+            where_clause = " AND ".join(filters)
 
-                query = sqlalchemy.text(f"""
-                    SELECT DISTINCT ON (cmetadata->>'document_id')
-                           cmetadata->>'file_name' AS file_name,
-                           topic AS topic,
-                           cmetadata->>'title' AS title,
-                           cmetadata->>'author' AS author,
-                           cmetadata->>'document_id' AS document_id,
-                           workspace_id::text AS workspace_id,
-                           account_id AS account_id,
-                           cmetadata AS metadata
-                    FROM langchain_pg_embedding
-                    WHERE {where_clause}
-                    ORDER BY cmetadata->>'document_id', id
-                    LIMIT 50;
-                """)
+            query = sqlalchemy.text(f"""
+                SELECT DISTINCT ON (cmetadata->>'document_id')
+                       cmetadata->>'file_name' AS file_name,
+                       topic AS topic,
+                       cmetadata->>'title' AS title,
+                       cmetadata->>'author' AS author,
+                       cmetadata->>'document_id' AS document_id,
+                       workspace_id::text AS workspace_id,
+                       account_id AS account_id,
+                       cmetadata AS metadata
+                FROM langchain_pg_embedding
+                WHERE {where_clause}
+                ORDER BY cmetadata->>'document_id', id
+                LIMIT 50;
+            """)
 
-                params = {'account_id': account_id}
-                if workspace_id:
-                    params['workspace_id'] = workspace_id
-                if decoded_topic:
-                    params['topic'] = decoded_topic
+            params = {'account_id': account_id}
+            if workspace_id:
+                params['workspace_id'] = workspace_id
+            if decoded_topic:
+                params['topic'] = decoded_topic
 
-                result = await session.execute(query, params)
-                documents = []
-                for row in result.fetchall():
-                    doc_dict = dict(row._mapping)
-                    documents.append(doc_dict)
+            result = await db_session.execute(query, params)
+            documents = []
+            for row in result.fetchall():
+                doc_dict = dict(row._mapping)
+                documents.append(doc_dict)
 
-                logger.info(f"✅ Encontrados {len(documents)} documentos en base de datos")
-                return documents
+            logger.info(f"✅ Encontrados {len(documents)} documentos en base de datos")
+            return documents
 
         except Exception as e:
             logger.error(f"❌ Error buscando documentos en base de datos: {e}")
             return []
 
-    async def _reconstruct_document_content(self, documents: List[Dict[str, Any]], account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def _reconstruct_document_content(self, documents: List[Dict[str, Any]], account_id: Optional[str] = None, topic: Optional[str] = None) -> List[Dict[str, Any]]:
         """Reconstruye el contenido completo de documentos desde chunks vectorizados."""
         processed_documents = []
 
@@ -311,6 +457,7 @@ class GraphIntegration:
         for i, doc in enumerate(documents):
             # Obtener el nombre del archivo (priorizar file_name sobre title)
             file_name = doc.get("file_name") or doc.get("metadata", {}).get("file_name") or doc.get("title")
+            workspace_id = doc.get("workspace_id") or doc.get("metadata", {}).get("workspace_id")
 
             if not file_name:
                 logger.warning(f"⚠️ Documento {i} sin nombre de archivo: {doc}")
@@ -322,7 +469,9 @@ class GraphIntegration:
             try:
                 full_content = await get_full_document_content(
                     account_id=account_id,
-                    file_name=file_name
+                    file_name=file_name,
+                    topic=topic,  # Filtro por topic
+                    workspace_id=workspace_id
                 )
 
                 if full_content and len(full_content.strip()) > 0:
@@ -468,7 +617,8 @@ class GraphIntegration:
             CALL db.index.fulltext.queryNodes('node_fulltext_index', $query) YIELD node AS n, score AS nodeScore
             WHERE n.dataset_name = $dataset_name
             WITH n, nodeScore
-            OPTIONAL MATCH (n)-[r]-(m:CONCEPTUAL_QUOTE {dataset_name: $dataset_name})
+            OPTIONAL MATCH (n)-[r]-(m) // Eliminar la restricción de tipo CONCEPTUAL_QUOTE
+            WHERE (m.dataset_name = $dataset_name OR m.dataset_name IS NULL) // Asegurar filtro de dataset_name para m
             RETURN DISTINCT n, r, m, nodeScore AS score
             UNION ALL
             CALL db.index.fulltext.queryRelationships('relationship_fulltext_index', $query) YIELD relationship AS r, score AS relScore
@@ -707,6 +857,8 @@ class GraphIntegration:
         dataset_name = conceptual_result.get("metadata", {}).get("dataset_name", "conceptual_dataset")
 
         entities = []
+        relationships = []
+
         conceptual_nodes = conceptual_result.get("conceptual_nodes", [])
         for quote in conceptual_nodes:
             entity = {
@@ -727,9 +879,26 @@ class GraphIntegration:
                 }
             }
             entities.append(entity)
+            
+            # Crear relación con el documento de origen si existe el ID
+            if quote.get("source_document_id"):
+                rel = {
+                    "source_id": quote["source_document_id"],
+                    "target_id": quote["id"],
+                    "source_type": "DOCUMENT",
+                    "target_type": "CONCEPTUAL_QUOTE",
+                    "relationship_type": "MENTIONS",
+                    "dataset_name": dataset_name,
+                    "confidence": 1.0,
+                    "description": f"Documento menciona la cita conceptual",
+                    "created_at": datetime.now().isoformat(),
+                    "extraction_method": quote.get("extraction_method", "conceptual_link")
+                }
+                relationships.append(rel)
 
-        relationships = []
+
         thematic_relationships = conceptual_result.get("thematic_relationships", [])
+
         for rel in thematic_relationships:
             relationship = {
                 "source_entity": rel.get("source_id", ""),

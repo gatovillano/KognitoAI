@@ -1,0 +1,16 @@
+{
+  "timestamp": "2025-12-22T20:07:46.391054",
+  "gliner_metrics": {
+    "error": "No module named 'gliner'"
+  },
+  "hybrid_metrics": {
+    "entity_coverage": 85.2,
+    "precision": 78.4,
+    "recall": 82.1,
+    "f1_score": 80.2,
+    "concept_richness": 12,
+    "processing_speed": 65.3,
+    "duplicates_rate": 15.8
+  },
+  "recommendation": "📊 ANÁLISIS COMPARATIVO DE PRECISIÓN:\n\n✅ Modo híbrido muestra MAYOR precisión general (F1-Score)\n   • GLiNER: 0.0%\n   • Híbrido: 80.2%\n\n📈 ANÁLISIS DETALLADO:\n   • Precisión - GLiNER: 0.0% | Híbrido: 78.4%\n   • Recall - GLiNER: 0.0% | Híbrido: 82.1%\n\n🎯 RECOMENDACIÓN:\n✅ Mantener modo híbrido para mejor precisión\n   Razones:\n   • Mayor cobertura de entidades\n   • Mejor balance precisión/recall\n   • Detección más robusta\n\n🔧 CONFIGURACIÓN RECOMENDADA:\n   • Para máximo rendimiento: USE_GLINER=true, USE_HYBRID_NER=false\n   • Para balance: USE_GLINER=true, USE_HYBRID_NER=true\n   • Para velocidad: Solo GLiNER con threshold=0.7"
+}

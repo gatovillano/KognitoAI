@@ -2,6 +2,7 @@ import logging
 from typing import Optional, Any, Dict, List, Literal
 from datetime import datetime
 import asyncio
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from knowledge_graph.graph_database import GraphDB
 from knowledge_graph.graph_integration import GraphIntegration
@@ -108,26 +109,42 @@ class KnowledgeGraphService:
             logger.error(f"❌ Error obteniendo memorias: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
-    async def process_documents_flow(self, documents: Optional[List[Dict[str, Any]]] = None, dataset_name: str = "default", account_id: Optional[str] = None, processing_mode: Literal["conceptual", "hybrid"] = "conceptual", topic: Optional[str] = None, workspace_id: Optional[str] = None, **kwargs):
+    async def process_documents_flow(self, db_session: AsyncSession, documents: Optional[List[Dict[str, Any]]] = None, dataset_name: str = "default", account_id: Optional[str] = None, processing_mode: Literal["conceptual", "hybrid"] = "conceptual", topic: Optional[str] = None, workspace_id: Optional[str] = None, request: Optional[Any] = None, **kwargs):
         """
         Flujo para procesar documentos y extraer información para el grafo de conocimiento.
         
         Args:
+            db_session: Sesión de base de datos asíncrona inyectada por FastAPI.
             documents: Lista de documentos a procesar
             dataset_name: Nombre del dataset
             account_id: ID de cuenta del usuario
             processing_mode: Modo de procesamiento ("conceptual" o "hybrid")
             topic: Tema para filtrar documentos
             workspace_id: ID del workspace
+            request: Objeto request de la API (opcional)
             **kwargs: Argumentos adicionales
         
         Returns:
             Dict con el resultado del procesamiento
         """
         try:
+            logger.info(f"DEBUG: db_session en process_documents_flow: {db_session}")
+            # Si se proporciona un objeto request, extraer parámetros de él
+            if request is not None:
+                # Extraer parámetros del request
+                documents = getattr(request, 'documents', None)
+                dataset_name = getattr(request, 'dataset_name', dataset_name)
+                topic = getattr(request, 'topic', topic)
+                workspace_id = getattr(request, 'workspace_id', workspace_id)
+                processing_mode = getattr(request, 'processing_mode', processing_mode)
+                
+                logger.info(f"📋 Extrayendo parámetros del request: topic={topic}, workspace_id={workspace_id}, processing_mode={processing_mode}")
+            
             # Asegurar que documents sea una lista vacía si es None
             if documents is None:
                 documents = []
+            
+            logger.info(f"🔄 process_documents_flow llamado con: topic={topic}, workspace_id={workspace_id}, documents_count={len(documents)}")
             
             # Conectar a la base de datos si no está conectada
             if self.graph_db._driver is None or getattr(self.graph_db._driver, 'closed', True):
@@ -135,12 +152,14 @@ class KnowledgeGraphService:
             
             # Usar GraphIntegration para procesar los documentos
             return await self.graph_integration.process_documents(
+                db_session=db_session,
                 documents=documents,
                 dataset_name=dataset_name,
                 account_id=account_id,
                 processing_mode=processing_mode,
                 topic=topic,
-                workspace_id=workspace_id
+                workspace_id=workspace_id,
+                task_id=kwargs.get("task_id")
             )
         except Exception as e:
             logger.error(f"Error en process_documents_flow: {e}", exc_info=True)

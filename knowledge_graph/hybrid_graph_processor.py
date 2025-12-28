@@ -2,10 +2,15 @@
 
 import logging
 import asyncio
-from typing import Dict, Any, List, Optional, Tuple, Set
+from typing import Dict, Any, List, Optional, Tuple, Set, TYPE_CHECKING
 from datetime import datetime
 import json
 import re
+
+from knowledge_graph.prompts_graph import RELATIONSHIP_EXTRACTION_PROMPT
+
+if TYPE_CHECKING:
+    from knowledge_graph.progress_tracker import ProgressTracker
 
 logger = logging.getLogger(__name__)
 
@@ -17,15 +22,18 @@ class HybridGraphProcessor:
     1. spaCy: Extracción de entidades básicas (NER)
     2. SentenceTransformers: Embeddings semánticos y relaciones
     3. Co-ocurrencia: Relaciones por proximidad textual
-    4. Gemini Flash: Solo para análisis contextual complejo (opcional)
+    4. LLM (Gemini Flash): Enriquecimiento de relaciones (opcional)
     """
     
-    def __init__(self):
+    def __init__(self, llm=None, fast_llm=None, progress_tracker: Optional["ProgressTracker"] = None):
+        self.llm = llm
+        self.fast_llm = fast_llm
         self.spacy_model = None
         self.gliner_model = None  # NUEVO: Modelo GLiNER
         self.sentence_transformer = None
         self.initialized = False
         self._save_callback = None
+        self.progress_tracker = progress_tracker  # Tracker de progreso
         logger.info("🔧 HybridGraphProcessor inicializado")
     
     async def initialize(self):
@@ -97,7 +105,8 @@ class HybridGraphProcessor:
                     logger.info(f"✅ spaCy modelo inglés descargado y cargado (fallback): {model_name}")
             except Exception as e2:
                 logger.error(f"❌ Error inicializando spaCy: {e2}")
-                raise
+                logger.warning("⚠️ spaCy no estará disponible para extracción de entidades")
+                self.spacy_model = None  # Asegurar que esté en None
     
     async def _initialize_gliner(self):
         """Inicializa el modelo GLiNER para NER mejorado con zero-shot."""
@@ -208,7 +217,8 @@ class HybridGraphProcessor:
         documents: List[Dict[str, Any]], 
         dataset_name: str,
         account_id: Optional[str] = None,
-        workspace_id: Optional[str] = None
+        workspace_id: Optional[str] = None,
+        progress_tracker: Optional["ProgressTracker"] = None
     ) -> Dict[str, Any]:
         """
         Procesa documentos usando el pipeline híbrido.
@@ -218,10 +228,18 @@ class HybridGraphProcessor:
             dataset_name: Nombre del dataset
             account_id: ID de la cuenta del usuario (para multi-tenancy)
             workspace_id: ID del workspace (para organización)
+            progress_tracker: Tracker opcional para reportar progreso
             
         Returns:
             Dict con entidades, relaciones y metadatos del grafo
         """
+        # Usar tracker proporcionado o el de la instancia
+        tracker = progress_tracker or self.progress_tracker
+        
+        # Importar aquí para evitar circular imports
+        if tracker:
+            from knowledge_graph.progress_tracker import ProcessingPhase
+        
         if not self.initialized:
             await self.initialize()
         
@@ -236,17 +254,55 @@ class HybridGraphProcessor:
         logger.info(f"   📦 Dataset: {dataset_name}")
         
         try:
-            # Fase 1: Extracción de entidades (spaCy, GLiNER o híbrido)
+            # ═══════════════════════════════════════════════════════════════
+            # FASE 1: Extracción de entidades (spaCy, GLiNER o híbrido)
+            # ═══════════════════════════════════════════════════════════════
+            if tracker:
+                tracker.update_phase(
+                    ProcessingPhase.HYBRID_EXTRACTING_ENTITIES,
+                    f"📝 Extrayendo entidades de {len(documents)} documentos...",
+                    10,
+                    {"documents_processed": len(documents)}
+                )
+            
             entities = await self._extract_entities(documents)
             logger.info(f"✅ Fase 1 completada: {len(entities)} entidades extraídas")
+            
+            if tracker:
+                tracker.update_sub_progress(f"📝 Extraídas {len(entities)} entidades, deduplicando...", 50)
             
             # Deduplicación inteligente basada en embeddings
             entities = await self._deduplicate_entities(entities)
             logger.info(f"✅ Deduplicación completada: {len(entities)} entidades únicas")
             
-            # Fase 2: Análisis semántico con SentenceTransformers
+            if tracker:
+                tracker.update_phase(
+                    ProcessingPhase.HYBRID_DEDUPLICATING,
+                    f"✅ {len(entities)} entidades únicas después de deduplicación",
+                    25,
+                    {"entities_count": len(entities)}
+                )
+            
+            # ═══════════════════════════════════════════════════════════════
+            # FASE 2: Análisis semántico con SentenceTransformers
+            # ═══════════════════════════════════════════════════════════════
+            if tracker:
+                tracker.update_phase(
+                    ProcessingPhase.HYBRID_SEMANTIC_RELATIONSHIPS,
+                    f"🔗 Analizando relaciones semánticas entre {len(entities)} entidades...",
+                    35
+                )
+            
             relationships = await self._extract_relationships_semantic(documents, entities)
             logger.info(f"✅ Fase 2 completada: {len(relationships)} relaciones semánticas")
+            
+            if tracker:
+                tracker.update_phase(
+                    ProcessingPhase.HYBRID_SEMANTIC_RELATIONSHIPS,
+                    f"✅ {len(relationships)} relaciones semánticas creadas",
+                    50,
+                    {"relationships_count": len(relationships)}
+                )
 
             # 🚨 GUARDAR INMEDIATAMENTE después de Fase 2 (antes de que se cuelgue)
             logger.info("💾 GUARDANDO DATOS INMEDIATAMENTE después de Fase 2...")
@@ -277,26 +333,64 @@ class HybridGraphProcessor:
                 logger.error(f"❌ Error guardando después de Fase 2: {save_error}")
                 # Continuar procesamiento aunque falle el guardado
 
-            # Fase 3: Relaciones por co-ocurrencia (OPTIMIZADA)
-            logger.info("⏭️ Fase 3: Saltando co-ocurrencia pesada, usando solo relaciones semánticas")
-
-            # Solo usar relaciones semánticas (ya son muy ricas)
-            all_relationships = relationships
-            cooccurrence_rels = []  # Inicializar para metadatos
-
-            # Co-ocurrencia optimizada pero más completa
-            logger.info("🔗 Ejecutando análisis optimizado de co-ocurrencia...")
-            try:
-                cooccurrence_rels = await self._extract_cooccurrence_relationships_optimized(
-                    documents, entities
+            # ═══════════════════════════════════════════════════════════════
+            # FASE 3: Co-ocurrencia optimizada para candidatos
+            # ═══════════════════════════════════════════════════════════════
+            if tracker:
+                tracker.update_phase(
+                    ProcessingPhase.HYBRID_COOCCURRENCE,
+                    "🔍 Generando candidatos de relación por co-ocurrencia...",
+                    60
                 )
-                all_relationships.extend(cooccurrence_rels)
-                logger.info(f"✅ Fase 3 optimizada completada: {len(cooccurrence_rels)} relaciones adicionales")
-            except Exception as e:
-                logger.warning(f"⚠️ Error en co-ocurrencia optimizada: {e}")
-                logger.info("✅ Continuando solo con relaciones semánticas")
-                cooccurrence_rels = []
             
+            logger.info("⏭️ Fase 3: Generando candidatos de relación por co-ocurrencia optimizada")
+            cooccurrence_rels = await self._extract_cooccurrence_relationships_optimized(documents, entities)
+            
+            if tracker:
+                tracker.update_phase(
+                    ProcessingPhase.HYBRID_COOCCURRENCE,
+                    f"✅ {len(cooccurrence_rels)} candidatos de co-ocurrencia generados",
+                    70,
+                    {"cooccurrence_candidates": len(cooccurrence_rels)}
+                )
+            
+            # ═══════════════════════════════════════════════════════════════
+            # FASE 4: Enriquecimiento con LLM (Si está disponible)
+            # ═══════════════════════════════════════════════════════════════
+            if (self.fast_llm or self.llm) and cooccurrence_rels:
+                if tracker:
+                    tracker.update_phase(
+                        ProcessingPhase.HYBRID_LLM_ENRICHMENT,
+                        f"🤖 Enriqueciendo {len(cooccurrence_rels)} relaciones con LLM...",
+                        75
+                    )
+                
+                logger.info(f"🤖 Fase 4: Enriqueciendo {len(cooccurrence_rels)} relaciones con LLM...")
+                enriched_rels = await self._enrich_relationships_with_llm(documents, cooccurrence_rels, entities)
+                # Combinar relaciones semánticas con las enriquecidas por LLM
+                all_relationships = relationships + enriched_rels
+                logger.info(f"✅ Fase 4 completada: {len(enriched_rels)} relaciones enriquecidas")
+                
+                if tracker:
+                    tracker.update_phase(
+                        ProcessingPhase.HYBRID_LLM_ENRICHMENT,
+                        f"✅ {len(enriched_rels)} relaciones enriquecidas con LLM",
+                        90,
+                        {"relationships_count": len(all_relationships)}
+                    )
+            else:
+                # Si no hay LLM, usar solo las semánticas (o añadir co-ocurrencias básicas si se prefiere)
+                all_relationships = relationships
+                logger.info("⚠️ Fase 4 saltada: LLM no disponible o no hay candidatos")
+                
+                if tracker:
+                    tracker.update_sub_progress("⏭️ Fase LLM saltada (no disponible o sin candidatos)", 90)
+            
+            logger.info(f"✅ Procesamiento completado con {len(all_relationships)} relaciones totales")
+            
+            # ═══════════════════════════════════════════════════════════════
+            # FINALIZACIÓN
+            # ═══════════════════════════════════════════════════════════════
             # Crear resultado final
             result = {
                 "entities": entities,
@@ -321,14 +415,30 @@ class HybridGraphProcessor:
             logger.info(f"   🔗 Relaciones: {len(all_relationships)}")
             logger.info(f"   ⚡ Método: Pipeline híbrido local")
             
+            # Marcar progreso como casi completo (el guardado a Neo4j se hace después)
+            if tracker:
+                tracker.update_phase(
+                    ProcessingPhase.SAVING_TO_NEO4J,
+                    f"💾 Guardando {len(entities)} entidades y {len(all_relationships)} relaciones en Neo4j...",
+                    95,
+                    {"entities_count": len(entities), "relationships_count": len(all_relationships)}
+                )
+            
             return result
             
         except Exception as e:
             logger.error(f"❌ Error en procesamiento híbrido: {e}")
+            if tracker:
+                tracker.set_error(str(e))
             raise
     
     async def _extract_entities_spacy(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Extrae entidades usando spaCy con validaciones de calidad mejoradas."""
+        # ✅ NUEVA VERIFICACIÓN: Verificar que spaCy está disponible
+        if self.spacy_model is None:
+            logger.warning("⚠️ spaCy no está disponible. Saltando extracción de spaCy.")
+            return []
+        
         entities = []
         entity_set = set()  # Para evitar duplicados
         
@@ -348,19 +458,19 @@ class HybridGraphProcessor:
                 
             logger.debug(f"🔍 Procesando documento {i+1} con spaCy...")
             
-            # Procesar con spaCy
-            spacy_doc = self.spacy_model(content[:10000])  # Limitar a 10k caracteres
+            # Procesar con spaCy en un hilo separado para no bloquear
+            spacy_doc = await asyncio.to_thread(self.spacy_model, content[:10000])  # Limitar a 10k caracteres
             
             # Extraer entidades nombradas con validación mejorada
             for ent in spacy_doc.ents:
                 entity_text = ent.text.strip()
                 entity_lower = entity_text.lower()
                 
-                # Validaciones de calidad
-                if (len(entity_text) < 3 or  # Longitud mínima 3 caracteres
+                # Validaciones de calidad RELAJADAS para más cobertura
+                if (len(entity_text) < 2 or  # Reducido de 3 a 2 para mayor cobertura
                     entity_lower in generic_words or  # No palabras genéricas
                     not any(c.isalpha() for c in entity_text) or  # Debe contener letras
-                    entity_text.count(' ') > 5):  # Máximo 5 palabras
+                    entity_text.count(' ') > 8):  # Aumentado de 5 a 8 (máximo 9 palabras)
                     continue
                 
                 # Filtrar entidades que son solo números o puntuación
@@ -380,6 +490,7 @@ class HybridGraphProcessor:
                         "type": ent.label_,
                         "description": f"{ent.label_}: {entity_text}",
                         "source_document": doc.get('title', f'doc_{i}'),
+                        "source_document_id": doc.get('id'),
                         "confidence": confidence,
                         "extraction_method": "spacy_ner"
                     })
@@ -425,9 +536,15 @@ class HybridGraphProcessor:
         """
         from core.config import settings
         
-        if settings.use_hybrid_ner and self.gliner_model and self.spacy_model:
+        # ✅ NUEVA VERIFICACIÓN: Verificar qué modelos están realmente disponibles
+        spacy_available = self.spacy_model is not None
+        gliner_available = self.gliner_model is not None
+        
+        logger.info(f"🔍 Modelos disponibles: spaCy={spacy_available}, GLiNER={gliner_available}")
+        
+        if settings.use_hybrid_ner and gliner_available and spacy_available:
             # Modo híbrido: combinar spaCy (rápido) + GLiNER (preciso)
-            logger.info("🔄 Modo híbrido:spaCy + GLiNER activado")
+            logger.info("🔄 Modo híbrido: spaCy + GLiNER activado")
             
             spacy_entities = await self._extract_entities_spacy(documents)
             logger.info(f"   📊 spaCy extrajo: {len(spacy_entities)} entidades")
@@ -445,15 +562,21 @@ class HybridGraphProcessor:
             logger.info(f"   ✅ Total combinado: {len(combined)} entidades (antes de deduplicar)")
             return combined
             
-        elif self.gliner_model:
-            # Solo GLiNER
+        elif gliner_available:
+            # Solo GLiNER (si spaCy no está disponible o no se requiere híbrido)
             logger.info("🎯 Modo GLiNER exclusivo activado")
             return await self._extract_entities_gliner(documents)
             
-        else:
-            # Solo spaCy (fallback)
+        elif spacy_available:
+            # Solo spaCy (fallback si GLiNER no está disponible)
             logger.info("⚡ Modo spaCy exclusivo activado")
             return await self._extract_entities_spacy(documents)
+            
+        else:
+            # 🚨 NINGÚN MODELO DISPONIBLE
+            logger.error("❌ ERROR: No hay modelos NER disponibles (ni spaCy ni GLiNER)")
+            logger.error("❌ No se pueden extraer entidades. Verificar instalación de dependencias.")
+            return []
     
     async def _extract_entities_gliner(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Extrae entidades usando GLiNER con tipos personalizados."""
@@ -467,10 +590,12 @@ class HybridGraphProcessor:
             # Entidades básicas (compatibles con spaCy)
             "person", "organization", "location", "product", "event", "date", "money",
             
-            # Conceptos académicos/técnicos (NUEVO - poder de GLiNER)
+            # Conceptos académicos/técnicos y de negocio (AMPLIADO)
             "theory", "methodology", "concept", "technology", "research_area",
             "institution", "publication", "dataset", "algorithm", "framework",
-            "scientific_term", "model", "technique", "approach", "system"
+            "scientific_term", "model", "technique", "approach", "system",
+            "skill", "tool", "problem", "solution", "metric", "goal", "strategy",
+            "software", "hardware", "language", "protocol"
         ]
         
         logger.info(f"🎯 GLiNER extraerá {len(entity_labels)} tipos de entidades")
@@ -482,19 +607,15 @@ class HybridGraphProcessor:
             
             logger.debug(f"🔍 Procesando documento {i+1} con GLiNER...")
             
-            # GLiNER funciona mejor con chunks de ~2000-5000 caracteres
-            max_length = 3000
-            chunks = []
-            for start in range(0, len(content), max_length - 500):  # Overlap de 500
-                chunk = content[start:start + max_length]
-                if chunk.strip():
-                    chunks.append(chunk)
+            # ✅ SOLUCIÓN AJUSTADA: Dividir contenido considerando límite real de GLiNER (384 chars)
+            chunks = self._split_content_intelligently(content, max_chars=350)  # Margen de seguridad antes de 384
             
-            # Procesar máximo 10 chunks por documento (para no saturar)
-            for chunk_idx, chunk in enumerate(chunks[:10]):
+            # Procesar máximo 25 chunks por documento (aumentado de 10 para textos densos)
+            for chunk_idx, chunk in enumerate(chunks[:25]):
                 try:
-                    # Predecir entidades con GLiNER
-                    predicted_entities = self.gliner_model.predict_entities(
+                    # Predecir entidades con GLiNER en un hilo separado
+                    predicted_entities = await asyncio.to_thread(
+                        self.gliner_model.predict_entities,
                         chunk,
                         entity_labels,
                         threshold=settings.gliner_threshold
@@ -506,10 +627,10 @@ class HybridGraphProcessor:
                         entity_label = ent['label']
                         entity_score = ent['score']
                         
-                        # Validaciones de calidad (similares a spaCy)
-                        if (len(entity_text) < 3 or
+                        # Validaciones de calidad RELAJADAS para más cobertura
+                        if (len(entity_text) < 2 or  # Reducido de 3 a 2
                             not any(c.isalpha() for c in entity_text) or
-                            entity_text.count(' ') > 6):
+                            entity_text.count(' ') > 8):  # Aumentado de 6 a 8 (máximo 9 palabras)
                             continue
                         
                         entity_key = f"{entity_lower}_{entity_label}"
@@ -525,9 +646,12 @@ class HybridGraphProcessor:
                                 "type": entity_type,
                                 "description": f"{entity_label}: {entity_text}",
                                 "source_document": doc.get('title', f'doc_{i}'),
+                                "source_document_id": doc.get('id'),
                                 "confidence": round(entity_score, 2),
                                 "extraction_method": "gliner_zero_shot",
-                                "gliner_label": entity_label  # Guardar label original
+                                "gliner_label": entity_label,  # Guardar label original
+                                "chunk_index": chunk_idx,  # NUEVO: Indicar de qué chunk viene
+                                "was_split": len(chunks) > 1  # NUEVO: Indicar si el texto fue dividido
                             })
                             entities.append(entity_data)
                             
@@ -536,7 +660,76 @@ class HybridGraphProcessor:
                     continue
         
         logger.info(f"✅ GLiNER extrajo {len(entities)} entidades")
+        logger.info(f"📊 Procesamiento: {len(chunks)} chunks por documento (límite: 350 chars para evitar truncamiento de GLiNER)")
         return entities
+    
+    def _split_content_intelligently(self, content: str, max_chars: int = 350) -> List[str]:
+        """División inteligente del contenido para evitar truncamiento de GLiNER.
+        
+        Args:
+            content: Texto a dividir
+            max_chars: Límite máximo por chunk (350 para evitar truncamiento de GLiNER a 384)
+        
+        Returns:
+            Lista de chunks con texto dividido inteligentemente
+        """
+        if len(content) <= max_chars:
+            return [content]
+        
+        chunks = []
+        current_chunk = ""
+        
+        # Patrones de división (en orden de prioridad)
+        split_patterns = [
+            r'\.\s+',           # Fin de oración (punto + espacio)
+            r';\s+',            # Punto y coma + espacio
+            r',\s+',            # Coma + espacio (menos preferible)
+            r'\n\s*\n',         # Párrafos vacíos
+            r'\n',              # Líneas nuevas
+            r'\s+'              # Espacios en blanco (último recurso)
+        ]
+        
+        sentences = content.split('. ')
+        
+        for sentence in sentences:
+            # Agregar el punto de vuelta si no es la última oración
+            if sentence != sentences[-1]:
+                sentence += '. '
+            
+            # Si agregar esta oración excede el límite
+            if len(current_chunk + sentence) > max_chars:
+                # Guardar el chunk actual si no está vacío
+                if current_chunk.strip():
+                    chunks.append(current_chunk.strip())
+                
+                # Si la oración individual es muy larga, dividirla
+                if len(sentence) > max_chars:
+                    # Dividir por comas si es muy larga
+                    parts = sentence.split(', ')
+                    temp_chunk = ""
+                    for part in parts:
+                        if len(temp_chunk + part) > max_chars:
+                            if temp_chunk.strip():
+                                chunks.append(temp_chunk.strip())
+                            temp_chunk = part
+                        else:
+                            temp_chunk += ", " + part if temp_chunk else part
+                    
+                    if temp_chunk.strip():
+                        current_chunk = temp_chunk
+                    else:
+                        current_chunk = ""
+                else:
+                    current_chunk = sentence
+            else:
+                # Agregar al chunk actual
+                current_chunk += sentence
+        
+        # Agregar el último chunk
+        if current_chunk.strip():
+            chunks.append(current_chunk.strip())
+        
+        return chunks
     
     def _map_gliner_label_to_type(self, gliner_label: str) -> str:
         """Mapea labels de GLiNER a tipos compatibles con el sistema."""
@@ -595,9 +788,9 @@ class HybridGraphProcessor:
         # Generar embeddings
         embeddings = await self._get_embeddings(entity_texts)
         
-        # Calcular matriz de similitud
+        # Calcular matriz de similitud en un hilo separado
         from sklearn.metrics.pairwise import cosine_similarity
-        similarities = cosine_similarity(embeddings)
+        similarities = await asyncio.to_thread(cosine_similarity, embeddings)
         
         # Encontrar y fusionar duplicados
         threshold = 0.92  # Muy similar (>92%)
@@ -777,16 +970,16 @@ class HybridGraphProcessor:
             concept_embeddings = await self._get_embeddings(concept_texts)
             entity_embeddings = await self._get_embeddings(entity_texts)
 
-            # Calcular similitudes cruzadas
+            # Calcular similitudes cruzadas en un hilo separado
             from sklearn.metrics.pairwise import cosine_similarity
             import numpy as np
             
-            cross_similarities = cosine_similarity(concept_embeddings, entity_embeddings)
+            cross_similarities = await asyncio.to_thread(cosine_similarity, concept_embeddings, entity_embeddings)
 
             # OPTIMIZACIÓN: En lugar de iterar sobre TODAS las combinaciones,
             # solo tomamos las top-k más similares para cada concepto
-            threshold = 0.75  # AUMENTADO de 0.7 para mayor precisión
-            max_relations_per_concept = 3  # REDUCIDO de 5 a 3 para mayor selectividad
+            threshold = 0.65  # REDUCIDO de 0.75 para mayor densidad
+            max_relations_per_concept = 8  # AUMENTADO de 3 para mayor conectividad
             
             logger.info(f"⚡ Optimizando: buscando top-{max_relations_per_concept} relaciones por concepto (umbral: {threshold})")
             
@@ -833,15 +1026,15 @@ class HybridGraphProcessor:
         concept_texts = [f"{c['name']} {c['description']}" for c in all_concepts]
         embeddings = await self._get_embeddings(concept_texts)
 
-        # Calcular similitudes
+        # Calcular similitudes en un hilo separado
         from sklearn.metrics.pairwise import cosine_similarity
         import numpy as np
         
-        similarities = cosine_similarity(embeddings)
+        similarities = await asyncio.to_thread(cosine_similarity, embeddings)
 
         # OPTIMIZACIÓN: Limitar el número de relaciones por concepto
-        threshold = 0.80  # AUMENTADO de 0.75 para mayor precisión
-        max_relations_per_concept = 2  # REDUCIDO de 3 a 2 para mayor selectividad
+        threshold = 0.70  # REDUCIDO de 0.80 para mayor densidad
+        max_relations_per_concept = 5  # AUMENTADO de 2 para mayor conectividad
         
         logger.info(f"⚡ Optimizando: buscando top-{max_relations_per_concept} conceptos similares por concepto (umbral: {threshold})")
         
@@ -895,10 +1088,10 @@ class HybridGraphProcessor:
                 target_embeddings = await self._get_embeddings(target_texts)
 
                 from sklearn.metrics.pairwise import cosine_similarity
-                similarities = cosine_similarity(source_embeddings, target_embeddings)
+                similarities = await asyncio.to_thread(cosine_similarity, source_embeddings, target_embeddings)
 
                 # Umbral más alto para relaciones jerárquicas de calidad
-                threshold = 0.70  # AUMENTADO de 0.6 para mayor precisión
+                threshold = 0.60  # REDUCIDO de 0.70 para mayor densidad
                 for i, source_concept in enumerate(source_concepts):
                     for j, target_concept in enumerate(target_concepts):
                         similarity = similarities[i][j]
@@ -916,33 +1109,95 @@ class HybridGraphProcessor:
                             }))
 
     def _determine_relationship_type(self, concept, entity, similarity):
-        """Determina el tipo de relación más específico basado en los tipos de entidades."""
+        """Determina el tipo de relación más específico basado en los tipos de entidades y palabras clave."""
 
-        concept_type = concept.get("type", "")
-        entity_type = entity.get("type", "")
+        concept_type = concept.get("type", "").upper()
+        entity_type = entity.get("type", "").upper()
+        concept_name = concept.get("name", "").lower()
+        entity_name = entity.get("name", "").lower()
+        
+        # Priorizar etiquetas específicas de GLiNER si están disponibles
+        gliner_label = entity.get("gliner_label", "").lower()
+        concept_gliner_label = concept.get("gliner_label", "").lower()
+        
+        # Combinación de nombres para búsqueda de palabras clave
+        combined_text = f"{concept_name} {entity_name}"
 
-        # Reglas específicas para tipos de relación
-        if entity_type == "PER":
-            if "CONCEPT_TECHNICAL" in concept_type:
-                return "PERSON_EXPERTISE"
+        # 0. Lógica específica para etiquetas de GLiNER (Muy precisa)
+        if gliner_label == "tool" or gliner_label == "software":
+            return "USES_TOOL"
+        if gliner_label == "problem":
+            return "ADDRESSES_PROBLEM"
+        if gliner_label == "solution":
+            return "PROVIDES_SOLUTION"
+        if gliner_label == "skill":
+            return "REQUIRES_SKILL"
+        if gliner_label == "metric":
+            return "MEASURED_BY"
+
+        # 1. Relaciones de PERSONA
+        if entity_type in ["PER", "PERSON"]:
+            if "CONCEPT_TECHNICAL" in concept_type or any(w in concept_name for w in ["experto", "especialista", "conocimiento", "habilidad"]):
+                return "EXPERT_IN"
+            elif any(w in concept_name for w in ["trabaja", "empleado", "puesto", "cargo", "director", "gerente"]):
+                return "WORKS_AS"
+            elif any(w in concept_name for w in ["creó", "desarrolló", "autor", "inventor", "fundador"]):
+                return "CREATED_BY"
+            elif any(w in concept_name for w in ["vive", "reside", "nació", "ubicado"]):
+                return "LIVES_IN"
             elif "CONCEPT_PHRASE" in concept_type:
-                return "PERSON_ASSOCIATED_WITH"
-            else:
-                return "PERSON_RELATED_TO"
+                return "ASSOCIATED_WITH_PERSON"
+            return "RELATED_TO_PERSON"
 
-        elif entity_type == "ORG":
-            if "CONCEPT_TECHNICAL" in concept_type:
-                return "ORG_SPECIALIZES_IN"
-            elif "CONCEPT_COMPOUND" in concept_type:
-                return "ORG_INVOLVED_IN"
-            else:
-                return "ORG_RELATED_TO"
+        # 2. Relaciones de ORGANIZACIÓN
+        elif entity_type in ["ORG", "ORGANIZATION"]:
+            if any(w in concept_name for w in ["sede", "oficina", "ubicación"]):
+                return "HEADQUARTERED_IN"
+            elif any(w in concept_name for w in ["producto", "servicio", "ofrece", "vende"]):
+                return "PROVIDES"
+            elif any(w in concept_name for w in ["miembro", "socio", "afiliado", "pertenece"]):
+                return "MEMBER_OF"
+            elif "CONCEPT_TECHNICAL" in concept_type:
+                return "USES_TECHNOLOGY"
+            return "ASSOCIATED_WITH_ORG"
 
-        elif entity_type == "LOC":
-            return "LOCATION_CONTEXT"
+        # 3. Relaciones de UBICACIÓN / GEOPOLÍTICA
+        elif entity_type in ["LOC", "LOCATION", "GPE"]:
+            if any(w in concept_name for w in ["capital", "ciudad", "región"]):
+                return "IS_CITY_OF"
+            elif any(w in concept_name for w in ["clima", "geografía", "terreno"]):
+                return "GEOGRAPHY_OF"
+            return "LOCATED_IN"
 
-        else:
-            return "SEMANTIC_ASSOCIATION"
+        # 4. Relaciones TÉCNICAS / CONCEPTUALES (NUEVO)
+        elif "CONCEPT" in concept_type and "CONCEPT" in entity_type:
+            if any(w in combined_text for w in ["causa", "genera", "produce", "provoca"]):
+                return "CAUSES"
+            elif any(w in combined_text for w in ["influye", "afecta", "impacta"]):
+                return "INFLUENCES"
+            elif any(w in combined_text for w in ["requiere", "necesita", "depende"]):
+                return "DEPENDS_ON"
+            elif any(w in combined_text for w in ["ejemplo", "instancia", "como"]):
+                return "INSTANCE_OF"
+            elif any(w in combined_text for w in ["parte", "componente", "segmento"]):
+                return "PART_OF"
+            elif any(w in combined_text for w in ["mejora", "optimiza", "potencia"]):
+                return "ENHANCES"
+            return "CONCEPTUAL_LINK"
+
+        # 5. Relaciones de PRODUCTO / EVENTO
+        elif entity_type in ["PRODUCT", "EVENT"]:
+            if entity_type == "EVENT":
+                return "OCCURS_DURING"
+            return "RELATED_TO_PRODUCT"
+
+        # 6. Fallback genérico con detección de dirección
+        if any(w in concept_name for w in ["parte de", "pertenece a", "contenido en"]):
+            return "PART_OF"
+        if any(w in concept_name for w in ["contiene", "incluye", "abarca"]):
+            return "CONTAINS"
+            
+        return "SEMANTIC_ASSOCIATION"
     
     async def _extract_cooccurrence_relationships(self, documents: List[Dict[str, Any]], entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Extrae relaciones por co-ocurrencia en el texto."""
@@ -1102,6 +1357,7 @@ class HybridGraphProcessor:
             overlap = 200       # Solapamiento de 200 caracteres
 
             for start in range(0, len(content), window_size - overlap):
+                await asyncio.sleep(0) # Ceder control en cada ventana
                 window = content[start:start + window_size]
 
                 # Encontrar entidades en esta ventana
@@ -1151,6 +1407,133 @@ class HybridGraphProcessor:
         logger.info(f"✅ Co-ocurrencia optimizada completada: {len(relationships)} relaciones")
         return relationships
 
+    async def _enrich_relationships_with_llm(self, documents: List[Dict[str, Any]], candidate_rels: List[Dict[str, Any]], entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Enriquece las relaciones candidatas usando un LLM para determinar el tipo y descripción exactos.
+        
+        Args:
+            documents: Lista de documentos originales para extraer contexto
+            candidate_rels: Relaciones potenciales (ej. por co-ocurrencia)
+            entities: Lista de todas las entidades para obtener metadatos
+            
+        Returns:
+            Lista de relaciones enriquecidas y validadas por el LLM
+        """
+        if not candidate_rels:
+            return []
+            
+        llm_to_use = self.fast_llm or self.llm
+        enriched_relationships = []
+        
+        # Crear mapa de entidades para acceso rápido
+        entity_map = {ent["id"]: ent for ent in entities}
+        
+        # Agrupar candidatos por documento para optimizar contexto
+        rels_by_doc = {}
+        for rel in candidate_rels:
+            doc_title = rel.get("source_document")
+            if doc_title not in rels_by_doc:
+                rels_by_doc[doc_title] = []
+            rels_by_doc[doc_title].append(rel)
+            
+        # Mapa de contenido de documentos
+        doc_content_map = {doc.get("title"): doc.get("content", "") for doc in documents}
+        
+        # Procesar por lotes de documentos
+        for doc_title, rels in rels_by_doc.items():
+            content = doc_content_map.get(doc_title, "")
+            if not content:
+                continue
+                
+            # Limitar a las top 15 relaciones por documento para no saturar el prompt
+            # Priorizar por confianza si está disponible
+            sorted_rels = sorted(rels, key=lambda x: x.get("confidence", 0), reverse=True)[:15]
+            
+            # Procesar en sub-lotes de 5 pares de entidades para máxima precisión
+            batch_size = 5
+            for i in range(0, len(sorted_rels), batch_size):
+                batch = sorted_rels[i:i + batch_size]
+                
+                # Preparar el prompt para el lote
+                pairs_info = []
+                for rel in batch:
+                    ent_a = entity_map.get(rel["source_entity_id"])
+                    ent_b = entity_map.get(rel["target_entity_id"])
+                    if ent_a and ent_b:
+                        pairs_info.append({
+                            "id": rel["id"],
+                            "a": ent_a["name"],
+                            "a_type": ent_a["type"],
+                            "b": ent_b["name"],
+                            "b_type": ent_b["type"]
+                        })
+                
+                if not pairs_info:
+                    continue
+                
+                # Intentar extraer un fragmento de texto relevante (ventana alrededor de las entidades)
+                # Para simplificar, tomamos los primeros 3000 caracteres del documento si es largo
+                context_snippet = content[:3000] 
+                
+                from knowledge_graph.prompts_graph import RELATIONSHIP_EXTRACTION_PROMPT
+
+                prompt = RELATIONSHIP_EXTRACTION_PROMPT.format(
+                    context=context_snippet,
+                    pairs_info=json.dumps(pairs_info, indent=2, ensure_ascii=False)
+                )
+
+                try:
+                    logger.info(f"🧠 Consultando LLM para {len(pairs_info)} relaciones en '{doc_title}'")
+                    response = await llm_to_use.ainvoke(prompt)
+                    response_text = response.content if hasattr(response, 'content') else str(response)
+                    
+                    # Limpiar respuesta si es necesario (quitar markdown blocks)
+                    if "```json" in response_text:
+                        response_text = response_text.split("```json")[1].split("```")[0].strip()
+                    elif "```" in response_text:
+                        response_text = response_text.split("```")[1].split("```")[0].strip()
+                    
+                    data = json.loads(response_text)
+                    llm_rels = data.get("relationships", [])
+                    
+                    for llm_rel in llm_rels:
+                        # Buscar la relación original en el batch usando el 'id'
+                        orig_rel = next((r for r in batch if r["id"] == llm_rel["id"]), None)
+                        
+                        if orig_rel:
+                            ent_a = entity_map.get(orig_rel["source_entity_id"])
+                            ent_b = entity_map.get(orig_rel["target_entity_id"])
+                            
+                            # Asegurarse de que el tipo no sea "NO_RELATION"
+                            if llm_rel.get("type") == "NO_RELATION":
+                                logger.debug(f"ℹ️ LLM no encontró relación para {ent_a['name']} y {ent_b['name']}")
+                                continue
+
+                            direction = llm_rel.get("direction", "a->b")
+                            source_id = orig_rel["source_entity_id"] if direction == "a->b" else orig_rel["target_entity_id"]
+                            target_id = orig_rel["target_entity_id"] if direction == "a->b" else orig_rel["source_entity_id"]
+                            
+                            enriched_rel = self._add_tenant_ids({
+                                "id": f"llm_rel_{len(enriched_relationships)}",
+                                "source_entity_id": source_id,
+                                "target_entity_id": target_id,
+                                "type": llm_rel.get("type", "RELATED_TO"),
+                                "relationship_type": llm_rel.get("type", "RELATED_TO"),
+                                "description": llm_rel.get("description", ""),
+                                "confidence": float(llm_rel.get("confidence", 0.7)),
+                                "extraction_method": "llm_enriched_cooccurrence",
+                                "source_document": doc_title
+                            })
+                            enriched_relationships.append(enriched_rel)
+                        else:
+                            logger.warning(f"⚠️ Relación del LLM con ID {llm_rel.get('id')} no encontrada en el batch original. Ignorando.")
+                            
+                except Exception as e:
+                    logger.error(f"❌ Error enriqueciendo relaciones con LLM: {e}")
+                    continue
+                    
+        return enriched_relationships
+
     async def _extract_semantic_concepts(self, spacy_doc, doc, doc_index, entities, entity_set):
         """
         Extrae conceptos semánticos más ricos que simples palabras.
@@ -1174,13 +1557,13 @@ class HybridGraphProcessor:
             chunk_text = chunk.text.strip()
             chunk_lower = chunk_text.lower()
             
-            # Validaciones más estrictas
-            if (len(chunk_text) < 8 or  # Mínimo 8 caracteres para frases
+            # Validaciones RELAJADAS para mayor cobertura
+            if (len(chunk_text) < 5 or  # Reducido de 8 a 5 caracteres para frases nominales
                 len(chunk_text) > 100 or  # Máximo 100
                 chunk.root.is_stop or  # Raíz no debe ser stop word
                 chunk.root.pos_ not in ["NOUN", "PROPN"] or  # Solo sustantivos
                 chunk_lower in stop_words_extended or  # No palabras vacías
-                chunk_text.count(' ') > 5):  # Máximo 5 palabras
+                chunk_text.count(' ') > 5):  # Máximo 6 palabras (aumentado de 5)
                 continue
             
             # Validar que tenga contenido semántico real
@@ -1226,7 +1609,7 @@ class HybridGraphProcessor:
                 concept_key = f"{compound_lower}_compound"
 
                 if (concept_key not in entity_set and
-                    len(compound_concept) > 8 and  # Mínimo 8 caracteres
+                    len(compound_concept) > 5 and  # Reducido de 8 a 5 caracteres
                     len(compound_concept) < 50):
 
                     entity_set.add(concept_key)
@@ -1294,7 +1677,7 @@ class HybridGraphProcessor:
                 concept_key = f"{expression_lower}_expression"
 
                 if (concept_key not in entity_set and
-                    len(expression) > 10 and  # Mínimo 10 caracteres
+                    len(expression) > 6 and  # Reducido de 10 a 6 caracteres
                     len(expression) < 60):
 
                     entity_set.add(concept_key)

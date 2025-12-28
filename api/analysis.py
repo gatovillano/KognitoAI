@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends, status, Form, BackgroundT
 from pydantic import BaseModel
 from sqlalchemy import select, desc, or_, and_, update, func, String, text
 
-from core.database import SessionLocal, AnalysisTask, ProactiveInsight, MindmapTask
+from core.database import SessionLocal, AnalysisTask, ProactiveInsight, MindmapTask, GapDevelopmentAnalysis
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.memory_manager import list_user_documents, get_full_document_content
@@ -36,12 +36,12 @@ from typing import AsyncGenerator
 
 # get_db eliminado en favor de core.dependencies.get_db_session
 
-async def list_all_user_documents(account_id: str, topic: Optional[str] = None):
+async def list_all_user_documents(account_id: str, topic: Optional[str] = None, workspace_id: Optional[str] = None):
     """
     Combina documentos regulares y documentos de GitHub para un usuario.
     """
-    # Obtener documentos regulares, pasando el topic para filtrar en la BD
-    regular_docs = await list_user_documents(account_id=account_id, topic=topic)
+    # Obtener documentos regulares, pasando el topic y workspace_id para filtrar en la BD
+    regular_docs = await list_user_documents(account_id=account_id, topic=topic, workspace_id=workspace_id)
     
     # Obtener documentos de GitHub
     async with DBSession(SessionLocal) as db: # type: ignore
@@ -101,7 +101,7 @@ async def get_saved_analyses_endpoint(
         
         # 1. Obtenemos los nombres de los archivos que pertenecen a este topic.
         #    (Usamos la función combinada que incluye documentos de GitHub)
-        all_user_docs = await list_all_user_documents(current_account_id, topic=req.topic)
+        all_user_docs = await list_all_user_documents(current_account_id, topic=req.topic, workspace_id=req.workspace_id)
         files_in_topic = [
             doc['file_name'] for doc in all_user_docs if doc.get('topic') == req.topic
         ]
@@ -173,7 +173,7 @@ async def get_saved_analyses_endpoint(
 class DeleteAnalysisRequest(BaseModel):
     task_id: str
 
-@router.post("/delete-analysis", summary="Eliminar un análisis guardado")
+@router.delete("/delete-analysis", summary="Eliminar un análisis guardado")
 async def delete_analysis_endpoint(
     req: DeleteAnalysisRequest,
     current_account_id: str = Depends(get_current_account_id),
@@ -224,6 +224,7 @@ async def get_dashboard_insights(
                 WHEN analysis_type = 'proactive_insight_manual' THEN 'insight'
                 WHEN analysis_type = 'custom' THEN 'custom'
                 WHEN analysis_type = 'knowledge_graph_analysis' THEN 'knowledge_graph'
+                WHEN analysis_type = 'gap_development' THEN 'gap_development'
                 ELSE 'document'
             END as frontend_analysis_type,
             COUNT(*) as total,
@@ -314,46 +315,90 @@ async def get_dashboard_insights(
 
     logger.info(f"DEBUG: Total proactive insights in DB: {total_proactive_insights}")
 
-    # 3. Obtener el último análisis semántico para brechas de conocimiento y preguntas
-    # Primero, intentamos encontrar un análisis semántico que contenga explícitamente las brechas o preguntas
-    semantic_analysis_with_gaps_or_questions_stmt = select(AnalysisTask.result_payload).where(
+    # 3. Obtener brechas de conocimiento y preguntas de exploración de análisis de documentos y colecciones
+    # Buscar análisis de documentos y colecciones que contengan brechas de conocimiento o preguntas
+    analysis_with_gaps_or_questions_stmt = select(AnalysisTask.result_payload, AnalysisTask.file_name, AnalysisTask.created_at).where(
         AnalysisTask.account_id == account_uuid,
         AnalysisTask.status == "completed",
         or_(
             AnalysisTask.analysis_type == "semantic",
-            AnalysisTask.analysis_type == "semantic_summary"
+            AnalysisTask.analysis_type == "semantic_summary",
+            AnalysisTask.analysis_type == "document",
+            AnalysisTask.analysis_type == "collection",
+            AnalysisTask.analysis_type == "single_note",
+            AnalysisTask.analysis_type == "notes_collection"
         ),
         # Filtramos por aquellos que tienen las claves específicas en el payload
         or_(
             func.jsonb_exists(AnalysisTask.result_payload, "brechas_conocimiento"),
             func.jsonb_exists(AnalysisTask.result_payload, "emergent_knowledge_gaps"),
             func.jsonb_exists(AnalysisTask.result_payload, "preguntas_exploracion"),
-            func.jsonb_exists(AnalysisTask.result_payload, "exploration_questions")
+            func.jsonb_exists(AnalysisTask.result_payload, "exploration_questions"),
+            func.jsonb_exists(AnalysisTask.result_payload, "knowledge_gaps")
         )
-    ).order_by(desc(AnalysisTask.created_at)).limit(1)
+    ).order_by(desc(AnalysisTask.created_at)).limit(10)  # Obtener hasta 10 análisis
 
-    semantic_analysis_with_gaps_or_questions_result = await db.execute(semantic_analysis_with_gaps_or_questions_stmt)
-    semantic_payload = semantic_analysis_with_gaps_or_questions_result.scalars().first()
-    logger.info(f"Semantic Payload (with gaps/questions search): {semantic_payload}")
+    analysis_with_gaps_or_questions_result = await db.execute(analysis_with_gaps_or_questions_stmt)
+    semantic_results = analysis_with_gaps_or_questions_result.fetchall()
+    logger.info(f"Analysis Payload (with gaps/questions search): Found {len(semantic_results)} analyses with gaps/questions")
 
     emergent_knowledge_gaps = []
     exploration_questions = []
-    if semantic_payload:
-        # Buscar brechas de conocimiento
-        if "brechas_conocimiento" in semantic_payload:
-            emergent_knowledge_gaps = semantic_payload["brechas_conocimiento"]
-        elif "emergent_knowledge_gaps" in semantic_payload:
-            emergent_knowledge_gaps = semantic_payload["emergent_knowledge_gaps"]
+    semantic_payload = None # Inicializar para evitar UnboundLocalError
+    
+    # Combinar brechas de todos los análisis encontrados
+    for result in semantic_results:
+        semantic_payload = result[0]  # result_payload
+        file_name = result[1]  # file_name
+        created_at = result[2]  # created_at
         
-        # Buscar preguntas de exploración
-        if "preguntas_exploracion" in semantic_payload:
-            exploration_questions = semantic_payload["preguntas_exploracion"]
-        elif "exploration_questions" in semantic_payload:
-            exploration_questions = semantic_payload["exploration_questions"]
-        elif "knowledge_gaps" in semantic_payload: # Para compatibilidad con SingleTextAnalysis
-            exploration_questions = semantic_payload["knowledge_gaps"]
-    logger.info(f"Emergent Knowledge Gaps (backend): {emergent_knowledge_gaps}")
-    logger.info(f"Exploration Questions (backend): {exploration_questions}")
+        if semantic_payload:
+            # 1. Extraer Brechas de Conocimiento (Gaps)
+            gaps_source = None
+            if "brechas_conocimiento" in semantic_payload:
+                gaps_source = semantic_payload["brechas_conocimiento"]
+            elif "emergent_knowledge_gaps" in semantic_payload:
+                gaps_source = semantic_payload["emergent_knowledge_gaps"]
+            elif "knowledge_gaps" in semantic_payload:
+                gaps_source = semantic_payload["knowledge_gaps"]
+            
+            if gaps_source and isinstance(gaps_source, list):
+                for gap in gaps_source:
+                    if isinstance(gap, dict):
+                        # Intentar obtener el texto de la brecha de varias posibles claves
+                        gap_text = gap.get("question") or gap.get("gap_title") or gap.get("explanation")
+                        if gap_text:
+                            emergent_knowledge_gaps.append(gap_text)
+                    elif isinstance(gap, str):
+                        emergent_knowledge_gaps.append(gap)
+
+            # 2. Extraer Preguntas de Exploración
+            questions_source = None
+            if "preguntas_exploracion" in semantic_payload:
+                questions_source = semantic_payload["preguntas_exploracion"]
+            elif "exploration_questions" in semantic_payload:
+                questions_source = semantic_payload["exploration_questions"]
+            
+            if questions_source and isinstance(questions_source, list):
+                for q in questions_source:
+                    if isinstance(q, dict):
+                        q_text = q.get("question") or q.get("text")
+                        if q_text:
+                            exploration_questions.append(q_text)
+                    elif isinstance(q, str):
+                        exploration_questions.append(q)
+    
+    # Limitar a las 10 brechas más recientes para evitar sobrecarga
+    # Usar shuffle aleatorio para mostrar diversidad de brechas
+    import random
+    random.shuffle(emergent_knowledge_gaps)
+    emergent_knowledge_gaps = emergent_knowledge_gaps[:10]
+    
+    random.shuffle(exploration_questions)
+    exploration_questions = exploration_questions[:10]
+    
+    logger.info(f"Emergent Knowledge Gaps (backend): Found {len(emergent_knowledge_gaps)} gaps from {len(semantic_results)} analyses")
+    logger.info(f"Exploration Questions (backend): Found {len(exploration_questions)} questions from {len(semantic_results)} analyses")
 
     # Si no encontramos un payload con brechas/preguntas, intentamos obtener el último análisis semántico general
     # Esto es para asegurar que los key_topics se sigan mostrando si no hay brechas/preguntas específicas
@@ -362,6 +407,8 @@ async def get_dashboard_insights(
             AnalysisTask.account_id == account_uuid,
             AnalysisTask.status == "completed",
             or_(
+                AnalysisTask.analysis_type == "document",
+                AnalysisTask.analysis_type == "collection",
                 AnalysisTask.analysis_type == "semantic",
                 AnalysisTask.analysis_type == "semantic_summary"
             ),
@@ -667,7 +714,7 @@ class AnalyzeCollectionRequest(BaseModel):
     topic: str
     workspace_id: Optional[str] = None
 
-async def run_collection_analysis_and_save(task_id: str, account_id: str, topic: str):
+async def run_collection_analysis_and_save(task_id: str, account_id: str, topic: str, workspace_id: Optional[str] = None):
     """
     Obtiene todos los documentos de una colección, los analiza y guarda el resultado.
     """
@@ -677,13 +724,13 @@ async def run_collection_analysis_and_save(task_id: str, account_id: str, topic:
             await db_session.execute(update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing"))
             await db_session.commit()
             
-            logger.info(f"Iniciando análisis de colección para tarea {task_id} (tema: {topic})")
+            logger.info(f"Iniciando análisis de colección para tarea {task_id} (tema: {topic}, workspace: {workspace_id})")
 
             # 1. Obtener todos los documentos de la colección
             all_docs_in_topic = []
             # (Aquí usamos la función combinada que incluye documentos de GitHub,
-            # pasando el 'topic' directamente para que filtre de forma eficiente)
-            filtered_doc_list = await list_all_user_documents(account_id, topic=topic)
+            # pasando el 'topic' y 'workspace_id' directamente para que filtre de forma eficiente)
+            filtered_doc_list = await list_all_user_documents(account_id, topic=topic, workspace_id=workspace_id)
             
             for doc_meta in filtered_doc_list:
                 content = await get_full_document_content(account_id, doc_meta['file_name'])
@@ -745,7 +792,7 @@ async def start_collection_analysis_endpoint(
     await db.commit()
     await db.refresh(new_task)
     
-    background_tasks.add_task(run_collection_analysis_and_save, str(new_task.id), current_account_id, req.topic)
+    background_tasks.add_task(run_collection_analysis_and_save, str(new_task.id), current_account_id, req.topic, req.workspace_id)
     
     return {"task_id": str(new_task.id)}
 
@@ -1977,6 +2024,13 @@ async def get_all_analysis_endpoint(
                     summary = "Análisis personalizado sin contenido"
                 elif 'formatted_result' in payload_dict:
                     summary = str(payload_dict['formatted_result'])[:200] + "..."
+                elif (analysis_type == "gap_development" or task_analysis_type == "gap_development") and 'report' in payload_dict:
+                    report_obj = payload_dict['report']
+                    if isinstance(report_obj, dict) and 'summary' in report_obj:
+                        summary = report_obj['summary']
+                    else:
+                        report_content = str(report_obj)
+                        summary = report_content[:200] + "..." if len(report_content) > 200 else report_content
  
                 # Obtener herramienta usada desde los metadatos o inferir basándose en la estructura
                 if 'tool_used' in payload_dict:
@@ -2136,7 +2190,44 @@ async def get_all_analysis_endpoint(
                 }
             })
 
-    # 4. Ordenar por fecha de actualización y aplicar paginación
+    # 4. Obtener GapDevelopmentAnalysis
+    if not req.analysis_type or req.analysis_type == 'gap_development':
+        gap_stmt = select(GapDevelopmentAnalysis).where(
+            GapDevelopmentAnalysis.account_id == account_uuid,
+            GapDevelopmentAnalysis.status == "completed"
+        ).order_by(GapDevelopmentAnalysis.updated_at.desc())
+
+        if req.search_query:
+            gap_stmt = gap_stmt.where(
+                or_(
+                    func.cast(GapDevelopmentAnalysis.report, String).ilike(f"%{req.search_query}%")
+                )
+            )
+
+        gap_results = await db.execute(gap_stmt)
+        gap_tasks = gap_results.scalars().all()
+
+        for task in gap_tasks:
+            report_obj = task.report or {}
+            summary = "Sin resumen disponible"
+            if isinstance(report_obj, dict):
+                summary = report_obj.get("summary", "Informe de investigación profunda")
+            else:
+                summary = str(report_obj)[:200]
+
+            all_analysis.append({
+                "id": str(task.id),
+                "type": "gap_development",
+                "title": f"Desarrollo de Brecha",
+                "summary": summary,
+                "created_at": task.created_at.isoformat(),
+                "updated_at": task.updated_at.isoformat(),
+                "source_table": "gap_development_analysis",
+                "tool_used": "deep_researcher.py",
+                "full_data": {"report": task.report}
+            })
+
+    # 5. Ordenar por fecha de actualización y aplicar paginación
     all_analysis.sort(key=lambda x: x['updated_at'], reverse=True)
 
     # Aplicar paginación
@@ -2152,13 +2243,93 @@ async def get_all_analysis_endpoint(
         "has_more": end_idx < len(all_analysis)
     }
 
+class GapDevelopmentRequest(BaseModel):
+    query: str
+    workspace_id: Optional[str] = None
+
+@router.post("/start-gap-development", status_code=202, summary="Iniciar desarrollo de brecha de conocimiento")
+async def start_gap_development_endpoint(
+    req: GapDevelopmentRequest,
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Inicia una investigación profunda (deep research) para una brecha de conocimiento o pregunta exploratoria.
+    """
+    new_task = AnalysisTask(
+        account_id=uuid.UUID(current_account_id),
+        file_name=f"Desarrollo de Brecha: {req.query[:50]}...",
+        status="pending",
+        analysis_type="gap_development"
+    )
+    db.add(new_task)
+    await db.commit()
+    await db.refresh(new_task)
+
+    background_tasks.add_task(
+        run_gap_development_and_save,
+        str(new_task.id),
+        current_account_id,
+        req.query,
+        req.workspace_id
+    )
+
+    return {"task_id": str(new_task.id)}
+
+
+async def run_gap_development_and_save(task_id: str, account_id: str, query: str, workspace_id: Optional[str]):
+    """
+    Ejecuta el deep researcher y guarda el resultado en la tarea de análisis.
+    """
+    async with DBSession(SessionLocal) as db_session: # type: ignore
+        try:
+            await db_session.execute(update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing"))
+            await db_session.commit()
+            
+            logger.info(f"Iniciando desarrollo de brecha para tarea {task_id}...")
+            
+            from api.deep_research import run_deep_research, DeepResearchRequest
+            
+            research_request = DeepResearchRequest(query=query, account_id=account_id)
+            research_result = await run_deep_research(research_request)
+            
+            if research_result.get("status") == "success":
+                result_payload = {
+                    "report": research_result.get("report"),
+                    "tool_used": "deep_researcher.py",
+                    "analysis_metadata": {
+                        "tool_used": "deep_researcher.py",
+                        "analysis_type": "gap_development",
+                        "query": query,
+                        "workspace_id": workspace_id,
+                        "created_at": datetime.now().isoformat()
+                    }
+                }
+                stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                    status="completed", result_payload=result_payload)
+                await db_session.execute(stmt_completed)
+            else:
+                raise Exception(research_result.get("detail", "Error desconocido en deep research"))
+
+            await db_session.commit()
+            logger.info(f"Desarrollo de brecha para tarea {task_id} completado.")
+
+        except Exception as e:
+            logger.error(f"Fallo en tarea de desarrollo de brecha {task_id}: {e}", exc_info=True)
+            stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="failed", error_message=str(e))
+            await db_session.execute(stmt_failed)
+            await db_session.commit()
+
+
 class GetRepoAnalysesRequest(BaseModel):
     repo_name: str
 
 @router.post("/get-repo-analyses")
 async def get_repo_analyses_endpoint(
     req: GetRepoAnalysesRequest,
-    current_account_id: str = Depends(get_current_account_id), 
+    current_account_id: str = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
