@@ -39,7 +39,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain.agents.output_parsers.tools import ToolsAgentOutputParser
 from langchain.agents.format_scratchpad.tools import format_to_tool_messages
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda, RunnableConfig
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.agents import AgentAction, AgentFinish # Importar AgentAction y AgentFinish
@@ -60,6 +60,7 @@ from core.prompts import SUMMARIZATION_PROMPT, THREAD_TITLE_PROMPT
 from core.enhanced_memory_manager import EnhancedMemoryManager
 from knowledge_graph.graph_database import GraphDB
 from knowledge_graph.graph_reasoning_node import GraphReasoningNode # NUEVO
+from tools.deep_research_tool import DeepResearchTool # Importar DeepResearchTool
 
 # --- Claves para estado temporal ---
 from utils.image_generation import GENERATED_IMAGE_KEY
@@ -913,7 +914,7 @@ async def tool_node(state: AgentState):
         await send_personal_message(target_account_id, {
             "type": "tool_start",
             "taskId": state.get("task_id"),
-            "toolName": tool_name,
+            "tool_name": tool_name,
         }, connection_type=conn_type)
 
         # Use get_tool_by_name from the new utils location
@@ -957,7 +958,7 @@ async def tool_node(state: AgentState):
             await send_personal_message(target_account_id, {
                 "type": "tool_end",
                 "taskId": state.get("task_id"),
-                "toolName": tool_name,
+                "tool_name": tool_name,
                 "status": "error",
                 "result": f"Error: Herramienta '{tool_name}' no encontrada.",
                 "error": True,
@@ -965,13 +966,31 @@ async def tool_node(state: AgentState):
             }, connection_type=conn_type)
             continue
         
-        # --- INYECCIÓN DE ATRIBUTOS DE CONTEXTO ---
-        selected_tool.account_id = state['account_id']  # type: ignore
-        selected_tool.workspace_id = state.get('workspace_id')  # type: ignore
-        selected_tool.telegram_id = state.get('telegram_id')  # type: ignore
 
-        if hasattr(selected_tool, 'thread_id'):
-            selected_tool.thread_id = state['messages'][-1].additional_kwargs.get('thread_id')  # type: ignore
+
+        # --- INYECCIÓN DE ATRIBUTOS DE CONTEXTO Y CONFIGURACIÓN ---
+        # Crear una RunnableConfig para pasar el contexto y el progress_callback
+        async def progress_callback(progress: int, message: str, *args, **kwargs):
+            await send_personal_message(target_account_id, {
+                "type": "progress",
+                "taskId": state.get("task_id"),
+                "progress": progress,
+                "message": message,
+                "thread_id": state.get("thread_id")
+            }, connection_type=conn_type)
+
+        run_config = RunnableConfig(
+            configurable={
+                "account_id": state['account_id'],
+                "workspace_id": state.get('workspace_id'),
+                "telegram_id": state.get('telegram_id'),
+                "thread_id": state.get('thread_id'),
+                "task_id": state.get('task_id'),
+                "progress_callback": progress_callback,
+                "base_progress": 0, # Se puede ajustar si se necesita un progreso base diferente
+                "max_sub_progress": 100 # Se puede ajustar si se necesita un rango de progreso diferente
+            }
+        )
         # --- FIN INYECCIÓN ---
 
         # --- TRACKING DE ERRORES Y PREVENCIÓN DE BUCLES ---
@@ -991,7 +1010,7 @@ async def tool_node(state: AgentState):
             await send_personal_message(target_account_id, {
                 "type": "tool_end",
                 "taskId": state.get("task_id"),
-                "toolName": tool_name,
+                "tool_name": tool_name,
                 "status": "error",
                 "result": stop_message,
                 "error": True,
@@ -1021,7 +1040,7 @@ Por favor, intenta de nuevo especificando correctamente la herramienta."""
             await send_personal_message(target_account_id, {
                 "type": "tool_end",
                 "taskId": state.get("task_id"),
-                "toolName": tool_name or "unknown",
+                "tool_name": tool_name or "unknown",
                 "status": "error",
                 "result": error_message,
                 "error": True,
@@ -1079,7 +1098,7 @@ Por favor, intenta de nuevo especificando correctamente la herramienta."""
                     await send_personal_message(target_account_id, {
                         "type": "tool_end",
                         "taskId": state.get("task_id"),
-                        "toolName": tool_name,
+                        "tool_name": tool_name,
                         "status": "error",
                         "result": error_message,
                         "error": True,
@@ -1093,8 +1112,14 @@ Por favor, intenta de nuevo especificando correctamente la herramienta."""
 
         try:
             logger.info(f"Ejecutando herramienta '{tool_name}' con argumentos: {tool_args}")
+            
+            # Inyectar progress_callback si la herramienta es deep_research
+            if tool_name == "deep_research":
+                selected_tool.progress_callback = progress_callback
+                logger.info(f"Inyectado progress_callback en herramienta '{tool_name}'")
+
             # La salida de la herramienta ahora siempre es un dict (model_dump de ToolOutputWithSources)
-            output_dump = await selected_tool.ainvoke(tool_args)
+            output_dump = await selected_tool.ainvoke(tool_args, config=run_config)
             logger.info(f"Resultado de la herramienta '{tool_name}': {output_dump}")
             
             # Asegurar que tool_output siempre sea un objeto ToolOutputWithSources válido
@@ -1222,7 +1247,7 @@ Por favor, intenta de nuevo especificando correctamente la herramienta."""
             await send_personal_message(target_account_id, {
                 "type": "tool_end",
                 "taskId": state.get("task_id"),
-                "toolName": tool_name,
+                "tool_name": tool_name,
                 "status": "end",
                 "result": tool_content_for_llm,
                 "sources": tool_sources_to_add, # Enviar solo las fuentes generadas por esta herramienta
@@ -1251,7 +1276,7 @@ Por favor, intenta de nuevo especificando correctamente la herramienta."""
             await send_personal_message(target_account_id, {
                 "type": "tool_end",
                 "taskId": state.get("task_id"),
-                "toolName": tool_name,
+                "tool_name": tool_name,
                 "status": "error",
                 "result": error_message,
                 "error": True,
@@ -1276,7 +1301,7 @@ Por favor, intenta de nuevo especificando correctamente la herramienta."""
             await send_personal_message(target_account_id, {
                 "type": "tool_end",
                 "taskId": state.get("task_id"),
-                "toolName": tool_name,
+                "tool_name": tool_name,
                 "status": "error",
                 "result": f"Error: {e}",
                 "error": True,

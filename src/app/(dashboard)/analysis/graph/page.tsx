@@ -1,4 +1,6 @@
 'use client';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useCallback, useRef } from 'react';
@@ -6,10 +8,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Info, RefreshCcw, Search, ExternalLink, Brain, Network, GitGraph, Database, ArrowLeft, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Loader2, Info, RefreshCcw, Search, ExternalLink, Brain, Network, GitGraph, Database, ArrowLeft, ChevronLeft, ChevronRight, X, Bookmark } from 'lucide-react';
 import { toast } from 'sonner';
 import dynamic from 'next/dynamic';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription as SheetDescriptionComp } from '@/components/ui/sheet';
 import { Label } from '@/components/ui/label';
 import apiClient from '@/lib/api';
 import { GraphFilters } from '@/components/KnowledgeGraph/GraphFilters';
@@ -40,7 +43,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
   const [processingStatus, setProcessingStatus] = useState<string | null>(null);
   const [availableDatasets, setAvailableDatasets] = useState<Array<{ name: string, node_count: number }>>([]);
   const [isInitialLoad, setIsInitialLoad] = useState(true); // Track initial load
-  const [filteredNodeId, setFilteredNodeId] = useState<string | number | null>(null); // Estado para filtro por nodo
+  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string | number>>(new Set()); // Estado para nodos expandidos (acumulativo)
 
   const loadAvailableDatasets = useCallback(async () => {
     try {
@@ -94,8 +97,8 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
           // Si no hay filtros seleccionados por el usuario, usar tipos por defecto según el modo
           if (nodeTypesToFilter.length === 0) {
             if (processingMode === 'conceptual') {
-              // En modo conceptual, mostrar solo nodos conceptuales por defecto
-              nodeTypesToFilter = ['CONCEPTUAL_QUOTE', 'IDEA_PROFILE'];
+              // En modo conceptual, mostrar solo nodos conceptuales y documentos por defecto
+              nodeTypesToFilter = ['CONCEPTUAL_QUOTE', 'IDEA_PROFILE', 'DOCUMENT'];
             }
             // En modo híbrido, no hay tipos por defecto (mostrar todos)
           }
@@ -125,7 +128,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     } finally {
       setIsLoading(false);
     }
-  }, [maxNodes, maxHops, selectedDataset, filters, processingMode, originalGraphData, isInitialLoad, filteredNodeId]);
+  }, [maxNodes, maxHops, selectedDataset, filters, processingMode, originalGraphData, isInitialLoad, expandedNodeIds]);
 
   // Función para aplicar filtros en el cliente sin recargar datos
   const applyClientFilters = useCallback(() => {
@@ -135,74 +138,88 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     }
 
     console.log("🔍 applyClientFilters: Iniciando con", originalGraphData.nodes.length, "nodos y", originalGraphData.edges.length, "edges");
-    console.log("🔍 filteredNodeId:", filteredNodeId);
+    console.log("🔍 expandedNodeIds:", Array.from(expandedNodeIds));
 
     let filteredNodes = [...originalGraphData.nodes];
     let filteredEdges = [...originalGraphData.edges];
 
-    // Primero aplicar filtro por nodo (doble click) si está activo
-    if (filteredNodeId !== null) {
-      console.log("🔍 Aplicando filtro por nodo:", filteredNodeId);
+    // Primero aplicar filtro por nodos expandidos (doble click) si hay alguno
+    if (expandedNodeIds.size > 0) {
+      console.log("🔍 Aplicando filtro por nodos expandidos:", Array.from(expandedNodeIds));
 
-      const connectedEdges = originalGraphData.edges.filter(edge =>
-        edge.from === filteredNodeId || edge.to === filteredNodeId
-      );
+      const visibleNodeIds = new Set<string | number>(expandedNodeIds);
+      const visibleEdges: any[] = [];
 
-      console.log("🔍 Edges conectadas encontradas:", connectedEdges.length);
-
-      const connectedNodeIds = new Set<string | number>();
-      connectedNodeIds.add(filteredNodeId);
-      connectedEdges.forEach(edge => {
-        connectedNodeIds.add(edge.from);
-        connectedNodeIds.add(edge.to);
+      // Encontrar todas las relaciones conectadas a los nodos expandidos
+      originalGraphData.edges.forEach(edge => {
+        if (expandedNodeIds.has(edge.from) || expandedNodeIds.has(edge.to)) {
+          visibleEdges.push(edge);
+          visibleNodeIds.add(edge.from);
+          visibleNodeIds.add(edge.to);
+        }
       });
 
-      console.log("🔍 Nodos conectados:", connectedNodeIds.size);
+      filteredNodes = originalGraphData.nodes.filter(node => visibleNodeIds.has(node.id));
+      filteredEdges = visibleEdges;
 
-      filteredNodes = originalGraphData.nodes.filter(node =>
-        connectedNodeIds.has(node.id)
-      );
-      filteredEdges = connectedEdges;
-
-      console.log("🔍 Después del filtro por nodo:", filteredNodes.length, "nodos y", filteredEdges.length, "edges");
+      console.log("🔍 Después del filtro por nodos expandidos:", filteredNodes.length, "nodos y", filteredEdges.length, "edges");
     }
 
-    // Aplicar filtros de tipos de nodo (sobre el resultado anterior)
+    // Aplicar filtros de inclusión de tipos de nodo
     if (filters.nodeTypes.length > 0) {
       const nodeIds = new Set(filteredNodes
         .filter(node => filters.nodeTypes.includes(node.type))
         .map(node => node.id)
       );
 
-      // Filtrar nodos
       filteredNodes = filteredNodes.filter(node => nodeIds.has(node.id));
-
-      // Filtrar edges que conecten nodos filtrados
       filteredEdges = filteredEdges.filter(edge =>
         nodeIds.has(edge.from) && nodeIds.has(edge.to)
       );
     }
 
-    // Aplicar filtros de tipos de relación (sobre el resultado anterior)
+    // Aplicar filtros de exclusión de tipos de nodo
+    if (filters.excludedNodeTypes && filters.excludedNodeTypes.length > 0) {
+      const excludedNodeIds = new Set(filteredNodes
+        .filter(node => filters.excludedNodeTypes?.includes(node.type))
+        .map(node => node.id)
+      );
+
+      filteredNodes = filteredNodes.filter(node => !excludedNodeIds.has(node.id));
+      filteredEdges = filteredEdges.filter(edge =>
+        !excludedNodeIds.has(edge.from) && !excludedNodeIds.has(edge.to)
+      );
+    }
+
+    // Aplicar filtros de inclusión de tipos de relación
     if (filters.edgeTypes.length > 0) {
       filteredEdges = filteredEdges.filter(edge =>
         filters.edgeTypes.includes(edge.type || edge.label)
       );
 
-      // Obtener nodos conectados por las edges filtradas
       const connectedNodeIds = new Set<string | number>();
       filteredEdges.forEach(edge => {
         connectedNodeIds.add(edge.from);
         connectedNodeIds.add(edge.to);
       });
 
-      // Filtrar nodos para incluir solo los conectados por edges filtradas
       filteredNodes = filteredNodes.filter(node => connectedNodeIds.has(node.id));
+    }
+
+    // Aplicar filtros de exclusión de tipos de relación
+    if (filters.excludedEdgeTypes && filters.excludedEdgeTypes.length > 0) {
+      filteredEdges = filteredEdges.filter(edge =>
+        !filters.excludedEdgeTypes?.includes(edge.type || edge.label)
+      );
+
+      // Re-verificar nodos conectados si es necesario, pero generalmente queremos mantener los nodos
+      // aunque se oculten algunas relaciones, a menos que queden aislados y queramos ocultarlos.
+      // Por simplicidad, solo ocultamos las relaciones.
     }
 
     console.log("🔍 Final: Enviando al display", filteredNodes.length, "nodos y", filteredEdges.length, "edges");
     setDisplayGraphData({ nodes: filteredNodes, edges: filteredEdges });
-  }, [originalGraphData, filters, filteredNodeId]);
+  }, [originalGraphData, filters, expandedNodeIds]);
 
   const processKnowledgeGraph = useCallback(async (setProcessingProgress?: React.Dispatch<React.SetStateAction<number>>, setProcessingMessage?: React.Dispatch<React.SetStateAction<string>>) => {
     setIsLoading(true);
@@ -249,6 +266,8 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
       if (setProcessingMessage) setProcessingMessage('Completado exitosamente');
 
       await loadGraphData();
+      await loadMetadata();
+      await loadAvailableDatasets();
       setProcessingStatus('completed');
 
       // Ocultar el indicador después de 3 segundos
@@ -275,7 +294,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
   const searchGraph = useCallback(async (query: string) => {
     if (!query) return [];
     try {
-      const response = await apiClient.post('/api/search-graph', { query });
+      const response = await apiClient.post('/api/knowledge-graph/search-graph', { query });
       // Verificar si la respuesta es exitosa
       if (response.data.success) {
         return response.data.data?.results || [];
@@ -299,7 +318,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     if (!isInitialLoad && originalGraphData) {
       applyClientFilters();
     }
-  }, [filters, filteredNodeId, applyClientFilters, isInitialLoad, originalGraphData]);
+  }, [filters, expandedNodeIds, applyClientFilters, isInitialLoad, originalGraphData]);
 
   // Recargar datos cuando cambia el modo de procesamiento o parámetros que requieren nueva consulta
   useEffect(() => {
@@ -310,13 +329,23 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
 
 
   const resetGraphFilter = useCallback(() => {
-    setFilteredNodeId(null); // Reset filter to show all nodes
-    // También se puede llamar a applyClientFilters aquí si se quiere actualizar inmediatamente
-    // applyClientFilters();
+    setExpandedNodeIds(new Set()); // Reset filter to show all nodes
   }, []);
 
   const updateFilteredNodeId = useCallback((nodeId: string | number | null) => {
-    setFilteredNodeId(nodeId);
+    if (nodeId === null) {
+      setExpandedNodeIds(new Set());
+    } else {
+      setExpandedNodeIds(prev => {
+        const next = new Set(prev);
+        if (next.has(nodeId)) {
+          next.delete(nodeId);
+        } else {
+          next.add(nodeId);
+        }
+        return next;
+      });
+    }
   }, []);
 
   return {
@@ -332,7 +361,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     searchGraph,
     clearError: () => setError(null),
     resetGraphFilter, // Expose new function
-    updateFilteredNodeId, // Expose setter for filteredNodeId
+    updateFilteredNodeId, // Expose toggle function
   };
 };
 
@@ -347,6 +376,8 @@ export default function KnowledgeGraphPage() {
   const [filters, setFilters] = useState<GraphFiltersType>({
     nodeTypes: [],
     edgeTypes: [],
+    excludedNodeTypes: [],
+    excludedEdgeTypes: [],
     datasetName: 'all'
   });
 
@@ -355,12 +386,20 @@ export default function KnowledgeGraphPage() {
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [isNodeDetailsOpen, setIsNodeDetailsOpen] = useState(false);
 
+  // Estado para el panel de detalles de la relación
+  const [selectedEdge, setSelectedEdge] = useState<any>(null);
+  const [isEdgeDetailsOpen, setIsEdgeDetailsOpen] = useState(false);
+
   // Estado para el panel de filtros desplegable
   const [isFiltersExpanded, setIsFiltersExpanded] = useState(true);
 
   // Estado para el progreso de procesamiento
   const [processingProgress, setProcessingProgress] = useState(0);
   const [processingMessage, setProcessingMessage] = useState('');
+
+  const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false);
+  const [savedNodes, setSavedNodes] = useState<any[]>([]);
+  const [isSavedNodesOpen, setIsSavedNodesOpen] = useState(false);
 
   const {
     graphData,
@@ -384,7 +423,7 @@ export default function KnowledgeGraphPage() {
     console.log("🔍 filterGraphByNode llamado con nodeId:", nodeId);
     // Actualizar el estado del filtro por nodo usando la función del hook
     updateFilteredNodeId(nodeId);
-    console.log("🔍 Estado filteredNodeId actualizado a:", nodeId);
+    console.log("🔍 Estado expandedNodeIds actualizado");
   }, [updateFilteredNodeId]);
 
   useEffect(() => {
@@ -400,10 +439,10 @@ export default function KnowledgeGraphPage() {
       setSearchError(null);
       return;
     }
-    
+
     setIsSearching(true);
     setSearchError(null);
-    
+
     try {
       const results = await searchGraph(graphQuery);
       setSearchResults(results);
@@ -441,14 +480,66 @@ export default function KnowledgeGraphPage() {
     } else {
       setSelectedNode(node);
       setIsNodeDetailsOpen(true);
+      setIsEdgeDetailsOpen(false); // Cerrar sidebar de edge si está abierto
+      setSelectedEdge(null);
       console.log("🔍 Sidebar de detalles abierto para nodo:", node.id, "Estado selectedNode:", node, "Estado isNodeDetailsOpen:", true);
     }
   }, [selectedNode, isNodeDetailsOpen]);
+
+  const handleEdgeClick = useCallback((edge: any) => {
+    console.log("🔍 handleEdgeClick llamado con edge:", edge);
+    if (!edge || !edge.id) {
+      console.warn("⚠️ handleEdgeClick: Edge inválido recibido o sin ID.");
+      setIsEdgeDetailsOpen(false);
+      setSelectedEdge(null);
+      return;
+    }
+
+    // Si el edge clicado es el mismo que el ya seleccionado y el sidebar está abierto, cerrarlo.
+    // De lo contrario, abrir el sidebar con el nuevo edge.
+    if (selectedEdge && selectedEdge.id === edge.id && isEdgeDetailsOpen) {
+      setIsEdgeDetailsOpen(false);
+      setSelectedEdge(null);
+      console.log("🔍 Sidebar cerrado: click en el mismo edge ya seleccionado.");
+    } else {
+      setSelectedEdge(edge);
+      setIsEdgeDetailsOpen(true);
+      setIsNodeDetailsOpen(false); // Cerrar sidebar de nodo si está abierto
+      setSelectedNode(null);
+      console.log("🔍 Sidebar de detalles abierto para edge:", edge.id, "Estado selectedEdge:", edge, "Estado isEdgeDetailsOpen:", true);
+    }
+  }, [selectedEdge, isEdgeDetailsOpen]);
 
   const handleCloseNodeDetails = useCallback(() => {
     setIsNodeDetailsOpen(false);
     setSelectedNode(null);
   }, []);
+
+  const handleCloseEdgeDetails = useCallback(() => {
+    setIsEdgeDetailsOpen(false);
+    setSelectedEdge(null);
+  }, []);
+
+  const toggleSaveNode = useCallback((node: any) => {
+    setSavedNodes(prev => {
+      const isAlreadySaved = prev.some(n => n.id === node.id);
+      if (isAlreadySaved) {
+        toast.success(`Nodo "${node.label}" eliminado de la lista`);
+        return prev.filter(n => n.id !== node.id);
+      } else {
+        toast.success(`Nodo "${node.label}" guardado en la lista`);
+        return [...prev, node];
+      }
+    });
+  }, []);
+
+  const focusNode = useCallback((nodeId: string | number) => {
+    // Aquí podríamos implementar el enfoque en el componente de visualización
+    // Por ahora, al menos nos aseguramos de que el nodo esté en los expandidos
+    updateFilteredNodeId(nodeId);
+    // Y cerramos el panel de guardados para ver el grafo
+    setIsSavedNodesOpen(false);
+  }, [updateFilteredNodeId]);
 
   const renderGraphContent = () => {
     if (isLoading && !graphData) {
@@ -484,6 +575,8 @@ export default function KnowledgeGraphPage() {
             metadata={metadata}
             onNodeClick={handleNodeClick}
             onNodeDoubleClick={filterGraphByNode} // Pass the new handler
+            onEdgeClick={handleEdgeClick} // Pass the new handler
+            savedNodeIds={new Set(savedNodes.map(n => n.id))}
           />
         </div>
       );
@@ -522,18 +615,9 @@ export default function KnowledgeGraphPage() {
         <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
           Grafos de Conocimiento
         </h1>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
-                <Info className="h-5 w-5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Visualiza las relaciones entre tus datos en un grafo interactivo.</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+          <Info className="h-5 w-5" />
+        </Button>
       </div>
 
       <Card className="flex flex-col flex-1">
@@ -542,6 +626,16 @@ export default function KnowledgeGraphPage() {
             <Network className="h-6 w-6" />
             Visualización del Grafo
             <div className="flex items-center gap-2 ml-auto"> {/* Added div for grouping buttons */}
+              <Button variant="ghost" size="sm" onClick={() => setIsSavedNodesOpen(true)} className="relative">
+                <Bookmark className="h-4 w-4 mr-2" />
+                Lista ({savedNodes.length})
+                {savedNodes.length > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
+                  </span>
+                )}
+              </Button>
               <Button variant="ghost" size="sm" onClick={resetGraphFilter} disabled={isLoading}>
                 <X className="h-4 w-4 mr-2" /> Limpiar Filtro
               </Button>
@@ -553,6 +647,10 @@ export default function KnowledgeGraphPage() {
                 setSearchResults([]); // Limpiar resultados de búsqueda
                 setGraphQuery(''); // Limpiar query de búsqueda
                 setSearchError(null); // Limpiar error de búsqueda
+                setSelectedNode(null); // Limpiar nodo seleccionado
+                setSelectedEdge(null); // Limpiar edge seleccionado
+                setIsNodeDetailsOpen(false); // Cerrar sidebar de nodo
+                setIsEdgeDetailsOpen(false); // Cerrar sidebar de edge
                 graphVisualizationRef.current?.fitView(); // Ajustar la vista del grafo
               }}>
                 <GitGraph className="h-4 w-4 mr-2" /> Vista Completa
@@ -595,9 +693,9 @@ export default function KnowledgeGraphPage() {
                         <span className="flex-1">
                           {result.label || result.name} ({result.type})
                         </span>
-                        <Button 
-                          variant="link" 
-                          size="sm" 
+                        <Button
+                          variant="link"
+                          size="sm"
                           className="h-auto p-0 text-primary"
                           onClick={() => {
                             // Por ahora solo mostrar en consola, se puede implementar enfoque después
@@ -673,32 +771,30 @@ export default function KnowledgeGraphPage() {
                 id="max-nodes"
                 type="number"
                 min={10}
-                max={2000}
                 value={maxNodes}
                 onChange={(e) => {
                   const value = e.target.value;
-                  // Permitir campo vacío mientras se edita
                   if (value === '') {
-                    setMaxNodes(25); // Valor temporal, se validará en onBlur
+                    setMaxNodes(25);
                     return;
                   }
                   const numValue = parseInt(value);
                   if (!isNaN(numValue)) {
-                    // Permitir valores fuera de rango mientras se edita, validar en onBlur
                     setMaxNodes(numValue);
                   }
                 }}
                 onBlur={(e) => {
                   const value = parseInt(e.target.value);
                   if (isNaN(value)) {
-                    setMaxNodes(100); // Valor por defecto si es inválido
+                    setMaxNodes(100);
                   } else {
-                    setMaxNodes(Math.max(10, Math.min(2000, value)));
+                    // Eliminamos el límite superior de 2000
+                    setMaxNodes(Math.max(10, value));
                   }
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    (e.target as HTMLInputElement).blur(); // Aplicar cambios al presionar Enter
+                    (e.target as HTMLInputElement).blur();
                   }
                 }}
                 className="w-full"
@@ -783,6 +879,15 @@ export default function KnowledgeGraphPage() {
         node={selectedNode}
         onClose={handleCloseNodeDetails}
         isOpen={isNodeDetailsOpen}
+        onToggleSave={toggleSaveNode}
+        isSaved={selectedNode ? savedNodes.some(n => n.id === selectedNode.id) : false}
+      />
+
+      {/* Panel de detalles del edge */}
+      <NodeDetailsSidebar
+        edge={selectedEdge}
+        onClose={handleCloseEdgeDetails}
+        isOpen={isEdgeDetailsOpen}
       />
 
       {/* Indicador de progreso de procesamiento */}
@@ -797,6 +902,100 @@ export default function KnowledgeGraphPage() {
           setProcessingMessage('');
         }}
       />
+      <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="text-xl font-bold text-primary">Grafos de Conocimiento</SheetTitle>
+            <SheetDescriptionComp className="text-sm text-muted-foreground">
+              Explora y visualiza las conexiones semánticas y conceptuales entre tus documentos y datos.
+            </SheetDescriptionComp>
+          </SheetHeader>
+          <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
+            <p><strong>¿Qué es el Grafo de Conocimiento?</strong></p>
+            <p>Es una representación visual de cómo se relacionan tus datos. Kognito AI analiza tus documentos para extraer entidades (personas, lugares, conceptos) y las relaciones entre ellas.</p>
+
+            <p><strong>Modos de Procesamiento:</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Híbrido (spaCy + Embeddings):</strong> Combina análisis lingüístico tradicional con modelos de lenguaje para una extracción precisa de entidades y relaciones explícitas. Ideal para ver conexiones directas.</li>
+              <li><strong>Conceptual (LLM-driven):</strong> Utiliza modelos de lenguaje avanzados para identificar conceptos abstractos, temas y relaciones temáticas. Ideal para descubrir conexiones ocultas o ideas transversales.</li>
+            </ul>
+
+            <p><strong>Funcionalidades Clave:</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Búsqueda de Entidades:</strong> Localiza rápidamente nodos específicos en el grafo.</li>
+              <li><strong>Filtros Avanzados:</strong> Filtra por tipo de nodo (ej. Persona, Organización) o tipo de relación para enfocar tu análisis.</li>
+              <li><strong>Exploración Interactiva:</strong> Haz clic en nodos y relaciones para ver detalles, metadatos y fragmentos de texto originales.</li>
+              <li><strong>Doble Clic:</strong> Haz doble clic en un nodo para centrar la vista y filtrar el grafo mostrando solo sus conexiones directas.</li>
+            </ul>
+
+            <p><strong>Consejos de Uso:</strong></p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li>Utiliza el selector de <strong>Dataset</strong> para limitar la visualización a un conjunto específico de documentos.</li>
+              <li>Ajusta el número de <strong>Nodos a Mostrar</strong> y <strong>Saltos Máximos</strong> para controlar la complejidad del grafo visualizado.</li>
+              <li>Si el grafo está vacío, asegúrate de haber procesado tus documentos utilizando el botón "Procesar Grafo Ahora".</li>
+            </ul>
+          </div>
+        </SheetContent>
+      </Sheet>
+      <Sheet open={isSavedNodesOpen} onOpenChange={setIsSavedNodesOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md flex flex-col h-full">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <Bookmark className="h-5 w-5 text-primary" />
+              Nodos Guardados ({savedNodes.length})
+            </SheetTitle>
+            <SheetDescriptionComp>
+              Lista de entidades y conceptos marcados como de interés.
+            </SheetDescriptionComp>
+          </SheetHeader>
+
+          <div className="flex-1 overflow-hidden flex flex-col mt-6">
+            {savedNodes.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-center p-8 opacity-50">
+                <Bookmark className="h-12 w-12 mb-4" />
+                <p>No tienes nodos guardados aún.</p>
+                <p className="text-xs">Haz clic en un nodo y usa el icono de marcador para guardarlo.</p>
+              </div>
+            ) : (
+              <ScrollArea className="flex-1 pr-4">
+                <div className="space-y-3">
+                  {savedNodes.map((node) => (
+                    <Card key={node.id} className="p-3 hover:bg-muted/50 transition-colors cursor-pointer group" onClick={() => focusNode(node.id)}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate">{node.label}</p>
+                          <Badge variant="secondary" className="text-[10px] h-4 mt-1">
+                            {node.type}
+                          </Badge>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSaveNode(node);
+                          }}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </ScrollArea>
+            )}
+          </div>
+
+          {savedNodes.length > 0 && (
+            <div className="pt-4 border-t mt-auto">
+              <Button variant="outline" className="w-full" onClick={() => setSavedNodes([])}>
+                Limpiar Lista
+              </Button>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

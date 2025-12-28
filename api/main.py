@@ -21,6 +21,7 @@ from api.search import router as search_router
 from api.forms import router as forms_router
 from api.collections import router as collections_router # Importar el router de collections
 from api.universal_search import router as universal_search_router # Importar el router de búsqueda universal
+from api.collection_search import router as collection_search_router # Importar el router de búsqueda en colecciones
 from core.config import settings
 from core.database import create_tables, Account
 from core.llm_manager import initialize_llms
@@ -262,6 +263,7 @@ from api.tasks import router as tasks_router # Importar el router de tasks
 
 from api.galleries import router as galleries_router, MEDIA_ROOT
 from api.graph import router as graph_router
+from api.memory import router as memory_router # NUEVO: Importar el router de memory
 
 app.include_router(github_router, prefix="/api/github", tags=["github"])
 app.include_router(telegram_router, prefix="", tags=["telegram"])
@@ -275,11 +277,15 @@ app.include_router(galleries_router, prefix="/api/galleries", tags=["galleries"]
 app.include_router(forms_router, prefix="/api", tags=["forms"])
 app.include_router(collections_router, prefix="/api", tags=["collections"])
 app.include_router(universal_search_router, prefix="/api", tags=["universal-search"])
+app.include_router(collection_search_router, prefix="/api", tags=["collection-search"])
+app.include_router(memory_router, prefix="/api", tags=["memory"]) # NUEVO: Incluir el router de memory
 
 from api.tools import router as tools_router
 from api.deep_research import router as deep_research_router
+from api.gap_development import router as gap_development_router
 app.include_router(tools_router, prefix="/api/tools", tags=["tools"])
 app.include_router(deep_research_router, prefix="/api", tags=["deep-research"])
+app.include_router(gap_development_router, prefix="/api", tags=["gap-development"])
 
 class AdminMetricsResponse(BaseModel):
     total_users: int

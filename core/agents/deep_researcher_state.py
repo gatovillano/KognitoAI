@@ -28,10 +28,10 @@ class ClarifyWithUser(BaseModel):
     need_clarification: bool = Field(
         description="Whether the user needs to be asked a clarifying question.",
     )
-    question: str = Field(
+    question: Optional[str] = Field(
         description="A question to ask the user to clarify the report scope",
     )
-    verification: str = Field(
+    verification: Optional[str] = Field(
         description="Verify message that we will start research after the user has provided the necessary information.",
     )
 
@@ -64,6 +64,9 @@ class AgentState(TypedDict):
     raw_notes: Annotated[List[str], override_reducer]
     notes: Annotated[List[str], override_reducer]
     final_report: str
+    sources: Annotated[List[dict], override_reducer]
+    recommendations: Annotated[List[str], override_reducer]
+    clarification_attempts: int
 
 class SupervisorState(TypedDict):
     """State for the supervisor that manages research tasks."""
@@ -73,6 +76,7 @@ class SupervisorState(TypedDict):
     notes: Annotated[List[str], override_reducer]
     research_iterations: int
     raw_notes: Annotated[List[str], override_reducer]
+    sources: Annotated[List[dict], override_reducer]
 
 class ResearcherState(TypedDict):
     """State for individual researchers conducting research."""
@@ -82,8 +86,10 @@ class ResearcherState(TypedDict):
     research_topic: str
     compressed_research: str
     raw_notes: Annotated[List[str], override_reducer]
+    sources: Annotated[List[dict], override_reducer]
 
 class ResearcherOutputState(BaseModel):
     """Output state from individual researchers."""
     compressed_research: str
     raw_notes: Annotated[List[str], override_reducer]
+    sources: Annotated[List[dict], override_reducer]

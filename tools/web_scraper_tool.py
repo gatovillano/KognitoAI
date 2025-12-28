@@ -75,10 +75,16 @@ class WebScraperTool(BaseTool):
         """
         logger.info(f"Ejecutando WebScraperTool para la URL: '{url}'")
         try:
-            # WebBaseLoader.load() es una operación síncrona (bloqueante).
-            # Para no congelar nuestro servidor asíncrono, la ejecutamos en
-            # un hilo separado usando el executor del event loop.
-            loader = WebBaseLoader(url)
+            # Detect if the URL is a PDF
+            is_pdf = url.lower().endswith('.pdf')
+            
+            if is_pdf:
+                logger.info(f"Detectado PDF. Usando PyPDFLoader para: {url}")
+                from langchain_community.document_loaders import PyPDFLoader
+                loader = PyPDFLoader(url)
+            else:
+                loader = WebBaseLoader(url)
+
             loop = asyncio.get_event_loop()
             
             # Ejecuta la función bloqueante en el pool de hilos por defecto con un timeout.
@@ -87,7 +93,7 @@ class WebScraperTool(BaseTool):
                     None,  # None usa el ThreadPoolExecutor por defecto.
                     loader.load
                 ),
-                timeout=15.0  # 15 segundos de timeout
+                timeout=20.0  # Aumentado a 20 segundos para PDFs pesados
             )
 
             if not docs:

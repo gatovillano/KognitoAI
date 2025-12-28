@@ -101,6 +101,10 @@ class Neo4jAdapter:
                 logger.warning("🔄 GraphDB no conectado en Neo4jAdapter, intentando reconectar...")
                 self.graph_db.connect()
 
+            if not entities:
+                logger.info("📝 No hay entidades para agregar a Neo4j")
+                return 0
+
             logger.info(f"📝 Agregando {len(entities)} entidades a Neo4j...")
             
             entities_added = 0
@@ -142,11 +146,12 @@ class Neo4jAdapter:
                         "created_at": created_at,
                         "extraction_method": extraction_method,
                         "concept": concept, # Incluir concept
-                        "category": category # Incluir category
+                        "category": category, # Incluir category
+                        "source_document_id": entity.get("source_document_id"),
+                        "dataset_name": dataset_name
                     }
                     entity_data["workspace_id"] = workspace_id
                     entity_data["account_id"] = account_id
-                    entity_data["dataset_name"] = dataset_name # Already extracted, default to None if not present
 
                     if j < 3:
                         logger.info(f"📝 DATOS MAPEADOS {j+1}:")
@@ -198,9 +203,13 @@ class Neo4jAdapter:
                 logger.debug(f"✅ Total nodos creados en lote: {total_created}")
                 entities_added += total_created
 
+                # Crear relaciones MENTIONS con los documentos de origen para este lote
+                await self._add_document_mentions(batch_data)
+
                 logger.debug(f"✅ Lote procesado: {len(batch)} entidades")
             
             logger.info(f"✅ {entities_added} entidades agregadas a Neo4j")
+            
             return entities_added
             
         except Exception as e:
@@ -298,6 +307,21 @@ class Neo4jAdapter:
                 for rel_type, type_relationships in relationships_by_type.items():
                     safe_rel_type = f"`{rel_type}`"
                     
+                    # Filtrar relaciones para evitar duplicados inversos
+                    filtered_relationships = []
+                    for rel in type_relationships:
+                        source_id = rel["source_id"]
+                        target_id = rel["target_id"]
+                        
+                        # Verificar si la relación (o su inversa) ya existe en la base de datos
+                        if await self._relationship_exists_in_db(source_id, target_id, rel_type):
+                            logger.debug(f"⚠️ Relación inversa ya existente o duplicada omitida: {source_id}-[:{rel_type}]->{target_id}")
+                            continue
+                        filtered_relationships.append(rel)
+
+                    if not filtered_relationships:
+                        continue # No hay relaciones para agregar en este tipo
+
                     # Query estática para cada tipo de relación, incluyendo todos los campos opcionales.
                     type_query = f"""
                     UNWIND $relationships AS rel
@@ -316,11 +340,11 @@ class Neo4jAdapter:
                     RETURN count(r) as created
                     """
 
-                    result = await self.graph_db.execute_query(type_query, {"relationships": type_relationships})
+                    result = await self.graph_db.execute_query(type_query, {"relationships": filtered_relationships})
                     created_count = result[0]["created"] if result else 0
                     relationships_added += created_count
                     logger.info(f"✅ Creadas {created_count} relaciones de tipo {rel_type}")
-                logger.debug(f"✅ Lote procesado: {len(batch)} relaciones")
+                logger.debug(f"✅ Lote procesado: {len(filtered_relationships)} relaciones")
             
             logger.info(f"✅ {relationships_added} relaciones agregadas a Neo4j")
             return relationships_added
@@ -328,7 +352,37 @@ class Neo4jAdapter:
         except Exception as e:
             logger.error(f"❌ Error agregando relaciones: {e}")
             raise
-    
+
+    async def _relationship_exists_in_db(self, source_id: str, target_id: str, rel_type: str) -> bool:
+        """
+        Verifica si una relación (o su inversa) ya existe en la base de datos.
+        
+        Args:
+            source_id: ID del nodo de origen
+            target_id: ID del nodo de destino
+            rel_type: Tipo de la relación
+            
+        Returns:
+            True si la relación (o su inversa) existe, False en caso contrario.
+        """
+        query = f"""
+        MATCH (s {{id: $source_id}})-[r:`{rel_type}`]->(t {{id: $target_id}})
+        RETURN count(r) > 0 AS exists
+        """
+        params = {"source_id": source_id, "target_id": target_id}
+        result = await self.graph_db.execute_query(query, params)
+        if result and result[0]["exists"]:
+            return True
+
+        # Verificar si la relación inversa existe
+        query_inverse = f"""
+        MATCH (s {{id: $target_id}})-[r:`{rel_type}`]->(t {{id: $source_id}})
+        RETURN count(r) > 0 AS exists
+        """
+        params_inverse = {"source_id": source_id, "target_id": target_id} # Los IDs se invierten en la consulta, no en los parámetros
+        result_inverse = await self.graph_db.execute_query(query_inverse, params_inverse)
+        return result_inverse and result_inverse[0]["exists"]
+
     def _generate_entity_id(self, entity: Dict) -> str:
         """
         Genera un ID único para una entidad.
@@ -406,3 +460,109 @@ class Neo4jAdapter:
                 "entity_types": [],
                 "error": str(e)
             }
+    async def create_document_nodes(self, document_nodes: List[Dict[str, Any]]) -> int:
+        """
+        Persiste nodos de tipo DOCUMENT en Neo4j.
+        
+        Args:
+            document_nodes: Lista de diccionarios con datos de documentos
+            
+        Returns:
+            Número de nodos creados
+        """
+        try:
+            if not document_nodes:
+                return 0
+
+            if self.graph_db._driver is None or getattr(self.graph_db._driver, 'closed', False):
+                self.graph_db.connect()
+
+            logger.info(f"📄 Persistiendo {len(document_nodes)} nodos DOCUMENT en Neo4j...")
+            
+            # Preparar los datos para Neo4j
+            formatted_docs = []
+            for doc in document_nodes:
+                formatted_doc = {
+                    "id": doc.get("id"),
+                    "title": doc.get("title", "Sin título"),
+                    "url": doc.get("url", ""),
+                    "content": doc.get("summary") or (doc.get("content", "")[:500] + "..." if len(doc.get("content", "")) > 500 else doc.get("content", "")),
+                    "content_hash": doc.get("content_hash", ""),
+                    "summary": doc.get("summary", ""),
+                    "keywords": doc.get("keywords", []),
+                    "publication_date": doc.get("publication_date"),
+                    "author": doc.get("author", "Desconocido"),
+                    "source_type": doc.get("source_type", "unknown"),
+                    "topic": doc.get("topic", "general"),
+                    "created_at": doc.get("created_at", datetime.now().isoformat()),
+                    "updated_at": doc.get("updated_at", datetime.now().isoformat()),
+                    "workspace_id": doc.get("workspace_id"),
+                    "account_id": doc.get("account_id"),
+                    "dataset_name": doc.get("dataset_name"),
+                    "type": "DOCUMENT"
+                }
+                formatted_docs.append(formatted_doc)
+
+            # Query para crear/actualizar nodos DOCUMENT
+            query = """
+            UNWIND $docs AS doc
+            MERGE (d:DOCUMENT {id: doc.id})
+            SET d.title = doc.title,
+                d.url = doc.url,
+                d.content = doc.content,
+                d.content_hash = doc.content_hash,
+                d.summary = doc.summary,
+                d.keywords = doc.keywords,
+                d.publication_date = doc.publication_date,
+                d.author = doc.author,
+                d.source_type = doc.source_type,
+                d.topic = doc.topic,
+                d.created_at = doc.created_at,
+                d.updated_at = doc.updated_at,
+                d.workspace_id = doc.workspace_id,
+                d.account_id = doc.account_id,
+                d.dataset_name = doc.dataset_name,
+                d.type = doc.type
+            RETURN count(d) as created
+            """
+
+            result = await self.graph_db.execute_query(query, {"docs": formatted_docs})
+            created_count = result[0]["created"] if result else 0
+            
+            logger.info(f"✅ {created_count} nodos DOCUMENT persistidos en Neo4j.")
+            return created_count
+
+        except Exception as e:
+            logger.error(f"❌ Error persistiendo nodos DOCUMENT: {e}")
+            raise
+
+    async def _add_document_mentions(self, entities: List[Dict], dataset_name: Optional[str] = None):
+        """Crea relaciones MENTIONS entre documentos y entidades."""
+        try:
+            mentions = [
+                {
+                    "source_id": ent["source_document_id"],
+                    "target_id": ent["id"],
+                    "dataset_name": dataset_name or ent.get("dataset_name")
+                }
+                for ent in entities if ent.get("source_document_id")
+            ]
+            
+            if not mentions:
+                return
+
+            query = """
+            UNWIND $mentions AS mention
+            MATCH (d:DOCUMENT {id: mention.source_id})
+            MATCH (e {id: mention.target_id})
+            MERGE (d)-[r:MENTIONS]->(e)
+            SET r.dataset_name = mention.dataset_name,
+                r.created_at = datetime().isoformat(),
+                r.extraction_method = 'hybrid_mention'
+            """
+            await self.graph_db.execute_query(query, {"mentions": mentions})
+            logger.info(f"🔗 Creadas {len(mentions)} relaciones MENTIONS entre documentos y entidades")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Error creando relaciones MENTIONS: {e}")
+

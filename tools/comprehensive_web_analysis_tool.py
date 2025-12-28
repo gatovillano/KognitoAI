@@ -12,6 +12,10 @@ from core.citation_models import ToolOutputWithSources, Source # <-- Añadir Sou
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from langchain_core.callbacks import CallbackManagerForToolRun
+from core.database import SessionLocal, AnalysisTask
+from utils.db_session import DBSession
+from datetime import datetime
+import uuid
 from langchain_core.messages import HumanMessage
 from core.prompts import KNOWLEDGE_SHARE_PRROMPT
 from bs4 import BeautifulSoup
@@ -298,8 +302,46 @@ class ComprehensiveWebAnalysisTool(BaseTool):
         Por favor, genera el informe detallado ahora, rellenando la estructura con la información anterior:
         """
         final_response = await final_analysis_llm.ainvoke([HumanMessage(content=final_prompt)])
+        final_report = final_response.content
 
-        return final_response.content
+        # --- SAVE TO DATABASE ---
+        try:
+            async with DBSession(SessionLocal) as db_session:
+                # Create a new AnalysisTask
+                # Note: We don't have a task_id here because this tool wasn't triggered by an AnalysisTask (unlike the endpoints in api/analysis.py).
+                # It was triggered by a chat or agent.
+                # So we create a COMPLETED task directly.
+                
+                # Construct a title
+                title = f"Investigación Web: {original_query[:50]}..."
+                
+                new_task = AnalysisTask(
+                    account_id=uuid.UUID(effective_account_id),
+                    file_name=title, # Using file_name as title/identifier
+                    analysis_type="comprehensive_web_analysis",
+                    status="completed",
+                    result_payload={
+                        "report": final_report,
+                        "executive_summary": final_report[:500] + "..." if len(final_report) > 500 else final_report,
+                        "summary": final_report[:500] + "..." if len(final_report) > 500 else final_report,
+                        "sources": urls_to_scrape_accumulated, # List of URLs
+                        "tool_used": "comprehensive_web_analysis_tool.py",
+                        "analysis_metadata": {
+                            "query": original_query,
+                            "workspace_id": effective_workspace_id,
+                            "created_at": datetime.now().isoformat()
+                        }
+                    }
+                )
+                db_session.add(new_task)
+                await db_session.commit()
+                logger.info(f"Comprehensive Web Analysis saved to DB with ID: {new_task.id}")
+                
+        except Exception as e:
+            logger.error(f"Error saving Comprehensive Web Analysis to DB: {e}", exc_info=True)
+            # We don't fail the tool execution just because DB save failed, but we log it.
+
+        return final_report
 
     def _run(self, **kwargs: Any) -> str:
         """Redirige la ejecución síncrona al método asíncrono."""

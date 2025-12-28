@@ -241,10 +241,10 @@ async def process_knowledge_graph_optimized(
     """
     try:
         result = await kg_service.process_documents_flow(
+            db_session=db,
             request=request,
             account_id=current_user['account_id'],
             background_tasks=background_tasks,
-            db_session=db
         )
         return GraphResponse(
             success=True,
@@ -273,10 +273,10 @@ async def process_knowledge_graph_with_cooccurrence(
     """
     try:
         result = await kg_service.process_documents_flow( # Assuming process_documents_flow handles co-occurrence
+            db_session=db,
             request=request,
             account_id=current_user['account_id'],
             background_tasks=background_tasks,
-            db_session=db
         )
         return GraphResponse(
             success=True,
@@ -1018,7 +1018,13 @@ async def get_graph_metadata(
         node_query = f"""
         MATCH (n)
         {where_statement}
-        RETURN DISTINCT n.type as type, count(n) as count
+        WITH n, 
+             CASE 
+                WHEN n.type IS NOT NULL AND n.type <> '' THEN n.type 
+                WHEN size(labels(n)) > 0 THEN labels(n)[0] 
+                ELSE 'Unknown' 
+             END AS node_type
+        RETURN DISTINCT node_type as type, count(n) as count
         ORDER BY count DESC
         """
 
@@ -1208,3 +1214,78 @@ async def get_knowledge_graph(
             error=str(e)
         )
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ENDPOINTS DE PROGRESO DE PROCESAMIENTO
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/progress/{task_id}", response_model=GraphResponse)
+async def get_processing_progress(
+    task_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Obtiene el estado de progreso de una tarea de procesamiento de grafo.
+    
+    Args:
+        task_id: ID de la tarea de procesamiento
+        
+    Returns:
+        Estado actual del progreso: fase, porcentaje, mensaje, métricas
+    """
+    try:
+        from knowledge_graph.progress_tracker import get_progress
+        
+        progress = get_progress(task_id)
+        
+        if progress is None:
+            return GraphResponse(
+                success=False,
+                error=f"Tarea '{task_id}' no encontrada. Puede que haya expirado o no exista.",
+                message="Tarea no encontrada"
+            )
+        
+        return GraphResponse(
+            success=True,
+            data=progress,
+            message=f"Progreso: {progress.get('progress_percent', 0):.0f}% - {progress.get('message', '')}"
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo progreso: {e}")
+        return GraphResponse(
+            success=False,
+            error=str(e)
+        )
+
+
+@router.get("/progress", response_model=GraphResponse)
+async def get_all_active_progress(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Obtiene el progreso de todas las tareas de procesamiento activas.
+    
+    Returns:
+        Lista de estados de progreso de todas las tareas activas
+    """
+    try:
+        from knowledge_graph.progress_tracker import get_all_active_progress
+        
+        active_tasks = get_all_active_progress()
+        
+        return GraphResponse(
+            success=True,
+            data={
+                "active_tasks": active_tasks,
+                "count": len(active_tasks)
+            },
+            message=f"{len(active_tasks)} tareas activas"
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo progreso activo: {e}")
+        return GraphResponse(
+            success=False,
+            error=str(e)
+        )
