@@ -393,6 +393,10 @@ class GraphIntegration:
 
             if workspace_id:
                 filters.append("workspace_id::text = :workspace_id")
+            # Si workspace_id es None, no filtramos por workspace_id para permitir
+            # encontrar documentos tanto globales como de cualquier workspace si es necesario,
+            # pero list_user_documents suele filtrar por IS NULL si se quiere el contexto personal.
+            # Aquí, para consistencia con memory_manager, si no hay workspace_id buscamos IS NULL.
             else:
                 filters.append("workspace_id IS NULL")
 
@@ -498,7 +502,9 @@ class GraphIntegration:
         target_concept: Optional[str] = None,
         max_hops: Optional[int] = None,
         pattern_description: Optional[str] = None,
-        return_type: Optional[Literal["nodes", "relationships", "paths", "summary", "cypher_query_only", "stats"]] = "summary"
+        return_type: Optional[Literal["nodes", "relationships", "paths", "summary", "cypher_query_only", "stats"]] = "summary",
+        account_id: Optional[str] = None,
+        workspace_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Realiza búsquedas en el grafo de conocimiento."""
         await self._create_fulltext_indexes()
@@ -509,6 +515,7 @@ class GraphIntegration:
                 logger.info(f"🧠 Ejecutando búsqueda relacional/de caminos con: source={source_concept}, target={target_concept}, rels={relationship_types}, hops={max_hops}")
                 
                 params = {"dataset_name": dataset_name}
+                where_clauses = ["all(n IN nodes(path) WHERE n.dataset_name = $dataset_name)"]
 
                 source_match = f"(s {{name: $source_concept, dataset_name: $dataset_name}})" if source_concept else "(s)"
                 target_match = f"(t {{name: $target_concept, dataset_name: $dataset_name}})" if target_concept else "(t)"
@@ -518,6 +525,14 @@ class GraphIntegration:
                 if target_concept:
                     params["target_concept"] = target_concept
 
+                if account_id:
+                    where_clauses.append("all(n IN nodes(path) WHERE n.account_id = $account_id OR n.account_id IS NULL)")
+                    params["account_id"] = account_id
+                
+                if workspace_id:
+                    where_clauses.append("all(n IN nodes(path) WHERE n.workspace_id = $workspace_id OR n.workspace_id IS NULL)")
+                    params["workspace_id"] = workspace_id
+
                 rel_spec = ""
                 if relationship_types:
                     rel_spec = ":" + "|".join(relationship_types)
@@ -525,7 +540,7 @@ class GraphIntegration:
                 hop_spec = f"*{1 if max_hops == 1 else ''}..{max_hops}" if max_hops else "*"
 
                 cypher_query = f"MATCH path = {source_match}-[{rel_spec}{hop_spec}]-{target_match} "
-                cypher_query += "WHERE all(n IN nodes(path) WHERE n.dataset_name = $dataset_name) "
+                cypher_query += "WHERE " + " AND ".join(where_clauses) + " "
                 
                 if return_type == "cypher_query_only":
                     return {
@@ -557,21 +572,36 @@ class GraphIntegration:
                 logger.info(f"🔍 Ejecutando búsqueda de patrón específica con: {pattern_description}")
                 
                 search_text_for_pattern = f"{query} {pattern_description}" if query else pattern_description
+                
+                params = {"search_text_for_pattern": search_text_for_pattern, "dataset_name": dataset_name}
+                where_n = ["n.dataset_name = $dataset_name"]
+                where_rel = ["n.dataset_name = $dataset_name", "m.dataset_name = $dataset_name"]
 
-                cypher_query = """
+                if account_id:
+                    where_n.append("(n.account_id = $account_id OR n.account_id IS NULL)")
+                    where_rel.append("(n.account_id = $account_id OR n.account_id IS NULL)")
+                    where_rel.append("(m.account_id = $account_id OR m.account_id IS NULL)")
+                    params["account_id"] = account_id
+                
+                if workspace_id:
+                    where_n.append("(n.workspace_id = $workspace_id OR n.workspace_id IS NULL)")
+                    where_rel.append("(n.workspace_id = $workspace_id OR n.workspace_id IS NULL)")
+                    where_rel.append("(m.workspace_id = $workspace_id OR m.workspace_id IS NULL)")
+                    params["workspace_id"] = workspace_id
+
+                cypher_query = f"""
                 CALL db.index.fulltext.queryNodes('node_fulltext_index', $search_text_for_pattern) YIELD node AS n, score AS nodeScore
-                WHERE n.dataset_name = $dataset_name
+                WHERE {" AND ".join(where_n)}
                 WITH n, nodeScore
                 OPTIONAL MATCH (n)-[r]-(m)
                 RETURN DISTINCT n, r, m, nodeScore AS score
                 UNION ALL
                 CALL db.index.fulltext.queryRelationships('relationship_fulltext_index', $search_text_for_pattern) YIELD relationship AS r, score AS relScore
                 MATCH (n)-[r]-(m)
-                WHERE n.dataset_name = $dataset_name AND m.dataset_name = $dataset_name
+                WHERE {" AND ".join(where_rel)}
                 RETURN DISTINCT n, r, m, relScore AS score
                 ORDER BY score DESC LIMIT 10
                 """
-                params = {"search_text_for_pattern": search_text_for_pattern, "dataset_name": dataset_name}
                 
                 if return_type == "cypher_query_only":
                     return {
@@ -613,21 +643,40 @@ class GraphIntegration:
             # 3. Lógica para Búsqueda Full-Text (default)
             # Esta será la opción principal si no se cumplen las condiciones anteriores
             logger.info(f"📝 Ejecutando búsqueda full-text para: {query}")
-            cypher_query = """
+            
+            params = {"query": query, "dataset_name": dataset_name}
+            where_n = ["n.dataset_name = $dataset_name"]
+            where_m = ["(m.dataset_name = $dataset_name OR m.dataset_name IS NULL)"]
+            where_rel = ["n.dataset_name = $dataset_name", "m.dataset_name = $dataset_name"]
+
+            if account_id:
+                where_n.append("(n.account_id = $account_id OR n.account_id IS NULL)")
+                where_m.append("(m.account_id = $account_id OR m.account_id IS NULL)")
+                where_rel.append("(n.account_id = $account_id OR n.account_id IS NULL)")
+                where_rel.append("(m.account_id = $account_id OR m.account_id IS NULL)")
+                params["account_id"] = account_id
+            
+            if workspace_id:
+                where_n.append("(n.workspace_id = $workspace_id OR n.workspace_id IS NULL)")
+                where_m.append("(m.workspace_id = $workspace_id OR m.workspace_id IS NULL)")
+                where_rel.append("(n.workspace_id = $workspace_id OR n.workspace_id IS NULL)")
+                where_rel.append("(m.workspace_id = $workspace_id OR m.workspace_id IS NULL)")
+                params["workspace_id"] = workspace_id
+
+            cypher_query = f"""
             CALL db.index.fulltext.queryNodes('node_fulltext_index', $query) YIELD node AS n, score AS nodeScore
-            WHERE n.dataset_name = $dataset_name
+            WHERE {" AND ".join(where_n)}
             WITH n, nodeScore
-            OPTIONAL MATCH (n)-[r]-(m) // Eliminar la restricción de tipo CONCEPTUAL_QUOTE
-            WHERE (m.dataset_name = $dataset_name OR m.dataset_name IS NULL) // Asegurar filtro de dataset_name para m
+            OPTIONAL MATCH (n)-[r]-(m)
+            WHERE {" AND ".join(where_m)}
             RETURN DISTINCT n, r, m, nodeScore AS score
             UNION ALL
             CALL db.index.fulltext.queryRelationships('relationship_fulltext_index', $query) YIELD relationship AS r, score AS relScore
             MATCH (n)-[r]-(m)
-            WHERE n.dataset_name = $dataset_name AND m.dataset_name = $dataset_name
+            WHERE {" AND ".join(where_rel)}
             RETURN DISTINCT n, r, m, relScore AS score
             ORDER BY score DESC LIMIT 20
             """
-            params = {"query": query, "dataset_name": dataset_name}
 
             if return_type == "cypher_query_only":
                 return {

@@ -294,31 +294,31 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
           onTitleUpdatedRef.current(message);
           break;
         case 'title_extraction_completed':
-          onTitleExtractionCompleted(message.data);
+          onTitleExtractionCompleted(message.data || message);
           break;
         case 'upload_started':
           onUploadStarted(message);
           break;
         case 'upload_progress':
-          onUploadProgress(message.data);
+          onUploadProgress(message.data || message);
           break;
         case 'upload_completed':
-          onUploadCompleted(message.data);
+          onUploadCompleted(message.data || message);
           break;
         case 'upload_failed':
-          onUploadFailed(message.data);
+          onUploadFailed(message.data || message);
           break;
         case 'document_processing_started':
-          onDocumentProcessingStarted(message);
+          onDocumentProcessingStarted(message.data || message);
           break;
         case 'document_processing_completed':
-          onDocumentProcessingCompleted(message);
+          onDocumentProcessingCompleted(message.data || message);
           break;
         case 'document_processing_failed':
-          onDocumentProcessingFailed(message);
+          onDocumentProcessingFailed(message.data || message);
           break;
         case 'knowledge_graph_progress':
-          onKnowledgeGraphProgress(message.data);
+          onKnowledgeGraphProgress(message.data || message);
           break;
       }
     };

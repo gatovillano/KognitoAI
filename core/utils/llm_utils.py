@@ -31,6 +31,7 @@ async def prune_messages_to_fit_token_limit(
     llm: BaseChatModel,
     max_tokens: int,
     min_messages_to_keep: int = 1,
+    keep_ratio: float = 0.5,
 ) -> List[BaseMessage]:
     """
     Prunes the list of messages to fit within the specified token limit.
@@ -39,7 +40,11 @@ async def prune_messages_to_fit_token_limit(
     if not messages:
         return []
 
-    current_tokens = llm.get_num_tokens_from_messages(messages)
+    try:
+        current_tokens = llm.get_num_tokens_from_messages(messages)
+    except Exception as e:
+        logger.warning(f"Error counting tokens: {e}. Assuming limit exceeded.")
+        current_tokens = max_tokens + 1
     
     if current_tokens <= max_tokens:
         return messages
@@ -74,12 +79,18 @@ async def prune_messages_to_fit_token_limit(
         
         # Calculate tokens for the proposed state (system + new block + kept messages)
         # Note: We add block_to_add at the beginning of messages_to_keep
-        tokens_for_proposed_state = llm.get_num_tokens_from_messages(system_messages + block_to_add + messages_to_keep)
+        try:
+            tokens_for_proposed_state = llm.get_num_tokens_from_messages(system_messages + block_to_add + messages_to_keep)
+        except Exception:
+            break
         
-        # We reserve some space for the summary, e.g., 30% of max_tokens for more aggressive pruning
-        if tokens_for_proposed_state <= max_tokens * 0.3:
+        # We reserve some space for the summary. keep_ratio defines how much of the limit to use for messages.
+        if tokens_for_proposed_state <= max_tokens * keep_ratio:
             messages_to_keep = block_to_add + messages_to_keep
         else:
+            # Always keep at least the most recent block if messages_to_keep is empty
+            if not messages_to_keep and len(blocks) > 0:
+                messages_to_keep = blocks[-1]
             break
 
     # Messages to be summarized are the ones not in messages_to_keep
@@ -120,12 +131,20 @@ async def prune_messages_to_fit_token_limit(
     final_messages.extend(messages_to_keep)
 
     # Final check
-    final_tokens = llm.get_num_tokens_from_messages(final_messages)
+    try:
+        final_tokens = llm.get_num_tokens_from_messages(final_messages)
+    except Exception:
+        final_tokens = max_tokens + 1
+
     if final_tokens > max_tokens:
         logger.warning(f"⚠️ [LLM Utils] Even after summarization, token count ({final_tokens}) exceeds limit ({max_tokens}). Further truncation may be needed.")
-        # Implement more aggressive truncation if necessary, for now, we log a warning.
-        # For example, we could truncate the summary itself or remove more of the recent messages.
-        # For now, we will just return the current list.
+        # If still over, aggressively truncate and keep only system and last few messages
+        if len(final_messages) > 3:
+            final_messages = system_messages + final_messages[-2:]
+            try:
+                final_tokens = llm.get_num_tokens_from_messages(final_messages)
+            except Exception:
+                pass
     
     logger.info(f"✅ [LLM Utils] Pruning complete. Messages reduced to {len(final_messages)} messages ({final_tokens} tokens).")
     return final_messages

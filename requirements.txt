@@ -114,3 +114,6 @@ vobject
 tzlocal
 pendulum
 attrs
+rich
+click
+websockets

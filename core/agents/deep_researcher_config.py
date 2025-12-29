@@ -6,6 +6,7 @@ from typing import Any, List, Optional
 
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
+from core.config import settings
 
 class SearchAPI(Enum):
     """Enumeration of available search API providers."""
@@ -48,16 +49,16 @@ class Configuration(BaseModel):
     # Model Configuration
     # We can define different models for different tasks
     summarization_model: str = Field(default="gemini-2.5-flash")
-    summarization_model_max_tokens: int = Field(default=8192)
+    summarization_model_max_tokens: int = Field(default=settings.deep_research_max_tokens)
 
     research_model: str = Field(default="gemini-2.5-flash")
-    research_model_max_tokens: int = Field(default=8192)
+    research_model_max_tokens: int = Field(default=settings.deep_research_max_tokens)
 
     compression_model: str = Field(default="gemini-2.5-flash")
-    compression_model_max_tokens: int = Field(default=8192)
+    compression_model_max_tokens: int = Field(default=settings.deep_research_max_tokens)
 
     final_report_model: str = Field(default="gemini-2.5-flash")
-    final_report_model_max_tokens: int = Field(default=8192)
+    final_report_model_max_tokens: int = Field(default=settings.deep_research_max_tokens)
     
     max_content_length: int = Field(default=10000)
 

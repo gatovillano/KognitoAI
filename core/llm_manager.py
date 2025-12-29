@@ -41,11 +41,11 @@ class RateLimiter(BaseRateLimiter):
         with cls._lock:
             if cls._instance is None:
                 cls._instance = super().__new__(cls)
-                cls._instance.max_requests = kwargs.get('max_requests', 20)
-                cls._instance.per_seconds = kwargs.get('per_seconds', 60)
+                cls._instance.max_requests = kwargs.get('max_requests', settings.rate_limit_max_requests)
+                cls._instance.per_seconds = kwargs.get('per_seconds', settings.rate_limit_per_seconds)
                 cls._instance.request_timestamps = deque()
                 logger.info(
-                    f"RateLimiter initialized: {cls._instance.max_requests} requests per {cls._instance.per_seconds} seconds."
+                    f"RateLimiter initialized: {cls._instance.max_requests} requests per {cls._instance.per_seconds} seconds. Enabled: {settings.rate_limit_enabled}"
                 )
             return cls._instance
 
@@ -61,6 +61,9 @@ class RateLimiter(BaseRateLimiter):
         Asynchronously waits if the rate limit is about to be exceeded.
         This method's signature matches what LangChain's async LLM calls expect.
         """
+        if not settings.rate_limit_enabled:
+            return
+
         with self._lock:
             now = time.monotonic()
             # Prune old timestamps
@@ -90,6 +93,9 @@ class RateLimiter(BaseRateLimiter):
         Synchronously waits if the rate limit is about to be exceeded.
         This method's signature matches what LangChain's sync LLM calls expect.
         """
+        if not settings.rate_limit_enabled:
+            return
+
         with self._lock:
             now = time.monotonic()
             while self.request_timestamps and self.request_timestamps[0] <= now - self.per_seconds:
@@ -107,7 +113,10 @@ class RateLimiter(BaseRateLimiter):
             self.request_timestamps.append(time.monotonic())
 
 # Initialize the global rate limiter
-gemini_rate_limiter = RateLimiter(max_requests=20, per_seconds=61) # 61 to be safe
+gemini_rate_limiter = RateLimiter(
+    max_requests=settings.rate_limit_max_requests,
+    per_seconds=settings.rate_limit_per_seconds
+)
 
 # --- Global LLM Instances ---
 _main_agent_llm_instance: Optional[ChatLiteLLM] = None
@@ -173,7 +182,7 @@ async def initialize_llms():
             "verbose": False,
             "max_retries": 0, # We handle rate limiting, so disable litellm's retries for this
             "rate_limiter": gemini_rate_limiter, # Pass the compliant rate limiter
-            "max_tokens": 8192, # Allow for massive reports
+            "max_tokens": settings.deep_research_max_tokens, # Allow for massive reports
         }
         
         if settings.llm_api_base:

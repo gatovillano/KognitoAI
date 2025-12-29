@@ -316,14 +316,6 @@ interface AnalysisDetailDialogProps {
   // onGenerateQuestions?: (analysisId: string) => void; // Opcional
 }
 
-interface QuestionSliderDialogProps {
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
-  questions: string[];
-  title: string;
-  onDevelopClick?: (question: string) => void; // Nueva prop
-  analysisId?: string; // Nueva prop para el id del análisis
-}
 interface ConceptDetailDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -781,6 +773,11 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
       const explanation = gap.explanation || gap.description || "";
       const context = gap.related_context || gap.context || "";
 
+      // Si el objeto ya es un string formateado por algún motivo, lo devolvemos
+      if (typeof gapTitle !== 'string' && typeof explanation !== 'string') {
+        return JSON.stringify(gap);
+      }
+
       return `**${gapTitle}**\n\n${explanation}${context ? `\n\n*Contexto*: ${context}` : ""}`;
     });
     setSliderQuestions(formattedGaps);
@@ -976,7 +973,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
             play={play}
             isLoading={isLoading}
             isPlaying={isPlaying}
-            activeText={activeText}
+            activeText={activeText || ""}
           />
         );
 
@@ -993,7 +990,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
             play={play}
             isLoading={isLoading}
             isPlaying={isPlaying}
-            activeText={activeText}
+            activeText={activeText || ""}
           />
         );
 
@@ -1011,7 +1008,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
             play={play}
             isLoading={isLoading}
             isPlaying={isPlaying}
-            activeText={activeText}
+            activeText={activeText || ""}
           />
         );
 
@@ -1038,7 +1035,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
             play={play}
             isLoading={isLoading}
             isPlaying={isPlaying}
-            activeText={activeText}
+            activeText={activeText || ""}
           />
         );
 
@@ -1056,7 +1053,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
             play={play}
             isLoading={isLoading}
             isPlaying={isPlaying}
-            activeText={activeText}
+            activeText={activeText || ""}
           />
         );
 
@@ -1083,7 +1080,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
             play={play}
             isLoading={isLoading}
             isPlaying={isPlaying}
-            activeText={activeText}
+            activeText={activeText || ""}
           />
         );
 
@@ -1177,14 +1174,16 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
               <DialogTitle className="text-3xl font-extrabold tracking-tight leading-tight">
                 {currentAnalysis.title}
               </DialogTitle>
-              <DialogDescription className="mt-2 text-md text-muted-foreground">
-                {currentAnalysis.type === 'gap_development' ? (
-                  <span>{currentAnalysis.title}</span>
-                ) : (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {currentAnalysis.summary || "Detalles del análisis."}
-                  </ReactMarkdown>
-                )}
+              <DialogDescription className="mt-2 text-md text-muted-foreground" asChild>
+                <div className="break-words">
+                  {currentAnalysis.type === 'gap_development' ? (
+                    <span>{currentAnalysis.title}</span>
+                  ) : (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {currentAnalysis.summary || "Detalles del análisis."}
+                    </ReactMarkdown>
+                  )}
+                </div>
               </DialogDescription>
             </div>
             <div className="flex-shrink-0 flex items-center gap-1">
@@ -1234,7 +1233,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                   </AlertDescription>
                 </Alert>
               ) : (
-                <div className="w-full">
+                <div className="w-full max-w-full min-w-0 overflow-hidden">
                   {renderTypeSpecificContent()}
                 </div>
               )}

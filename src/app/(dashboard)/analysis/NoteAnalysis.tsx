@@ -155,10 +155,10 @@ const NoteAnalysis: React.FC<NoteAnalysisProps> = ({
                 Implicaciones Potenciales
               </h4>
               <div className="space-y-3">
-                {analysis.potential_implications.map((imp, index) => (
+                {analysis.potential_implications.map((imp: any, index: number) => (
                   <div key={index} className="p-4 rounded-xl border bg-amber-50/30 dark:bg-amber-900/10 flex gap-3 items-start">
                     <div className="mt-1"><ArrowRight className="w-4 h-4 text-amber-500" /></div>
-                    <p className="text-sm text-foreground leading-relaxed">{imp}</p>
+                    <p className="text-sm text-foreground leading-relaxed">{typeof imp === 'string' ? imp : (imp.implication || imp.description || JSON.stringify(imp))}</p>
                   </div>
                 ))}
               </div>

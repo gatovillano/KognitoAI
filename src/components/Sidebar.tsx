@@ -163,7 +163,13 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
       const response = await apiClient.post<ChatThread>('/api/threads', payload);
       const newThread = response.data;
       setThreads((prevThreads) => [newThread, ...prevThreads].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
-      router.push(`/chat/${newThread.id}`);
+
+      if (activeWorkspaceId) {
+        router.push(`/workspaces/${activeWorkspaceId}/chat/${newThread.id}`);
+      } else {
+        router.push(`/chat/${newThread.id}`);
+      }
+
       if (onLinkClick) {
         onLinkClick();
       }

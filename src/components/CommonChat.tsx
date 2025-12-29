@@ -84,28 +84,24 @@ interface CommonChatProps {
 function LoadingIndicator({
   isComprehensiveAnalysisActive = false,
   isKnowledgeAnalysisActive = false,
-  isDeepResearchActive = false, // Added isDeepResearchActive
+  isDeepResearchActive = false,
   toolName,
   reactState,
 }: {
   isComprehensiveAnalysisActive?: boolean;
   isKnowledgeAnalysisActive?: boolean;
-  isDeepResearchActive?: boolean; // Added isDeepResearchActive
+  isDeepResearchActive?: boolean;
   toolName?: string;
   reactState?: string;
 }) {
   let text = 'Kognito está pensando';
-  let Icon = Bot;
 
   if (isDeepResearchActive) {
     text = 'Realizando investigación profunda';
-    Icon = BrainCircuit; // O un icono más adecuado para investigación
   } else if (isComprehensiveAnalysisActive) {
     text = 'Realizando análisis comprensivo';
-    Icon = BrainCircuit;
   } else if (isKnowledgeAnalysisActive) {
     text = 'Consultando la base de conocimiento';
-    Icon = Search;
   }
 
   if (toolName) {
@@ -113,25 +109,49 @@ function LoadingIndicator({
   }
 
   if (reactState) {
-    text += ` - Estado ReAct: ${reactState}`;
+    text += ` - ${reactState}`;
   }
 
+  const dotVariants = {
+    initial: { y: 0 },
+    animate: {
+      y: -8,
+      transition: {
+        duration: 0.6,
+        repeat: Infinity,
+        repeatType: "reverse" as const,
+        ease: "easeInOut" as const
+      }
+    }
+  };
+
+  const containerVariants = {
+    initial: { transition: { staggerChildren: 0.15 } },
+    animate: { transition: { staggerChildren: 0.15 } }
+  };
+
   return (
-    <div className="flex items-start space-x-4">
-      <div className="flex-shrink-0">
-        <div className="h-8 w-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground">
-          <Icon className="h-5 w-5" />
-        </div>
-      </div>
-      <div className="flex-1 bg-muted p-3 rounded-lg max-w-[70%] relative">
-        <p className="text-base text-muted-foreground flex items-center">
-          {text}
-          <span className="animate-pulse delay-0 inline-block ml-1">.</span>
-          <span className="animate-pulse delay-150 inline-block">.</span>
-          <span className="animate-pulse delay-300 inline-block">.</span>
-        </p>
-        <div className="absolute left-[-8px] top-3 h-4 w-4 bg-muted rotate-45 transform origin-bottom-left"></div>
-      </div>
+    <div className="flex flex-col items-center space-y-3 py-4 w-full">
+      <motion.div
+        className="flex space-x-2"
+        variants={containerVariants}
+        initial="initial"
+        animate="animate"
+      >
+        <motion.div className="w-3 h-3 rounded-full bg-[#3B82F6] shadow-sm shadow-blue-500/50" variants={dotVariants} />
+        <motion.div className="w-3 h-3 rounded-full bg-[#6366F1] shadow-sm shadow-indigo-500/50" variants={dotVariants} />
+        <motion.div className="w-3 h-3 rounded-full bg-[#8B5CF6] shadow-sm shadow-violet-500/50" variants={dotVariants} />
+        <motion.div className="w-3 h-3 rounded-full bg-[#A855F7] shadow-sm shadow-purple-500/50" variants={dotVariants} />
+      </motion.div>
+
+      <motion.p
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5 }}
+        className="text-sm font-medium text-muted-foreground/80 tracking-wide"
+      >
+        {text}
+      </motion.p>
     </div>
   );
 }
@@ -199,6 +219,14 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       });
     }
   }, []);
+
+  // Force scroll to bottom when loading indicators appear
+  useEffect(() => {
+    if (isResponding || toolName || isDeepResearchActive || backgroundTasks.length > 0) {
+      // Use a small timeout to ensure the DOM has updated with the new indicator
+      setTimeout(() => scrollToBottom(true), 100);
+    }
+  }, [isResponding, toolName, isDeepResearchActive, backgroundTasks.length, scrollToBottom]);
 
   const { registerMessageHandler } = useWebSocketContext();
 
@@ -391,7 +419,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         setIsResponding(true);
         let newThreadId = '';
         try {
-          const threadResponse = await apiClient.post('/api/threads', {});
+          const threadResponse = await apiClient.post('/api/threads', { workspace_id: workspaceId });
           newThreadId = threadResponse.data.id;
 
           const formData = new FormData();
@@ -412,7 +440,12 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           if (selectedContext.length > 0) {
             newSearchParams.set('rag_context', JSON.stringify(selectedContext.map(item => ({ type: item.type, id: item.id }))));
           }
-          router.replace(`/chat/${newThreadId}?${newSearchParams.toString()}`);
+
+          if (workspaceId) {
+            router.replace(`/workspaces/${workspaceId}/chat/${newThreadId}?${newSearchParams.toString()}`);
+          } else {
+            router.replace(`/chat/${newThreadId}?${newSearchParams.toString()}`);
+          }
         } catch (error) {
           console.error('Error creando nuevo hilo de chat o enviando mensaje inicial:', error);
           toast.error('No se pudo iniciar una nueva conversación.');
@@ -828,6 +861,14 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     };
     sendInitialMessage();
   }, [initialMessage, initialRagContext, isLoading, messages.length, handleSendMessage]);
+
+  // Effect to scroll to bottom when initial loading finishes
+  useEffect(() => {
+    if (!isLoading) {
+      // Use a small timeout to ensure the DOM has updated with the messages
+      setTimeout(() => scrollToBottom(false), 150);
+    }
+  }, [isLoading, scrollToBottom]);
 
   // ... (other effects and handlers remain the same) ...
 
