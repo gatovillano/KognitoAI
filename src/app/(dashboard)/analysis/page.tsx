@@ -440,6 +440,8 @@ export default function AnalysisPage() {
     { value: 'collection', label: 'Colecciones' },
     { value: 'insight', label: 'Insights Proactivos' },
     { value: 'proactive_insight_manual', label: 'Insights Manuales' },
+    { value: 'note_analysis', label: 'Notas' },
+    { value: 'note_collection_analysis', label: 'Colecciones de Notas' },
     { value: 'code', label: 'Código' },
     { value: 'semantic', label: 'Semántico' },
     { value: 'semantic_summary', label: 'Resumen Semántico' },

@@ -70,9 +70,9 @@ engine = create_async_engine(
     echo=False,  # Poner en True para depurar las queries SQL
     pool_pre_ping=True,
     pool_recycle=3600,  # Recicla conexiones cada hora
-    pool_size=10,       # Aumentar el número de conexiones persistentes
-    max_overflow=20,    # Aumentar el número de conexiones adicionales
-    pool_timeout=60,    # Aumentar el tiempo de espera para adquirir una conexión
+    pool_size=30,       # Aumentar el número de conexiones persistentes
+    max_overflow=60,    # Aumentar el número de conexiones adicionales
+    pool_timeout=120,    # Aumentar el tiempo de espera para adquirir una conexión
     json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
     json_deserializer=json.loads
 )

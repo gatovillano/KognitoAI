@@ -309,10 +309,10 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
                 Áreas Problemáticas
               </h4>
               <ul className="space-y-2">
-                {analysis.problematic_areas.map((area, index) => (
+                {analysis.problematic_areas.map((area: any, index: number) => (
                   <li key={index} className="flex gap-2 text-sm text-muted-foreground p-2 rounded bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30">
                     <span className="font-bold text-red-500">•</span>
-                    {area}
+                    {typeof area === 'string' ? area : (area.issue || area.description || area.gap || JSON.stringify(area))}
                   </li>
                 ))}
               </ul>
@@ -326,12 +326,12 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
                 Acciones Recomendadas
               </h4>
               <div className="space-y-2">
-                {analysis.action_items.map((item, index) => (
+                {analysis.action_items.map((item: any, index: number) => (
                   <div key={index} className="flex items-center gap-3 p-3 rounded-lg border bg-green-50/30 dark:bg-green-900/10">
                     <div className="w-6 h-6 rounded-full bg-green-500 text-white flex items-center justify-center text-xs font-bold">
                       {index + 1}
                     </div>
-                    <p className="text-sm font-medium">{item}</p>
+                    <p className="text-sm font-medium">{typeof item === 'string' ? item : (item.task || item.description || JSON.stringify(item))}</p>
                   </div>
                 ))}
               </div>
@@ -348,8 +348,8 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
               </CardHeader>
               <CardContent>
                 <ul className="space-y-2 text-sm text-muted-foreground italic">
-                  {analysis.final_reflections.map((reflection, index) => (
-                    <li key={index}>"{reflection}"</li>
+                  {analysis.final_reflections.map((reflection: any, index: number) => (
+                    <li key={index}>"{typeof reflection === 'string' ? reflection : (reflection.reflection || reflection.thought || JSON.stringify(reflection))}"</li>
                   ))}
                 </ul>
               </CardContent>

@@ -161,7 +161,17 @@ SUMMARIZATION_PROMPT = "Tu tarea es crear un resumen conciso de la siguiente con
 
 EMOJI_LIST = "💡, ❓, ✨, 🚀, 📚, 📝, 💰, 📈, 📉, ⚙️, 🔗, 🧠, 💬, 📁, 📊, 🎯, 🔑, 🔒, 🔔, ⏳, 🔬, 🎨, 🎬, 🎤, 🎼, 🎲, 🧩, 🎮, 🏆, 🚗, ✈️, 🌍, 🏠, 🏢, 🏥, 🏦, 💻, 📱, 💾, 📁, 📂, 📄, 📅, 📌, 📎, 📈, 📊, 💡, 🤖, 🧑‍💻, 🧐, 🤔, 🎉, 🥳, 🎈, 🎁, 🎂, 🎄, 🎃, 👻, 👽, 👾, 🤖, 🧑‍🚀, 🕵️, 👨‍🏫, 👩‍🎓, 👨‍🍳, 👩‍🎨, 👨‍💻, 👩‍💼, 👨‍🔬, 👩‍🚀, 👨‍🚒, 👩‍✈️, 👨‍⚖️, 👩‍⚖️"
 
-THREAD_TITLE_PROMPT = f"Basado en la siguiente conversación, crea un título breve y descriptivo de no más de 8 palabras. El título debe comenzar con un emoji relevante que represente el tema de la conversación. Elige un emoji de la siguiente lista variada: {EMOJI_LIST}\n\nConversación:\n{{conversation_text}}"
+THREAD_TITLE_PROMPT = f"""TAREA: Generar un título corto para la conversación proporcionada.
+REGLAS:
+1. Longitud máxima: 8 palabras.
+2. Formato: [Emoji] [Título de texto]
+3. Emoji: Elige uno de esta lista: {EMOJI_LIST}
+4. SALIDA ESTRICTA: Devuelve SOLO el título. No respondas a la conversación. No uses comillas.
+
+Conversación:
+{{conversation_text}}
+
+Título:"""
 
 # ==============================================================================
 # PLANTILLA PARA PROMPT ENRIQUECIDO (Knowledge Graph)

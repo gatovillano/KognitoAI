@@ -20,7 +20,7 @@ interface CollectionAnalysisProps {
   play: (text: string) => void;
   isLoading: boolean;
   isPlaying: boolean;
-  activeText: string;
+  activeText: string | null;
 }
 
 import { ActionableButton } from '@/components/analysis/ActionableButton';
@@ -210,11 +210,11 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
                   Relaciones Conceptuales
                 </h4>
                 <div className="space-y-3">
-                  {analysis.concept_relationships.map((rel, index) => (
+                  {analysis.concept_relationships.map((rel: any, index: number) => (
                     <div key={index} className="text-sm text-muted-foreground flex gap-2 items-start p-3 rounded-lg bg-muted/30 border border-muted/50">
                       <div className="mt-1"><LinkIcon className="w-3 h-3 text-blue-500" /></div>
                       <div className="prose prose-sm dark:prose-invert max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{rel}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{typeof rel === 'string' ? rel : (rel.relationship || rel.description || JSON.stringify(rel))}</ReactMarkdown>
                       </div>
                     </div>
                   ))}
@@ -276,10 +276,10 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
                 Áreas Problemáticas o Conflictivas
               </h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {analysis.problematic_areas.map((area, index) => (
+                {analysis.problematic_areas.map((area: any, index: number) => (
                   <div key={index} className="p-3 rounded-lg border border-red-100 dark:border-red-900/30 bg-red-50/30 dark:bg-red-900/10 text-sm flex gap-2">
                     <span className="text-red-500 font-bold">!</span>
-                    {area}
+                    {typeof area === 'string' ? area : (area.issue || area.description || JSON.stringify(area))}
                   </div>
                 ))}
               </div>
@@ -296,9 +296,9 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {analysis.final_reflections.map((reflection, index) => (
+                  {analysis.final_reflections.map((reflection: any, index: number) => (
                     <p key={index} className="text-sm text-muted-foreground italic border-l-2 border-primary/20 pl-3">
-                      "{reflection}"
+                      "{typeof reflection === 'string' ? reflection : (reflection.reflection || reflection.thought || JSON.stringify(reflection))}"
                     </p>
                   ))}
                 </div>
@@ -317,9 +317,9 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
                   Notas Metodológicas
                 </h4>
                 <ul className="space-y-2">
-                  {analysis.methodological_notes.map((note, i) => (
+                  {analysis.methodological_notes.map((note: any, i: number) => (
                     <li key={i} className="text-sm text-muted-foreground bg-slate-50 dark:bg-slate-900/20 p-3 rounded-lg border">
-                      {note}
+                      {typeof note === 'string' ? note : (note.note || note.description || JSON.stringify(note))}
                     </li>
                   ))}
                 </ul>

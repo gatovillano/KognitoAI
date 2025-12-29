@@ -70,7 +70,9 @@ class KnowledgeGraphTool(BaseTool):
             search_result = await graph_integration.search_knowledge_graph(
                 query=natural_language_query,
                 dataset_name="default",
-                return_type="summary"
+                return_type="summary",
+                account_id=self.account_id,
+                workspace_id=self.workspace_id
             )
 
             if not search_result.get("results"):
