@@ -69,6 +69,12 @@ class Config:
         self.ollama_api_url: str = os.getenv("OLLAMA_API_URL", "http://host.docker.internal:11434") # URL por defecto para acceder al host desde Docker
         self.llm_request_timeout: int = int(os.getenv("LLM_REQUEST_TIMEOUT", 120)) # Nuevo: Tiempo de espera para las solicitudes al LLM en segundos
         self.llm_max_retries: int = int(os.getenv("LLM_MAX_RETRIES", 3)) # Nuevo: Número máximo de reintentos para llamadas al LLM
+        
+        # --- Configuración de Rate Limiting y Tokens ---
+        self.rate_limit_enabled: bool = os.getenv("RATE_LIMIT_ENABLED", "True").lower() in ('true', '1', 't')
+        self.rate_limit_max_requests: int = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", 20))
+        self.rate_limit_per_seconds: int = int(os.getenv("RATE_LIMIT_PER_SECONDS", 60))
+        self.deep_research_max_tokens: int = int(os.getenv("DEEP_RESEARCH_MAX_TOKENS", 8192))
 
 
         # --- Configuración de Telegram ---

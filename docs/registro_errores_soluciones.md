@@ -351,3 +351,15 @@ Se solucionaron tres errores críticos que afectaban la experiencia del usuario 
     1. Se añadió un **retorno temprano** al inicio de `_add_entities_to_neo4j` que devuelve 0 si la lista de entidades está vacía, evitando que el código intente procesar nada.
     2. Se movió la llamada a `_add_document_mentions(batch_data)` **dentro del bucle de lotes**, asegurando que las relaciones de mención se creen para cada lote procesado y eliminando la dependencia de variables locales fuera de su ámbito de definición.
     3. Se simplificó el mapeo de datos para incluir `dataset_name` directamente en el diccionario de la entidad, permitiendo que `_add_document_mentions` lo utilice de forma más robusta.
+
+---
+
+## 28-12-2025 - `DataException` por dimensiones de vectores inconsistentes en `langchain_pg_embedding`
+
+- **Error**: Se produjo un `psycopg.errors.DataException: different vector dimensions 384 and 768` al realizar búsquedas semánticas en `core/memory_manager.py`.
+- **Causa**: La tabla `langchain_pg_embedding` contenía una mezcla de embeddings con 384 dimensiones (probablemente de un modelo anterior o de una configuración incorrecta) y 768 dimensiones (el modelo actual). pgvector no permite realizar operaciones de similitud entre vectores de diferentes dimensiones en la misma consulta.
+- **Solución**: Se identificaron y eliminaron los registros con dimensiones incorrectas mediante una consulta SQL directa en el contenedor de la base de datos:
+    1. Se verificaron las dimensiones existentes: `SELECT vector_dims(embedding) as dimension, COUNT(*) as count FROM langchain_pg_embedding GROUP BY vector_dims(embedding);`.
+    2. Se eliminaron los 457 registros que tenían dimensión 384: `DELETE FROM langchain_pg_embedding WHERE vector_dims(embedding) = 384;`.
+    3. Se verificó que la tabla de `notas` no tuviera el mismo problema.
+    Esto restauró la consistencia de la tabla y permitió que las búsquedas semánticas volvieran a funcionar con el modelo de 768 dimensiones.

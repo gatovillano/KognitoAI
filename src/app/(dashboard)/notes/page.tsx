@@ -20,6 +20,8 @@ import { ManageLinkedProfilesDialog } from './ManageLinkedProfilesDialog';
 import { AnalysisDetailDialog } from '../analysis/analysis-detail-dialog';
 import { ContactProfile } from '../profiles/page';
 import { Analysis } from '@/lib/models';
+import { useAuth } from '@/contexts/AuthContext';
+import { NoteSearch } from '@/components/NoteSearch';
 
 export interface Note {
   id: number;
@@ -36,6 +38,7 @@ export interface Note {
 }
 
 export default function NotesPage() {
+  const { user } = useAuth();
   const [notes, setNotes] = useState<Note[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [categoryView, setCategoryView] = useState(false);
@@ -692,6 +695,24 @@ export default function NotesPage() {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+      </div>
+
+      <div className="mb-8">
+        <NoteSearch
+          accountId={user?.id || ''}
+          workspaceId={workspaceView || undefined}
+          onResultClick={(result) => {
+            const note = notes.find(n => String(n.id) === result.note_id);
+            if (note) {
+              setViewingNote(note);
+              setIsViewDialogOpen(true);
+            } else {
+              toast.info(`Nota: ${result.title || 'Sin título'}`, {
+                description: result.content.substring(0, 200) + '...'
+              });
+            }
+          }}
+        />
       </div>
 
       {renderNotes()}

@@ -39,8 +39,8 @@ interface EmptyChatProps {
   workspaceId?: string;
   selectedContext: SelectedContextItem[]; // Added
   onContextSelected: (context: SelectedContextItem[]) => void; // Added
-  isUploadingImage: boolean;
-  uploadedImagePreview?: string | null;
+  isUploadingImages: boolean;
+  uploadedImagePreviews: string[];
   onRemoveImage: () => void;
   onImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
@@ -71,8 +71,8 @@ export function EmptyChat({
   workspaceId,
   selectedContext, // Added
   onContextSelected, // Added
-  isUploadingImage,
-  uploadedImagePreview,
+  isUploadingImages,
+  uploadedImagePreviews,
   onRemoveImage,
   onImageUpload,
 }: EmptyChatProps) {
@@ -83,7 +83,7 @@ export function EmptyChat({
     "Compara las ventajas y desventajas de React vs. Vue para un proyecto a gran escala."
   ];
 
-    const containerVariants = {
+  const containerVariants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
@@ -134,8 +134,8 @@ export function EmptyChat({
           isProcessingAudio={isProcessingAudio}
           isUploadingFile={isUploadingFile}
           isVectorizingFile={isVectorizingFile} // Pasar el nuevo estado
-          isUploadingImage={isUploadingImage}
-          uploadedImagePreview={uploadedImagePreview}
+          isUploadingImages={isUploadingImages}
+          uploadedImagePreviews={uploadedImagePreviews}
           onRemoveImage={onRemoveImage}
           onImageUpload={onImageUpload}
           onKeyDown={onKeyDown}
@@ -155,7 +155,7 @@ export function EmptyChat({
           <ContextSelectorButton
             onContextSelected={onContextSelected}
             currentContext={selectedContext}
-            // No pasamos workspaceId aquí, ya que EmptyChat es para chats generales
+          // No pasamos workspaceId aquí, ya que EmptyChat es para chats generales
           />
         </ChatInputBar>
         <motion.div

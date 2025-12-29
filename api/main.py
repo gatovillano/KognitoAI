@@ -22,6 +22,7 @@ from api.forms import router as forms_router
 from api.collections import router as collections_router # Importar el router de collections
 from api.universal_search import router as universal_search_router # Importar el router de búsqueda universal
 from api.collection_search import router as collection_search_router # Importar el router de búsqueda en colecciones
+from api.note_search import router as note_search_router # Importar el router de búsqueda en notas
 from core.config import settings
 from core.database import create_tables, Account
 from core.llm_manager import initialize_llms
@@ -35,7 +36,8 @@ from core.dependencies import get_db_session # Importar get_db_session
 from utils.tool_scheduler import tool_scheduler # Importar tool_scheduler
 from utils.scheduled_tools_manager import scheduled_tools_manager # Importar scheduled_tools_manager
 from telegram_client.bot_manager import bot_manager # Importar bot_manager
-from pydantic import BaseModel
+from typing import Optional
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func # Importar func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -278,14 +280,67 @@ app.include_router(forms_router, prefix="/api", tags=["forms"])
 app.include_router(collections_router, prefix="/api", tags=["collections"])
 app.include_router(universal_search_router, prefix="/api", tags=["universal-search"])
 app.include_router(collection_search_router, prefix="/api", tags=["collection-search"])
+app.include_router(note_search_router, prefix="/api", tags=["note-search"])
 app.include_router(memory_router, prefix="/api", tags=["memory"]) # NUEVO: Incluir el router de memory
 
 from api.tools import router as tools_router
 from api.deep_research import router as deep_research_router
 from api.gap_development import router as gap_development_router
+from core.tools import HTMLGeneratorTool # Importar la herramienta HTMLGeneratorTool
+from utils.security import get_current_account_id # Importar get_current_account_id
+
 app.include_router(tools_router, prefix="/api/tools", tags=["tools"])
 app.include_router(deep_research_router, prefix="/api", tags=["deep-research"])
 app.include_router(gap_development_router, prefix="/api", tags=["gap-development"])
+
+class GenerateHTMLRequest(BaseModel):
+    content: str = Field(..., description="El contenido en formato Markdown o texto plano.")
+    title: Optional[str] = Field("Documento Generado", description="El título del documento HTML.")
+    include_css: bool = Field(True, description="Si se debe incluir un CSS básico para mejorar la presentación.")
+
+@app.post("/api/generate-html", summary="Generar y descargar un archivo HTML", response_class=FileResponse)
+async def generate_html_file(
+    request_data: GenerateHTMLRequest,
+    account_id: str = Depends(get_current_account_id) # Usar get_current_account_id para autenticación
+):
+    """
+    Genera un archivo HTML a partir del contenido proporcionado (Markdown o texto plano)
+    y lo devuelve para su descarga.
+    """
+    try:
+        # Instanciar la herramienta HTMLGeneratorTool
+        html_generator = HTMLGeneratorTool(account_id=account_id) # Pasar account_id si la herramienta lo necesita
+        
+        # Ejecutar la herramienta para obtener el contenido HTML
+        html_content = await html_generator._arun(
+            content=request_data.content,
+            title=request_data.title,
+            include_css=request_data.include_css
+        )
+
+        # Usar un nombre de archivo más robusto y seguro
+        safe_title = "".join(c for c in request_data.title if c.isalnum() or c in (' ', '.', '_')).rstrip()
+        file_name = f"{safe_title.replace(' ', '_').lower()}_{uuid.uuid4().hex[:6]}.html"
+        
+        # Definir el directorio de salida dentro de 'media' usando MEDIA_ROOT absoluto
+        output_dir = os.path.join(MEDIA_ROOT, "generated_html")
+        os.makedirs(output_dir, exist_ok=True) # Asegurarse de que el directorio exista
+        
+        temp_file_path = os.path.join(output_dir, file_name) # Guardar en el directorio 'media/generated_html'
+
+        with open(temp_file_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+
+        # Devolver el archivo para descarga
+        return FileResponse(
+            path=temp_file_path,
+            media_type="text/html",
+            filename=file_name,
+            headers={"Content-Disposition": f"attachment; filename={file_name}"}
+        )
+    except Exception as e:
+        logger.error(f"Error al generar archivo HTML: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error al generar archivo HTML: {e}")
 
 class AdminMetricsResponse(BaseModel):
     total_users: int

@@ -3,6 +3,8 @@
 import logging
 from typing import List, Optional
 import uuid
+import re
+import base64
 from datetime import datetime # Importar datetime
 import io # Para manejar el PDF en memoria
 import markdown # Para convertir Markdown a HTML
@@ -147,8 +149,19 @@ async def generate_note_pdf_endpoint(
 
     buffer = io.BytesIO()
 
+    # Process Mermaid diagrams
+    content = note_data["content"]
+    def replace_mermaid(match):
+        mermaid_code = match.group(1).strip()
+        mermaid_base64 = base64.urlsafe_b64encode(mermaid_code.encode('utf-8')).decode('utf-8')
+        image_url = f"https://mermaid.ink/img/{mermaid_base64}"
+        return f'<div class="mermaid-diagram"><img src="{image_url}" alt="Mermaid Diagram" /></div>'
+
+    pattern = r'```mermaid\s+(.*?)```'
+    content = re.sub(pattern, replace_mermaid, content, flags=re.DOTALL)
+
     # Convertir Markdown a HTML, asegurando el soporte para tablas
-    html_content = markdown.markdown(note_data["content"], extensions=['tables'])
+    html_content = markdown.markdown(content, extensions=['tables'])
 
     # Convertir created_at a datetime si es una cadena y asegurar que siempre esté definida
     created_at_dt = note_data['created_at']

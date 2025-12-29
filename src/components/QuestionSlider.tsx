@@ -111,7 +111,10 @@ export function QuestionSlider({
             >
               <div>
                 <p className="text-sm text-muted-foreground leading-relaxed">
-                  {questions[currentIndex]}
+                  {typeof questions[currentIndex] === 'string'
+                    ? questions[currentIndex]
+                    : (questions[currentIndex] as any).gap_title || (questions[currentIndex] as any).gap || (questions[currentIndex] as any).question || JSON.stringify(questions[currentIndex])
+                  }
                 </p>
               </div>
             </motion.div>

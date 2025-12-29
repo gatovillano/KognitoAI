@@ -526,10 +526,14 @@ IMPORTANTE:
             response = await llm_to_use.ainvoke(prompt)
             response_text = response.content if hasattr(response, 'content') else str(response)
 
-            # Parsear respuesta JSON
+            # Parsear respuesta JSON usando el limpiador robusto
             import json
             try:
-                parsed = json.loads(response_text)
+                cleaned_response = self._robust_json_cleaner(response_text)
+                if not cleaned_response:
+                    raise json.JSONDecodeError("No se encontró JSON válido", response_text, 0)
+                
+                parsed = json.loads(cleaned_response)
                 documents_data = parsed.get("documents", [])
 
                 all_quotes = []
@@ -634,10 +638,14 @@ IMPORTANTE: Solo el JSON solicitado.
             response_text = response.content if hasattr(response, 'content') else str(response)
             logger.debug(f"✅ _extract_quotes_with_llm: Respuesta cruda del LLM (primeros 500 chars): {response_text[:500]}...")
 
-            # Parsear respuesta JSON
+            # Parsear respuesta JSON usando el limpiador robusto
             import json
             try:
-                parsed = json.loads(response_text)
+                cleaned_response = self._robust_json_cleaner(response_text)
+                if not cleaned_response:
+                    raise json.JSONDecodeError("No se encontró JSON válido", response_text, 0)
+                
+                parsed = json.loads(cleaned_response)
                 quotes_data = parsed.get("quotes", [])
 
                 quotes = []
@@ -1413,8 +1421,8 @@ Responde ÚNICAMENTE con el array JSON solicitado."""
         import json
         
         try:
-            # Limpiar respuesta
-            cleaned_response = self._validate_and_clean_response(response_text)
+            # Limpiar respuesta usando el limpiador robusto
+            cleaned_response = self._robust_json_cleaner(response_text)
             if not cleaned_response:
                 return []
             
@@ -2037,8 +2045,8 @@ Responde ÚNICAMENTE con el array JSON solicitado."""
                 # Log de la respuesta para debugging
                 logger.debug(f"📝 Respuesta LLM para par {quote1_idx}-{quote2_idx}: '{response_text[:200]}{'...' if len(response_text) > 200 else ''}'")
                 
-                # Validar y limpiar la respuesta
-                cleaned_response = self._validate_and_clean_response(response_text)
+                # Validar y limpiar la respuesta usando el limpiador robusto
+                cleaned_response = self._robust_json_cleaner(response_text)
                 
                 if not cleaned_response:
                     logger.warning(f"⚠️ Respuesta vacía o inválida del LLM para par {quote1_idx}-{quote2_idx} (intento {attempt + 1})")
@@ -2167,32 +2175,48 @@ Responde ÚNICAMENTE con un objeto JSON válido:
 
 NO incluyas texto adicional, solo el JSON."""
     
-    def _validate_and_clean_response(self, response_text: str) -> Optional[str]:
+    def _robust_json_cleaner(self, response_text: str) -> Optional[str]:
         """
-        Valida y limpia la respuesta del LLM antes de parsear JSON.
-        
-        Args:
-            response_text: Texto de respuesta del LLM
-            
-        Returns:
-            Texto limpio o None si la respuesta es inválida
+        Limpia y extrae JSON de forma robusta de la respuesta del LLM.
+        Soporta tanto objetos {...} como arrays [...].
         """
         if not response_text or not response_text.strip():
             return None
         
-        # Limpiar la respuesta
-        cleaned = response_text.strip()
+        # Remover bloques de código markdown si existen
+        cleaned = re.sub(r'```json\s*', '', response_text)
+        cleaned = re.sub(r'```\s*', '', cleaned)
+        cleaned = cleaned.strip()
         
-        # Remover caracteres de control y normalizar
+        # Remover caracteres de control
         cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x84\x86-\x9f]', '', cleaned)
         
-        # Buscar JSON en la respuesta
-        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', cleaned)
-        if json_match:
-            return json_match.group(0)
+        # Encontrar el primer delimitador JSON ({ o [) y el último (} o ])
+        start_idx_obj = cleaned.find('{')
+        start_idx_arr = cleaned.find('[')
         
-        # Si no se encuentra JSON válido, devolver None
-        return None
+        start_idx = -1
+        end_delimiter = ''
+        
+        if start_idx_obj != -1 and (start_idx_arr == -1 or start_idx_obj < start_idx_arr):
+            start_idx = start_idx_obj
+            end_delimiter = '}'
+        elif start_idx_arr != -1:
+            start_idx = start_idx_arr
+            end_delimiter = ']'
+            
+        if start_idx == -1:
+            return None
+            
+        end_idx = cleaned.rfind(end_delimiter)
+        if end_idx == -1 or end_idx < start_idx:
+            return None
+            
+        return cleaned[start_idx:end_idx + 1]
+
+    def _validate_and_clean_response(self, response_text: str) -> Optional[str]:
+        """DEPRECATED: Usar _robust_json_cleaner en su lugar."""
+        return self._robust_json_cleaner(response_text)
     
     def _extract_json_from_text(self, text: str, quote1_idx: int, quote2_idx: int, similarity: float) -> Optional[Dict[str, Any]]:
         """
@@ -2291,31 +2315,8 @@ NO incluyas texto adicional, solo el JSON."""
         }
     
     def _validate_and_clean_llm_response(self, response_text: str) -> Optional[str]:
-        """
-        Valida y limpia la respuesta del LLM para extracción de citas.
-        
-        Args:
-            response_text: Texto de respuesta del LLM
-            
-        Returns:
-            Texto limpio o None si la respuesta es inválida
-        """
-        if not response_text or not response_text.strip():
-            return None
-        
-        # Limpiar la respuesta
-        cleaned = response_text.strip()
-        
-        # Remover caracteres de control y normalizar
-        cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x84\x86-\x9f]', '', cleaned)
-        
-        # Buscar JSON en la respuesta
-        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', cleaned)
-        if json_match:
-            return json_match.group(0)
-        
-        # Si no se encuentra JSON válido, devolver None
-        return None
+        """Limpia la respuesta del LLM para extracción de citas usando el limpiador robusto."""
+        return self._robust_json_cleaner(response_text)
     
     async def _call_llm_safely(self, prompt: str, cache_key: str) -> Optional[str]:
         """
@@ -2524,20 +2525,3 @@ NO incluyas texto adicional, solo el JSON."""
         if cached_result is not None:
             return cached_result
 
-        prompt = f"""
-        Extrae una lista de 5-10 palabras clave o frases cortas que representen los temas principales del siguiente documento. Responde únicamente con las palabras clave separadas por comas.
-
-        Documento:
-        {content[:4000]}
-
-        Palabras clave:
-        """
-        try:
-            response = await llm_to_use.ainvoke(prompt)
-            keywords_str = response.content.strip() if hasattr(response, 'content') else str(response).strip()
-            keywords = [kw.strip() for kw in keywords_str.split(',') if kw.strip()]
-            self._store_in_cache(cache_key, keywords)
-            return keywords
-        except Exception as e:
-            logger.warning(f"⚠️ Falló la generación de palabras clave con LLM: {e}")
-            return []

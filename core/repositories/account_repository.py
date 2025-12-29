@@ -66,3 +66,26 @@ class AccountRepository:
         )
         result = await self.db_session.execute(stmt)
         return result.scalars().first()
+
+    async def find_telegram_identity(self, identifier: str) -> Optional[PlatformIdentity]:
+        """
+        Busca una identidad de Telegram por alias (username) o por ID de plataforma.
+        """
+        # Intentar buscar por username en la tabla Account
+        stmt = select(PlatformIdentity).join(Account).where(
+            PlatformIdentity.platform == 'telegram',
+            Account.username == identifier
+        )
+        result = await self.db_session.execute(stmt)
+        identity = result.scalars().first()
+        
+        if not identity:
+            # Si no se encuentra por username, intentar buscar por platform_user_id
+            stmt = select(PlatformIdentity).where(
+                PlatformIdentity.platform == 'telegram',
+                PlatformIdentity.platform_user_id == identifier
+            )
+            result = await self.db_session.execute(stmt)
+            identity = result.scalars().first()
+            
+        return identity

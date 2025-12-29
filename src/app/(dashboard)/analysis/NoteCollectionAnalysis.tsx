@@ -108,7 +108,7 @@ const NoteCollectionAnalysis: React.FC<NoteCollectionAnalysisProps> = ({
                 Síntesis de KAI
               </h4>
               <div className="text-sm italic text-foreground/90 leading-relaxed">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysis.kai_synthesis}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{String(analysis.kai_synthesis)}</ReactMarkdown>
               </div>
             </div>
           )}
@@ -188,10 +188,10 @@ const NoteCollectionAnalysis: React.FC<NoteCollectionAnalysisProps> = ({
                 Insights Sintetizados
               </h4>
               <div className="grid grid-cols-1 gap-3">
-                {analysis.synthesized_insights.map((insight, index) => (
+                {analysis.synthesized_insights.map((insight: any, index: number) => (
                   <div key={index} className="p-4 rounded-xl border bg-card shadow-sm hover:shadow-md transition-shadow border-l-4 border-l-primary">
                     <p className="text-sm text-foreground leading-relaxed">
-                      {insight}
+                      {typeof insight === 'string' ? insight : (insight.insight || insight.description || JSON.stringify(insight))}
                     </p>
                   </div>
                 ))}

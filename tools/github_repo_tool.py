@@ -97,7 +97,7 @@ class GitHubRepoTool(BaseTool):
             self.session = requests.Session()
         self.github_token = github_token or self.github_token or os.environ.get("GITHUB_TOKEN")
         if self.github_token:
-            self.session.headers.update({'Authorization': f'token {self.github_token}'})
+            self.session.headers.update({'Authorization': f'Bearer {self.github_token}'})
             logger.info("Using github_token to access repo")
         try:
             if action == "list_tree":

@@ -48,7 +48,7 @@ from langchain_core.messages import ToolMessage
 
 # --- Módulos del Proyecto ---
 from core.tools import get_all_langchain_tools
-from core.memory_manager import get_user_profile, add_memory_to_vector_db
+from core.memory_manager import get_user_profile, add_memory_to_vector_db, get_relevant_memories
 from core.context_cache import get_cached_context, cache_context
 from core.database import SessionLocal, Account, ChatThread, Workspace
 from utils.db_session import DBSession
@@ -402,6 +402,12 @@ async def update_thread_title_if_needed(thread_id: str, messages: list):
             logger.info(f"[TÍTULO] Solicitando título para hilo {thread_id} con {len(messages)} mensajes...")
             response = await llm.ainvoke(prompt)
             new_title = str(response.content).strip() if hasattr(response, 'content') else str(response).strip()
+            
+            # Limpieza y truncamiento de seguridad
+            new_title = new_title.strip('"').strip("'")
+            if len(new_title) > 100:
+                new_title = new_title[:97] + "..."
+                
             logger.info(f"[TÍTULO] Título generado para hilo {thread_id}: '{new_title}'")
             async with DBSession(SessionLocal) as db:
                 await db.execute(update(ChatThread).where(ChatThread.id == uuid.UUID(thread_id)).values(title=new_title))
@@ -447,6 +453,12 @@ async def force_update_thread_title(thread_id: str):
             logger.info(f"Forzando la generación de título para el hilo {thread_id}...")
             response = await llm.ainvoke(prompt)
             new_title = str(response.content).strip() if hasattr(response, 'content') else str(response).strip()
+            
+            # Limpieza y truncamiento de seguridad
+            new_title = new_title.strip('"').strip("'")
+            if len(new_title) > 100:
+                new_title = new_title[:97] + "..."
+
             logger.info(f"Nuevo título generado para el hilo {thread_id}: '{new_title}'")
             
             # Obtener account_id para la notificación ANTES de hacer commit
@@ -571,6 +583,43 @@ async def call_model_node(state: AgentState):
 
     relevant_memories_text = ""
     final_sources_for_state = state.get('sources', []) # Mantener las fuentes existentes si las hay
+
+    # --- RAG AUTOMÁTICO PARA ALIMENTAR EL CONTEXTO ---
+    # Se ejecuta solo si no venimos de una llamada a herramienta y hay un mensaje del usuario
+    if not is_after_tool_call and user_message:
+        try:
+            logger.info(f"🔍 Ejecutando RAG automático para alimentar el contexto. Workspace: {state.get('workspace_id')}")
+            
+            # Priorizar búsqueda en documentos si hay contexto explícito
+            explicit_doc_ids = None
+            if rag_context:
+                explicit_doc_ids = [item['id'] for item in rag_context if item.get('type') == 'document']
+
+            # Realizar búsqueda híbrida (incluye notas gracias a cambios en memory_manager)
+            rag_output = await get_relevant_memories(
+                account_id=state['account_id'],
+                query=user_message,
+                workspace_id=state.get('workspace_id'),
+                explicit_document_ids=explicit_doc_ids,
+                k=10
+            )
+            
+            relevant_memories_text = rag_output.context_for_llm
+            
+            # Integrar fuentes encontradas en el estado
+            if rag_output.sources:
+                if final_sources_for_state is None:
+                    final_sources_for_state = []
+                
+                existing_urls = {s.get('url') for s in final_sources_for_state if s.get('url')}
+                for source in rag_output.sources:
+                    source_dict = source.dict()
+                    if source_dict.get('url') not in existing_urls:
+                        final_sources_for_state.append(source_dict)
+                        
+            logger.info(f"✅ RAG automático completado. Se encontraron {len(rag_output.sources)} fuentes.")
+        except Exception as e:
+            logger.error(f"❌ Error en RAG automático: {e}", exc_info=True)
 
     # --- FIN DE LA LÓGICA DE MANEJO DE FUENTES ---
         

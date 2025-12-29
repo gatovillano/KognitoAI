@@ -22,7 +22,7 @@ interface SemanticAnalysisProps {
   play: (text: string) => void;
   isLoading: boolean;
   isPlaying: boolean;
-  activeText: string;
+  activeText: string | null;
 }
 
 const SemanticAnalysis: React.FC<SemanticAnalysisProps> = ({
@@ -38,6 +38,7 @@ const SemanticAnalysis: React.FC<SemanticAnalysisProps> = ({
   activeText,
 }) => {
   const semanticData = analysis.result || analysis.full_data || {};
+  const textToRead = semanticData?.resumen_semantico || analysis.summary || "";
 
   return (
     <div className="space-y-6">
@@ -274,7 +275,7 @@ const SemanticAnalysis: React.FC<SemanticAnalysisProps> = ({
                   <div key={index} className="p-3 rounded-lg border border-red-100 dark:border-red-900/30 bg-red-50/30 dark:bg-red-900/10 flex gap-3 items-start">
                     <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5" />
                     <div className="flex-1">
-                      <p className="text-sm font-medium">{typeof area === 'string' ? area : (area.issue || area.description)}</p>
+                      <p className="text-sm font-medium">{typeof area === 'string' ? area : (area.issue || area.description || area.gap || JSON.stringify(area))}</p>
                     </div>
                     <Button
                       variant="ghost"

@@ -8,11 +8,12 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2, Upload, CheckCircle, XCircle, Clock, Network, ChevronDown, Settings, AlertTriangle, BarChart3 } from 'lucide-react';
+import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2, Upload, CheckCircle, XCircle, Clock, Network, ChevronDown, Settings, AlertTriangle, BarChart3, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
-import { Info } from 'lucide-react';
+import { useWebSocketContext } from '@/contexts/WebSocketContext';
+import { WebSocketMessage } from '@/hooks/useWebSocket';
 
 import { UploadDocumentDialog } from './upload-document-dialog';
 import { CreateCollectionDialog } from './create-collection-dialog';
@@ -70,7 +71,7 @@ export default function RagCollectionsPage() {
   const [processingTopic, setProcessingTopic] = useState<string | null>(null);
   const [processingWorkspaceId, setProcessingWorkspaceId] = useState<string | null>(null);
 
-  const router = useRouter();
+  const { registerMessageHandler } = useWebSocketContext();
 
   const fetchCollections = useCallback(async () => {
     setIsLoading(true);
@@ -87,6 +88,62 @@ export default function RagCollectionsPage() {
       console.log('Finished fetching collections. isLoading set to false.'); // Debug log
     }
   }, []);
+
+  const onUploadStarted = useCallback((message: WebSocketMessage) => {
+    if (!message || !message.task_id) return;
+    setUploadTasks(prev => {
+      // Evitar duplicados si ya se añadió por onUploadStart del diálogo
+      const exists = prev.some(t => t.id === message.task_id || t.id === (message.file_names?.[0]));
+      if (exists) {
+        return prev.map(t => (t.id === message.task_id || t.id === (message.file_names?.[0]))
+          ? { ...t, id: message.task_id, status: 'processing', file_names: message.file_names, topic: message.topic }
+          : t);
+      }
+      return [...prev, { id: message.task_id, status: 'processing', file_names: message.file_names, topic: message.topic, created_at: message.created_at || new Date().toISOString() }];
+    });
+  }, []);
+
+  const onUploadProgress = useCallback((data: any) => {
+    if (!data || !data.task_id) return;
+    setUploadTasks(prev => prev.map(task => task.id === data.task_id ? { ...task, progress: data.progress } : task));
+  }, []);
+
+  const onUploadCompleted = useCallback((data: any) => {
+    if (!data || !data.task_id) return;
+    toast.success(data.message || 'Subida completada.');
+    setUploadTasks(prev => prev.filter(task => task.id !== data.task_id));
+    fetchCollections();
+  }, [fetchCollections]);
+
+  const onUploadFailed = useCallback((data: any) => {
+    if (!data || !data.task_id) return;
+    toast.error(data.error_message || 'Falló la subida de archivos.');
+    setUploadTasks(prev => prev.filter(task => task.id !== data.task_id));
+  }, []);
+
+  useEffect(() => {
+    const handleWebSocketMessage = (message: WebSocketMessage) => {
+      switch (message.type) {
+        case 'upload_started':
+          onUploadStarted(message);
+          break;
+        case 'upload_progress':
+          onUploadProgress(message.data || message);
+          break;
+        case 'upload_completed':
+          onUploadCompleted(message.data || message);
+          break;
+        case 'upload_failed':
+          onUploadFailed(message.data || message);
+          break;
+      }
+    };
+
+    const unregister = registerMessageHandler(handleWebSocketMessage);
+    return unregister;
+  }, [registerMessageHandler, onUploadStarted, onUploadProgress, onUploadCompleted, onUploadFailed]);
+
+  const router = useRouter();
 
   useEffect(() => {
     console.log('useEffect: Fetching collections...'); // Debug log
@@ -435,7 +492,11 @@ export default function RagCollectionsPage() {
         </div>
       </div>
 
-      {uploadTasks.length > 0 && <UploadProgressIndicator tasks={uploadTasks} />}
+      {uploadTasks.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-50 w-80">
+          <UploadProgressIndicator tasks={uploadTasks} />
+        </div>
+      )}
 
       {renderContent()}
 
