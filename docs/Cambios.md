@@ -91,7 +91,7 @@ Se ha modificado el componente `GraphVisualization` para que las etiquetas de la
 
 ---
 
-## 24-12-2025 Corrección de `TypeError` en `deep_researcher` por concatenación de tipos
+## 24-12-25 Corrección de `TypeError` en `deep_researcher` por concatenación de tipos
 
 - **Error**: Se produjo un `TypeError: can only concatenate list (not "str") to list` en el agente `DeepResearcher`.
 - **Causa**: El nodo `compress_research` del grafo de investigación estaba devolviendo el campo `raw_notes` como una cadena de texto (`string`), mientras que el estado del agente (`ResearcherState`) esperaba una lista de cadenas (`list[str]`). Al intentar actualizar el estado, el reductor `operator.add` fallaba al intentar concatenar una lista con una cadena.
@@ -144,6 +144,16 @@ Se ha implementado la funcionalidad para recuperar y visualizar las memorias vec
   - La función `fetchMemories` ahora realiza una llamada al nuevo endpoint `/api/memories` para obtener la lista de memorias vectoriales.
   - La función `addMemory` ahora utiliza el endpoint `POST /api/memories` para guardar nuevas memorias.
   - Se añadió un mensaje informativo en la función `deleteMemory` indicando que la eliminación de memorias vectoriales aún no está implementada.
+
+---
+
+## 28-12-25 Integración de Notas de Workspace en Búsqueda RAG
+
+Se ha mejorado el sistema de recuperación de información (RAG) para que incluya automáticamente las notas del workspace actual al alimentar el contexto del LLM.
+
+- **Filtrado de Notas por Workspace**: Se actualizaron las funciones `_run_semantic_search` y `_run_fts_search` en [`core/memory_manager.py`](core/memory_manager.py) para aplicar el filtro de `workspace_id` al buscar en la tabla de notas.
+- **RAG Automático en el Agente**: Se implementó una búsqueda RAG proactiva en el nodo `call_model_node` de [`core/agent.py`](core/agent.py). Ahora, el agente recupera memorias, documentos y notas relevantes del workspace antes de generar cada respuesta, asegurando que el LLM tenga contexto actualizado sin depender de llamadas explícitas a herramientas.
+- **Consistencia en Herramientas**: Se verificó que las herramientas de búsqueda de conocimiento utilicen la lógica actualizada, garantizando que los resultados respeten el ámbito del workspace activo.
 
 ---
 
@@ -229,9 +239,9 @@ Se mejoró el `lead_researcher_prompt` para hacer más explícita la conexión e
 
 ## 24-12-25 Corrección de conexión WebSocket en componentes de progreso de investigación 🔌
 
-Se corrigió el problema donde las notificaciones de progreso del Deep Researcher no se mostrabn en el frontend debido a que los componentes QuestionSliderDialog y GapDevelopmentDialog no estaban conectados correctamente al WebSocket.
+Se corrigió el problema donde las notificaciones de progreso del Deep Researcher no se mostraban en el frontend debido a que los componentes QuestionSliderDialog y GapDevelopmentDialog no estaban conectados correctamente al WebSocket.
 
-- **Cambio de useWebSocket a useWebSocketContext**: Se modificaron `src/components/QuestionSliderDialog.tsx` y `src/components/GapDevelopmentDialog.tsx` para usar `useWebSocketContext` en lugar de `useWebSocket` directamente, permitiendo que reciban las actualizaciones de progreso enviadas por el backend a través de WebSocket.
+- **Cambio de useWebSocket a useWebSocketContext**: Se modificaron `src/components/QuestionSliderDialog.tsx` y `src/components/GapDevelopmentDialog.Dialog.tsx` para usar `useWebSocketContext` en lugar de `useWebSocket` directamente, permitiendo que reciban las actualizaciones de progreso enviadas por el backend a través de WebSocket.
 
 ---
 
@@ -613,7 +623,7 @@ Se corrigió un `pydantic_core._pydantic_core.ValidationError` que ocurría al i
 
 ## 27-12-25 Corrección de inyección de `account_id` en herramientas de Deep Researcher 🛠️
 
-Se corrigió un error de validación de Pydantic que ocurría porque el `account_id` no se estaba inyectando correctamente en las herramientas `GraphCypherGeneratorTool` y `knowledge_search` dentro del agente `DeepResearcher`.
+Se corrigió un error de validación de Pydantic que ocurría porque el `account_id` no se estaba inyectando correctamente en las herramientas `GraphCypherGeneratorTool` y `knowledge_search` dentro del sub-grafo del `DeepResearcher`.
 
 - **Inyección explícita de `account_id` en `GraphCypherGeneratorTool`**: Se modificó la función `get_all_tools` en `core/agents/deep_researcher_utils.py` para extraer el `account_id` del `RunnableConfig` y pasarlo explícitamente al constructor de `GraphCypherGeneratorTool`.
 - **Restablecimiento de `account_id` como requerido en `knowledge_search`**: Se revirtió el cambio en `tools/knowledge_search_tool.py`, volviendo a hacer que el parámetro `account_id` sea requerido y confiando en la inyección de `InjectedToolArg` por parte de LangGraph.
@@ -648,60 +658,185 @@ Se corrigió un `pydantic_core._pydantic_core.ValidationError` que ocurría en l
 
 ## 27-12-25 Corrección de `ValidationError` en `knowledge_search` (Intento 2) 🐞
 
-Se corrigió un `pydantic_core._pydantic_core.ValidationError` persistente en las herramientas `knowledge_search` y `graph_cypher_generator` del `DeepResearcher`. El problema se debía a un conflicto entre la validación de Pydantic en el momento de la instanciación y la inyección de dependencias en tiempo de ejecución.
+Se corrigió un `pydantic_core._pydantic_core.ValidationError` persistente en las herramientas `knowledge_search` y `graph_cypher_generator_tool` dentro del sub-grafo del `DeepResearcher`. El problema se debía a que el `account_id` y `workspace_id` no se estaban inyectando correctamente en el constructor de las herramientas.
 
-- **Campos Opcionales en `BaseTool`**: Se modificaron las clases `KnowledgeSearchTool` y `GraphCypherGeneratorTool` para que el campo `account_id` (y `workspace_id` en `KnowledgeSearchTool`) sea opcional (`Optional[str] = None`).
-- **Inyección Post-Instanciación**: Se actualizó la función `get_all_tools` en `core/agents/deep_researcher_utils.py` para que primero instancie las herramientas sin argumentos y luego asigne los atributos `account_id` y `workspace_id` a las instancias creadas. Este enfoque de dos pasos evita el error de validación inicial y asegura que las dependencias estén presentes antes de la ejecución de la herramienta.
-
----
-
-## 27-12-25 Corrección del indicador de progreso de Deep Research en el chat 🐛
-
-Se corrigió un problema donde el indicador de progreso para la herramienta "Deep Research" no aparecía en el chat. Esto se debía a una discrepancia en el nombre de la propiedad utilizada para el nombre de la herramienta en los eventos de WebSocket enviados desde el backend.
-
-- **Estandarización de `tool_name`**: Se modificó `core/agent.py` para enviar la propiedad `tool_name` (snake_case) en lugar de `toolName` (camelCase) en los eventos `tool_start` y `tool_end`. Esto alinea el backend con la interfaz `ToolStatusMessage` esperada por el componente frontend `CommonChat.tsx`.
+- **Inyección de `account_id` y `workspace_id` en `KnowledgeSearchTool`**: Se modificó la función `get_all_tools` en `core/agents/deep_researcher_utils.py` para pasar explícitamente `account_id` y `workspace_id` al constructor de `KnowledgeSearchTool`.
+- **Inyección de `account_id` y `workspace_id` en `GraphCypherGeneratorTool`**: Se modificó la función `get_all_tools` en `core/agents/deep_researcher_utils.py` para pasar explícitamente `account_id` y `workspace_id` al constructor de `GraphCypherGeneratorTool`.
+- **Actualización de `KnowledgeSearchTool`**: Se actualizó la clase `KnowledgeSearchTool` en `tools/knowledge_search_tool.py` para aceptar `account_id` y `workspace_id` en su constructor y utilizarlos en el método `_run`.
+- **Actualización de `GraphCypherGeneratorTool`**: Se actualizó la clase `GraphCypherGeneratorTool` en `tools/graph_cypher_generator_tool.py` para aceptar `account_id` y `workspace_id` en su constructor y utilizarlos en el método `_arun`.
 
 ---
 
-## 27-12-25 Adición de Logging para Depuración de `BadRequestError` en Deep Researcher 🐞
+## 28-12-25 Implementación de análisis de notas en Workspaces 🚀
 
-Se añadió logging detallado en la función `researcher` del agente `DeepResearcher` para diagnosticar un error `litellm.BadRequestError` con el mensaje "Not the same number of function calls and responses".
+Se ha añadido la funcionalidad para analizar notas directamente desde la página de detalles de un workspace, permitiendo obtener insights tanto de notas individuales como del conjunto de notas del espacio de trabajo.
 
-- **Logging de Mensajes**: Se añadió una línea de log en `core/agents/deep_researcher.py` para imprimir el contenido de la variable `pruned_messages_for_researcher` justo antes de que sea enviada al modelo LLM. Esto permitirá inspeccionar la secuencia de mensajes y verificar si hay un desajuste entre las llamadas a herramientas y las respuestas de las mismas.
-
----
-
-## 27-12-25 Corrección de actualizaciones de progreso en Deep Research 🐛
-
-Se solucionó un problema donde el indicador de progreso de Deep Research se quedaba estático en 0%. Esto se debía a que la función de callback de progreso no se estaba inyectando correctamente en la herramienta y había una discrepancia en la firma de la función.
-
-- **Inyección de `progress_callback`**: Se añadió el campo `progress_callback` a la clase `DeepResearchTool` y se modificó `core/agent.py` para inyectar explícitamente la función de callback en la instancia de la herramienta antes de su ejecución.
-- **Corrección de firma de callback**: Se actualizó la función `progress_callback` en `core/agent.py` para aceptar argumentos variables (`*args`, `**kwargs`) y utilizar directamente el valor de progreso absoluto calculado por el agente de investigación, resolviendo conflictos de tipos y lógica de cálculo.
+- **Botón de Análisis General**: Se añadió un botón "Analizar Notas" en el encabezado de la sección de notas del workspace para procesar todas las notas cargadas.
+- **Acciones en Notas Individuales**: Cada tarjeta de nota ahora incluye un menú de acciones con opciones para ver el detalle de la nota y ejecutar un análisis individual.
+- **Visualización de Resultados**: Se integró el componente `AnalysisDetailDialog` para mostrar los resultados de los análisis generados (insights, resúmenes, etc.) sin salir de la página del workspace.
+- **Lógica de Integración con API**: Se implementaron los controladores `handleAnalyzeAllNotes` y `handleAnalyzeSingleNote` utilizando los endpoints `/api/analyze-note-collection` y `/api/analyze-note`.
 
 ---
 
-## 27-12-25 Corrección de `invalid_request_message_order` en Deep Researcher 🐞
+## 28-12-25 Corrección de TypeError en ReactMarkdown en NoteCollectionAnalysis 🐞
 
-Se corrigió un error `litellm.BadRequestError: OpenrouterException` con el mensaje "Not the same number of function calls and responses" que ocurría cuando el historial de mensajes era podado por exceder el límite de tokens.
+Se corrigió un `TypeError` en `src/app/(dashboard)/analysis/NoteCollectionAnalysis.tsx` donde el componente `ReactMarkdown` recibía un objeto en lugar de una cadena de texto para la propiedad `children`.
 
-- **Preservación de secuencias de herramientas en `prune_messages_to_fit_token_limit`**: Se reescribió la función `prune_messages_to_fit_token_limit` en `core/utils/llm_utils.py` para agrupar los mensajes en bloques atómicos. Esto asegura que un `AIMessage` con llamadas a herramientas y sus correspondientes `ToolMessage`s nunca se separen durante el proceso de poda, manteniendo la integridad de la conversación.
-- **Corrección de conteo de tokens**: Se solucionó un bug en la misma función donde los tokens de los mensajes retenidos se contaban múltiples veces, lo que llevaba a una poda excesiva e incorrecta.
-- **Mejora en `remove_up_to_last_ai_message`**: Se actualizó la función `remove_up_to_last_ai_message` en `core/utils/llm_utils.py` para que, al eliminar un mensaje de IA, también elimine los mensajes de herramientas subsiguientes si el mensaje de IA contenía llamadas a herramientas. Esto evita dejar respuestas de herramientas huérfanas en el historial.
+- **Conversión a String**: Se modificó la línea `analysis.kai_synthesis` para que se convierta explícitamente a `String(analysis.kai_synthesis)` antes de pasarlo al componente `ReactMarkdown`. Esto asegura que el componente reciba el tipo de dato esperado y resuelve el error.
 
 ---
 
-## 27-12-25 Corrección de `TypeError` en `ConceptualProcessingTool` por `async_generator` 🐞
+## 28-12-25 Solución a Error 401 Client Error: Unauthorized en GitHubRepoTool 🔑
 
-Se corrigió un `TypeError: 'async_generator' object does not support the asynchronous context manager protocol` que ocurría en `tools/conceptual_processing_tool.py` al intentar usar `get_db_session` con `async with`.
+Se diagnosticó y propuso una solución para el error `401 Client Error: Unauthorized` al intentar acceder a repositorios de GitHub mediante `GitHubRepoTool`. Este error indica que la aplicación no tiene los permisos necesarios para acceder al repositorio.
 
-- **Uso de `@asynccontextmanager`**: Se decoró la función `get_db_session` en `core/dependencies.py` con `@asynccontextmanager` de la librería `contextlib`. Esto convierte el generador asíncrono en un gestor de contexto asíncrono adecuado, permitiendo que se use correctamente con `async with` en toda la aplicación y resolviendo el `TypeError`.
+- **Causa del problema**: Se identificó que el `github_token` no se estaba proporcionando correctamente a la herramienta, ya sea porque no se enviaba en la solicitud POST a `/api/collections`, la variable de entorno `GITHUB_TOKEN` no estaba configurada en el contenedor `kognito_core`, o el token utilizado era inválido/caducado o no tenía los scopes adecuados.
+- **Solución propuesta**:
+  1. **Obtener un token de acceso personal de GitHub**: Generar un nuevo token con los scopes necesarios (al menos `repo` para repositorios privados o `public_repo` para públicos).
+  2. **Añadir el token al archivo `.env`**: Incluir la línea `GITHUB_TOKEN=tu_token_personal_de_github` en el archivo `.env` en la raíz del proyecto.
+  3. **Reconstruir y reiniciar los contenedores de Docker**: Ejecutar `docker-compose down` y luego `docker-compose up --build` para aplicar los cambios.
+
+- **Impacto**: Al asegurar que el `GITHUB_TOKEN` esté correctamente configurado y sea válido, el `kognito_core` podrá autenticarse exitosamente con la API de GitHub, permitiendo que `GitHubRepoTool` realice sus operaciones sin errores de autorización.
 
 ---
 
-## 27-12-25 Corrección de `UnboundLocalError` en `Neo4jAdapter` 🐞
+## 28-12-25 Corrección de header de autorización para tokens de GitHub 🔑
 
-Se corrigió un error `UnboundLocalError: cannot access local variable 'batch_data' where it is not associated with a value` que ocurría en el procesamiento conceptual del grafo de conocimiento cuando no se encontraban entidades para procesar.
+Se corrigió el error 401 Unauthorized al acceder a repositorios de GitHub cambiando el header de autorización de 'token' a 'Bearer' para tokens de acceso personal de GitHub.
 
-- **Retorno temprano para entidades vacías**: Se añadió una verificación al inicio de `_add_entities_to_neo4j` en `knowledge_graph/neo4j_adapter.py` para retornar inmediatamente si la lista de entidades está vacía. Esto evita que el código intente ejecutar el bucle de procesamiento y acceda a variables no inicializadas.
-- **Reubicación de la creación de menciones**: Se movió la llamada a `_add_document_mentions` dentro del bucle de procesamiento por lotes. Esto asegura que las relaciones `MENTIONS` se creen correctamente para cada lote de entidades procesado y elimina la dependencia de la variable `batch_data` fuera del ámbito del bucle.
-- **Mejora en el mapeo de datos**: Se incluyó el campo `dataset_name` directamente en el diccionario de datos de la entidad durante el mapeo, permitiendo una propagación más limpia y robusta de los metadatos hacia las relaciones de mención.
+- **Actualización del header de autorización**: Se cambió 'Authorization': f'token {self.github_token}' por 'Authorization': f'Bearer {self.github_token}' en ambas funciones **init** y _arun de tools/github_repo_tool.py para usar el formato correcto para fine-grained PATs.
+
+---
+
+## 28-12-25 Refuerzo de contención de texto, mejora de Resumen Ejecutivo y Estabilización de Procesamiento 🚀
+
+Se aplicaron medidas integrales para mejorar la visualización de análisis, enriquecer los reportes técnicos y asegurar la estabilidad del procesamiento de grafos.
+
+- **Corrección de Desbordamientos (UI)**:
+  - En `src/app/(dashboard)/analysis/CodeAnalysis.tsx`, se añadieron clases `w-full min-w-0` y la propiedad CSS `[word-break:break-word]` junto con `break-words` y `overflow-hidden` en todas las secciones críticas (Resumen, Arquitectura, Dependencias y Calidad).
+  - En `src/app/(dashboard)/analysis/analysis-detail-dialog.tsx`, se restringió el ancho del contenedor con `max-w-full min-w-0 overflow-hidden` y se corrigió el anidamiento de etiquetas en `DialogDescription` usando `asChild`.
+- **Enriquecimiento del Resumen Ejecutivo (Backend)**: Se actualizó el prompt en `utils/advanced_code_analyzer.py` para que el análisis incluya una reseña de la aplicación y sus funcionalidades principales.
+- **Robustez en Procesamiento por Lotes (Backend)**:
+  - Se corrigieron los validadores de respuesta en `knowledge_graph/conceptual_graph_processor.py` para soportar arrays JSON y eliminar bloques de código markdown.
+  - Se optimizó la concurrencia en `_create_parallel_batch_tasks` usando un semáforo (`asyncio.Semaphore`) para procesar todos los lotes sin omisiones y con mayor estabilidad.
+
+---
+
+## 29-12-25 Configuración flexible de Rate Limiting y límites de tokens para LLMs ⚙️🚀
+
+ Se implementaron variables de entorno para permitir la desactivación y configuración granular del rate limiting en todos los LLMs, así como la personalización del límite máximo de tokens para los reportes de Deep Research.
+
+- **Nuevas variables de entorno**: Se agregaron `RATE_LIMIT_ENABLED`, `RATE_LIMIT_MAX_REQUESTS`, `RATE_LIMIT_PER_SECONDS` y `DEEP_RESEARCH_MAX_TOKENS` a [`core/config.py`](core/config.py) para un control centralizado.
+- **Desactivación global de Rate Limit**: Se modificó la clase `RateLimiter` en [`core/llm_manager.py`](core/llm_manager.py) para permitir omitir las esperas si el rate limit está desactivado, optimizando la velocidad de respuesta cuando no hay restricciones de proveedor.
+- **Configuración dinámica de tokens**: Se vinculó el límite de tokens de los modelos del agente Deep Researcher y del LLM principal a la nueva configuración global, permitiendo ajustar la extensión de los reportes generados.
+
+---
+
+## 28-12-25 Corrección de ReferenceError en la página de colecciones RAG 🐞
+
+Se corrigió un `ReferenceError: can't access lexical declaration 'fetchCollections' before initialization` que ocurría en la página de colecciones RAG (`src/app/(dashboard)/rag/page.tsx`).
+
+- **Causa del error**: El error se producía porque la función `fetchCollections`, definida con `useCallback`, se utilizaba en el array de dependencias de otro hook `useCallback` (`onUploadCompleted`) antes de que su declaración fuera procesada por el intérprete de JavaScript, cayendo en la "zona muerta temporal" (Temporal Dead Zone).
+- **Solución**: Se reorganizó el código moviendo la declaración del hook `useCallback` para `fetchCollections` a una posición anterior a los hooks que dependen de él. Esto asegura que la función esté inicializada y disponible cuando los otros hooks la necesiten, resolviendo el `ReferenceError`.
+
+---
+
+## 29-12-25 Solución a errores 404 en descargas de PDF y archivos media 🐞🚀
+
+Se corrigió un problema donde los enlaces de descarga de archivos PDF generados devolvían un error 404, debido a inconsistencias en las rutas y la configuración del proxy inverso.
+
+- **URLs Absolutas en Herramientas**: Se modificó `tools/create_pdf_tool.py` para generar URLs de descarga absolutas utilizando `settings.api_server_url`, asegurando que el frontend siempre apunte al servidor correcto.
+- **Rutas Físicas Robustas**: Se actualizaron `tools/create_pdf_tool.py` y `api/main.py` para utilizar `MEDIA_ROOT` (ruta absoluta `/app/media`) en lugar de rutas relativas al guardar archivos, evitando fallos por cambios en el directorio de trabajo.
+- **Optimización de Nginx**: Se ajustó `nginx.conf` para delegar la gestión de la ruta `/media/` directamente al backend (FastAPI) mediante `proxy_pass`. Esto elimina la dependencia de volúmenes compartidos en el contenedor de Nginx y garantiza que los archivos sean servidos correctamente por el sistema de archivos estáticos del backend.
+
+---
+
+## 29-12-25 Corrección de alucinación de enlaces en generación de PDF 🐞
+
+Se corrigió un problema donde el agente proporcionaba enlaces incorrectos (ej. `.../chat/sandbox/...`) para descargar los PDFs generados, debido a una alucinación del LLM sobre la ubicación del archivo.
+
+- **URL explícita en contexto**: Se modificó `tools/create_pdf_tool.py` para incluir la URL de descarga absoluta y explícita en el mensaje de contexto (`context_for_llm`) que se devuelve al agente. Esto fuerza al LLM a utilizar el enlace real proporcionado por la herramienta en lugar de intentar construir uno basado en el contexto de la conversación.
+
+---
+
+## 29-12-25 Modernización del Indicador de Pensamiento 'Cyberpunk Gradient' 🎨
+
+Se ha rediseñado el componente `LoadingIndicator` en el chat para ofrecer una experiencia visual más moderna y sofisticada.
+
+- **Animación de 4 Puntos**: Se implementó una animación de ondas con 4 puntos utilizando un degradado progresivo de azul a morado (`#3B82F6` a `#A855F7`) y `framer-motion`.
+- **Efecto de Brillo**: Cada punto incluye una sombra suave del mismo tono para añadir profundidad y un toque futurista.
+- **Diseño Minimalista**: Se eliminó la burbuja de chat gris para un look más limpio y flotante.
+- **Feedback de Estado**: El texto de estado ahora aparece sutilmente debajo de la animación.
+- **Integración Fluida**: El nuevo indicador reemplaza al anterior en todos los estados de carga estándar.
+
+---
+
+## 29-12-25 Centrado del Indicador de Pensamiento en CommonChat 🎨
+
+Se ha centrado el componente `LoadingIndicator` dentro de `CommonChat` para mejorar la estética y la alineación visual durante los estados de carga y pensamiento del asistente.
+
+- **Ajuste de alineación en `CommonChat.tsx`**: Se modificaron las clases CSS del contenedor del `LoadingIndicator` en `src/components/CommonChat.tsx`. Se cambió `items-start` por `items-center` y se eliminó el padding izquierdo (`pl-2`) para lograr una alineación central perfecta.
+
+---
+
+## 29-12-25 Corrección de renderizado Markdown en PDFs 📄
+
+Se solucionó un problema donde el contenido Markdown no se renderizaba correctamente en los PDFs generados, mostrándose como texto plano debido a saltos de línea escapados o configuración incorrecta de `is_html`.
+
+- **Sanitización de saltos de línea**: Se implementó el reemplazo automático de secuencias literales `\n` por saltos de línea reales en el contenido de entrada.
+- **Detección automática de Markdown**: Se añadió lógica para detectar si el contenido es Markdown (presencia de `#`, `**`, `---`) incluso si `is_html` es `True`, forzando el procesamiento correcto.
+- **Mejora en extensiones Markdown**: Se incluyó la extensión `nl2br` para asegurar que los saltos de línea simples se respeten en el PDF final.
+
+---
+
+## 29-12-25 Mejora de Autoscroll con Indicadores de Carga 📜
+
+Se ha mejorado la experiencia de usuario en el chat asegurando que la vista se desplace automáticamente hacia abajo cuando aparecen indicadores de carga o estado, evitando que queden ocultos fuera de la vista.
+
+- **Nuevo efecto de scroll en `CommonChat.tsx`**: Se implementó un `useEffect` que detecta cambios en los estados `isResponding`, `toolName`, `isDeepResearchActive` y `backgroundTasks`.
+- **Scroll automático**: Cuando cualquiera de estos estados se activa, se dispara un `scrollToBottom` con un ligero retraso para garantizar que el nuevo indicador renderizado sea visible para el usuario.
+
+---
+
+## 29-12-25 Reparación Robusta de Estructura Markdown en PDFs 📄🛠️
+
+Se implementó una solución avanzada para corregir problemas de renderizado en PDFs donde el contenido Markdown llegaba sin los saltos de línea estructurales necesarios (todo en una sola línea).
+
+- **Función `_repair_markdown`**: Se creó un pre-procesador que detecta patrones de encabezados (`#`, `##`) y reglas horizontales (`---`) incrustados dentro del texto y fuerza la inserción de saltos de línea (`\n\n`) antes de ellos.
+- **Sanitización profunda**: Se asegura la conversión de caracteres de escape `\n` y la eliminación de `\r` para normalizar el texto antes del procesamiento.
+- **Detección de Markdown relajada**: Se ajustó la lógica de detección automática para identificar contenido Markdown incluso si los marcadores estructurales no se encuentran al inicio de la cadena, permitiendo corregir y renderizar documentos mal formados.
+
+---
+
+## 29-12-25 Corrección de scroll inicial en chat 📜
+
+Se corrigió un problema de usabilidad donde al entrar a un chat, la vista se mantenía en el primer mensaje en lugar de mostrar el último.
+
+- **Scroll automático al cargar**: Se implementó un `useEffect` en `CommonChat.tsx` que detecta cuando finaliza la carga inicial de mensajes (`isLoading` pasa a `false`).
+- **Visualización inmediata**: Se fuerza un desplazamiento inmediato al final del chat para asegurar que el usuario vea los mensajes más recientes al abrir la conversación.
+
+---
+
+## 29-12-25 Eliminación de icono de usuario en chat 👤
+
+Se eliminó el icono (avatar) del usuario que aparecía junto a la burbuja de chat en `CommonChat` para limpiar la interfaz.
+
+- **Modificación en `ChatMessage.tsx`**: Se eliminó el componente `<ChatAvatar sender="user" />` dentro del bloque condicional que renderiza los mensajes del usuario.
+
+---
+
+## 29-12-25 Visualización condicional del indicador KAI Assistant en ChatMessage 🎨
+
+Se ha modificado el componente `ChatMessage` para que el encabezado "KAI Assistant" solo se muestre cuando el mensaje ya tiene contenido (texto o código de herramienta), evitando que aparezca prematuramente antes de que comience el streaming.
+
+- **Renderizado condicional del encabezado**: Se envolvió el bloque del encabezado "KAI Assistant" en `src/components/ChatMessage.tsx` con una condición `(msg.text || msg.tool_code)`. Esto asegura que el indicador permanezca oculto mientras el mensaje sea un marcador de posición vacío y solo aparezca una vez que se reciba el primer fragmento de texto o se ejecute una herramienta.
+
+---
+
+## 29-12-25 Visualización condicional de botones de acción en ChatMessage 🎨
+
+Se ha extendido la lógica de visualización condicional a los botones de acción del mensaje de la IA (copiar, reproducir audio y editar).
+
+- **Ocultamiento de botones durante el inicio del streaming**: Se envolvió el contenedor de botones de acción en `src/components/ChatMessage.tsx` con la condición `(msg.text || msg.tool_code)`. Esto evita que los iconos aparezcan debajo de la burbuja de chat vacía antes de que el asistente comience a generar contenido, manteniendo la interfaz limpia y coherente.
+
+---

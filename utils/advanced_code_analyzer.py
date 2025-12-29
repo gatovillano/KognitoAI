@@ -56,7 +56,7 @@ Contenido del código:
 
 Proporciona un análisis estructurado en formato JSON con las siguientes secciones, cada una debe ser una lista de objetos con las propiedades especificadas:
 
-- executive_summary: (string) Un resumen extendido y detallado específico de ESTE código.
+- executive_summary: (string) Un resumen ejecutivo que incluya una reseña explicando qué es la aplicación analizada y cuáles son sus funcionalidades principales, seguido de un análisis técnico extendido y detallado específico de ESTE código.
 
 - code_structure: Lista de objetos con propiedades:
   * component: (string) Nombre del componente (ej. "UserService class", "authenticate function")

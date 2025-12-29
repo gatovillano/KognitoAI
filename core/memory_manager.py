@@ -178,8 +178,16 @@ async def _run_semantic_search(
 
         # Búsqueda en la tabla de Notas si se especifica
         if content_types and "user_notes" in content_types:
+            note_clauses = [Nota.account_id == uuid.UUID(account_id)]
+            
+            # Filtrar por workspace_id si se proporciona
+            if workspace_id is not None and workspace_id != "":
+                note_clauses.append(Nota.workspace_id == uuid.UUID(workspace_id))
+            elif workspace_id == "":
+                note_clauses.append(Nota.workspace_id.is_(None))
+
             note_query = select(Nota, (Nota.embedding.l2_distance(query_embedding)).label("similarity_score")).where(
-                Nota.account_id == uuid.UUID(account_id)
+                *note_clauses
             ).order_by("similarity_score").limit(k)
             
             if db_session:
@@ -319,12 +327,22 @@ async def _run_fts_search(
 
         # Búsqueda en la tabla de Notas si se especifica
         if content_types and "user_notes" in content_types:
+            note_clauses = [
+                Nota.account_id == uuid.UUID(account_id),
+                Nota.text_search_vector.op('@@')(func.plainto_tsquery('spanish', query))
+            ]
+
+            # Filtrar por workspace_id si se proporciona
+            if workspace_id is not None and workspace_id != "":
+                note_clauses.append(Nota.workspace_id == uuid.UUID(workspace_id))
+            elif workspace_id == "":
+                note_clauses.append(Nota.workspace_id.is_(None))
+
             note_query = select(
                 Nota,
                 func.ts_rank(Nota.text_search_vector, func.plainto_tsquery('spanish', query)).label("rank_score")
             ).where(
-                Nota.account_id == uuid.UUID(account_id),
-                Nota.text_search_vector.op('@@')(func.plainto_tsquery('spanish', query))
+                *note_clauses
             ).order_by(text("rank_score DESC")).limit(k)
 
             if db_session:
@@ -1267,12 +1285,17 @@ async def get_full_document_content(
                 except ValueError:
                     processed_workspace_id = None # No es un UUID válido
 
-            if processed_workspace_id:
+            # Manejo de workspace_id:
+            # - Si processed_workspace_id es un UUID válido (string no vacío), filtrar por ese workspace_id.
+            # - Si processed_workspace_id es explícitamente None, filtrar por workspace_id IS NULL.
+            # - Si processed_workspace_id no se proporciona (o es una cadena vacía), NO filtrar por workspace_id,
+            #   lo que significa que se buscarán chunks tanto con como sin workspace_id.
+            if processed_workspace_id is not None and processed_workspace_id != "":
                 clauses.append("workspace_id = :workspace_id")
                 params["workspace_id"] = processed_workspace_id
-            else:
-                # Si processed_workspace_id es None, buscar documentos con workspace_id IS NULL
+            elif processed_workspace_id == "": # Caso en que se pasa explícitamente una cadena vacía para buscar NULLs
                 clauses.append("workspace_id IS NULL")
+            # Si processed_workspace_id es None (el valor por defecto), no se añade ninguna cláusula de filtro para workspace_id.
 
             # Consulta para obtener todos los chunks del documento
             select_sql = text(f"""

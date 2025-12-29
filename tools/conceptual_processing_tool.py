@@ -119,7 +119,8 @@ class ConceptualProcessingTool(BaseTool):
 
                 full_content = await get_full_document_content(
                     account_id=account_id,
-                    file_name=file_name
+                    file_name=file_name,
+                    workspace_id=self.workspace_id
                 )
 
                 if full_content and isinstance(full_content, str) and len(full_content.strip()) > 0:

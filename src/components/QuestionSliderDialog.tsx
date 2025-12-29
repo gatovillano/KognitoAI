@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -35,13 +35,13 @@ export interface ContentPart {
   citationNumber?: number;
 }
 
-interface QuestionSliderDialogProps {
+export interface QuestionSliderDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  questions: string[];
+  questions: any[];
   title: string;
   analysisId?: string;
-  onDevelopClick?: () => void;
+  onDevelopClick?: (question: string) => void;
 }
 
 interface GapDevelopmentStatus {
@@ -136,8 +136,14 @@ export function QuestionSliderDialog({ isOpen, onOpenChange, questions, title, a
   const [isDeveloping, setIsDeveloping] = useState(false);
   const [clarificationAnswer, setClarificationAnswer] = useState('');
   const [activeAnalysisId, setActiveAnalysisId] = useState<string | null>(null);
+  const activeAnalysisIdRef = useRef<string | null>(null);
   const { toast } = useToast();
   const { registerMessageHandler } = useWebSocketContext();
+
+  // Update ref when state changes
+  useEffect(() => {
+    activeAnalysisIdRef.current = activeAnalysisId;
+  }, [activeAnalysisId]);
 
   // Reset internal state when dialog opens/closes or question changes
   useEffect(() => {
@@ -155,9 +161,9 @@ export function QuestionSliderDialog({ isOpen, onOpenChange, questions, title, a
     const unregister = registerMessageHandler((message: any) => {
       if (message.type === 'gap_development_update') {
         console.log('✅ Received gap_development_update message:', message);
-        console.log('🔍 Comparing analysis_id:', message.analysis_id, '===', activeAnalysisId, ':', message.analysis_id === activeAnalysisId);
+        console.log('🔍 Comparing analysis_id:', message.analysis_id, '===', activeAnalysisIdRef.current, ':', message.analysis_id === activeAnalysisIdRef.current);
 
-        if (message.analysis_id === activeAnalysisId) {
+        if (message.analysis_id && message.analysis_id === activeAnalysisIdRef.current) {
           console.log('📊 Processing message with progress:', message.progress);
           setDevelopmentStatus({
             status: message.status,
@@ -191,22 +197,30 @@ export function QuestionSliderDialog({ isOpen, onOpenChange, questions, title, a
             console.log('📈 Setting progress to:', message.progress);
             setProgressValue(message.progress);
           }
-        } else {
-          console.log('❌ Analysis ID mismatch - ignoring message');
+        } else if (message.analysis_id) {
+          console.log('❌ Analysis ID mismatch - ignoring message. Expected:', activeAnalysisIdRef.current, 'Got:', message.analysis_id);
         }
       } else if (message.type === 'progress' && message.progress !== undefined) {
         // También escuchamos mensajes de progreso genéricos si están asociados a este análisis
-        // Nota: En este diálogo, confiamos principalmente en gap_development_update, 
-        // pero esto añade compatibilidad con el visualizador.
-        setProgressValue(message.progress);
-        if (message.message) {
-          setResearchStatus(message.message);
+        // Verificamos por thread_id o analysis_id para evitar colisiones con otras tareas
+        const isTargetAnalysis = activeAnalysisIdRef.current && (
+          (message.thread_id === activeAnalysisIdRef.current) ||
+          (message.analysis_id === activeAnalysisIdRef.current) ||
+          (message.taskId === activeAnalysisIdRef.current)
+        );
+
+        if (isTargetAnalysis) {
+          console.log('📈 Setting progress from generic progress message:', message.progress);
+          setProgressValue(message.progress);
+          if (message.message) {
+            setResearchStatus(message.message);
+          }
         }
       }
     });
 
     return () => unregister();
-  }, [registerMessageHandler, activeAnalysisId, toast]);
+  }, [registerMessageHandler, toast]);
 
   const handleNext = () => {
     setCurrentIndex((prev) => (prev + 1) % questions.length);
@@ -268,8 +282,7 @@ export function QuestionSliderDialog({ isOpen, onOpenChange, questions, title, a
           <div className="w-full max-w-2xl mx-auto py-10">
             <DeepResearchVisualizer
               progress={progressValue}
-              status={researchStatus}
-              isActive={true}
+              statusText={researchStatus}
             />
             <p className="text-xs text-center text-muted-foreground italic mt-6">
               Esto puede tomar un momento mientras conectamos puntos de información...
@@ -498,13 +511,13 @@ export function QuestionSliderDialog({ isOpen, onOpenChange, questions, title, a
                     >
                       <div className="prose prose-2xl dark:prose-invert max-w-4xl font-semibold leading-tight text-foreground">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {questions[currentIndex] ? `"${questions[currentIndex]}"` : "Pregunta no disponible"}
+                          {questions[currentIndex] ? `"${typeof questions[currentIndex] === 'string' ? questions[currentIndex] : (typeof questions[currentIndex] === 'object' ? JSON.stringify(questions[currentIndex]) : String(questions[currentIndex]))}"` : "Pregunta no disponible"}
                         </ReactMarkdown>
                       </div>
 
                       {onDevelopClick && (
                         <Button
-                          onClick={() => handleDevelop()}
+                          onClick={() => handleDevelop(questions[currentIndex])}
                           size="lg"
                           className="h-16 px-10 rounded-2xl text-lg font-bold shadow-xl shadow-primary/20 hover:shadow-primary/30 transition-all gap-3 group"
                           disabled={isDeveloping}
@@ -544,8 +557,8 @@ export function QuestionSliderDialog({ isOpen, onOpenChange, questions, title, a
                           key={index}
                           onClick={() => setCurrentIndex(index)}
                           className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${index === currentIndex
-                              ? 'bg-primary w-8'
-                              : 'bg-muted-foreground/20 hover:bg-muted-foreground/40'
+                            ? 'bg-primary w-8'
+                            : 'bg-muted-foreground/20 hover:bg-muted-foreground/40'
                             }`}
                         />
                       ))}

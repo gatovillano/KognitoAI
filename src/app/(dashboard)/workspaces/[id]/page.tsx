@@ -7,8 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { ArrowLeft, Bot, Plus, MessageSquare, BookMarked, MoreVertical, Sparkles, Calendar, Notebook, ListTodo } from 'lucide-react';
+import { ArrowLeft, Bot, Plus, MessageSquare, BookMarked, MoreVertical, Sparkles, Calendar, Notebook, ListTodo, Lightbulb } from 'lucide-react';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
+import { Analysis } from '@/lib/models';
+import { AnalysisDetailDialog } from '../../analysis/analysis-detail-dialog';
 import apiClient from '@/lib/api';
 import { CreateWorkspaceCollectionDialog } from './CreateWorkspaceCollectionDialog';
 import { AgendaEvent, TaskResponse } from '../../agenda/types'; // Import types from agenda page
@@ -91,6 +93,62 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const [selectedEvent, setSelectedEvent] = useState<AgendaEvent | null>(null); // New state for selected event
   const [isShareWorkspaceDialogOpen, setIsShareWorkspaceDialogOpen] = useState(false); // New state for ShareWorkspaceDialog
   const [selectedTask, setSelectedTask] = useState<TaskResponse | null>(null); // New state for selected task
+  const [analysisResult, setAnalysisResult] = useState<Analysis | null>(null); // New state for analysis result
+  const [isAnalysisResultDialogOpen, setIsAnalysisResultDialogOpen] = useState(false); // New state for AnalysisDetailDialog
+
+  const handleAnalyzeAllNotes = async () => {
+    if (notes.length === 0) {
+      alert("No hay notas para analizar.");
+      return;
+    }
+
+    const confirmAnalysis = confirm("¿Deseas analizar todas las notas de este workspace?");
+    if (!confirmAnalysis) return;
+
+    try {
+      const noteIds = notes.map(note => note.id);
+      const response = await apiClient.post('/api/analyze-note-collection', {
+        note_ids: noteIds,
+        collection_name: `Notas de ${workspace?.name || 'Workspace'}`
+      });
+
+      const newAnalysis: Analysis = {
+        id: response.data.task_id || `analysis-${Date.now()}`,
+        type: 'note_collection_analysis',
+        title: `Análisis de Notas: ${workspace?.name || "Workspace"}`,
+        created_at: new Date().toISOString(),
+        result: response.data.result_payload
+      };
+
+      setAnalysisResult(newAnalysis);
+      setIsAnalysisResultDialogOpen(true);
+    } catch (error) {
+      console.error("Error al analizar las notas:", error);
+      alert("Error al analizar las notas.");
+    }
+  };
+
+  const handleAnalyzeSingleNote = async (note: Note) => {
+    try {
+      const response = await apiClient.post('/api/analyze-note', {
+        note_id: note.id
+      });
+
+      const newAnalysis: Analysis = {
+        id: response.data.task_id || `analysis-${Date.now()}`,
+        type: 'note_analysis',
+        title: `Análisis: ${note.title || "Nota sin título"}`,
+        created_at: new Date().toISOString(),
+        result: response.data.result_payload
+      };
+
+      setAnalysisResult(newAnalysis);
+      setIsAnalysisResultDialogOpen(true);
+    } catch (error) {
+      console.error("Error al analizar la nota:", error);
+      alert("Error al analizar la nota.");
+    }
+  };
 
   const handleEditEvent = (event: AgendaEvent) => {
     setSelectedEvent(event);
@@ -909,6 +967,10 @@ export default function WorkspaceDashboard({ params }: PageProps) {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
+            <Button variant="outline" onClick={handleAnalyzeAllNotes} disabled={notes.length === 0}>
+              <Lightbulb className="mr-2 h-4 w-4" />
+              Analizar Notas
+            </Button>
             <Button variant="outline" onClick={() => setIsNoteDialogOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               Nueva Nota
@@ -947,7 +1009,23 @@ export default function WorkspaceDashboard({ params }: PageProps) {
                         </div>
                       </div>
                     </div>
-                    {/* Add dropdown for actions if needed */}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleNoteClick(note); }}>
+                          <Notebook className="mr-2 h-4 w-4" />
+                          Ver Nota
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleAnalyzeSingleNote(note); }}>
+                          <Lightbulb className="mr-2 h-4 w-4" />
+                          Analizar Nota
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="pt-0">
@@ -1141,6 +1219,12 @@ export default function WorkspaceDashboard({ params }: PageProps) {
         isOpen={isViewNoteDialogOpen}
         onOpenChange={setIsViewNoteDialogOpen}
         onNoteUpdated={fetchInitialData} // Llamar a fetchInitialData para recargar los datos
+      />
+
+      <AnalysisDetailDialog
+        analysis={analysisResult}
+        isOpen={isAnalysisResultDialogOpen}
+        onOpenChange={setIsAnalysisResultDialogOpen}
       />
     </div>
     // </DndProvider>

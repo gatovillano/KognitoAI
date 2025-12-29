@@ -64,6 +64,7 @@ ImageBackgroundEraserTool = _import_tool_class("image_background_eraser_tool", "
 ImageGenerationTool = _import_tool_class("image_generation_tool", "ImageGenerationTool")
 InternalKnowledgeSearchTool = _import_tool_class("internal_knowledge_search_tool", "InternalKnowledgeSearchTool")
 MemoryAddTool = _import_tool_class("memory_add_tool", "MemoryAddTool")
+CreatePDFTool = _import_tool_class("create_pdf_tool", "CreatePDFTool")
 MindmapGeneratorTool = _import_tool_class("mindmap_generator_tool", "MindmapGeneratorTool")
 MultiQuerySearchTool = _import_tool_class("multi_query_search_tool", "MultiQuerySearchTool")
 NaturalQueryInterpreterTool = _import_tool_class("natural_query_interpreter_tool", "NaturalQueryInterpreterTool")
@@ -80,6 +81,8 @@ ListScheduledToolsTool = _import_tool_class("schedule_tool_execution", "ListSche
 SearchNotesTool = _import_tool_class("search_notes_tool", "SearchNotesTool")
 WebSearchTool = _import_tool_class("web_search_tool", "WebSearchTool")
 GraphCypherGeneratorTool = _import_tool_class("graph_cypher_generator_tool", "GraphCypherGeneratorTool")
+HTMLGeneratorTool = _import_tool_class("html_generator_tool", "HTMLGeneratorTool")
+ExecuteCommandTool = _import_tool_class("execute_command_tool", "ExecuteCommandTool")
 
 # Global singletons for shared dependencies
 _graph_db_instance = None
@@ -206,9 +209,9 @@ async def _instantiate_tool(
             if 'telegram_id' in ToolClass.model_fields and telegram_id is not None:
                 tool_kwargs['telegram_id'] = str(telegram_id)
             if 'thread_id' in ToolClass.model_fields and thread_id is not None:
-                tool_kwargs['thread_id'] = thread_id # Pasar thread_id a herramientas estándar
+                tool_kwargs['thread_id'] = thread_id
             if 'workspace_id' in ToolClass.model_fields and workspace_id is not None:
-                tool_kwargs['workspace_id'] = workspace_id # Pasar workspace_id a herramientas estándar
+                tool_kwargs['workspace_id'] = workspace_id
             tool_instance = ToolClass(**tool_kwargs)
         
         # --- No-Args Tools ---
@@ -241,11 +244,11 @@ async def get_all_langchain_tools(
         ExtractDocumentTitlesTool, GetAgendaTool, GetAnalysisResultsTool, GetDocumentContentTool,
         GetDocumentListTool, GetNotesTool, GetFormResponsesTool, GetProactiveInsightsTool,
         GitHubRepoTool, ImageBackgroundEraserTool, ImageGenerationTool, InternalKnowledgeSearchTool,
-        MemoryAddTool, MindmapGeneratorTool, MultiQuerySearchTool,
+        MemoryAddTool, CreatePDFTool, MindmapGeneratorTool, MultiQuerySearchTool,
         NaturalQueryInterpreterTool, ScheduleEventTool, ScopedRagAnalysisTool, SearchNotesTool,
         SetReminderTool, UpdateDocumentMetadataTool, UpdateNoteTool, UpdateProfileTool,
         WebScraperTool, ScheduleToolExecutionTool, ListScheduledToolsTool, ContactProfileTool,
-        WebSearchTool,
+        WebSearchTool, HTMLGeneratorTool, ExecuteCommandTool
     ]
 
     all_instantiated_tools: List[Tool] = []

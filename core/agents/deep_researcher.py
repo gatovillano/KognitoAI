@@ -262,7 +262,6 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
     raw_notes = state.get("raw_notes", [])
     findings = "\n\n".join(raw_notes)
     logger.info(f"📝 [DeepResearcher] Generating final report based on {len(raw_notes)} raw findings/notes.")
-    logger.debug(f"Findings for final report: {findings}")
     
     writer_model = get_main_llm()
     if not writer_model:
@@ -270,14 +269,44 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
 
     current_messages_list: list[BaseMessage] = [cast(BaseMessage, msg) for msg in state.get("messages", [])]
 
+    # Proactively prune messages to fit within the token limit
+    pruned_messages_for_report = await prune_messages_to_fit_token_limit(
+        current_messages_list, writer_model, cfg.max_input_tokens, keep_ratio=0.3
+    )
+
+    # Truncate findings if they are excessively large (approx 100k chars ~ 25k tokens)
+    max_findings_chars = 100000
+    if len(findings) > max_findings_chars:
+        logger.warning(f"⚠️ [DeepResearcher] Findings too large ({len(findings)} chars). Truncating to {max_findings_chars} chars.")
+        findings = findings[:max_findings_chars] + "\n\n[... Findings truncated due to size ...]"
+
     final_report_prompt = final_report_generation_prompt.format(
         research_brief=state.get("research_brief", ""),
-        messages=get_buffer_string(current_messages_list),
+        messages=get_buffer_string(pruned_messages_for_report),
         findings=findings,
         date=get_today_str(),
     )
     
-    final_report = await writer_model.ainvoke([HumanMessage(content=final_report_prompt)])
+    try:
+        final_report = await writer_model.ainvoke([HumanMessage(content=final_report_prompt)])
+    except Exception as e:
+        if is_token_limit_exceeded(e):
+            logger.warning("⚠️ [DeepResearcher] Final report generation failed due to token limit. Retrying with more aggressive pruning.")
+            # Even more aggressive pruning
+            pruned_messages_ultra = await prune_messages_to_fit_token_limit(
+                current_messages_list, writer_model, cfg.max_input_tokens, keep_ratio=0.1
+            )
+            findings_ultra = findings[:50000] + "\n\n[... Findings aggressively truncated ...]"
+            
+            final_report_prompt_ultra = final_report_generation_prompt.format(
+                research_brief=state.get("research_brief", ""),
+                messages=get_buffer_string(pruned_messages_ultra),
+                findings=findings_ultra,
+                date=get_today_str(),
+            )
+            final_report = await writer_model.ainvoke([HumanMessage(content=final_report_prompt_ultra)])
+        else:
+            raise e
     
     # Extract sources and recommendations from the supervisor messages
     sources = []
