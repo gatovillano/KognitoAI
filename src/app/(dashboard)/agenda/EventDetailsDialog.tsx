@@ -2,56 +2,39 @@
 
 import { toast } from 'sonner';
 import { useState, useEffect } from 'react';
-import { Pencil, Trash2 } from 'lucide-react'; // Importar el icono de lápiz y basura
-
+import { Pencil, Trash2, Calendar as CalendarIcon, Clock, MapPin, AlignLeft, Users, Briefcase, Activity, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
 import apiClient from '@/lib/api';
-import { ProfileSelectorDialog } from '@/components/dialogs/ProfileSelectorDialog';
-import { Tag } from '@/components/ui/tag'; // Assuming a Tag component for displaying linked profiles
 
 interface EventDetailsDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  onEditClick: (event: any) => void; // Nueva prop para manejar la edición
-  onDeleteClick: (event: any) => void; // Nueva prop para manejar la eliminación
+  onEditClick: (event: any) => void;
+  onDeleteClick: (event: any) => void;
   event: any;
 }
 
 export function EventDetailsDialog({ isOpen, onOpenChange, onEditClick, onDeleteClick, event }: EventDetailsDialogProps) {
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
-  const [isProfileSelectorOpen, setIsProfileSelectorOpen] = useState(false);
-  const [linkedProfiles, setLinkedProfiles] = useState<any[]>([]); // State to store linked profiles
+  const [linkedProfiles, setLinkedProfiles] = useState<any[]>([]);
 
   useEffect(() => {
-    const fetchTeams = async () => {
-      try {
-      } catch (error) {
-        console.error("Error fetching teams:", error);
-      } finally {
-      }
-    };
-
     const fetchWorkspaces = async () => {
       setLoadingWorkspaces(true);
       try {
         const response = await apiClient.get('/api/workspaces');
-        // Solución al problema: /api/workspaces did not return an array
         if (response.data && Array.isArray(response.data.workspaces)) {
           setWorkspaces(response.data.workspaces);
-        } else if (Array.isArray(response.data)) { // En caso de que la respuesta sea directamente el array
+        } else if (Array.isArray(response.data)) {
           setWorkspaces(response.data);
-        }
-        else {
-          console.warn("/api/workspaces did not return an array in expected format:", response.data);
-          setWorkspaces([]);
         }
       } catch (error) {
         console.error("Error fetching workspaces:", error);
-        toast.error('Error al cargar los workspaces.');
-        setWorkspaces([]);
       } finally {
         setLoadingWorkspaces(false);
       }
@@ -64,151 +47,156 @@ export function EventDetailsDialog({ isOpen, onOpenChange, onEditClick, onDelete
           setLinkedProfiles(response.data);
         } catch (error) {
           console.error("Error fetching linked profiles:", error);
-          toast.error("Error al cargar perfiles vinculados.");
         }
       }
     };
 
     if (isOpen) {
-      fetchTeams();
       fetchWorkspaces();
       fetchLinkedProfiles();
     }
   }, [isOpen, event?.id]);
 
-  // No hay onSubmit en este diálogo de solo lectura
-
-  // Function to handle linking a profile (se mantiene para visualización)
-  const handleLinkProfile = async (selectedProfiles: any[]) => {
-    if (!event?.id || selectedProfiles.length === 0) return;
-    // Esta función no debería ser llamada en un diálogo de solo lectura,
-    // pero la mantengo para evitar errores si el botón de "Vincular Perfil" se muestra por error.
-    // En el modo de visualización, este botón debería estar deshabilitado o no visible.
-    toast.info("Para vincular perfiles, por favor edita el evento.");
-  };
-
-  // Function to handle unlinking a profile (se mantiene para visualización)
-  const handleUnlinkProfile = async (profileId: string) => {
-    if (!event?.id) return;
-    // Similar a handleLinkProfile, esta función no debería ser llamada.
-    toast.info("Para desvincular perfiles, por favor edita el evento.");
-  };
-
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Detalles del Evento</DialogTitle>
+      <DialogContent className="sm:max-w-[550px] bg-white/80 dark:bg-card/40 backdrop-blur-2xl border-white/20 dark:border-border/40 rounded-[2.5rem] shadow-2xl overflow-hidden p-0">
+        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent pointer-events-none" />
+
+        <DialogHeader className="p-8 pb-4 relative z-10">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-primary/10 text-primary shadow-inner">
+                <CalendarIcon className="h-6 w-6" />
+              </div>
+              <DialogTitle className="text-3xl font-black tracking-tighter bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+                Detalles del Evento
+              </DialogTitle>
+            </div>
+            <Badge variant="outline" className="rounded-full px-4 py-1 border-primary/20 bg-primary/5 text-primary font-bold uppercase tracking-widest text-[10px]">
+              {event?.status || 'Pendiente'}
+            </Badge>
+          </div>
         </DialogHeader>
-        <form className="space-y-4"> {/* Eliminar onSubmit */}
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Título</p>
-            <p className="text-sm font-medium">{event?.summary || 'N/A'}</p>
+
+        <div className="p-8 pt-0 space-y-8 relative z-10 max-h-[70vh] overflow-y-auto custom-scrollbar">
+          <div className="space-y-4">
+            <h3 className="text-2xl font-black tracking-tight text-foreground/90 leading-tight">
+              {event?.summary || 'Sin título'}
+            </h3>
+            {event?.description && (
+              <div className="flex gap-3">
+                <AlignLeft className="h-5 w-5 text-primary/50 shrink-0 mt-1" />
+                <p className="text-muted-foreground leading-relaxed font-medium">
+                  {event.description}
+                </p>
+              </div>
+            )}
           </div>
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Estado</p>
-            <p className="text-sm text-muted-foreground">{event?.status || 'Pendiente'}</p>
-          </div>
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Descripción</p>
-            <p className="text-sm text-muted-foreground">{event?.description || 'N/A'}</p>
-          </div>
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Ubicación</p>
-            <p className="text-sm text-muted-foreground">{event?.location || 'N/A'}</p>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Fecha</p>
-              <p className="text-sm text-muted-foreground">{event?.event_datetime_local ? new Date(event.event_datetime_local).toLocaleDateString('es-ES') : 'N/A'}</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-6 rounded-[2rem] bg-primary/5 border border-primary/10">
+            <div className="space-y-1">
+              <p className="text-[10px] font-black uppercase tracking-widest text-primary/60">Inicio</p>
+              <div className="flex items-center gap-2">
+                <CalendarIcon className="h-4 w-4 text-primary" />
+                <span className="font-bold text-sm">
+                  {event?.event_datetime_local ? format(new Date(event.event_datetime_local), "PPP", { locale: es }) : 'N/A'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 ml-6">
+                <Clock className="h-3.5 w-3.5 text-primary/50" />
+                <span className="font-medium text-xs text-muted-foreground">
+                  {event?.event_datetime_local ? format(new Date(event.event_datetime_local), "HH:mm") : 'N/A'}
+                </span>
+              </div>
             </div>
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Hora</p>
-              <p className="text-sm text-muted-foreground">{event?.event_datetime_local ? new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</p>
+            <div className="space-y-1 border-l border-primary/10 pl-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-primary/60">Fin</p>
+              <div className="flex items-center gap-2">
+                <CalendarIcon className="h-4 w-4 text-primary" />
+                <span className="font-bold text-sm">
+                  {event?.end_date ? format(new Date(event.end_date), "PPP", { locale: es }) : 'N/A'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 ml-6">
+                <Clock className="h-3.5 w-3.5 text-primary/50" />
+                <span className="font-medium text-xs text-muted-foreground">
+                  {event?.end_date ? format(new Date(event.end_date), "HH:mm") : 'N/A'}
+                </span>
+              </div>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {event?.location && (
+              <div className="space-y-2">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Ubicación</p>
+                <div className="flex items-center gap-2">
+                  <MapPin className="h-4 w-4 text-primary" />
+                  <span className="font-bold text-sm truncate">{event.location}</span>
+                </div>
+              </div>
+            )}
             <div className="space-y-2">
-              <p className="text-sm font-medium">Fecha Fin</p>
-              <p className="text-sm text-muted-foreground">{event?.end_date ? new Date(event.end_date).toLocaleDateString('es-ES') : 'N/A'}</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Workspace</p>
+              <div className="flex items-center gap-2">
+                <Briefcase className="h-4 w-4 text-primary" />
+                <span className="font-bold text-sm truncate">
+                  {event?.workspace_id ? (workspaces.find(ws => ws.id.toString() === event.workspace_id)?.name || event.workspace_name || event.workspace_id) : 'Personal'}
+                </span>
+              </div>
             </div>
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Hora Fin</p>
-              <p className="text-sm text-muted-foreground">{event?.end_date ? new Date(event.end_date).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</p>
+          </div>
+
+          {(event?.attendees?.length > 0 || event?.external_attendees?.length > 0) && (
+            <div className="space-y-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Asistentes</p>
+              <div className="flex flex-wrap gap-2">
+                {event?.attendees?.map((id: string) => (
+                  <Badge key={id} variant="secondary" className="rounded-xl px-3 py-1 bg-background/50 border-border/40 font-bold text-[10px]">
+                    ID: {id}
+                  </Badge>
+                ))}
+                {event?.external_attendees?.map((name: string) => (
+                  <Badge key={name} variant="secondary" className="rounded-xl px-3 py-1 bg-background/50 border-border/40 font-bold text-[10px]">
+                    {name}
+                  </Badge>
+                ))}
+              </div>
             </div>
-          </div>
-          <div className="space-y-2">
-            <p className="text-sm font-medium">IDs de Asistentes</p>
-            <p className="text-sm text-muted-foreground">{event?.attendees?.join(', ') || 'N/A'}</p>
-          </div>
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Asistentes Externos</p>
-            <p className="text-sm text-muted-foreground">{event?.external_attendees?.join(', ') || 'N/A'}</p>
-          </div>
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Compartir con Equipo</p>
-            <p className="text-sm text-muted-foreground">No</p>
-          </div>
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Asociar a Workspace</p>
-            <p className="text-sm text-muted-foreground">{event?.workspace_id ? (workspaces.find(ws => ws.id.toString() === event.workspace_id)?.name || event.workspace_name || event.workspace_id) : 'N/A'}</p>
-          </div>
-          {/* New section for Linked Profiles */}
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Perfiles Vinculados</p>
-            <div className="flex flex-wrap gap-2 p-2 border rounded-md min-h-[40px]">
+          )}
+
+          <div className="space-y-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Perfiles Vinculados</p>
+            <div className="flex flex-wrap gap-2 p-4 rounded-2xl bg-background/30 border border-border/40 min-h-[60px] items-center">
               {linkedProfiles.length === 0 ? (
-                <span className="text-sm text-muted-foreground">Ningún perfil vinculado.</span>
+                <span className="text-xs font-medium text-muted-foreground/60 italic">Ningún perfil vinculado...</span>
               ) : (
                 linkedProfiles.map(profile => (
-                  <Tag key={profile.id} variant="outline" className="flex items-center gap-1">
+                  <div key={profile.id} className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-primary/10 border border-primary/20 text-primary text-[10px] font-black uppercase tracking-tighter transition-all hover:bg-primary/20">
                     {profile.name}
-                    {/* Botón de desvincular deshabilitado en modo visualización */}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-auto p-1"
-                      disabled
-                    >
-                      x
-                    </Button>
-                  </Tag>
+                  </div>
                 ))
               )}
             </div>
-            {/* Botón de vincular perfil deshabilitado en modo visualización */}
-            <Button
-              type="button"
-              variant="outline"
-              disabled
-              className="w-full"
-            >
-              Vincular Perfil
-            </Button>
           </div>
-          <DialogFooter className="flex justify-between sm:justify-between">
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={() => onDeleteClick(event)}
-            >
-              <Trash2 className="mr-2 h-4 w-4" /> Eliminar Evento
-            </Button>
-            <Button type="button" onClick={() => onEditClick(event)}>
-              <Pencil className="mr-2 h-4 w-4" /> Editar Evento
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
+        </div>
 
-      {/* Profile Selector Dialog (se mantiene pero no debería ser interactivo) */}
-      <ProfileSelectorDialog
-        isOpen={isProfileSelectorOpen}
-        onOpenChange={setIsProfileSelectorOpen}
-        onSelectProfiles={handleLinkProfile}
-        multiselect={false}
-        preSelectedProfileIds={linkedProfiles.map(p => p.id)}
-      />
+        <DialogFooter className="p-8 pt-4 bg-background/20 backdrop-blur-md border-t border-border/40 grid grid-cols-2 gap-4">
+          <Button
+            variant="destructive"
+            className="h-12 rounded-2xl font-black uppercase tracking-widest text-[10px] gap-2 shadow-lg shadow-destructive/10 hover:shadow-destructive/20 transition-all"
+            onClick={() => onDeleteClick(event)}
+          >
+            <Trash2 className="h-4 w-4" /> Eliminar
+          </Button>
+          <Button
+            className="h-12 rounded-2xl bg-primary font-black uppercase tracking-widest text-[10px] gap-2 shadow-lg shadow-primary/10 hover:shadow-primary/20 transition-all"
+            onClick={() => onEditClick(event)}
+          >
+            <Pencil className="h-4 w-4" /> Editar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
     </Dialog>
   );
 }

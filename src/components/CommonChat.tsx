@@ -12,6 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { ArrowLeft, FolderKanban, Bot, BrainCircuit, Search, X, Folder, File as FileIcon } from 'lucide-react';
 import { ChatMessage } from '@/components/ChatMessage';
 import ChatInputBar from '@/components/ChatInputBar';
+import { stripMarkdown } from '@/lib/chatUtils';
 import { BackgroundTaskIndicator } from '@/components/BackgroundTaskIndicator';
 import { EmptyChat } from '@/components/EmptyChat';
 import { ContextSelectorButton } from '@/components/ContextSelectorButton';
@@ -131,24 +132,24 @@ function LoadingIndicator({
   };
 
   return (
-    <div className="flex flex-col items-center space-y-3 py-4 w-full">
+    <div className="flex flex-col items-center space-y-2 sm:space-y-3 py-2 sm:py-4 w-full">
       <motion.div
-        className="flex space-x-2"
+        className="flex space-x-1.5 sm:space-x-2"
         variants={containerVariants}
         initial="initial"
         animate="animate"
       >
-        <motion.div className="w-3 h-3 rounded-full bg-[#3B82F6] shadow-sm shadow-blue-500/50" variants={dotVariants} />
-        <motion.div className="w-3 h-3 rounded-full bg-[#6366F1] shadow-sm shadow-indigo-500/50" variants={dotVariants} />
-        <motion.div className="w-3 h-3 rounded-full bg-[#8B5CF6] shadow-sm shadow-violet-500/50" variants={dotVariants} />
-        <motion.div className="w-3 h-3 rounded-full bg-[#A855F7] shadow-sm shadow-purple-500/50" variants={dotVariants} />
+        <motion.div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-[#3B82F6] shadow-sm shadow-blue-500/50" variants={dotVariants} />
+        <motion.div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-[#6366F1] shadow-sm shadow-indigo-500/50" variants={dotVariants} />
+        <motion.div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-[#8B5CF6] shadow-sm shadow-violet-500/50" variants={dotVariants} />
+        <motion.div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-[#A855F7] shadow-sm shadow-purple-500/50" variants={dotVariants} />
       </motion.div>
 
       <motion.p
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5 }}
-        className="text-sm font-medium text-muted-foreground/80 tracking-wide"
+        className="text-xs sm:text-sm font-medium text-muted-foreground/80 tracking-wide"
       >
         {text}
       </motion.p>
@@ -709,7 +710,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     toast.info('Generando audio...');
 
     try {
-      const response = await apiClient.post('/api/text-to-speech', { text }, {
+      const cleanText = stripMarkdown(text);
+      const response = await apiClient.post('/api/text-to-speech', { text: cleanText }, {
         responseType: 'blob', // Importante para recibir el audio como Blob
       });
 
@@ -920,10 +922,10 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   }
 
   return (
-    <div className="flex h-screen bg-background overflow-x-hidden">
+    <div className="flex h-screen bg-transparent overflow-x-hidden">
       <div className="flex flex-col h-full w-full">
         <div ref={scrollAreaRef} className="flex-1 overflow-y-auto">
-          <div className="p-4 md:p-6 space-y-6 w-full md:max-w-6xl mx-auto">
+          <div className="p-2 sm:p-4 md:p-6 space-y-3 sm:space-y-6 w-full md:max-w-6xl mx-auto">
             <div>
               {hasMoreMessages && (
                 <div ref={topSentinelRef} className="flex justify-center p-4">
@@ -979,7 +981,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             </div>
           </div>
         </div>
-        <div className="w-full md:max-w-6xl mx-auto px-4 pb-4">
+        <div className="w-full md:max-w-6xl mx-auto px-2 pb-2 sm:px-4 sm:pb-4">
           <div className="relative">
             <ChatInputBar
               newMessage={newMessage}

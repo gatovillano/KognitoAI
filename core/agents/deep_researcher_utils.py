@@ -314,7 +314,13 @@ def get_tavily_api_key(config: Optional[RunnableConfig]): # Changed to Optional
 async def execute_tool_safely(tool, args, config: Optional[RunnableConfig]): # Changed to Optional
     """Safely execute a tool with error handling."""
     try:
-        return await tool.ainvoke(args, config)
+        tool_args = args.copy()
+        if tool.name == "tavily_search":
+            # The LLM sometimes hallucinates a 'config' argument for tavily_search.
+            # We overwrite it with the actual RunnableConfig object to prevent validation errors.
+            tool_args['config'] = config
+        
+        return await tool.ainvoke(tool_args, config)
     except Exception as e:
         logger.error(f"Error executing tool {tool.name}: {e}", exc_info=True)
         return f"Error executing tool: {str(e)}"

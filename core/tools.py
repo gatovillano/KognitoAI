@@ -83,6 +83,10 @@ WebSearchTool = _import_tool_class("web_search_tool", "WebSearchTool")
 GraphCypherGeneratorTool = _import_tool_class("graph_cypher_generator_tool", "GraphCypherGeneratorTool")
 HTMLGeneratorTool = _import_tool_class("html_generator_tool", "HTMLGeneratorTool")
 ExecuteCommandTool = _import_tool_class("execute_command_tool", "ExecuteCommandTool")
+TableAnalysisTool = _import_tool_class("table_analysis_tool", "TableAnalysisTool")
+AnalysisInterpreterTool = _import_tool_class("analysis_interpreter_tool", "AnalysisInterpreterTool")
+CypherTool = _import_tool_class("cypher_tool", "CypherTool")
+StructuredDataGeneratorTool = _import_tool_class("structured_data_generator_tool", "StructuredDataGeneratorTool")
 
 # Global singletons for shared dependencies
 _graph_db_instance = None
@@ -248,7 +252,8 @@ async def get_all_langchain_tools(
         NaturalQueryInterpreterTool, ScheduleEventTool, ScopedRagAnalysisTool, SearchNotesTool,
         SetReminderTool, UpdateDocumentMetadataTool, UpdateNoteTool, UpdateProfileTool,
         WebScraperTool, ScheduleToolExecutionTool, ListScheduledToolsTool, ContactProfileTool,
-        WebSearchTool, HTMLGeneratorTool, ExecuteCommandTool
+        WebSearchTool, HTMLGeneratorTool, ExecuteCommandTool, TableAnalysisTool,
+        AnalysisInterpreterTool, CypherTool, StructuredDataGeneratorTool
     ]
 
     all_instantiated_tools: List[Tool] = []

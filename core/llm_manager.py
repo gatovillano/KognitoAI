@@ -121,6 +121,7 @@ gemini_rate_limiter = RateLimiter(
 # --- Global LLM Instances ---
 _main_agent_llm_instance: Optional[ChatLiteLLM] = None
 _fast_task_llm_instance: Optional[ChatLiteLLM] = None
+_vision_llm_instance: Optional[ChatLiteLLM] = None
 
 def get_main_llm() -> Optional[ChatLiteLLM]: # More specific return type
     """Returns the initialized main agent LLM instance."""
@@ -129,6 +130,10 @@ def get_main_llm() -> Optional[ChatLiteLLM]: # More specific return type
 def get_fast_llm() -> Optional[ChatLiteLLM]: # More specific return type
     """Returns the initialized fast task LLM instance, or the main one as a fallback."""
     return _fast_task_llm_instance or _main_agent_llm_instance
+
+def get_vision_llm() -> Optional[ChatLiteLLM]:
+    """Returns the initialized vision LLM instance for multimodal tasks."""
+    return _vision_llm_instance or _main_agent_llm_instance
 
 def get_fallback_llm() -> Optional[ChatLiteLLM]:
     """Returns a fallback LLM instance using a different provider when OpenRouter fails."""
@@ -229,6 +234,28 @@ async def initialize_llms():
     except Exception as e:
         logger.warning(f"⚠️ Failed to initialize the fast task LLM. The main LLM will be used as a fallback: {e}")
         _fast_task_llm_instance = _main_agent_llm_instance
+
+    try:
+        logger.info(f"🛠️ Initializing vision LLM with rate limiting (LiteLLM - {settings.vision_model})...")
+        vision_llm_kwargs = {
+            "model_name": settings.vision_model,
+            "temperature": 0.0,
+            "streaming": True,
+            "verbose": False,
+            "max_retries": 0,
+            "rate_limiter": gemini_rate_limiter,
+        }
+
+        if "openrouter" in settings.vision_model.lower():
+            logger.info("🔧 Applying OpenRouter specific config for vision LLM.")
+            vision_llm_kwargs["provider"] = "openai"
+
+        vision_llm = ChatLiteLLM(**vision_llm_kwargs)
+        _vision_llm_instance = vision_llm
+        logger.info("✅ Vision LLM initialized with rate limiting.")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to initialize the vision LLM. The main LLM will be used as a fallback: {e}")
+        _vision_llm_instance = _main_agent_llm_instance
 
 async def get_enhanced_llm_response(
     user_message: str,

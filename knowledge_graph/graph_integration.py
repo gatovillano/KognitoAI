@@ -256,7 +256,8 @@ class GraphIntegration:
                     hybrid_result["entities"], 
                     hybrid_result["relationships"],
                     workspace_id=documents[0].get("metadata", {}).get("workspace_id") if documents else None,
-                    account_id=account_id
+                    account_id=account_id,
+                    dataset_name=dataset_name
                 )
                 
                 # Marcar como completado
@@ -468,6 +469,17 @@ class GraphIntegration:
                 continue
 
             logger.info(f"🔄 Reconstruyendo contenido para: {file_name}")
+
+            # Verificar si el documento ya tiene contenido
+            existing_content = doc.get("content")
+            if existing_content and isinstance(existing_content, str) and len(existing_content.strip()) > 0:
+                logger.info(f"✅ Usando contenido existente para: {file_name}")
+                processed_documents.append({
+                    "title": file_name,
+                    "content": existing_content.strip(),
+                    "metadata": doc.get("metadata", {})
+                })
+                continue
 
             # Reconstruir contenido completo desde chunks vectorizados
             try:

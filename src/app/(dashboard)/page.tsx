@@ -1,21 +1,41 @@
- 'use client';
+'use client';
 
-import Image from 'next/image';
-import { useState, useRef, useEffect, ClipboardEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Textarea } from '@/components/ui/textarea';
-import { Button } from '@/components/ui/button';
-import { motion } from 'framer-motion';
-import apiClient from '@/lib/api';
-import { Send, Search, BookMarked, BrainCircuit, Upload, Mic, MessageSquare } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  LayoutDashboard,
+  RefreshCcw,
+  Plus,
+  BarChart3,
+  Activity,
+  FileText,
+  Sparkles,
+  AlertTriangle,
+  TrendingUp,
+  HelpCircle,
+  Info,
+  Loader2
+} from 'lucide-react';
 import { toast } from 'sonner';
+
+import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { EmptyChat } from '@/components/EmptyChat';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { QuestionSlider } from '@/components/QuestionSlider';
+import { KeyTopicSlider } from '@/components/KeyTopicSlider';
+import { KeyTopicDetailDialog } from '@/components/KeyTopicDetailDialog';
+import { DashboardInsightsResponse, KeyTopic } from '@/lib/models';
 
-export default function ChatLandingPage() {
+export default function DashboardPage() {
   const { user } = useAuth();
+  const router = useRouter();
+
+  // Chat States
   const [chatInput, setChatInput] = useState('');
-  const [isInputMoved, setIsInputMoved] = useState(false);
   const [isResponding, setIsResponding] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isKnowledgeAnalysisActive, setIsKnowledgeAnalysisActive] = useState(false);
@@ -26,18 +46,44 @@ export default function ChatLandingPage() {
   const [isDeepResearchActive, setIsDeepResearchActive] = useState(false);
   const [workspaceId, setWorkspaceId] = useState<string | undefined>(undefined);
   const [selectedContext, setSelectedContext] = useState<any[]>([]);
-  const router = useRouter();
+
+  // Dashboard Data States
+  const [dashboardData, setDashboardData] = useState<DashboardInsightsResponse | null>(null);
+  const [isLoadingDashboard, setIsLoadingDashboard] = useState(true);
+  const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false);
+  const [selectedKeyTopic, setSelectedKeyTopic] = useState<KeyTopic | null>(null);
+  const [isKeyTopicDetailDialogOpen, setIsKeyTopicDetailDialogOpen] = useState(false);
+
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  useEffect(() => {
-    if (textAreaRef.current) {
-      textAreaRef.current.style.height = 'auto';
-      textAreaRef.current.style.height = `${textAreaRef.current.scrollHeight}px`;
-    }
-  }, [chatInput]);
+  // Fetch Dashboard Data
+  const fetchDashboardData = useCallback(async () => {
+    if (!user?.account_id) return;
 
+    setIsLoadingDashboard(true);
+    try {
+      const response = await apiClient.post<DashboardInsightsResponse>('/api/dashboard-insights', {});
+      setDashboardData(response.data);
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+      // Silent error for dashboard data to not interrupt chat
+    } finally {
+      setIsLoadingDashboard(false);
+    }
+  }, [user?.account_id]);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
+
+  const handleRefreshDashboard = () => {
+    fetchDashboardData();
+    toast.success('Datos actualizados');
+  };
+
+  // Chat Handlers
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -45,9 +91,7 @@ export default function ChatLandingPage() {
       audioChunksRef.current = [];
 
       mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
       };
 
       mediaRecorderRef.current.onstop = async () => {
@@ -57,16 +101,12 @@ export default function ChatLandingPage() {
 
         try {
           const response = await apiClient.post('/api/transcribe-audio', formData, {
-            headers: {
-              'Content-Type': 'multipart/form-data',
-            },
+            headers: { 'Content-Type': 'multipart/form-data' },
           });
-          const transcribedText = response.data.transcription;
-          setChatInput(transcribedText);
-          toast.success('Transcripción completada con éxito.');
+          setChatInput(response.data.transcription);
+          toast.success('Transcripción completada');
         } catch (error) {
-          console.error('Error transcribing audio:', error);
-          toast.error('Error al transcribir el audio. Inténtalo de nuevo.');
+          toast.error('Error al transcribir audio');
         } finally {
           setIsRecording(false);
           stream.getTracks().forEach(track => track.stop());
@@ -76,13 +116,12 @@ export default function ChatLandingPage() {
       mediaRecorderRef.current.start();
       setIsRecording(true);
     } catch (error) {
-      console.error('Error accessing microphone:', error);
-      toast.error('Error al acceder al micrófono. Verifica los permisos.');
+      toast.error('Error al acceder al micrófono');
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+    if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
     }
   };
@@ -93,58 +132,24 @@ export default function ChatLandingPage() {
 
     setIsResponding(true);
     try {
-      // Envía un cuerpo JSON vacío explícitamente
-      let newThread;
-      if (chatInput.trim()) { // Solo crea un hilo si hay un mensaje
-        const response = await apiClient.post('/api/threads', {}); 
-        newThread = response.data;
-      } else {
-        // Si no hay mensaje, no se crea un hilo y se sale de la función
-        setIsResponding(false);
-        return;
-      }
-      // Send the first message to the new thread
-      const mode = isKnowledgeAnalysisActive
-        ? 'knowledgeAnalysis'
-        : isWebSearchActive
-        ? 'webSearch'
-        : isComprehensiveAnalysisActive
-        ? 'comprehensiveAnalysis'
-        : '';
-      if (!user || !user.id) {
-        toast.error("Error: Usuario no autenticado o ID de usuario faltante.");
-        setIsResponding(false);
-        return;
-      }
-      if (!newThread.id) {
-        toast.error("Error: ID del nuevo hilo de chat faltante.");
-        setIsResponding(false);
-        return;
-      }
-      
-      // Ensure IDs are treated as strings
-      const accountId = String(user.id);
-      const threadId = String(newThread.id);
+      const threadResponse = await apiClient.post('/api/threads', {});
+      const newThread = threadResponse.data;
 
-      console.log('New Thread ID:', newThread.id);
-      console.log('User ID:', user.id);
+      const mode = isKnowledgeAnalysisActive ? 'knowledgeAnalysis'
+        : isWebSearchActive ? 'webSearch'
+          : isComprehensiveAnalysisActive ? 'comprehensiveAnalysis'
+            : '';
 
       await apiClient.post('/api/chat', {
-        thread_id: threadId,
-        account_id: accountId,
+        thread_id: String(newThread.id),
+        account_id: String(user?.id),
         user_message: chatInput,
         mode: mode,
       });
-      setIsInputMoved(true); // Trigger the animation to move input downwards
+
       router.push(`/chat/${newThread.id}`);
-    } catch (error: any) {
-      console.error('Error creating new chat thread or sending message:', error);
-      let errorMessage = 'Error al iniciar el chat. Inténtalo de nuevo.';
-      if (error.response && error.response.status === 422) {
-        errorMessage = 'Error de validación: Asegúrate de que los datos sean correctos. Revisa la consola para más detalles.';
-        console.error('Validation errors:', error.response.data.detail);
-      }
-      toast.error(errorMessage);
+    } catch (error) {
+      toast.error('Error al iniciar el chat');
     } finally {
       setIsResponding(false);
     }
@@ -153,113 +158,234 @@ export default function ChatLandingPage() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleChatSubmit(e as any);
+      handleChatSubmit();
     }
-  };
-
-  const toggleKnowledgeAnalysis = () => {
-    setIsKnowledgeAnalysisActive(!isKnowledgeAnalysisActive);
-    if (isWebSearchActive) setIsWebSearchActive(false);
-    if (isComprehensiveAnalysisActive) setIsComprehensiveAnalysisActive(false);
-  };
-
-  const toggleWebSearch = () => {
-    setIsWebSearchActive(!isWebSearchActive);
-    if (isKnowledgeAnalysisActive) setIsKnowledgeAnalysisActive(false);
-    if (isComprehensiveAnalysisActive) setIsComprehensiveAnalysisActive(false);
-  };
-
-  const toggleComprehensiveAnalysis = () => {
-    setIsComprehensiveAnalysisActive(!isComprehensiveAnalysisActive);
-    if (isKnowledgeAnalysisActive) setIsKnowledgeAnalysisActive(false);
-    if (isWebSearchActive) setIsWebSearchActive(false);
-  };
-
-  const onToggleDeepResearch = () => {
-    setIsDeepResearchActive(!isDeepResearchActive);
-  };
-
-  const onRemoveContextItem = (item: any) => {
-    console.log('Removing context item:', item);
-    // Implement actual removal logic if needed
-  };
-
-  const onPaste = (e: any) => { // Changed to 'any' to resolve type incompatibility with ClipboardEvent
-    console.log('Paste event:', e);
-    // Implement actual paste logic if needed
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0 || isUploadingFile) return;
-
-    const fileNames = Array.from(e.target.files).map(f => f.name).join(', ');
-    toast.info(`Subiendo: ${fileNames}`);
+    if (!e.target.files?.length || isUploadingFile) return;
 
     setIsUploadingFile(true);
     try {
-      const response = await apiClient.post('/api/threads', {}); // Crea el hilo solo si hay archivos
-      const newThread = response.data;
+      const threadResponse = await apiClient.post('/api/threads', {});
+      const newThread = threadResponse.data;
       const formData = new FormData();
-      
-      for (let i = 0; i < e.target.files.length; i++) {
-        formData.append('files', e.target.files[i]);
-      }
+
+      Array.from(e.target.files).forEach(file => formData.append('files', file));
       formData.append('topic', 'General');
-      console.log('FormData contents:', Object.fromEntries(formData.entries()));
+
       await apiClient.post('/api/documents/upload-document', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
-      toast.success('Archivo(s) subido(s) con éxito al contexto del chat.');
+
+      toast.success('Archivos subidos con éxito');
       router.push(`/chat/${newThread.id}`);
     } catch (error) {
-      console.error('Error uploading file:', error);
-      toast.error('Error al subir archivo(s). Inténtalo de nuevo.');
+      toast.error('Error al subir archivos');
     } finally {
       setIsUploadingFile(false);
-      e.target.value = ''; // Reset file input
     }
   };
 
-  const exampleQuestions = [
-    "¿Cuáles son los top 2025 auriculares con cancelación de ruido?",
-    "¿Cuáles son los aspectos económicos de la actual escasez mundial de huevos?",
-    "¿Cuáles son algunos ETFs con la mayor oportunidad de crecimiento?",
-    "¿Cuáles son buenos zapatos duraderos para correr largas distancias?"
-  ];
+  const systemStats = useMemo(() => {
+    if (!dashboardData) return null;
+    const totalProcessed = dashboardData.analysis_stats_by_type?.reduce((acc, stat) => acc + stat.completed + stat.failed, 0) || 0;
+    const successRate = totalProcessed > 0 ? (dashboardData.analysis_stats_by_type?.reduce((acc, stat) => acc + stat.completed, 0) || 0) / totalProcessed * 100 : 0;
+    return {
+      totalProcessed,
+      successRate: Math.round(successRate),
+      activeInsights: dashboardData.total_proactive_insights || 0,
+    };
+  }, [dashboardData]);
 
   return (
-    <EmptyChat
-      onSendMessage={handleChatSubmit}
-      newMessage={chatInput}
-      setNewMessage={setChatInput}
-      isResponding={isResponding}
-      isRecording={isRecording}
-      isProcessingAudio={isProcessingAudio}
-      isUploadingFile={isUploadingFile}
-      isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
-      isWebSearchActive={isWebSearchActive}
-      isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
-      isDeepResearchActive={isDeepResearchActive}
-      onKeyDown={handleKeyDown}
-      onToggleKnowledgeAnalysis={toggleKnowledgeAnalysis}
-      onToggleWebSearch={toggleWebSearch}
-      onToggleComprehensiveAnalysis={toggleComprehensiveAnalysis}
-      onToggleDeepResearch={onToggleDeepResearch}
-      onStartRecording={startRecording}
-      onStopRecording={stopRecording}
-      onFileUpload={handleFileUpload}
-      onRemoveContextItem={onRemoveContextItem}
-      onPaste={onPaste}
-      isUploadingImage={false}
-      uploadedImagePreview={null}
-      onRemoveImage={() => {}}
-      onImageUpload={() => {}}
-      workspaceId={workspaceId}
-      selectedContext={selectedContext}
-      onContextSelected={setSelectedContext}
-      isVectorizingFile={false} // Añadir la prop requerida
-    />
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden space-y-8 animate-in fade-in duration-500">
+      {/* Header Section */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl sm:text-3xl font-bold flex items-center truncate">
+            <LayoutDashboard className="mr-2 sm:mr-3 h-6 w-6 sm:h-8 sm:w-8 text-primary flex-shrink-0" />
+            <span className="truncate">Escritorio</span>
+          </h1>
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground flex-shrink-0" onClick={() => setIsInfoSheetOpen(true)}>
+            <Info className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <Button variant="outline" size="sm" onClick={handleRefreshDashboard} disabled={isLoadingDashboard} className="flex-1 sm:flex-none">
+            <RefreshCcw className={`h-4 w-4 mr-2 ${isLoadingDashboard ? 'animate-spin' : ''}`} />
+            Actualizar
+          </Button>
+        </div>
+      </div>
+
+      {/* Stats Section */}
+      <AnimatePresence mode="wait">
+        {isLoadingDashboard ? (
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+            {[1, 2, 3, 4].map((i) => (
+              <Card key={i} className="h-24 animate-pulse bg-muted/50 border-none" />
+            ))}
+          </div>
+        ) : dashboardData && systemStats ? (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4"
+          >
+            <Card className="relative overflow-hidden border-none shadow-md bg-gradient-to-br from-blue-500/5 to-purple-500/5">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total de Análisis</CardTitle>
+                <BarChart3 className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{dashboardData.total_analysis_tasks}</div>
+                <p className="text-xs text-muted-foreground">{dashboardData.total_proactive_insights} insights proactivos</p>
+              </CardContent>
+            </Card>
+
+            <Card className="relative overflow-hidden border-none shadow-md bg-gradient-to-br from-green-500/5 to-emerald-500/5">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Tasa de Éxito</CardTitle>
+                <Activity className="h-4 w-4 text-green-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{systemStats.successRate}%</div>
+                <p className="text-xs text-muted-foreground">Sistema operativo</p>
+              </CardContent>
+            </Card>
+
+            <Card className="relative overflow-hidden border-none shadow-md bg-gradient-to-br from-orange-500/5 to-red-500/5">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Procesados</CardTitle>
+                <FileText className="h-4 w-4 text-orange-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{systemStats.totalProcessed}</div>
+                <p className="text-xs text-muted-foreground">Documentos y tareas</p>
+              </CardContent>
+            </Card>
+
+            <Card className="relative overflow-hidden border-none shadow-md bg-gradient-to-br from-yellow-500/5 to-amber-500/5">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Insights Activos</CardTitle>
+                <Sparkles className="h-4 w-4 text-yellow-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{systemStats.activeInsights}</div>
+                <p className="text-xs text-muted-foreground">Generados por KAI</p>
+              </CardContent>
+            </Card>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      {/* Sliders Section */}
+      {!isLoadingDashboard && dashboardData && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="grid gap-4 md:grid-cols-2 lg:grid-cols-3"
+        >
+          <QuestionSlider
+            title="Brechas de Conocimiento"
+            questions={dashboardData.emergent_knowledge_gaps || []}
+            icon={<AlertTriangle className="h-5 w-5 text-amber-500" />}
+            emptyMessage="No se detectaron brechas recientes."
+            autoSlide={true}
+          />
+
+          <KeyTopicSlider
+            title="Temas Clave"
+            keyTopics={dashboardData.key_topics || []}
+            icon={<TrendingUp className="h-5 w-5 text-blue-500" />}
+            emptyMessage="No hay temas clave recientes."
+            autoSlide={true}
+            onKeyTopicClick={(topic) => {
+              setSelectedKeyTopic(topic);
+              setIsKeyTopicDetailDialogOpen(true);
+            }}
+          />
+
+          <QuestionSlider
+            title="Preguntas para Explorar"
+            questions={dashboardData.exploration_questions || []}
+            icon={<HelpCircle className="h-5 w-5 text-indigo-500" />}
+            emptyMessage="No hay preguntas para explorar recientes."
+            autoSlide={true}
+          />
+        </motion.div>
+      )}
+
+      {/* Chat Section */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+        className="pt-8"
+      >
+        <EmptyChat
+          onSendMessage={handleChatSubmit}
+          newMessage={chatInput}
+          setNewMessage={setChatInput}
+          isResponding={isResponding}
+          isRecording={isRecording}
+          isProcessingAudio={isProcessingAudio}
+          isUploadingFile={isUploadingFile}
+          isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+          isWebSearchActive={isWebSearchActive}
+          isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+          isDeepResearchActive={isDeepResearchActive}
+          onKeyDown={handleKeyDown}
+          onToggleKnowledgeAnalysis={() => setIsKnowledgeAnalysisActive(!isKnowledgeAnalysisActive)}
+          onToggleWebSearch={() => setIsWebSearchActive(!isWebSearchActive)}
+          onToggleComprehensiveAnalysis={() => setIsComprehensiveAnalysisActive(!isComprehensiveAnalysisActive)}
+          onToggleDeepResearch={() => setIsDeepResearchActive(!isDeepResearchActive)}
+          onStartRecording={startRecording}
+          onStopRecording={stopRecording}
+          onFileUpload={handleFileUpload}
+          onRemoveContextItem={() => { }}
+          onPaste={() => { }}
+          isUploadingImages={false}
+          uploadedImagePreviews={[]}
+          onRemoveImage={() => { }}
+          onImageUpload={() => { }}
+          workspaceId={workspaceId}
+          selectedContext={selectedContext}
+          onContextSelected={setSelectedContext}
+          isVectorizingFile={false}
+        />
+      </motion.div>
+
+      {/* Dialogs & Info */}
+      <KeyTopicDetailDialog
+        isOpen={isKeyTopicDetailDialogOpen}
+        onOpenChange={setIsKeyTopicDetailDialogOpen}
+        keyTopic={selectedKeyTopic}
+      />
+
+      <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md">
+          <SheetHeader>
+            <SheetTitle>Escritorio de Kognito AI</SheetTitle>
+            <SheetDescription>
+              Tu centro de control inteligente para interactuar con tu conocimiento.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="py-6 space-y-4 text-sm">
+            <p>Desde aquí puedes acceder rápidamente a los insights generados por la IA y comenzar nuevas conversaciones.</p>
+            <div className="space-y-2">
+              <h4 className="font-bold">Secciones:</h4>
+              <ul className="list-disc pl-5 space-y-1 text-muted-foreground">
+                <li><strong>Estadísticas:</strong> Resumen de la actividad de análisis.</li>
+                <li><strong>Insights:</strong> Temas clave y brechas detectadas automáticamente.</li>
+                <li><strong>Chat:</strong> Interfaz principal para consultas y análisis.</li>
+              </ul>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
   );
 }

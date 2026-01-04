@@ -489,26 +489,27 @@ export default function AnalysisPage() {
     <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden space-y-8">
       {/* Header y título */}
       <div className="spacing-component">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={() => router.push('/rag')} className="h-8 w-8 text-muted-foreground">
+            <Button variant="ghost" size="icon" onClick={() => router.push('/rag')} className="h-8 w-8 text-muted-foreground flex-shrink-0">
               <ArrowLeft className="h-5 w-5" />
             </Button>
-            <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
+            <h1 className="text-2xl sm:text-3xl md:text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight truncate">
               Centro de Análisis
             </h1>
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground flex-shrink-0" onClick={() => setIsInfoSheetOpen(true)}>
               <Info className="h-5 w-5" />
             </Button>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={handleRefreshDashboard} disabled={isLoadingDashboard}>
-              <RefreshCcw className={`h-4 w-4 mr-2 ${isLoadingDashboard ? 'animate-spin' : ''}`} />
+          <div className="flex gap-2 w-full sm:w-auto">
+            <Button variant="outline" size="sm" onClick={handleRefreshDashboard} disabled={isLoadingDashboard} className="flex-1 sm:flex-none text-xs sm:text-sm">
+              <RefreshCcw className={`h-3.5 w-3.5 mr-1.5 sm:mr-2 ${isLoadingDashboard ? 'animate-spin' : ''}`} />
               Actualizar
             </Button>
-            <Button onClick={() => setShowInsightFormModal(true)} className="gap-2">
-              <Plus className="h-4 w-4" />
-              Generar Insight Manual
+            <Button size="sm" onClick={() => setShowInsightFormModal(true)} className="flex-1 sm:flex-none gap-1.5 sm:gap-2 text-xs sm:text-sm">
+              <Plus className="h-3.5 w-3.5" />
+              <span className="hidden xs:inline">Generar Insight</span>
+              <span className="xs:hidden">Insight</span>
             </Button>
           </div>
         </div>
@@ -518,7 +519,7 @@ export default function AnalysisPage() {
       {dashboardData && systemStats && (
         <>
           {/* Tarjetas principales de estadísticas */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
             {/* Tarjeta 1: Total de Análisis */}
             <Card className="relative overflow-hidden">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -586,7 +587,7 @@ export default function AnalysisPage() {
           </div>
 
           {/* Tarjetas de información dinámica */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
             {/* Tarjeta: Brechas de Conocimiento */}
             <QuestionSlider
               title="Brechas de Conocimiento"
@@ -634,8 +635,8 @@ export default function AnalysisPage() {
             <CardTitle>Estadísticas por Tipo de Análisis</CardTitle>
             <CardDescription>Resumen de la actividad de análisis por categoría.</CardDescription>
           </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
+          <CardContent className="px-1 sm:px-6">
+            <ResponsiveContainer width="100%" height={250} className="sm:h-[300px]">
               <BarChart
                 data={chartData}
                 margin={{
@@ -657,47 +658,50 @@ export default function AnalysisPage() {
       {/* --- SECCIÓN DE LISTA DE ANÁLISIS EXISTENTE --- */}
       <>
         {/* Filtros y búsqueda */}
-        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-          <form onSubmit={handleSearch} className="flex gap-2 flex-1">
+        <div className="flex flex-col gap-4">
+          <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-2 w-full">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Buscar en análisis..."
                 value={searchQuery}
                 onChange={(e) => updateSearchQuery(e.target.value)}
-                className="pl-10"
+                className="pl-10 h-10 text-sm"
               />
             </div>
             <Input
-              placeholder="Palabras clave (separadas por comas)"
+              placeholder="Palabras clave..."
               value={topicKeywords}
               onChange={(e) => updateTopicKeywords(e.target.value)}
-              className="flex-1"
+              className="flex-1 h-10 text-sm"
             />
-            <Button type="submit" variant="outline">
-              Buscar
-            </Button>
-          </form>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="gap-2">
-                <Filter className="h-4 w-4" />
-                {selectedType ? getAnalysisTypeLabel(selectedType) : 'Filtrar por tipo'}
-                <ChevronDown className="h-4 w-4" />
+            <div className="flex gap-2">
+              <Button type="submit" variant="outline" className="flex-1 sm:flex-none h-10 text-sm">
+                Buscar
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {analysisTypes.map((type) => (
-                <DropdownMenuItem
-                  key={type.value || 'all'}
-                  onClick={() => setSelectedType(type.value)}
-                >
-                  {type.label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="flex-1 sm:flex-none gap-2 h-10 text-sm">
+                    <Filter className="h-4 w-4" />
+                    <span className="truncate max-w-[100px]">
+                      {selectedType ? getAnalysisTypeLabel(selectedType) : 'Tipo'}
+                    </span>
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="max-h-[300px] overflow-y-auto">
+                  {analysisTypes.map((type) => (
+                    <DropdownMenuItem
+                      key={type.value || 'all'}
+                      onClick={() => setSelectedType(type.value)}
+                    >
+                      {type.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </form>
         </div>
 
         {/* Lista de análisis */}
@@ -713,7 +717,7 @@ export default function AnalysisPage() {
             </p>
           </div>
         ) : (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
             <AnimatePresence>
               {analyses.map((analysis, index) => (
                 <motion.div
