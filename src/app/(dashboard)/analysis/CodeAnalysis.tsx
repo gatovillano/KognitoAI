@@ -6,7 +6,7 @@ import { Separator } from '@/components/ui/separator';
 import { CodeAnalysisResultFrontend } from '@/lib/models';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Code, Layout, GitBranch, AlertTriangle, Zap, Info, Box, Puzzle } from 'lucide-react';
+import { Code, Layout, GitBranch, AlertTriangle, Zap, Info, Box, Puzzle, CircleCheck, Sparkles } from 'lucide-react';
 
 interface CodeAnalysisProps {
   analysis: CodeAnalysisResultFrontend;
@@ -27,7 +27,7 @@ const CodeAnalysis: React.FC<CodeAnalysisProps> = ({
       </div>
 
       <Tabs defaultValue="summary" className="w-full">
-        <TabsList className="grid w-full grid-cols-4 mb-8">
+        <TabsList className="grid w-full grid-cols-5 mb-8">
           <TabsTrigger value="summary" className="gap-2">
             <Info className="w-4 h-4" />
             <span className="hidden sm:inline">Resumen</span>
@@ -40,9 +40,13 @@ const CodeAnalysis: React.FC<CodeAnalysisProps> = ({
             <Box className="w-4 h-4" />
             <span className="hidden sm:inline">Dependencias</span>
           </TabsTrigger>
-          <TabsTrigger value="quality" className="gap-2">
+          <TabsTrigger value="issues" className="gap-2">
+            <AlertTriangle className="w-4 h-4" />
+            <span className="hidden sm:inline">Problemas</span>
+          </TabsTrigger>
+          <TabsTrigger value="recommendations" className="gap-2">
             <Zap className="w-4 h-4" />
-            <span className="hidden sm:inline">Calidad</span>
+            <span className="hidden sm:inline">Mejoras</span>
           </TabsTrigger>
         </TabsList>
 
@@ -136,20 +140,20 @@ const CodeAnalysis: React.FC<CodeAnalysisProps> = ({
           )}
         </TabsContent>
 
-        {/* TAB: CALIDAD Y MEJORAS */}
-        <TabsContent value="quality" className="space-y-6 animate-in fade-in-50 duration-500 w-full min-w-0">
-          {analysis.potential_issues && analysis.potential_issues.length > 0 && (
+        {/* TAB: PROBLEMAS */}
+        <TabsContent value="issues" className="space-y-6 animate-in fade-in-50 duration-500 w-full min-w-0">
+          {analysis.potential_issues && analysis.potential_issues.length > 0 ? (
             <div>
               <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-red-600">
                 <AlertTriangle className="w-5 h-5" />
-                Problemas Potenciales
+                Problemas Potenciales Detectados
               </h4>
               <div className="space-y-3">
                 {analysis.potential_issues.map((item, index) => (
                   <Card key={index} className="border-l-4 border-l-red-500 bg-red-50/20 overflow-hidden min-w-0">
                     <CardContent className="pt-4">
-                      <h5 className="font-bold text-red-900 dark:text-red-100 break-words [word-break:break-word]">{item.issue}</h5>
-                      <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground mt-1 leading-relaxed break-words [word-break:break-word] overflow-hidden">
+                      <h5 className="font-bold text-red-900 dark:text-red-100 break-words whitespace-normal">{item.issue}</h5>
+                      <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground mt-1 leading-relaxed break-words whitespace-normal overflow-hidden">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.description}</ReactMarkdown>
                       </div>
                     </CardContent>
@@ -157,9 +161,17 @@ const CodeAnalysis: React.FC<CodeAnalysisProps> = ({
                 ))}
               </div>
             </div>
+          ) : (
+            <div className="text-center py-12 text-muted-foreground">
+              <CircleCheck className="w-12 h-12 mx-auto mb-4 text-green-500 opacity-50" />
+              <p>No se detectaron problemas potenciales en el código.</p>
+            </div>
           )}
+        </TabsContent>
 
-          {analysis.recommendations && analysis.recommendations.length > 0 && (
+        {/* TAB: MEJORAS */}
+        <TabsContent value="recommendations" className="space-y-6 animate-in fade-in-50 duration-500 w-full min-w-0">
+          {analysis.recommendations && analysis.recommendations.length > 0 ? (
             <div>
               <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-green-600">
                 <Zap className="w-5 h-5" />
@@ -172,18 +184,18 @@ const CodeAnalysis: React.FC<CodeAnalysisProps> = ({
                       <div className="w-6 h-6 rounded-full bg-green-500 text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
                         {index + 1}
                       </div>
-                      <h5 className="font-bold text-foreground break-words">{item.recommendation}</h5>
+                      <h5 className="font-bold text-foreground break-words whitespace-normal">{item.recommendation}</h5>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm w-full min-w-0">
                       <div className="min-w-0 overflow-hidden">
                         <span className="text-xs font-bold text-muted-foreground uppercase block mb-1">Razón</span>
-                        <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground leading-relaxed break-words [word-break:break-word] overflow-hidden">
+                        <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground leading-relaxed break-words whitespace-normal overflow-hidden">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.rationale}</ReactMarkdown>
                         </div>
                       </div>
                       <div className="min-w-0 overflow-hidden">
                         <span className="text-xs font-bold text-muted-foreground uppercase block mb-1">Aplicación</span>
-                        <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground leading-relaxed break-words [word-break:break-word] overflow-hidden">
+                        <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground leading-relaxed break-words whitespace-normal overflow-hidden">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.application}</ReactMarkdown>
                         </div>
                       </div>
@@ -191,7 +203,7 @@ const CodeAnalysis: React.FC<CodeAnalysisProps> = ({
                     {item.implementation && (
                       <div className="pt-2">
                         <span className="text-xs font-bold text-muted-foreground uppercase block mb-1">Implementación</span>
-                        <pre className="text-xs bg-muted p-2 rounded border overflow-x-auto">
+                        <pre className="text-xs bg-muted p-3 rounded-lg border whitespace-pre-wrap break-words font-mono leading-relaxed">
                           {item.implementation}
                         </pre>
                       </div>
@@ -199,6 +211,11 @@ const CodeAnalysis: React.FC<CodeAnalysisProps> = ({
                   </div>
                 ))}
               </div>
+            </div>
+          ) : (
+            <div className="text-center py-12 text-muted-foreground">
+              <Sparkles className="w-12 h-12 mx-auto mb-4 text-yellow-500 opacity-50" />
+              <p>El código sigue las mejores prácticas identificadas.</p>
             </div>
           )}
         </TabsContent>

@@ -76,10 +76,10 @@ async def document_message_handler(update: Update, context: CallbackContext) -> 
         
         # El caption del mensaje puede contener el tema del documento.
         topic = message.caption if message.caption else "General"
-        extracted_text, metadata = extract_text_and_metadata_from_document(
-        document.file_name,
-        bytes(file_bytes),
-    )
+        extracted_text, metadata = await extract_text_and_metadata_from_document(
+            document.file_name,
+            bytes(file_bytes),
+        )
         # Procesamos el documento en memoria usando process_document_for_rag
         try:
             await process_document_for_rag(

@@ -47,11 +47,12 @@ router = APIRouter()
 # --- Modelos para el Chat ---
 class Source(BaseModel):
     """Define la estructura de datos para una fuente citada."""
-    id: int
+    id: Union[int, str]
     title: str
     url: str
     snippet: str
     type: str = "web"  # "web", "document", "memory", etc.
+    metadata: Optional[Dict[str, Any]] = None
 
 class ChatRequest(BaseModel):
     """Define la estructura de datos para una solicitud de mensaje de chat al agente."""
@@ -65,6 +66,7 @@ class ChatRequest(BaseModel):
     mode: Optional[str] = None
     rag_context: Optional[str] = None # Contexto RAG: [{'type': 'document', 'id': '...'}, {'type': 'collection', 'id': '...'}]
     workspace_id: Optional[str] = None  # Campo para el ID del workspace
+    context: Optional[Dict[str, Any]] = None # Contexto específico: {"type": "table", "id": "...", "snapshot": {...}}
 
 class ToolExecutionRequest(BaseModel):
     tool_name: str
@@ -233,13 +235,25 @@ async def get_messages_for_thread(
             raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
 
         db_sync_url = settings.database_url.replace("+psycopg", "")
-        chat_message_history = PostgresChatMessageHistory(
-            connection_string=db_sync_url,
-            session_id=thread_id,
-            table_name="langchain_chat_history",
-        )
         
-        all_messages = await chat_message_history.aget_messages()
+        # Robustez: Intentar inicializar el historial con reintentos
+        chat_message_history = None
+        for attempt in range(3):
+            try:
+                chat_message_history = PostgresChatMessageHistory(
+                    connection_string=db_sync_url,
+                    session_id=thread_id,
+                    table_name="langchain_chat_history",
+                )
+                all_messages = await chat_message_history.aget_messages()
+                break
+            except Exception as e:
+                logger.warning(f"⚠️ Intento {attempt + 1} fallido al obtener mensajes del hilo {thread_id}: {e}")
+                if attempt == 2:
+                    logger.error(f"❌ No se pudo conectar con el historial del hilo {thread_id}: {e}")
+                    raise HTTPException(status_code=500, detail="Error al recuperar el historial de mensajes.")
+                await asyncio.sleep(1)
+
         
         # Filtrar mensajes que no son de tipo "summary"
         real_messages = []
@@ -525,10 +539,14 @@ async def text_to_speech(request: TextToSpeechRequest):
     # 1. Eliminar bloques de código cercados (```...```)
     text_to_speak = re.sub(r'```.*?```', '', text_to_speak, flags=re.DOTALL)
     # 2. Eliminar código en línea (`...`)
-    # text_to_speak = re.sub(r'`[^`]*`', '', text_to_speak)
-    # 3. Eliminar caracteres de puntuación que no se quieren leer
-    # text_to_speak = re.sub(r'[[]{}()#*_]', '', text_to_speak)
-    # 4. Limpiar espacios en blanco múltiples
+    text_to_speak = re.sub(r'`[^`]*`', '', text_to_speak)
+    # 3. Eliminar encabezados de markdown (#, ##, etc.)
+    text_to_speak = re.sub(r'#+\s*', '', text_to_speak)
+    # 4. Limpiar enlaces de markdown: [texto](url) -> texto
+    text_to_speak = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text_to_speak)
+    # 5. Eliminar otros caracteres de puntuación de markdown (*, _, ~, >)
+    text_to_speak = re.sub(r'[*_~>]', '', text_to_speak)
+    # 6. Limpiar espacios en blanco múltiples
     text_to_speak = re.sub(r'\s+', ' ', text_to_speak).strip()
 
     if not text_to_speak:
@@ -681,7 +699,8 @@ async def handle_chat(
         mode=request.mode,
         rag_context=parsed_rag_context,
         background_tasks=background_tasks,
-        workspace_id=workspace_id
+        workspace_id=workspace_id,
+        context=request.context # Pasar el contexto
     )
     
     # Devolver una respuesta inmediata
@@ -700,6 +719,7 @@ async def handle_chat_form(
     mode: Optional[str] = Form(None),
     rag_context: Optional[str] = Form(None),
     workspace_id: Optional[str] = Form(None),
+    context: Optional[str] = Form(None), # Nuevo campo en FormData
     current_account_id: str = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db_session)
 ):
@@ -709,6 +729,14 @@ async def handle_chat_form(
     a través de WebSocket.
     """
     task_id = str(uuid.uuid4())
+    
+    # Parse context if provided
+    parsed_context = None
+    if context:
+        try:
+            parsed_context = json.loads(context)
+        except json.JSONDecodeError:
+            logger.error(f"Error al parsear context JSON: {context}")
     
     # Parse rag_context if provided
     parsed_rag_context = None
@@ -752,7 +780,8 @@ async def handle_chat_form(
         mode=mode,
         rag_context=parsed_rag_context,
         background_tasks=background_tasks,
-        workspace_id=final_workspace_id
+        workspace_id=final_workspace_id,
+        context=parsed_context # Pasar el contexto parseado
     )
     
     # Devolver una respuesta inmediata
@@ -772,6 +801,7 @@ async def create_and_run_agent_streaming(
     rag_context: Optional[List[Dict[str, str]]] = None,
     background_tasks: Optional[Any] = None,
     workspace_id: Optional[str] = None,
+    context: Optional[Dict[str, Any]] = None, # Nuevo parámetro
     k: int = 5
 ):
     """
@@ -804,12 +834,26 @@ async def create_and_run_agent_streaming(
         # Optimization: Usar grafo cacheado en lugar de recrearlo
         agent_app = get_langgraph_agent()
         db_sync_url = settings.database_url.replace("+psycopg", "")
-        chat_message_history = PostgresChatMessageHistory(
-            connection_string=db_sync_url,
-            session_id=thread_id,
-            table_name="langchain_chat_history",
-        )
-        history_messages = await chat_message_history.aget_messages()
+        
+        # Robustez: Intentar inicializar el historial con reintentos en caso de fallo de conexión
+        chat_message_history = None
+        for attempt in range(3):
+            try:
+                chat_message_history = PostgresChatMessageHistory(
+                    connection_string=db_sync_url,
+                    session_id=thread_id,
+                    table_name="langchain_chat_history",
+                )
+                # Forzar una pequeña operación para verificar la conexión
+                history_messages = await chat_message_history.aget_messages()
+                break
+            except Exception as e:
+                logger.warning(f"⚠️ Intento {attempt + 1} fallido al conectar con el historial de chat: {e}")
+                if attempt == 2:
+                    logger.error(f"❌ No se pudo inicializar el historial de chat tras 3 intentos: {e}")
+                    raise HTTPException(status_code=500, detail="Error de conexión con la base de datos de historial.")
+                await asyncio.sleep(1)
+
 
         # El rag_context se pasará directamente al estado del agente, no se pre-procesa aquí.
         # El user_message se mantiene sin modificar aquí.
@@ -844,6 +888,7 @@ async def create_and_run_agent_streaming(
             "rag_context": rag_context,
             "sources": [],
             "thread_id": thread_id, # Añadir thread_id al estado inicial
+            "context": context, # Inyectar el contexto
         }
 
         # Asegurarse de que el historial de mensajes se inicialice con el mensaje del usuario

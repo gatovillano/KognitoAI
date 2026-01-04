@@ -9,6 +9,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import json
 import os
+from utils.patches import apply_patches
+
+# Aplicar parches de estabilidad antes de cualquier otra cosa
+apply_patches()
+
 
 from api.auth import router as auth_router
 from api.users import router as users_router
@@ -23,6 +28,7 @@ from api.collections import router as collections_router # Importar el router de
 from api.universal_search import router as universal_search_router # Importar el router de búsqueda universal
 from api.collection_search import router as collection_search_router # Importar el router de búsqueda en colecciones
 from api.note_search import router as note_search_router # Importar el router de búsqueda en notas
+from api.tables import router as tables_router
 from core.config import settings
 from core.database import create_tables, Account
 from core.llm_manager import initialize_llms
@@ -126,6 +132,14 @@ async def startup_event():
         # Se asume que el bot de Telegram se ejecuta como un proceso separado y se encarga de esto.
         await scheduled_tools_manager.initialize_scheduled_tools() # Inicializar el programador de herramientas
         tool_scheduler.start() # Iniciar el nuevo scheduler de APScheduler
+        
+        # 🧹 Limpieza de archivos generados al arrancar
+        try:
+            from utils.file_cleanup import cleanup_old_generated_files
+            cleanup_old_generated_files()
+        except Exception as e:
+            logger.error(f"Error en la limpieza inicial de archivos: {e}")
+            
         logger.info("Servidor listo para aceptar peticiones.")
     except Exception as e:
         logger.error(f"ERROR FATAL DURANTE EL ARRANQUE: {e}", exc_info=True)
@@ -282,6 +296,7 @@ app.include_router(universal_search_router, prefix="/api", tags=["universal-sear
 app.include_router(collection_search_router, prefix="/api", tags=["collection-search"])
 app.include_router(note_search_router, prefix="/api", tags=["note-search"])
 app.include_router(memory_router, prefix="/api", tags=["memory"]) # NUEVO: Incluir el router de memory
+app.include_router(tables_router, prefix="/api/tables", tags=["tables"])
 
 from api.tools import router as tools_router
 from api.deep_research import router as deep_research_router
@@ -371,6 +386,23 @@ async def get_admin_metrics(
         total_scheduled_tools=total_scheduled,
         active_scheduled_tools=active_jobs
     )
+
+@app.post("/api/admin/cleanup-files", summary="Ejecutar limpieza manual de archivos (solo admin)")
+async def manual_cleanup_files(
+    admin_account: Account = Depends(get_current_admin_account)
+):
+    """
+    Ejecuta manualmente la limpieza de archivos generados con más de 24 horas.
+    Requiere privilegios de administrador.
+    """
+    logger.info(f"Admin {admin_account.id} solicitando limpieza manual de archivos.")
+    try:
+        from utils.file_cleanup import cleanup_old_generated_files
+        files_deleted = cleanup_old_generated_files()
+        return {"message": "Limpieza completada", "files_deleted": files_deleted}
+    except Exception as e:
+        logger.error(f"Error en limpieza manual: {e}")
+        raise HTTPException(status_code=500, detail=f"Error en limpieza manual: {e}")
 
 @app.get("/test-connection")
 async def test_connection():

@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Users, Settings, Clock, ArrowRight, Plus, Edit } from 'lucide-react';
+import { Users, Settings, Clock, ArrowRight, Plus, Edit, Trash2 } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -130,7 +130,7 @@ export default function AdminPage({ params }: PageProps) {
     }
   };
 
-  
+
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -213,6 +213,27 @@ export default function AdminPage({ params }: PageProps) {
       toast({
         title: 'Error',
         description: error.response?.data?.detail || 'No se pudieron eliminar los usuarios.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleCleanup = async () => {
+    if (!confirm('¿Estás seguro de que quieres limpiar los archivos temporales con más de 24 horas?')) {
+      return;
+    }
+
+    try {
+      const response = await apiClient.post('/api/admin/cleanup-files');
+      toast({
+        title: 'Limpieza Completada',
+        description: `Se han eliminado ${response.data.files_deleted} archivos.`,
+      });
+    } catch (error: any) {
+      console.error('Error cleaning up files:', error);
+      toast({
+        title: 'Error',
+        description: error.response?.data?.detail || 'No se pudo realizar la limpieza.',
         variant: 'destructive',
       });
     }
@@ -544,6 +565,25 @@ export default function AdminPage({ params }: PageProps) {
                       <p className="text-xs text-muted-foreground">
                         {metrics.active_scheduled_tools} activas
                       </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Limpieza de Archivos</CardTitle>
+                      <Trash2 className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <div className="text-xs text-muted-foreground">
+                        Elimina archivos generados (PDF, CSV, etc.) con más de 24 horas.
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleCleanup}
+                        className="w-full"
+                      >
+                        Ejecutar Limpieza Manual
+                      </Button>
                     </CardContent>
                   </Card>
                 </div>

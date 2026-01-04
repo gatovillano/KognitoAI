@@ -1,12 +1,12 @@
 // src/app/(dashboard)/agenda/task-dialog.tsx
 
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { CalendarIcon } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Clock, Briefcase, Activity, AlignLeft, Calendar as CalendarIconLucide, UserPlus, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Calendar } from '@/components/ui/calendar';
@@ -16,55 +16,52 @@ import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { TaskResponse } from './types';
 import { ProfileSelectorDialog } from '@/components/dialogs/ProfileSelectorDialog';
-import { Tag } from '@/components/ui/tag'; // Assuming a Tag component for displaying linked profiles
-import { KanbanStatus } from '../workspaces/[id]/projects/types'; // Correctly placed import
+import { KanbanStatus } from '../workspaces/[id]/projects/types';
 
 interface TaskDialogProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   onSaveSuccess: (task: TaskResponse) => void;
-  task?: TaskResponse | null; // Tarea opcional para edición, ahora acepta null
-  workspaceId?: string; // Añadir workspaceId
+  task?: TaskResponse | null;
+  workspaceId?: string;
 }
 
 export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspaceId }: TaskDialogProps) {
   const [description, setDescription] = useState(task?.description || '');
-  const [startDate, setStartDate] = useState<Date | undefined>(task?.start_date ? new Date(task.start_date) : undefined); // Nuevo estado
-  const [endDate, setEndDate] = useState<Date | undefined>(task?.end_date ? new Date(task.end_date) : undefined); // Nuevo estado
+  const [startDate, setStartDate] = useState<Date | undefined>(task?.start_date ? new Date(task.start_date) : undefined);
+  const [endDate, setEndDate] = useState<Date | undefined>(task?.end_date ? new Date(task.end_date) : undefined);
   const [status, setStatus] = useState<KanbanStatus>('Pendiente');
   const [isLoading, setIsLoading] = useState(false);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(task?.workspace_id || ''); // NUEVO ESTADO para el selector
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(task?.workspace_id || '');
   const [isProfileSelectorOpen, setIsProfileSelectorOpen] = useState(false);
-  const [linkedProfiles, setLinkedProfiles] = useState<any[]>([]); // State to store linked profiles
+  const [linkedProfiles, setLinkedProfiles] = useState<any[]>([]);
 
   useEffect(() => {
     if (task) {
       setDescription(task.description);
-      setStartDate(task.start_date ? new Date(task.start_date) : undefined); // Inicializar startDate
-      setEndDate(task.end_date ? new Date(task.end_date) : undefined); // Inicializar endDate
+      setStartDate(task.start_date ? new Date(task.start_date) : undefined);
+      setEndDate(task.end_date ? new Date(task.end_date) : undefined);
       setStatus(task.status as KanbanStatus || (task.is_completed ? 'Hecho' : 'Pendiente'));
-      setSelectedWorkspaceId(task.workspace_id || ''); // Precargar workspace_id si la tarea ya lo tiene
+      setSelectedWorkspaceId(task.workspace_id || '');
     } else {
-      // Resetear el formulario si no hay tarea para editar
       setDescription('');
-      setStartDate(undefined); // Resetear startDate
-      setEndDate(undefined); // Resetear endDate
+      setStartDate(undefined);
+      setEndDate(undefined);
       setStatus('Pendiente');
-      setSelectedWorkspaceId(workspaceId || ''); // Usar el workspaceId del prop para nueva tarea
+      setSelectedWorkspaceId(workspaceId || '');
     }
-  }, [task, isOpen, workspaceId]); // Resetear cuando la tarea o el estado del diálogo cambian
+  }, [task, isOpen, workspaceId]);
 
-  useEffect(() => { // NUEVO useEffect para workspaces
+  useEffect(() => {
     const fetchWorkspaces = async () => {
       setLoadingWorkspaces(true);
       try {
-        const response = await apiClient.get('/api/workspaces'); // Asumo este endpoint
+        const response = await apiClient.get('/api/workspaces');
         setWorkspaces(response.data.workspaces);
       } catch (error) {
         console.error("Error fetching workspaces:", error);
-        toast.error('Error al cargar los workspaces.');
       } finally {
         setLoadingWorkspaces(false);
       }
@@ -77,7 +74,6 @@ export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspac
           setLinkedProfiles(response.data);
         } catch (error) {
           console.error("Error fetching linked profiles:", error);
-          toast.error("Error al cargar perfiles vinculados.");
         }
       }
     };
@@ -97,28 +93,26 @@ export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspac
     setIsLoading(true);
     const payload = {
       description: description,
-      start_date: startDate?.toISOString(), // Nuevo campo
-      end_date: endDate?.toISOString(), // Nuevo campo
+      start_date: startDate?.toISOString(),
+      end_date: endDate?.toISOString(),
       status: status,
       is_completed: status === 'Hecho',
-      workspace_id: selectedWorkspaceId,
+      workspace_id: selectedWorkspaceId === 'none' ? null : selectedWorkspaceId,
     };
 
     try {
       let savedTask: TaskResponse;
       if (task) {
-        // Actualizar tarea existente
         const response = await apiClient.put(`/api/tasks/${task.id}`, payload);
         savedTask = response.data;
         toast.success('Tarea actualizada con éxito.');
       } else {
-        // Crear nueva tarea
         const response = await apiClient.post('/api/tasks', payload);
         savedTask = response.data;
         toast.success('Tarea creada con éxito.');
       }
       onSaveSuccess(savedTask);
-      onOpenChange(false); // Cerrar el diálogo
+      onOpenChange(false);
     } catch (error) {
       console.error('Error al guardar la tarea:', error);
       toast.error('Error al guardar la tarea.');
@@ -127,195 +121,214 @@ export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspac
     }
   };
 
-  // Function to handle linking a profile
   const handleLinkProfile = async (selectedProfiles: any[]) => {
     if (!task?.id || selectedProfiles.length === 0) return;
-
-    const profileToLink = selectedProfiles[0]; // Assuming single selection for now
+    const profileToLink = selectedProfiles[0];
     try {
       await apiClient.post(`/api/tasks/${task.id}/link-profile`, { profile_id: profileToLink.id });
-      toast.success(`Perfil ${profileToLink.name} vinculado correctamente.`);
-      setLinkedProfiles(prev => [...prev, profileToLink]); // Add to linked profiles state
-      onSaveSuccess(task); // Trigger a refresh in parent if needed
+      toast.success(`Perfil ${profileToLink.name} vinculado.`);
+      setLinkedProfiles(prev => [...prev, profileToLink]);
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || `Error al vincular el perfil ${profileToLink.name}.`);
-      console.error("Error linking profile:", error);
+      toast.error(`Error al vincular el perfil.`);
     }
   };
 
-  // Function to handle unlinking a profile
   const handleUnlinkProfile = async (profileId: string) => {
     if (!task?.id) return;
-
     try {
       await apiClient.post(`/api/tasks/${task.id}/unlink-profile`, { profile_id: profileId });
-      toast.success(`Perfil desvinculado correctamente.`);
-      setLinkedProfiles(prev => prev.filter(p => p.id !== profileId)); // Remove from linked profiles state
-      onSaveSuccess(task); // Trigger a refresh in parent if needed
+      toast.success(`Perfil desvinculado.`);
+      setLinkedProfiles(prev => prev.filter(p => p.id !== profileId));
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || `Error al desvincular el perfil.`);
-      console.error("Error unlinking profile:", error);
+      toast.error(`Error al desvincular el perfil.`);
     }
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]">
-        <DialogHeader>
-          <DialogTitle>{task ? 'Editar Tarea' : 'Crear Nueva Tarea'}</DialogTitle>
+      <DialogContent className="sm:max-w-[500px] bg-white/80 dark:bg-card/40 backdrop-blur-2xl border-white/20 dark:border-border/40 rounded-[2.5rem] shadow-2xl overflow-hidden p-0">
+        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent pointer-events-none" />
+
+        <DialogHeader className="p-8 pb-4 relative z-10">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-2.5 rounded-2xl bg-primary/10 text-primary shadow-inner">
+              <Activity className="h-6 w-6" />
+            </div>
+            <DialogTitle className="text-3xl font-black tracking-tighter bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+              {task ? 'Editar Tarea' : 'Nueva Tarea'}
+            </DialogTitle>
+          </div>
+          <DialogDescription className="text-muted-foreground font-medium">
+            Define tus objetivos y mantén el control de tu progreso.
+          </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="description" className="text-right">
-              Descripción
+
+        <div className="p-8 pt-0 space-y-6 relative z-10 max-h-[75vh] overflow-y-auto custom-scrollbar">
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2 font-bold text-xs uppercase tracking-widest text-muted-foreground/80 mb-2">
+              <AlignLeft className="h-3.5 w-3.5 text-primary" /> Descripción
             </Label>
             <Textarea
               id="description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="col-span-3"
-              rows={3}
+              placeholder="¿Qué necesitas hacer?"
+              className="min-h-[100px] rounded-2xl bg-background/50 border-border/40 focus:ring-primary/20 transition-all resize-none leading-relaxed"
             />
           </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="workspace" className="text-right">
-              Workspace
-            </Label>
-            <select
-              id="workspace"
-              value={selectedWorkspaceId}
-              onChange={(e) => setSelectedWorkspaceId(e.target.value)}
-              className="col-span-3 border rounded-md p-2"
-              disabled={loadingWorkspaces}
-            >
-              <option value="">{loadingWorkspaces ? "Cargando workspaces..." : "Ninguno"}</option>
-              {workspaces && Array.isArray(workspaces) && workspaces.map(ws => (
-                <option key={ws.id} value={ws.id}>
-                  {ws.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="status" className="text-right">
-              Estado
-            </Label>
-            <select
-              id="status"
-              value={status}
-              onChange={(e) => setStatus(e.target.value as KanbanStatus)}
-              className="col-span-3 border rounded-md p-2 bg-background"
-            >
-              <option value="Pendiente">Pendiente</option>
-              <option value="En Progreso">En Progreso</option>
-              <option value="Hecho">Hecho</option>
-            </select>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="startDate" className="text-right">
-              Fecha Inicio
-            </Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant={"outline"}
-                  className={cn(
-                    "col-span-3 justify-start text-left font-normal",
-                    !startDate && "text-muted-foreground"
-                  )}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {startDate ? format(startDate, "PPP", { locale: es }) : <span>Selecciona una fecha</span>}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0">
-                <Calendar
-                  mode="single"
-                  selected={startDate}
-                  onSelect={setStartDate}
-                  initialFocus
-                  locale={es}
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="endDate" className="text-right">
-              Fecha Fin
-            </Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant={"outline"}
-                  className={cn(
-                    "col-span-3 justify-start text-left font-normal",
-                    !endDate && "text-muted-foreground"
-                  )}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {endDate ? format(endDate, "PPP", { locale: es }) : <span>Selecciona una fecha</span>}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0">
-                <Calendar
-                  mode="single"
-                  selected={endDate}
-                  onSelect={setEndDate}
-                  initialFocus
-                  locale={es}
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-        </div>
-        {task && ( // Only show if editing an existing task
-          <div className="space-y-2">
-            <Label>Perfiles Vinculados</Label>
-            <div className="flex flex-wrap gap-2 p-2 border rounded-md min-h-[40px]">
-              {linkedProfiles.length === 0 ? (
-                <span className="text-sm text-muted-foreground">Ningún perfil vinculado.</span>
-              ) : (
-                linkedProfiles.map(profile => (
-                  <Tag key={profile.id} variant="outline" className="flex items-center gap-1">
-                    {profile.name}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-auto p-1"
-                      onClick={() => handleUnlinkProfile(profile.id)}
-                    >
-                      x
-                    </Button>
-                  </Tag>
-                ))
-              )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2 font-bold text-xs uppercase tracking-widest text-muted-foreground/80 mb-2">
+                <Briefcase className="h-3.5 w-3.5 text-primary" /> Workspace
+              </Label>
+              <Select onValueChange={setSelectedWorkspaceId} value={selectedWorkspaceId || 'none'}>
+                <SelectTrigger className="h-12 rounded-2xl bg-background/50 border-border/40 focus:ring-primary/20 transition-all">
+                  <SelectValue placeholder={loadingWorkspaces ? "Cargando..." : "Ninguno"} />
+                </SelectTrigger>
+                <SelectContent className="rounded-2xl bg-card/95 backdrop-blur-xl border-border/40">
+                  <SelectItem value="none" className="rounded-xl">Ninguno</SelectItem>
+                  {workspaces && Array.isArray(workspaces) && workspaces.map(ws => (
+                    <SelectItem key={ws.id} value={ws.id.toString()} className="rounded-xl">
+                      {ws.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setIsProfileSelectorOpen(true)}
-              className="w-full"
-            >
-              Vincular Perfil
-            </Button>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2 font-bold text-xs uppercase tracking-widest text-muted-foreground/80 mb-2">
+                <Activity className="h-3.5 w-3.5 text-primary" /> Estado
+              </Label>
+              <Select onValueChange={(val) => setStatus(val as KanbanStatus)} value={status}>
+                <SelectTrigger className="h-12 rounded-2xl bg-background/50 border-border/40 focus:ring-primary/20 transition-all">
+                  <SelectValue placeholder="Seleccionar estado" />
+                </SelectTrigger>
+                <SelectContent className="rounded-2xl bg-card/95 backdrop-blur-xl border-border/40">
+                  <SelectItem value="Pendiente" className="rounded-xl">Pendiente</SelectItem>
+                  <SelectItem value="En Progreso" className="rounded-xl">En Progreso</SelectItem>
+                  <SelectItem value="Hecho" className="rounded-xl">Hecho</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-        )}
-        <DialogFooter>
-          <Button onClick={() => onOpenChange(false)} variant="outline">
-            Cancelar
-          </Button>
-          <Button onClick={handleSave} disabled={isLoading}>
-            {isLoading ? 'Guardando...' : 'Guardar Tarea'}
+
+          <div className="p-6 rounded-[2rem] bg-primary/5 border border-primary/10 space-y-6">
+            <div className="grid grid-cols-1 gap-6">
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2 font-bold text-[10px] uppercase tracking-widest text-primary/70 mb-2">
+                  <CalendarIconLucide className="h-3 w-3" /> Fecha Inicio
+                </Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant={"outline"}
+                      className={cn(
+                        "w-full h-11 rounded-xl bg-background/80 border-primary/20 justify-start text-left font-bold text-xs",
+                        !startDate && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIconLucide className="mr-2 h-4 w-4 text-primary/50" />
+                      {startDate ? format(startDate, "PPP", { locale: es }) : <span>Seleccionar fecha</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0 rounded-2xl border-border/40 shadow-2xl overflow-hidden">
+                    <Calendar
+                      mode="single"
+                      selected={startDate}
+                      onSelect={setStartDate}
+                      initialFocus
+                      locale={es}
+                      className="bg-card/95 backdrop-blur-xl"
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2 font-bold text-[10px] uppercase tracking-widest text-primary/70 mb-2">
+                  <CalendarIconLucide className="h-3 w-3" /> Fecha Fin
+                </Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant={"outline"}
+                      className={cn(
+                        "w-full h-11 rounded-xl bg-background/80 border-primary/20 justify-start text-left font-bold text-xs",
+                        !endDate && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIconLucide className="mr-2 h-4 w-4 text-primary/50" />
+                      {endDate ? format(endDate, "PPP", { locale: es }) : <span>Seleccionar fecha</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0 rounded-2xl border-border/40 shadow-2xl overflow-hidden">
+                    <Calendar
+                      mode="single"
+                      selected={endDate}
+                      onSelect={setEndDate}
+                      initialFocus
+                      locale={es}
+                      className="bg-card/95 backdrop-blur-xl"
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+          </div>
+
+          {task && (
+            <div className="space-y-4 pt-2">
+              <Label className="flex items-center gap-2 font-bold text-xs uppercase tracking-widest text-muted-foreground/80">
+                <UserPlus className="h-3.5 w-3.5 text-primary" /> Perfiles Vinculados
+              </Label>
+              <div className="flex flex-wrap gap-2 p-4 rounded-2xl bg-background/30 border border-border/40 min-h-[60px] items-center">
+                {linkedProfiles.length === 0 ? (
+                  <span className="text-xs font-medium text-muted-foreground/60 italic">Ningún perfil vinculado aún...</span>
+                ) : (
+                  linkedProfiles.map(profile => (
+                    <div key={profile.id} className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-primary/10 border border-primary/20 text-primary text-[10px] font-black uppercase tracking-tighter group/tag transition-all hover:bg-primary/20">
+                      {profile.name}
+                      <button
+                        onClick={() => handleUnlinkProfile(profile.id)}
+                        className="hover:text-destructive transition-colors"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setIsProfileSelectorOpen(true)}
+                className="w-full h-10 rounded-xl border border-dashed border-primary/30 text-primary hover:bg-primary/5 transition-all text-[10px] font-black uppercase tracking-widest"
+              >
+                + Vincular Perfil
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="p-8 pt-4 bg-background/20 backdrop-blur-md border-t border-border/40">
+          <Button onClick={handleSave} disabled={isLoading} className="w-full h-14 rounded-2xl bg-primary shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all font-black uppercase tracking-widest text-xs gap-3">
+            {isLoading ? (
+              <div className="h-5 w-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <Activity className="h-5 w-5" />
+            )}
+            {isLoading ? 'Guardando...' : task ? 'Guardar Cambios' : 'Crear Tarea'}
           </Button>
         </DialogFooter>
       </DialogContent>
 
-      {/* Profile Selector Dialog */}
       <ProfileSelectorDialog
         isOpen={isProfileSelectorOpen}
         onOpenChange={setIsProfileSelectorOpen}
         onSelectProfiles={handleLinkProfile}
-        multiselect={false} // Tasks link to single profile at a time
+        multiselect={false}
         preSelectedProfileIds={linkedProfiles.map(p => p.id)}
       />
     </Dialog>

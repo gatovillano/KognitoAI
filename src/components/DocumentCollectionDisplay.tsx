@@ -29,6 +29,7 @@ import { ShareDocumentDialog } from '@/app/(dashboard)/rag/share-document-dialog
 import { CustomAnalysisDialog } from '@/app/(dashboard)/rag/custom-analysis-dialog';
 import { DatasetNameDialog } from '@/app/(dashboard)/rag/dataset-name-dialog';
 import { CollectionSearch } from '@/components/CollectionSearch';
+import { ContextualChat } from '@/components/ContextualChat';
 
 import { Analysis, AnalysisType } from '@/lib/models';
 
@@ -103,6 +104,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   const [isDatasetDialogOpen, setIsDatasetDialogOpen] = useState(false);
   const [processingTopic, setProcessingTopic] = useState<string | null>(null);
   const [processingWorkspaceId, setProcessingWorkspaceId] = useState<string | null>(null);
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   const fetchPageData = useCallback(async () => {
     setIsLoading(true);
@@ -624,6 +626,11 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={() => setIsChatOpen(true)}>
+                <Brain className="mr-2 h-4 w-4 text-primary" />
+                <span className="font-medium text-primary">Chatear con Colección</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setIsUploadOpen(true)}>
                 <Upload className="mr-2 h-4 w-4" />
                 <span>Subir Documentos</span>
@@ -885,6 +892,20 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         workspaceId={processingWorkspaceId || undefined}
       />
 
+      <ContextualChat
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        title={collectionName || topic}
+        context={{
+          type: 'collection',
+          id: topic,
+          snapshot: {
+            name: collectionName || topic,
+            document_count: documents.length,
+            workspace_id: workspaceId
+          }
+        }}
+      />
     </>
   );
 }

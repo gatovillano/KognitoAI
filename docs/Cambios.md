@@ -840,3 +840,199 @@ Se ha extendido la lógica de visualización condicional a los botones de acció
 - **Ocultamiento de botones durante el inicio del streaming**: Se envolvió el contenedor de botones de acción en `src/components/ChatMessage.tsx` con la condición `(msg.text || msg.tool_code)`. Esto evita que los iconos aparezcan debajo de la burbuja de chat vacía antes de que el asistente comience a generar contenido, manteniendo la interfaz limpia y coherente.
 
 ---
+---
+
+## 01-01-26 Implementación de Herramienta para Generación de Datos Estructurados (CSV, Excel, ODS) 📊🚀
+
+Se ha creado una nueva herramienta que permite al LLM generar y exportar datos estructurados en formatos profesionales, facilitando la creación de reportes y tablas descargables.
+
+- **Nueva Herramienta `StructuredDataGeneratorTool`**: Implementada en [`tools/structured_data_generator_tool.py`](tools/structured_data_generator_tool.py). Utiliza `pandas` para procesar listas de diccionarios y convertirlas a archivos `.csv`, `.xlsx` (Excel) y `.ods` (OpenDocument).
+- **Registro en el Sistema**: La herramienta ha sido registrada en [`core/tools.py`](core/tools.py) y está disponible para ser utilizada por el agente principal.
+- **Gestión de Dependencias**: Se añadieron `openpyxl` (para Excel) y `odfpy` (para ODS) al archivo `requirements.txt` y se instalaron en el contenedor `kognito_core`.
+- **Almacenamiento y Limpieza Automática**: Los archivos generados se guardan en `media/generated_data/` y `media/generated_pdfs/`. Se implementó un sistema de limpieza automática ([`utils/file_cleanup.py`](utils/file_cleanup.py)) que elimina archivos con más de 24 horas de antigüedad al arrancar la API y antes de cada nueva generación de archivos.
+- **Integración en Panel de Administración**: Se añadió un endpoint de limpieza manual y un botón "Ejecutar Limpieza Manual" en la pestaña de métricas del panel de administración, permitiendo a los administradores gestionar el almacenamiento bajo demanda.
+- **Verificación Exitosa**: Se validó el funcionamiento de la herramienta, el sistema de limpieza y la integración administrativa dentro del contenedor `kognito_core`.
+
+---
+
+## 01-01-26 Implementación del Sistema de Citación y Renderizado de Fuentes en ContextualChat 🚀
+
+Se ha implementado exitosamente el mismo sistema de citación y renderizado de fuentes que existe en `ChatMessage.tsx` dentro del componente `ContextualChat.tsx`, proporcionando una experiencia consistente en toda la aplicación.
+
+- **Creación de archivo de utilidades**: Se creó [`src/lib/chatUtils.ts`](src/lib/chatUtils.ts) que contiene las funciones `processMessageWithCitations` y `collectSourcesFromMessage` para manejar el procesamiento de citas y la recolección de fuentes de manera centralizada.
+- **Actualización de la interfaz Message**: Se extendieron las propiedades de la interfaz `Message` en `ContextualChat.tsx` para incluir `sources`, `ragContext`, `chunks`, `tool_code` y `document_url`.
+- **Modificación del WebSocket**: Se actualizó el `useEffect` del WebSocket para capturar y manejar las fuentes enviadas en los eventos `stream_end` y `agent_response`.
+- **Implementación del renderizado de citas**: Se integró la lógica de procesamiento de fuentes y citas en el renderizado de mensajes de la IA, utilizando `contentParts` cuando hay citas presentes.
+- **Refactorización de ChatMessage**: Se eliminaron las interfaces redundantes (`Source`, `ContentPart`) y las funciones locales (`SourceButton`, `processMessageWithCitations`) de `ChatMessage.tsx`, usando ahora las versiones centralizadas.
+- **Limpieza de imports**: Se removió la importación innecesaria de `uuid` y se actualizaron todos los imports para usar las interfaces y funciones centralizadas.
+- **Consistencia de comportamiento**: Ahora tanto `ContextualChat` como `ChatMessage` utilizan el mismo sistema de renderizado de citas, proporcionando una experiencia uniforme al usuario.
+
+---
+
+## 01-01-26 Integración de Chat Contextual en Diálogos de Análisis 💬🚀
+
+Se ha integrado exitosamente el componente `ContextualChat` en los diálogos de análisis para permitir que los usuarios chateen directamente con los análisis específicos, mejorando la experiencia de interacción con el contenido analítico.
+
+- **Integración en `analysis-detail-dialog.tsx`**:
+  - Se agregó la importación del componente `ContextualChat` desde `@/components/ContextualChat`.
+  - Se añadió el estado `isChatOpen` para controlar la visibilidad del chat contextual.
+  - Se implementó un botón de chat con ícono `MessageSquare` en el header del diálogo, junto a los botones de eliminación.
+  - Se integró el componente `ContextualChat` al final del componente con el contexto del análisis actual (`type: 'analysis'`, `id: analysis.id`, `snapshot: analysis`).
+
+- **Integración en `deep-research-detail-dialog.tsx`**:
+  - Se agregó la importación del componente `ContextualChat` y los estados necesarios (`useState`).
+  - Se añadió el estado `isChatOpen` para controlar la visibilidad del chat contextual.
+  - Se reestructuró el header del diálogo para incluir un botón de chat con ícono `MessageSquare` en la esquina superior derecha.
+  - Se integró el componente `ContextualChat` al final del componente con el contexto de la investigación profunda (`type: 'analysis'`, `id: analysis.id`, `snapshot: analysis`).
+
+- **Funcionalidad Implementada**:
+  - **Chat Contextual por Análisis**: Los usuarios pueden hacer preguntas específicas sobre cualquier análisis o investigación profunda.
+  - **Contexto Automático**: El chat se inicializa con el contexto del análisis específico, incluyendo título y snapshot del análisis.
+  - **Interfaz Integrada**: El botón de chat se integra naturalmente en la interfaz existente de los diálogos.
+  - **Experiencia Consistente**: Utiliza el mismo sistema de citación y renderizado de fuentes que el resto de la aplicación.
+
+- **Beneficios para el Usuario**:
+  - **Interacción Directa**: Permite hacer preguntas específicas sobre los resultados de análisis sin salir del contexto.
+  - **Exploración Profunda**: Facilita la exploración de insights, fuentes y recomendaciones de manera conversacional.
+  - **Eficiencia Mejorada**: Elimina la necesidad de cambiar entre múltiples ventanas o pestañas para hacer consultas.
+
+---
+
+## 01-01-26 Unificación del sistema de citación en ContextualChat 💬📚
+
+Se implementó el sistema de citación y renderizado de fuentes en el chat contextual para igualar la funcionalidad y experiencia del chat principal, asegurando que las referencias bibliográficas sean interactivas y consistentes.
+
+- **Procesamiento de fuentes**: Se integraron las funciones `collectSourcesFromMessage` y `processMessageWithCitations` en `src/components/ContextualChat.tsx` para manejar fuentes provenientes tanto de `sources` como de `ragContext`.
+- **Renderizado de citas**: Se actualizó el uso de `MarkdownRenderer` para soportar `contentParts`, permitiendo mostrar botones de fuentes interactivos dentro del texto del chat contextual.
+- **Soporte para streaming**: Se modificó el manejador de WebSocket para inicializar y acumular `chunks` de mensajes, permitiendo que el renderizador detecte correctamente el estado de streaming y mejore la fluidez visual.
+- **Visualización de fuentes adicionales**: Se añadió una sección para mostrar fuentes no citadas directamente en el texto, proporcionando un contexto completo al usuario.
+- **Corrección de UX en Diálogos**: Se solucionó un problema donde el chat contextual se cerraba al interactuar con él dentro de los diálogos de análisis. Se implementó la detención de propagación de eventos y se configuró `onPointerDownOutside` en los diálogos padres para permitir una interacción fluida sin cierres inesperados.
+
+---
+
+## 02-01-26 Implementación de creación y edición de tablas en Conocimientos 📊
+
+Se implementó la lógica de creación, edición de estructura y gestión de datos para tablas personalizadas, proporcionando una experiencia similar a Nextcloud Tables.
+
+- **Creación de Tablas**: Se creó el componente [`create-table-dialog.tsx`](src/app/(dashboard)/rag/create-table-dialog.tsx) que permite a los usuarios definir el esquema inicial de una tabla (nombre, descripción y columnas con tipos específicos).
+- **Interfaz de Gestión**: Se integró la opción de creación en la vista principal de tablas ([`tables-view.tsx`](src/app/(dashboard)/rag/tables-view.tsx)).
+- **Edición de Datos por Tipo**: Se mejoró [`editable-data-grid.tsx`](src/app/(dashboard)/rag/editable-data-grid.tsx) para soportar inputs específicos según el tipo de columna (Checkbox para booleanos, selectores de fecha, inputs numéricos).
+- **Gestión de Columnas**: Se actualizó [`column-manager-dialog.tsx`](src/app/(dashboard)/rag/column-manager-dialog.tsx) para asegurar la consistencia de los tipos de datos entre la creación y la edición posterior.
+
+---
+
+## 02-01-26 Reemplazo de Paneles Redimensionables por Sidebar Fijo 🛠️🚀
+
+Se ha simplificado la interfaz del dashboard eliminando la funcionalidad de paneles redimensionables y estableciendo un sidebar fijo con un ancho consistente, mejorando la estabilidad visual y la coherencia con la versión móvil.
+
+- **Eliminación de `react-resizable-panels`**: Se removió la dependencia y la lógica de paneles ajustables en el componente `AppShell.tsx`.
+- **Implementación de Sidebar Fijo**: Se estableció un ancho fijo de `w-72` para el sidebar en la versión de escritorio (`hidden md:block`), igualando el tamaño utilizado en el menú lateral de la versión móvil.
+- **Optimización de Layout**: Se reemplazó la estructura de `PanelGroup` por un contenedor `flex` estándar, asegurando que el contenido principal (`flex-1`) ocupe todo el espacio restante de manera fluida.
+- **Limpieza de Interfaz**: Se eliminó el estado `sidebarSize` y los controladores de redimensionamiento manual, proporcionando una interfaz más sólida y predecible.
+- **Mantenimiento de Responsividad**: Se conservó la funcionalidad del menú lateral (drawer) para dispositivos móviles, asegurando una experiencia de usuario uniforme en todos los tamaños de pantalla.
+
+---
+
+## 02-01-26 Renderizado de Markdown y Limpieza Avanzada de JSON/Python 📝✨
+
+Se ha implementado una solución definitiva para la visualización de resúmenes de análisis, manejando tanto JSON estándar como diccionarios de Python.
+
+- **Extracción Robusta con Regex**: Se añadió una capa de seguridad que utiliza expresiones regulares para extraer campos como `final_report` o `summary` cuando el parseo JSON falla (común en strings de Python con comillas simples).
+- **Limpieza de Caracteres Escapados**: Se implementó la función `cleanExtractedText` para procesar saltos de línea (`\n`) y comillas escapadas, asegurando un texto limpio para el renderizado.
+- **Triple Validación de Datos**: El sistema ahora intenta tres métodos de recuperación de texto (JSON, Regex y Conversión de tipos) antes de recurrir al texto original.
+- **Integración de `InlineMarkdownRenderer`**: Se reemplazó el renderizado de texto plano por el componente `InlineMarkdownRenderer` en las tarjetas de análisis de `AnalysisView`.
+- **Consistencia Visual**: Se mantuvo el truncado de texto (`line-clamp-3`) para asegurar que el diseño de la cuadrícula de tarjetas permanezca ordenado y profesional.
+
+---
+
+## 02-01-26 Modernización Integral de la Agenda 📅🧊
+
+Se ha realizado una transformación visual completa del módulo de Agenda para alinearlo con la nueva estética premium del proyecto.
+
+- **Interfaz Glassmorphism**: Implementación de contenedores con `backdrop-blur-xl` y bordes `rounded-[2rem]` en todas las vistas de la agenda.
+- **Vistas Diaria, Semanal y Mensual**:
+  - **Mensual**: Rediseño de la cuadrícula con celdas de cristal y eventos tipo "píldora" con gradientes dinámicos.
+  - **Semanal**: Sustitución de tablas tradicionales por una rejilla moderna de alta legibilidad.
+  - **Diaria**: Mejora de la jerarquía visual en la lista de tareas y eventos con tarjetas interactivas.
+- **Navegación Premium**: Nuevas barras de navegación con botones de cristal y tipografía de alto impacto (font-black).
+- **Micro-interacciones**: Añadidos efectos de escalado, resplandor (glow) y transiciones fluidas en el hover y drag-and-drop.
+- **Optimización de Espacio**: Mejora en el layout general para maximizar el área de visualización de compromisos.
+
+---
+
+## 02-01-26 Modernización de Mensajes de Chat (ChatMessage) 🤖🧊
+
+Se ha rediseñado la presentación de los mensajes del agente y del usuario para una experiencia de chat más inmersiva y premium.
+
+- **Burbujas de IA Glassmorphism**: Implementación de contenedores translúcidos con `backdrop-blur-xl` y bordes ultra-redondeados (`rounded-[2rem]`).
+- **Controles de Acción Dinámicos**:
+  - Rediseño de botones de copiar, reproducir audio y editar con estilo de cristal y animaciones de entrada (`translate-y`).
+  - Mejora en la respuesta táctil y visual (hover effects) de todas las acciones del mensaje.
+- **Identidad Visual del Agente**: Sustitución de texto plano por un badge premium de "KAI Intelligence" con efectos de pulso y gradientes.
+- **Bloques de Ejecución Técnicos**: Mejora en la visualización de herramientas utilizadas, con un diseño más limpio, tipografía mono-espaciada y fondos translúcidos.
+- **Optimización de Lectura**: Ajuste de paddings y tamaños de fuente para mejorar la legibilidad del contenido generado por la IA.
+
+---
+
+## 02-01-26 Modernización de Estadísticas y Cabecera (AnalysisView) 📊✨
+
+Se ha completado la segunda fase de la transformación visual del Centro de Análisis, enfocándose en la cabecera y los paneles de métricas.
+
+- **Cabecera de Alto Impacto**: Rediseño del título con gradientes dinámicos y botones con estilo de cristal y bordes `rounded-2xl`.
+- **Paneles de Métricas "Glow"**:
+  - Implementación de tarjetas con efecto `backdrop-blur-xl` y bordes ultra-redondeados (`rounded-[2rem]`).
+  - Acompañamiento de iconos con resplandor (glow) cromático para cada tipo de métrica.
+  - Uso de gradientes vibrantes en las cifras principales para mejorar la legibilidad y el atractivo visual.
+- **Micro-interacciones Dinámicas**: Añadidos efectos de elevación, sombras ambientales de colores y escalado de iconos en el hover.
+- **Refinamiento Tipográfico**: Mejora en la jerarquía de la información utilizando fuentes en mayúsculas para metadatos y tracking ajustado para títulos.
+
+---
+
+## 02-01-26 Modernización de la Interfaz Principal (AppShell) 🎨✨
+
+Se ha realizado una transformación visual profunda de la estructura principal de la aplicación para adoptar un estilo más moderno, fluido y "premium".
+
+- **Sidebar Flotante**: Se rediseñó el sidebar para que aparezca como un panel flotante con bordes redondeados (`rounded-3xl`) y efecto de cristal profundo (`backdrop-blur-2xl`).
+- **Efecto Glassmorphism**: Se mejoró el uso de desenfoques y transparencias en el header y contenedores, utilizando `bg-card/40` y `backdrop-blur-xl` para una sensación de ligereza.
+- **Gradientes de Profundidad**: Se añadió un gradiente de fondo sutil al contenedor principal para mejorar la jerarquía visual y la profundidad.
+- **Refinamiento de Componentes**:
+  - Se actualizaron los bordes redondeados a `rounded-2xl` y `rounded-3xl` en toda la estructura.
+  - Se mejoraron los indicadores de estado de conexión con animaciones de pulso y sombras dinámicas.
+  - Se añadió un efecto de brillo (glow) al logo y contenedores de herramientas.
+- **Optimización de Layout**: Se aumentó el espaciado interno del contenido principal y se centró en un contenedor de ancho máximo (`max-w-7xl`) para mejorar la legibilidad en pantallas grandes.
+
+---
+
+## 03-01-26 Integración de Visión Multimodal con Mistral Small 3.1 👁️🚀
+
+Se ha dotado a KognitoAI de capacidades visuales avanzadas mediante la integración del modelo multimodal **Mistral Small 3.1** a través de OpenRouter, permitiendo el procesamiento de imágenes y documentos escaneados tanto en el chat como en la base de conocimientos.
+
+- **Configuración de Modelo de Visión**: Se añadió la variable `VISION_MODEL` en `core/config.py` (por defecto `openrouter/mistralai/mistral-small-3.1-24b-instruct:free`) para centralizar la gestión del motor de visión.
+- **Gestión de LLM Multimodal**: Se implementó `get_vision_llm()` en `core/llm_manager.py`, asegurando que el modelo de visión se inicialice correctamente con soporte para OpenRouter y rate limiting.
+- **OCR Multimodal en Documentos**: Se transformó `extract_text_and_metadata_from_document` en `utils/document_parser.py` en una función asíncrona que:
+  - Detecta automáticamente imágenes (`.png`, `.jpg`, `.jpeg`, `.webp`).
+  - Identifica PDFs escaneados (sin capa de texto digital).
+  - Utiliza el modelo de visión para realizar OCR inteligente, preservando la estructura de facturas, tablas y escritura a mano.
+- **Soporte Multimodal en Chat**: Se modificó el nodo `call_model_node` en `core/agent.py` para detectar la presencia de imágenes en los mensajes del usuario. En caso de detectarse una imagen, el agente cambia automáticamente al modelo de visión para generar la respuesta, permitiendo interacciones directas sobre contenido visual.
+- **Actualización de Flujos Asíncronos**: Se actualizaron `core/tasks.py`, `api/documents.py` y `telegram_client/handlers/document_handlers.py` para soportar la nueva naturaleza asíncrona del procesamiento de documentos, garantizando la estabilidad del sistema durante la ingesta de archivos pesados.
+- **Impacto**: KAI ahora puede "ver" y entender facturas, pizarras, apuntes manuales y capturas de pantalla, integrándolos plenamente en su memoria a largo plazo y permitiendo consultas visuales en tiempo real.
+
+---
+
+## 03-01-26 Corrección en Procesamiento y Visualización de Memorias en el Grafo 🧠
+
+Se solucionó un problema que impedía que las memorias del usuario (tanto proactivas como explícitas) se procesaran y visualizaran correctamente en el grafo de conocimiento.
+
+- **Activación de KnowledgeExtractionNode**: Se habilitó e inicializó correctamente el nodo de extracción de conocimiento en `core/agent.py` para asegurar que la información se persista en el grafo.
+- **Corrección en memory_graph_processor.py**: Se corrigió un error crítico donde no se pasaba la sesión de base de datos, se redujo el umbral de procesamiento a 1 para feedback inmediato, y se estandarizó el nombre del dataset a "Agent Memories".
+- **Estandarización de Datos**: Se ajustó `KnowledgeExtractionNode` para incluir `dataset_name`, `account_id` y `workspace_id` en el nivel superior de las entidades y relaciones, garantizando su correcta visualización y filtrado en la interfaz.
+
+---
+
+## 03-01-26 Restauración de Fuentes y Citas para Herramientas de Notas 📝🔍
+
+Se corrigió un problema crítico que impedía que las fuentes (citations) de las notas aparecieran en el chat al utilizar las herramientas de búsqueda y obtención de notas.
+
+- **Corrección en el Procesamiento de Salida de Herramientas**: Se modificó [`core/agent.py`](core/agent.py) para reconocer y procesar correctamente los objetos `ToolOutputWithSources` devueltos por las herramientas. Anteriormente, estos objetos se convertían a texto plano, descartando las fuentes bibliográficas.
+- **Sincronización del Modelo de Fuentes en la API**: Se actualizó la definición de la clase `Source` en [`api/chat.py`](api/chat.py) para incluir el campo `metadata` y permitir IDs de tipo string. Esto asegura que la información extendida de las notas (como IDs de referencia y puntuaciones de relevancia) se preserve durante la transmisión via WebSocket y al recargar el historial.
+- **Mejora en la Persistencia de Citas**: Con estos cambios, las notas citadas por el asistente ahora aparecen correctamente en la sección de "Fuentes y Referencias" del frontend, permitiendo al usuario abrir la nota original directamente desde la cita.

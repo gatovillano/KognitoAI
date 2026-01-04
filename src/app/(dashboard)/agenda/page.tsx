@@ -10,6 +10,8 @@ import { PlusCircle, Clock, Trash2, Users, MoreHorizontal, Info, CheckCircle2, L
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { EventDialog } from './event-dialog';
 import { Calendar } from '@/components/ui/calendar';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { format, startOfWeek, endOfWeek } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -324,63 +326,94 @@ export default function AgendaPage() {
   const periodText = viewType === 'week' ? "esta semana" : viewType === 'month' ? "este mes" : "este día";
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
-      <div className="p-6 h-full flex flex-col">
-        <div className="flex items-center justify-between mb-6 shrink-0">
-          <div>
-            <h1 className="text-3xl font-bold flex items-center">
-              <CalendarIcon className="mr-2 h-8 w-8 text-primary" />
-              Agenda
-              <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
-                <Info className="h-4 w-4" />
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden animate-in fade-in duration-700">
+      <div className="h-full flex flex-col space-y-10">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 shrink-0">
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-primary/10 text-primary shadow-lg shadow-primary/10">
+                <CalendarIcon className="h-8 w-8" />
+              </div>
+              <h1 className="text-4xl font-black tracking-tighter bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+                Agenda
+              </h1>
+              <Button variant="ghost" size="icon" className="h-10 w-10 rounded-2xl bg-primary/5 text-primary hover:bg-primary/10 transition-all" onClick={() => setIsInfoSheetOpen(true)}>
+                <Info className="h-5 w-5" />
               </Button>
-            </h1>
+            </div>
+            <p className="text-muted-foreground font-medium">Gestiona tus eventos, reuniones y tareas con inteligencia.</p>
           </div>
-          <div className="flex gap-2">
+
+          <div className="flex items-center gap-3">
+            <div className="bg-card/40 backdrop-blur-md p-1 rounded-2xl border border-border/40 flex gap-1">
+              {(['day', 'week', 'month'] as const).map((type) => (
+                <Button
+                  key={type}
+                  variant={viewType === type ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setViewType(type)}
+                  className={`rounded-xl px-4 font-bold text-xs uppercase tracking-widest transition-all ${viewType === type ? 'shadow-lg shadow-primary/20' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {type === 'day' ? 'Día' : type === 'week' ? 'Semana' : 'Mes'}
+                </Button>
+              ))}
+            </div>
+
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8 px-2 md:px-4">
-                  <span className="hidden md:inline">Acciones</span> <MoreHorizontal className="md:ml-2 h-4 w-4" />
+                <Button className="h-12 px-6 rounded-2xl bg-primary shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all gap-2 font-bold">
+                  <PlusCircle className="h-5 w-5" />
+                  <span className="hidden md:inline">Crear</span>
+                  <MoreHorizontal className="h-4 w-4 opacity-50" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[180px]"> {/* Ancho ajustado */}
-                <DropdownMenuItem onClick={() => setIsEventDialogOpen(true)}>
-                  <PlusCircle className="mr-2 h-4 w-4" /> Agendar Evento
+              <DropdownMenuContent align="end" className="w-56 bg-card/95 backdrop-blur-xl border-border/40 rounded-2xl p-2">
+                <DropdownMenuItem onClick={() => setIsEventDialogOpen(true)} className="rounded-xl focus:bg-primary/10 focus:text-primary cursor-pointer py-2.5 gap-3">
+                  <PlusCircle className="h-4 w-4" /> Agendar Evento
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { setSelectedTask(null); setIsTaskDialogOpen(true); }}>
-                  <CheckCircle2 className="mr-2 h-4 w-4" /> Añadir Tarea
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setViewType('week')} className={viewType === 'week' ? "font-bold" : ""}>
-                  Vista Semanal
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setViewType('day')} className={viewType === 'day' ? "font-bold" : ""}>
-                  Vista Diaria
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setViewType('month')} className={viewType === 'month' ? "font-bold" : ""}>
-                  Vista Mensual
+                <DropdownMenuItem onClick={() => { setSelectedTask(null); setIsTaskDialogOpen(true); }} className="rounded-xl focus:bg-primary/10 focus:text-primary cursor-pointer py-2.5 gap-3">
+                  <CheckCircle2 className="h-4 w-4" /> Añadir Tarea
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
         </div>
 
-        {/* ---- ESTRUCTURA DE LAYOUT CORREGIDA ---- */}
-        <div className={`flex-grow grid gap-6 min-h-0 ${viewType === 'week' || viewType === 'month' ? 'md:grid-cols-1' : 'md:grid-cols-3'}`}>
-          <div className={`${viewType === 'week' || viewType === 'month' ? 'hidden' : 'md:col-span-1'} flex justify-center md:justify-start`}>
-            <Calendar
-              mode="single"
-              selected={selectedDate}
-              onSelect={setSelectedDate}
-              className="rounded-md border p-0"
-              classNames={{
-                month: "space-y-4 p-3",
-                caption_label: "text-sm font-medium",
-              }}
-            />
+        <div className={`flex-grow grid gap-8 min-h-0 ${viewType === 'week' || viewType === 'month' ? 'md:grid-cols-1' : 'md:grid-cols-12'}`}>
+          <div className={`${viewType === 'week' || viewType === 'month' ? 'hidden' : 'md:col-span-4'} flex flex-col gap-6`}>
+            <Card className="border-border/40 bg-card/40 backdrop-blur-xl rounded-[2rem] overflow-hidden shadow-sm">
+              <Calendar
+                mode="single"
+                selected={selectedDate}
+                onSelect={setSelectedDate}
+                className="p-4"
+                classNames={{
+                  month: "space-y-4",
+                  caption_label: "text-sm font-black uppercase tracking-widest",
+                  day_selected: "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground rounded-xl shadow-lg shadow-primary/30",
+                  day_today: "bg-primary/10 text-primary font-bold rounded-xl",
+                  day: "h-10 w-10 p-0 font-medium aria-selected:opacity-100 hover:bg-primary/5 rounded-xl transition-colors",
+                }}
+              />
+            </Card>
+
+            {/* Mini estadísticas o info adicional podría ir aquí */}
+            <div className="bg-gradient-to-br from-primary/10 to-secondary/10 p-6 rounded-[2rem] border border-primary/10">
+              <h4 className="text-xs font-black uppercase tracking-widest text-primary mb-3">Resumen del día</h4>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-muted-foreground">Eventos</span>
+                  <span className="text-sm font-bold">{eventsForSelectedPeriod.length}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-muted-foreground">Tareas</span>
+                  <span className="text-sm font-bold">{tasksForSelectedPeriod.length}</span>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className={`${viewType === 'week' || viewType === 'month' ? 'md:col-span-1' : 'md:col-span-2'} flex flex-col min-h-0`}>
+          <div className={`${viewType === 'week' || viewType === 'month' ? 'md:col-span-1' : 'md:col-span-8'} flex flex-col min-h-0`}>
             {viewType === 'week' ? (
               <WeeklyScheduleView
                 currentDate={selectedDate || new Date()}
@@ -402,140 +435,132 @@ export default function AgendaPage() {
                 onEditEvent={(event) => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}
                 onEditTask={(task) => { setSelectedTask(task); setIsTaskDialogOpen(true); }}
                 onToggleTaskCompleted={handleToggleTaskCompleted}
-                onCreateEvent={handleCreateEvent} // Pasar la función para crear eventos
-                onMoveEvent={handleMoveEvent} // Pasar la función para mover eventos
-                onMoveTask={handleMoveTask} // Pasar la función para mover tareas
+                onCreateEvent={handleCreateEvent}
+                onMoveEvent={handleMoveEvent}
+                onMoveTask={handleMoveTask}
               />
             ) : (
-              <>
-                <h2 className="text-xl font-semibold mb-4 shrink-0">
-                  Agenda para {selectedDate ? format(selectedDate, "PPP", { locale: es }) : "..."}
-                </h2>
-                <div className="flex-grow overflow-y-auto pr-2">
-                  {isLoading ? <p>Cargando agenda...</p> : (
-                    <div className="space-y-4">
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-2xl font-black tracking-tight">
+                    {selectedDate ? format(selectedDate, "EEEE, d 'de' MMMM", { locale: es }) : "Cargando..."}
+                  </h2>
+                  <div className="h-px flex-1 bg-gradient-to-r from-border/60 to-transparent ml-6" />
+                </div>
+
+                <div className="flex-grow overflow-y-auto pr-2 space-y-8 custom-scrollbar">
+                  {isLoading ? (
+                    <div className="flex flex-col items-center justify-center py-20 gap-4">
+                      <div className="h-10 w-10 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
+                      <p className="text-muted-foreground font-medium">Sincronizando tu agenda...</p>
+                    </div>
+                  ) : (
+                    <>
                       {/* Sección de Tareas */}
-                      {tasksForSelectedPeriod.length > 0 && (
-                        <>
-                          <h3 className="text-lg font-semibold mt-4 mb-2">Tareas</h3>
-                          {tasksForSelectedPeriod.map((task) => (
-                            <div key={task.id} className="p-4 border rounded-lg flex items-center justify-between hover:border-primary/50">
-                              <div className="flex items-center gap-3">
-                                <Checkbox
-                                  checked={task.is_completed}
-                                  onCheckedChange={() => handleToggleTaskCompleted(task)}
-                                  className="h-5 w-5"
-                                />
-                                <div className={task.is_completed ? "line-through text-muted-foreground" : ""}>
-                                  <p className="font-semibold">{task.description}</p>
-                                  {task.end_date && (
-                                    <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
-                                      <Clock className="h-4 w-4" />
-                                      {format(new Date(task.end_date!), "PPP", { locale: es })}
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-5 w-5 text-green-500" />
+                          <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground/70">Tareas Prioritarias</h3>
+                        </div>
+
+                        {tasksForSelectedPeriod.length > 0 ? (
+                          <div className="grid gap-3">
+                            {tasksForSelectedPeriod.map((task) => (
+                              <Card key={task.id} className="group relative overflow-hidden border-border/40 bg-card/40 backdrop-blur-md rounded-2xl hover:bg-card/60 transition-all duration-300 hover:shadow-lg hover:shadow-primary/5">
+                                <div className="p-4 flex items-center justify-between gap-4">
+                                  <div className="flex items-center gap-4 min-w-0">
+                                    <Checkbox
+                                      checked={task.is_completed}
+                                      onCheckedChange={() => handleToggleTaskCompleted(task)}
+                                      className="h-6 w-6 rounded-lg border-2 border-primary/20 data-[state=checked]:bg-primary data-[state=checked]:border-primary transition-all"
+                                    />
+                                    <div className={task.is_completed ? "opacity-50" : ""}>
+                                      <p className={`font-bold text-sm sm:text-base truncate ${task.is_completed ? "line-through" : ""}`}>
+                                        {task.description}
+                                      </p>
+                                      {task.end_date && (
+                                        <div className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1.5 mt-1">
+                                          <Clock className="h-3 w-3" />
+                                          {format(new Date(task.end_date!), "p", { locale: es })}
+                                        </div>
+                                      )}
                                     </div>
-                                  )}
+                                  </div>
+                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl hover:bg-primary/10 hover:text-primary" onClick={() => { setSelectedTask(task); setIsTaskDialogOpen(true); }}>
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl hover:bg-destructive/10 hover:text-destructive" onClick={() => setDeletingTask(task)}>
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
                                 </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Button variant="ghost" size="icon" onClick={() => { setSelectedTask(task); setIsTaskDialogOpen(true); }}>
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                                <Button variant="ghost" size="icon" onClick={() => setDeletingTask(task)}>
-                                  <Trash2 className="h-4 w-4 text-destructive" />
-                                </Button>
-                                {task.linked_profiles && task.linked_profiles.length > 0 && (
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <Button variant="ghost" size="icon" className="text-primary">
-                                          <LinkIcon className="h-4 w-4" />
-                                        </Button>
-                                      </TooltipTrigger>
-                                      <TooltipContent>
-                                        <p>Vinculado a: {task.linked_profiles.map(p => p.name).join(', ')}</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
-                                )}
-                                <Button variant="ghost" size="icon" onClick={() => { setSelectedTask(task); setIsTaskDialogOpen(true); }}>
-                                  <LinkIcon className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          ))}
-                        </>
-                      )}
+                              </Card>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="py-8 text-center border-2 border-dashed border-border/40 rounded-3xl bg-card/20">
+                            <p className="text-xs font-bold text-muted-foreground/60 uppercase tracking-widest">Sin tareas pendientes</p>
+                          </div>
+                        )}
+                      </div>
 
                       {/* Sección de Eventos */}
-                      {eventsForSelectedPeriod.length > 0 && (
-                        <>
-                          <h3 className="text-lg font-semibold mt-4 mb-2">Eventos</h3>
-                          {eventsForSelectedPeriod.map((event) => (
-                            <div key={event.id} className="p-4 border rounded-lg flex items-center justify-between hover:border-primary/50 cursor-pointer" onClick={() => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}>
-                              <div>
-                                <p className="font-semibold flex items-center">
-                                  {event.summary}
-                                  {event.team_shared && (
-                                    <span title="Compartido con equipo">
-                                      <Users className="ml-2 h-4 w-4 text-blue-500" />
-                                    </span>
-                                  )}
-                                </p>
-                                {event.workspace_name && (
-                                  <div
-                                    className="inline-flex items-center gap-1.5 mt-2 text-xs font-medium px-2 py-0.5 rounded-full"
-                                    style={{
-                                      backgroundColor: event.workspace_color ? `${event.workspace_color}20` : '#f3f4f6', // bg-gray-100
-                                    }}
-                                  >
-                                    <span
-                                      className="h-2 w-2 rounded-full"
-                                      style={{ backgroundColor: event.workspace_color || '#888888' }}
-                                    ></span>
-                                    <span style={{ color: event.workspace_color || '#374151' }}>
-                                      {event.workspace_name}
-                                    </span>
-                                  </div>
-                                )}
-                                <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
-                                  <Clock className="h-4 w-4" />
-                                  {new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                                </div>
-                              </div>
-                              <div onClick={(e) => e.stopPropagation()}>
-                                {event.linked_profiles && event.linked_profiles.length > 0 && (
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <Button variant="ghost" size="icon" className="text-primary">
-                                          <LinkIcon className="h-4 w-4" />
-                                        </Button>
-                                      </TooltipTrigger>
-                                      <TooltipContent>
-                                        <p>Vinculado a: {event.linked_profiles.map(p => p.name).join(', ')}</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
-                                )}
-                                <Button variant="ghost" size="icon" onClick={() => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}>
-                                  <LinkIcon className="h-4 w-4" />
-                                </Button>
-                                <Button variant="ghost" size="icon" onClick={() => setDeletingEvent(event)}>
-                                  <Trash2 className="h-4 w-4 text-destructive" />
-                                </Button>
-                              </div>
-                            </div>
-                          ))}
-                        </>
-                      )}
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-2">
+                          <CalendarIcon className="h-5 w-5 text-primary" />
+                          <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground/70">Eventos Programados</h3>
+                        </div>
 
-                      {tasksForSelectedPeriod.length === 0 && eventsForSelectedPeriod.length === 0 && (
-                        <p className="text-center text-muted-foreground pt-10">No tienes eventos ni tareas para {periodText}.</p>
-                      )}
-                    </div>
+                        {eventsForSelectedPeriod.length > 0 ? (
+                          <div className="grid gap-4">
+                            {eventsForSelectedPeriod.map((event) => (
+                              <Card
+                                key={event.id}
+                                className="group relative overflow-hidden border-border/40 bg-card/40 backdrop-blur-md rounded-[2rem] hover:bg-card/60 transition-all duration-500 hover:shadow-xl hover:shadow-primary/5 cursor-pointer"
+                                onClick={() => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}
+                              >
+                                <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                                <div className="p-5 flex items-center justify-between gap-4 relative z-10">
+                                  <div className="flex items-center gap-5 min-w-0">
+                                    <div className="p-3 rounded-2xl bg-background/50 border border-border/40 shadow-inner group-hover:scale-110 transition-transform duration-500">
+                                      <Clock className="h-5 w-5 text-primary" />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="font-black text-lg tracking-tight truncate group-hover:text-primary transition-colors">
+                                        {event.summary}
+                                      </p>
+                                      <div className="flex items-center gap-3 mt-1.5">
+                                        <div className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest flex items-center gap-1.5">
+                                          {new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                                        </div>
+                                        {event.workspace_name && (
+                                          <Badge variant="outline" className="text-[9px] font-black uppercase tracking-tighter px-2 py-0 border-none" style={{ backgroundColor: `${event.workspace_color}15`, color: event.workspace_color }}>
+                                            {event.workspace_name}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0" onClick={(e) => e.stopPropagation()}>
+                                    <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl hover:bg-destructive/10 hover:text-destructive" onClick={() => setDeletingEvent(event)}>
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              </Card>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="py-12 text-center border-2 border-dashed border-border/40 rounded-[2rem] bg-card/20">
+                            <p className="text-xs font-bold text-muted-foreground/60 uppercase tracking-widest">No hay eventos para hoy</p>
+                          </div>
+                        )}
+                      </div>
+                    </>
                   )}
                 </div>
-              </>
+              </div>
             )}
           </div>
         </div>

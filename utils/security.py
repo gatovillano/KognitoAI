@@ -1,5 +1,42 @@
 # utils/security.py
 
+# --- PARCHE DE COMPATIBILIDAD BCRYPT 4.0+ ---
+# Este parche es CRÍTICO. Passlib intenta hacer tests internos con contraseñas largas
+# que disparan un ValueError en versiones modernas de bcrypt, bloqueando el login
+# incluso para contraseñas cortas.
+try:
+    import bcrypt
+    # 1. Arreglar el error de atributo __about__
+    if not hasattr(bcrypt, "__about__"):
+        class BcryptAbout:
+            __version__ = bcrypt.__version__
+        bcrypt.__about__ = BcryptAbout()
+    
+    # 2. Monkey-patch de hashpw para truncar automáticamente a 72 bytes
+    # Esto evita que passlib falle en sus comprobaciones internas de "wrap bug".
+    _original_hashpw = bcrypt.hashpw
+    def _patched_hashpw(password, salt):
+        if isinstance(password, str):
+            password = password.encode('utf-8')
+        if len(password) > 72:
+            password = password[:72]
+        return _original_hashpw(password, salt)
+    bcrypt.hashpw = _patched_hashpw
+    
+    # 3. Lo mismo para checkpw por seguridad
+    _original_checkpw = bcrypt.checkpw
+    def _patched_checkpw(password, hashed_password):
+        if isinstance(password, str):
+            password = password.encode('utf-8')
+        if len(password) > 72:
+            password = password[:72]
+        return _original_checkpw(password, hashed_password)
+    bcrypt.checkpw = _patched_checkpw
+    
+except ImportError:
+    pass
+# --------------------------------------------
+
 """
 Módulo de utilidades de seguridad para la autenticación.
 
@@ -30,7 +67,12 @@ logger.setLevel(logging.DEBUG) # AÑADIR ESTA LÍNEA
 
 # 1. Contexto de Hasheo de Contraseña
 # Usamos bcrypt, que es el estándar recomendado.
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Se añade truncate_error=False para evitar el error de 72 bytes de bcrypt.
+pwd_context = CryptContext(
+    schemes=["bcrypt"], 
+    deprecated="auto",
+    bcrypt__truncate_error=False  # Esto permite contraseñas de más de 72 caracteres truncándolas (comportamiento estándar de bcrypt)
+)
 
 # 2. Esquema de Autenticación OAuth2
 # Esto le dice a FastAPI cómo esperar el token (en el header "Authorization: Bearer <token>")
@@ -43,11 +85,41 @@ from starlette.websockets import WebSocketDisconnect # Añadido
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verifica una contraseña plana contra su versión hasheada."""
-    return pwd_context.verify(plain_password, hashed_password)
+    if not plain_password:
+        return False
+    
+    try:
+        # El límite real de bcrypt es 72 BYTES. 
+        # Truncamos a nivel de bytes para asegurar compatibilidad total.
+        pw_bytes = plain_password.encode('utf-8')
+        if len(pw_bytes) > 72:
+            logger.warning(f"⚠️ Contraseña de login truncada de {len(pw_bytes)} a 72 bytes.")
+            pw_bytes = pw_bytes[:72]
+        
+        return pwd_context.verify(pw_bytes, hashed_password)
+    except Exception as e:
+        logger.error(f"❌ Error crítico en verify_password: {e}", exc_info=True)
+        # Si falla por el límite de bytes a pesar del truncado, intentamos un último recurso
+        if "72 bytes" in str(e):
+            return pwd_context.verify(plain_password[:50], hashed_password)
+        raise
 
 def get_password_hash(password: str) -> str:
     """Genera el hash de una contraseña."""
-    return pwd_context.hash(password)
+    if not password:
+        return ""
+        
+    try:
+        # Truncamos a 72 bytes al crear el hash también.
+        pw_bytes = password.encode('utf-8')
+        if len(pw_bytes) > 72:
+            logger.warning(f"⚠️ Nueva contraseña truncada de {len(pw_bytes)} a 72 bytes para el hash.")
+            pw_bytes = pw_bytes[:72]
+            
+        return pwd_context.hash(pw_bytes)
+    except Exception as e:
+        logger.error(f"❌ Error crítico en get_password_hash: {e}", exc_info=True)
+        raise
 
 # --- Funciones de Token JWT ---
 

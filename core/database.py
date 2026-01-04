@@ -997,6 +997,56 @@ class GapDevelopmentAnalysis(Base):
         return f"<GapDevelopmentAnalysis(id={self.id}, gap_id={self.gap_id}, status='{self.status}')>"
 
 
+class UserTable(Base):
+    """
+    Representa una tabla personalizada creada por un usuario.
+    """
+    __tablename__ = "user_tables"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=True, index=True)
+
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    
+    # Estructura de columnas: [{"name": "col1", "type": "string", "required": true}, ...]
+    columns = Column(JSONB, nullable=False, default=[])
+    
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+    # Relaciones
+    account = relationship("Account", backref="user_tables")
+    workspace = relationship("Workspace", backref="user_tables")
+    rows = relationship("UserTableRow", back_populates="table", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<UserTable(id={self.id}, name='{self.name}', account_id={self.account_id})>"
+
+
+class UserTableRow(Base):
+    """
+    Representa una fila de datos dentro de una UserTable.
+    """
+    __tablename__ = "user_table_rows"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    table_id = Column(UUID(as_uuid=True), ForeignKey("user_tables.id", ondelete='CASCADE'), nullable=False, index=True)
+    
+    # Datos de la fila: {"col1": "valor1", "col2": 123, ...}
+    data = Column(JSONB, nullable=False, default={})
+    
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+    # Relaciones
+    table = relationship("UserTable", back_populates="rows")
+
+    def __repr__(self):
+        return f"<UserTableRow(id={self.id}, table_id={self.table_id})>"
+
+
 # ==============================================================================
 # SECCIÓN 2: FUNCIONES AUXILIARES DE LA BASE DE DATOS
 # ==============================================================================

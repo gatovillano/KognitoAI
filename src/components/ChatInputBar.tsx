@@ -79,18 +79,18 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   selectedToolName,
   setNewMessage,
   onSendMessage,
-  onKeyDown = () => {},
-  onToggleKnowledgeAnalysis = () => {},
-  onToggleWebSearch = () => {},
-  onToggleComprehensiveAnalysis = () => {},
-  onToggleDeepResearch = () => {},
-  onStartRecording = () => {},
-  onStopRecording = () => {},
-  onFileUpload = () => {},
-  onImageUpload = () => {},
-  onRemoveImage = () => {},
-  onRemoveContextItem = () => {},
-  onPaste = () => {},
+  onKeyDown = () => { },
+  onToggleKnowledgeAnalysis = () => { },
+  onToggleWebSearch = () => { },
+  onToggleComprehensiveAnalysis = () => { },
+  onToggleDeepResearch = () => { },
+  onStartRecording = () => { },
+  onStopRecording = () => { },
+  onFileUpload = () => { },
+  onImageUpload = () => { },
+  onRemoveImage = () => { },
+  onRemoveContextItem = () => { },
+  onPaste = () => { },
   currentContext,
   isFixedPosition = true,
   onOpenSearch,
@@ -225,11 +225,11 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
 
 
   return (
-    <div className={isFixedPosition ? "fixed bottom-0 w-full md:w-[calc(100%-320px)] right-0 p-4 md:p-6 bg-background z-30" : "relative w-full"}>
+    <div className={isFixedPosition ? "fixed bottom-0 w-full md:w-[calc(100%-320px)] right-0 p-2 sm:p-4 md:p-6 bg-transparent z-30" : "relative w-full"}>
       <div className="flex justify-center w-full">
         <form onSubmit={handleSubmit} className="relative w-full">
 
-          <div className="rounded-3xl bg-card border border-border px-4 py-2 shadow-medium hover:shadow-strong transition-shadow duration-300">
+          <div className="rounded-3xl bg-card border border-border px-3 py-1.5 sm:px-4 sm:py-2 shadow-medium hover:shadow-strong transition-shadow duration-300">
             {currentContext.length > 0 && (
               <div className="mb-2 flex gap-2 overflow-x-auto pb-2">
                 {currentContext.map((item, index) => (
@@ -276,7 +276,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
               placeholder={inputPlaceholder || (currentContext.length > 0 ? "Escribe tu mensaje..." : "Escribe tu mensaje o selecciona contexto...")}
               autoComplete="on"
               disabled={isResponding}
-              className="w-full resize-none bg-transparent border-0 focus:ring-0 p-0 text-lg placeholder:text-muted-foreground/70"
+              className="w-full resize-none bg-transparent border-0 focus:ring-0 p-0 text-base sm:text-lg placeholder:text-muted-foreground/70"
               rows={1}
               onChange={handleMessageChange}
             />

@@ -75,12 +75,54 @@ class PromptManager:
         mode: Optional[str] = None,
         user_message: str = "",
         has_explicit_rag_context: bool = False,
-        explicit_document_names: Optional[List[str]] = None # Nuevo parámetro
+        explicit_document_names: Optional[List[str]] = None,
+        context: Optional[Dict[str, Any]] = None # Nuevo parámetro
     ) -> str:
         """
         Construye el prompt del sistema dinámicamente, integrando todos los
         componentes de contexto.
         """
+        # 0. Construir instrucciones de contexto específico
+        context_instructions = ""
+        if context:
+            ctx_type = context.get("type")
+            ctx_id = context.get("id")
+            ctx_snapshot = context.get("snapshot", {})
+            
+            if ctx_type == "table":
+                context_instructions = f"""
+--- CONTEXTO DE TABLA ACTIVA ---
+Estás asistiendo al usuario en la vista de la tabla '{ctx_snapshot.get('name', 'Sin nombre')}'.
+ID de la Tabla: {ctx_id}
+Columnas: {ctx_snapshot.get('columns', [])}
+Instrucción: Tienes acceso a herramientas de análisis de tablas. Si el usuario pregunta sobre estos datos, usa `get_table_stats` o `get_table_prediction` si es necesario, o simplemente analiza el snapshot proporcionado.
+-------------------------------
+"""
+            elif ctx_type == "graph":
+                context_instructions = f"""
+--- CONTEXTO DE GRAFO ACTIVO ---
+El usuario está explorando un Grafo de Conocimiento.
+ID del Grafo/Colección: {ctx_id}
+Instrucción: Prioriza el uso de `knowledge_graph_tool` para realizar consultas Cypher y explicar las relaciones entre entidades.
+-------------------------------
+"""
+            elif ctx_type == "analysis":
+                context_instructions = f"""
+--- CONTEXTO DE ANÁLISIS ACTIVO ---
+El usuario está revisando el informe de análisis: '{ctx_snapshot.get('title', 'Sin título')}'.
+Instrucción: Ayuda al usuario a interpretar los hallazgos de este análisis. No inventes datos que no estén en el informe.
+-------------------------------
+"""
+            elif ctx_type == "collection":
+                context_instructions = f"""
+--- CONTEXTO DE COLECCIÓN ACTIVA ---
+Estás asistiendo al usuario en la vista de la colección '{ctx_snapshot.get('name', 'Sin nombre')}'.
+ID de la Colección: {ctx_id}
+Documentos: {ctx_snapshot.get('document_count', 0)}
+Instrucción: El usuario está interesado en la información contenida en esta colección. Prioriza el uso de herramientas de búsqueda en documentos (RAG) filtrando por esta colección si es posible, o simplemente utiliza el conocimiento que ya tienes sobre ella.
+------------------------------------
+"""
+
         # Escape relevant_memories to prevent unescaped curly braces from causing KeyError
         # This ensures that any curly braces within the content are treated as literal characters
         # and not as placeholders for string formatting.
@@ -174,6 +216,7 @@ Herramientas clave:
 """
 
         final_prompt_parts = [
+            context_instructions, # Inyectar instrucciones de contexto al principio
             user_context_string,
             summary_string,
             "<hr>",

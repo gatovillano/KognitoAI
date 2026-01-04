@@ -6,6 +6,11 @@ import sys
 from utils.ascii_logo import print_startup_logo
 
 from api.main import app
+from utils.patches import apply_patches
+
+# Aplicar parches de estabilidad
+apply_patches()
+
 
 # Restaura el manejador de excepciones por defecto para desactivar los tracebacks de 'rich'
 sys.excepthook = sys.__excepthook__
