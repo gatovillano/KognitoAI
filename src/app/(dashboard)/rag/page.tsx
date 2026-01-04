@@ -5,15 +5,17 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2, Upload, CheckCircle, XCircle, Clock, Network, ChevronDown, Settings, AlertTriangle, BarChart3, Info } from 'lucide-react';
+import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, Brain, Trash2, Github, Edit, Share2, Upload, CheckCircle, XCircle, Clock, Network, ChevronDown, Settings, AlertTriangle, BarChart3, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
 import { WebSocketMessage } from '@/hooks/useWebSocket';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Table as TableIcon, FileSpreadsheet, BarChart, Share, Download, Filter, Search } from 'lucide-react';
 
 import { UploadDocumentDialog } from './upload-document-dialog';
 import { CreateCollectionDialog } from './create-collection-dialog';
@@ -26,6 +28,10 @@ import { ShareCollectionDialog } from './share-collection-dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { CollectionDisplay, StaticCollectionCard } from '@/components/CollectionDisplay'; // Import CollectionDisplay and StaticCollectionCard
 import { DatasetNameDialog } from './dataset-name-dialog';
+import { TablesView } from './tables-view';
+import { AnalysisResults } from '@/components/AnalysisResults';
+import { GraphView } from '@/components/GraphView';
+import { ContextualChat } from '@/components/ContextualChat';
 
 interface Collection {
   topic: string;
@@ -53,6 +59,7 @@ export default function RagCollectionsPage() {
 
   // Estados para procesamiento de grafos de conocimiento
   const [isProcessingKnowledgeGraph, setIsProcessingKnowledgeGraph] = useState(false);
+  const [isProcessingMemories, setIsProcessingMemories] = useState(false);
 
   const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
   const [collectionPollingId, setCollectionPollingId] = useState<string | null>(null);
@@ -61,6 +68,8 @@ export default function RagCollectionsPage() {
   // Estados para editar y compartir colecciones
   const [isEditCollectionOpen, setIsEditCollectionOpen] = useState(false);
   const [isShareCollectionOpen, setIsShareCollectionOpen] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [selectedCollectionForChat, setSelectedCollectionForChat] = useState<Collection | null>(null);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
 
   // Nuevo estado para el diálogo de análisis global
@@ -330,6 +339,11 @@ export default function RagCollectionsPage() {
     }
   };
 
+  const handleChatCollection = (collection: Collection) => {
+    setSelectedCollectionForChat(collection);
+    setIsChatOpen(true);
+  };
+
   const renderContent = () => {
     console.log('renderContent called. isLoading:', isLoading, 'collections.length:', collections.length); // Debug log
     if (isLoading) {
@@ -356,7 +370,7 @@ export default function RagCollectionsPage() {
     console.log('renderContent: Displaying collections.'); // Debug log
 
     return (
-      <motion.div layout className="grid gap-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 px-2">
+      <motion.div layout className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-8 px-2">
         <AnimatePresence>
           <StaticCollectionCard
             key="all-documents-card"
@@ -382,6 +396,7 @@ export default function RagCollectionsPage() {
                 onDelete={openDeleteDialog}
                 onEdit={handleEditCollection}
                 onShare={handleShareCollection}
+                onChat={handleChatCollection}
                 onProcessKnowledgeGraph={handleProcessKnowledgeGraph}
                 isAnalyzing={collectionPollingId !== null && analyzingTopic === collection.topic}
                 type="list" // Specify type as 'list'
@@ -428,17 +443,38 @@ export default function RagCollectionsPage() {
     }
   };
 
+  const handleProcessMemories = async () => {
+    if (isProcessingMemories) return;
+
+    if (!window.confirm('¿Deseas procesar todas las memorias pendientes de KAI e integrarlas al grafo?')) {
+      return;
+    }
+
+    setIsProcessingMemories(true);
+    const toastId = toast.loading("Iniciando procesamiento de memorias...");
+
+    try {
+      await apiClient.post('/api/knowledge-graph/process-memories');
+      toast.success("Procesamiento de memorias iniciado en segundo plano.", { id: toastId });
+    } catch (error) {
+      console.error(error);
+      toast.error("Error al iniciar el procesamiento de memorias.", { id: toastId });
+    } finally {
+      setIsProcessingMemories(false);
+    }
+  };
+
   return (
     <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 sm:mb-12 gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold flex items-center">
-            <BookMarked className="mr-2 sm:mr-3 h-6 w-6 sm:h-8 sm:w-8 text-primary" />
-            Colecciones de Conocimientos
-            <Button variant="ghost" size="icon" className="ml-1 sm:ml-2 h-5 w-5 sm:h-6 sm:w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
-              <Info className="h-3 w-3 sm:h-4 sm:w-4" />
-            </Button>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl sm:text-3xl font-bold flex items-center truncate">
+            <Brain className="mr-2 sm:mr-3 h-6 w-6 sm:h-8 sm:w-8 text-primary flex-shrink-0" />
+            <span className="truncate">Conocimientos</span>
           </h1>
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground flex-shrink-0" onClick={() => setIsInfoSheetOpen(true)}>
+            <Info className="h-4 w-4" />
+          </Button>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
           {/* Menú de Acciones Avanzadas */}
@@ -451,44 +487,45 @@ export default function RagCollectionsPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48 sm:w-56">
-              <DropdownMenuItem onClick={() => setIsGitHubRepoOpen(true)}>
+              <DropdownMenuItem onClick={() => setIsUploadOpen(true)} className="cursor-pointer font-medium text-primary">
+                <Upload className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                <span className="text-xs sm:text-sm">Subir Documento</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setIsGitHubRepoOpen(true)} className="cursor-pointer">
                 <Github className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="text-xs sm:text-sm">Añadir Repositorio</span>
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => handleProcessKnowledgeGraph()}
                 disabled={isProcessingKnowledgeGraph}
+                className="cursor-pointer"
               >
                 <Network className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="text-xs sm:text-sm">{isProcessingKnowledgeGraph ? "Procesando Grafos..." : "Crear Grafos de Conocimiento"}</span>
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={handleClearKnowledgeGraph}
-                className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                className="text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer"
               >
                 <AlertTriangle className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="text-xs sm:text-sm">Limpiar Grafo Global</span>
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={handleProcessMemories}
+                disabled={isProcessingMemories}
+                className="cursor-pointer text-purple-600 focus:text-purple-600 focus:bg-purple-50"
+              >
+                {isProcessingMemories ? (
+                  <Loader2 className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4 animate-spin" />
+                ) : (
+                  <Brain className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                )}
+                <span className="text-xs sm:text-sm">Procesar memorias de KAI</span>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-
-          {/* Botón de Análisis */}
-          <Button size="sm" className="bg-primary hover:bg-primary/90 gap-1 sm:gap-2 w-full sm:w-auto" onClick={() => router.push('/analysis')}>
-            <BarChart3 className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-            <span className="text-xs sm:text-sm">Análisis</span>
-          </Button>
-
-          {/* Botón de Grafos de Conocimiento */}
-          <Button size="sm" className="bg-primary hover:bg-primary/90 gap-1 sm:gap-2 w-full sm:w-auto" onClick={() => router.push('/analysis/graph')}>
-            <Network className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-            <span className="text-xs sm:text-sm">Grafos</span>
-          </Button>
-
-          {/* Botón Principal */}
-          <Button size="sm" className="bg-primary hover:bg-primary/90 gap-1 sm:gap-2 w-full sm:w-auto" onClick={() => setIsUploadOpen(true)}>
-            <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
-            <span className="text-xs sm:text-sm">Subir Documento</span>
-          </Button>
         </div>
       </div>
 
@@ -498,7 +535,42 @@ export default function RagCollectionsPage() {
         </div>
       )}
 
-      {renderContent()}
+      <Tabs defaultValue="collections" className="w-full">
+        <TabsList className="flex w-full overflow-x-auto no-scrollbar bg-muted/50 p-1 rounded-xl mb-8">
+          <TabsTrigger value="collections" className="flex-1 flex items-center justify-center gap-2 py-2.5">
+            <Library className="h-4 w-4" />
+            <span className="hidden xs:inline text-xs">Colecciones</span>
+          </TabsTrigger>
+          <TabsTrigger value="tables" className="flex-1 flex items-center justify-center gap-2 py-2.5">
+            <TableIcon className="h-4 w-4" />
+            <span className="hidden xs:inline text-xs">Tablas</span>
+          </TabsTrigger>
+          <TabsTrigger value="results" className="flex-1 flex items-center justify-center gap-2 py-2.5">
+            <BarChart3 className="h-4 w-4" />
+            <span className="hidden xs:inline text-xs">Resultados</span>
+          </TabsTrigger>
+          <TabsTrigger value="graph" className="flex-1 flex items-center justify-center gap-2 py-2.5">
+            <Network className="h-4 w-4" />
+            <span className="hidden xs:inline text-xs">Grafos</span>
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="collections" className="space-y-4">
+          {renderContent()}
+        </TabsContent>
+
+        <TabsContent value="tables" className="space-y-4">
+          <TablesView />
+        </TabsContent>
+
+        <TabsContent value="results" className="space-y-4">
+          <AnalysisResults />
+        </TabsContent>
+
+        <TabsContent value="graph" className="space-y-4">
+          <GraphView />
+        </TabsContent>
+      </Tabs>
 
       <UploadDocumentDialog
         isOpen={isUploadOpen}
@@ -620,6 +692,22 @@ export default function RagCollectionsPage() {
           </div>
         </SheetContent>
       </Sheet>
+      {selectedCollectionForChat && (
+        <ContextualChat
+          isOpen={isChatOpen}
+          onClose={() => setIsChatOpen(false)}
+          title={selectedCollectionForChat.topic}
+          context={{
+            type: 'collection',
+            id: selectedCollectionForChat.topic,
+            snapshot: {
+              name: selectedCollectionForChat.topic,
+              document_count: selectedCollectionForChat.document_count,
+              workspace_id: selectedCollectionForChat.workspace_id
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

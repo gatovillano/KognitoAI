@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { marked } from 'marked';
 import { sentImage } from '@/lib/imageUtils';
 import { toast } from 'sonner';
@@ -135,6 +135,17 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
           .replace(/"/g, '&quot;')
           .replace(/'/g, '&#039;');
       };
+      renderer.link = function ({ href, title, text }) {
+        const isPdf = href.toLowerCase().endsWith('.pdf');
+        if (isPdf) {
+          return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium transition-all bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white shadow-md hover:shadow-lg h-9 px-4 py-2 my-2 no-underline">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+            <span>${text || 'Descargar PDF'}</span>
+          </a>`;
+        }
+        return `<a href="${href}" title="${title || ''}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+      };
+
       renderer.code = function ({ text, lang }) {
         if (lang === 'mermaid') {
           return `<div class="mermaid-code-block" data-mermaid-code="${encodeURIComponent(text)}"></div>`;
@@ -222,6 +233,40 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
   const containerClass = inline
     ? `${fontSize} text-foreground`
     : `${proseSizeClass} max-w-none text-foreground dark:prose-invert`; // Added dark:prose-invert
+
+  // Hidratación de placeholders de citas con componentes React
+  useEffect(() => {
+    if (!contentParts || !containerRef.current) return;
+
+    const container = containerRef.current;
+    const placeholders = container.querySelectorAll('.source-button-placeholder');
+
+    placeholders.forEach((placeholder) => {
+      if (placeholder.getAttribute('data-hydrated') === 'true') return;
+
+      const citationNumber = placeholder.getAttribute('data-citation-number');
+      if (!citationNumber) return;
+
+      const citationPart = contentParts.find(part =>
+        part.type === 'citation' && part.citationNumber === parseInt(citationNumber)
+      );
+
+      if (citationPart && citationPart.source) {
+        // Marcar como hidratado
+        placeholder.setAttribute('data-hydrated', 'true');
+
+        // Crear el elemento SourceButton
+        const sourceButton = React.createElement(SourceButton, {
+          source: citationPart.source,
+          citationNumber: citationPart.citationNumber || 0
+        });
+
+        // Renderizar el componente React dentro del placeholder
+        const reactRoot = createRoot(placeholder);
+        reactRoot.render(sourceButton);
+      }
+    });
+  }, [contentParts, renderedContent]);
 
   const ContainerElement = inline ? 'span' : 'div';
 

@@ -162,6 +162,9 @@ class Config:
         self.mistral_ocr_api_url: Optional[str] = os.getenv("MISTRAL_OCR_API_URL")
         self.mistral_ocr_api_key: Optional[str] = os.getenv("MISTRAL_OCR_API_KEY")
 
+        # Modelo de Visión Multimodal (OCR y análisis de imágenes)
+        self.vision_model: str = os.getenv("VISION_MODEL", "openrouter/mistralai/mistral-small-3.1-24b-instruct:free")
+
         # Búsqueda Web Avanzada
         self.tavily_api_key: Optional[str] = os.getenv("TAVILY_API_KEY")
         self.tavily_search_engine_type: str = os.getenv("TAVILY_SEARCH_ENGINE_TYPE", "tavily")

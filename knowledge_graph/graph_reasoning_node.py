@@ -37,12 +37,13 @@ class GraphReasoningNode:
             raise ValueError("No se pudo obtener un LLM rápido para el GraphReasoningNode.")
         logger.info("✅ GraphReasoningNode inicializado con LLM rápido.")
 
-    async def ainvoke(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    async def ainvoke(self, state: Dict[str, Any], target_datasets: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Punto de entrada asíncrono para el nodo. Orquesta el proceso completo.
 
         Args:
             state: El estado actual del grafo de LangGraph.
+            target_datasets: Lista de datasets específicos a consultar.
 
         Returns:
             Un diccionario con el contexto enriquecido y las nuevas fuentes.
@@ -55,7 +56,7 @@ class GraphReasoningNode:
             return {}
 
         # 1. Generar consulta Cypher
-        cypher_query = await self._generate_cypher_query(user_message)
+        cypher_query = await self._generate_cypher_query(user_message, target_datasets)
         if not cypher_query:
             return {}
         
@@ -87,7 +88,7 @@ class GraphReasoningNode:
                 return str(message.content)
         return None
 
-    async def _generate_cypher_query(self, user_query: str) -> Optional[str]:
+    async def _generate_cypher_query(self, user_query: str, target_datasets: Optional[List[str]] = None) -> Optional[str]:
         """Genera una consulta Cypher usando un LLM a partir de la pregunta del usuario."""
         if not self.graph_db.schema:
             logger.error("No se puede generar la consulta Cypher: el schema del grafo no está disponible.")
@@ -103,7 +104,18 @@ class GraphReasoningNode:
             if not self.llm:
                 raise ValueError("LLM no está disponible")
             chain = prompt | self.llm
-            response = await chain.ainvoke({"question": user_query, "schema": self.graph_db.schema})
+            
+            # Preparar información de datasets para el prompt
+            dataset_context = ""
+            if target_datasets:
+                dataset_context = f"\n**Datasets Objetivo**: {', '.join(target_datasets)}\nFiltra los nodos usando `WHERE n.dataset_name IN {target_datasets}`."
+            else:
+                dataset_context = "\nBusca en todos los datasets disponibles."
+
+            response = await chain.ainvoke({
+                "question": f"{user_query}{dataset_context}", 
+                "schema": self.graph_db.schema
+            })
             cypher_query = str(response.content).strip().replace("```cypher", "").replace("```", "").strip()
             logger.info(f"Consulta Cypher generada: {cypher_query}")
             return cypher_query

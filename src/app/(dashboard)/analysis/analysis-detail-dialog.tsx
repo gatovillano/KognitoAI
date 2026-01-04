@@ -1,3 +1,4 @@
+import { MessageSquare } from 'lucide-react';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -12,6 +13,7 @@ import { Separator } from '@/components/ui/separator';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { QuestionSliderDialog } from '@/components/QuestionSliderDialog';
+import { ContextualChat } from '@/components/ContextualChat';
 import { useTextToSpeech } from '@/hooks/useTextToSpeech';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
@@ -724,6 +726,9 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  
+  // Estados para el chat contextual
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   const { play, stop, isLoading, isPlaying, activeText } = useTextToSpeech();
 
@@ -1164,7 +1169,27 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl w-full max-h-[90vh] rounded-2xl bg-card/95 backdrop-blur-xl border shadow-2xl flex flex-col overflow-hidden">
+      <DialogContent
+        className="max-w-4xl w-full max-h-[90vh] rounded-2xl bg-card/95 backdrop-blur-xl border shadow-2xl flex flex-col overflow-hidden"
+        onPointerDownOutside={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('.contextual-chat-container')) {
+            e.preventDefault();
+          }
+        }}
+        onInteractOutside={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('.contextual-chat-container')) {
+            e.preventDefault();
+          }
+        }}
+        onFocusOutside={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('.contextual-chat-container')) {
+            e.preventDefault();
+          }
+        }}
+      >
         <DialogHeader className="px-8 pt-8 pb-4 border-b">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -1198,11 +1223,16 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                   </Button>
                 </div>
               ) : (
-                onAnalysisDeleted && (
-                  <Button variant="ghost" size="icon" onClick={handleConfirmDelete} className="text-muted-foreground hover:text-destructive hover:bg-destructive/10">
-                    <Trash2 className="h-4 w-4" />
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(true)} className="text-muted-foreground hover:text-primary hover:bg-primary/10" title="Chatear con este análisis">
+                    <MessageSquare className="h-4 w-4" />
                   </Button>
-                )
+                  {onAnalysisDeleted && (
+                    <Button variant="ghost" size="icon" onClick={handleConfirmDelete} className="text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -1260,6 +1290,20 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
             </div>
           </div>
         </DialogFooter>
+
+        {/* Chat Contextual para el Análisis - Movido dentro de DialogContent */}
+        {currentAnalysis && (
+          <ContextualChat
+            isOpen={isChatOpen}
+            onClose={() => setIsChatOpen(false)}
+            context={{
+              type: 'analysis',
+              id: currentAnalysis.id,
+              snapshot: currentAnalysis
+            }}
+            title={currentAnalysis.title}
+          />
+        )}
       </DialogContent>
 
       {/* Diálogos para sliders y detalles */}
@@ -1298,6 +1342,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
         icon={simpleListIcon}
         colorClass={simpleListColor}
       />
+      
     </Dialog>
   );
 };

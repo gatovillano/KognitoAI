@@ -900,6 +900,13 @@ class HybridGraphProcessor:
             "merged_from": len(entities),
             "merged_variants": [e.get("name", "") for e in entities if e.get("name") != best_name][:3]  # Hasta 3 variantes
         }
+
+        # Preservar IDs de tenant y dataset_name (usando el primero que tenga valor)
+        for key in ["account_id", "workspace_id", "dataset_name"]:
+            for e in entities:
+                if e.get(key):
+                    merged_entity[key] = e[key]
+                    break
         
         # Preservar metadatos adicionales del mejor candidato
         for key in ["frequency", "dependency", "centrality_score"]:

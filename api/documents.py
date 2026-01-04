@@ -153,7 +153,7 @@ async def upload_chat_document_endpoint(
         file_name = file.filename or "documento_subido"
 
         # Extraer texto y metadatos
-        extracted_text, metadata = extract_text_and_metadata_from_document(file_name, content_bytes)
+        extracted_text, metadata = await extract_text_and_metadata_from_document(file_name, content_bytes)
 
         if not extracted_text:
             raise HTTPException(status_code=400, detail=f"No se pudo extraer texto del archivo '{file_name}'.")
@@ -478,10 +478,13 @@ async def add_document_to_collection(
     # Leer el contenido del archivo
     file_content = await file.read()
     
+    # Extraer texto y metadatos (Añadido para consistencia con el nuevo parser asíncrono)
+    extracted_text, metadata = await extract_text_and_metadata_from_document(file.filename, file_content)
+    
     # Llamar a la función de procesamiento de documentos
     await process_document_for_rag(
         file_name=file.filename,
-        extracted_text=file_content.decode('utf-8'), # Asumimos UTF-8, ajustar si es necesario
+        extracted_text=extracted_text,
         account_id=current_account_id,
         topic=topic,
         workspace_id=workspace_id

@@ -35,6 +35,7 @@ interface CollectionDisplayProps {
   onUploadDocument?: (topic: string, workspaceId?: string) => void;
   onExtractTitles?: (topic: string, workspaceId?: string) => void;
   onSemanticSummary?: (topic: string, workspaceId?: string) => void;
+  onChat?: (collection: Collection) => void;
   isAnalyzing?: boolean;
   isProcessingKnowledgeGraph?: boolean;
   className?: string; // Para estilos adicionales
@@ -53,6 +54,7 @@ export const CollectionDisplay = ({
   onUploadDocument,
   onExtractTitles,
   onSemanticSummary,
+  onChat,
   isAnalyzing = false,
   isProcessingKnowledgeGraph = false,
   className,
@@ -96,6 +98,12 @@ export const CollectionDisplay = ({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()} data-dropdown-content>
+        {onChat && (
+          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onChat(collection); }}>
+            <Brain className="mr-2 h-4 w-4 text-primary" />
+            <span className="font-medium text-primary">Chatear con Colección</span>
+          </DropdownMenuItem>
+        )}
         {onAnalyze && (
           <DropdownMenuItem onClick={handleAction(onAnalyze)} disabled={isAnalyzing}>
             <ScanSearch className="mr-2 h-4 w-4" />
@@ -132,6 +140,12 @@ export const CollectionDisplay = ({
 
   const renderDetailActions = () => (
     <div className="flex items-center gap-2">
+      {onChat && (
+        <Button onClick={(e) => { e.stopPropagation(); onChat(collection); }} className="gap-2">
+          <Brain className="h-4 w-4" />
+          Chatear con Colección
+        </Button>
+      )}
       {onAnalyze && (
         <Button onClick={handleAction(onAnalyze)} variant="outline" disabled={isAnalyzing}>
           {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ScanSearch className="mr-2 h-4 w-4" />}

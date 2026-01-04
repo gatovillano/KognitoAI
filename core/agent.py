@@ -60,6 +60,7 @@ from core.prompts import SUMMARIZATION_PROMPT, THREAD_TITLE_PROMPT
 from core.enhanced_memory_manager import EnhancedMemoryManager
 from knowledge_graph.graph_database import GraphDB
 from knowledge_graph.graph_reasoning_node import GraphReasoningNode # NUEVO
+from knowledge_graph.knowledge_extraction_node import KnowledgeExtractionNode # NUEVO
 from tools.deep_research_tool import DeepResearchTool # Importar DeepResearchTool
 
 # --- Claves para estado temporal ---
@@ -72,6 +73,7 @@ from core.websocket_manager import send_personal_message # Importar aquí para e
 # --- Global singletons for shared dependencies ---
 _graph_db_instance = None
 _enhanced_memory_manager_instance = None
+_knowledge_extraction_node_instance = None
 
 async def get_shared_graph_dependencies():
     """
@@ -226,6 +228,10 @@ class AgentState(TypedDict):
     graph_sources: Optional[List[Dict[str, Any]]] = None
     mermaid_diagram: Optional[str] = None
     turn_count: int = 0  # Nuevo: Contador de turnos para la memoria proactiva
+    # Contexto específico del chat (tablas, grafos, análisis)
+    context: Optional[Dict[str, Any]] = None
+    # Datasets seleccionados para la consulta al grafo
+    target_datasets: Optional[List[str]] = None
 
 # ==============================================================================
 # SECCIÓN 2: VALIDACIÓN DE HERRAMIENTAS Y MANEJO DE ERRORES
@@ -432,12 +438,43 @@ async def force_update_thread_title(thread_id: str):
             return
 
         db_sync_url = db_url.replace("+psycopg", "")
-        chat_message_history = PostgresChatMessageHistory(
-            connection_string=db_sync_url,
-            session_id=thread_id,
-            table_name="langchain_chat_history",
-        )
-        messages = await chat_message_history.aget_messages()
+        
+        # Robustez: Intentar inicializar el historial con reintentos
+        chat_message_history = None
+        messages = []
+        for attempt in range(3):
+            try:
+                # Asegurarnos de que la URL no tenga el driver de sqlalchemy si se usa directamente
+                connection_url = db_sync_url
+                if connection_url.startswith("postgresql+psycopg://"):
+                    connection_url = connection_url.replace("postgresql+psycopg://", "postgresql://")
+                elif connection_url.startswith("postgresql+psycopg2://"):
+                    connection_url = connection_url.replace("postgresql+psycopg2://", "postgresql://")
+                
+                chat_message_history = PostgresChatMessageHistory(
+                    connection_string=connection_url,
+                    session_id=thread_id,
+                    table_name="langchain_chat_history",
+                )
+                # Intentar obtener mensajes para validar la conexión
+                messages = await chat_message_history.aget_messages()
+                break
+            except Exception as e:
+                error_msg = str(e)
+                logger.warning(f"⚠️ Intento {attempt + 1} fallido al conectar con el historial para título del hilo {thread_id}: {error_msg}")
+                
+                # Si el error es el famoso 'no attribute cursor', es un fallo de inicialización de LangChain
+                if "object has no attribute 'cursor'" in error_msg:
+                    logger.error(f"❌ Error de inicialización en PostgresChatMessageHistory (posible fallo de conexión a DB)")
+                
+                if attempt == 2:
+                    logger.error(f"❌ No se pudo conectar con el historial del hilo {thread_id} tras 3 intentos: {error_msg}")
+                    return
+                
+                # Limpiar el objeto fallido para evitar problemas en el destructor
+                chat_message_history = None
+                await asyncio.sleep(1 * (attempt + 1))
+
         
         if not messages:
             logger.info(f"No hay mensajes en el hilo {thread_id} para generar un título.")
@@ -567,8 +604,10 @@ async def call_model_node(state: AgentState):
     user_profile = await get_user_profile(state['account_id'])
 
     rag_context = state.get("rag_context")
+    context = state.get("context")
     document_ids_for_rag = None
     document_names_for_rag = None # Nuevo
+    filter_topics = None
     has_explicit_rag_context = False
 
     if rag_context:
@@ -576,6 +615,17 @@ async def call_model_node(state: AgentState):
         document_ids_for_rag = [item['id'] for item in rag_context if item.get('type') == 'document']
         document_names_for_rag = [item.get('name') for item in rag_context if item.get('type') == 'document' and item.get('name')] # Manejar 'name' de forma segura
         has_explicit_rag_context = True
+
+    # Soporte para contexto de colección
+    if context and context.get("type") == "collection":
+        topic = context.get("id")
+        if topic:
+            logger.info(f"Aplicando filtro de colección RAG para el tema: {topic}")
+            filter_topics = [topic]
+            has_explicit_rag_context = True
+            # Si no hay nombres de documentos explícitos, usamos el nombre de la colección
+            if not document_names_for_rag:
+                document_names_for_rag = [context.get("snapshot", {}).get("name", topic)]
     # --- INICIO DE LA LÓGICA DE MEMORIA MEJORADA ---
     # Se ejecuta solo si no venimos de una llamada a herramienta, para no sobrescribir sus fuentes.
     last_message = state["messages"][-1] if state["messages"] else None
@@ -601,6 +651,7 @@ async def call_model_node(state: AgentState):
                 query=user_message,
                 workspace_id=state.get('workspace_id'),
                 explicit_document_ids=explicit_doc_ids,
+                filter_topics=filter_topics,
                 k=10
             )
             
@@ -677,7 +728,8 @@ async def call_model_node(state: AgentState):
         telegram_id=state.get('telegram_id'),
         user_message=user_message,
         has_explicit_rag_context=has_explicit_rag_context,
-        explicit_document_names=[name for name in document_names_for_rag if name is not None] if document_names_for_rag else None
+        explicit_document_names=[name for name in document_names_for_rag if name is not None] if document_names_for_rag else None,
+        context=state.get('context') # Pasar el contexto aquí
     )
 
     if state.get('workspace_id'):
@@ -697,10 +749,26 @@ async def call_model_node(state: AgentState):
                 telegram_id=state.get('telegram_id'),
                 user_message=user_message,
                 has_explicit_rag_context=has_explicit_rag_context,
-                explicit_document_names=[str(name) for name in document_names_for_rag if name is not None] if document_names_for_rag else None
+                explicit_document_names=[str(name) for name in document_names_for_rag if name is not None] if document_names_for_rag else None,
+                context=state.get('context') # Pasar el contexto aquí
             )
     
     llm = get_main_llm()
+    
+    # --- SOPORTE MULTIMODAL EN CHAT ---
+    # Si el mensaje contiene una imagen, usamos el modelo de visión
+    has_image = False
+    if isinstance(last_message.content, list):
+        for item in last_message.content:
+            if isinstance(item, dict) and item.get("type") == "image_url":
+                has_image = True
+                break
+    
+    if has_image:
+        logger.info("📸 Imagen detectada en el chat. Cambiando al modelo de visión.")
+        llm = get_vision_llm()
+    # --- FIN SOPORTE MULTIMODAL ---
+
     if not llm:
         raise ValueError("El LLM principal no está disponible.")
          
@@ -868,8 +936,12 @@ async def generate_response_node(state: AgentState):
     Actúa como un punto de salida nombrado que 'api/chat.py' puede escuchar.
     """
     logger.info("--- (Grafo) Nodo: Generar Respuesta ---")
-    if isinstance(state["messages"][-1], AIMessage):
-        logger.debug(f"DEBUG (agent.py - generate_response_node): AIMessage final del agente: {state['messages'][-1].content}")
+    # --- INICIO: Extracción de conocimiento en segundo plano ---
+    # Ejecutar el nodo de extracción de forma asíncrona para no bloquear la respuesta
+    # y evitar romper el flujo de streaming esperado por la API.
+    import asyncio
+    asyncio.create_task(knowledge_extraction_node(state))
+    # --- FIN: Extracción de conocimiento ---
     return {"messages": state["messages"]}
 
 async def tool_node(state: AgentState):
@@ -1176,7 +1248,9 @@ Por favor, intenta de nuevo especificando correctamente la herramienta."""
             context_content: str = ""
             sources_list = []
 
-            if isinstance(output_dump, str):
+            if isinstance(output_dump, ToolOutputWithSources):
+                tool_output = output_dump
+            elif isinstance(output_dump, str):
                 try:
                     parsed_output = json.loads(output_dump)
                     # Caso 1: Salida de knowledge_search con 'results'
@@ -1272,7 +1346,7 @@ Por favor, intenta de nuevo especificando correctamente la herramienta."""
             if tool_output.sources:
                 logger.info(f"La herramienta '{tool_name}' devolvió {len(tool_output.sources)} fuentes. Añadiendo a fuentes existentes.")
                 # Convertir las nuevas fuentes a dicts
-                new_sources_dicts = [s.dict() for s in tool_output.sources]
+                new_sources_dicts = [s.model_dump() if hasattr(s, 'model_dump') else (s.dict() if hasattr(s, 'dict') else s) for s in tool_output.sources]
                 
                 # Asegurarse de que current_sources es una lista antes de extender
                 if current_sources is None:
@@ -1393,6 +1467,13 @@ Por favor, intenta de nuevo especificando correctamente la herramienta."""
     # --- FIN: Deduplicación y asignación de IDs secuenciales ---
 
     # Devolver los mensajes de la herramienta Y las fuentes actualizadas al estado del grafo
+    # --- INICIO: Extracción de conocimiento en segundo plano ---
+    # Ejecutar el nodo de extracción de forma asíncrona para no bloquear la respuesta
+    # y evitar romper el flujo de streaming esperado por la API.
+    import asyncio
+    asyncio.create_task(knowledge_extraction_node(state))
+    # --- FIN: Extracción de conocimiento ---
+
     return {"messages": state["messages"] + tool_messages, "sources": final_sources_with_sequential_ids}
 
 # --- 2. Enrutador ---
@@ -1416,6 +1497,7 @@ def should_continue(state: AgentState) -> str:
 # Global cache for the compiled agent graph (singleton pattern)
 _compiled_agent_graph = None
 _graph_reasoning_node_instance = None # NUEVO: Singleton para el nodo de razonamiento
+_knowledge_extraction_node_instance = None # NUEVO: Singleton para el nodo de extracción
 
 def get_langgraph_agent():
     """
@@ -1444,10 +1526,12 @@ def create_langgraph_agent():
 
     # Añadir los nodos al grafo
     workflow.add_node("proactive_memory", proactive_memory_node)
+    workflow.add_node("graph_router", graph_router_node) # NUEVO NODO DE DECISIÓN
     workflow.add_node("graph_reasoning", graph_reasoning_node) # NUEVO NODO
     workflow.add_node("agent", call_model_node)
     workflow.add_node("action", tool_node)
     workflow.add_node("generateResponse", generate_response_node)
+    workflow.add_node("knowledge_extraction", knowledge_extraction_node) # NUEVO NODO
 
     # Definir las aristas (el flujo de trabajo)
     workflow.set_entry_point("proactive_memory")
@@ -1457,10 +1541,13 @@ def create_langgraph_agent():
         "proactive_memory",
         should_use_graph_reasoning, # NUEVO enrutador
         {
-            "continue_to_graph": "graph_reasoning",
+            "continue_to_graph": "graph_router", # Ahora pasa por el router primero
             "continue_to_agent": "agent",
         }
     )
+
+    # El router siempre pasa al razonamiento
+    workflow.add_edge("graph_router", "graph_reasoning")
 
     # El nodo del grafo siempre pasa al agente principal después
     workflow.add_edge("graph_reasoning", "agent")
@@ -1521,7 +1608,11 @@ async def graph_reasoning_node(state: AgentState):
         logger.info("✅ Instancia de GraphReasoningNode creada.")
 
     # 3. Invocar el nodo y obtener el contexto enriquecido
-    graph_output = await _graph_reasoning_node_instance.ainvoke(cast(dict, state))
+    # Pasar target_datasets si existen en el estado
+    graph_output = await _graph_reasoning_node_instance.ainvoke(
+        cast(dict, state), 
+        target_datasets=state.get('target_datasets')
+    )
 
     # 4. Actualizar el estado con la salida del nodo
     if graph_output:
@@ -1529,6 +1620,107 @@ async def graph_reasoning_node(state: AgentState):
         state['graph_sources'] = graph_output.get('graph_sources')
         state['mermaid_diagram'] = graph_output.get('mermaid_diagram')
         logger.info("Estado actualizado con la salida del GraphReasoningNode.")
+
+    return state
+
+
+async def knowledge_extraction_node(state: AgentState):
+    """
+    Ejecuta el nodo de extracción de conocimiento para persistir información en el grafo.
+    """
+    global _knowledge_extraction_node_instance
+    
+    # 1. Asegurarse de que las dependencias del grafo existan
+    state = await ensure_graph_dependencies(state)
+    graph_db = state.get('graph_db')
+    
+    if not graph_db:
+        logger.warning("Saltando nodo de extracción de conocimiento: GraphDB no está disponible.")
+        return state
+
+    # 2. Inicializar el nodo de extracción si es necesario (singleton)
+    if _knowledge_extraction_node_instance is None:
+        _knowledge_extraction_node_instance = KnowledgeExtractionNode(graph_db)
+        logger.info("✅ Instancia de KnowledgeExtractionNode creada.")
+
+    # 3. Invocar el nodo para extraer y persistir conocimiento
+    try:
+        # El método ainvoke de KnowledgeExtractionNode espera el estado y devuelve el estado modificado
+        # o realiza efectos secundarios (persistencia) y devuelve el estado.
+        state = await _knowledge_extraction_node_instance.ainvoke(cast(dict, state))
+        logger.info("✅ Extracción de conocimiento completada exitosamente.")
+    except Exception as e:
+        logger.error(f"❌ Error en el nodo de extracción de conocimiento: {e}")
+
+    return state
+
+
+async def graph_router_node(state: AgentState):
+    """
+    Nodo de decisión que identifica qué datasets del grafo son relevantes para la consulta.
+    """
+    logger.info("--- (Grafo) Nodo: Enrutador de Datasets ---")
+    
+    # 1. Asegurarse de que las dependencias existan
+    state = await ensure_graph_dependencies(state)
+    graph_db = state.get('graph_db')
+    if not graph_db:
+        return state
+
+    # 2. Obtener datasets disponibles
+    try:
+        datasets_info = await graph_db.get_available_datasets(state['account_id'])
+        if not datasets_info:
+            logger.info("No hay datasets disponibles en el grafo.")
+            return state
+        
+        datasets_list = [d['name'] for d in datasets_info]
+        logger.info(f"Datasets disponibles: {datasets_list}")
+    except Exception as e:
+        logger.error(f"Error obteniendo datasets: {e}")
+        return state
+
+    # 3. Usar LLM para decidir
+    llm = get_fast_llm()
+    last_message = ""
+    if state["messages"]:
+        last_msg_obj = state["messages"][-1]
+        last_message = str(last_msg_obj.content)
+    
+    prompt = f"""
+Analiza la siguiente pregunta del usuario y decide qué datasets del grafo de conocimiento son relevantes.
+
+**Datasets Disponibles**:
+{json.dumps(datasets_list, indent=2)}
+
+**Pregunta**: "{last_message}"
+
+**Instrucciones**:
+- `Agent Memories`: Contiene historia personal, preferencias y hechos sobre el usuario.
+- Otros datasets: Contienen conocimientos técnicos o de documentos específicos.
+- Responde ÚNICAMENTE con una lista JSON de los nombres de los datasets relevantes.
+- Ejemplo: ["Agent Memories", "manual_tecnico"]
+- Si no estás seguro, incluye `Agent Memories` por defecto.
+
+**Respuesta (solo JSON)**:
+"""
+    try:
+        response = await llm.ainvoke(prompt)
+        content = str(response.content).strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.endswith("```"):
+            content = content[:-3]
+            
+        selected = json.loads(content.strip())
+        
+        # Validar que los seleccionados existan
+        target_datasets = [d for d in selected if d in datasets_list]
+        state['target_datasets'] = target_datasets
+        logger.info(f"🎯 Datasets seleccionados por el LLM: {target_datasets}")
+    except Exception as e:
+        logger.error(f"Error en la decisión del router: {e}")
+        state['target_datasets'] = ["Agent Memories"] # Fallback
 
     return state
 

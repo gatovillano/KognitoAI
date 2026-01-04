@@ -247,6 +247,10 @@ class CreatePDFTool(BaseTool):
         logger.info(f"Generating PDF from {'HTML' if is_html else 'Markdown'}. Title: {title}")
         
         try:
+            # 0. Cleanup old files
+            from utils.file_cleanup import cleanup_old_generated_files
+            cleanup_old_generated_files()
+            
             # 1. Create directory for generated media using absolute MEDIA_ROOT
             from api.galleries import MEDIA_ROOT
             output_dir = os.path.join(MEDIA_ROOT, "generated_pdfs")

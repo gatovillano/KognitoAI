@@ -22,7 +22,7 @@ class Neo4jAdapter:
         self.graph_db = graph_db
         logger.info("✅ Neo4jAdapter inicializado")
     
-    async def add_cognee_results_to_graph(self, entities: List[Dict], relationships: List[Dict], workspace_id: Optional[str] = None, account_id: Optional[str] = None) -> Dict[str, Any]:
+    async def add_cognee_results_to_graph(self, entities: List[Dict], relationships: List[Dict], workspace_id: Optional[str] = None, account_id: Optional[str] = None, dataset_name: Optional[str] = None) -> Dict[str, Any]:
         """
         Agrega entidades y relaciones del pipeline híbrido a Neo4j.
         
@@ -31,6 +31,7 @@ class Neo4jAdapter:
             relationships: Lista de relaciones extraídas
             workspace_id: ID del workspace actual
             account_id: ID de la cuenta del usuario
+            dataset_name: Nombre del dataset (opcional, para sobrescribir/asegurar)
             
         Returns:
             Dict con estadísticas del proceso
@@ -54,10 +55,10 @@ class Neo4jAdapter:
             }
             
             # Agregar entidades
-            stats["entities_added"] = await self._add_entities_to_neo4j(entities, workspace_id, account_id)
+            stats["entities_added"] = await self._add_entities_to_neo4j(entities, workspace_id, account_id, dataset_name)
             
             # Agregar relaciones
-            stats["relationships_added"] = await self._add_relationships_to_neo4j(relationships, workspace_id, account_id)
+            stats["relationships_added"] = await self._add_relationships_to_neo4j(relationships, workspace_id, account_id, dataset_name)
             
             logger.info(f"✅ Integración completada: {stats}")
             return stats
@@ -84,7 +85,7 @@ class Neo4jAdapter:
         except Exception as e:
             logger.warning(f"⚠️ Error limpiando grafo: {e}")
     
-    async def _add_entities_to_neo4j(self, entities: List[Dict], workspace_id: Optional[str], account_id: Optional[str]) -> int:
+    async def _add_entities_to_neo4j(self, entities: List[Dict], workspace_id: Optional[str], account_id: Optional[str], dataset_name: Optional[str] = None) -> int:
         """
         Agrega entidades a Neo4j.
         
@@ -92,6 +93,7 @@ class Neo4jAdapter:
             entities: Lista de entidades
             workspace_id: ID del workspace
             account_id: ID de la cuenta
+            dataset_name: Nombre del dataset (opcional)
             
         Returns:
             Número de entidades agregadas
@@ -132,7 +134,10 @@ class Neo4jAdapter:
                     created_at = props.get("created_at") or entity.get("created_at", datetime.now().isoformat())
                     extraction_method = props.get("extraction_method") or entity.get("extraction_method", "hybrid")
                     entity_type = entity.get("type", "Entity")
-                    dataset_name = entity.get("dataset_name")  # Obtener dataset_name si existe
+                    
+                    # Prioridad: 1. Entidad, 2. Argumento global
+                    final_dataset_name = entity.get("dataset_name") or dataset_name
+                    
                     concept = props.get("concept") or entity.get("concept") # Extraer concept
                     category = props.get("category") or entity.get("category") # Extraer category
 
@@ -148,7 +153,7 @@ class Neo4jAdapter:
                         "concept": concept, # Incluir concept
                         "category": category, # Incluir category
                         "source_document_id": entity.get("source_document_id"),
-                        "dataset_name": dataset_name
+                        "dataset_name": final_dataset_name
                     }
                     entity_data["workspace_id"] = workspace_id
                     entity_data["account_id"] = account_id
@@ -216,7 +221,7 @@ class Neo4jAdapter:
             logger.error(f"❌ Error agregando entidades: {e}")
             raise
     
-    async def _add_relationships_to_neo4j(self, relationships: List[Dict], workspace_id: Optional[str], account_id: Optional[str]) -> int:
+    async def _add_relationships_to_neo4j(self, relationships: List[Dict], workspace_id: Optional[str], account_id: Optional[str], dataset_name: Optional[str] = None) -> int:
         """
         Agrega relaciones a Neo4j.
         
@@ -224,6 +229,7 @@ class Neo4jAdapter:
             relationships: Lista de relaciones
             workspace_id: ID del workspace
             account_id: ID de la cuenta
+            dataset_name: Nombre del dataset (opcional)
             
         Returns:
             Número de relaciones agregadas
@@ -272,7 +278,8 @@ class Neo4jAdapter:
                                    relationship.get("type") or
                                    "RELATED")
 
-                        dataset_name = relationship.get("dataset_name")  # Obtener dataset_name si existe
+                        # Prioridad: 1. Relación, 2. Argumento global
+                        final_dataset_name = relationship.get("dataset_name") or dataset_name
                         
                         rel_data = {
                             "source_id": source_id,
@@ -286,7 +293,7 @@ class Neo4jAdapter:
                         }
                         rel_data["workspace_id"] = workspace_id
                         rel_data["account_id"] = account_id
-                        rel_data["dataset_name"] = dataset_name # Already extracted, default to None if not present
+                        rel_data["dataset_name"] = final_dataset_name # Already extracted, default to None if not present
                         batch_data.append(rel_data)
 
                         if j < 3:

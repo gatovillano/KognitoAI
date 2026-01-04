@@ -1289,3 +1289,34 @@ async def get_all_active_progress(
             success=False,
             error=str(e)
         )
+@router.post("/process-memories", response_model=GraphResponse)
+async def process_memories_endpoint(
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Dispara manualmente el procesamiento de memorias del usuario actual
+    para actualizarlas en el grafo de conocimiento.
+    """
+    try:
+        account_id = current_user.get("uid")
+        if not account_id:
+            raise HTTPException(status_code=400, detail="Usuario no identificado")
+
+        from knowledge_graph.memory_graph_processor import process_memory_batches
+        
+        # Ejecutar en background para no bloquear
+        background_tasks.add_task(process_memory_batches, account_id=account_id)
+        
+        return GraphResponse(
+            success=True,
+            message="Procesamiento de memorias iniciado en segundo plano.",
+            data={"account_id": account_id}
+        )
+    except Exception as e:
+        logger.error(f"Error al iniciar procesamiento de memorias: {e}")
+        return GraphResponse(
+            success=False,
+            error=str(e),
+            message="Error al iniciar el procesamiento."
+        )

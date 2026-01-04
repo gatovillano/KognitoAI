@@ -20,7 +20,7 @@ from core.config import settings
 logger = logging.getLogger(__name__)
 
 # Umbral de memorias para procesar en un lote
-MEMORY_PROCESSING_THRESHOLD = 10
+MEMORY_PROCESSING_THRESHOLD = 1
 
 # Lock para evitar condiciones de carrera al procesar lotes
 processing_lock = asyncio.Lock()
@@ -31,7 +31,9 @@ async def get_unprocessed_memories_count(account_id: str) -> int:
     async with DBSession(SessionLocal) as db:
         query = text("""
             SELECT COUNT(*) FROM langchain_pg_embedding
-            WHERE account_id = :account_id AND is_graph_processed = false
+            WHERE account_id = :account_id 
+            AND (is_graph_processed = false OR is_graph_processed IS NULL)
+            AND cmetadata->>'type' IN ('user_memory', 'user_memory_proactive_llm', 'agent_memory', 'chat_summary')
         """)
         result = await db.execute(query, {"account_id": account_id})
         return result.scalar_one_or_none() or 0
@@ -41,7 +43,9 @@ async def get_unprocessed_memories(account_id: str, limit: int) -> List[Dict[str
     async with DBSession(SessionLocal) as db:
         query = text("""
             SELECT uuid, document, cmetadata FROM langchain_pg_embedding
-            WHERE account_id = :account_id AND is_graph_processed = false
+            WHERE account_id = :account_id 
+            AND (is_graph_processed = false OR is_graph_processed IS NULL)
+            AND cmetadata->>'type' IN ('user_memory', 'user_memory_proactive_llm', 'agent_memory', 'chat_summary')
             ORDER BY cmetadata->>'created_at' ASC
             LIMIT :limit
         """)
@@ -106,7 +110,8 @@ async def process_memory_batches(account_id: str):
                         "memory_type": mem.get('cmetadata', {}).get('type', 'general'),
                         "category": mem.get('cmetadata', {}).get('category'),
                         "created_at": mem.get('cmetadata', {}).get('created_at'),
-                        "original_uuid": str(mem.get('uuid'))
+                        "original_uuid": str(mem.get('uuid')),
+                        "account_id": account_id # Ensure account_id is in metadata too
                     }
                 } for mem in memories_to_process
             ]
@@ -115,11 +120,14 @@ async def process_memory_batches(account_id: str):
             graph_db.connect()
             graph_integration = GraphIntegration(graph_db)
             
-            await graph_integration.process_documents(
-                documents=documents,
-                dataset_name=f"agent_memories_{account_id.replace('-', '_')}",
-                processing_mode="hybrid"
-            )
+            async with DBSession(SessionLocal) as db_session:
+                await graph_integration.process_documents(
+                    db_session=db_session,
+                    documents=documents,
+                    dataset_name="Agent Memories",
+                    account_id=account_id,
+                    processing_mode="hybrid"
+                )
 
             memory_ids = [mem['uuid'] for mem in memories_to_process]
             await mark_memories_as_processed(memory_ids)

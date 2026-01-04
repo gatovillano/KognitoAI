@@ -231,9 +231,14 @@ class ContactProfileTool(BaseTool):
                     return f"No se encontró ningún perfil con el nombre '{name}'."
 
                 if event_id:
+                    try:
+                        event_id_int = int(event_id)
+                    except ValueError:
+                        return f"Error: El ID del evento '{event_id}' no es un número válido."
+
                     event = await db.scalar(
-                        select(AgendaEvent).where(
-                            AgendaEvent.id == event_id,
+                        select(AgendaEvent).options(selectinload(AgendaEvent.contact_profiles)).where(
+                            AgendaEvent.id == event_id_int,
                             AgendaEvent.account_id == uuid.UUID(self.account_id)
                         )
                     )
@@ -249,7 +254,7 @@ class ContactProfileTool(BaseTool):
 
                 elif task_id:
                     task = await db.scalar(
-                        select(Task).where(
+                        select(Task).options(selectinload(Task.contact_profiles)).where(
                             Task.id == uuid.UUID(task_id),
                             Task.account_id == uuid.UUID(self.account_id)
                         )

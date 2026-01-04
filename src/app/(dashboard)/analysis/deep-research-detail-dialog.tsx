@@ -1,14 +1,15 @@
 // src/app/(dashboard)/analysis/deep-research-detail-dialog.tsx
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { FileText, Target, ExternalLink, Lightbulb, Search } from 'lucide-react';
+import { FileText, Target, ExternalLink, Lightbulb, Search, MessageSquare } from 'lucide-react';
 import { Analysis, DeepResearchAnalysisResult } from '@/lib/models'; // Import DeepResearchAnalysisResult
+import { ContextualChat } from '@/components/ContextualChat';
 
 interface DeepResearchDetailDialogProps {
   analysis: Analysis;
@@ -17,6 +18,7 @@ interface DeepResearchDetailDialogProps {
 }
 
 export function DeepResearchDetailDialog({ analysis, isOpen, onOpenChange }: DeepResearchDetailDialogProps) {
+  const [isChatOpen, setIsChatOpen] = useState(false);
   const deepResearchResult = analysis.result as DeepResearchAnalysisResult;
 
   if (!deepResearchResult || !deepResearchResult.final_report) {
@@ -50,17 +52,46 @@ export function DeepResearchDetailDialog({ analysis, isOpen, onOpenChange }: Dee
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl backdrop-blur-2xl bg-card/95 border-border/50 shadow-2xl">
+      <DialogContent
+        className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl backdrop-blur-2xl bg-card/95 border-border/50 shadow-2xl"
+        onPointerDownOutside={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('.contextual-chat-container')) {
+            e.preventDefault();
+          }
+        }}
+        onInteractOutside={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('.contextual-chat-container')) {
+            e.preventDefault();
+          }
+        }}
+        onFocusOutside={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('.contextual-chat-container')) {
+            e.preventDefault();
+          }
+        }}
+      >
         <DialogHeader className="p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Badge variant="secondary" className="rounded-full px-3 text-[10px] font-bold tracking-widest uppercase">Investigación Profunda</Badge>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <Badge variant="secondary" className="rounded-full px-3 text-[10px] font-bold tracking-widest uppercase">Investigación Profunda</Badge>
+              </div>
+              <DialogTitle className="text-3xl font-black tracking-tight leading-tight">
+                {analysis.title || "Informe de Investigación Profunda"}
+              </DialogTitle>
+              <DialogDescription className="text-base">
+                Resultados detallados de la investigación profunda asistida por IA.
+              </DialogDescription>
+            </div>
+            <div className="flex-shrink-0">
+              <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(true)} className="text-muted-foreground hover:text-primary hover:bg-primary/10" title="Chatear con esta investigación">
+                <MessageSquare className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
-          <DialogTitle className="text-3xl font-black tracking-tight leading-tight">
-            {analysis.title || "Informe de Investigación Profunda"}
-          </DialogTitle>
-          <DialogDescription className="text-base">
-            Resultados detallados de la investigación profunda asistida por IA.
-          </DialogDescription>
         </DialogHeader>
         
         <div className="py-2">
@@ -128,7 +159,7 @@ export function DeepResearchDetailDialog({ analysis, isOpen, onOpenChange }: Dee
         </div>
         
         <DialogFooter className="p-4 border-t border-border/10">
-          <Button 
+          <Button
             onClick={() => onOpenChange(false)}
             variant="ghost"
             className="rounded-xl"
@@ -136,6 +167,18 @@ export function DeepResearchDetailDialog({ analysis, isOpen, onOpenChange }: Dee
             Cerrar
           </Button>
         </DialogFooter>
+
+        {/* Chat Contextual para la Investigación Profunda - Movido dentro de DialogContent */}
+        <ContextualChat
+          isOpen={isChatOpen}
+          onClose={() => setIsChatOpen(false)}
+          context={{
+            type: 'analysis',
+            id: analysis.id,
+            snapshot: analysis
+          }}
+          title={analysis.title || "Investigación Profunda"}
+        />
       </DialogContent>
     </Dialog>
   );

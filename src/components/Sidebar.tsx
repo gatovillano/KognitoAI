@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Plus, MessageSquare, BookMarked, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical, FolderKanban, Settings, BarChart3, Smartphone, User, Image as ImageIcon, ClipboardList } from 'lucide-react';
+import { Plus, MessageSquare, Brain, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical, FolderKanban, Settings, BarChart3, Smartphone, User, Image as ImageIcon, ClipboardList } from 'lucide-react';
 import Image from 'next/image';
 import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -383,7 +383,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
                   pathname?.startsWith('/rag') && "bg-primary/10 text-primary border border-primary/20"
                 )}
               >
-                <BookMarked className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
+                <Brain className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
                 {showToolText && <span className="text-sm font-medium">Conocimientos</span>}
               </Button>
             </Link>

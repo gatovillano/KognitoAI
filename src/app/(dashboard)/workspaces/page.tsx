@@ -81,11 +81,11 @@ export default function WorkspacesPage() {
   }
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-2 sm:p-4 md:p-8 max-w-7xl mx-auto overflow-x-hidden">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold flex items-center">
-            <Bot className="mr-3 h-8 w-8 text-primary" />
+          <h1 className="text-2xl sm:text-3xl font-bold flex items-center">
+            <Bot className="mr-3 h-6 w-6 sm:h-8 sm:w-8 text-primary" />
             Workspaces
             <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
               <Info className="h-4 w-4" />
@@ -95,7 +95,7 @@ export default function WorkspacesPage() {
         <Button size="lg" onClick={() => {
           setSelectedWorkspace(null);
           setIsDialogOpen(true);
-        }} className="bg-primary hover:bg-primary/90">
+        }} className="w-full sm:w-auto bg-primary hover:bg-primary/90">
           <Plus className="mr-2 h-5 w-5" />
           Nuevo Workspace
         </Button>
@@ -118,7 +118,7 @@ export default function WorkspacesPage() {
         </div>
       ) : (
         <>
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {workspaces.map((workspace) => (
               <Card key={workspace.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleCardClick(workspace.id)}>
                 <CardHeader className="pb-3">
@@ -130,10 +130,10 @@ export default function WorkspacesPage() {
                       <span className="font-semibold text-lg truncate">{workspace.name}</span>
                     </div>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="h-8 w-8 p-0 hover:bg-muted" 
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0 hover:bg-muted"
                         onClick={(e) => { e.stopPropagation(); handleEdit(workspace); }}
                         title="Editar workspace"
                       >
@@ -249,7 +249,7 @@ export default function WorkspacesPage() {
           <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
             <p><strong>¿Qué son los Workspaces?</strong></p>
             <p>Los workspaces son entornos aislados donde puedes configurar asistentes de IA con indicaciones de sistema específicas y gestionar colecciones de conocimientos exclusivas. Esto permite tener diferentes "personalidades" de IA y bases de conocimiento para distintas tareas o proyectos.</p>
-            
+
             <p><strong>Características Principales:</strong></p>
             <ul className="list-disc pl-5 space-y-2">
               <li><strong>Asistentes Personalizados:</strong> Configura asistentes de IA con prompts de sistema únicos para cada workspace.</li>
