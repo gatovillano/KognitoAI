@@ -8,7 +8,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Info, RefreshCcw, Search, ExternalLink, Brain, Network, GitGraph, Database, ArrowLeft, ChevronLeft, ChevronRight, X, Bookmark } from 'lucide-react';
+import { Loader2, Info, RefreshCcw, Search, ExternalLink, Brain, Network, GitGraph, Database, ArrowLeft, ChevronLeft, ChevronRight, X, Bookmark, ChevronDown } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from 'sonner';
 import dynamic from 'next/dynamic';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -365,7 +371,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
   };
 };
 
-export default function KnowledgeGraphPage() {
+export function GraphView() {
   const router = useRouter();
   const graphVisualizationRef = useRef<GraphVisualizationRef>(null); // Ref para el componente GraphVisualization
   const [graphQuery, setGraphQuery] = useState('');
@@ -609,12 +615,9 @@ export default function KnowledgeGraphPage() {
   return (
     <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-8 flex flex-col h-full">
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" onClick={() => router.push('/analysis')} className="h-8 w-8 text-muted-foreground">
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
-        <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
+        <h2 className="text-3xl font-bold tracking-tight">
           Grafos de Conocimiento
-        </h1>
+        </h2>
         <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
           <Info className="h-5 w-5" />
         </Button>
@@ -625,36 +628,38 @@ export default function KnowledgeGraphPage() {
           <CardTitle className="flex items-center gap-2">
             <Network className="h-6 w-6" />
             Visualización del Grafo
-            <div className="flex items-center gap-2 ml-auto"> {/* Added div for grouping buttons */}
-              <Button variant="ghost" size="sm" onClick={() => setIsSavedNodesOpen(true)} className="relative">
-                <Bookmark className="h-4 w-4 mr-2" />
-                Lista ({savedNodes.length})
-                {savedNodes.length > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
-                  </span>
-                )}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={resetGraphFilter} disabled={isLoading}>
-                <X className="h-4 w-4 mr-2" /> Limpiar Filtro
-              </Button>
-              <Button variant="ghost" size="sm" onClick={refreshGraphData} disabled={isLoading}>
-                <RefreshCcw className="h-4 w-4 mr-2" /> Actualizar
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => {
-                updateFilteredNodeId(null); // Limpiar filtro de nodo
-                setSearchResults([]); // Limpiar resultados de búsqueda
-                setGraphQuery(''); // Limpiar query de búsqueda
-                setSearchError(null); // Limpiar error de búsqueda
-                setSelectedNode(null); // Limpiar nodo seleccionado
-                setSelectedEdge(null); // Limpiar edge seleccionado
-                setIsNodeDetailsOpen(false); // Cerrar sidebar de nodo
-                setIsEdgeDetailsOpen(false); // Cerrar sidebar de edge
-                graphVisualizationRef.current?.fitView(); // Ajustar la vista del grafo
-              }}>
-                <GitGraph className="h-4 w-4 mr-2" /> Vista Completa
-              </Button>
+            <div className="flex items-center gap-2 ml-auto">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-2">
+                    Acciones <ChevronDown className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem onClick={() => setIsSavedNodesOpen(true)} className="cursor-pointer">
+                    <Bookmark className="h-4 w-4 mr-2" /> Lista ({savedNodes.length})
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={resetGraphFilter} disabled={isLoading} className="cursor-pointer">
+                    <X className="h-4 w-4 mr-2" /> Limpiar Filtro
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={refreshGraphData} disabled={isLoading} className="cursor-pointer">
+                    <RefreshCcw className="h-4 w-4 mr-2" /> Actualizar
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => {
+                    updateFilteredNodeId(null);
+                    setSearchResults([]);
+                    setGraphQuery('');
+                    setSearchError(null);
+                    setSelectedNode(null);
+                    setSelectedEdge(null);
+                    setIsNodeDetailsOpen(false);
+                    setIsEdgeDetailsOpen(false);
+                    graphVisualizationRef.current?.fitView();
+                  }} className="cursor-pointer">
+                    <GitGraph className="h-4 w-4 mr-2" /> Vista Completa
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </CardTitle>
         </CardHeader>

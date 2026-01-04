@@ -237,9 +237,10 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
 
       networkRef.current = new Network(visJsContainer.current, data, options);
 
-      // Evento de clic en nodo
+      // Eventos de clic
       networkRef.current.on("click", (properties) => {
         if (properties.nodes.length > 0 && onNodeClick && nodesDatasetRef.current) {
+          // Clic en Nodo
           const nodeId = properties.nodes[0];
           const rawClickedNode = nodesDatasetRef.current.get(nodeId);
           let clickedNode: VisGraphNode | undefined;
@@ -254,21 +255,8 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
             console.log("🔍 Node clicked:", clickedNode);
             onNodeClick(clickedNode);
           }
-        }
-      });
-
-      // Evento de doble clic en nodo
-      networkRef.current.on("doubleClick", (properties) => {
-        if (properties.nodes.length > 0 && onNodeDoubleClick) {
-          const nodeId = properties.nodes[0];
-          onNodeDoubleClick(nodeId);
-        }
-      });
-
-      // Evento de clic en arista
-      networkRef.current.on("click", (properties) => {
-        // Si se hizo clic en una arista (edge)
-        if (properties.edges.length > 0 && properties.nodes.length === 0 && onEdgeClick && edgesDatasetRef.current) {
+        } else if (properties.edges.length > 0 && properties.nodes.length === 0 && onEdgeClick && edgesDatasetRef.current) {
+          // Clic en Arista
           const edgeId = properties.edges[0];
           const rawClickedEdge = edgesDatasetRef.current.get(edgeId);
           let clickedEdge: VisGraphEdge | undefined;
@@ -282,6 +270,14 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
           if (clickedEdge) {
             onEdgeClick(clickedEdge);
           }
+        }
+      });
+
+      // Evento de doble clic en nodo
+      networkRef.current.on("doubleClick", (properties) => {
+        if (properties.nodes.length > 0 && onNodeDoubleClick) {
+          const nodeId = properties.nodes[0];
+          onNodeDoubleClick(nodeId);
         }
       });
 

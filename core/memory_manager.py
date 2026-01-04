@@ -409,6 +409,10 @@ async def get_relevant_memories(
         if content_types is None:
             content_types = ["user_memories", "user_documents", "user_notes"]
         
+        # Asegurar que explicit_document_ids sean strings para evitar errores de validación de Pydantic
+        if explicit_document_ids:
+            explicit_document_ids = [str(doc_id) for doc_id in explicit_document_ids]
+        
         class KognitoPGVectorRetriever(BaseRetriever):
             
             # collection_id: uuid.UUID # Eliminado

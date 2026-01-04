@@ -7,7 +7,21 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { ArrowLeft, Bot, Plus, MessageSquare, BookMarked, MoreVertical, Sparkles, Calendar, Notebook, ListTodo, Lightbulb } from 'lucide-react';
+import {
+  ArrowLeft,
+  Bot,
+  Plus,
+  MessageSquare,
+  BookMarked,
+  MoreVertical,
+  Sparkles,
+  Calendar,
+  Notebook,
+  ListTodo,
+  Lightbulb,
+  Share2,
+  Search
+} from 'lucide-react';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import { Analysis } from '@/lib/models';
 import { AnalysisDetailDialog } from '../../analysis/analysis-detail-dialog';
@@ -227,7 +241,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
 
       setWorkspace(wsResponse.data);
       setCollections(collectionsResponse.data);
-      
+
       const items = itemsResponse.data;
       setAgendaEvents(items.filter((item: any) => item.type === 'event'));
       setTasks(items.filter((item: any) => item.type === 'task'));
@@ -628,41 +642,38 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   return (
     // <DndProvider backend={HTML5Backend}>
     <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
         <div className="flex items-center gap-3">
-          <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
-            <Bot className="h-6 w-6 text-primary" />
+          <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+            <Bot className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
           </div>
-          <div>
-            <h1 className="text-3xl font-bold">{workspace.name}</h1>
-            <p className="text-muted-foreground">Espacio de trabajo especializado</p>
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-3xl font-bold truncate">{workspace.name}</h1>
+            <p className="text-xs sm:text-sm text-muted-foreground truncate">Espacio de trabajo especializado</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setIsShareWorkspaceDialogOpen(true)}>
-            <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-            </svg>
-            Compartir Workspace
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <Button variant="outline" size="sm" onClick={() => setIsShareWorkspaceDialogOpen(true)} className="flex-1 sm:flex-none text-xs sm:text-sm">
+            <Share2 className="mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            <span className="hidden xs:inline">Compartir</span>
+            <span className="xs:hidden">Compartir</span>
           </Button>
-          <Button variant="outline" onClick={() => router.push('/workspaces')}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Volver a Workspaces
+          <Button variant="outline" size="sm" onClick={() => router.push('/workspaces')} className="flex-1 sm:flex-none text-xs sm:text-sm">
+            <ArrowLeft className="mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            Volver
           </Button>
         </div>
       </div>
 
       <div className="mb-8">
         <div className="relative">
-          <svg className="absolute left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+          <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             type="text"
             placeholder="Buscar en chats y documentos..."
             value={searchTerm}
             onChange={handleSearchChange}
-            className="pl-12 h-12 rounded-full bg-card border-0 shadow-sm focus:ring-2 focus:ring-primary/20"
+            className="pl-12 h-10 sm:h-12 rounded-full bg-card border-0 shadow-sm focus:ring-2 focus:ring-primary/20 text-sm sm:text-base"
           />
         </div>
       </div>
@@ -670,11 +681,11 @@ export default function WorkspaceDashboard({ params }: PageProps) {
       <div className="mb-12">
         <div className="mb-6">
           <div>
-            <h2 className="text-2xl font-semibold flex items-center">
-              <MessageSquare className="mr-3 h-6 w-6 text-primary" />
-              Chats en este Workspace
+            <h2 className="text-xl sm:text-2xl font-semibold flex items-center">
+              <MessageSquare className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+              Chats del Workspace
             </h2>
-            <p className="text-muted-foreground mt-1">Conversaciones específicas de este espacio</p>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">Conversaciones específicas de este espacio</p>
           </div>
         </div>
 
@@ -698,7 +709,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
             )}
           </div>
         ) : (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
             <Card
               className="group border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center text-center p-6 cursor-pointer min-h-[180px]"
               onClick={handleNewChat}
@@ -805,7 +816,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
             </Card>
           </div>
         ) : (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
             <Card
               className="group border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center text-center p-6 cursor-pointer"
               onClick={() => setCreateCollectionDialogOpen(true)}
@@ -892,33 +903,33 @@ export default function WorkspaceDashboard({ params }: PageProps) {
       <div className="mb-12">
         <div className="mb-6">
           <div>
-            <h2 className="text-2xl font-semibold flex items-center">
-              <Calendar className="mr-3 h-6 w-6 text-primary" />
+            <h2 className="text-xl sm:text-2xl font-semibold flex items-center">
+              <Calendar className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 text-primary" />
               Agenda del Workspace
             </h2>
-            <p className="text-muted-foreground mt-1">Eventos y tareas programadas para este espacio</p>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">Eventos y tareas programadas</p>
           </div>
         </div>
-        <div className="flex justify-between items-center mb-4">
-          <div>
-            <Button variant={viewMode === 'list' ? 'default' : 'outline'} onClick={() => setViewMode('list')} className="mr-2">Lista</Button>
-            <Button variant={viewMode === 'kanban' ? 'default' : 'outline'} onClick={() => setViewMode('kanban')} className="mr-2">Kanban</Button>
-            <Button variant={viewMode === 'gantt' ? 'default' : 'outline'} onClick={() => setViewMode('gantt')}>Gantt</Button>
+        <div className="flex flex-col gap-4 mb-6">
+          <div className="flex bg-muted/50 p-1 rounded-lg w-fit">
+            <Button variant={viewMode === 'list' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('list')} className="text-xs px-3">Lista</Button>
+            <Button variant={viewMode === 'kanban' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('kanban')} className="text-xs px-3">Kanban</Button>
+            <Button variant={viewMode === 'gantt' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('gantt')} className="text-xs px-3">Gantt</Button>
           </div>
-          <div>
-            <Button variant="outline" onClick={() => {
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => {
               setSelectedEvent(null);
               setIsEventDialogOpen(true);
-            }} className="mr-2">
-              <Plus className="mr-2 h-4 w-4" />
-              Nuevo Evento
+            }} className="flex-1 sm:flex-none text-xs">
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              Evento
             </Button>
-            <Button variant="outline" onClick={() => {
+            <Button variant="outline" size="sm" onClick={() => {
               setSelectedTask(null);
               setIsTaskDialogOpen(true);
-            }}>
-              <Plus className="mr-2 h-4 w-4" />
-              Nueva Tarea
+            }} className="flex-1 sm:flex-none text-xs">
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              Tarea
             </Button>
           </div>
         </div>
@@ -944,38 +955,38 @@ export default function WorkspaceDashboard({ params }: PageProps) {
 
       {/* Notes Section (NEW) */}
       <div className="mb-12">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
-            <h2 className="text-2xl font-semibold flex items-center">
-              <Notebook className="mr-3 h-6 w-6 text-primary" />
+            <h2 className="text-xl sm:text-2xl font-semibold flex items-center">
+              <Notebook className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 text-primary" />
               Notas del Workspace
             </h2>
-            <p className="text-muted-foreground mt-1">Notas y apuntes específicos de este espacio</p>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">Notas y apuntes específicos</p>
           </div>
-          <div className="flex items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline">
-                  Categoría: {selectedNoteCategory}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {uniqueNoteCategories.map(category => (
-                  <DropdownMenuItem key={category} onClick={() => setSelectedNoteCategory(category)}>
-                    {category}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button variant="outline" onClick={handleAnalyzeAllNotes} disabled={notes.length === 0}>
-              <Lightbulb className="mr-2 h-4 w-4" />
-              Analizar Notas
-            </Button>
-            <Button variant="outline" onClick={() => setIsNoteDialogOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Nueva Nota
-            </Button>
-          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 mb-6">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="text-xs">
+                Categoría: {selectedNoteCategory}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {uniqueNoteCategories.map(category => (
+                <DropdownMenuItem key={category} onClick={() => setSelectedNoteCategory(category)}>
+                  {category}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button variant="outline" size="sm" onClick={handleAnalyzeAllNotes} disabled={notes.length === 0} className="text-xs">
+            <Lightbulb className="mr-1.5 h-3.5 w-3.5 text-yellow-500" />
+            Analizar
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setIsNoteDialogOpen(true)} className="text-xs ml-auto sm:ml-0">
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            Nueva Nota
+          </Button>
         </div>
         {filteredNotes.length === 0 ? (
           <div className="text-center py-16 border-2 border-dashed border-border rounded-xl">
@@ -994,7 +1005,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
             )}
           </div>
         ) : (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
             {filteredNotesByCategory.map((note) => (
               <Card key={note.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleNoteClick(note)}>
                 <CardHeader className="pb-3">
@@ -1227,6 +1238,5 @@ export default function WorkspaceDashboard({ params }: PageProps) {
         onOpenChange={setIsAnalysisResultDialogOpen}
       />
     </div>
-    // </DndProvider>
   );
 }

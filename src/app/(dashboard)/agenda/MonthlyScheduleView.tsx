@@ -51,17 +51,18 @@ const EventCard: React.FC<EventCardProps> = ({ event, onEditEvent }) => {
     <div
       key={event.id}
       ref={ref}
-      className="p-1 rounded-md cursor-pointer hover:opacity-80 text-blue-900"
-      style={{ backgroundColor: event.workspace_color || '#DBEAFE', opacity: isDragging ? 0.5 : 1 }}
-      onClick={(e) => { e.stopPropagation(); onEditEvent(event as AgendaEvent); }} // Evitar que el clic se propague al día
+      className="p-1.5 rounded-lg cursor-pointer hover:scale-[1.02] transition-all duration-200 shadow-sm border border-white/10 group"
+      style={{
+        backgroundColor: event.workspace_color ? `${event.workspace_color}25` : 'rgba(59, 130, 246, 0.1)',
+        color: event.workspace_color || '#3b82f6',
+        opacity: isDragging ? 0.5 : 1
+      }}
+      onClick={(e) => { e.stopPropagation(); onEditEvent(event as AgendaEvent); }}
     >
-      <p className="font-semibold truncate">{event.summary}</p>
-      {'event_datetime_local' in event && (
-        <div className="flex items-center mt-1">
-          <Clock className="h-3 w-3 mr-1" />
-          {new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-        </div>
-      )}
+      <div className="flex items-center gap-1.5">
+        <div className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
+        <p className="font-black text-[10px] uppercase tracking-tighter truncate">{event.summary}</p>
+      </div>
     </div>
   );
 };
@@ -89,24 +90,23 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onEditTask, onToggleTaskCompl
     <div
       key={task.id}
       ref={ref}
-      className={`p-1 rounded-md ${task.is_completed ? 'bg-green-100 text-green-800 line-through' : 'bg-yellow-100 text-yellow-800'} ${isPastDue ? 'bg-red-200 text-red-800' : ''} cursor-pointer hover:opacity-80`}
+      className={`p-1.5 rounded-lg cursor-pointer hover:scale-[1.02] transition-all duration-200 shadow-sm border border-white/5 ${task.is_completed
+        ? 'bg-green-500/10 text-green-600 dark:text-green-400 line-through'
+        : isPastDue
+          ? 'bg-red-500/10 text-red-600 dark:text-red-400'
+          : 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400'
+        }`}
       style={{ opacity: isDragging ? 0.5 : 1 }}
-      onClick={(e) => { e.stopPropagation(); onEditTask(task as TaskResponse); }} // Evitar que el clic se propague al día
+      onClick={(e) => { e.stopPropagation(); onEditTask(task as TaskResponse); }}
     >
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1.5">
         <Checkbox
           checked={task.is_completed}
           onCheckedChange={() => onToggleTaskCompleted(task as TaskResponse)}
-          className="h-3 w-3"
+          className="h-3 w-3 rounded-sm border-current/30"
         />
-        <p className="font-semibold flex-grow truncate">{(task as TaskResponse).description}</p>
+        <p className="font-bold text-[10px] uppercase tracking-tighter truncate">{(task as TaskResponse).description}</p>
       </div>
-      {task.end_date && (
-        <div className="flex items-center mt-1">
-          <Clock className="h-3 w-3 mr-1" />
-          {format(new Date(task.end_date), 'HH:mm', { locale: es })}
-        </div>
-      )}
     </div>
   );
 };
@@ -148,7 +148,7 @@ const DayCell: React.FC<DayCellProps> = ({
           return;
         }
         if (item.type === 'event') {
-          onMoveEvent(item.id, day); // item.id ya es string
+          onMoveEvent(item.id, day);
         } else if (item.type === 'task') {
           onMoveTask(item.id, day);
         }
@@ -164,13 +164,14 @@ const DayCell: React.FC<DayCellProps> = ({
     <div
       key={day.toISOString()}
       ref={dropRef}
-      className={`flex flex-col border rounded-lg p-2 min-h-[100px] ${!isCurrentMonth ? 'text-gray-400' : ''} ${isTodayDay ? 'border-blue-500 ring-2 ring-blue-500' : ''} ${isOver ? 'bg-blue-50' : ''}`}
-      onClick={() => onCreateEvent(day)} // Manejador de clic para crear evento
+      className={`group flex flex-col border border-border/40 rounded-2xl p-2 min-h-[120px] transition-all duration-300 ${!isCurrentMonth ? 'opacity-30 grayscale' : 'bg-card/20 hover:bg-card/40'
+        } ${isTodayDay ? 'ring-2 ring-primary bg-primary/5 border-primary/50' : ''} ${isOver ? 'bg-primary/20 scale-[0.98]' : ''}`}
+      onClick={() => onCreateEvent(day)}
     >
-      <div className={`text-right font-medium mb-2 ${isTodayDay ? 'text-blue-600' : ''}`}>
+      <div className={`text-right font-black text-xs mb-2 transition-colors ${isTodayDay ? 'text-primary' : 'text-muted-foreground/60 group-hover:text-foreground'}`}>
         {format(day, 'd')}
       </div>
-      <div className="flex-grow space-y-1 overflow-y-auto text-xs">
+      <div className="flex-grow space-y-1.5 overflow-y-auto custom-scrollbar pr-1">
         {dayEvents.map(event => (
           <EventCard key={event.id} event={event} onEditEvent={onEditEvent} />
         ))}
@@ -182,9 +183,6 @@ const DayCell: React.FC<DayCellProps> = ({
             onToggleTaskCompleted={onToggleTaskCompleted}
           />
         ))}
-        {dayEvents.length === 0 && dayTasks.length === 0 && (
-          <p className="text-center text-muted-foreground py-4">Sin elementos</p>
-        )}
       </div>
     </div>
   );
@@ -289,31 +287,31 @@ export function MonthlyScheduleView({
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full space-y-6">
       {/* Navegación del mes */}
-      <div className="flex items-center justify-between mb-4 shrink-0">
-        <Button variant="ghost" size="icon" onClick={handlePreviousMonth}>
-          <ChevronLeft className="h-5 w-5" />
+      <div className="flex items-center justify-between shrink-0 bg-card/40 backdrop-blur-md p-2 rounded-2xl border border-border/40">
+        <Button variant="ghost" size="icon" onClick={handlePreviousMonth} className="h-10 w-10 rounded-xl hover:bg-primary/10 hover:text-primary transition-all">
+          <ChevronLeft className="h-6 w-6" />
         </Button>
-        <h2 className="text-xl font-semibold">
+        <h2 className="text-xl font-black tracking-tighter uppercase">
           {format(currentDate, 'MMMM yyyy', { locale: es })}
         </h2>
-        <Button variant="ghost" size="icon" onClick={handleNextMonth}>
-          <ChevronRight className="h-5 w-5" />
+        <Button variant="ghost" size="icon" onClick={handleNextMonth} className="h-10 w-10 rounded-xl hover:bg-primary/10 hover:text-primary transition-all">
+          <ChevronRight className="h-6 w-6" />
         </Button>
       </div>
 
       {/* Nombres de los días de la semana */}
-      <div className="grid grid-cols-7 gap-2 mb-2">
-        {['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'].map(dayName => (
-          <div key={dayName} className="text-center font-medium text-sm">
+      <div className="grid grid-cols-7 gap-4 px-2">
+        {['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(dayName => (
+          <div key={dayName} className="text-center font-black text-[10px] uppercase tracking-[0.2em] text-muted-foreground/60">
             {dayName}
           </div>
         ))}
       </div>
 
       {/* Cuadrícula del mes */}
-      <div className="flex-grow grid grid-cols-7 gap-2 overflow-auto border rounded-lg p-2">
+      <div className="flex-grow grid grid-cols-7 gap-3 overflow-auto custom-scrollbar pr-2">
         {daysInMonthView.map(day => {
           const dayEvents = filterItemsByDay(events, day);
           const dayTasks = filterItemsByDay(tasks, day);

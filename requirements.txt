@@ -116,4 +116,5 @@ pendulum
 attrs
 rich
 click
-websockets
+websocketsopenpyxl>=3.1.0
+odfpy>=1.4.1

@@ -363,3 +363,13 @@ Se solucionaron tres errores críticos que afectaban la experiencia del usuario 
     2. Se eliminaron los 457 registros que tenían dimensión 384: `DELETE FROM langchain_pg_embedding WHERE vector_dims(embedding) = 384;`.
     3. Se verificó que la tabla de `notas` no tuviera el mismo problema.
     Esto restauró la consistencia de la tabla y permitió que las búsquedas semánticas volvieran a funcionar con el modelo de 768 dimensiones.
+
+---
+
+## 01-01-2026 - `AttributeError: 'PostgresChatMessageHistory' object has no attribute 'cursor'` en el destructor
+
+- **Error**: Se producían múltiples errores `AttributeError: 'PostgresChatMessageHistory' object has no attribute 'cursor'` en los logs, específicamente dentro del método `__del__` de la clase.
+- **Causa**: Este error ocurre cuando la inicialización (`__init__`) de `PostgresChatMessageHistory` falla (por ejemplo, debido a un fallo de conexión con la base de datos o un timeout al intentar crear la tabla de historial). Al fallar el `__init__`, el atributo `self.cursor` nunca se llega a crear. Cuando el recolector de basura de Python intenta destruir el objeto "roto", el método `__del__` intenta acceder a `self.cursor` para cerrarlo, disparando la excepción.
+- **Solución**: Se implementó una solución en dos niveles:
+    1. **Monkey Patch Preventivo**: Se creó un sistema de parches en `utils/patches.py` que se aplica al inicio de la aplicación (`run_api.py` y `api/main.py`). Este parche redefine el método `PostgresChatMessageHistory.__del__` para que verifique la existencia del atributo `cursor` antes de intentar cerrarlo, evitando así que el error inunde los logs.
+    2. **Robustez con Reintentos**: Se envolvió la instanciación de `PostgresChatMessageHistory` en bloques `try-except` con una lógica de hasta 3 reintentos y esperas de 1 segundo entre ellos en los puntos críticos de `api/chat.py` y `core/agent.py`. Esto ayuda a mitigar fallos temporales de conexión y asegura que el objeto se inicialice correctamente antes de ser usado.

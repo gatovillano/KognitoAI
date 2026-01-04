@@ -35,14 +35,10 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
             documents_to_process = []
 
             # Extraer texto y metadatos para todos los archivos en paralelo
-            # Usamos run_in_executor para tareas CPU-bound como la extracción de texto
-            loop = asyncio.get_running_loop()
             extraction_tasks = []
             for file_data in file_data_list:
                 file_name_str = file_data.get('filename', 'unknown_file')
-                extraction_tasks.append(loop.run_in_executor(
-                    None,
-                    extract_text_and_metadata_from_document,
+                extraction_tasks.append(extract_text_and_metadata_from_document(
                     file_name_str,
                     file_data['content']
                 ))

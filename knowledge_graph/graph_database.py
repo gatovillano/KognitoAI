@@ -219,3 +219,16 @@ class GraphDB:
         )
         params = {"source_val": source_prop_value, "target_val": target_prop_value, "props": properties}
         await self.execute_query(query, parameters=params)
+
+    async def get_available_datasets(self, account_id: str) -> List[Dict[str, Any]]:
+        """
+        Obtiene la lista de datasets únicos disponibles para un account_id.
+        """
+        query = """
+        MATCH (n)
+        WHERE (n.account_id = $account_id OR n.account_id IS NULL)
+          AND n.dataset_name IS NOT NULL
+        RETURN DISTINCT n.dataset_name as name, count(n) as node_count
+        ORDER BY name
+        """
+        return await self.execute_query(query, parameters={"account_id": account_id})
