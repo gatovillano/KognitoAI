@@ -8,13 +8,24 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Info, RefreshCcw, Search, ExternalLink, Brain, Network, GitGraph, Database, ArrowLeft, ChevronLeft, ChevronRight, X, Bookmark, ChevronDown } from 'lucide-react';
+import { Loader2, Info, RefreshCcw, Search, ExternalLink, Brain, Network, GitGraph, Database, ArrowLeft, ChevronLeft, ChevronRight, X, Bookmark, ChevronDown, Trash2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { toast } from 'sonner';
 import dynamic from 'next/dynamic';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -368,6 +379,23 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     clearError: () => setError(null),
     resetGraphFilter, // Expose new function
     updateFilteredNodeId, // Expose toggle function
+    deleteDataset: async (datasetName: string) => {
+      try {
+        const response = await apiClient.delete(`/api/knowledge-graph/datasets/${encodeURIComponent(datasetName)}`);
+        if (response.data.success) {
+          toast.success(`Dataset "${datasetName}" eliminado correctamente.`);
+          await loadAvailableDatasets();
+          return true;
+        } else {
+          toast.error(response.data.error || 'Error al eliminar el dataset');
+          return false;
+        }
+      } catch (err) {
+        console.error('Error deleting dataset:', err);
+        toast.error('Error al eliminar el dataset');
+        return false;
+      }
+    }
   };
 };
 
@@ -420,6 +448,7 @@ export function GraphView() {
     clearError,
     resetGraphFilter, // Get new function from hook
     updateFilteredNodeId, // Get setter function from hook
+    deleteDataset,
   } = useKnowledgeGraph(maxNodes, maxHops, selectedDataset, filters, processingMode);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -718,26 +747,64 @@ export function GraphView() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-            <div>
-              <Label htmlFor="dataset-select" className="mb-2 block flex items-center gap-2">
-                <Database className="h-4 w-4" />
-                Dataset
-              </Label>
-              <Select value={selectedDataset} onValueChange={setSelectedDataset}>
-                <SelectTrigger id="dataset-select" className="w-full">
-                  <SelectValue placeholder="Seleccionar dataset" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">
-                    Todos los datasets ({availableDatasets.reduce((sum, d) => sum + d.node_count, 0)} nodos)
-                  </SelectItem>
-                  {availableDatasets.map((dataset) => (
-                    <SelectItem key={dataset.name} value={dataset.name}>
-                      {dataset.name} ({dataset.node_count} nodos)
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <Label htmlFor="dataset-select" className="mb-2 block flex items-center gap-2">
+                  <Database className="h-4 w-4" />
+                  Dataset
+                </Label>
+                <Select value={selectedDataset} onValueChange={setSelectedDataset}>
+                  <SelectTrigger id="dataset-select" className="w-full max-w-[200px]">
+                    <SelectValue placeholder="Seleccionar dataset" className="truncate" />
+                  </SelectTrigger>
+                  <SelectContent className="max-w-[400px]">
+                    <SelectItem value="all">
+                      <span className="truncate block">
+                        Todos los datasets ({availableDatasets.reduce((sum, d) => sum + d.node_count, 0)} nodos)
+                      </span>
                     </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                    {availableDatasets.map((dataset) => (
+                      <SelectItem key={dataset.name} value={dataset.name}>
+                        <span className="truncate block">
+                          {dataset.name} ({dataset.node_count} nodos)
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {selectedDataset !== 'all' && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="outline" size="icon" className="text-destructive hover:bg-destructive/10 border-destructive/20 h-10 w-10 shrink-0">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>¿Eliminar dataset?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Esta acción eliminará permanentemente todos los nodos y relaciones asociados al dataset <strong>{selectedDataset}</strong> del grafo de conocimiento. Esta acción no se puede deshacer.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={async () => {
+                          const success = await deleteDataset(selectedDataset);
+                          if (success) {
+                            setSelectedDataset('all');
+                            refreshGraphData();
+                          }
+                        }}
+                        className="bg-destructive hover:bg-destructive/90"
+                      >
+                        Eliminar Dataset
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
             </div>
             <div>
               <Label htmlFor="processing-mode-select" className="mb-2 block flex items-center gap-2">

@@ -32,6 +32,7 @@ import { TablesView } from './tables-view';
 import { AnalysisResults } from '@/components/AnalysisResults';
 import { GraphView } from '@/components/GraphView';
 import { ContextualChat } from '@/components/ContextualChat';
+import GraphProgressIndicator, { GraphTask } from '@/components/GraphProgressIndicator';
 
 interface Collection {
   topic: string;
@@ -79,6 +80,7 @@ export default function RagCollectionsPage() {
   const [isDatasetDialogOpen, setIsDatasetDialogOpen] = useState(false);
   const [processingTopic, setProcessingTopic] = useState<string | null>(null);
   const [processingWorkspaceId, setProcessingWorkspaceId] = useState<string | null>(null);
+  const [graphTasks, setGraphTasks] = useState<GraphTask[]>([]);
 
   const { registerMessageHandler } = useWebSocketContext();
 
@@ -144,6 +146,22 @@ export default function RagCollectionsPage() {
           break;
         case 'upload_failed':
           onUploadFailed(message.data || message);
+          break;
+        case 'knowledge_graph_progress':
+          const graphData = message.data as GraphTask;
+          if (graphData && graphData.task_id) {
+            setGraphTasks(prev => {
+              const exists = prev.some(t => t.task_id === graphData.task_id);
+              if (exists) {
+                return prev.map(t => t.task_id === graphData.task_id ? { ...t, ...graphData } : t);
+              }
+              return [...prev, graphData];
+            });
+
+            if (graphData.is_complete) {
+              fetchCollections();
+            }
+          }
           break;
       }
     };
@@ -303,6 +321,19 @@ export default function RagCollectionsPage() {
     );
 
     try {
+      // Inicializar tarea localmente para feedback inmediato
+      const tempTaskId = `temp-${Date.now()}`;
+      setGraphTasks(prev => [...prev, {
+        task_id: tempTaskId,
+        phase: 'initializing',
+        message: 'Iniciando procesamiento...',
+        progress_percent: 0,
+        is_complete: false,
+        has_error: false,
+        processing_mode: mode,
+        topic: processingTopic || undefined
+      }]);
+
       // Determinar qué endpoint usar basado en el modo
       if (mode === 'conceptual') {
         // Modo Conceptual: Usar la herramienta de Cognee
@@ -314,15 +345,25 @@ export default function RagCollectionsPage() {
           documents: [],
           workspace_id: processingWorkspaceId || undefined  // Workspace de la colección específica
         };
-        await apiClient.post('/api/tools/run', payload);
+        const response = await apiClient.post('/api/tools/run', payload);
+
+        // Actualizar el ID de la tarea temporal con el real si viene en la respuesta
+        if (response.data?.task_id) {
+          setGraphTasks(prev => prev.map(t => t.task_id === tempTaskId ? { ...t, task_id: response.data.task_id } : t));
+        }
       } else {
         // Modo Híbrido (Estándar): Llamar al endpoint optimizado
-        await apiClient.post('/api/knowledge-graph/process-knowledge-graph-optimized', {
+        const response = await apiClient.post('/api/knowledge-graph/process-knowledge-graph-optimized', {
           workspace_id: processingWorkspaceId || undefined,
           dataset_name: datasetName,
           topic: processingTopic || undefined,  // Filtrar por colección específica
           force_reprocess: true
         });
+
+        // Actualizar el ID de la tarea temporal con el real
+        if (response.data?.task_id) {
+          setGraphTasks(prev => prev.map(t => t.task_id === tempTaskId ? { ...t, task_id: response.data.task_id } : t));
+        }
       }
 
       toast.success(
@@ -332,6 +373,8 @@ export default function RagCollectionsPage() {
     } catch (error) {
       console.error(error);
       toast.error("Error al iniciar el procesamiento del grafo.", { id: toastId });
+      // Limpiar tareas temporales en caso de error
+      setGraphTasks(prev => prev.filter(t => !t.task_id.startsWith('temp-')));
     } finally {
       setIsProcessingKnowledgeGraph(false);
       setProcessingTopic(null);
@@ -529,9 +572,15 @@ export default function RagCollectionsPage() {
         </div>
       </div>
 
-      {uploadTasks.length > 0 && (
-        <div className="fixed bottom-6 right-6 z-50 w-80">
-          <UploadProgressIndicator tasks={uploadTasks} />
+      {(uploadTasks.length > 0 || graphTasks.length > 0) && (
+        <div className="fixed bottom-6 right-6 z-50 w-80 space-y-4">
+          {uploadTasks.length > 0 && <UploadProgressIndicator tasks={uploadTasks} />}
+          {graphTasks.length > 0 && (
+            <GraphProgressIndicator
+              tasks={graphTasks}
+              onDismiss={(taskId) => setGraphTasks(prev => prev.filter(t => t.task_id !== taskId))}
+            />
+          )}
         </div>
       )}
 

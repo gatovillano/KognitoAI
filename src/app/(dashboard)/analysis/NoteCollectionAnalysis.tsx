@@ -86,7 +86,11 @@ const NoteCollectionAnalysis: React.FC<NoteCollectionAnalysisProps> = ({
               </CardHeader>
               <CardContent>
                 <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground leading-relaxed">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysis.collection_summary}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {typeof analysis.collection_summary === 'string'
+                      ? analysis.collection_summary
+                      : (analysis.collection_summary as any)?.summary || JSON.stringify(analysis.collection_summary)}
+                  </ReactMarkdown>
                 </div>
               </CardContent>
             </Card>
@@ -134,7 +138,11 @@ const NoteCollectionAnalysis: React.FC<NoteCollectionAnalysisProps> = ({
               </CardHeader>
               <CardContent>
                 <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground leading-relaxed">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysis.general_analysis}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {typeof analysis.general_analysis === 'string'
+                      ? analysis.general_analysis
+                      : (analysis.general_analysis as any)?.analysis || JSON.stringify(analysis.general_analysis)}
+                  </ReactMarkdown>
                 </div>
               </CardContent>
             </Card>
@@ -146,15 +154,15 @@ const NoteCollectionAnalysis: React.FC<NoteCollectionAnalysisProps> = ({
           )}
 
           {analysis.authorial_tone && (
-             <div className="mt-4">
-               <h4 className="text-md font-bold mb-2 flex items-center gap-2">
-                 <MessageSquare className="w-4 h-4 text-slate-500" />
-                 Tono Predominante
-               </h4>
-               <p className="text-sm text-muted-foreground bg-muted/30 p-3 rounded-lg border italic">
-                 {analysis.authorial_tone}
-               </p>
-             </div>
+            <div className="mt-4">
+              <h4 className="text-md font-bold mb-2 flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-slate-500" />
+                Tono Predominante
+              </h4>
+              <p className="text-sm text-muted-foreground bg-muted/30 p-3 rounded-lg border italic">
+                {analysis.authorial_tone}
+              </p>
+            </div>
           )}
         </TabsContent>
 

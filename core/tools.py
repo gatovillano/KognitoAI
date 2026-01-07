@@ -87,6 +87,8 @@ TableAnalysisTool = _import_tool_class("table_analysis_tool", "TableAnalysisTool
 AnalysisInterpreterTool = _import_tool_class("analysis_interpreter_tool", "AnalysisInterpreterTool")
 CypherTool = _import_tool_class("cypher_tool", "CypherTool")
 StructuredDataGeneratorTool = _import_tool_class("structured_data_generator_tool", "StructuredDataGeneratorTool")
+TavilySearchTool = _import_tool_class("tavily_search_tool", "TavilySearchTool")
+
 
 # Global singletons for shared dependencies
 _graph_db_instance = None
@@ -253,7 +255,7 @@ async def get_all_langchain_tools(
         SetReminderTool, UpdateDocumentMetadataTool, UpdateNoteTool, UpdateProfileTool,
         WebScraperTool, ScheduleToolExecutionTool, ListScheduledToolsTool, ContactProfileTool,
         WebSearchTool, HTMLGeneratorTool, ExecuteCommandTool, TableAnalysisTool,
-        AnalysisInterpreterTool, CypherTool, StructuredDataGeneratorTool
+        AnalysisInterpreterTool, CypherTool, StructuredDataGeneratorTool, TavilySearchTool
     ]
 
     all_instantiated_tools: List[Tool] = []

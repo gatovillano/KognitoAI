@@ -138,7 +138,19 @@ class KnowledgeGraphService:
                 workspace_id = getattr(request, 'workspace_id', workspace_id)
                 processing_mode = getattr(request, 'processing_mode', processing_mode)
                 
-                logger.info(f"📋 Extrayendo parámetros del request: topic={topic}, workspace_id={workspace_id}, processing_mode={processing_mode}")
+                # Si hay un topic, usarlo como dataset_name para mantener consistencia con la colección
+                if topic:
+                    from urllib.parse import unquote
+                    decoded_topic = unquote(topic)
+                    dataset_name = decoded_topic
+                    logger.info(f"🏷️ Forzando dataset_name a '{dataset_name}' basado en el topic de la colección")
+                
+                # Decodificar dataset_name si viene del topic y está URL encoded
+                elif dataset_name and '%' in dataset_name:
+                    from urllib.parse import unquote
+                    dataset_name = unquote(dataset_name)
+                
+                logger.info(f"📋 Extrayendo parámetros del request: topic={topic}, workspace_id={workspace_id}, processing_mode={processing_mode}, dataset_name={dataset_name}")
             
             # Asegurar que documents sea una lista vacía si es None
             if documents is None:
@@ -656,3 +668,50 @@ class KnowledgeGraphService:
             logger.error(f"❌ Error obteniendo metadatos: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
+    async def delete_dataset_flow(self, dataset_name: str, account_id: str) -> Dict[str, Any]:
+        """
+        Flujo para eliminar un dataset completo del grafo.
+        """
+        try:
+            logger.info(f"🗑️ Iniciando flujo de eliminación de dataset: {dataset_name}")
+            
+            # Asegurar que la conexión esté activa
+            if self.graph_db._driver is None or getattr(self.graph_db._driver, 'closed', True):
+                self.graph_db.connect()
+            
+            # Ejecutar eliminación en GraphDB
+            await self.graph_db.delete_dataset(dataset_name, account_id)
+            
+            return {
+                "success": True,
+                "message": f"Dataset '{dataset_name}' eliminado correctamente del grafo.",
+                "dataset_name": dataset_name
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error en flujo de eliminación de dataset: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def update_dataset_name_flow(self, old_dataset_name: str, new_dataset_name: str, account_id: str, file_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Flujo para actualizar el nombre de un dataset en el grafo.
+        """
+        try:
+            logger.info(f"🔄 Iniciando flujo de actualización de dataset: {old_dataset_name} -> {new_dataset_name}")
+            
+            # Asegurar que la conexión esté activa
+            if self.graph_db._driver is None or getattr(self.graph_db._driver, 'closed', True):
+                self.graph_db.connect()
+            
+            # Ejecutar actualización en GraphDB
+            result = await self.graph_db.update_dataset_name(old_dataset_name, new_dataset_name, account_id, file_name)
+            
+            return {
+                "success": True,
+                "message": f"Dataset actualizado correctamente en el grafo.",
+                "details": result
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error en flujo de actualización de dataset: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}

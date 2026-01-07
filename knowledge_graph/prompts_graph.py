@@ -17,7 +17,7 @@ CYPHER_GENERATION_PROMPT = """
     - Otros nombres (ej. `conceptual_graph`): Contienen conocimientos extraídos de documentos subidos.
     - **IMPORTANTE**: Si la pregunta es personal o sobre el historial, filtra por `dataset_name = 'Agent Memories'`. Si es técnica o sobre documentos, usa el dataset correspondiente o no filtres si no estás seguro.
 4.  **Relaciones Variables**: Utiliza `[r*1..2]` para explorar conexiones.
-5.  **RETURN**: Siempre devuelve el `path` o los nodos y relaciones (`n, r, m`).
+5.  **RETURN**: Para devolver caminos completos, usa la sintaxis `MATCH p = ... RETURN p`. NUNCA uses funciones inexistentes como `path(n, r, m)`. Si no usas una variable de camino, devuelve `n, r, m`.
 
 **Schema de la Base de Datos**:
 ```

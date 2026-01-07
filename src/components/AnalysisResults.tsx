@@ -48,6 +48,7 @@ const getAnalysisIcon = (type: string) => {
             return <FolderKanban className="h-5 w-5 text-green-500" />;
         case 'insight':
         case 'proactive_insight_manual':
+        case 'neural_insight':
             return <Lightbulb className="h-5 w-5 text-yellow-500" />;
         case 'code':
             return <Code className="h-5 w-5 text-orange-500" />;
@@ -75,6 +76,7 @@ const getAnalysisTypeLabel = (type: string) => {
         case 'collection': return 'Colección';
         case 'insight':
         case 'proactive_insight_manual': return 'Insight';
+        case 'neural_insight': return 'Neural Insight';
         case 'code': return 'Código';
         case 'semantic': return 'Semántico';
         case 'semantic_summary': return 'Resumen Semántico';
@@ -94,7 +96,8 @@ const getAnalysisTypeBadgeColor = (type: string) => {
         case 'document': return 'bg-blue-100 text-blue-800 border-blue-200';
         case 'collection': return 'bg-green-100 text-green-800 border-green-200';
         case 'insight':
-        case 'proactive_insight_manual': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+        case 'proactive_insight_manual':
+        case 'neural_insight': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
         case 'code': return 'bg-orange-100 text-orange-800 border-orange-200';
         case 'semantic':
         case 'semantic_summary': return 'bg-indigo-100 text-indigo-800 border-indigo-200';
@@ -263,6 +266,7 @@ export function AnalysisResults() {
         { value: 'collection', label: 'Colecciones' },
         { value: 'insight', label: 'Insights Proactivos' },
         { value: 'proactive_insight_manual', label: 'Insights Manuales' },
+        { value: 'neural_insight', label: 'Neural Insights' },
         { value: 'note_analysis', label: 'Notas' },
         { value: 'note_collection_analysis', label: 'Colecciones de Notas' },
         { value: 'code', label: 'Código' },
@@ -514,7 +518,7 @@ export function AnalysisResults() {
                                             <div className="mt-4 pt-3 border-t flex items-center justify-between text-[10px] text-muted-foreground">
                                                 <div className="flex items-center gap-1">
                                                     <Clock className="h-3 w-3" />
-                                                    {formatDate(analysis.created_at)}
+                                                    {analysis.created_at ? formatDate(analysis.created_at) : 'N/A'}
                                                 </div>
                                                 <Eye className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                                             </div>

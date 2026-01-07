@@ -30,6 +30,7 @@ import DeepResearchAnalysis from './DeepResearchAnalysis';
 import ProactiveInsightAnalysis from './ProactiveInsightAnalysis';
 import ComprehensiveWebAnalysis from './ComprehensiveWebAnalysis';
 import ScopedRagAnalysis from './ScopedRagAnalysis';
+import NeuralInsightAnalysis from './NeuralInsightAnalysis';
 
 
 const cleanAsterisks = (text: string) => {
@@ -149,6 +150,7 @@ const getAnalysisColorScheme = (type: AnalysisType) => {
     case 'insight':
     case 'proactive_insight_manual':
     case 'proactive_insight':
+    case 'neural_insight':
       return {
         color: 'yellow',
         cardBg: 'bg-yellow-50/50 border-yellow-100 dark:bg-yellow-900/10 dark:border-yellow-900/50',
@@ -726,7 +728,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  
+
   // Estados para el chat contextual
   const [isChatOpen, setIsChatOpen] = useState(false);
 
@@ -1141,6 +1143,17 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
           />
         );
 
+      case 'neural_insight':
+        return (
+          <NeuralInsightAnalysis
+            analysis={currentAnalysis}
+            play={play}
+            isLoading={isLoading}
+            isPlaying={isPlaying}
+            activeText={activeText || undefined}
+          />
+        );
+
       default:
         return (
           <div className="text-center py-10">
@@ -1342,7 +1355,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
         icon={simpleListIcon}
         colorClass={simpleListColor}
       />
-      
+
     </Dialog>
   );
 };

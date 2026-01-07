@@ -6,7 +6,7 @@ import { Separator } from '@/components/ui/separator';
 import { NoteAnalysisResult } from '@/lib/models';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { FileText, Target, Brain, Zap, Lightbulb, Info, ArrowRight } from 'lucide-react';
+import { FileText, Target, Brain, Zap, Lightbulb, Info, ArrowRight, Activity, MessageSquare } from 'lucide-react';
 import { InteractiveTag } from '@/components/analysis/InteractiveTag';
 
 import { SectionTTSButton } from './analysis-detail-dialog';

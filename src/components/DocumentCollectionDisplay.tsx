@@ -28,6 +28,7 @@ import AnalysisProgressIndicator from '@/components/AnalysisProgressIndicator';
 import { ShareDocumentDialog } from '@/app/(dashboard)/rag/share-document-dialog';
 import { CustomAnalysisDialog } from '@/app/(dashboard)/rag/custom-analysis-dialog';
 import { DatasetNameDialog } from '@/app/(dashboard)/rag/dataset-name-dialog';
+import { MoveToCollectionDialog } from '@/app/(dashboard)/rag/move-to-collection-dialog';
 import { CollectionSearch } from '@/components/CollectionSearch';
 import { ContextualChat } from '@/components/ContextualChat';
 
@@ -77,7 +78,9 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   const [documentToEdit, setDocumentToEdit] = useState<Document | null>(null);
   const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null);
   const [documentToShare, setDocumentToShare] = useState<Document | null>(null);
+  const [documentToMove, setDocumentToMove] = useState<Document | null>(null);
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const [isMoveOpen, setIsMoveOpen] = useState(false);
   const [highlightText, setHighlightText] = useState<string | undefined>(undefined);
 
   // Estados para análisis
@@ -570,7 +573,11 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
       setDocumentToShare(doc);
       setIsShareOpen(true);
     },
-    handleExtractTitleForDocument
+    handleExtractTitleForDocument,
+    (doc) => {
+      setDocumentToMove(doc);
+      setIsMoveOpen(true);
+    }
   ), [handleAnalyzeDocument, handleExtractTitleForDocument]);
 
   const router = useRouter();
@@ -715,6 +722,10 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                       setIsShareOpen(true);
                     }}
                     onExtractTitle={handleExtractTitleForDocument}
+                    onMoveToCollection={(doc) => {
+                      setDocumentToMove(doc);
+                      setIsMoveOpen(true);
+                    }}
                   />
                 ))}
               </div>
@@ -890,6 +901,14 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         onConfirm={handleConfirmProcessGraph}
         defaultTopic={processingTopic}
         workspaceId={processingWorkspaceId || undefined}
+      />
+
+      <MoveToCollectionDialog
+        isOpen={isMoveOpen}
+        onOpenChange={setIsMoveOpen}
+        document={documentToMove}
+        onSuccess={fetchPageData}
+        workspaceId={workspaceId}
       />
 
       <ContextualChat

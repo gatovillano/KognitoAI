@@ -51,6 +51,7 @@ def get_notes_manager(db: AsyncSession = Depends(get_db_session)) -> NotesManage
 class ListNotesRequest(BaseModel):
     search_term: Optional[str] = None
     workspace_id: Optional[str] = None
+    category: Optional[str] = None
     skip: int = 0
     limit: int = 10
 
@@ -450,7 +451,14 @@ async def list_notes_endpoint(
     """
     Devuelve todas las notas de un usuario, incluyendo personales y de equipos, o filtradas por workspace, con paginación.
     """
-    total, notes = await notes_manager.get_notes_as_dicts(current_account_id, request.search_term, workspace_id=request.workspace_id, skip=request.skip, limit=request.limit)
+    total, notes = await notes_manager.get_notes_as_dicts(
+        current_account_id, 
+        request.search_term, 
+        workspace_id=request.workspace_id, 
+        category=request.category,
+        skip=request.skip, 
+        limit=request.limit
+    )
     
     return PaginatedNotesResponse(total=total, notes=[NoteResponse(**note) for note in notes])
 

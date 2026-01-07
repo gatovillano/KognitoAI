@@ -1,6 +1,7 @@
 # telegram_client/websocket_client.py
 
 import asyncio
+import os
 import json
 import logging
 import websockets
@@ -26,7 +27,12 @@ class TelegramWebSocketClient:
         self.account_id = account_id
         self.token = token
         self.application = application # Guardar la instancia de Application
-        self.uri = f"{settings.api_server_url.replace('http', 'ws')}/ws/{self.account_id}?token={self.token}"
+        
+        # Forzar el uso de la dirección interna del contenedor 'core' en la red Docker
+        # Esto evita problemas con proxies externos y errores 502.
+        self.uri = f"ws://core:8000/ws/{self.account_id}?token={self.token}"
+        logger.info(f"Configurando WebSocket URI interna: {self.uri}")
+        
         self.websocket = None
         self.is_running = False
         self.accumulated_messages: Dict[str, str] = {}
@@ -46,7 +52,7 @@ class TelegramWebSocketClient:
                 await asyncio.sleep(5)
             except Exception as e:
                 logger.error(f"Error inesperado en el cliente WebSocket: {e}", exc_info=True)
-                self.is_running = False
+                await asyncio.sleep(5) # Evitar bucle rápido en caso de error inesperado
 
     async def listen_for_messages(self):
         """Escucha los mensajes entrantes del WebSocket."""
@@ -194,13 +200,21 @@ async def start_telegram_ws_client(application: Application):
     """Inicia el cliente WebSocket para el bot de Telegram."""
     global telegram_ws_client
     
+    if telegram_ws_client and telegram_ws_client.is_running:
+        logger.warning("El cliente WebSocket de Telegram ya está en ejecución. Omitiendo inicio.")
+        return
+
     bot_account_id = "telegram_bot_service"
     bot_token = _create_bot_jwt()
 
     telegram_ws_client = TelegramWebSocketClient(account_id=bot_account_id, token=bot_token, application=application)
+    telegram_ws_client.is_running = True # Marcar como corriendo inmediatamente para evitar condiciones de carrera
     asyncio.create_task(telegram_ws_client.connect())
 
-def stop_telegram_ws_client():
-    """Detiene el cliente WebSocket."""
+async def stop_telegram_ws_client():
+    """Detiene el cliente WebSocket de forma asíncrona."""
+    global telegram_ws_client
     if telegram_ws_client:
         telegram_ws_client.stop()
+        # Dar un pequeño margen para que la tarea de cierre se inicie
+        await asyncio.sleep(0.1)

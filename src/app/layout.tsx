@@ -1,15 +1,14 @@
 import type { Metadata } from "next";
-import { Lato } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { UserSettingsProvider } from "@/contexts/UserSettingsContext";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { Toaster } from "@/components/ui/sonner"; // Importar Toaster de sonner
 
-const lato = Lato({ 
-  subsets: ["latin"], 
+const inter = Inter({
+  subsets: ["latin"],
   variable: "--font-sans",
-  weight: ["400", "700", "900"] 
 });
 
 export const metadata: Metadata = {
@@ -23,7 +22,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode; }>) {
   return (
     <html lang="es" suppressHydrationWarning>
-      <body className={lato.className}>
+      <body className={inter.className}>
         <AuthProvider>
           <UserSettingsProvider>
             <ThemeProvider

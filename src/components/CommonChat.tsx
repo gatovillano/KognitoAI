@@ -19,6 +19,8 @@ import { ContextSelectorButton } from '@/components/ContextSelectorButton';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
 import { WebSocketMessage } from '@/hooks/useWebSocket'; // Importar WebSocketMessage
 import DeepResearchVisualizer from '@/components/DeepResearchVisualizer';
+import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
+import { Analysis } from '@/lib/models';
 
 // ... (interfaces remain the same) ...
 interface ToolStatusMessage {
@@ -34,11 +36,11 @@ interface ToolStatusMessage {
 }
 
 interface Source {
-  id: number;
+  id: number | string;
   title: string;
   url: string;
   snippet: string;
-  type: 'web' | 'document' | 'memory' | 'code' | 'database' | 'graph';
+  type: 'web' | 'document' | 'memory' | 'code' | 'database' | 'graph' | 'note';
   metadata?: Record<string, any>;
 }
 
@@ -192,6 +194,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [isAudioPaused, setIsAudioPaused] = useState(false);
   const [researchProgress, setResearchProgress] = useState(0);
   const [researchStatus, setResearchStatus] = useState('Iniciando investigación...');
+  const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
 
   // Refs to hold latest values for stable callbacks
   const isRespondingRef = useRef(isResponding);
@@ -287,15 +290,23 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               chunkMessageIndex = updatedMessages.length - 1; // Update index
             }
 
-            if (taskId && (data.chunk !== undefined || data.content !== undefined) && chunkMessageIndex !== -1) {
-              const textChunk = data.chunk !== undefined ? data.chunk : data.content;
-              console.log(`[CommonChat DEBUG] Appending chunk to message at index ${chunkMessageIndex}: "${textChunk}"`);
+            if (taskId && (data.chunk !== undefined || data.content !== undefined || (data as any).full_text !== undefined) && chunkMessageIndex !== -1) {
               const existingMessage = updatedMessages[chunkMessageIndex];
-              const newText = existingMessage.text + textChunk;
+              let newText = existingMessage.text;
+
+              if ((data as any).full_text !== undefined) {
+                newText = (data as any).full_text;
+              } else {
+                const textChunk = data.chunk !== undefined ? data.chunk : data.content;
+                newText += textChunk;
+              }
+
+              console.log(`[CommonChat DEBUG] Updating message at index ${chunkMessageIndex}. New text length: ${newText.length}`);
+
               updatedMessages[chunkMessageIndex] = {
                 ...existingMessage,
                 text: newText,
-                chunks: [...(existingMessage.chunks || []), textChunk],
+                chunks: [...(existingMessage.chunks || []), data.chunk !== undefined ? data.chunk : data.content],
               };
             } else {
               console.error("[CommonChat DEBUG] Dropping chunk. Data:", data, `Index: ${chunkMessageIndex}`);
@@ -314,6 +325,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               const finalMessage = updatedMessages[messageIndex];
               updatedMessages[messageIndex] = {
                 ...finalMessage,
+                text: (data as any).text || finalMessage.text, // Asegurar consistencia final
                 chunks: undefined, // Eliminar chunks una vez finalizado
                 taskId: undefined, // Eliminar taskId una vez finalizado
                 sources: (data as any).sources || finalMessage.sources || [], // Asegurar que las fuentes se persistan
@@ -772,6 +784,33 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     toast.info(`"${itemToRemove.name}" eliminado del contexto.`);
   }, []);
 
+  const handleSourceClick = useCallback(async (source: Source) => {
+    if (source.type === 'graph' && source.url.startsWith('analysis://')) {
+      const analysisId = source.url.replace('analysis://', '');
+      try {
+        toast.info('Cargando detalles del insight...');
+        const response = await apiClient.get(`/api/get-analysis-result/${analysisId}`);
+        const analysisData = response.data;
+
+        // Construct Analysis object from response
+        const analysis: Analysis = {
+          id: analysisData.id,
+          file_name: analysisData.file_name,
+          type: analysisData.analysis_type, // Map analysis_type to type
+          title: analysisData.file_name, // Use file_name as title
+          created_at: analysisData.created_at,
+          status: analysisData.status,
+          result_payload: analysisData.result_payload
+        };
+
+        setSelectedAnalysis(analysis);
+      } catch (error) {
+        console.error('Error fetching analysis details:', error);
+        toast.error('No se pudieron cargar los detalles del insight.');
+      }
+    }
+  }, []);
+
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -935,23 +974,16 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               {filteredMessages.map((msg, index) => (
                 <div key={`msg-${index}-${msg.created_at || 'temp'}`}>
                   <ChatMessage
-                    msg={{
-                      text: msg.text,
-                      sender: msg.sender,
-                      images_base64: msg.images_base64 || [],
-                      document_url: msg.document_url || '',
-                      ragContext: msg.ragContext,
-                      sources: msg.sources,
-                      chunks: msg.chunks,
-                      tool_code: msg.tool_code,
-                    }}
+                    key={index}
                     index={index}
+                    msg={msg}
                     handleCopyMessage={handleCopyMessage}
                     handleRetry={handleRetry}
                     handlePlayAudio={handlePlayAudio}
                     isAudioLoading={isAudioLoading}
                     playingMessageIndex={playingMessageIndex}
                     isAudioPaused={isAudioPaused}
+                    onSourceClick={handleSourceClick}
                   />
                 </div>
               ))}

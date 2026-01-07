@@ -232,3 +232,82 @@ class GraphDB:
         ORDER BY name
         """
         return await self.execute_query(query, parameters={"account_id": account_id})
+
+    async def delete_dataset(self, dataset_name: str, account_id: str):
+        """
+        Elimina todos los nodos y relaciones asociados a un dataset específico.
+        """
+        logger.info(f"🗑️ Eliminando dataset '{dataset_name}' para la cuenta {account_id}")
+        
+        # 1. Eliminar relaciones primero (buena práctica en Neo4j)
+        rel_query = """
+        MATCH (n)-[r]-()
+        WHERE n.dataset_name = $dataset_name 
+          AND (n.account_id = $account_id OR n.account_id IS NULL)
+        DELETE r
+        """
+        await self.execute_query(rel_query, parameters={"dataset_name": dataset_name, "account_id": account_id})
+        
+        # 2. Eliminar nodos
+        node_query = """
+        MATCH (n)
+        WHERE n.dataset_name = $dataset_name
+          AND (n.account_id = $account_id OR n.account_id IS NULL)
+        DELETE n
+        """
+        await self.execute_query(node_query, parameters={"dataset_name": dataset_name, "account_id": account_id})
+        
+        logger.info(f"✅ Dataset '{dataset_name}' eliminado exitosamente.")
+
+    async def update_dataset_name(self, old_dataset_name: str, new_dataset_name: str, account_id: str, file_name: Optional[str] = None):
+        """
+        Actualiza el dataset_name de los nodos y relaciones.
+        Si se proporciona file_name, solo actualiza los nodos asociados a ese archivo.
+        """
+        logger.info(f"🔄 Actualizando dataset_name de '{old_dataset_name}' a '{new_dataset_name}' para la cuenta {account_id}")
+        
+        # 1. Actualizar nodos
+        node_query = """
+        MATCH (n)
+        WHERE n.dataset_name = $old_name
+          AND (n.account_id = $account_id OR n.account_id IS NULL)
+        """
+        if file_name:
+            node_query += " AND (n.file_name = $file_name OR n.original_filename = $file_name)"
+        
+        node_query += " SET n.dataset_name = $new_name RETURN count(n) as count"
+        
+        params = {
+            "old_name": old_dataset_name,
+            "new_name": new_dataset_name,
+            "account_id": account_id,
+            "file_name": file_name
+        }
+        
+        node_result = await self.execute_query(node_query, parameters=params)
+        node_count = node_result[0]["count"] if node_result else 0
+        
+        # 2. Actualizar relaciones (opcional, si tienen dataset_name)
+        if file_name:
+            rel_query = """
+            MATCH (n)-[r]->(m)
+            WHERE (n.file_name = $file_name OR n.original_filename = $file_name OR m.file_name = $file_name OR m.original_filename = $file_name)
+              AND (n.account_id = $account_id OR n.account_id IS NULL)
+              AND r.dataset_name = $old_name
+            SET r.dataset_name = $new_name
+            RETURN count(r) as count
+            """
+        else:
+            rel_query = """
+            MATCH ()-[r]->()
+            WHERE r.dataset_name = $old_name
+              AND (r.account_id = $account_id OR r.account_id IS NULL)
+            SET r.dataset_name = $new_name
+            RETURN count(r) as count
+            """
+            
+        rel_result = await self.execute_query(rel_query, parameters=params)
+        rel_count = rel_result[0]["count"] if rel_result else 0
+        
+        logger.info(f"✅ Dataset actualizado: {node_count} nodos y {rel_count} relaciones modificadas.")
+        return {"nodes_updated": node_count, "relationships_updated": rel_count}
