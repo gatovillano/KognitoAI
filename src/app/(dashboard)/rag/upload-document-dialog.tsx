@@ -263,7 +263,6 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
                     name="files"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Archivos</FormLabel>
                         <FormControl>
                           <Input
                             type="file"

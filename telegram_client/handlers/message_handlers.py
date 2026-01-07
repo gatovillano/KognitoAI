@@ -574,7 +574,8 @@ def register_message_handlers(application: Application) -> None:
     application.add_handler(MessageHandler(filters.PHOTO, photo_message_handler), group=0)
 
     # Handler genérico (comodín) para mensajes que no son de los tipos anteriores o comandos.
-    # Este debe tener una PRIORIDAD M
+    # Este debe tener una PRIORIDAD MENOR (group=1) para que se ejecute solo si los anteriores no capturan el mensaje.
+    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, generic_message_handler_for_unsupported_types), group=1)
 
 def calculate_telegram_login_hash(user, bot_token, auth_date):
     import hashlib

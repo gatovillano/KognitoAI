@@ -373,3 +373,25 @@ Se solucionaron tres errores críticos que afectaban la experiencia del usuario 
 - **Solución**: Se implementó una solución en dos niveles:
     1. **Monkey Patch Preventivo**: Se creó un sistema de parches en `utils/patches.py` que se aplica al inicio de la aplicación (`run_api.py` y `api/main.py`). Este parche redefine el método `PostgresChatMessageHistory.__del__` para que verifique la existencia del atributo `cursor` antes de intentar cerrarlo, evitando así que el error inunde los logs.
     2. **Robustez con Reintentos**: Se envolvió la instanciación de `PostgresChatMessageHistory` en bloques `try-except` con una lógica de hasta 3 reintentos y esperas de 1 segundo entre ellos en los puntos críticos de `api/chat.py` y `core/agent.py`. Esto ayuda a mitigar fallos temporales de conexión y asegura que el objeto se inicialice correctamente antes de ser usado.
+
+---
+
+## 05-01-2026 - `InvalidUpdateError` en LangGraph por actualizaciones paralelas
+
+- **Error**: Se produjo un `langgraph.errors.InvalidUpdateError: At key 'messages': Can receive only one value per step. Use an Annotated key to handle multiple values.` al ejecutar el RAG y el razonamiento del grafo en paralelo.
+- **Causa**: Al ejecutar ramas paralelas en LangGraph, si varios nodos intentan devolver el mismo campo del estado (en este caso `messages`), el sistema no sabe cómo fusionarlos a menos que se defina un reductor. Además, los nodos estaban devolviendo el estado completo en lugar de solo sus actualizaciones.
+- **Solución**: Se implementaron dos cambios en `core/agent.py`:
+    1. Se actualizó la definición de `AgentState` para que la clave `messages` utilice un reductor: `messages: Annotated[List[BaseMessage], operator.add]`. Esto permite que LangGraph concatene automáticamente los mensajes de diferentes nodos.
+    2. Se refactorizaron todos los nodos (`rag_node`, `graph_reasoning_node`, `proactive_memory_node`, etc.) para que devuelvan únicamente un diccionario con las claves que han modificado, en lugar del objeto `state` completo. Esto evita conflictos de escritura y hace el flujo de datos más eficiente.
+
+---
+
+## 05-01-2026 - `BadRequestError` en Mistral/OpenRouter por paridad de llamadas a herramientas
+
+- **Error**: Se produjo un `litellm.BadRequestError: OpenrouterException - {"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"{\"object\":\"error\",\"message\":\"Not the same number of function calls and responses\",\"type\":\"invalid_request_message_order\",\"param\":null,\"code\":\"3230\"}","provider_name":"Mistral"}}}`.
+- **Causa**: Los modelos de Mistral (especialmente a través de OpenRouter) son extremadamente estrictos con el historial de mensajes. Exigen que cada `AIMessage` que contenga `tool_calls` sea seguido inmediatamente por exactamente el mismo número de `ToolMessage`s, uno para cada ID de llamada. Si un mensaje de usuario interrumpe la secuencia o si algunas respuestas se pierden, el modelo rechaza la solicitud.
+- **Solución**: Se refactorizó la función `clean_messages_for_mistral` en `core/agent.py` para garantizar el cumplimiento de estas reglas:
+    1. **Agrupamiento y Paridad**: La función ahora agrupa cada `AIMessage` con sus respuestas inmediatas y filtra las `tool_calls` del `AIMessage` para que solo queden aquellas que realmente tienen una respuesta en ese bloque.
+    2. **Ordenación**: Se añadió una lógica de ordenación para que las `ToolMessage` aparezcan en el mismo orden que las `tool_calls` filtradas.
+    3. **Limpieza de Huérfanos**: Se eliminan los mensajes de asistente que quedan vacíos (sin contenido ni llamadas válidas) y se asegura que el historial no termine en un `ToolMessage`.
+    4. **Robustez**: Se utiliza un enfoque de ventana deslizante para procesar el historial, lo que permite manejar secuencias complejas de llamadas a herramientas de forma segura.

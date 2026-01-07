@@ -136,7 +136,12 @@ class Neo4jAdapter:
                     entity_type = entity.get("type", "Entity")
                     
                     # Prioridad: 1. Entidad, 2. Argumento global
-                    final_dataset_name = entity.get("dataset_name") or dataset_name
+                    # Decodificar dataset_name si es necesario
+                    raw_dataset_name = entity.get("dataset_name") or dataset_name
+                    final_dataset_name = raw_dataset_name
+                    if final_dataset_name and '%' in final_dataset_name:
+                        from urllib.parse import unquote
+                        final_dataset_name = unquote(final_dataset_name)
                     
                     concept = props.get("concept") or entity.get("concept") # Extraer concept
                     category = props.get("category") or entity.get("category") # Extraer category
@@ -279,7 +284,11 @@ class Neo4jAdapter:
                                    "RELATED")
 
                         # Prioridad: 1. Relación, 2. Argumento global
-                        final_dataset_name = relationship.get("dataset_name") or dataset_name
+                        raw_dataset_name = relationship.get("dataset_name") or dataset_name
+                        final_dataset_name = raw_dataset_name
+                        if final_dataset_name and '%' in final_dataset_name:
+                            from urllib.parse import unquote
+                            final_dataset_name = unquote(final_dataset_name)
                         
                         rel_data = {
                             "source_id": source_id,
@@ -404,8 +413,13 @@ class Neo4jAdapter:
         name = props.get("name", "unknown")
         entity_type = entity.get("type", "Entity")
         
-        # Crear ID basado en nombre y tipo (normalizado)
-        normalized_name = name.lower().replace(" ", "_").replace("-", "_")
+        # Crear ID basado en nombre y tipo (normalizado robustamente)
+        normalized_name = re.sub(r'[^\w\s]', '', name.lower())
+        normalized_name = re.sub(r'\s+', '_', normalized_name).strip('_')
+        
+        if not normalized_name:
+            normalized_name = "unknown"
+            
         return f"{entity_type.lower()}_{normalized_name}"
     
     def _extract_entity_id(self, entity_reference: str) -> Optional[str]:

@@ -152,6 +152,8 @@ export interface CodeAnalysisResultFrontend {
 
 export interface NoteAnalysisResult {
   executive_summary: string;
+  general_analysis?: string;
+  authorial_tone?: string;
   key_themes: string[];
   potential_implications: string[];
   action_suggestions: string[];
@@ -261,6 +263,7 @@ export interface Analysis {
   full_data?: any; // Añadido para que coincida con la implementación existente
   status?: 'pending' | 'in_progress' | 'completed' | 'failed';
   error_message?: string;
+  result_payload?: any;
 }
 
 export type AnalysisType =
@@ -297,4 +300,6 @@ export type AnalysisType =
   | 'comprehensive_web_analysis'
   | 'scoped_rag_analysis'
   | 'deep_research'
-  | 'proactive_insight';
+  | 'deep_research'
+  | 'proactive_insight'
+  | 'neural_insight';

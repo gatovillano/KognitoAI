@@ -105,7 +105,18 @@ async def run_tool(
             documents_to_process = args.get("documents")
             document_titles_to_process = args.get("document_titles")
             topic = args.get("topic")
-            dataset_name = args.get("dataset_name") or "default"
+            dataset_name = args.get("dataset_name")
+            
+            # Si no se proporciona dataset_name pero hay un topic, usar el topic como dataset_name
+            # Esto asegura que el dataset tenga el nombre de la colección
+            if not dataset_name and topic:
+                # Decodificar el topic si viene encodeado
+                from urllib.parse import unquote
+                decoded_topic = unquote(topic)
+                dataset_name = decoded_topic
+                logger.info(f"🏷️ Usando topic '{decoded_topic}' como dataset_name para la herramienta")
+            
+            dataset_name = dataset_name or "default"
             
             # Validación más flexible: permitir documentos vacíos si hay un topic
             if not documents_to_process and not document_titles_to_process and not topic:

@@ -53,7 +53,8 @@ const getAnalysisIcon = (type: string) => {
     case 'collection':
       return <FolderKanban className="h-5 w-5 text-green-500" />;
     case 'insight':
-    case 'proactive_insight_manual': // Añadido el nuevo tipo
+    case 'proactive_insight_manual':
+    case 'neural_insight':
       return <Lightbulb className="h-5 w-5 text-yellow-500" />;
     case 'code':
       return <Code className="h-5 w-5 text-orange-500" />;
@@ -82,7 +83,8 @@ const getAnalysisTypeLabel = (type: string) => {
     case 'collection':
       return 'Colección';
     case 'insight':
-    case 'proactive_insight_manual': // Añadido el nuevo tipo
+    case 'proactive_insight_manual':
+    case 'neural_insight':
       return 'Insight';
     case 'code':
       return 'Código';
@@ -116,7 +118,8 @@ const getAnalysisTypeBadgeColor = (type: string) => {
     case 'collection':
       return 'bg-green-100 text-green-800 border-green-200';
     case 'insight':
-    case 'proactive_insight_manual': // Añadido el nuevo tipo
+    case 'proactive_insight_manual':
+    case 'neural_insight':
       return 'bg-yellow-100 text-yellow-800 border-yellow-200';
     case 'code':
       return 'bg-orange-100 text-orange-800 border-orange-200';
@@ -147,6 +150,7 @@ const getAnalysisTypeColor = (type: string) => {
       return 'bg-green-500';
     case 'insight':
     case 'proactive_insight_manual':
+    case 'neural_insight':
       return 'bg-yellow-500';
     case 'code':
       return 'bg-orange-500';
@@ -176,6 +180,7 @@ const getAnalysisTypeProgressColor = (type: string) => {
       return 'bg-green-500';
     case 'insight':
     case 'proactive_insight_manual':
+    case 'neural_insight':
       return 'bg-yellow-500';
     case 'code':
       return 'bg-orange-500';
@@ -440,6 +445,7 @@ export default function AnalysisPage() {
     { value: 'collection', label: 'Colecciones' },
     { value: 'insight', label: 'Insights Proactivos' },
     { value: 'proactive_insight_manual', label: 'Insights Manuales' },
+    { value: 'neural_insight', label: 'Neural Insights' },
     { value: 'note_analysis', label: 'Notas' },
     { value: 'note_collection_analysis', label: 'Colecciones de Notas' },
     { value: 'code', label: 'Código' },

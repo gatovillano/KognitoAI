@@ -80,7 +80,16 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
           {analysis.collection_summary && (
             <Card className={`${colColors.cardBg} border-none shadow-md`}>
               <CardHeader className="pb-2">
-                <CardTitle className={`text-lg font-bold ${colColors.cardTitle}`}>Resumen de la Colección</CardTitle>
+                <CardTitle className={`text-lg font-bold ${colColors.cardTitle} flex items-center justify-between`}>
+                  Resumen de la Colección
+                  <SectionTTSButton
+                    text={analysis.collection_summary || ""}
+                    play={play}
+                    isLoading={isLoading}
+                    isPlaying={isPlaying}
+                    activeText={activeText}
+                  />
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="prose prose-sm max-w-none dark:prose-invert text-muted-foreground leading-relaxed">
@@ -92,9 +101,18 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
 
           {analysis.kai_synthesis && (
             <div className="mt-6 p-5 rounded-xl bg-gradient-to-br from-primary/10 to-emerald-500/10 border border-emerald-500/20 shadow-inner">
-              <h4 className="text-sm font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mb-2 flex items-center gap-2">
-                <Zap className="w-4 h-4" />
-                Síntesis Maestra de KAI
+              <h4 className="text-sm font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Zap className="w-4 h-4" />
+                  Síntesis Maestra de KAI
+                </div>
+                <SectionTTSButton
+                  text={analysis.kai_synthesis || ""}
+                  play={play}
+                  isLoading={isLoading}
+                  isPlaying={isPlaying}
+                  activeText={activeText}
+                />
               </h4>
               <div className="text-sm italic text-foreground/90 leading-relaxed">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysis.kai_synthesis}</ReactMarkdown>
@@ -202,7 +220,7 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
                 </div>
               </div>
             )}
- 
+
             {analysis.concept_relationships && analysis.concept_relationships.length > 0 && (
               <div>
                 <h4 className="text-md font-bold mb-3 flex items-center gap-2">

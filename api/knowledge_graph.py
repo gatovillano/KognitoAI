@@ -240,6 +240,15 @@ async def process_knowledge_graph_optimized(
     Garantiza que el procesamiento complete exitosamente.
     """
     try:
+        # Si no se proporciona dataset_name pero hay un topic, usar el topic como dataset_name
+        # Esto asegura que el dataset tenga el nombre de la colección
+        if request.topic:
+            # Decodificar el topic si viene encodeado
+            from urllib.parse import unquote
+            decoded_topic = unquote(request.topic)
+            request.dataset_name = decoded_topic
+            logger.info(f"🏷️ Usando topic '{decoded_topic}' como dataset_name para procesamiento optimizado")
+
         result = await kg_service.process_documents_flow(
             db_session=db,
             request=request,
@@ -272,6 +281,15 @@ async def process_knowledge_graph_with_cooccurrence(
     Más lento pero más completo que la versión optimizada básica.
     """
     try:
+        # Si no se proporciona dataset_name pero hay un topic, usar el topic como dataset_name
+        # Esto asegura que el dataset tenga el nombre de la colección
+        if request.topic:
+            # Decodificar el topic si viene encodeado
+            from urllib.parse import unquote
+            decoded_topic = unquote(request.topic)
+            request.dataset_name = decoded_topic
+            logger.info(f"🏷️ Usando topic '{decoded_topic}' como dataset_name para procesamiento con co-ocurrencia")
+
         result = await kg_service.process_documents_flow( # Assuming process_documents_flow handles co-occurrence
             db_session=db,
             request=request,
@@ -317,6 +335,32 @@ async def get_graph_stats(
             error=str(e)
         )
 
+@router.delete("/datasets/{dataset_name}", response_model=GraphResponse)
+async def delete_dataset(
+    dataset_name: str,
+    current_user: dict = Depends(get_current_user),
+    kg_service: KnowledgeGraphService = Depends(get_knowledge_graph_service)
+):
+    """
+    Elimina un dataset específico del grafo de conocimiento.
+    """
+    try:
+        result = await kg_service.delete_dataset_flow(
+            dataset_name=dataset_name,
+            account_id=current_user['account_id']
+        )
+        return GraphResponse(
+            success=result["success"],
+            data=result if result["success"] else None,
+            error=result.get("error") if not result["success"] else None,
+            message=result.get("message")
+        )
+    except Exception as e:
+        logger.error(f"❌ Error eliminando dataset '{dataset_name}': {e}")
+        return GraphResponse(
+            success=False,
+            error=str(e)
+        )
 
 
 @router.post("/clear-neo4j", response_model=GraphResponse)
@@ -605,12 +649,37 @@ async def process_documents_conceptually(
 
         logger.info(f"🧠 Iniciando procesamiento conceptual de {len(documents)} documentos")
 
-        # Inicializar integración
+        # Inicializar servicio
+        from utils.knowledge_graph_service import KnowledgeGraphService
+        from knowledge_graph.graph_integration import GraphIntegration
+        
         db = get_graph_db()
-        cognee_integration = CogneeIntegration(db)
+        graph_integration = GraphIntegration(db)
+        kg_service = KnowledgeGraphService(db, graph_integration)
 
-        # Procesar conceptualmente
-        result = await cognee_integration.process_documents_conceptually(documents, dataset_name)
+        # Usar el servicio para procesar conceptualmente
+        # Nota: process_documents_flow maneja conceptual vs hybrid via processing_mode
+        # Pero aquí estamos llamando directamente a una ruta específica.
+        # Lo ideal es reutilizar process_documents_flow con processing_mode="conceptual"
+        
+        # Simular request object para compatibilidad con process_documents_flow
+        class MockRequest:
+            def __init__(self, **kwargs):
+                for k, v in kwargs.items():
+                    setattr(self, k, v)
+        
+        mock_req = MockRequest(
+            documents=documents,
+            dataset_name=dataset_name,
+            processing_mode="conceptual"
+        )
+
+        result = await kg_service.process_documents_flow(
+            db_session=None, # No se necesita para docs directos
+            request=mock_req,
+            account_id=current_user['account_id'],
+            processing_mode="conceptual"
+        )
 
         return GraphResponse(
             success=True,
