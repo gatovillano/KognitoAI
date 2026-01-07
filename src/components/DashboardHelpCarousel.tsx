@@ -13,62 +13,74 @@ import {
   BarChart,
   Library,
   Sparkles,
+  Search,
+  Network,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
 
 const slideContent = [
-    {
-      icon: <BrainCircuit size={28} className="text-primary" />,
-      title: "¿Qué es KognitoAI?",
-      content: "KognitoAI es tu exocerebro digital, un copiloto inteligente diseñado para aumentar tu inteligencia y la de tu equipo. Centraliza tu información, la conecta de formas inesperadas y te ayuda a tomar decisiones más informadas, actuando como la memoria colectiva viviente de tu organización."
-    },
-    {
-      icon: <Library size={28} className="text-primary" />,
-      title: "Módulo de Conocimientos (RAG)",
-      content: "Tu biblioteca personal y de equipo. Sube documentos (PDFs, webs, repositorios de GitHub) y organízalos en 'Colecciones'. Kognito los procesa para que puedas conversar con ellos, obtener resúmenes y recibir respuestas basadas en tu propia información."
-    },
-    {
-      icon: <Calendar size={28} className="text-primary" />,
-      title: "Módulo de Agenda",
-      content: "Tu centro de organización temporal. Programa eventos, crea recordatorios y gestiona tus tareas directamente desde el chat. Vincula eventos a notas o perfiles de contacto para tener una visión 360° de tus compromisos."
-    },
-    {
-      icon: <StickyNote size={28} className="text-primary" />,
-      title: "Módulo de Notas",
-      content: "Tu bloc de notas inteligente. Captura ideas, apuntes de reuniones o cualquier información al instante. Kognito integra tus notas en su base de conocimiento, permitiendo encontrar conexiones entre tus pensamientos y los documentos que has subido."
-    },
-    {
-      icon: <Users size={28} className="text-primary" />,
-      title: "Módulo de Perfiles de Contacto",
-      content: "Crea un CRM personal. Registra perfiles para las personas con las que interactúas y vincula notas, eventos o documentos relacionados. Ten toda la información relevante sobre un contacto a un solo clic de distancia."
-    },
-    {
-      icon: <ImageIcon size={28} className="text-primary" />,
-      title: "Módulo de Galerías",
-      content: "Tu archivo visual. Organiza imágenes en 'Galerías' o álbumes temáticos. Kognito genera miniaturas y te permite gestionar y visualizar tus recursos gráficos de forma ordenada y accesible."
-    },
-    {
-      icon: <ClipboardList size={28} className="text-primary" />,
-      title: "Módulo de Formularios",
-      content: "Recolecta información de manera estructurada. Diseña formularios dinámicos para encuestas, feedback o cualquier tipo de recolección de datos. Las respuestas se almacenan y pueden ser analizadas por Kognito."
-    },
-    {
-      icon: <BarChart size={28} className="text-primary" />,
-      title: "Módulo de Análisis e Insights",
-      content: "El poder predictivo de Kognito. Pide análisis profundos de tus datos para encontrar tendencias, temas clave y brechas de conocimiento. Además, el sistema genera 'Insights Proactivos' automáticamente, revelando conexiones que no habías visto."
-    },
-    {
-      icon: <BookOpen size={28} className="text-primary" />,
-      title: "Workspaces y Equipos",
-      content: "Colaboración sin caos. Usa 'Workspaces' para separar contextos (ej. Personal, Trabajo) y crea 'Equipos' para compartir conocimiento y colaborar con otros usuarios en un entorno seguro y organizado."
-    },
-    {
-      icon: <Sparkles size={28} className="text-primary" />,
-      title: "¡Explora tu Nuevo Potencial!",
-      content: "Esto es solo el comienzo. Kognito tiene muchas más funcionalidades esperando a ser descubiertas. Te invitamos a explorar, experimentar y conversar con tu nuevo copiloto de conocimiento. ¡El límite es tu curiosidad!"
-    }
-  ];
+  {
+    icon: <BrainCircuit size={28} className="text-primary" />,
+    title: "¿Qué es KognitoAI?",
+    content: "KognitoAI es tu exocerebro digital, un copiloto inteligente que centraliza información, potencia la colaboración y brinda respuestas basadas en tu propio conocimiento mediante RAG, gestión de agenda, notas, contactos, galerías, análisis predictivo, investigación profunda y grafos de conocimiento. Conecta datos de forma inesperada y te ayuda a tomar decisiones más informadas, actuando como la memoria colectiva viviente de tu organización."
+  },
+  {
+    icon: <Library size={28} className="text-primary" />,
+    title: "Módulo de Conocimientos (RAG)",
+    content: "Tu biblioteca personal y de equipo. Sube documentos (PDFs, webs, repositorios de GitHub) y organízalos en 'Colecciones'. Kognito los procesa para que puedas conversar con ellos, obtener resúmenes y recibir respuestas basadas en tu propia información, potenciada por grafos de conocimiento."
+  },
+  {
+    icon: <Network size={28} className="text-primary" />,
+    title: "Grafos de Conocimiento",
+    content: "Visualiza y explora las conexiones invisibles entre tus datos. Kognito construye automáticamente un grafo que relaciona conceptos, entidades y documentos, permitiendo una navegación intuitiva y un descubrimiento de conocimiento mucho más profundo."
+  },
+  {
+    icon: <Calendar size={28} className="text-primary" />,
+    title: "Módulo de Agenda",
+    content: "Tu centro de organización temporal. Programa eventos, crea recordatorios y gestiona tus tareas directamente desde el chat. Vincula eventos a notas o perfiles de contacto para tener una visión 360° de tus compromisos."
+  },
+  {
+    icon: <StickyNote size={28} className="text-primary" />,
+    title: "Módulo de Notas",
+    content: "Tu bloc de notas inteligente. Captura ideas, apuntes de reuniones o cualquier información al instante. Kognito integra tus notas en su base de conocimiento, permitiendo encontrar conexiones entre tus pensamientos y los documentos que has subido."
+  },
+  {
+    icon: <Users size={28} className="text-primary" />,
+    title: "Módulo de Perfiles de Contacto",
+    content: "Crea un CRM personal. Registra perfiles para las personas con las que interactúas y vincula notas, eventos o documentos relacionados. Ten toda la información relevante sobre un contacto a un solo clic de distancia."
+  },
+  {
+    icon: <ImageIcon size={28} className="text-primary" />,
+    title: "Módulo de Galerías",
+    content: "Tu archivo visual. Organiza imágenes en 'Galerías' o álbumes temáticos. Kognito genera miniaturas y te permite gestionar y visualizar tus recursos gráficos de forma ordenada y accesible."
+  },
+  {
+    icon: <ClipboardList size={28} className="text-primary" />,
+    title: "Módulo de Formularios",
+    content: "Recolecta información de manera estructurada. Diseña formularios dinámicos para encuestas, feedback o cualquier tipo de recolección de datos. Las respuestas se almacenan y pueden ser analizadas por Kognito."
+  },
+  {
+    icon: <BarChart size={28} className="text-primary" />,
+    title: "Módulo de Análisis e Insights",
+    content: "El poder predictivo de Kognito. Pide análisis profundos de tus datos para encontrar tendencias, temas clave y brechas de conocimiento. Además, el sistema genera 'Insights Proactivos' automáticamente, revelando conexiones que no habías visto."
+  },
+  {
+    icon: <Search size={28} className="text-primary" />,
+    title: "Investigación Profunda",
+    content: "Lleva tus búsquedas al siguiente nivel. Kognito puede realizar investigaciones exhaustivas en la web y en tus propios documentos, sintetizando información compleja y generando reportes detallados para que no se te escape ningún detalle importante."
+  },
+  {
+    icon: <BookOpen size={28} className="text-primary" />,
+    title: "Workspaces y Equipos",
+    content: "Colaboración sin caos. Usa 'Workspaces' para separar contextos (ej. Personal, Trabajo) y crea 'Equipos' para compartir conocimiento y colaborar con otros usuarios en un entorno seguro y organizado."
+  },
+  {
+    icon: <Sparkles size={28} className="text-primary" />,
+    title: "¡Explora tu Nuevo Potencial!",
+    content: "Esto es solo el comienzo. Kognito tiene muchas más funcionalidades esperando a ser descubiertas. Te invitamos a explorar, experimentar y conversar con tu nuevo copiloto de conocimiento. ¡El límite es tu curiosidad!"
+  }
+];
 
 
 export function DashboardHelpCarousel() {
@@ -81,7 +93,7 @@ export function DashboardHelpCarousel() {
   const prevSlide = () => {
     setCurrentIndex((prevIndex) => (prevIndex - 1 + slideContent.length) % slideContent.length);
   };
-  
+
   const goToSlide = (index: number) => {
     setCurrentIndex(index);
   };
@@ -122,9 +134,8 @@ export function DashboardHelpCarousel() {
           {slideContent.map((_, i) => (
             <button
               key={i}
-              className={`w-2 h-2 rounded-full transition-colors ${
-                currentIndex === i ? 'bg-primary' : 'bg-muted-foreground/30 hover:bg-muted-foreground/50'
-              }`}
+              className={`w-2 h-2 rounded-full transition-colors ${currentIndex === i ? 'bg-primary' : 'bg-muted-foreground/30 hover:bg-muted-foreground/50'
+                }`}
               onClick={() => goToSlide(i)}
               aria-label={`Go to slide ${i + 1}`}
             />

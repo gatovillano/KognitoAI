@@ -47,8 +47,9 @@ Encapsula la lógica para:
 """
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Any
 
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -188,6 +189,94 @@ async def get_current_account_id(token: str = Depends(oauth2_scheme)) -> str:
     
     logger.info(f"✅ account_id extraído del token: {account_id}")
     return account_id
+
+async def get_current_admin_account(
+    token: str = Depends(oauth2_scheme),
+    session: AsyncSession = Depends(get_db_session)
+) -> Account:
+    """
+    Dependencia de FastAPI para obtener el objeto Account del administrador actual.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="No se pudieron validar las credenciales",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    payload = decode_access_token(token)
+    if payload is None:
+        raise credentials_exception
+
+    account_id: str = payload.get("sub")
+    if account_id is None:
+        raise credentials_exception
+    
+    try:
+        query = select(Account).where(
+            Account.id == account_id,
+            Account.is_active == True
+        )
+        result = await session.execute(query)
+        user_account = result.scalars().first()
+
+        if not user_account or not user_account.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No tienes permisos de administrador para acceder a este recurso."
+            )
+        
+        return user_account
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error obteniendo el objeto Account del administrador: {e}")
+        raise credentials_exception
+
+class PIISanitizer:
+    """
+    Clase para detectar y redactar Información de Identificación Personal (PII).
+    """
+    EMAIL_REGEX = re.compile(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+')
+    PHONE_REGEX = re.compile(r'\+?\d{1,4}[-.\s]?\(?\d{1,3}?\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}')
+    # Regex simple para detectar posibles secretos o claves
+    SECRET_REGEX = re.compile(r'(?i)(api[_-]?key|secret|password|token|auth|credential)["\s:]+([^\s,;"]{8,})')
+
+    @classmethod
+    def sanitize(cls, text: str) -> str:
+        """Redacta PII de una cadena de texto."""
+        if not isinstance(text, str):
+            return str(text)
+        
+        sanitized = text
+        # Redactar Emails
+        sanitized = cls.EMAIL_REGEX.sub("[EMAIL_REDACTED]", sanitized)
+        # Redactar Teléfonos (con cuidado de no borrar IDs numéricos cortos)
+        def phone_replacer(match):
+            group = match.group(0)
+            if len(group.strip()) > 7:
+                return "[PHONE_REDACTED]"
+            return group
+        sanitized = cls.PHONE_REGEX.sub(phone_replacer, sanitized)
+        
+        # Redactar Secretos
+        def secret_replacer(match):
+            key_part = match.group(1)
+            return f"{key_part}: [SECRET_REDACTED]"
+        sanitized = cls.SECRET_REGEX.sub(secret_replacer, sanitized)
+        
+        return sanitized
+
+    @classmethod
+    def sanitize_dict(cls, data: Any) -> Any:
+        """Sanitiza recursivamente un diccionario o lista."""
+        if isinstance(data, dict):
+            return {k: cls.sanitize_dict(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [cls.sanitize_dict(item) for item in data]
+        elif isinstance(data, str):
+            return cls.sanitize(data)
+        return data
 
 def verify_token_ws(token: str) -> str:
     """

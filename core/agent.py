@@ -198,12 +198,15 @@ def convert_langchain_tools_to_openai_format(tools: List[Any]) -> List[Dict[str,
 # SECCIÓN 1: DEFINICIÓN DEL ESTADO DEL GRAFO (NUEVO)
 # ==============================================================================
 
+from typing import Annotated
+import operator
+
 class AgentState(TypedDict):
     """
     Define la estructura de datos para el estado que fluye a través del grafo.
     """
-    # Mensajes de la conversación (el historial)
-    messages: List[BaseMessage]
+    # Mensajes de la conversación (el historial) - Usamos Annotated con operator.add para permitir actualizaciones paralelas
+    messages: Annotated[List[BaseMessage], operator.add]
     # El ID de la cuenta, para pasarlo a las herramientas
     account_id: str
     # El ID de Telegram, también para las herramientas
@@ -212,8 +215,8 @@ class AgentState(TypedDict):
     workspace_id: Optional[str]
     # El contexto RAG explícito seleccionado por el usuario
     rag_context: Optional[List[Dict[str, Any]]]
-    # Las fuentes recuperadas para la citación
-    sources: Optional[List[Dict[str, Any]]]
+    # Las fuentes recuperadas para la citación - Usamos Annotated con operator.add para permitir actualizaciones paralelas
+    sources: Annotated[List[Dict[str, Any]], operator.add]
     # El ID de la tarea para los eventos de WebSocket
     task_id: Optional[str]
     # El ID del hilo de chat
@@ -224,14 +227,14 @@ class AgentState(TypedDict):
     graph_db: Optional[GraphDB]
     enhanced_memory_manager: Optional[EnhancedMemoryManager]
     # Salida del nuevo nodo de razonamiento del grafo
-    graph_context: Optional[str] = None
-    graph_sources: Optional[List[Dict[str, Any]]] = None
-    mermaid_diagram: Optional[str] = None
-    turn_count: int = 0  # Nuevo: Contador de turnos para la memoria proactiva
+    graph_context: Optional[str]
+    graph_sources: Optional[List[Dict[str, Any]]]
+    mermaid_diagram: Optional[str]
+    turn_count: int  # Nuevo: Contador de turnos para la memoria proactiva
     # Contexto específico del chat (tablas, grafos, análisis)
-    context: Optional[Dict[str, Any]] = None
+    context: Optional[Dict[str, Any]]
     # Datasets seleccionados para la consulta al grafo
-    target_datasets: Optional[List[str]] = None
+    target_datasets: Optional[List[str]]
 
 # ==============================================================================
 # SECCIÓN 2: VALIDACIÓN DE HERRAMIENTAS Y MANEJO DE ERRORES
@@ -599,6 +602,9 @@ async def call_model_node(state: AgentState):
                      tc["name"] = "unknown_tool"
     # --- END FIX ---
 
+    # Definir last_message al inicio para evitar NameError
+    last_message = state["messages"][-1] if state["messages"] else None
+
     # 1. Construir el prompt del sistema dinámicamente
     user_message = extract_text_content(state["messages"][-1].content)
     user_profile = await get_user_profile(state['account_id'])
@@ -626,79 +632,65 @@ async def call_model_node(state: AgentState):
             # Si no hay nombres de documentos explícitos, usamos el nombre de la colección
             if not document_names_for_rag:
                 document_names_for_rag = [context.get("snapshot", {}).get("name", topic)]
-    # --- INICIO DE LA LÓGICA DE MEMORIA MEJORADA ---
-    # Se ejecuta solo si no venimos de una llamada a herramienta, para no sobrescribir sus fuentes.
-    last_message = state["messages"][-1] if state["messages"] else None
-    is_after_tool_call = isinstance(last_message, ToolMessage)
+    # --- CONSOLIDACIÓN Y RE-INDEXACIÓN DE FUENTES PARA EL LLM ---
+    # Importaciones necesarias para Source, SourceType y format_context_with_sources
+    from typing import List
+    from core.citation_models import Source, SourceType, format_context_with_sources
 
-    relevant_memories_text = ""
-    final_sources_for_state = state.get('sources', []) # Mantener las fuentes existentes si las hay
-
-    # --- RAG AUTOMÁTICO PARA ALIMENTAR EL CONTEXTO ---
-    # Se ejecuta solo si no venimos de una llamada a herramienta y hay un mensaje del usuario
-    if not is_after_tool_call and user_message:
-        try:
-            logger.info(f"🔍 Ejecutando RAG automático para alimentar el contexto. Workspace: {state.get('workspace_id')}")
-            
-            # Priorizar búsqueda en documentos si hay contexto explícito
-            explicit_doc_ids = None
-            if rag_context:
-                explicit_doc_ids = [item['id'] for item in rag_context if item.get('type') == 'document']
-
-            # Realizar búsqueda híbrida (incluye notas gracias a cambios en memory_manager)
-            rag_output = await get_relevant_memories(
-                account_id=state['account_id'],
-                query=user_message,
-                workspace_id=state.get('workspace_id'),
-                explicit_document_ids=explicit_doc_ids,
-                filter_topics=filter_topics,
-                k=10
-            )
-            
-            relevant_memories_text = rag_output.context_for_llm
-            
-            # Integrar fuentes encontradas en el estado
-            if rag_output.sources:
-                if final_sources_for_state is None:
-                    final_sources_for_state = []
+    # Combinar fuentes de RAG y Grafo, asegurando IDs únicos y secuenciales
+    all_sources_for_llm: List[Source] = []
+    final_sources_for_state = [] # Inicializar para evitar UnboundLocalError
+    
+    # 1. Añadir fuentes de RAG (que ahora vienen del rag_node en state['sources'])
+    rag_sources_dicts = state.get('sources', [])
+    if rag_sources_dicts:
+        for s_dict in rag_sources_dicts:
+            try:
+                # Asegurar que s_dict es un diccionario
+                if hasattr(s_dict, 'dict'):
+                    s_dict = s_dict.dict()
+                elif hasattr(s_dict, 'model_dump'):
+                    s_dict = s_dict.model_dump()
                 
-                existing_urls = {s.get('url') for s in final_sources_for_state if s.get('url')}
-                for source in rag_output.sources:
-                    source_dict = source.dict()
-                    if source_dict.get('url') not in existing_urls:
-                        final_sources_for_state.append(source_dict)
-                        
-            logger.info(f"✅ RAG automático completado. Se encontraron {len(rag_output.sources)} fuentes.")
-        except Exception as e:
-            logger.error(f"❌ Error en RAG automático: {e}", exc_info=True)
+                # Crear objeto Source
+                source_obj = Source(**s_dict)
+                all_sources_for_llm.append(source_obj)
+            except Exception as e:
+                logger.error(f"Error procesando fuente RAG para LLM: {e}")
 
-    # --- FIN DE LA LÓGICA DE MANEJO DE FUENTES ---
+    # 2. Añadir fuentes de Grafo (re-indexando para que sigan a las de RAG)
+    if state.get("graph_sources"):
+        graph_sources_val = state.get("graph_sources")
+        if graph_sources_val:
+            for s_dict in graph_sources_val:
+                # Crear objeto Source desde dict
+                try:
+                    # Asegurarse de que el tipo sea GRAPH
+                    s_dict['type'] = SourceType.GRAPH
+                    source_obj = Source(**s_dict)
+                    # Re-indexar basado en la posición actual en all_sources_for_llm
+                    source_obj.id = len(all_sources_for_llm) + 1
+                    all_sources_for_llm.append(source_obj)
+                except Exception as e:
+                    logger.error(f"Error procesando fuente del grafo: {e}")
+
+    # 3. Generar el contexto formateado con los nuevos IDs
+    if all_sources_for_llm:
+        relevant_memories_text = format_context_with_sources(all_sources_for_llm)
         
-    # INICIO: Integración del contexto del nuevo nodo de razonamiento del grafo
-    if state.get("graph_context"):
-        logger.info("🧠 Integrando contexto del GraphReasoningNode en el prompt.")
-        # Combina el contexto RAG tradicional con el del grafo
-        relevant_memories_text += "\n\n--- Análisis del Grafo de Conocimiento ---\n"
+        # Actualizar final_sources_for_state con los objetos Source (convertidos a dict)
         
-        # Asegurarse de que state["graph_context"] no sea None antes de concatenar
-        graph_context_val = state.get("graph_context")
-        if graph_context_val:
-            relevant_memories_text += graph_context_val
+        existing_urls = set()
+        new_sources = [s.dict() for s in all_sources_for_llm]
         
-        # Añadir las fuentes del grafo a las fuentes finales, evitando duplicados
-        if state.get("graph_sources"):
-            # Inicializar final_sources_for_state si es None
-            if final_sources_for_state is None:
-                final_sources_for_state = []
-            
-            existing_urls = {s['url'] for s in final_sources_for_state if 'url' in s}
-            
-            graph_sources_val = state.get("graph_sources")
-            if graph_sources_val:
-                new_graph_sources = [s for s in graph_sources_val if s.get('url') not in existing_urls]
-                final_sources_for_state.extend(new_graph_sources)
-                logger.info(f"Añadidas {len(new_graph_sources)} nuevas fuentes desde el grafo.")
-    # FIN: Integración del contexto
+        for ns in new_sources:
+            if ns.get('url') not in existing_urls:
+                final_sources_for_state.append(ns)
+                existing_urls.add(ns.get('url'))
+                
+        logger.info(f"Consolidadas {len(all_sources_for_llm)} fuentes totales para el LLM (RAG + Grafo).")
+    else:
+        relevant_memories_text = "No se encontraron memorias o documentos relevantes en la base de conocimiento ni en el grafo."
     # --- FIN DE LA LÓGICA DE MANEJO DE FUENTES ---
         
     from core.prompt_manager import PromptManager
@@ -838,7 +830,80 @@ async def call_model_node(state: AgentState):
     target_account_id = "telegram_bot_service" if state.get('telegram_id') else state['account_id']
     conn_type = "chat" if state.get('telegram_id') else None
 
-    async for chunk in chain.astream({"messages": state["messages"]}):
+    # --- LIMPIEZA DE HISTORIAL PARA MISTRAL/OPENROUTER ---
+    # Mistral es extremadamente estricto con el orden y la paridad: 
+    # User -> AI (tool calls) -> Tool (todas las respuestas) -> AI
+    def clean_messages_for_mistral(messages):
+        cleaned = []
+        i = 0
+        while i < len(messages):
+            msg = messages[i]
+            
+            # 1. Ignorar mensajes vacíos que no sean llamadas a herramientas
+            if not msg.content and not (isinstance(msg, AIMessage) and getattr(msg, 'tool_calls', None)):
+                i += 1
+                continue
+                
+            if isinstance(msg, AIMessage) and getattr(msg, 'tool_calls', None):
+                # Encontrado un bloque de llamadas a herramientas. 
+                # Debemos encontrar TODAS sus respuestas inmediatamente después.
+                current_tool_calls = msg.tool_calls
+                call_ids = {tc.get('id') for tc in current_tool_calls if tc.get('id')}
+                
+                responses = []
+                next_i = i + 1
+                while next_i < len(messages):
+                    next_msg = messages[next_i]
+                    if isinstance(next_msg, ToolMessage):
+                        if next_msg.tool_call_id in call_ids:
+                            responses.append(next_msg)
+                            call_ids.remove(next_msg.tool_call_id)
+                        else:
+                            # ToolMessage que no pertenece a este bloque, ignorar o tratar como huérfano
+                            logger.warning(f"⚠️ ToolMessage huérfano o desordenado detectado: {next_msg.tool_call_id}")
+                    elif isinstance(next_msg, (HumanMessage, AIMessage, SystemMessage)):
+                        # Si encontramos cualquier otro mensaje antes de completar las respuestas,
+                        # Mistral fallará si dejamos llamadas sin respuesta.
+                        break
+                    next_i += 1
+                
+                # Reconstruir el AIMessage solo con las llamadas que SÍ tienen respuesta
+                valid_call_ids = {r.tool_call_id for r in responses}
+                filtered_tool_calls = [tc for tc in current_tool_calls if tc.get('id') in valid_call_ids]
+                
+                # Ordenar respuestas para que coincidan con el orden de las llamadas (Mistral strictness)
+                order_map = {tc.get('id'): idx for idx, tc in enumerate(filtered_tool_calls)}
+                responses.sort(key=lambda r: order_map.get(r.tool_call_id, 999))
+                
+                if filtered_tool_calls or msg.content:
+                    # Crear una copia del mensaje con las llamadas filtradas
+                    new_ai_msg = AIMessage(
+                        content=msg.content,
+                        tool_calls=filtered_tool_calls,
+                        additional_kwargs=getattr(msg, 'additional_kwargs', {})
+                    )
+                    cleaned.append(new_ai_msg)
+                    # Añadir las respuestas encontradas inmediatamente después
+                    cleaned.extend(responses)
+                else:
+                    logger.warning("⚠️ Omitiendo AIMessage porque no tiene contenido ni llamadas válidas con respuesta.")
+                
+                # Saltar los mensajes procesados
+                i = next_i
+            elif isinstance(msg, ToolMessage):
+                # ToolMessage huérfano (no precedido por su AIMessage)
+                logger.warning(f"⚠️ Omitiendo ToolMessage huérfano: {msg.tool_call_id}")
+                i += 1
+            else:
+                # Mensajes normales (Human, System, AI sin herramientas)
+                cleaned.append(msg)
+                i += 1
+        
+        return cleaned
+
+    cleaned_messages = clean_messages_for_mistral(state["messages"])
+    
+    async for chunk in chain.astream({"messages": cleaned_messages}):
         if isinstance(chunk, AIMessage):
             if isinstance(chunk.content, str):
                 full_ai_message_content += chunk.content
@@ -855,7 +920,8 @@ async def call_model_node(state: AgentState):
                 "type": "stream_chunk",
                 "thread_id": state['thread_id'],
                 "taskId": state.get("task_id"),
-                "chunk": str(chunk.content or "")
+                "chunk": str(chunk.content or ""),
+                "full_text": full_ai_message_content
             }, connection_type=conn_type)
             
             final_response_message = chunk
@@ -927,7 +993,7 @@ async def call_model_node(state: AgentState):
         final_ai_message.additional_kwargs["tool_code"] = json.dumps(tool_code_data)
             
     return {
-        "messages": state["messages"] + [final_ai_message],
+        "messages": [final_ai_message],
         "sources": final_sources_for_state # Asegurarse de que las fuentes se propaguen en el estado
     }
 async def generate_response_node(state: AgentState):
@@ -951,14 +1017,14 @@ async def tool_node(state: AgentState):
     """
     logger.info("--- (Grafo) Nodo: Llamar Herramienta ---")
     if not isinstance(state["messages"][-1], AIMessage):
-        return {"messages": state["messages"]}
+        return {}
 
     agent_message = state["messages"][-1]
     # Asegurarse de que agent_message es un AIMessage antes de acceder a tool_calls
     tool_calls = agent_message.tool_calls if isinstance(agent_message, AIMessage) and hasattr(agent_message, 'tool_calls') else []
     
     if not tool_calls:
-        return {"messages": state["messages"]}
+        return {}
 
     # Optimization: Instantiate only the requested tool using get_tool_by_name
     # tools = await get_all_langchain_tools(...) # Removed to avoid overhead
@@ -1344,22 +1410,49 @@ Por favor, intenta de nuevo especificando correctamente la herramienta."""
             tool_sources_to_add: List[Dict[str, Any]] = []
 
             if tool_output.sources:
-                logger.info(f"La herramienta '{tool_name}' devolvió {len(tool_output.sources)} fuentes. Añadiendo a fuentes existentes.")
-                # Convertir las nuevas fuentes a dicts
-                new_sources_dicts = [s.model_dump() if hasattr(s, 'model_dump') else (s.dict() if hasattr(s, 'dict') else s) for s in tool_output.sources]
+                logger.info(f"La herramienta '{tool_name}' devolvió {len(tool_output.sources)} fuentes. Re-indexando para mantener coherencia.")
                 
-                # Asegurarse de que current_sources es una lista antes de extender
-                if current_sources is None:
-                    current_sources = []
+                # Calcular el offset basado en las fuentes ya existentes en este turno
+                # para que el LLM vea IDs continuos y no repetidos.
+                current_offset = len(current_sources)
                 
-                current_sources.extend(new_sources_dicts)
-                
-                # Asigna las nuevas fuentes para el evento websocket
-                tool_sources_to_add = new_sources_dicts
+                reindexed_sources = []
+                for i, s in enumerate(tool_output.sources):
+                    s_dict = s.model_dump() if hasattr(s, 'model_dump') else (s.dict() if hasattr(s, 'dict') else s)
+                    old_id = s_dict.get('id')
+                    new_id = current_offset + i + 1
+                    s_dict['id'] = new_id
+                    reindexed_sources.append(s_dict)
+                    
+                    # REGLA CRÍTICA: Si el contenido para el LLM usa el ID viejo, lo actualizamos al nuevo
+                    # Esto evita que el LLM cite [1] refiriéndose a la fuente 1 de la herramienta,
+                    # cuando en realidad ahora es la fuente [N+1] del mensaje total.
+                    if old_id is not None:
+                        old_pattern = f"[{old_id}]"
+                        new_pattern = f"[{new_id}]"
+                        if old_pattern in tool_content_for_llm:
+                            tool_content_for_llm = tool_content_for_llm.replace(old_pattern, new_pattern)
+                        
+                        # También manejar el formato "Contexto [N]"
+                        old_ctx = f"Contexto [{old_id}]"
+                        new_ctx = f"Contexto [{new_id}]"
+                        if old_ctx in tool_content_for_llm:
+                            tool_content_for_llm = tool_content_for_llm.replace(old_ctx, new_ctx)
+
+                # Añadir las fuentes re-indexadas a la lista global del turno
+                current_sources.extend(reindexed_sources)
+                tool_sources_to_add = reindexed_sources
             else:
-                # Si la herramienta no devuelve fuentes, nos aseguramos de que no se añada nada
                 tool_sources_to_add = []
             
+            # --- TRUNCAMIENTO DE SEGURIDAD ---
+            # Si la salida es demasiado larga, puede causar errores de límite de tokens en el LLM (400 Bad Request)
+            MAX_TOOL_OUTPUT_CHARS = 30000 # Límite generoso pero seguro para modelos de 32k+ tokens
+            if len(tool_content_for_llm) > MAX_TOOL_OUTPUT_CHARS:
+                logger.warning(f"⚠️ La salida de la herramienta '{tool_name}' es demasiado larga ({len(tool_content_for_llm)} chars). Truncando a {MAX_TOOL_OUTPUT_CHARS}...")
+                tool_content_for_llm = tool_content_for_llm[:MAX_TOOL_OUTPUT_CHARS] + "\n\n[... CONTENIDO TRUNCADO POR SEGURIDAD DEBIDO A SU EXTENSIÓN ...]"
+            # --- FIN TRUNCAMIENTO ---
+
             tool_messages.append(ToolMessage(
                 content=tool_content_for_llm,
                 tool_call_id=tool_call.get("id") or str(uuid.uuid4())
@@ -1373,7 +1466,7 @@ Por favor, intenta de nuevo especificando correctamente la herramienta."""
                 "tool_name": tool_name,
                 "status": "end",
                 "result": tool_content_for_llm,
-                "sources": tool_sources_to_add, # Enviar solo las fuentes generadas por esta herramienta
+                "sources": tool_sources_to_add, # Enviar las fuentes ya re-indexadas
             }, connection_type=conn_type)
 
 
@@ -1474,7 +1567,7 @@ Por favor, intenta de nuevo especificando correctamente la herramienta."""
     asyncio.create_task(knowledge_extraction_node(state))
     # --- FIN: Extracción de conocimiento ---
 
-    return {"messages": state["messages"] + tool_messages, "sources": final_sources_with_sequential_ids}
+    return {"messages": tool_messages, "sources": final_sources_with_sequential_ids}
 
 # --- 2. Enrutador ---
 
@@ -1526,30 +1619,29 @@ def create_langgraph_agent():
 
     # Añadir los nodos al grafo
     workflow.add_node("proactive_memory", proactive_memory_node)
-    workflow.add_node("graph_router", graph_router_node) # NUEVO NODO DE DECISIÓN
-    workflow.add_node("graph_reasoning", graph_reasoning_node) # NUEVO NODO
+    workflow.add_node("graph_router", graph_router_node) # Nodo de decisión del grafo
+    workflow.add_node("graph_reasoning", graph_reasoning_node) # Nodo de ejecución del grafo
+    workflow.add_node("rag_node", rag_node) # NUEVO: Nodo de RAG paralelo
     workflow.add_node("agent", call_model_node)
     workflow.add_node("action", tool_node)
     workflow.add_node("generateResponse", generate_response_node)
-    workflow.add_node("knowledge_extraction", knowledge_extraction_node) # NUEVO NODO
+    workflow.add_node("knowledge_extraction", knowledge_extraction_node)
 
     # Definir las aristas (el flujo de trabajo)
     workflow.set_entry_point("proactive_memory")
     
-    # Decidir si ir al nodo del grafo o directamente al agente
+    # PARALELISMO: Desde proactive_memory, bifurcamos a RAG y (condicionalmente) al Grafo
+    # should_use_graph_reasoning ahora devuelve una lista de nodos destino
     workflow.add_conditional_edges(
         "proactive_memory",
-        should_use_graph_reasoning, # NUEVO enrutador
-        {
-            "continue_to_graph": "graph_router", # Ahora pasa por el router primero
-            "continue_to_agent": "agent",
-        }
+        should_use_graph_reasoning
     )
-
+    
     # El router siempre pasa al razonamiento
     workflow.add_edge("graph_router", "graph_reasoning")
 
-    # El nodo del grafo siempre pasa al agente principal después
+    # CONVERGENCIA: Tanto RAG como Grafo alimentan al Agente
+    workflow.add_edge("rag_node", "agent")
     workflow.add_edge("graph_reasoning", "agent")
 
     workflow.add_conditional_edges(
@@ -1615,13 +1707,16 @@ async def graph_reasoning_node(state: AgentState):
     )
 
     # 4. Actualizar el estado con la salida del nodo
+    updates = {}
     if graph_output:
-        state['graph_context'] = graph_output.get('graph_context')
-        state['graph_sources'] = graph_output.get('graph_sources')
-        state['mermaid_diagram'] = graph_output.get('mermaid_diagram')
-        logger.info("Estado actualizado con la salida del GraphReasoningNode.")
+        updates['graph_context'] = graph_output.get('graph_context')
+        updates['graph_sources'] = graph_output.get('graph_sources')
+        updates['mermaid_diagram'] = graph_output.get('mermaid_diagram')
+        
+        context_preview = updates['graph_context'][:200] + "..." if updates['graph_context'] else "Sin contexto"
+        logger.info(f"✅ Salida del GraphReasoningNode preparada.\nContexto Previo: {context_preview}\nFuentes: {len(updates['graph_sources'] or [])}")
 
-    return state
+    return updates
 
 
 async def knowledge_extraction_node(state: AgentState):
@@ -1647,105 +1742,200 @@ async def knowledge_extraction_node(state: AgentState):
     try:
         # El método ainvoke de KnowledgeExtractionNode espera el estado y devuelve el estado modificado
         # o realiza efectos secundarios (persistencia) y devuelve el estado.
-        state = await _knowledge_extraction_node_instance.ainvoke(cast(dict, state))
+        await _knowledge_extraction_node_instance.ainvoke(cast(dict, state))
         logger.info("✅ Extracción de conocimiento completada exitosamente.")
     except Exception as e:
         logger.error(f"❌ Error en el nodo de extracción de conocimiento: {e}")
 
-    return state
+    return {}
 
 
 async def graph_router_node(state: AgentState):
     """
     Nodo de decisión que identifica qué datasets del grafo son relevantes para la consulta.
+    Diferencia entre 'Agent Memories' (personal) y datasets de conocimiento (documentos).
     """
     logger.info("--- (Grafo) Nodo: Enrutador de Datasets ---")
     
     # 1. Asegurarse de que las dependencias existan
     state = await ensure_graph_dependencies(state)
     graph_db = state.get('graph_db')
+    enhanced_memory_manager = state.get('enhanced_memory_manager')
+    
     if not graph_db:
-        return state
+        return {"target_datasets": ["Agent Memories"]}
 
     # 2. Obtener datasets disponibles
     try:
         datasets_info = await graph_db.get_available_datasets(state['account_id'])
         if not datasets_info:
             logger.info("No hay datasets disponibles en el grafo.")
+            state['target_datasets'] = ["Agent Memories"] # Fallback mínimo
             return state
         
         datasets_list = [d['name'] for d in datasets_info]
         logger.info(f"Datasets disponibles: {datasets_list}")
     except Exception as e:
         logger.error(f"Error obteniendo datasets: {e}")
+        state['target_datasets'] = ["Agent Memories"]
         return state
 
-    # 3. Usar LLM para decidir
+    # 3. Usar LLM para decidir con lógica de doble indagación
     llm = get_fast_llm()
     last_message = ""
     if state["messages"]:
         last_msg_obj = state["messages"][-1]
-        last_message = str(last_msg_obj.content)
+        last_message = extract_text_content(last_msg_obj.content)
     
     prompt = f"""
-Analiza la siguiente pregunta del usuario y decide qué datasets del grafo de conocimiento son relevantes.
+Analiza la siguiente pregunta del usuario y decide qué datasets del grafo de conocimiento son relevantes para responder con precisión.
 
 **Datasets Disponibles**:
 {json.dumps(datasets_list, indent=2)}
 
-**Pregunta**: "{last_message}"
+**Pregunta del Usuario**: "{last_message}"
 
-**Instrucciones**:
-- `Agent Memories`: Contiene historia personal, preferencias y hechos sobre el usuario.
-- Otros datasets: Contienen conocimientos técnicos o de documentos específicos.
+**Instrucciones de Clasificación**:
+1.  **Agent Memories**: Selecciona este dataset si la pregunta es sobre el usuario, sus gustos, su historia personal, sus tareas, sus contactos o cualquier cosa que el asistente deba "recordar" sobre él.
+2.  **Datasets de Conocimiento**: Selecciona los nombres de los datasets que correspondan a temas técnicos, documentos específicos o colecciones de información externa que el usuario haya cargado.
+
+**Reglas**:
+- Puedes seleccionar varios datasets.
+- Si la pregunta es general o ambigua, incluye siempre `Agent Memories`.
 - Responde ÚNICAMENTE con una lista JSON de los nombres de los datasets relevantes.
-- Ejemplo: ["Agent Memories", "manual_tecnico"]
-- Si no estás seguro, incluye `Agent Memories` por defecto.
 
 **Respuesta (solo JSON)**:
 """
     try:
         response = await llm.ainvoke(prompt)
         content = str(response.content).strip()
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.endswith("```"):
-            content = content[:-3]
-            
-        selected = json.loads(content.strip())
         
-        # Validar que los seleccionados existan
+        # Limpiar posible formato markdown
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0].strip()
+            
+        selected = json.loads(content)
+        
+        # Validar que los seleccionados existan en la lista real
         target_datasets = [d for d in selected if d in datasets_list]
-        state['target_datasets'] = target_datasets
-        logger.info(f"🎯 Datasets seleccionados por el LLM: {target_datasets}")
+        
+        # Asegurar que si no se seleccionó nada, al menos use Agent Memories
+        if not target_datasets:
+            target_datasets = ["Agent Memories"]
+            
+        logger.info(f"🎯 Router de Grafo: Datasets seleccionados para indagación: {target_datasets}")
+        return {"target_datasets": target_datasets, "graph_db": graph_db, "enhanced_memory_manager": enhanced_memory_manager}
     except Exception as e:
         logger.error(f"Error en la decisión del router: {e}")
-        state['target_datasets'] = ["Agent Memories"] # Fallback
-
-    return state
+        return {"target_datasets": ["Agent Memories"], "graph_db": graph_db, "enhanced_memory_manager": enhanced_memory_manager}
 
 
-def should_use_graph_reasoning(state: AgentState) -> str:
+async def should_use_graph_reasoning(state: AgentState):
     """
-    Decide si se debe pasar por el nodo de razonamiento del grafo.
+    Decide inteligentemente si se debe activar la rama de razonamiento del grafo.
+    Utiliza un LLM rápido para analizar si la consulta se beneficiaría de un análisis relacional.
     """
+    destinations = ["rag_node"] # RAG siempre se ejecuta
+    
+    last_message = state["messages"][-1] if state["messages"] else None
+    if not isinstance(last_message, HumanMessage):
+        return destinations
+
+    user_message = extract_text_content(last_message.content)
+    
+    # 1. Filtro rápido de longitud
+    if len(user_message.strip()) < 5:
+        return destinations
+
+    # 2. Decisión vía Fast LLM
+    llm = get_fast_llm()
+    if not llm:
+        logger.warning("No hay LLM rápido disponible para el enrutador de grafo. Usando RAG solamente.")
+        return destinations
+
+    prompt = f"""
+Analiza si la siguiente consulta del usuario requiere explorar relaciones, entidades, conexiones históricas o contexto profundo en un grafo de conocimiento.
+
+Consulta: "{user_message}"
+
+Responde ÚNICAMENTE con la palabra "SÍ" si crees que el grafo aportaría valor, o "NO" si es una consulta simple o puramente transaccional.
+Respuesta:"""
+
+    try:
+        response = await llm.ainvoke(prompt)
+        decision = str(response.content).strip().upper()
+        
+        if "SÍ" in decision or "SI" in decision or "YES" in decision:
+            logger.info(f"🧠 Enrutador Inteligente: Activando rama de Grafo para: '{user_message[:50]}...'")
+            destinations.append("graph_router")
+        else:
+            logger.info(f"🔍 Enrutador Inteligente: Solo RAG para: '{user_message[:50]}...'")
+            
+    except Exception as e:
+        logger.error(f"Error en la decisión inteligente del enrutador: {e}")
+        # Fallback: si falla el LLM, podríamos usar el filtro de palabras clave anterior o solo RAG
+        # Por seguridad, usaremos solo RAG para no bloquear el flujo
+    
+    return destinations
+
+async def rag_node(state: AgentState):
+    """
+    Nodo dedicado para realizar la búsqueda RAG (Recuperación Aumentada por Generación) en paralelo.
+    """
+    logger.info("--- (Grafo) Nodo: RAG (Búsqueda Vectorial) ---")
+    
     user_message = ""
     last_message = state["messages"][-1] if state["messages"] else None
-    if isinstance(last_message, HumanMessage):
-        user_message = str(last_message.content)
-
-    # Palabras clave que sugieren una consulta al grafo
-    graph_keywords = [
-        "relación entre", "conecta con", "vinculado a", "grafo de conocimiento",
-        "cómo se relaciona", "qué sabes sobre", "dame un resumen de", "explícame"
-    ]
-
-    if any(keyword in user_message.lower() for keyword in graph_keywords):
-        logger.info("Enrutador -> 'graph_reasoning': Se detectó palabra clave para el grafo.")
-        return "continue_to_graph"
     
-    logger.info("Enrutador -> 'agent': No se necesita razonamiento del grafo.")
-    return "continue_to_agent"
+    # Si el último mensaje es una herramienta, no hacemos RAG
+    if isinstance(last_message, ToolMessage):
+        return {}
+
+    if isinstance(last_message, HumanMessage):
+        user_message = extract_text_content(last_message.content)
+    
+    if not user_message:
+        return state
+
+    rag_context = state.get("rag_context")
+    context = state.get("context")
+    filter_topics = None
+    explicit_doc_ids = None
+
+    # Preparar filtros
+    if rag_context:
+        explicit_doc_ids = [item['id'] for item in rag_context if item.get('type') == 'document']
+    
+    if context and context.get("type") == "collection":
+        topic = context.get("id")
+        if topic:
+            filter_topics = [topic]
+
+    try:
+        logger.info(f"🔍 Ejecutando RAG en nodo paralelo. Workspace: {state.get('workspace_id')}")
+        
+        rag_output = await get_relevant_memories(
+            account_id=state['account_id'],
+            query=user_message,
+            workspace_id=state.get('workspace_id'),
+            explicit_document_ids=explicit_doc_ids,
+            filter_topics=filter_topics,
+            k=10
+        )
+        
+        if rag_output and rag_output.sources:
+            # Convertir fuentes a diccionarios para el estado
+            sources_dicts = [s.dict() for s in rag_output.sources]
+            logger.info(f"✅ RAG completado. Fuentes encontradas: {len(sources_dicts)}")
+            return {"sources": sources_dicts}
+        else:
+            return {"sources": []}
+            
+    except Exception as e:
+        logger.error(f"❌ Error en nodo RAG: {e}", exc_info=True)
+        return {"sources": []}
 
 from core.prompts import PROACTIVE_MEMORY_PROMPT
 import json
@@ -1826,15 +2016,13 @@ async def proactive_memory_node(state: AgentState):
     last_message = state["messages"][-1]
     if not isinstance(last_message, HumanMessage):
         logger.info("Saltando memoria proactiva: el último mensaje no es del usuario.")
-        # Incrementar turn_count incluso si no es HumanMessage, para mantener el ciclo
-        state['turn_count'] = state.get('turn_count', 0) + 1
-        return state
+        # Devolver el incremento de turn_count
+        return {"turn_count": state.get('turn_count', 0) + 1}
 
     user_content = extract_text_content(last_message.content)
     if not user_content or len(user_content.strip()) < 10:
         logger.info("Saltando memoria proactiva: contenido del usuario muy corto o vacío.")
-        state['turn_count'] = state.get('turn_count', 0) + 1
-        return state
+        return {"turn_count": state.get('turn_count', 0) + 1}
 
     # 2. Incrementar el contador de turnos
     current_turn_count = state.get('turn_count', 0) + 1
@@ -1844,7 +2032,7 @@ async def proactive_memory_node(state: AgentState):
     # 3. Decidir si es momento de procesar la memoria proactiva (cada 5 turnos)
     if current_turn_count % 5 != 0:
         logger.info("Saltando memoria proactiva: no es un turno de procesamiento.")
-        return state
+        return {"turn_count": current_turn_count}
 
     # 4. Preparar el LLM
     llm = get_fast_llm()
@@ -1870,4 +2058,4 @@ async def proactive_memory_node(state: AgentState):
     )
     logger.info("Tarea de memoria proactiva programada en segundo plano. El grafo continuará su ejecución.")
 
-    return state
+    return {"turn_count": current_turn_count}

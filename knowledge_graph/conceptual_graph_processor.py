@@ -930,9 +930,12 @@ IMPORTANTE: Solo el JSON solicitado.
     
     def _generate_quote_id(self, text: str) -> str:
         """Genera un ID único para una cita."""
+        # Normalizar texto para evitar duplicados por variaciones menores
+        normalized_text = re.sub(r'[^\w\s]', '', text.lower())
+        normalized_text = re.sub(r'\s+', ' ', normalized_text).strip()
         
-        # Usar hash del texto para generar ID único
-        text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()[:12]
+        # Usar hash del texto normalizado para generar ID único
+        text_hash = hashlib.md5(normalized_text.encode('utf-8')).hexdigest()[:12]
         return f"quote_{text_hash}"
     
     async def _deduplicate_and_filter_quotes(self, quotes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1801,8 +1804,8 @@ Responde ÚNICAMENTE con el array JSON solicitado."""
         ]
         importance_score = sum(importance_scores) / len(importance_scores)
 
-        # Identificar categorías representadas
-        categories = list(set(quote.get("category", "") for quote in cluster_quotes))
+        # Identificar categorías representadas (ordenadas para determinismo)
+        categories = sorted(list(set(quote.get("category", "") for quote in cluster_quotes)))
         categories_str = ", ".join(categories) if categories else ""
 
         # Crear descripción del perfil

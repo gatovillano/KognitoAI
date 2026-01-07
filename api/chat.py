@@ -901,8 +901,13 @@ async def create_and_run_agent_streaming(
 
         config: RunnableConfig = {"configurable": {"thread_id": thread_id}} # Castear a RunnableConfig
         final_graph_state = None
+        full_response_text = ""
+        
         async for chunk_data in agent_app.astream(initial_state, config=config):
             final_graph_state = chunk_data
+            # Las actualizaciones de streaming (stream_chunk) ahora se manejan directamente 
+            # desde los nodos en core/agent.py para mayor tiempo real y evitar duplicaciones.
+            pass
 
         # El estado final es un diccionario con el nombre del último nodo ejecutado como clave.
         if not final_graph_state or "generateResponse" not in final_graph_state:
@@ -922,6 +927,15 @@ async def create_and_run_agent_streaming(
         if not final_ai_message:
             logger.error("El grafo no produjo un AIMessage en su estado final.")
             raise ValueError("El grafo no produjo un AIMessage en su estado final.")
+
+        # Extraer el texto final para el evento stream_end
+        full_response_text = ""
+        if isinstance(final_ai_message.content, str):
+            full_response_text = final_ai_message.content
+        elif isinstance(final_ai_message.content, list):
+            for part in final_ai_message.content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    full_response_text += part.get("text", "")
 
         # Guardar el AIMessage final completo en el historial
         logger.info(f"DEBUG (create_and_run_agent_streaming): Guardando respuesta final en historial. thread_id: {thread_id}, task_id: {task_id}")
@@ -970,6 +984,7 @@ async def create_and_run_agent_streaming(
             "type": "stream_end",
             "thread_id": thread_id,
             "taskId": task_id,
+            "text": full_response_text,
             "sources": final_sources,
         }, connection_type=conn_type)
 

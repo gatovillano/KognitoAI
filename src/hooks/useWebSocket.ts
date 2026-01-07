@@ -20,6 +20,13 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 5;
 
+  // Usar ref para onMessage para evitar reconexiones innecesarias si la función cambia
+  const onMessageRef = useRef(onMessage);
+
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+  }, [onMessage]);
+
   const connect = useCallback(() => {
     console.log('WS: Intentando conectar...');
     try {
@@ -57,14 +64,22 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
 
       const wsUrl = `${wsProtocol}://${wsHost}/ws/${userId}?token=${encodeURIComponent(token)}`;
       console.log(`WS: Intentando conectar a: ${wsUrl}`);
-      
+
       wsRef.current = new WebSocket(wsUrl);
 
       wsRef.current.onopen = () => {
         console.log('WS: 🔌 WebSocket conectado exitosamente.');
         setIsConnected(true);
         setConnectionError(null);
-        reconnectAttempts.current = 0;
+
+        // Smart Reset: No resetear intentos inmediatamente para evitar bucles de flapping.
+        // Solo resetear si la conexión permanece estable por 5 segundos.
+        setTimeout(() => {
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            reconnectAttempts.current = 0;
+            console.log('WS: Conexión estable por 5s, reseteando contador de intentos.');
+          }
+        }, 5000);
       };
 
       wsRef.current.onmessage = (event) => {
@@ -77,14 +92,16 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
           }
           return;
         }
-        
+
         if (msgStr === 'pong') {
           return;
         }
 
         try {
           const message: WebSocketMessage = JSON.parse(msgStr);
-          onMessage?.(message);
+          if (onMessageRef.current) {
+            onMessageRef.current(message);
+          }
         } catch (error) {
           console.error('WS: ❌ ERROR CRÍTICO al parsear mensaje WebSocket:', error, 'Mensaje RAW recibido:', msgStr);
         }
@@ -143,7 +160,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       console.error('WS: ❌ Error al crear WebSocket:', error);
       setConnectionError('Error al crear conexión WebSocket');
     }
-  }, [userId, onMessage]);
+  }, [userId]); // Removed onMessage from dependencies
 
   const disconnect = useCallback(() => {
     console.log('WS: Desconectando WebSocket...');
@@ -151,12 +168,12 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
-    
+
     if (wsRef.current) {
       wsRef.current.close(1000, 'Desconexión intencional');
       wsRef.current = null;
     }
-    
+
     setIsConnected(false);
     setConnectionError(null);
   }, []);

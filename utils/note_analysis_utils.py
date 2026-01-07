@@ -20,6 +20,7 @@ Tu objetivo es analizar notas cotidianas y extraer valor oculto, conexiones y pr
 No te limites a resumir; busca el 'insight' detrás de la información.
 Analiza la nota proporcionada y genera un análisis estructurado en formato JSON con los siguientes campos:
 - executive_summary: Un resumen ejecutivo breve y directo.
+- general_analysis: Un análisis general extenso del documento que profundiza en el contexto, argumentos principales e implicaciones (500-1000 palabras).
 - key_themes: Lista de temas clave identificados (strings).
 - potential_implications: Implicaciones potenciales de esta información que el usuario podría no haber notado.
 - action_suggestions: Sugerencias de acción concretas basadas en la nota.

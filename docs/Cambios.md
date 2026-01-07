@@ -1,3 +1,4 @@
+
 ## 25-12-25 Corrección de ReferenceError: onDevelopClick is not defined 🐞
 
 Se corrigió un `ReferenceError: onDevelopClick is not defined` que ocurría en el componente `QuestionSliderDialog` al intentar renderizar el botón de "Iniciar Investigación Profunda".
@@ -493,7 +494,7 @@ Se corrigió el error `ValueError: "DeepResearchTool" object has no field "progr
 - **Eliminación de inyección directa de atributos**: Se eliminó la asignación directa de `account_id`, `workspace_id`, `telegram_id` y `thread_id` al objeto `selected_tool`.
 - **Eliminación de inyección directa de `progress_callback`**: Se eliminó la asignación directa de la función `progress_callback` al objeto `selected_tool`.
 - **Creación de `RunnableConfig`**: Se creó una instancia de `RunnableConfig` que encapsula el `progress_callback` y los IDs de contexto (`account_id`, `workspace_id`, `telegram_id`, `thread_id`, `task_id`).
-- **Modificación de la invocación de la herramienta**: La llamada a `selected_tool.ainvoke()` se modificó para aceptar la `run_config` como parámetro, asegurando que el `progress_callback` y el contexto se pasen correctamente a `DeepResearchTool` y otras herramientas que lo requieran a través de la configuración.
+- **Modificación de la invocación de la herramienta**: La llamada a `selected_tool.ainvoke()` se modificó para aceptar la `run_config` como parámetro, asegurando que the `progress_callback` y el contexto se pasen correctamente a `DeepResearchTool` y otras herramientas que lo requieran a través de la configuración.
 
 ---
 
@@ -549,7 +550,7 @@ Se corrigió un `NameError: name 'AsyncSession' is not defined` que ocurría en 
 Se corrigió un bucle infinito en la clarificación del Deep Researcher que ocurría porque el estado `final_report` no se actualizaba correctamente al forzar el avance de la investigación.
 
 - **Adición de `max_clarification_attempts`**: Se añadió el campo `max_clarification_attempts` a la clase `Configuration` en `core/agents/deep_researcher_config.py` con un valor por defecto de 3, permitiendo controlar el número máximo de intentos de clarificación.
-- **Actualización explícita de `final_report`**: Se modificó la función `clarify_with_user` en `core/agents/deep_researcher.py` para que, al exceder el número máximo de intentos de clarificación o al no necesitar más clarificación, establezca explícitamente `final_report: None` en el estado retornado. Esto asegura que la función `should_start_research` evalúe correctamente el estado y permita que el grafo avance a `write_research_brief` en lugar de volver a `await_user_clarification`.
+- **Actualización explícita de `final_report`**: Se modificó la función `clarify_with_user` en `core/agents/deep_researcher.py` para que, al exceder el número máximo de intentos de clarificación o al no necesitar más clarificación, establezca explícitamente `final_report: None` en el estado retornado. Esto asegura que la función `should_start_research` evalúe correctamente el estado y permita que the grafo avance a `write_research_brief` en lugar de volver a `await_user_clarification`.
 
 ---
 
@@ -566,8 +567,8 @@ Se corrigió un error de compilación `Module parse failed: Invalid regular expr
 
 Se mejoró la experiencia de usuario en la visualización de grafos de conocimiento para que los nodos y relaciones se posicionen inmediatamente sin animaciones prolongadas, mientras que las animaciones solo ocurren durante el arrastre manual de nodos.
 
-- **Reducción de tiempo de estabilización**: Se disminuyeron los parámetros de estabilización en `src/components/KnowledgeGraph/GraphVisualization.tsx` de 200 iteraciones con 200ms de intervalo a 50 iteraciones con 50ms de intervalo, acelerando el posicionamiento inicial.
-- **Habilitación de física durante arrastre**: Se añadieron eventos `dragStart` y `dragEnd` para activar la física de vis-network solo durante el arrastre de nodos, permitiendo movimientos suaves, y desactivarla después con un retraso de 500ms para estabilizar la posición.
+- **Reducción de tiempo de estabilización**: Se disminuyeron los parámetros de estabilización en `src/components/KnowledgeGraph/GraphVisualization.tsx` de 200 iteraciones con 200ms de intervalo a 50 iteraciones con 50ms de intervalo, acelerando the posicionamiento inicial.
+- **Habilitación de física durante arrastre**: Se añadieron eventos `dragStart` y `dragEnd` para activar the física de vis-network solo durante el arrastre de nodos, permitiendo movimientos suaves, y desactivarla después con un retraso de 500ms para estabilizar la posición.
 
 ---
 
@@ -576,24 +577,24 @@ Se mejoró la experiencia de usuario en la visualización de grafos de conocimie
 Se convirtió la clase `KnowledgeSearchTool` a una función decorada con `@tool` para resolver errores de validación de Pydantic relacionados con campos requeridos no proporcionados.
 
 - **Conversión a función tool**: Se transformó `KnowledgeSearchTool` de clase a función en `tools/knowledge_search_tool.py`, utilizando `@tool` y `InjectedToolArg` para `account_id`, `workspace_id`, `team_id` y `telegram_id`.
-- **Actualización de importaciones**: Se modificó `core/agents/deep_researcher_utils.py` para importar `knowledge_search` en lugar de `KnowledgeSearchTool`, y se actualizó `core/tools.py` para remover la herramienta de la lista de instanciación ya que ahora se importa directamente.
+- **Actualización de importaciones**: Se modificó `core/agents/deep_researcher_utils.py` para importar `knowledge_search` en lugar de `KnowledgeSearchTool`, y se actualizó `core/tools.py` para remover la herramienta de the lista de instanciación ya que ahora se importa directamente.
 - **Campo opcional en KnowledgeGraphTool**: Se hizo `account_id` opcional en `tools/knowledge_graph_tool.py` para evitar errores similares de validación.
 
 ---
 
 ## 27-12-25 Corrección de reconstrucción de contenido de documentos en grafo de conocimiento 🐞
 
-Se corrigió un error en la reconstrucción del contenido de documentos en el grafo de conocimiento que ocurría cuando los documentos no tenían un `workspace_id` asignado. Anteriormente, la lógica de filtrado no manejaba correctamente el caso de `workspace_id` nulo, lo que provocaba que la función `_reconstruct_document_content` devolviera una lista vacía y, consecuentemente, un error de "No se pudo reconstruir contenido de documentos.".
+Se corrigió un error en the reconstrucción del contenido de documentos en el grafo de conocimiento que ocurría cuando los documentos no tenían un `workspace_id` asignado. Anteriormente, the lógica de filtrado no manejaba correctamente el caso de `workspace_id` nulo, lo que provocaba que the función `_reconstruct_document_content` devolviera una lista vacía y, consecuentemente, un error de "No se pudo reconstruir contenido de documentos.".
 
-- **Modificación de `get_full_document_content`**: Se ajustó la lógica en la función `get_full_document_content` dentro de `core/memory_manager.py`. Ahora, si el `workspace_id` proporcionado es `None` (o una cadena vacía después de la validación), la consulta SQL para recuperar los chunks del documento incluirá explícitamente la cláusula `workspace_id IS NULL`. Esto asegura que los documentos sin un `workspace_id` asignado sean correctamente recuperados y su contenido pueda ser reconstruido.
+- **Modificación de `get_full_document_content`**: Se ajustó the lógica en the función `get_full_document_content` dentro de `core/memory_manager.py`. Ahora, si el `workspace_id` proporcionado es `None` (o una cadena vacía después de the validación), the consulta SQL para recuperar los chunks del documento incluirá explícitamente the cláusula `workspace_id IS NULL`. Esto asegura que los documentos sin un `workspace_id` asignado sean correctamente recuperados y su contenido pueda ser reconstruido.
 
 ---
 
 ## 27-12-25 Corrección de reconstrucción de contenido de documentos en grafo de conocimiento (2) 🐞
 
-Se corrigió un error persistente en la reconstrucción del contenido de documentos en el grafo de conocimiento. El problema radicaba en que el `workspace_id` no se estaba propagando correctamente a la función `get_full_document_content`.
+Se corrigió un error persistente en the reconstrucción del contenido de documentos en el grafo de conocimiento. El problema radicaba en que el `workspace_id` no se estaba propagando correctamente a the función `get_full_document_content`.
 
-- **Modificación de `_reconstruct_document_content`**: Se ajustó la lógica en la función `_reconstruct_document_content` dentro de `knowledge_graph/graph_integration.py`. Ahora, se extrae el `workspace_id` de cada documento y se pasa explícitamente a la llamada a `get_full_document_content`. Esto asegura que la reconstrucción del contenido se realice en el contexto del workspace correcto, evitando que la función devuelva una lista vacía y soluciona el error "No se pudo reconstruir contenido de documentos.".
+- **Modificación de `_reconstruct_document_content`**: Se ajustó the lógica en the función `_reconstruct_document_content` dentro de `knowledge_graph/graph_integration.py`. Ahora, se extrae el `workspace_id` de cada documento y se pasa explícitamente a the llamada a `get_full_document_content`. Esto asegura que the reconstrucción del contenido se realice en el contexto del workspace correcto, evitando que the función devuelva una lista vacía y soluciona el error "No se pudo reconstruir contenido de documentos.".
 
 ---
 
@@ -601,7 +602,7 @@ Se corrigió un error persistente en la reconstrucción del contenido de documen
 
 Se corrigió un `SyntaxError: parameter without a default follows parameter with a default` en `tools/knowledge_search_tool.py`. El error se debía a que el parámetro `account_id` no tenía un valor por defecto y estaba definido después de otros parámetros que sí lo tenían.
 
-- **Reordenamiento de parámetros**: Se movió el parámetro `account_id` al principio de la lista de parámetros de la función `knowledge_search`, antes de cualquier parámetro con valor por defecto, para cumplir con las reglas de sintaxis de Python.
+- **Reordenamiento de parámetros**: Se movió el parámetro `account_id` al principio de the lista de parámetros de the función `knowledge_search`, antes de cualquier parámetro con valor por defecto, para cumplir con the reglas de sintaxis de Python.
 
 ---
 
@@ -609,33 +610,33 @@ Se corrigió un `SyntaxError: parameter without a default follows parameter with
 
 Se corrigió un `pydantic_core._pydantic_core.ValidationError` que ocurría al instanciar `GraphCypherGeneratorTool` sin proporcionar el campo requerido `account_id`.
 
-- **Campo `account_id` opcional**: Se modificó la definición de la clase `GraphCypherGeneratorTool` en `tools/graph_cypher_generator_tool.py` para que el campo `account_id` sea opcional (`Optional[str] = None`). Esto permite que la herramienta se instancie sin errores y que el `account_id` se inyecte más tarde en el flujo de ejecución del agente.
+- **Campo `account_id` opcional**: Se modificó the definición de the clase `GraphCypherGeneratorTool` en `tools/graph_cypher_generator_tool.py` para que el campo `account_id` sea opcional (`Optional[str] = None`). Esto permite que the herramienta se instancie sin errores y que el `account_id` se inyecte más tarde en el flujo de ejecución del agente.
 
 ---
 
 ## 27-12-25 Corrección de ValidationError en knowledge_search 🐞
 
-Se corrigió un `pydantic_core._pydantic_core.ValidationError` que ocurría al invocar la herramienta `knowledge_search` sin que el `account_id` fuera inyectado correctamente.
+Se corrigió un `pydantic_core._pydantic_core.ValidationError` que ocurría al invocar the herramienta `knowledge_search` sin que el `account_id` fuera inyectado correctamente.
 
-- **Campo `account_id` opcional y validación en tiempo de ejecución**: Se modificó la definición de la función `knowledge_search` en `tools/knowledge_search_tool.py` para que el parámetro `account_id` sea opcional. Además, se añadió una validación al inicio de la función para lanzar un `ValueError` si `account_id` es `None`, asegurando que la herramienta falle con un error claro si el `account_id` no se inyecta correctamente en tiempo de ejecución.
+- **Campo `account_id` opcional y validación en tiempo de ejecución**: Se modificó the definición de the función `knowledge_search` en `tools/knowledge_search_tool.py` para que el parámetro `account_id` sea opcional. Además, se añadió una validación al inicio de the función para lanzar un `ValueError` si `account_id` es `None`, asegurando que the herramienta falle con un error claro si el `account_id` no se inyecta correctamente en tiempo de ejecución.
 
 ---
 
 ## 27-12-25 Corrección de inyección de `account_id` en herramientas de Deep Researcher 🛠️
 
-Se corrigió un error de validación de Pydantic que ocurría porque el `account_id` no se estaba inyectando correctamente en las herramientas `GraphCypherGeneratorTool` y `knowledge_search` dentro del sub-grafo del `DeepResearcher`.
+Se corrigió un error de validación de Pydantic que ocurría porque el `account_id` no se estaba inyectando correctamente en the herramientas `GraphCypherGeneratorTool` y `knowledge_search` dentro del sub-grafo del `DeepResearcher`.
 
-- **Inyección explícita de `account_id` en `GraphCypherGeneratorTool`**: Se modificó la función `get_all_tools` en `core/agents/deep_researcher_utils.py` para extraer el `account_id` del `RunnableConfig` y pasarlo explícitamente al constructor de `GraphCypherGeneratorTool`.
-- **Restablecimiento de `account_id` como requerido en `knowledge_search`**: Se revirtió el cambio en `tools/knowledge_search_tool.py`, volviendo a hacer que el parámetro `account_id` sea requerido y confiando en la inyección de `InjectedToolArg` por parte de LangGraph.
+- **Inyección explícita de `account_id` en `GraphCypherGeneratorTool`**: Se modificó the función `get_all_tools` en `core/agents/deep_researcher_utils.py` para extraer el `account_id` del `RunnableConfig` y pasarlo explícitamente al constructor de `GraphCypherGeneratorTool`.
+- **Restablecimiento de `account_id` como requerido en `knowledge_search`**: Se revirtió el cambio en `tools/knowledge_search_tool.py`, volviendo a hacer que el parámetro `account_id` sea requerido y confiando en the inyección de `InjectedToolArg` por parte de LangGraph.
 - **Restablecimiento de `account_id` como requerido en `GraphCypherGeneratorTool`**: Se revirtió el cambio en `tools/graph_cypher_generator_tool.py`, volviendo a hacer que el campo `account_id` sea requerido.
 
 ---
 
 ## 27-12-25 Corrección de `AttributeError: 'NoneType' object has no attribute 'execute'` en `ConceptualProcessingTool` 🐞
 
-Se corrigió un error `AttributeError: 'NoneType' object has no attribute 'execute'` que ocurría en la herramienta `ConceptualProcessingTool` porque no se estaba pasando una sesión de base de datos (`db_session`) a la función `process_documents_flow`.
+Se corrigió un error `AttributeError: 'NoneType' object has no attribute 'execute'` que ocurría en the herramienta `ConceptualProcessingTool` porque no se estaba pasando una sesión de base de datos (`db_session`) a the función `process_documents_flow`.
 
-- **Inyección de `db_session`**: Se modificó la herramienta `ConceptualProcessingTool` en `tools/conceptual_processing_tool.py` para que obtenga una sesión de base de datos usando `get_db_session` de `core.dependencies` y la pase explícitamente a `knowledge_graph_service.process_documents_flow`. Esto asegura que las operaciones de base de datos dentro del flujo de procesamiento del grafo de conocimiento tengan una sesión de base de datos válida.
+- **Inyección de `db_session`**: Se modificó the herramienta `ConceptualProcessingTool` en `tools/conceptual_processing_tool.py` para que obtenga una sesión de base de datos usando `get_db_session` de `core.dependencies` y the pase explícitamente a `knowledge_graph_service.process_documents_flow`. Esto asegura que the operaciones de base de datos dentro del flujo de procesamiento del grafo de conocimiento tengan una sesión de base de datos válida.
 
 ---
 
@@ -643,396 +644,79 @@ Se corrigió un error `AttributeError: 'NoneType' object has no attribute 'execu
 
 Se corrigió un `NameError: name 'logging' is not defined` que ocurría en `tools/conceptual_processing_tool.py` porque el módulo `logging` no había sido importado antes de ser utilizado.
 
-- **Importación de `logging`**: Se añadió la línea `import logging` al principio del archivo `tools/conceptual_processing_tool.py` para asegurar que el módulo `logging` esté disponible cuando se inicializa el logger.
+- **Importación de `logging`**: Se añadió the línea `import logging` al principio del archivo `tools/conceptual_processing_tool.py` para asegurar que el módulo `logging` esté disponible cuando se inicializa el logger.
 
 ---
 
 ## 27-12-25 Corrección de `ValidationError` en `knowledge_search` por falta de `account_id` 🐞
 
-Se corrigió un `pydantic_core._pydantic_core.ValidationError` que ocurría en la herramienta `knowledge_search` porque el `account_id` no se estaba inyectando correctamente. El enfoque de usar `InjectedToolArg` no funcionó como se esperaba dentro del sub-grafo del `DeepResearcher`.
+Se corrigió un `pydantic_core._pydantic_core.ValidationError` que ocurría en the herramienta `knowledge_search` porque el `account_id` no se estaba inyectando correctamente. El enfoque de usar `InjectedToolArg` no funcionó como se esperaba dentro del sub-grafo del `DeepResearcher`.
 
-- **Conversión a Clase `BaseTool`**: Se convirtió la herramienta `knowledge_search` de una función decorada con `@tool` a una clase `KnowledgeSearchTool` que hereda de `BaseTool`. Esto permite un control explícito sobre su instanciación.
-- **Inyección Explícita de Dependencias**: Se modificó la función `get_all_tools` en `core/agents/deep_researcher_utils.py` para instanciar `KnowledgeSearchTool` explícitamente, pasando los valores de `account_id` y `workspace_id` extraídos del `RunnableConfig`. Esto elimina la dependencia de la inyección automática y asegura que la herramienta siempre reciba los parámetros necesarios.
+- **Conversión a Clase `BaseTool`**: Se convirtió the herramienta `knowledge_search` de una función decorada con `@tool` a una clase `KnowledgeSearchTool` que hereda de `BaseTool`. Esto permite un control explícito sobre su instanciación.
+- **Inyección Explícita de Dependencias**: Se modificó the función `get_all_tools` en `core/agents/deep_researcher_utils.py` para instanciar `KnowledgeSearchTool` explícitamente, pasando los valores de `account_id` y `workspace_id` extraídos del `RunnableConfig`. Esto elimina the dependencia de the inyección automática y asegura que the herramienta siempre reciba los parámetros necesarios.
 
 ---
 
 ## 27-12-25 Corrección de `ValidationError` en `knowledge_search` (Intento 2) 🐞
 
-Se corrigió un `pydantic_core._pydantic_core.ValidationError` persistente en las herramientas `knowledge_search` y `graph_cypher_generator_tool` dentro del sub-grafo del `DeepResearcher`. El problema se debía a que el `account_id` y `workspace_id` no se estaban inyectando correctamente en el constructor de las herramientas.
+Se corrigió un `pydantic_core._pydantic_core.ValidationError` persistente en the herramientas `knowledge_search` y `graph_cypher_generator_tool` dentro del sub-grafo del `DeepResearcher`. El problema se debía a que el `account_id` y `workspace_id` no se estaban inyectando correctamente en el constructor de the herramientas.
 
-- **Inyección de `account_id` y `workspace_id` en `KnowledgeSearchTool`**: Se modificó la función `get_all_tools` en `core/agents/deep_researcher_utils.py` para pasar explícitamente `account_id` y `workspace_id` al constructor de `KnowledgeSearchTool`.
-- **Inyección de `account_id` y `workspace_id` en `GraphCypherGeneratorTool`**: Se modificó la función `get_all_tools` en `core/agents/deep_researcher_utils.py` para pasar explícitamente `account_id` y `workspace_id` al constructor de `GraphCypherGeneratorTool`.
-- **Actualización de `KnowledgeSearchTool`**: Se actualizó la clase `KnowledgeSearchTool` en `tools/knowledge_search_tool.py` para aceptar `account_id` y `workspace_id` en su constructor y utilizarlos en el método `_run`.
-- **Actualización de `GraphCypherGeneratorTool`**: Se actualizó la clase `GraphCypherGeneratorTool` en `tools/graph_cypher_generator_tool.py` para aceptar `account_id` y `workspace_id` en su constructor y utilizarlos en el método `_arun`.
+- **Inyección de `account_id` y `workspace_id` en `KnowledgeSearchTool`**: Se modificó the función `get_all_tools` en `core/agents/deep_researcher_utils.py` para pasar explícitamente `account_id` y `workspace_id` al constructor de `KnowledgeSearchTool`.
+- **Inyección de `account_id` y `workspace_id` en `GraphCypherGeneratorTool`**: Se modificó the función `get_all_tools` en `core/agents/deep_researcher_utils.py` para pasar explícitamente `account_id` y `workspace_id` al constructor de `GraphCypherGeneratorTool`.
+- **Actualización de `KnowledgeSearchTool`**: Se actualizó the clase `KnowledgeSearchTool` en `tools/knowledge_search_tool.py` para aceptar `account_id` y `workspace_id` en su constructor y utilizarlos en el método `_run`.
+- **Actualización de `GraphCypherGeneratorTool`**: Se actualizó the clase `GraphCypherGeneratorTool` en `tools/graph_cypher_generator_tool.py` para aceptar `account_id` y `workspace_id` en su constructor y utilizarlos en el método `_arun`.
 
 ---
 
 ## 28-12-25 Implementación de análisis de notas en Workspaces 🚀
 
-Se ha añadido la funcionalidad para analizar notas directamente desde la página de detalles de un workspace, permitiendo obtener insights tanto de notas individuales como del conjunto de notas del espacio de trabajo.
+Se ha añadido the funcionalidad para analizar notas directamente desde the página de detalles de un workspace, permitiendo obtener insights tanto de notas individuales como del conjunto de notas del espacio de trabajo.
 
-- **Botón de Análisis General**: Se añadió un botón "Analizar Notas" en el encabezado de la sección de notas del workspace para procesar todas las notas cargadas.
-- **Acciones en Notas Individuales**: Cada tarjeta de nota ahora incluye un menú de acciones con opciones para ver el detalle de la nota y ejecutar un análisis individual.
-- **Visualización de Resultados**: Se integró el componente `AnalysisDetailDialog` para mostrar los resultados de los análisis generados (insights, resúmenes, etc.) sin salir de la página del workspace.
+- **Botón de Análisis General**: Se añadió un botón "Analizar Notas" en el encabezado de the sección de notas del workspace para procesar todas the notas cargadas.
+- **Acciones en Notas Individuales**: Cada tarjeta de nota ahora incluye un menú de acciones con opciones para ver el detalle de the nota y ejecutar un análisis individual.
+- **Visualización de Resultados**: Se integró el componente `AnalysisDetailDialog` para mostrar los resultados de los análisis generados (insights, resúmenes, etc.) sin salir de the página del workspace.
 - **Lógica de Integración con API**: Se implementaron los controladores `handleAnalyzeAllNotes` y `handleAnalyzeSingleNote` utilizando los endpoints `/api/analyze-note-collection` y `/api/analyze-note`.
 
 ---
 
 ## 28-12-25 Corrección de TypeError en ReactMarkdown en NoteCollectionAnalysis 🐞
 
-Se corrigió un `TypeError` en `src/app/(dashboard)/analysis/NoteCollectionAnalysis.tsx` donde el componente `ReactMarkdown` recibía un objeto en lugar de una cadena de texto para la propiedad `children`.
+Se corrigió un `TypeError` en `src/app/(dashboard)/analysis/NoteCollectionAnalysis.tsx` donde el componente `ReactMarkdown` recibía un objeto en lugar de una cadena de texto para the propiedad `children`.
 
-- **Conversión a String**: Se modificó la línea `analysis.kai_synthesis` para que se convierta explícitamente a `String(analysis.kai_synthesis)` antes de pasarlo al componente `ReactMarkdown`. Esto asegura que el componente reciba el tipo de dato esperado y resuelve el error.
-
----
-
-## 28-12-25 Solución a Error 401 Client Error: Unauthorized en GitHubRepoTool 🔑
-
-Se diagnosticó y propuso una solución para el error `401 Client Error: Unauthorized` al intentar acceder a repositorios de GitHub mediante `GitHubRepoTool`. Este error indica que la aplicación no tiene los permisos necesarios para acceder al repositorio.
-
-- **Causa del problema**: Se identificó que el `github_token` no se estaba proporcionando correctamente a la herramienta, ya sea porque no se enviaba en la solicitud POST a `/api/collections`, la variable de entorno `GITHUB_TOKEN` no estaba configurada en el contenedor `kognito_core`, o el token utilizado era inválido/caducado o no tenía los scopes adecuados.
-- **Solución propuesta**:
-  1. **Obtener un token de acceso personal de GitHub**: Generar un nuevo token con los scopes necesarios (al menos `repo` para repositorios privados o `public_repo` para públicos).
-  2. **Añadir el token al archivo `.env`**: Incluir la línea `GITHUB_TOKEN=tu_token_personal_de_github` en el archivo `.env` en la raíz del proyecto.
-  3. **Reconstruir y reiniciar los contenedores de Docker**: Ejecutar `docker-compose down` y luego `docker-compose up --build` para aplicar los cambios.
-
-- **Impacto**: Al asegurar que el `GITHUB_TOKEN` esté correctamente configurado y sea válido, el `kognito_core` podrá autenticarse exitosamente con la API de GitHub, permitiendo que `GitHubRepoTool` realice sus operaciones sin errores de autorización.
+- **Conversión a String**: Se modificó the línea `analysis.kai_synthesis` para que se convierta explícitamente a `String(analysis.kai_synthesis)` antes de pasarlo al componente `ReactMarkdown`. Esto asegura que el componente reciba el tipo de dato esperado y resuelve el error.
 
 ---
 
-## 28-12-25 Corrección de header de autorización para tokens de GitHub 🔑
+## 05-01-26 Creación de Documentación Maestra y Enciclopedia de KognitoAI 🚀📚✨
 
-Se corrigió el error 401 Unauthorized al acceder a repositorios de GitHub cambiando el header de autorización de 'token' a 'Bearer' para tokens de acceso personal de GitHub.
+Se ha desarrollado un conjunto exhaustivo de documentos técnicos y comerciales para cubrir todas las necesidades de implementación, capacitación y referencia del sistema KognitoAI.
 
-- **Actualización del header de autorización**: Se cambió 'Authorization': f'token {self.github_token}' por 'Authorization': f'Bearer {self.github_token}' en ambas funciones **init** y _arun de tools/github_repo_tool.py para usar el formato correcto para fine-grained PATs.
-
----
-
-## 28-12-25 Refuerzo de contención de texto, mejora de Resumen Ejecutivo y Estabilización de Procesamiento 🚀
-
-Se aplicaron medidas integrales para mejorar la visualización de análisis, enriquecer los reportes técnicos y asegurar la estabilidad del procesamiento de grafos.
-
-- **Corrección de Desbordamientos (UI)**:
-  - En `src/app/(dashboard)/analysis/CodeAnalysis.tsx`, se añadieron clases `w-full min-w-0` y la propiedad CSS `[word-break:break-word]` junto con `break-words` y `overflow-hidden` en todas las secciones críticas (Resumen, Arquitectura, Dependencias y Calidad).
-  - En `src/app/(dashboard)/analysis/analysis-detail-dialog.tsx`, se restringió el ancho del contenedor con `max-w-full min-w-0 overflow-hidden` y se corrigió el anidamiento de etiquetas en `DialogDescription` usando `asChild`.
-- **Enriquecimiento del Resumen Ejecutivo (Backend)**: Se actualizó el prompt en `utils/advanced_code_analyzer.py` para que el análisis incluya una reseña de la aplicación y sus funcionalidades principales.
-- **Robustez en Procesamiento por Lotes (Backend)**:
-  - Se corrigieron los validadores de respuesta en `knowledge_graph/conceptual_graph_processor.py` para soportar arrays JSON y eliminar bloques de código markdown.
-  - Se optimizó la concurrencia en `_create_parallel_batch_tasks` usando un semáforo (`asyncio.Semaphore`) para procesar todos los lotes sin omisiones y con mayor estabilidad.
+- **Guía de Implementación Técnica**: Se creó [`docs/Guia_Implementacion_KognitoAI.md`](docs/Guia_Implementacion_KognitoAI.md) detallando requisitos de hardware (GPU NVIDIA), pasos de instalación con Docker, diagramas de arquitectura Mermaid y ejemplos de integración con la API.
+- **Manual de Capacitación para Ventas**: Se creó [`docs/Manual_Capacitacion_Ventas_KognitoAI.md`](docs/Manual_Capacitacion_Ventas_KognitoAI.md) con un enfoque en Soberanía Cognitiva, el concepto de "Second Me", casos de uso por industria y estrategias de cierre de negocios.
+- **Documentación Completa (Estilo Mozilla)**: Se creó [`docs/Documentacion_Completa_KognitoAI.md`](docs/Documentacion_Completa_KognitoAI.md) siguiendo la estructura de mozilla.pdf, abarcando la visión, espíritu, estructura de archivos y lógica operativa profunda del sistema.
+- **Enciclopedia KognitoAI**: Se creó [`docs/Enciclopedia_KognitoAI.md`](docs/Enciclopedia_KognitoAI.md) como el recurso definitivo "pro", detallando todos los módulos (Forms, Galleries, Tables, CalDAV), estrategias de agentes (Sequential, ToT, Planning) e integraciones avanzadas (AWS EKS, OIDC, OperationParser).
+- **Detalle de Módulos Específicos**: Se documentó la lógica de NoteService para refinamiento cognitivo, el OperationParser para generación dinámica de herramientas y la integración CalDAV para calendarios universales.
+- **Integraciones Pro**: Se incorporaron detalles técnicos sobre infraestructura crítica en AWS, inteligencia emocional con emotion2vec y procesamiento multimodal avanzado.
 
 ---
 
-## 29-12-25 Configuración flexible de Rate Limiting y límites de tokens para LLMs ⚙️🚀
+## 05-01-26 Mejora de Privacidad y Seguridad en KognitoAI 🛡️🔒
+ Se realizó un análisis profundo de la aplicación detectando riesgos de exposición de datos en los logs detallados del LLM y la falta de sanitización de información sensible. Se implementaron medidas restrictivas y un motor de redacción de PII (Información de Identificación Personal).
 
- Se implementaron variables de entorno para permitir la desactivación y configuración granular del rate limiting en todos los LLMs, así como la personalización del límite máximo de tokens para los reportes de Deep Research.
-
-- **Nuevas variables de entorno**: Se agregaron `RATE_LIMIT_ENABLED`, `RATE_LIMIT_MAX_REQUESTS`, `RATE_LIMIT_PER_SECONDS` y `DEEP_RESEARCH_MAX_TOKENS` a [`core/config.py`](core/config.py) para un control centralizado.
-- **Desactivación global de Rate Limit**: Se modificó la clase `RateLimiter` en [`core/llm_manager.py`](core/llm_manager.py) para permitir omitir las esperas si el rate limit está desactivado, optimizando la velocidad de respuesta cuando no hay restricciones de proveedor.
-- **Configuración dinámica de tokens**: Se vinculó el límite de tokens de los modelos del agente Deep Researcher y del LLM principal a la nueva configuración global, permitiendo ajustar la extensión de los reportes generados.
-
----
-
-## 28-12-25 Corrección de ReferenceError en la página de colecciones RAG 🐞
-
-Se corrigió un `ReferenceError: can't access lexical declaration 'fetchCollections' before initialization` que ocurría en la página de colecciones RAG (`src/app/(dashboard)/rag/page.tsx`).
-
-- **Causa del error**: El error se producía porque la función `fetchCollections`, definida con `useCallback`, se utilizaba en el array de dependencias de otro hook `useCallback` (`onUploadCompleted`) antes de que su declaración fuera procesada por el intérprete de JavaScript, cayendo en la "zona muerta temporal" (Temporal Dead Zone).
-- **Solución**: Se reorganizó el código moviendo la declaración del hook `useCallback` para `fetchCollections` a una posición anterior a los hooks que dependen de él. Esto asegura que la función esté inicializada y disponible cuando los otros hooks la necesiten, resolviendo el `ReferenceError`.
+ - **Restricción de Endpoints de Logs**: Se modificó [`api/logs.py`](api/logs.py) para que todos los endpoints de acceso a logs requieran privilegios de administrador (`get_current_admin_account`), evitando que cualquier usuario autenticado vea conversaciones globales.
+ - **Motor de Sanitización PII**: Se implementó la clase `PIISanitizer` en [`utils/security.py`](utils/security.py) que utiliza expresiones regulares para detectar y redactar automáticamente Emails, Teléfonos y Secretos (API Keys, Passwords) en cadenas de texto y estructuras de datos.
+ - **Logging Seguro con Redacción**: Se creó e integró `PIIRedactionFormatter` en [`utils/llm_logging_config.py`](utils/llm_logging_config.py), asegurando que todos los logs escritos en disco pasen por el filtro de redacción de forma transparente.
+ - **Fortalecimiento de Autenticación**: Se mejoró la dependencia `get_current_admin_account` en [`utils/security.py`](utils/security.py) para una validación de roles más robusta y reutilizable.
 
 ---
 
-## 29-12-25 Solución a errores 404 en descargas de PDF y archivos media 🐞🚀
+## 05-01-26 Creación de la Enciclopedia Definitiva de KognitoAI 📚🚀✨
 
-Se corrigió un problema donde los enlaces de descarga de archivos PDF generados devolvían un error 404, debido a inconsistencias en las rutas y la configuración del proxy inverso.
+Se ha redactado un documento monumental que sirve como la referencia total del sistema ("Enciclopedia"), detallando cada módulo, lógica operativa y estrategia de agentes de nivel profesional.
 
-- **URLs Absolutas en Herramientas**: Se modificó `tools/create_pdf_tool.py` para generar URLs de descarga absolutas utilizando `settings.api_server_url`, asegurando que el frontend siempre apunte al servidor correcto.
-- **Rutas Físicas Robustas**: Se actualizaron `tools/create_pdf_tool.py` y `api/main.py` para utilizar `MEDIA_ROOT` (ruta absoluta `/app/media`) en lugar de rutas relativas al guardar archivos, evitando fallos por cambios en el directorio de trabajo.
-- **Optimización de Nginx**: Se ajustó `nginx.conf` para delegar la gestión de la ruta `/media/` directamente al backend (FastAPI) mediante `proxy_pass`. Esto elimina la dependencia de volúmenes compartidos en el contenedor de Nginx y garantiza que los archivos sean servidos correctamente por el sistema de archivos estáticos del backend.
+- **Ecosistema de Módulos 360°**: Se documentaron a fondo los módulos de Formularios (Forms), Galerías de fotos, Tablas personalizadas con análisis predictivo y la integración CalDAV para calendarios.
+- **Lógica de Agentes Maestro Pro**: Se explicaron las estrategias de `SequentialAgent`, `Tree of Thoughts` (ToT), `Behavioral Cloning` y el motor de planificación autónoma supervisada por humanos.
+- **Ciclo de Vida del Conocimiento**: Se detalló el proceso de refinamiento cognitivo gestionado por el `NoteService` y la gestión de identidades soberanas ("Second Me").
+- **Infraestructura y Conectividad**: Se profundizaron las capacidades de extensibilidad mediante `OperationParser`, protocolos MCP e integraciones masivas con ecosistemas Cloud (AWS EKS/IAM/QBusiness).
+- **Multimodalidad e Inteligencia Emocional**: Se incorporó el detalle técnico de la visión computacional (Mistral/Nova) y el análisis de audio avanzado (BiCifParaformer/emotion2vec).
 
----
-
-## 29-12-25 Corrección de alucinación de enlaces en generación de PDF 🐞
-
-Se corrigió un problema donde el agente proporcionaba enlaces incorrectos (ej. `.../chat/sandbox/...`) para descargar los PDFs generados, debido a una alucinación del LLM sobre la ubicación del archivo.
-
-- **URL explícita en contexto**: Se modificó `tools/create_pdf_tool.py` para incluir la URL de descarga absoluta y explícita en el mensaje de contexto (`context_for_llm`) que se devuelve al agente. Esto fuerza al LLM a utilizar el enlace real proporcionado por la herramienta en lugar de intentar construir uno basado en el contexto de la conversación.
-
----
-
-## 29-12-25 Modernización del Indicador de Pensamiento 'Cyberpunk Gradient' 🎨
-
-Se ha rediseñado el componente `LoadingIndicator` en el chat para ofrecer una experiencia visual más moderna y sofisticada.
-
-- **Animación de 4 Puntos**: Se implementó una animación de ondas con 4 puntos utilizando un degradado progresivo de azul a morado (`#3B82F6` a `#A855F7`) y `framer-motion`.
-- **Efecto de Brillo**: Cada punto incluye una sombra suave del mismo tono para añadir profundidad y un toque futurista.
-- **Diseño Minimalista**: Se eliminó la burbuja de chat gris para un look más limpio y flotante.
-- **Feedback de Estado**: El texto de estado ahora aparece sutilmente debajo de la animación.
-- **Integración Fluida**: El nuevo indicador reemplaza al anterior en todos los estados de carga estándar.
-
----
-
-## 29-12-25 Centrado del Indicador de Pensamiento en CommonChat 🎨
-
-Se ha centrado el componente `LoadingIndicator` dentro de `CommonChat` para mejorar la estética y la alineación visual durante los estados de carga y pensamiento del asistente.
-
-- **Ajuste de alineación en `CommonChat.tsx`**: Se modificaron las clases CSS del contenedor del `LoadingIndicator` en `src/components/CommonChat.tsx`. Se cambió `items-start` por `items-center` y se eliminó el padding izquierdo (`pl-2`) para lograr una alineación central perfecta.
-
----
-
-## 29-12-25 Corrección de renderizado Markdown en PDFs 📄
-
-Se solucionó un problema donde el contenido Markdown no se renderizaba correctamente en los PDFs generados, mostrándose como texto plano debido a saltos de línea escapados o configuración incorrecta de `is_html`.
-
-- **Sanitización de saltos de línea**: Se implementó el reemplazo automático de secuencias literales `\n` por saltos de línea reales en el contenido de entrada.
-- **Detección automática de Markdown**: Se añadió lógica para detectar si el contenido es Markdown (presencia de `#`, `**`, `---`) incluso si `is_html` es `True`, forzando el procesamiento correcto.
-- **Mejora en extensiones Markdown**: Se incluyó la extensión `nl2br` para asegurar que los saltos de línea simples se respeten en el PDF final.
-
----
-
-## 29-12-25 Mejora de Autoscroll con Indicadores de Carga 📜
-
-Se ha mejorado la experiencia de usuario en el chat asegurando que la vista se desplace automáticamente hacia abajo cuando aparecen indicadores de carga o estado, evitando que queden ocultos fuera de la vista.
-
-- **Nuevo efecto de scroll en `CommonChat.tsx`**: Se implementó un `useEffect` que detecta cambios en los estados `isResponding`, `toolName`, `isDeepResearchActive` y `backgroundTasks`.
-- **Scroll automático**: Cuando cualquiera de estos estados se activa, se dispara un `scrollToBottom` con un ligero retraso para garantizar que el nuevo indicador renderizado sea visible para el usuario.
-
----
-
-## 29-12-25 Reparación Robusta de Estructura Markdown en PDFs 📄🛠️
-
-Se implementó una solución avanzada para corregir problemas de renderizado en PDFs donde el contenido Markdown llegaba sin los saltos de línea estructurales necesarios (todo en una sola línea).
-
-- **Función `_repair_markdown`**: Se creó un pre-procesador que detecta patrones de encabezados (`#`, `##`) y reglas horizontales (`---`) incrustados dentro del texto y fuerza la inserción de saltos de línea (`\n\n`) antes de ellos.
-- **Sanitización profunda**: Se asegura la conversión de caracteres de escape `\n` y la eliminación de `\r` para normalizar el texto antes del procesamiento.
-- **Detección de Markdown relajada**: Se ajustó la lógica de detección automática para identificar contenido Markdown incluso si los marcadores estructurales no se encuentran al inicio de la cadena, permitiendo corregir y renderizar documentos mal formados.
-
----
-
-## 29-12-25 Corrección de scroll inicial en chat 📜
-
-Se corrigió un problema de usabilidad donde al entrar a un chat, la vista se mantenía en el primer mensaje en lugar de mostrar el último.
-
-- **Scroll automático al cargar**: Se implementó un `useEffect` en `CommonChat.tsx` que detecta cuando finaliza la carga inicial de mensajes (`isLoading` pasa a `false`).
-- **Visualización inmediata**: Se fuerza un desplazamiento inmediato al final del chat para asegurar que el usuario vea los mensajes más recientes al abrir la conversación.
-
----
-
-## 29-12-25 Eliminación de icono de usuario en chat 👤
-
-Se eliminó el icono (avatar) del usuario que aparecía junto a la burbuja de chat en `CommonChat` para limpiar la interfaz.
-
-- **Modificación en `ChatMessage.tsx`**: Se eliminó el componente `<ChatAvatar sender="user" />` dentro del bloque condicional que renderiza los mensajes del usuario.
-
----
-
-## 29-12-25 Visualización condicional del indicador KAI Assistant en ChatMessage 🎨
-
-Se ha modificado el componente `ChatMessage` para que el encabezado "KAI Assistant" solo se muestre cuando el mensaje ya tiene contenido (texto o código de herramienta), evitando que aparezca prematuramente antes de que comience el streaming.
-
-- **Renderizado condicional del encabezado**: Se envolvió el bloque del encabezado "KAI Assistant" en `src/components/ChatMessage.tsx` con una condición `(msg.text || msg.tool_code)`. Esto asegura que el indicador permanezca oculto mientras el mensaje sea un marcador de posición vacío y solo aparezca una vez que se reciba el primer fragmento de texto o se ejecute una herramienta.
-
----
-
-## 29-12-25 Visualización condicional de botones de acción en ChatMessage 🎨
-
-Se ha extendido la lógica de visualización condicional a los botones de acción del mensaje de la IA (copiar, reproducir audio y editar).
-
-- **Ocultamiento de botones durante el inicio del streaming**: Se envolvió el contenedor de botones de acción en `src/components/ChatMessage.tsx` con la condición `(msg.text || msg.tool_code)`. Esto evita que los iconos aparezcan debajo de la burbuja de chat vacía antes de que el asistente comience a generar contenido, manteniendo la interfaz limpia y coherente.
-
----
----
-
-## 01-01-26 Implementación de Herramienta para Generación de Datos Estructurados (CSV, Excel, ODS) 📊🚀
-
-Se ha creado una nueva herramienta que permite al LLM generar y exportar datos estructurados en formatos profesionales, facilitando la creación de reportes y tablas descargables.
-
-- **Nueva Herramienta `StructuredDataGeneratorTool`**: Implementada en [`tools/structured_data_generator_tool.py`](tools/structured_data_generator_tool.py). Utiliza `pandas` para procesar listas de diccionarios y convertirlas a archivos `.csv`, `.xlsx` (Excel) y `.ods` (OpenDocument).
-- **Registro en el Sistema**: La herramienta ha sido registrada en [`core/tools.py`](core/tools.py) y está disponible para ser utilizada por el agente principal.
-- **Gestión de Dependencias**: Se añadieron `openpyxl` (para Excel) y `odfpy` (para ODS) al archivo `requirements.txt` y se instalaron en el contenedor `kognito_core`.
-- **Almacenamiento y Limpieza Automática**: Los archivos generados se guardan en `media/generated_data/` y `media/generated_pdfs/`. Se implementó un sistema de limpieza automática ([`utils/file_cleanup.py`](utils/file_cleanup.py)) que elimina archivos con más de 24 horas de antigüedad al arrancar la API y antes de cada nueva generación de archivos.
-- **Integración en Panel de Administración**: Se añadió un endpoint de limpieza manual y un botón "Ejecutar Limpieza Manual" en la pestaña de métricas del panel de administración, permitiendo a los administradores gestionar el almacenamiento bajo demanda.
-- **Verificación Exitosa**: Se validó el funcionamiento de la herramienta, el sistema de limpieza y la integración administrativa dentro del contenedor `kognito_core`.
-
----
-
-## 01-01-26 Implementación del Sistema de Citación y Renderizado de Fuentes en ContextualChat 🚀
-
-Se ha implementado exitosamente el mismo sistema de citación y renderizado de fuentes que existe en `ChatMessage.tsx` dentro del componente `ContextualChat.tsx`, proporcionando una experiencia consistente en toda la aplicación.
-
-- **Creación de archivo de utilidades**: Se creó [`src/lib/chatUtils.ts`](src/lib/chatUtils.ts) que contiene las funciones `processMessageWithCitations` y `collectSourcesFromMessage` para manejar el procesamiento de citas y la recolección de fuentes de manera centralizada.
-- **Actualización de la interfaz Message**: Se extendieron las propiedades de la interfaz `Message` en `ContextualChat.tsx` para incluir `sources`, `ragContext`, `chunks`, `tool_code` y `document_url`.
-- **Modificación del WebSocket**: Se actualizó el `useEffect` del WebSocket para capturar y manejar las fuentes enviadas en los eventos `stream_end` y `agent_response`.
-- **Implementación del renderizado de citas**: Se integró la lógica de procesamiento de fuentes y citas en el renderizado de mensajes de la IA, utilizando `contentParts` cuando hay citas presentes.
-- **Refactorización de ChatMessage**: Se eliminaron las interfaces redundantes (`Source`, `ContentPart`) y las funciones locales (`SourceButton`, `processMessageWithCitations`) de `ChatMessage.tsx`, usando ahora las versiones centralizadas.
-- **Limpieza de imports**: Se removió la importación innecesaria de `uuid` y se actualizaron todos los imports para usar las interfaces y funciones centralizadas.
-- **Consistencia de comportamiento**: Ahora tanto `ContextualChat` como `ChatMessage` utilizan el mismo sistema de renderizado de citas, proporcionando una experiencia uniforme al usuario.
-
----
-
-## 01-01-26 Integración de Chat Contextual en Diálogos de Análisis 💬🚀
-
-Se ha integrado exitosamente el componente `ContextualChat` en los diálogos de análisis para permitir que los usuarios chateen directamente con los análisis específicos, mejorando la experiencia de interacción con el contenido analítico.
-
-- **Integración en `analysis-detail-dialog.tsx`**:
-  - Se agregó la importación del componente `ContextualChat` desde `@/components/ContextualChat`.
-  - Se añadió el estado `isChatOpen` para controlar la visibilidad del chat contextual.
-  - Se implementó un botón de chat con ícono `MessageSquare` en el header del diálogo, junto a los botones de eliminación.
-  - Se integró el componente `ContextualChat` al final del componente con el contexto del análisis actual (`type: 'analysis'`, `id: analysis.id`, `snapshot: analysis`).
-
-- **Integración en `deep-research-detail-dialog.tsx`**:
-  - Se agregó la importación del componente `ContextualChat` y los estados necesarios (`useState`).
-  - Se añadió el estado `isChatOpen` para controlar la visibilidad del chat contextual.
-  - Se reestructuró el header del diálogo para incluir un botón de chat con ícono `MessageSquare` en la esquina superior derecha.
-  - Se integró el componente `ContextualChat` al final del componente con el contexto de la investigación profunda (`type: 'analysis'`, `id: analysis.id`, `snapshot: analysis`).
-
-- **Funcionalidad Implementada**:
-  - **Chat Contextual por Análisis**: Los usuarios pueden hacer preguntas específicas sobre cualquier análisis o investigación profunda.
-  - **Contexto Automático**: El chat se inicializa con el contexto del análisis específico, incluyendo título y snapshot del análisis.
-  - **Interfaz Integrada**: El botón de chat se integra naturalmente en la interfaz existente de los diálogos.
-  - **Experiencia Consistente**: Utiliza el mismo sistema de citación y renderizado de fuentes que el resto de la aplicación.
-
-- **Beneficios para el Usuario**:
-  - **Interacción Directa**: Permite hacer preguntas específicas sobre los resultados de análisis sin salir del contexto.
-  - **Exploración Profunda**: Facilita la exploración de insights, fuentes y recomendaciones de manera conversacional.
-  - **Eficiencia Mejorada**: Elimina la necesidad de cambiar entre múltiples ventanas o pestañas para hacer consultas.
-
----
-
-## 01-01-26 Unificación del sistema de citación en ContextualChat 💬📚
-
-Se implementó el sistema de citación y renderizado de fuentes en el chat contextual para igualar la funcionalidad y experiencia del chat principal, asegurando que las referencias bibliográficas sean interactivas y consistentes.
-
-- **Procesamiento de fuentes**: Se integraron las funciones `collectSourcesFromMessage` y `processMessageWithCitations` en `src/components/ContextualChat.tsx` para manejar fuentes provenientes tanto de `sources` como de `ragContext`.
-- **Renderizado de citas**: Se actualizó el uso de `MarkdownRenderer` para soportar `contentParts`, permitiendo mostrar botones de fuentes interactivos dentro del texto del chat contextual.
-- **Soporte para streaming**: Se modificó el manejador de WebSocket para inicializar y acumular `chunks` de mensajes, permitiendo que el renderizador detecte correctamente el estado de streaming y mejore la fluidez visual.
-- **Visualización de fuentes adicionales**: Se añadió una sección para mostrar fuentes no citadas directamente en el texto, proporcionando un contexto completo al usuario.
-- **Corrección de UX en Diálogos**: Se solucionó un problema donde el chat contextual se cerraba al interactuar con él dentro de los diálogos de análisis. Se implementó la detención de propagación de eventos y se configuró `onPointerDownOutside` en los diálogos padres para permitir una interacción fluida sin cierres inesperados.
-
----
-
-## 02-01-26 Implementación de creación y edición de tablas en Conocimientos 📊
-
-Se implementó la lógica de creación, edición de estructura y gestión de datos para tablas personalizadas, proporcionando una experiencia similar a Nextcloud Tables.
-
-- **Creación de Tablas**: Se creó el componente [`create-table-dialog.tsx`](src/app/(dashboard)/rag/create-table-dialog.tsx) que permite a los usuarios definir el esquema inicial de una tabla (nombre, descripción y columnas con tipos específicos).
-- **Interfaz de Gestión**: Se integró la opción de creación en la vista principal de tablas ([`tables-view.tsx`](src/app/(dashboard)/rag/tables-view.tsx)).
-- **Edición de Datos por Tipo**: Se mejoró [`editable-data-grid.tsx`](src/app/(dashboard)/rag/editable-data-grid.tsx) para soportar inputs específicos según el tipo de columna (Checkbox para booleanos, selectores de fecha, inputs numéricos).
-- **Gestión de Columnas**: Se actualizó [`column-manager-dialog.tsx`](src/app/(dashboard)/rag/column-manager-dialog.tsx) para asegurar la consistencia de los tipos de datos entre la creación y la edición posterior.
-
----
-
-## 02-01-26 Reemplazo de Paneles Redimensionables por Sidebar Fijo 🛠️🚀
-
-Se ha simplificado la interfaz del dashboard eliminando la funcionalidad de paneles redimensionables y estableciendo un sidebar fijo con un ancho consistente, mejorando la estabilidad visual y la coherencia con la versión móvil.
-
-- **Eliminación de `react-resizable-panels`**: Se removió la dependencia y la lógica de paneles ajustables en el componente `AppShell.tsx`.
-- **Implementación de Sidebar Fijo**: Se estableció un ancho fijo de `w-72` para el sidebar en la versión de escritorio (`hidden md:block`), igualando el tamaño utilizado en el menú lateral de la versión móvil.
-- **Optimización de Layout**: Se reemplazó la estructura de `PanelGroup` por un contenedor `flex` estándar, asegurando que el contenido principal (`flex-1`) ocupe todo el espacio restante de manera fluida.
-- **Limpieza de Interfaz**: Se eliminó el estado `sidebarSize` y los controladores de redimensionamiento manual, proporcionando una interfaz más sólida y predecible.
-- **Mantenimiento de Responsividad**: Se conservó la funcionalidad del menú lateral (drawer) para dispositivos móviles, asegurando una experiencia de usuario uniforme en todos los tamaños de pantalla.
-
----
-
-## 02-01-26 Renderizado de Markdown y Limpieza Avanzada de JSON/Python 📝✨
-
-Se ha implementado una solución definitiva para la visualización de resúmenes de análisis, manejando tanto JSON estándar como diccionarios de Python.
-
-- **Extracción Robusta con Regex**: Se añadió una capa de seguridad que utiliza expresiones regulares para extraer campos como `final_report` o `summary` cuando el parseo JSON falla (común en strings de Python con comillas simples).
-- **Limpieza de Caracteres Escapados**: Se implementó la función `cleanExtractedText` para procesar saltos de línea (`\n`) y comillas escapadas, asegurando un texto limpio para el renderizado.
-- **Triple Validación de Datos**: El sistema ahora intenta tres métodos de recuperación de texto (JSON, Regex y Conversión de tipos) antes de recurrir al texto original.
-- **Integración de `InlineMarkdownRenderer`**: Se reemplazó el renderizado de texto plano por el componente `InlineMarkdownRenderer` en las tarjetas de análisis de `AnalysisView`.
-- **Consistencia Visual**: Se mantuvo el truncado de texto (`line-clamp-3`) para asegurar que el diseño de la cuadrícula de tarjetas permanezca ordenado y profesional.
-
----
-
-## 02-01-26 Modernización Integral de la Agenda 📅🧊
-
-Se ha realizado una transformación visual completa del módulo de Agenda para alinearlo con la nueva estética premium del proyecto.
-
-- **Interfaz Glassmorphism**: Implementación de contenedores con `backdrop-blur-xl` y bordes `rounded-[2rem]` en todas las vistas de la agenda.
-- **Vistas Diaria, Semanal y Mensual**:
-  - **Mensual**: Rediseño de la cuadrícula con celdas de cristal y eventos tipo "píldora" con gradientes dinámicos.
-  - **Semanal**: Sustitución de tablas tradicionales por una rejilla moderna de alta legibilidad.
-  - **Diaria**: Mejora de la jerarquía visual en la lista de tareas y eventos con tarjetas interactivas.
-- **Navegación Premium**: Nuevas barras de navegación con botones de cristal y tipografía de alto impacto (font-black).
-- **Micro-interacciones**: Añadidos efectos de escalado, resplandor (glow) y transiciones fluidas en el hover y drag-and-drop.
-- **Optimización de Espacio**: Mejora en el layout general para maximizar el área de visualización de compromisos.
-
----
-
-## 02-01-26 Modernización de Mensajes de Chat (ChatMessage) 🤖🧊
-
-Se ha rediseñado la presentación de los mensajes del agente y del usuario para una experiencia de chat más inmersiva y premium.
-
-- **Burbujas de IA Glassmorphism**: Implementación de contenedores translúcidos con `backdrop-blur-xl` y bordes ultra-redondeados (`rounded-[2rem]`).
-- **Controles de Acción Dinámicos**:
-  - Rediseño de botones de copiar, reproducir audio y editar con estilo de cristal y animaciones de entrada (`translate-y`).
-  - Mejora en la respuesta táctil y visual (hover effects) de todas las acciones del mensaje.
-- **Identidad Visual del Agente**: Sustitución de texto plano por un badge premium de "KAI Intelligence" con efectos de pulso y gradientes.
-- **Bloques de Ejecución Técnicos**: Mejora en la visualización de herramientas utilizadas, con un diseño más limpio, tipografía mono-espaciada y fondos translúcidos.
-- **Optimización de Lectura**: Ajuste de paddings y tamaños de fuente para mejorar la legibilidad del contenido generado por la IA.
-
----
-
-## 02-01-26 Modernización de Estadísticas y Cabecera (AnalysisView) 📊✨
-
-Se ha completado la segunda fase de la transformación visual del Centro de Análisis, enfocándose en la cabecera y los paneles de métricas.
-
-- **Cabecera de Alto Impacto**: Rediseño del título con gradientes dinámicos y botones con estilo de cristal y bordes `rounded-2xl`.
-- **Paneles de Métricas "Glow"**:
-  - Implementación de tarjetas con efecto `backdrop-blur-xl` y bordes ultra-redondeados (`rounded-[2rem]`).
-  - Acompañamiento de iconos con resplandor (glow) cromático para cada tipo de métrica.
-  - Uso de gradientes vibrantes en las cifras principales para mejorar la legibilidad y el atractivo visual.
-- **Micro-interacciones Dinámicas**: Añadidos efectos de elevación, sombras ambientales de colores y escalado de iconos en el hover.
-- **Refinamiento Tipográfico**: Mejora en la jerarquía de la información utilizando fuentes en mayúsculas para metadatos y tracking ajustado para títulos.
-
----
-
-## 02-01-26 Modernización de la Interfaz Principal (AppShell) 🎨✨
-
-Se ha realizado una transformación visual profunda de la estructura principal de la aplicación para adoptar un estilo más moderno, fluido y "premium".
-
-- **Sidebar Flotante**: Se rediseñó el sidebar para que aparezca como un panel flotante con bordes redondeados (`rounded-3xl`) y efecto de cristal profundo (`backdrop-blur-2xl`).
-- **Efecto Glassmorphism**: Se mejoró el uso de desenfoques y transparencias en el header y contenedores, utilizando `bg-card/40` y `backdrop-blur-xl` para una sensación de ligereza.
-- **Gradientes de Profundidad**: Se añadió un gradiente de fondo sutil al contenedor principal para mejorar la jerarquía visual y la profundidad.
-- **Refinamiento de Componentes**:
-  - Se actualizaron los bordes redondeados a `rounded-2xl` y `rounded-3xl` en toda la estructura.
-  - Se mejoraron los indicadores de estado de conexión con animaciones de pulso y sombras dinámicas.
-  - Se añadió un efecto de brillo (glow) al logo y contenedores de herramientas.
-- **Optimización de Layout**: Se aumentó el espaciado interno del contenido principal y se centró en un contenedor de ancho máximo (`max-w-7xl`) para mejorar la legibilidad en pantallas grandes.
-
----
-
-## 03-01-26 Integración de Visión Multimodal con Mistral Small 3.1 👁️🚀
-
-Se ha dotado a KognitoAI de capacidades visuales avanzadas mediante la integración del modelo multimodal **Mistral Small 3.1** a través de OpenRouter, permitiendo el procesamiento de imágenes y documentos escaneados tanto en el chat como en la base de conocimientos.
-
-- **Configuración de Modelo de Visión**: Se añadió la variable `VISION_MODEL` en `core/config.py` (por defecto `openrouter/mistralai/mistral-small-3.1-24b-instruct:free`) para centralizar la gestión del motor de visión.
-- **Gestión de LLM Multimodal**: Se implementó `get_vision_llm()` en `core/llm_manager.py`, asegurando que el modelo de visión se inicialice correctamente con soporte para OpenRouter y rate limiting.
-- **OCR Multimodal en Documentos**: Se transformó `extract_text_and_metadata_from_document` en `utils/document_parser.py` en una función asíncrona que:
-  - Detecta automáticamente imágenes (`.png`, `.jpg`, `.jpeg`, `.webp`).
-  - Identifica PDFs escaneados (sin capa de texto digital).
-  - Utiliza el modelo de visión para realizar OCR inteligente, preservando la estructura de facturas, tablas y escritura a mano.
-- **Soporte Multimodal en Chat**: Se modificó el nodo `call_model_node` en `core/agent.py` para detectar la presencia de imágenes en los mensajes del usuario. En caso de detectarse una imagen, el agente cambia automáticamente al modelo de visión para generar la respuesta, permitiendo interacciones directas sobre contenido visual.
-- **Actualización de Flujos Asíncronos**: Se actualizaron `core/tasks.py`, `api/documents.py` y `telegram_client/handlers/document_handlers.py` para soportar la nueva naturaleza asíncrona del procesamiento de documentos, garantizando la estabilidad del sistema durante la ingesta de archivos pesados.
-- **Impacto**: KAI ahora puede "ver" y entender facturas, pizarras, apuntes manuales y capturas de pantalla, integrándolos plenamente en su memoria a largo plazo y permitiendo consultas visuales en tiempo real.
-
----
-
-## 03-01-26 Corrección en Procesamiento y Visualización de Memorias en el Grafo 🧠
-
-Se solucionó un problema que impedía que las memorias del usuario (tanto proactivas como explícitas) se procesaran y visualizaran correctamente en el grafo de conocimiento.
-
-- **Activación de KnowledgeExtractionNode**: Se habilitó e inicializó correctamente el nodo de extracción de conocimiento en `core/agent.py` para asegurar que la información se persista en el grafo.
-- **Corrección en memory_graph_processor.py**: Se corrigió un error crítico donde no se pasaba la sesión de base de datos, se redujo el umbral de procesamiento a 1 para feedback inmediato, y se estandarizó el nombre del dataset a "Agent Memories".
-- **Estandarización de Datos**: Se ajustó `KnowledgeExtractionNode` para incluir `dataset_name`, `account_id` y `workspace_id` en el nivel superior de las entidades y relaciones, garantizando su correcta visualización y filtrado en la interfaz.
-
----
-
-## 03-01-26 Restauración de Fuentes y Citas para Herramientas de Notas 📝🔍
-
-Se corrigió un problema crítico que impedía que las fuentes (citations) de las notas aparecieran en el chat al utilizar las herramientas de búsqueda y obtención de notas.
-
-- **Corrección en el Procesamiento de Salida de Herramientas**: Se modificó [`core/agent.py`](core/agent.py) para reconocer y procesar correctamente los objetos `ToolOutputWithSources` devueltos por las herramientas. Anteriormente, estos objetos se convertían a texto plano, descartando las fuentes bibliográficas.
-- **Sincronización del Modelo de Fuentes en la API**: Se actualizó la definición de la clase `Source` en [`api/chat.py`](api/chat.py) para incluir el campo `metadata` y permitir IDs de tipo string. Esto asegura que la información extendida de las notas (como IDs de referencia y puntuaciones de relevancia) se preserve durante la transmisión via WebSocket y al recargar el historial.
-- **Mejora en la Persistencia de Citas**: Con estos cambios, las notas citadas por el asistente ahora aparecen correctamente en la sección de "Fuentes y Referencias" del frontend, permitiendo al usuario abrir la nota original directamente desde la cita.

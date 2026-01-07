@@ -113,14 +113,77 @@ class WebSearchTool(BaseTool):
 
             scraped_contents = await asyncio.gather(*scraping_tasks, return_exceptions=True)
 
+            # --- SMART CHUNKING & RERANKING ---
+            from core.reranker import reranker
+            from langchain.schema import Document
+            
+            all_chunks_as_docs = []
+            MAX_CHARS_PER_PAGE = 10000 # Límite para no procesar páginas infinitas
+            
             for i, content in enumerate(scraped_contents):
                 if isinstance(content, Exception) or not content or content.startswith("Ocurrió un error") or content.startswith("No se pudo"):
-                    logger.warning(f"⚠️ Scrapeo fallido o contenido inválido para {valid_results[i]['link']}. Usando snippet original.")
-                else:
-                    valid_results[i]["snippet"] = content
-                    logger.info(f"✅ Scrapeo exitoso para {valid_results[i]['link']}. Contenido completo utilizado.")
+                    # Si falla el scrapeo, usamos el snippet original como un único chunk
+                    snippet = valid_results[i].get("snippet", "")
+                    all_chunks_as_docs.append(Document(
+                        page_content=snippet,
+                        metadata={"source_idx": i, "title": valid_results[i].get("title", "Sin título"), "link": valid_results[i].get("link", "")}
+                    ))
+                    continue
+                
+                # Limitar longitud inicial por seguridad
+                text = content[:MAX_CHARS_PER_PAGE]
+                
+                # Fragmentación simple por párrafos/bloques
+                paragraphs = [p.strip() for p in text.split("\n\n") if len(p.strip()) > 100]
+                if not paragraphs: # Fallback si no hay párrafos claros
+                    paragraphs = [text[i:i+1000] for i in range(0, len(text), 1000)]
+                
+                for p in paragraphs:
+                    all_chunks_as_docs.append(Document(
+                        page_content=p,
+                        metadata={"source_idx": i, "title": valid_results[i].get("title", "Sin título"), "link": valid_results[i].get("link", "")}
+                    ))
 
-            context_for_llm, sources = self._format_results(valid_results)
+            # Rerankear todos los fragmentos encontrados
+            logger.info(f"🔍 Rerankeando {len(all_chunks_as_docs)} fragmentos de {len(valid_results)} sitios web...")
+            reranked_docs = await reranker.rerank(query, all_chunks_as_docs)
+            
+            # Re-ensamblar resultados basados en los mejores fragmentos
+            # Presupuesto total de caracteres para el LLM: 25,000
+            TOTAL_BUDGET = 25000
+            current_total = 0
+            final_results_map = {} # source_idx -> {title, link, chunks: []}
+            
+            for doc in reranked_docs:
+                if current_total >= TOTAL_BUDGET:
+                    break
+                
+                s_idx = doc.metadata["source_idx"]
+                if s_idx not in final_results_map:
+                    final_results_map[s_idx] = {
+                        "title": doc.metadata["title"],
+                        "link": doc.metadata["link"],
+                        "chunks": []
+                    }
+                
+                chunk_text = doc.page_content
+                if current_total + len(chunk_text) > TOTAL_BUDGET:
+                    # Truncar el último fragmento para ajustar al presupuesto
+                    chunk_text = chunk_text[:TOTAL_BUDGET - current_total]
+                
+                final_results_map[s_idx]["chunks"].append(chunk_text)
+                current_total += len(chunk_text)
+
+            # Convertir el mapa de vuelta a la estructura de valid_results
+            final_formatted_results = []
+            for s_idx, data in final_results_map.items():
+                final_formatted_results.append({
+                    "title": data["title"],
+                    "link": data["link"],
+                    "snippet": "\n---\n".join(data["chunks"])
+                })
+
+            context_for_llm, sources = self._format_results(final_formatted_results)
             output = ToolOutputWithSources(context_for_llm=context_for_llm, sources=sources)
             return output.model_dump()
 

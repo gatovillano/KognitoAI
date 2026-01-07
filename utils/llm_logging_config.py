@@ -10,6 +10,16 @@ import logging
 import os
 from datetime import datetime
 from typing import Optional
+from utils.security import PIISanitizer
+
+class PIIRedactionFormatter(logging.Formatter):
+    """Formatter que redacta PII automáticamente de los mensajes de log."""
+    def format(self, record: logging.LogRecord) -> str:
+        if isinstance(record.msg, str):
+            record.msg = PIISanitizer.sanitize(record.msg)
+        elif isinstance(record.msg, (dict, list)):
+            record.msg = str(PIISanitizer.sanitize_dict(record.msg))
+        return super().format(record)
 
 def setup_llm_detailed_logging(log_level: str = "INFO", log_file: Optional[str] = None) -> None:
     """
@@ -20,8 +30,8 @@ def setup_llm_detailed_logging(log_level: str = "INFO", log_file: Optional[str] 
         log_file: Archivo opcional para guardar logs específicos del LLM
     """
 
-    # Crear un formatter específico para logs del LLM
-    llm_formatter = logging.Formatter(
+    # Crear un formatter específico para logs del LLM con redacción de PII
+    llm_formatter = PIIRedactionFormatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 

@@ -191,6 +191,16 @@ class HybridGraphProcessor:
             data["dataset_name"] = self.dataset_name
         return data
     
+    def _normalize_for_id(self, text: str) -> str:
+        """Normaliza un texto para usarlo en un ID (minúsculas, sin puntuación, espacios a guiones bajos)."""
+        if not text:
+            return "unknown"
+        # Quitar puntuación y pasar a minúsculas
+        normalized = re.sub(r'[^\w\s]', '', text.lower())
+        # Reemplazar espacios por guiones bajos y quitar espacios extra
+        normalized = re.sub(r'\s+', '_', normalized).strip('_')
+        return normalized or "unknown"
+    
     async def _get_embeddings(self, texts: List[str]):
         """
         Genera embeddings para una lista de textos usando Ollama.
@@ -484,8 +494,11 @@ class HybridGraphProcessor:
                     # Calcular confianza basada en características de la entidad
                     confidence = self._calculate_entity_confidence(ent)
                     
+                    # Generar ID determinista basado en nombre y tipo
+                    entity_id = f"entity_{ent.label_.lower()}_{self._normalize_for_id(entity_text)}"
+                    
                     entity_data = self._add_tenant_ids({
-                        "id": f"entity_{len(entities)}",
+                        "id": entity_id,
                         "name": entity_text,
                         "type": ent.label_,
                         "description": f"{ent.label_}: {entity_text}",
@@ -640,8 +653,11 @@ class HybridGraphProcessor:
                             # Mapear labels de GLiNER a tipos compatibles
                             entity_type = self._map_gliner_label_to_type(entity_label)
                             
+                            # Generar ID determinista basado en nombre y tipo
+                            entity_id = f"entity_{entity_type.lower()}_{self._normalize_for_id(entity_text)}"
+                            
                             entity_data = self._add_tenant_ids({
-                                "id": f"entity_gliner_{len(entities)}",
+                                "id": entity_id,
                                 "name": entity_text,
                                 "type": entity_type,
                                 "description": f"{entity_label}: {entity_text}",
@@ -1003,16 +1019,22 @@ class HybridGraphProcessor:
                         # Determinar tipo de relación más específico
                         rel_type = self._determine_relationship_type(concept, entity, similarity)
 
-                        relationships.append(self._add_tenant_ids({
-                            "id": f"concept_rel_{len(relationships)}",
-                            "source_entity_id": concept["id"],
-                            "target_entity_id": entity["id"],
-                            "type": rel_type,  # Usar 'type' en lugar de 'relationship_type'
-                            "relationship_type": rel_type,  # Mantener ambos por compatibilidad
-                            "description": f"{concept['name']} está relacionado con {entity['name']}",
-                            "confidence": float(similarity),
-                            "extraction_method": "semantic_concept_entity"
-                        }))
+                        if concept.get("id") and entity.get("id") and concept["id"] != entity["id"]:
+                            # Generar ID determinista para la relación
+                            source_id = concept["id"]
+                            target_id = entity["id"]
+                            rel_id = f"rel_{source_id}_{target_id}_{rel_type.lower()}"
+                            
+                            relationships.append(self._add_tenant_ids({
+                                "id": rel_id,
+                                "source_entity_id": source_id,
+                                "target_entity_id": target_id,
+                                "type": rel_type,  # Usar 'type' en lugar de 'relationship_type'
+                                "relationship_type": rel_type,  # Mantener ambos por compatibilidad
+                                "description": f"{concept['name']} está relacionado con {entity['name']}",
+                                "confidence": float(similarity),
+                                "extraction_method": "semantic_concept_entity"
+                            }))
             
             logger.info(f"✅ Creadas {len([r for r in relationships if r.get('extraction_method') == 'semantic_concept_entity'])} relaciones concepto-entidad")
 
@@ -1056,8 +1078,13 @@ class HybridGraphProcessor:
                     similarity = similarities[i][j]
 
                     if similarity > threshold:
+                        # Generar ID determinista para la relación
+                        source_id = all_concepts[i]["id"]
+                        target_id = all_concepts[j]["id"]
+                        rel_id = f"rel_sim_{source_id}_{target_id}"
+                        
                         relationships.append(self._add_tenant_ids({
-                        "id": f"concept_sim_{len(relationships)}",
+                            "id": rel_id,
                         "source_entity_id": all_concepts[i]["id"],
                         "target_entity_id": all_concepts[j]["id"],
                         "type": "CONCEPTUAL_SIMILARITY",
@@ -1104,8 +1131,13 @@ class HybridGraphProcessor:
                         similarity = similarities[i][j]
 
                         if similarity > threshold:
+                            # Generar ID determinista para la relación
+                            source_id = source_concept["id"]
+                            target_id = target_concept["id"]
+                            rel_id = f"rel_{source_id}_{target_id}_{rel_type.lower()}"
+                            
                             relationships.append(self._add_tenant_ids({
-                                "id": f"hierarchy_{len(relationships)}",
+                                "id": rel_id,
                                 "source_entity_id": source_concept["id"],
                                 "target_entity_id": target_concept["id"],
                                 "type": rel_type,
@@ -1234,8 +1266,13 @@ class HybridGraphProcessor:
                     entity2_pos = content.find(found_entities[j]['name'].lower())
                     
                     if abs(entity1_pos - entity2_pos) < 200:  # Aparecen cerca
+                        # Generar ID determinista para la relación
+                        source_id = found_entities[i]["id"]
+                        target_id = found_entities[j]["id"]
+                        rel_id = f"rel_cooc_{source_id}_{target_id}"
+
                         relationships.append(self._add_tenant_ids({
-                            "id": f"cooc_{len(relationships)}",
+                            "id": rel_id,
                             "source_entity_id": found_entities[i]["id"],
                             "target_entity_id": found_entities[j]["id"],
                             "type": "CO_OCCURRENCE",
@@ -1278,8 +1315,13 @@ class HybridGraphProcessor:
                     if len(relationships) >= 100:  # Límite de relaciones
                         break
 
+                    # Generar ID determinista para la relación
+                    source_id = found_entities[j]["id"]
+                    target_id = found_entities[k]["id"]
+                    rel_id = f"rel_lcooc_{source_id}_{target_id}"
+                    
                     relationships.append(self._add_tenant_ids({
-                        "id": f"light_cooc_{len(relationships)}",
+                        "id": rel_id,
                         "source_entity_id": found_entities[j]["id"],
                         "target_entity_id": found_entities[k]["id"],
                         "type": "CO_OCCURRENCE_LIGHT",
@@ -1385,8 +1427,13 @@ class HybridGraphProcessor:
                             distance = abs(pos1 - pos2)
                             confidence = max(0.5, 1.0 - (distance / 300))
 
+                            # Generar ID determinista para la relación
+                            source_id = entity1["id"]
+                            target_id = entity2["id"]
+                            rel_id = f"rel_optcooc_{source_id}_{target_id}"
+
                             relationships.append(self._add_tenant_ids({
-                                "id": f"opt_cooc_{len(relationships)}",
+                                "id": rel_id,
                                 "source_entity_id": entity1["id"],
                                 "target_entity_id": entity2["id"],
                                 "type": "CO_OCCURRENCE_OPT",
@@ -1519,9 +1566,12 @@ class HybridGraphProcessor:
                             direction = llm_rel.get("direction", "a->b")
                             source_id = orig_rel["source_entity_id"] if direction == "a->b" else orig_rel["target_entity_id"]
                             target_id = orig_rel["target_entity_id"] if direction == "a->b" else orig_rel["source_entity_id"]
-                            
-                            enriched_rel = self._add_tenant_ids({
-                                "id": f"llm_rel_{len(enriched_relationships)}",
+                            rel_type = llm_rel.get("type", "RELATED_TO")
+                            # Generar ID determinista para la relación
+                            rel_id = f"rel_llm_{source_id}_{target_id}_{rel_type.lower()}"
+                                
+                            enriched_relationships.append(self._add_tenant_ids({
+                                "id": rel_id,
                                 "source_entity_id": source_id,
                                 "target_entity_id": target_id,
                                 "type": llm_rel.get("type", "RELATED_TO"),
@@ -1530,8 +1580,7 @@ class HybridGraphProcessor:
                                 "confidence": float(llm_rel.get("confidence", 0.7)),
                                 "extraction_method": "llm_enriched_cooccurrence",
                                 "source_document": doc_title
-                            })
-                            enriched_relationships.append(enriched_rel)
+                            }))
                         else:
                             logger.warning(f"⚠️ Relación del LLM con ID {llm_rel.get('id')} no encontrada en el batch original. Ignorando.")
                             
@@ -1583,11 +1632,11 @@ class HybridGraphProcessor:
             if concept_key not in entity_set:
                 entity_set.add(concept_key)
                 
-                # Calcular confianza basada en complejidad
-                confidence = 0.75 + (min(len(content_words), 3) * 0.05)
+                # Generar ID determinista basado en el texto
+                concept_id = f"concept_np_{self._normalize_for_id(chunk_text)}"
                 
                 entities.append(self._add_tenant_ids({
-                    "id": f"concept_np_{len(entities)}",
+                    "id": concept_id,
                     "name": chunk_text,
                     "type": "CONCEPT_PHRASE",
                     "description": f"Frase nominal: {chunk_text}",
@@ -1620,8 +1669,11 @@ class HybridGraphProcessor:
                     len(compound_concept) < 50):
 
                     entity_set.add(concept_key)
+                    # Generar ID determinista basado en el texto
+                    concept_id = f"concept_comp_{self._normalize_for_id(compound_concept)}"
+                    
                     entities.append(self._add_tenant_ids({
-                        "id": f"concept_comp_{len(entities)}",
+                        "id": concept_id,
                         "name": compound_concept.strip(),
                         "type": "CONCEPT_COMPOUND",
                         "description": f"Concepto compuesto: {compound_concept}",
@@ -1651,9 +1703,11 @@ class HybridGraphProcessor:
                     
                     # Confianza más alta para términos muy frecuentes
                     confidence = min(0.95, 0.7 + (freq * 0.08))
+                    # Generar ID determinista basado en el texto
+                    concept_id = f"concept_tech_{self._normalize_for_id(lemma)}"
                     
                     entities.append(self._add_tenant_ids({
-                        "id": f"concept_tech_{len(entities)}",
+                        "id": concept_id,
                         "name": lemma.title(),
                         "type": "CONCEPT_TECHNICAL",
                         "description": f"Término técnico (freq: {freq}): {lemma}",
@@ -1691,9 +1745,11 @@ class HybridGraphProcessor:
                     
                     # Confianza basada en el tipo de dependencia
                     confidence = 0.75 if token.dep_ == "nsubj" else 0.7
-                    
+                    # Generar ID determinista basado en el texto
+                    concept_id = f"concept_expr_{self._normalize_for_id(expression)}"
+                        
                     entities.append(self._add_tenant_ids({
-                        "id": f"concept_expr_{len(entities)}",
+                        "id": concept_id,
                         "name": expression.strip(),
                         "type": "CONCEPT_EXPRESSION",
                         "description": f"Expresión clave: {expression} (relación: {token.dep_})",
