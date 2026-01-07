@@ -42,6 +42,7 @@ interface ChatMessageProps {
   playingMessageIndex: number | null;
   isAudioPaused: boolean;
   children?: React.ReactNode; // Añadir la propiedad children
+  onSourceClick?: (source: Source) => void;
 }
 
 
@@ -57,7 +58,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   isAudioLoading,
   playingMessageIndex,
   isAudioPaused,
+
   children, // Recibir children en las props
+  onSourceClick,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(msg.text);
@@ -97,7 +100,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   return (
     <motion.div
       key={index}
-className="text-base sm:text-lg break-words font-sans p-2 sm:p-4 font-normal transition-all duration-500"
+      className="text-base sm:text-lg break-words font-sans p-2 sm:p-4 font-normal transition-all duration-500"
       initial={{ opacity: 0, y: 10 }}
       animate={{
         opacity: 1,
@@ -317,11 +320,11 @@ className="text-base sm:text-lg break-words font-sans p-2 sm:p-4 font-normal tra
                       <div className="p-1 rounded-md bg-primary/10">
                         <Notebook className="h-3 w-3 text-primary" />
                       </div>
-                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Fuentes y Referencias</span>
+                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Fuentes y Resultados RAG</span>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {uniqueSources.map((source, idx) => (
-                        <SourceButton key={idx} source={source} citationNumber={idx + 1} />
+                        <SourceButton key={idx} source={source} citationNumber={idx + 1} onSourceClick={onSourceClick} />
                       ))}
                     </div>
                   </motion.div>

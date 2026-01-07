@@ -24,118 +24,124 @@ export type Document = {
 
 // La función ahora recibe los handlers para cada acción
 export const getColumns = (
-    onPreview: (doc: Document) => void,
-    onEdit: (doc: Document) => void,
-    onDelete: (doc: Document) => void,
-    onAnalyze?: (doc: Document) => void,
-    onShare?: (doc: Document) => void,
-    onExtractTitle?: (doc: Document) => void
+  onPreview: (doc: Document) => void,
+  onEdit: (doc: Document) => void,
+  onDelete: (doc: Document) => void,
+  onAnalyze?: (doc: Document) => void,
+  onShare?: (doc: Document) => void,
+  onExtractTitle?: (doc: Document) => void,
+  onMoveToCollection?: (doc: Document) => void
 ): ColumnDef<Document>[] => [
-  {
-    accessorKey: 'title',
-    header: 'Título',
-    enableSorting: true,
-    cell: ({ row }) => {
-      const doc = row.original;
+    {
+      accessorKey: 'title',
+      header: 'Título',
+      enableSorting: true,
+      cell: ({ row }) => {
+        const doc = row.original;
 
-      // Unificar la lógica para estados de carga
-      if (doc.document_type === 'placeholder') {
-        const isLoading = doc.status === 'processing' || doc.status === 'pending';
-        const isFailed = doc.status === 'failed';
+        // Unificar la lógica para estados de carga
+        if (doc.document_type === 'placeholder') {
+          const isLoading = doc.status === 'processing' || doc.status === 'pending';
+          const isFailed = doc.status === 'failed';
 
-        if (isLoading) {
-          return (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="italic">{doc.title || 'Procesando...'}</span>
-            </div>
-          );
+          if (isLoading) {
+            return (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="italic">{doc.title || 'Procesando...'}</span>
+              </div>
+            );
+          }
+
+          if (isFailed) {
+            return (
+              <div className="flex items-center gap-2 text-destructive">
+                <XCircle className="h-4 w-4" />
+                <span className="italic" title={doc.error}>Error al procesar</span>
+              </div>
+            );
+          }
         }
 
-        if (isFailed) {
-          return (
-            <div className="flex items-center gap-2 text-destructive">
-              <XCircle className="h-4 w-4" />
-              <span className="italic" title={doc.error}>Error al procesar</span>
-            </div>
-          );
-        }
-      }
-
-      return (
-        <div className="font-medium whitespace-normal break-words">
-          {doc.title || <span className="text-muted-foreground italic">Sin título</span>}
-          {doc.team_shared && (
-            <span className="ml-2 text-blue-500" title="Compartido con equipo">👥</span>
-          )}
-        </div>
-      );
-    },
-  },
-  {
-    accessorKey: 'file_name',
-    header: () => <div className="hidden sm:table-cell">Nombre del Archivo</div>,
-    cell: ({ row }) => <div className="hidden sm:table-cell">{row.original.file_name}</div>,
-    enableSorting: true,
-  },
-  {
-    accessorKey: 'topic',
-    header: () => <div className="hidden md:table-cell">Base de Conocimiento</div>,
-    cell: ({ row }) => <div className="hidden md:table-cell">{row.original.topic}</div>,
-    enableSorting: true,
-  },
-  {
-    id: 'actions',
-    cell: ({ row }) => {
-      const document = row.original;
-      const isProcessing = document.status === 'processing' || document.status === 'pending';
-
-      if (isProcessing) {
         return (
-          <div className="flex items-center justify-center pr-4">
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          <div className="font-medium whitespace-normal break-words">
+            {doc.title || <span className="text-muted-foreground italic">Sin título</span>}
+            {doc.team_shared && (
+              <span className="ml-2 text-blue-500" title="Compartido con equipo">👥</span>
+            )}
           </div>
         );
-      }
-
-      return (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="h-8 w-8 p-0" disabled={isProcessing}>
-              <span className="sr-only">Abrir menú</span>
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Acciones</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => onPreview(document)}>
-              Previsualizar
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onEdit(document)}>
-              Editar Metadatos
-            </DropdownMenuItem>
-            {onAnalyze && (
-              <DropdownMenuItem onClick={() => onAnalyze(document)}>
-                Analizar Documento
-              </DropdownMenuItem>
-            )}
-            {onShare && (
-              <DropdownMenuItem onClick={() => onShare(document)}>
-                Compartir Documento
-              </DropdownMenuItem>
-            )}
-            {onExtractTitle && (
-              <DropdownMenuItem onClick={() => onExtractTitle(document)}>
-                Extraer Título
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onDelete(document)} className="text-destructive focus:bg-destructive/30">
-              Eliminar
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      );
+      },
     },
-  },
-];
+    {
+      accessorKey: 'file_name',
+      header: () => <div className="hidden sm:table-cell">Nombre del Archivo</div>,
+      cell: ({ row }) => <div className="hidden sm:table-cell">{row.original.file_name}</div>,
+      enableSorting: true,
+    },
+    {
+      accessorKey: 'topic',
+      header: () => <div className="hidden md:table-cell">Base de Conocimiento</div>,
+      cell: ({ row }) => <div className="hidden md:table-cell">{row.original.topic}</div>,
+      enableSorting: true,
+    },
+    {
+      id: 'actions',
+      cell: ({ row }) => {
+        const document = row.original;
+        const isProcessing = document.status === 'processing' || document.status === 'pending';
+
+        if (isProcessing) {
+          return (
+            <div className="flex items-center justify-center pr-4">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            </div>
+          );
+        }
+
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="h-8 w-8 p-0" disabled={isProcessing}>
+                <span className="sr-only">Abrir menú</span>
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Acciones</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => onPreview(document)}>
+                Previsualizar
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onEdit(document)}>
+                Editar Metadatos
+              </DropdownMenuItem>
+              {onAnalyze && (
+                <DropdownMenuItem onClick={() => onAnalyze(document)}>
+                  Analizar Documento
+                </DropdownMenuItem>
+              )}
+              {onShare && (
+                <DropdownMenuItem onClick={() => onShare(document)}>
+                  Compartir Documento
+                </DropdownMenuItem>
+              )}
+              {onExtractTitle && (
+                <DropdownMenuItem onClick={() => onExtractTitle(document)}>
+                  Extraer Título
+                </DropdownMenuItem>
+              )}
+              {onMoveToCollection && (
+                <DropdownMenuItem onClick={() => onMoveToCollection(document)}>
+                  Mover a Colección
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => onDelete(document)} className="text-destructive focus:bg-destructive/30">
+                Eliminar
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        );
+      },
+    },
+  ];

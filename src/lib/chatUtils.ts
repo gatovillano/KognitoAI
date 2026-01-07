@@ -76,6 +76,8 @@ export const collectSourcesFromMessage = (
       let ragId: number | string;
       if (typeof ragItem.id === 'number') {
         ragId = ragItem.id;
+      } else if (ragItem.metadata?.document_id) {
+        ragId = ragItem.metadata.document_id;
       } else {
         ragId = `rag-${Math.random().toString(36).substr(2, 9)}`; // Generate unique ID if not numeric
       }
@@ -83,9 +85,9 @@ export const collectSourcesFromMessage = (
       const newSource: Source = {
         id: ragId,
         title: ragItem.name || ragItem.title || 'Contexto RAG',
-        url: ragItem.url || '',
+        url: ragItem.url || ragItem.metadata?.document_id || '',
         snippet: ragItem.snippet || ragItem.content || '',
-        type: ragItem.type || 'document',
+        type: ragItem.type || ragItem.metadata?.type || 'document',
         metadata: ragItem.metadata || {},
         name: ragItem.name || ragItem.title || 'Contexto RAG',
       };

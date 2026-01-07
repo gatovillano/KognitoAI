@@ -171,7 +171,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (!isResponding && (newMessage.trim() || currentContext.length > 0 || (uploadedImagePreviews && uploadedImagePreviews.length > 0))) {
+      if (newMessage.trim() || currentContext.length > 0 || (uploadedImagePreviews && uploadedImagePreviews.length > 0)) {
         const form = (e.target as HTMLTextAreaElement).form;
         if (form) {
           form.requestSubmit();
@@ -275,7 +275,6 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
               onKeyDown={handleKeyDown}
               placeholder={inputPlaceholder || (currentContext.length > 0 ? "Escribe tu mensaje..." : "Escribe tu mensaje o selecciona contexto...")}
               autoComplete="on"
-              disabled={isResponding}
               className="w-full resize-none bg-transparent border-0 focus:ring-0 p-0 text-base sm:text-lg placeholder:text-muted-foreground/70"
               rows={1}
               onChange={handleMessageChange}
@@ -309,7 +308,6 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                   size="icon"
                   className="rounded-full text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                   onClick={() => setIsNoteSelectorOpen(true)}
-                  disabled={isResponding}
                 >
                   <NotebookText className="h-5 w-5" />
                 </Button>
@@ -324,7 +322,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                     const action = isRecording ? onStopRecording : onStartRecording;
                     action?.();
                   }}
-                  disabled={isResponding || isProcessingAudio}
+                  disabled={isProcessingAudio}
                   className={`rounded-full ${isRecording ? 'text-red-500 hover:bg-red-100 dark:hover:bg-red-900/50' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'}`}
                 >
                   {isProcessingAudio ? <Loader2 className="h-5 w-5 animate-spin" /> : <Mic className="h-5 w-5" />}
@@ -332,10 +330,10 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                 <Button
                   type="submit"
                   size="icon"
-                  disabled={isResponding || isUploadingFile || isVectorizingFile || (!newMessage.trim() && currentContext.length === 0 && (!uploadedImagePreviews || uploadedImagePreviews.length === 0))}
+                  disabled={isUploadingFile || isVectorizingFile || (!newMessage.trim() && currentContext.length === 0 && (!uploadedImagePreviews || uploadedImagePreviews.length === 0))}
                   className="rounded-full"
                 >
-                  {(isResponding || isUploadingFile || isVectorizingFile) ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+                  {(isUploadingFile || isVectorizingFile) ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
                 </Button>
               </div>
             </div>

@@ -16,6 +16,7 @@ interface DocumentCardProps {
   onAnalyze: (doc: Document) => void;
   onShare: (doc: Document) => void;
   onExtractTitle: (doc: Document) => void;
+  onMoveToCollection?: (doc: Document) => void;
 }
 
 export function DocumentCard({
@@ -26,6 +27,7 @@ export function DocumentCard({
   onAnalyze,
   onShare,
   onExtractTitle,
+  onMoveToCollection,
 }: DocumentCardProps) {
   return (
     <Card className="flex flex-col h-full">
@@ -62,6 +64,11 @@ export function DocumentCard({
               <DropdownMenuItem onClick={() => onShare(document)}>
                 Compartir
               </DropdownMenuItem>
+              {onMoveToCollection && (
+                <DropdownMenuItem onClick={() => onMoveToCollection(document)}>
+                  Mover a Colección
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </CardTitle>

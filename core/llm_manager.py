@@ -201,7 +201,6 @@ async def initialize_llms():
             llm_kwargs["provider"] = "google_ai_studio"
         elif "openrouter" in settings.llm_model.lower():
             logger.info("🔧 Applying OpenRouter specific config.")
-            llm_kwargs["provider"] = "openai"  # OpenRouter acts as OpenAI proxy
 
         main_llm = ChatLiteLLM(**llm_kwargs)
         _main_agent_llm_instance = main_llm
@@ -226,7 +225,6 @@ async def initialize_llms():
 
         if "openrouter" in settings.fast_llm_model.lower():
             logger.info("🔧 Applying OpenRouter specific config for fast LLM.")
-            fast_llm_kwargs["provider"] = "openai"  # OpenRouter acts as OpenAI proxy
 
         fast_llm = ChatLiteLLM(**fast_llm_kwargs)
         _fast_task_llm_instance = fast_llm
@@ -248,7 +246,6 @@ async def initialize_llms():
 
         if "openrouter" in settings.vision_model.lower():
             logger.info("🔧 Applying OpenRouter specific config for vision LLM.")
-            vision_llm_kwargs["provider"] = "openai"
 
         vision_llm = ChatLiteLLM(**vision_llm_kwargs)
         _vision_llm_instance = vision_llm

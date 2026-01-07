@@ -59,7 +59,7 @@ from utils.db_session import DBSession
 from utils.embeddings import get_embedding_model
 from core.config import settings
 from urllib.parse import unquote
-from core.citation_models import ToolOutputWithSources, Source, create_document_source, format_context_with_sources
+from core.citation_models import ToolOutputWithSources, Source, SourceType, create_document_source, format_context_with_sources
 from core.reranker import Reranker # Importación aquí para evitar circularidad
 
 logger = logging.getLogger(__name__)
@@ -540,14 +540,28 @@ async def get_relevant_memories(
         final_sources = []
         for i, doc in enumerate(final_retrieved_docs):
             final_content_list.append(doc.page_content)
+            
+            # Determinar el tipo de fuente basado en los metadatos
+            doc_type = doc.metadata.get("type", "user_documents")
+            source_type = SourceType.DOCUMENT
+            
+            if doc_type == "user_memories":
+                source_type = SourceType.MEMORY
+            elif doc_type == "user_notes":
+                source_type = SourceType.NOTE
+            elif doc_type == "user_documents":
+                source_type = SourceType.DOCUMENT
+            
             # Corrected create_document_source call
-            final_sources.append(create_document_source(
-                source_id=i + 1, # Pass a unique integer ID
+            final_sources.append(Source(
+                id=i + 1, # Pass a unique integer ID
                 title=doc.metadata.get("title", doc.metadata.get("file_name", "Documento")),
-                file_path=doc.metadata.get("document_id", f"doc_{i}"), # Use document_id as unique URL/path
+                url=doc.metadata.get("document_id", doc.metadata.get("note_id", f"doc_{i}")), # Use document_id or note_id
                 snippet=doc.page_content,
+                type=source_type,
                 metadata={
                     "document_id": doc.metadata.get("document_id"),
+                    "note_id": doc.metadata.get("note_id"),
                     "file_name": doc.metadata.get("file_name"),
                     "chunk_index": doc.metadata.get("chunk_index"),
                     "topic": doc.metadata.get("topic"),
@@ -1581,6 +1595,23 @@ async def update_document_metadata(
             if result.rowcount > 0:
                 logger.info(f"✅ Se actualizaron {result.rowcount} chunks para el archivo '{file_name}' usando consulta optimizada.")
 
+                # ACTUALIZACIÓN DEL GRAFO DE CONOCIMIENTO (Neo4j)
+                if decoded_new_topic is not None:
+                    old_topic = current_cmetadata.get('topic')
+                    if old_topic and old_topic != decoded_new_topic:
+                        try:
+                            from utils.knowledge_graph_service import KnowledgeGraphService
+                            kg_service = KnowledgeGraphService()
+                            await kg_service.update_dataset_name_flow(
+                                old_dataset_name=old_topic,
+                                new_dataset_name=decoded_new_topic,
+                                account_id=account_id,
+                                file_name=file_name
+                            )
+                            logger.info(f"🧠 Grafo de conocimiento actualizado: '{old_topic}' -> '{decoded_new_topic}' para '{file_name}'")
+                        except Exception as e:
+                            logger.error(f"❌ Error al actualizar el grafo de conocimiento: {e}")
+
                 # Enviar notificación WebSocket en tiempo real
                 try:
                     from core.websocket_manager import send_personal_message
@@ -1594,15 +1625,15 @@ async def update_document_metadata(
                     })
                     logger.info(f"📡 Notificación WebSocket enviada para actualización de título de '{file_name}'")
                 except Exception as e:
-                    logger.warning(f"No se pudo enviar notificación WebSocket para '{file_name}': {e}")
+                    logger.error(f"❌ Error al enviar notificación WebSocket: {e}")
 
                 return True
             else:
-                logger.warning(f"La consulta de actualización optimizada para '{file_name}' no afectó ninguna fila.")
+                logger.warning(f"⚠️ No se actualizó ninguna fila para el archivo '{file_name}'.")
                 return False
 
         except Exception as e:
-            logger.error(f"❌ Error actualizando metadatos optimizado de '{file_name}' (workspace {workspace_id}): {e}", exc_info=True)
+            logger.error(f"❌ Error al actualizar metadatos del documento '{file_name}': {e}", exc_info=True)
             await db.rollback()
             return False
 

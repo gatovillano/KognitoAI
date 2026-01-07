@@ -374,7 +374,7 @@ export default function NotesPage() {
         style={{ opacity: isDragging ? 0.5 : 1 }}
       >
         <Card
-          className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full min-h-[200px]"
+          className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-[250px]"
           onClick={() => {
             setViewingNote(note);
             setIsViewDialogOpen(true);
@@ -446,8 +446,8 @@ export default function NotesPage() {
               </DropdownMenu>
             </CardTitle>
           </CardHeader>
-          <CardContent className="pt-0 flex-grow">
-            <div className="text-sm text-muted-foreground line-clamp-3 leading-relaxed">
+          <CardContent className="pt-0 flex-grow overflow-hidden">
+            <div className="text-sm text-muted-foreground line-clamp-4 leading-relaxed">
               {note.content ? (
                 <InlineMarkdownRenderer content={note.content} />
               ) : (

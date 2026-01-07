@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from utils.security import get_current_account_id
+from utils.security import get_current_account_id, get_current_admin_account
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -118,8 +118,8 @@ def parse_log_line(line: str) -> Optional[LogEntry]:
         )
 
 @router.get("/logs/llm/files", response_model=List[LogFile])
-async def get_log_files(current_account_id: str = Depends(get_current_account_id)):
-    """Obtiene la lista de archivos de log del LLM disponibles."""
+async def get_log_files(admin_account: str = Depends(get_current_admin_account)):
+    """Obtiene la lista de archivos de log del LLM disponibles. Solo para administradores."""
     try:
         return get_llm_log_files()
     except Exception as e:
@@ -132,7 +132,7 @@ async def get_log_content(
     lines: int = Query(100, description="Número de líneas a obtener"),
     filter_level: Optional[str] = Query(None, description="Filtrar por nivel de log"),
     filter_logger: Optional[str] = Query(None, description="Filtrar por nombre de logger"),
-    current_account_id: str = Depends(get_current_account_id)
+    admin_account: str = Depends(get_current_admin_account)
 ):
     """Obtiene el contenido de un archivo de log del LLM."""
     try:
@@ -182,7 +182,7 @@ async def get_log_content(
 @router.get("/logs/llm/stream")
 async def stream_log_content(
     filename: Optional[str] = Query(None, description="Nombre del archivo de log"),
-    current_account_id: str = Depends(get_current_account_id)
+    admin_account: str = Depends(get_current_admin_account)
 ):
     """Stream del contenido de un archivo de log en tiempo real."""
     try:
@@ -235,7 +235,7 @@ async def search_logs(
     query: str = Query(..., description="Término de búsqueda"),
     filename: Optional[str] = Query(None, description="Nombre del archivo de log"),
     max_results: int = Query(50, description="Máximo número de resultados"),
-    current_account_id: str = Depends(get_current_account_id)
+    admin_account: str = Depends(get_current_admin_account)
 ):
     """Busca en los logs del LLM por un término específico."""
     try:

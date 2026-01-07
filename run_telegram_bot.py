@@ -126,50 +126,47 @@ async def lifespan(app: FastAPI):
 
     if ptb_app.updater:
         # Iniciar polling y añadir el callback síncrono.
+        logger.info("Iniciando updater.start_polling()...")
         polling_task = asyncio.create_task(ptb_app.updater.start_polling(drop_pending_updates=True, error_callback=done_callback))
         polling_task.add_done_callback(done_callback)
         logger.info("✅ Tarea de polling de Telegram iniciada.")
         
         # Iniciar cliente WebSocket
-        await start_telegram_ws_client(ptb_app) # Pasar la instancia de ptb_app
-        logger.info("✅ Cliente WebSocket de Telegram iniciado.")
+        logger.info("Iniciando start_telegram_ws_client()...")
+        try:
+            await start_telegram_ws_client(ptb_app) # Pasar la instancia de ptb_app
+            logger.info("✅ Cliente WebSocket de Telegram iniciado.")
+        except Exception as ws_err:
+            logger.error(f"❌ Error crítico al iniciar el cliente WebSocket: {ws_err}", exc_info=True)
 
         # Guardar la tarea de polling para poder cancelarla al apagar.
         app.state.background_tasks = [polling_task]
         
 
-    yield # La API y el bot están ahora activos.
+    logger.info("🚀 Bot de Telegram y API interna listos y funcionando.")
+    try:
+        yield
+    finally:
+        # --- Lógica de Apagado Única y Limpia ---
+        logger.info("🔌 Apagando el cliente de Telegram...")
+        
+        # 1. Detener el WebSocket
+        await stop_telegram_ws_client()
+        logger.info("✅ Cliente WebSocket de Telegram detenido.")
 
-    # --- Lógica de Apagado ---
-    logger.info("🔌 Apagando el cliente de Telegram...")
-    if app.state.ptb_app.updater:
-        logger.info("Deteniendo polling de Telegram...")
-        await app.state.ptb_app.updater.stop()
-        logger.info("Polling de Telegram detenido.")
-    
-    if app.state.background_tasks:
-        for task in app.state.background_tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*app.state.background_tasks, return_exceptions=True)
-        logger.info("Tareas en segundo plano canceladas.")
-
-    await stop_telegram_ws_client()
-    logger.info("Cliente WebSocket de Telegram detenido.")
-    if app.state.ptb_app.updater:
-        logger.info("Deteniendo polling de Telegram...")
-        await app.state.ptb_app.updater.stop()
-        logger.info("Polling de Telegram detenido.")
-    
-    if app.state.background_tasks:
-        for task in app.state.background_tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*app.state.background_tasks, return_exceptions=True)
-        logger.info("Tareas en segundo plano canceladas.")
-
-    await stop_telegram_ws_client()
-    logger.info("Cliente WebSocket de Telegram detenido.")
+        # 2. Detener el polling si está activo
+        if hasattr(app.state, 'ptb_app') and app.state.ptb_app.updater and app.state.ptb_app.updater.running:
+            logger.info("Deteniendo polling de Telegram...")
+            await app.state.ptb_app.updater.stop()
+            logger.info("✅ Polling de Telegram detenido.")
+        
+        # 3. Cancelar tareas en segundo plano
+        if hasattr(app.state, 'background_tasks') and app.state.background_tasks:
+            for task in app.state.background_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*app.state.background_tasks, return_exceptions=True)
+            logger.info("✅ Tareas en segundo plano canceladas.")
 
 
 internal_api = FastAPI(lifespan=lifespan)
@@ -270,10 +267,19 @@ async def bot_create_thread_endpoint(request: BotCreateThreadRequest):
 
 
 if __name__ == "__main__":
-    logger.info("Iniciando el servidor del cliente de Telegram en modo de desarrollo...")
-    uvicorn.run(
-        "run_telegram_bot:internal_api",
-        host="0.0.0.0",
-        port=9090,
-        reload=True
-    )
+    # Intentar ejecutar con Uvicorn para la API interna
+    try:
+        logger.info("Iniciando Uvicorn en el puerto 9090...")
+        uvicorn.run(
+            "run_telegram_bot:internal_api",
+            host="0.0.0.0",
+            port=9090,
+            reload=False,
+            workers=1
+        )
+    except Exception as e:
+        logger.error(f"❌ Error al iniciar Uvicorn: {e}. Intentando modo de solo bot...")
+        # Fallback: Mantener el proceso vivo si Uvicorn falla
+        import time
+        while True:
+            time.sleep(3600)

@@ -696,7 +696,16 @@ async def get_analysis_result_endpoint(
         logger.warning(f"Tarea {task_id} encontrada, pero account_id no coincide. Task account: {task.account_id}, Current account: {current_account_id}")
         raise HTTPException(status_code=404, detail="Tarea no pertenece al usuario.")
     logger.info(f"Tarea {task_id} encontrada. Estado: {task.status}")
-    return {"status": task.status, "result": task.result_payload, "error": task.error_message}
+    return {
+        "id": str(task.id),
+        "status": task.status,
+        "result": task.result_payload,
+        "result_payload": task.result_payload, # Redundant but safe
+        "error": task.error_message,
+        "analysis_type": task.analysis_type,
+        "file_name": task.file_name,
+        "created_at": task.created_at.isoformat() if task.created_at else None
+    }
 
 @router.get("/get-mindmap-result/{task_id}")
 async def get_mindmap_result_endpoint(
@@ -1367,6 +1376,7 @@ async def run_semantic_summary_analysis(task_id: str, account_id: str, topic: st
             # Crear resultado estructurado
             result_payload = {
                 "resumen_semantico": semantic_analysis.collection_summary,
+                "general_analysis": semantic_analysis.general_analysis,
                 "temas_transversales": [
                     {
                         "tema": theme.theme,
