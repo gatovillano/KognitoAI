@@ -58,7 +58,7 @@ export default function GraphProgressIndicator({ tasks, onDismiss }: { tasks: Gr
         if (tasks.length > 0) {
             setIsVisible(true);
         } else {
-            const timer = setTimeout(() => setIsVisible(false), 500);
+            const timer = setTimeout(() => setIsVisible(false), 500) as any;
             return () => clearTimeout(timer);
         }
     }, [tasks]);
@@ -106,10 +106,10 @@ export default function GraphProgressIndicator({ tasks, onDismiss }: { tasks: Gr
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, x: -20, scale: 0.95 }}
                                 className={`relative p-4 rounded-xl border-2 transition-all duration-300 ${task.has_error
-                                        ? 'bg-red-50/50 border-red-200 dark:bg-red-950/20 dark:border-red-800'
-                                        : task.is_complete
-                                            ? 'bg-emerald-50/50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800'
-                                            : 'bg-white/50 border-purple-100 dark:bg-gray-800/50 dark:border-purple-900/30'
+                                    ? 'bg-red-50/50 border-red-200 dark:bg-red-950/20 dark:border-red-800'
+                                    : task.is_complete
+                                        ? 'bg-emerald-50/50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800'
+                                        : 'bg-white/50 border-purple-100 dark:bg-gray-800/50 dark:border-purple-900/30'
                                     }`}
                             >
                                 <div className="space-y-3">

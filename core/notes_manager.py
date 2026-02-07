@@ -42,7 +42,7 @@ class NotesManager:
         except ValueError:
             raise HTTPException(status_code=400, detail=f"El ID de cuenta '{account_id}' proporcionado no es un UUID válido.")
         
-        if workspace_id:
+        if workspace_id and isinstance(workspace_id, str):
             if workspace_id.lower() == 'none' or workspace_id == '':
                 workspace_uuid = None
             else:
@@ -50,6 +50,8 @@ class NotesManager:
                     workspace_uuid = uuid.UUID(workspace_id)
                 except ValueError:
                     raise HTTPException(status_code=400, detail=f"El ID de workspace '{workspace_id}' proporcionado no es un UUID válido.")
+        else:
+            workspace_uuid = None
 
         new_note = Nota(
             account_id=account_uuid,
@@ -86,7 +88,7 @@ class NotesManager:
         except ValueError:
             raise HTTPException(status_code=400, detail=f"El ID de cuenta '{account_id}' proporcionado no es un UUID válido.")
         
-        if workspace_id:
+        if workspace_id and isinstance(workspace_id, str):
             if workspace_id.lower() == 'none' or workspace_id == '':
                 workspace_uuid = None
             else:
@@ -94,6 +96,8 @@ class NotesManager:
                     workspace_uuid = uuid.UUID(workspace_id)
                 except ValueError:
                     raise HTTPException(status_code=400, detail=f"El ID de workspace '{workspace_id}' proporcionado no es un UUID válido.")
+        else:
+            workspace_uuid = None
 
         # Si se especifica un workspace, mostrar TODAS las notas de ese workspace
         # (no solo las del usuario actual), después de verificar permisos

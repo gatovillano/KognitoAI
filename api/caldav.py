@@ -1,6 +1,7 @@
 # api/caldav.py
 
-from fastapi import APIRouter, Request, Response, Depends, HTTPException, status
+from api.caldav_router import CalDAVRouter
+from fastapi import Request, Response, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_db_session, AgendaEvent, Account, ContactProfile, Task # Import AgendaEvent, Account, ContactProfile, Task
 from utils.security import get_current_account_id
@@ -12,7 +13,7 @@ import uuid # Importar uuid
 from core.agenda_manager import get_task_by_id_db as get_event_task_by_id_db, update_task_db as update_event_task_db # Importar funciones para tareas
 from core.tasks_manager import create_task, delete_task, get_task_by_id_db, update_task_db, get_tasks_as_dicts # Importar funciones de tasks_manager
 
-router = APIRouter()
+router = CalDAVRouter()
 
 # --- Funciones auxiliares para iCalendar ---
 def _event_to_ical(event: AgendaEvent, account_timezone: str) -> str:

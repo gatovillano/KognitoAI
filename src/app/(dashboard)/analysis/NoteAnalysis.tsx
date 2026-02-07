@@ -105,7 +105,7 @@ const NoteAnalysis: React.FC<NoteAnalysisProps> = ({
 
         {/* TAB: TEMAS Y CONCEPTOS */}
         <TabsContent value="themes" className="space-y-6 animate-in fade-in-50 duration-500">
-          {analysis.key_themes && analysis.key_themes.length > 0 && (
+          {Array.isArray(analysis.key_themes) && analysis.key_themes.length > 0 && (
             <div>
               <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${noteColors.icon}`}>
                 <Target className="w-5 h-5" />
@@ -126,7 +126,7 @@ const NoteAnalysis: React.FC<NoteAnalysisProps> = ({
 
           <Separator />
 
-          {analysis.related_concepts && analysis.related_concepts.length > 0 && (
+          {Array.isArray(analysis.related_concepts) && analysis.related_concepts.length > 0 && (
             <div>
               <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-purple-600">
                 <Brain className="w-5 h-5" />
@@ -148,7 +148,7 @@ const NoteAnalysis: React.FC<NoteAnalysisProps> = ({
 
         {/* TAB: ACCIÓN E IMPLICACIONES */}
         <TabsContent value="action" className="space-y-6 animate-in fade-in-50 duration-500">
-          {analysis.potential_implications && analysis.potential_implications.length > 0 && (
+          {Array.isArray(analysis.potential_implications) && analysis.potential_implications.length > 0 && (
             <div>
               <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-amber-600">
                 <Info className="w-5 h-5" />
@@ -167,7 +167,7 @@ const NoteAnalysis: React.FC<NoteAnalysisProps> = ({
 
           <Separator />
 
-          {analysis.action_suggestions && analysis.action_suggestions.length > 0 && (
+          {Array.isArray(analysis.action_suggestions) && analysis.action_suggestions.length > 0 && (
             <ActionableButton
               title="Sugerencias de Acción"
               description="Pasos recomendados para desarrollar o aplicar las ideas de la nota."

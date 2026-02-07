@@ -23,6 +23,7 @@ class SourceType(str, Enum):
     DATABASE = "database"
     GRAPH = "graph"
     NOTE = "note"
+    GITHUB = "github"
 
 
 class Source(BaseModel):
@@ -185,6 +186,29 @@ def create_note_source(source_id: int, title: str, note_id: str, snippet: str,
         url=f"note://{note_id}",
         snippet=snippet,
         type=SourceType.NOTE,
+        metadata=metadata or {}
+    )
+
+
+def create_github_source(source_id: int, title: str, url: str, snippet: str,
+                         metadata: Optional[Dict[str, Any]] = None) -> Source:
+    """
+    Función helper para crear una fuente de GitHub.
+    Args:
+        source_id: ID único de la fuente
+        title: Nombre del archivo o repositorio
+        url: URL directa al archivo o repositorio en GitHub
+        snippet: Fragmento relevante del contenido del archivo
+        metadata: Metadatos adicionales (ej: repo, rama, path, etc.)
+    Returns:
+        Objeto Source configurado para GitHub
+    """
+    return Source(
+        id=source_id,
+        title=title,
+        url=url,
+        snippet=snippet,
+        type=SourceType.GITHUB,
         metadata=metadata or {}
     )
 

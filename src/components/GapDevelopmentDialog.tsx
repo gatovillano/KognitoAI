@@ -10,7 +10,10 @@ import { Badge } from './ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
-import { Zap, Loader2, Sparkles, FileText, Target, ExternalLink, Lightbulb } from 'lucide-react';
+import { Zap, Loader2, Sparkles, FileText, Target, ExternalLink, Lightbulb, Notebook } from 'lucide-react';
+import { MarkdownRenderer } from './MarkdownRenderer';
+import { Source, SourceButton } from './SourceButton';
+import { processMessageWithCitations } from '@/lib/chatUtils';
 
 interface GapDevelopmentDialogProps {
   gapId: string;
@@ -33,52 +36,80 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
   const [progressValue, setProgressValue] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
-  const { lastMessage } = useWebSocketContext();
+  const { registerMessageHandler } = useWebSocketContext();
+
+  const [processedSources, setProcessedSources] = useState<Source[]>([]);
+  const [contentParts, setContentParts] = useState<any[]>([]);
+
+  // Procesar fuentes cuando cambie el reporte
+  useEffect(() => {
+    if (developmentStatus?.status === 'completed' && developmentStatus.report) {
+      const report = developmentStatus.report;
+      const rawSources = report.sources || [];
+
+      // Convertir fuentes del reporte al formato Source esperado
+      const formattedSources: Source[] = rawSources.map((s: any, idx: number) => ({
+        id: idx + 1,
+        title: s.title || s.url || `Fuente ${idx + 1}`,
+        url: s.url || '',
+        snippet: s.snippet || s.content || '',
+        type: 'web', // Por defecto web si viene de investigación profunda
+        metadata: { relevance: s.relevance }
+      }));
+
+      setProcessedSources(formattedSources);
+
+      // Procesar el resumen con citas si las hay
+      const { contentParts: parts } = processMessageWithCitations(
+        report.summary || "",
+        formattedSources
+      );
+      setContentParts(parts);
+    }
+  }, [developmentStatus]);
 
   // Manejar mensajes de WebSocket
   useEffect(() => {
-    if (lastMessage && lastMessage.type === 'gap_development_update') {
-      const message = lastMessage as any;
-      setDevelopmentStatus({
-        status: message.status,
-        analysisId: message.analysis_id,
-        message: message.message,
-        report: message.report,
-        error: message.error,
-        question: message.question
-      });
-      
-      if (message.status === 'completed') {
-        setProgressValue(100);
-        toast({
-          title: "Análisis completado",
-          description: "La investigación profunda ha finalizado con éxito",
+    const unregister = registerMessageHandler((message) => {
+      if (message.type === 'gap_development_update') {
+        const update = message as any;
+        setDevelopmentStatus({
+          status: update.status,
+          analysisId: update.analysis_id,
+          message: update.message,
+          report: update.report,
+          error: update.error,
+          question: update.question
         });
-      } else if (message.status === 'failed') {
-        setProgressValue(0);
-        toast({
-          title: "Análisis fallido",
-          description: message.error || "Error desconocido",
-          variant: "destructive"
-        });
-      }
-    }
-  }, [lastMessage, toast]);
 
-  // Manejar mensajes de WebSocket para progreso
-  useEffect(() => {
-    if (lastMessage && lastMessage.type === 'gap_development_update') {
-      const message = lastMessage as any;
-      if (message.status === 'processing' && message.progress !== undefined) {
-        setProgressValue(message.progress);
+        if (update.status === 'completed') {
+          setProgressValue(100);
+          toast({
+            title: "Análisis completado",
+            description: "La investigación profunda ha finalizado con éxito",
+          });
+        } else if (update.status === 'failed') {
+          setProgressValue(0);
+          toast({
+            title: "Análisis fallido",
+            description: update.error || "Error desconocido",
+            variant: "destructive"
+          });
+        }
+
+        if (update.status === 'processing' && update.progress !== undefined) {
+          setProgressValue(update.progress);
+        }
       }
-    }
-  }, [lastMessage]);
+    });
+
+    return unregister;
+  }, [registerMessageHandler, toast]);
 
   const handleStartDevelopment = async () => {
     setIsLoading(true);
     setProgressValue(10);
-    
+
     try {
       const response = await fetch('/api/gap-development/', {
         method: 'POST',
@@ -92,23 +123,23 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
           depth: 3
         })
       });
-      
+
       if (!response.ok) {
         throw new Error('Failed to start gap development');
       }
-      
+
       const data = await response.json();
       setDevelopmentStatus({
         status: data.status,
         analysisId: data.analysis_id,
         message: data.message
       });
-      
+
       toast({
         title: "Análisis iniciado",
         description: "La investigación profunda ha comenzado",
       });
-      
+
     } catch (error) {
       console.error('Error starting gap development:', error);
       toast({
@@ -122,14 +153,14 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
 
   const getStatusBadge = () => {
     if (!developmentStatus) return null;
-    
+
     const statusConfig = {
       pending: { text: "Pendiente", variant: "secondary" },
       processing: { text: "Procesando", variant: "default" },
       completed: { text: "Completado", variant: "success" },
       failed: { text: "Fallido", variant: "destructive" }
     };
-    
+
     return (
       <Badge variant={statusConfig[developmentStatus.status].variant as any}>
         {statusConfig[developmentStatus.status].text}
@@ -147,7 +178,7 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
           <p className="text-muted-foreground max-w-sm mx-auto">
             Preparado para iniciar una investigación profunda asistida por IA sobre esta brecha de conocimiento.
           </p>
-          <Button 
+          <Button
             onClick={handleStartDevelopment}
             className="h-12 px-8 rounded-xl font-bold gap-2 shadow-lg shadow-primary/20"
             disabled={isLoading}
@@ -158,7 +189,7 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
         </div>
       );
     }
-    
+
     switch (developmentStatus.status) {
       case 'pending':
       case 'processing':
@@ -168,7 +199,7 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
               <h3 className="text-lg font-semibold">Estado del Análisis</h3>
               {getStatusBadge()}
             </div>
-            
+
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
                 {developmentStatus.message || "Procesando su solicitud..."}
@@ -178,7 +209,7 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
                 {progressValue}%
               </p>
             </div>
-            
+
             <div className="bg-primary/5 p-4 rounded-xl border border-primary/10">
               <h4 className="text-sm font-semibold mb-1">Información</h4>
               <p className="text-xs text-muted-foreground leading-relaxed">
@@ -187,7 +218,7 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
             </div>
           </div>
         );
-      
+
       case 'completed':
         const report = developmentStatus.report || {};
         return (
@@ -199,18 +230,21 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
                 <TabsTrigger value="sources" className="gap-2"><ExternalLink className="h-4 w-4" />Fuentes</TabsTrigger>
                 <TabsTrigger value="recommendations" className="gap-2"><Lightbulb className="h-4 w-4" />Acciones</TabsTrigger>
               </TabsList>
-              
+
               <div className="mt-6">
                 <TabsContent value="summary">
                   <Card className="border-0 shadow-none bg-transparent">
                     <CardContent className="p-0">
-                      <p className="text-lg leading-relaxed">
-                        {report.summary || "No hay resumen disponible."}
-                      </p>
+                      <div className="text-lg leading-relaxed">
+                        <MarkdownRenderer
+                          contentParts={contentParts}
+                          content={report.summary}
+                        />
+                      </div>
                     </CardContent>
                   </Card>
                 </TabsContent>
-                
+
                 <TabsContent value="findings">
                   <div className="space-y-4">
                     {report.findings?.map((finding: string, index: number) => (
@@ -223,24 +257,31 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
                     )) || <p className="text-muted-foreground text-center py-8">No hay hallazgos disponibles.</p>}
                   </div>
                 </TabsContent>
-                
+
                 <TabsContent value="sources">
-                  <div className="space-y-3">
-                    {report.sources?.map((source: any, index: number) => (
-                      <a 
-                        key={index} 
-                        href={source.url} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="flex items-center justify-between p-4 rounded-xl bg-card border border-border/50 hover:bg-accent/50 transition-all"
-                      >
-                        <span className="text-sm font-medium truncate max-w-[250px]">{source.url}</span>
-                        <Badge variant="secondary">Relevancia: {source.relevance}/10</Badge>
-                      </a>
-                    )) || <p className="text-muted-foreground text-center py-8">No hay fuentes disponibles.</p>}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="p-1 rounded-md bg-primary/10">
+                        <Notebook className="h-3 w-3 text-primary" />
+                      </div>
+                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Fuentes de Investigación</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {processedSources.map((source, idx) => (
+                        <SourceButton
+                          key={idx}
+                          source={source}
+                          citationNumber={idx + 1}
+                        />
+                      ))}
+                    </div>
+
+                    {processedSources.length === 0 && (
+                      <p className="text-muted-foreground text-center py-8">No hay fuentes disponibles.</p>
+                    )}
                   </div>
                 </TabsContent>
-                
+
                 <TabsContent value="recommendations">
                   <div className="space-y-4">
                     {report.recommendations?.map((rec: string, index: number) => (
@@ -255,7 +296,7 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
             </Tabs>
           </div>
         );
-      
+
       case 'failed':
         return (
           <div className="p-8 text-center space-y-4">
@@ -268,7 +309,7 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
                 {developmentStatus.error || "Ocurrió un error desconocido"}
               </p>
             </div>
-            <Button 
+            <Button
               onClick={() => setDevelopmentStatus(null)}
               variant="outline"
               className="rounded-xl"
@@ -277,7 +318,7 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
             </Button>
           </div>
         );
-      
+
       default:
         return null;
     }
@@ -297,13 +338,13 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
             Desarrollo profundo de brecha de conocimiento asistido por IA.
           </DialogDescription>
         </DialogHeader>
-        
+
         <div className="py-2">
           {renderContent()}
         </div>
-        
+
         <DialogFooter className="p-4 border-t border-border/10">
-          <Button 
+          <Button
             onClick={() => onOpenChange(false)}
             variant="ghost"
             className="rounded-xl"

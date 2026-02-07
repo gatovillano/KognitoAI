@@ -63,7 +63,7 @@ class WebSearchTool(BaseTool):
             
         api_key = os.environ.get("BRAVE_SEARCH_API_KEY")
         if api_key:
-            self._brave_search_tool = BraveSearch.from_api_key(api_key=api_key, search_kwargs={"count": 10})
+            object.__setattr__(self, '_brave_search_tool', BraveSearch.from_api_key(api_key=api_key, search_kwargs={"count": 10}))
         else:
             logger.warning(
                 "BRAVE_SEARCH_API_KEY no encontrada en las variables de entorno. "

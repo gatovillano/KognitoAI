@@ -50,7 +50,7 @@ const SharedAlbumPage: React.FC = () => {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 segundos de timeout
+      const timeoutId = setTimeout(() => controller.abort(), 10000) as any; // 10 segundos de timeout
 
       const payload: { password?: string } = {};
       if (submitPassword) {

@@ -113,7 +113,7 @@ export default function ProfilesPage() {
         className="h-full"
       >
         <Card
-          className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full min-h-[200px]"
+          className="cursor-pointer flex flex-col h-full min-h-[200px] hover:border-primary/20"
           style={{ opacity: isDragging ? 0.5 : 1 }}
           onClick={() => {
             setViewingProfileId(profile.id);

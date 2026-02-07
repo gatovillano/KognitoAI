@@ -26,7 +26,7 @@ class CreatePDFInput(BaseModel):
     """Input schema for the Create PDF tool."""
     content: str = Field(
         ...,
-        description="El contenido a convertir. PREFERIBLEMENTE HTML con etiquetas estructuradas (h2, p, ul, table)."
+        description="El contenido a convertir. DEBE ser un texto largo y estructurado. PREFERIBLEMENTE HTML con etiquetas estructuradas (h2, p, ul, table). NUNCA envíes este campo vacío."
     )
     is_html: bool = Field(
         True,
@@ -48,12 +48,12 @@ class CreatePDFTool(BaseTool):
     name: str = "create_pdf_tool"
     description: str = (
         "Crea un documento PDF profesional y estilizado. "
-        "REGLAS DE FORMATO OBLIGATORIAS PARA EL MODELO:\n"
-        "1. USA HTML SIEMPRE: Para evitar que el texto se vea como un solo bloque denso (como en la imagen de error), DEBES escribir el contenido en HTML y establecer 'is_html' en True.\n"
-        "2. ESTRUCTURA: Usa etiquetas <h2> y <h3> para títulos de sección, <p> para cada párrafo, y <ul>/<li> para listas. Esto es vital para la legibilidad.\n"
-        "3. TABLAS: Si presentas datos, usa etiquetas <table>, <thead>, <tbody>, <tr>, <th> y <td>. Se renderizan perfectamente.\n"
-        "4. NO USES MARKDOWN: El Markdown suele fallar si olvidas las líneas en blanco. El HTML es mucho más seguro y profesional para esta herramienta.\n"
-        "Usa esta herramienta para informes, manifiestos, resúmenes técnicos o cualquier documento formal."
+        "REGLAS DE FORMATO OBLIGATORIAS:\n"
+        "1. USA HTML SIEMPRE: Escribe el contenido en HTML y establece 'is_html' en True.\n"
+        "2. ESTRUCTURA: Usa etiquetas <h2>, <h3>, <p>, <ul>/<li>.\n"
+        "3. TABLAS: Usa etiquetas <table> para datos estructurados.\n"
+        "4. DIAGRAMAS: Soporta Mermaid. Usa bloques ```mermaid ... ``` o <pre><code>graph ...</code></pre>. "
+        "Se convertirán automáticamente en imágenes de alta calidad en el PDF."
     )
     
     # Standard context attributes
@@ -63,31 +63,80 @@ class CreatePDFTool(BaseTool):
     args_schema: Type[BaseModel] = CreatePDFInput
     return_direct: bool = False
 
+    
     def _process_mermaid_blocks(self, content: str) -> str:
         """
-        Finds mermaid code blocks and replaces them with images from mermaid.ink.
+        Extremely robust detection of Mermaid diagrams.
+        Matches:
+        1. ```mermaid ... ```
+        2. ``` ... (starting with graph/etc) ... ```
+        3. <pre><code class="language-mermaid"> ... </code></pre>
+        4. Generic <pre> or <code> blocks that START with mermaid keywords.
         """
+        mermaid_keywords = (
+            r'graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|'
+            r'erDiagram|journey|gantt|pie|quadrantChart|requirementDiagram|'
+            r'gitGraph|C4Context|mindmap|timeline|zenuml|architecture'
+        )
+
         def replace_mermaid(match):
-            mermaid_code = match.group(1).strip()
-            logger.info(f"Processing Mermaid block: {mermaid_code[:50]}...")
+            # Try to get the code from the first non-empty capturing group
+            mermaid_code = next((g for g in match.groups() if g is not None), "").strip()
+            
+            # If the code is missing or too short, return original
+            if not mermaid_code or len(mermaid_code) < 10:
+                return match.group(0)
+
+            # Check if it looks like mermaid (either by tag or by content start)
+            is_explicit = 'mermaid' in match.group(0).lower()
+            starts_with_keyword = re.match(rf'^({mermaid_keywords})', mermaid_code, re.IGNORECASE)
+            
+            if not (is_explicit or starts_with_keyword):
+                return match.group(0) # Not a mermaid block
+
+            # Cleanup: decodificar posibles escapes si viene de HTML
+            mermaid_code = (mermaid_code
+                .replace('&lt;', '<')
+                .replace('&gt;', '>')
+                .replace('&amp;', '&')
+                .replace('&quot;', '"')
+                .replace('&#039;', "'")
+            )
+
+            # Ensure the first line is exactly the keyword if it was detected by content
+            # (Mermaid rendering can fail if there's leading garbage)
+            logger.info(f"Processing Mermaid block: {mermaid_code[:40]}...")
+            
             try:
-                # Encode to base64 for mermaid.ink
+                # Use mermaid.ink for rendering
                 mermaid_bytes = mermaid_code.encode('utf-8')
                 mermaid_base64 = base64.b64encode(mermaid_bytes).decode('utf-8')
-                # Construct the image URL
                 image_url = f"https://mermaid.ink/img/{mermaid_base64}"
-                # Return an image tag wrapped in a div with inline styles to prevent markdown interference
-                # We use a unique marker to avoid markdown processing issues
-                return f'\n\n<div class="mermaid-diagram" style="text-align: center; margin: 20px 0; page-break-inside: avoid;"><img src="{image_url}" alt="Mermaid Diagram" style="max-width: 100%; height: auto; border: 1px solid #eee; border-radius: 8px; padding: 10px; background: white;" /></div>\n\n'
+                
+                # We return a centered div for the image
+                return (
+                    f'\n\n<div class="mermaid-diagram" style="text-align:center; margin:2.5em 0; padding:1.5em; '
+                    f'background:#f8f9fa; border:1px solid #e9ecef; border-radius:12px; page-break-inside:avoid;">'
+                    f'<img src="{image_url}" alt="Diagrama Mermaid" style="max-width:100%; height:auto; display:inline-block;" />'
+                    f'</div>\n\n'
+                )
             except Exception as e:
-                logger.error(f"Error encoding mermaid block: {e}")
-                return match.group(0) # Return original on error
+                logger.error(f"Error rendering mermaid: {e}")
+                return match.group(0)
 
-        # Robust regex to find ```mermaid ... ``` blocks
-        # We use [\s\S] to match any character including newlines
-        pattern = r'```mermaid\s*([\s\S]*?)\s*```'
-        processed = re.sub(pattern, replace_mermaid, content, flags=re.IGNORECASE)
-        return processed
+        # 1. Regex for Markdown blocks (tagged or untagged)
+        # r'```(?:mermaid)?\s*([\s\S]*?)\s*```'
+        content = re.sub(r'```(?:mermaid)?\s*([\s\S]*?)\s*```', replace_mermaid, content, flags=re.IGNORECASE)
+
+        # 2. Regex for HTML blocks: <pre><code>...</code></pre> (with or without class)
+        content = re.sub(r'<pre[^>]*>(?:\s*<code[^>]*>)?([\s\S]*?)(?:</code>\s*)?</pre>', replace_mermaid, content, flags=re.IGNORECASE)
+        
+        # 3. Final cleanup for orphaned mermaid code tags just in case
+        content = re.sub(r'<code[^>]*class="[^"]*mermaid[^"]*"[^>]*>([\s\S]*?)</code>', replace_mermaid, content, flags=re.IGNORECASE)
+
+        return content
+
+
 
     def _get_modern_css(self) -> str:
         """Returns a modern CSS string for the PDF styling."""
@@ -105,13 +154,12 @@ class CreatePDFTool(BaseTool):
                 content: element(footer);
             }
         }
-
         body {
-            font-family: 'DejaVu Sans', sans-serif;
-            line-height: 1.4;
+            font-family: 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', 'DejaVu Sans', Arial, sans-serif;
+            line-height: 1.5;
             color: #2d3436;
             background-color: #fff;
-            font-size: 9pt; /* Smaller font as requested */
+            font-size: 10pt;
         }
 
         h1 {
@@ -246,6 +294,12 @@ class CreatePDFTool(BaseTool):
         """
         logger.info(f"Generating PDF from {'HTML' if is_html else 'Markdown'}. Title: {title}")
         
+        if not content or len(content.strip()) < 10:
+            return {
+                "context_for_llm": "Error: El contenido proporcionado para el PDF es demasiado corto o está vacío. Por favor, genera un contenido sustancial antes de crear el PDF.",
+                "sources": []
+            }
+        
         try:
             # 0. Cleanup old files
             from utils.file_cleanup import cleanup_old_generated_files
@@ -285,6 +339,9 @@ class CreatePDFTool(BaseTool):
                 is_html = True
 
             if is_html:
+                # 3a. Process Mermaid blocks even in HTML (they might be inside pre/code or just blocks)
+                content = self._process_mermaid_blocks(content)
+                
                 # Check if it's a full document or just a fragment
                 is_full_doc = re.search(r'<(html|body|head)', content, re.IGNORECASE)
                 if is_full_doc:
@@ -326,6 +383,7 @@ class CreatePDFTool(BaseTool):
                     processed_content, 
                     extensions=['extra', 'toc', 'nl2br', 'sane_lists']
                 )
+
                 
                 # Wrap fragment in boilerplate
                 full_html = f"""

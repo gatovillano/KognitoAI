@@ -12,25 +12,16 @@ from datetime import datetime
 
 from langchain_core.tools import BaseTool
 from langchain_core.messages import HumanMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
-
+from core.llm_manager import get_llm_for_user
 from core.memory_manager import get_relevant_memories
 
 logger = logging.getLogger(__name__)
 
-_interpreter_llm: Optional[ChatGoogleGenerativeAI] = None
-
-async def get_interpreter_llm() -> ChatGoogleGenerativeAI:
-    global _interpreter_llm
-    if _interpreter_llm is None:
-        logger.info("🧠 Inicializando LLM para interpretación de consultas...")
-        _interpreter_llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            temperature=0.0,
-            disable_streaming=True
-        )
-    return _interpreter_llm
+async def get_interpreter_llm(account_id: str) -> Any:
+    """Obtiene el modelo de interpretación para el usuario."""
+    logger.info(f"🧠 Obteniendo LLM para interpretación de consultas (usuario: {account_id})...")
+    return await get_llm_for_user(account_id, purpose="fast")
 
 class InternalKnowledgeSearchInput(BaseModel):
     """Input schema para la búsqueda de conocimiento interno."""
@@ -62,7 +53,7 @@ class InternalKnowledgeSearchTool(BaseTool):
     return_direct: bool = False
 
     async def _interpret_query(self, query: str) -> Dict[str, Any]:
-        llm = await get_interpreter_llm()
+        llm = await get_interpreter_llm(self.account_id)
         current_date = datetime.now().strftime('%Y-%m-%d')
         prompt = f"""
 Eres un experto en interpretar consultas de búsqueda en lenguaje natural.

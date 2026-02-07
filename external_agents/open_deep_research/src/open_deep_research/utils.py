@@ -52,14 +52,17 @@ TAVILY_SEARCH_DESCRIPTION = (
     "A search engine optimized for comprehensive, accurate, and trusted results. "
     "Useful for when you need to answer questions about current events."
 )
-@tool(description=TAVILY_SEARCH_DESCRIPTION)
+@tool
 async def tavily_search(
     queries: List[str],
     max_results: Annotated[int, InjectedToolArg] = 5,
     topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
     config: RunnableConfig = None
 ) -> str:
-    """Fetch and summarize search results from Tavily search API.
+    """A search engine optimized for comprehensive, accurate, and trusted results. 
+    Useful for when you need to answer questions about current events.
+
+    Fetch and summarize search results from Tavily search API.
 
     Args:
         queries: List of search queries to execute
@@ -230,9 +233,11 @@ async def summarize_webpage(model: BaseChatModel, webpage_content: str) -> str:
 # Reflection Tool Utils
 ##########################
 
-@tool(description="Strategic reflection tool for research planning")
+@tool
 def think_tool(reflection: str) -> str:
-    """Tool for strategic reflection on research progress and decision-making.
+    """Strategic reflection tool for research planning.
+    
+    Tool for strategic reflection on research progress and decision-making.
 
     Use this tool after each search to analyze results and plan next steps systematically.
     This creates a deliberate pause in the research workflow for quality decision-making.
@@ -405,14 +410,17 @@ TAVILY_SEARCH_DESCRIPTION = (
     "A search engine optimized for comprehensive, accurate, and trusted results. "
     "Useful for when you need to answer questions about current events."
 )
-@tool(description=TAVILY_SEARCH_DESCRIPTION)
+@tool
 async def tavily_search(
     queries: List[str],
     max_results: Annotated[int, InjectedToolArg] = 5,
     topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
     config: RunnableConfig = None
 ) -> str:
-    """Fetch and summarize search results from Tavily search API.
+    """A search engine optimized for comprehensive, accurate, and trusted results. 
+    Useful for when you need to answer questions about current events.
+
+    Fetch and summarize search results from Tavily search API.
 
     Args:
         queries: List of search queries to execute
@@ -583,9 +591,11 @@ async def summarize_webpage(model: BaseChatModel, webpage_content: str) -> str:
 # Reflection Tool Utils
 ##########################
 
-@tool(description="Strategic reflection tool for research planning")
+@tool
 def think_tool(reflection: str) -> str:
-    """Tool for strategic reflection on research progress and decision-making.
+    """Strategic reflection tool for research planning.
+    
+    Tool for strategic reflection on research progress and decision-making.
 
     Use this tool after each search to analyze results and plan next steps systematically.
     This creates a deliberate pause in the research workflow for quality decision-making.
@@ -1169,7 +1179,7 @@ MODEL_TOKEN_LIMITS = {
     "anthropic:claude-3-5-sonnet": 200000,
     "anthropic:claude-3-5-haiku": 200000,
     "google:gemini-2.5-pro": 2097152,
-    "google:gemini-2.5-flash": 1048576,
+    "google:": 1048576,
     "google:gemini-pro": 32768,
     "cohere:command-r-plus": 128000,
     "cohere:command-r": 128000,

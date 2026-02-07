@@ -683,6 +683,12 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
   const [isKnowledgeGapsDialogOpen, setIsKnowledgeGapsDialogOpen] = useState(false);
   const [selectedConcept, setSelectedConcept] = useState<string | null>(null);
   const [isConceptDialogOpen, setIsConceptDialogOpen] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [sliderQuestions, setSliderQuestions] = useState<string[]>([]);
+  const [sliderTitle, setSliderTitle] = useState('');
 
   // Estados para el diálogo simple de notas
   const [isSimpleListDialogOpen, setIsSimpleListDialogOpen] = useState(false);
@@ -692,7 +698,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
   const [simpleListIcon, setSimpleListIcon] = useState<React.ReactNode>(null);
   const [simpleListColor, setSimpleListColor] = useState("");
 
-  const { play: playTTS, stop: stopTTS, isPlaying: isTTSPlaying, isLoading: isTTSLoading } = useTextToSpeech();
+  const { play, stop, isLoading, isPlaying, activeText } = useTextToSpeech();
 
   const getAnalysisTextForSpeech = useCallback(() => {
     if (!currentAnalysis) return '';
@@ -711,28 +717,19 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
       '';
   }, [currentAnalysis]);
 
-  const handleTTSClick = () => {
-    if (isTTSPlaying) {
-      stopTTS();
+  const handlePlayPauseMainSummary = () => {
+    const text = getAnalysisTextForSpeech();
+    if (!text) return;
+
+    if (isPlaying && activeText === text) {
+      stop();
     } else {
-      const text = getAnalysisTextForSpeech();
-      if (text) playTTS(text);
+      play(text);
     }
   };
 
-  // Estados para el slider unificado
-  const [sliderQuestions, setSliderQuestions] = useState<string[]>([]);
-  const [sliderTitle, setSliderTitle] = useState("");
-
-  // Estados para la eliminación
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-
-  // Estados para el chat contextual
-  const [isChatOpen, setIsChatOpen] = useState(false);
-
-  const { play, stop, isLoading, isPlaying, activeText } = useTextToSpeech();
+  const isMainSummaryPlaying = isPlaying && activeText === getAnalysisTextForSpeech();
+  const isMainSummaryLoading = isLoading && activeText === getAnalysisTextForSpeech();
 
   useEffect(() => {
     setCurrentAnalysis(initialAnalysis);
@@ -1161,7 +1158,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
           </div>
         );
     }
-  }, [currentAnalysis, isLoading, isPlaying, activeText, textToRead, play, handleThemeClick, handleConceptClick, openGapsSlider, openQuestionsSlider, openSimpleListDialog, playTTS, isTTSLoading]);
+  }, [currentAnalysis, isLoading, isPlaying, activeText, textToRead, play, handleThemeClick, handleConceptClick, openGapsSlider, openQuestionsSlider, openSimpleListDialog]);
 
   if (!currentAnalysis) {
     return (
@@ -1201,6 +1198,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
           if (target.closest('.contextual-chat-container')) {
             e.preventDefault();
           }
+          stop(); // Detener la reproducción de TTS al interactuar fuera del diálogo
         }}
       >
         <DialogHeader className="px-8 pt-8 pb-4 border-b">
@@ -1209,9 +1207,33 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
               <Badge className={`mb-2 ${getAnalysisTypeBadgeColor(currentAnalysis.type)}`}>
                 {getAnalysisTypeLabel(currentAnalysis.type)}
               </Badge>
-              <DialogTitle className="text-3xl font-extrabold tracking-tight leading-tight">
-                {currentAnalysis.title}
-              </DialogTitle>
+              <div className="flex items-center gap-2">
+                <DialogTitle className="text-3xl font-extrabold tracking-tight leading-tight break-words">
+                  {currentAnalysis.title}
+                </DialogTitle>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "h-8 w-8 p-0 rounded-full transition-all duration-300",
+                    isMainSummaryPlaying ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-primary hover:bg-primary/10"
+                  )}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handlePlayPauseMainSummary();
+                  }}
+                  disabled={isMainSummaryLoading}
+                  title={isMainSummaryPlaying ? "Pausar lectura del resumen" : "Escuchar resumen"}
+                >
+                  {isMainSummaryLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : isMainSummaryPlaying ? (
+                    <Pause className="h-4 w-4" />
+                  ) : (
+                    <Volume2 className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
               <DialogDescription className="mt-2 text-md text-muted-foreground" asChild>
                 <div className="break-words">
                   {currentAnalysis.type === 'gap_development' ? (
@@ -1312,7 +1334,11 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
             context={{
               type: 'analysis',
               id: currentAnalysis.id,
-              snapshot: currentAnalysis
+              snapshot: {
+                ...currentAnalysis,
+                // Asegurar que el contexto incluya los datos procesados para que la IA los vea
+                processed_data: currentAnalysis.full_data || currentAnalysis.result
+              }
             }}
             title={currentAnalysis.title}
           />

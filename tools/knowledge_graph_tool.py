@@ -41,12 +41,12 @@ class KnowledgeGraphTool(BaseTool):
     def __init__(self, knowledge_graph_service: Optional[KnowledgeGraphService] = None, **data: Any):
         super().__init__(**data)
         if knowledge_graph_service:
-            self._knowledge_graph_service = knowledge_graph_service
+            object.__setattr__(self, '_knowledge_graph_service', knowledge_graph_service)
         else:
             # Crear instancia del servicio si no se proporciona
             logger.info("🔧 Creando nueva instancia de KnowledgeGraphService para KnowledgeGraphTool")
             try:
-                self._knowledge_graph_service = KnowledgeGraphService()
+                object.__setattr__(self, '_knowledge_graph_service', KnowledgeGraphService())
             except Exception as e:
                 logger.error(f"❌ Error inicializando KnowledgeGraphService: {e}")
                 raise ValueError(f"No se pudo inicializar KnowledgeGraphService: {e}")
@@ -97,30 +97,48 @@ class KnowledgeGraphTool(BaseTool):
             return json.dumps({"error": f"Error al ejecutar la consulta en el grafo: {str(e)}", "status": "error"})
 
     def _format_search_results(self, search_result: Dict[str, Any]) -> str:
-        """Formatea los resultados de búsqueda para mejor legibilidad."""
+        """Formatea los resultados de búsqueda para mejor legibilidad, incluyendo propiedades."""
         results = search_result.get("results", [])
         if not results:
             return "No se encontraron resultados en el grafo de conocimiento."
         
         # Si los resultados son un resumen de texto
         if len(results) == 1 and isinstance(results[0], dict) and results[0].get("type") == "summary_text_insight":
-            return results[0].get("content", "Resultados encontrados en el grafo.")
+            content = results[0].get("content", "Resultados encontrados en el grafo.")
+            # Si hay datos adicionales en el resumen (como conteos), incluirlos
+            node_count = results[0].get("node_count")
+            rel_count = results[0].get("relationship_count")
+            if node_count is not None or rel_count is not None:
+                content += f"\n(Estadísticas: {node_count or 0} nodos, {rel_count or 0} relaciones)"
+            return content
         
-        # Para otros tipos de resultados, crear un resumen
+        # Para otros tipos de resultados, crear un resumen detallado
         formatted_parts = []
-        for result in results[:5]:  # Limitar a 5 resultados
+        for result in results[:10]:  # Aumentar límite a 10 resultados para dar más contexto
             if isinstance(result, dict):
-                if "content" in result:
-                    formatted_parts.append(f"- {result['content']}")
-                elif "name" in result:
-                    formatted_parts.append(f"- {result['name']}: {result.get('description', '')}")
-                elif "type" in result and "description" in result:
-                    formatted_parts.append(f"- {result['type']}: {result['description']}")
+                # Extraer información básica
+                name = result.get("name") or result.get("concept") or result.get("title") or "Sin nombre"
+                res_type = result.get("type") or (result.get("labels", ["Desconocido"])[0] if result.get("labels") else "Entidad")
+                description = result.get("description") or result.get("content") or ""
+                
+                # Construir string de propiedades adicionales
+                excluded_keys = {"name", "concept", "title", "type", "labels", "description", "content", "element_id", "id", "dataset_name", "account_id", "workspace_id"}
+                props = {k: v for k, v in result.items() if k not in excluded_keys and v is not None}
+                props_str = ", ".join([f"{k}: {v}" for k, v in props.items()])
+                
+                part = f"- [{res_type}] {name}"
+                if description:
+                    part += f": {description}"
+                if props_str:
+                    part += f" (Propiedades: {props_str})"
+                
+                formatted_parts.append(part)
         
         if formatted_parts:
-            return "Resultados encontrados:\n" + "\n".join(formatted_parts)
+            header = f"Resultados encontrados ({len(results)} en total, mostrando {len(formatted_parts)}):\n"
+            return header + "\n".join(formatted_parts)
         else:
-            return "Se encontraron resultados en el grafo de conocimiento."
+            return "Se encontraron resultados en el grafo de conocimiento, pero no se pudieron formatear detalladamente."
 
     def _run(self, *args, **kwargs):
         return asyncio.run(self._arun(*args, **kwargs))

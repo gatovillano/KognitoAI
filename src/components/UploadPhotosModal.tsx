@@ -67,6 +67,7 @@ export const UploadPhotosModal: React.FC<UploadPhotosModalProps> = ({
             setUploadProgress(percentCompleted);
           }
         },
+        timeout: 300000, // Añadir un timeout de 5 minutos
       });
 
       toast.success('Fotos subidas correctamente.');
