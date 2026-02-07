@@ -184,12 +184,15 @@ class Neo4jAdapter:
 
                 # Crear nodos por cada tipo específico
                 for entity_type, type_entities in entities_by_type.items():
-                    # Query estática para cada tipo, incluyendo todos los campos opcionales.
-                    # Neo4j manejará los valores nulos si no están presentes en la entidad.
+                    # Query mejorada para consolidar:
+                    # 1. MERGE usando una etiqueta base (Entity) y el ID (basado en nombre)
+                    # 2. SET para aplicar la etiqueta específica (n:{entity_type})
+                    # 3. SET para actualizar propiedades
                     type_query = f"""
                     UNWIND $entities AS entity
-                    MERGE (n:{entity_type} {{id: entity.id}})
-                    SET n.name = entity.name,
+                    MERGE (n:Entity {{id: entity.id}})
+                    SET n:{entity_type},
+                        n.name = entity.name,
                         n.type = entity.type,
                         n.description = entity.description,
                         n.confidence = entity.confidence,
@@ -208,7 +211,7 @@ class Neo4jAdapter:
                     created_count = result[0]["created"] if result else 0
                     total_created += created_count
 
-                    logger.debug(f"✅ Creados {created_count} nodos de tipo {entity_type}")
+                    logger.debug(f"✅ Consolidados/Creados {created_count} nodos con tipo {entity_type}")
 
                 logger.debug(f"✅ Total nodos creados en lote: {total_created}")
                 entities_added += total_created
@@ -409,18 +412,14 @@ class Neo4jAdapter:
         Returns:
             ID único como string
         """
-        props = entity.get("properties", {})
-        name = props.get("name", "unknown")
-        entity_type = entity.get("type", "Entity")
-        
-        # Crear ID basado en nombre y tipo (normalizado robustamente)
+        # Crear ID basado únicamente en el nombre normalizado (para permitir consolidación entre tipos)
         normalized_name = re.sub(r'[^\w\s]', '', name.lower())
         normalized_name = re.sub(r'\s+', '_', normalized_name).strip('_')
         
         if not normalized_name:
             normalized_name = "unknown"
             
-        return f"{entity_type.lower()}_{normalized_name}"
+        return f"entity_{normalized_name}"
     
     def _extract_entity_id(self, entity_reference: str) -> Optional[str]:
         """

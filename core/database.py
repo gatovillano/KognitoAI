@@ -139,6 +139,19 @@ class Account(Base):
     notifications_push = Column(Boolean, default=True, nullable=False, comment="Indica si las notificaciones push están habilitadas.")
     language = Column(String(10), nullable=False, default="en", comment="Idioma preferido de la interfaz de usuario (e.g., 'en', 'es').")
     privacy_data_sharing = Column(Boolean, default=False, nullable=False, comment="Indica si el usuario permite compartir datos para mejoras del servicio.")
+    
+    # Configuraciones de LLM Personalizadas
+    llm_provider = Column(String(50), nullable=True, comment="Proveedor de LLM preferido (openai, google, anthropic, etc.).")
+    llm_model = Column(String(255), nullable=True, comment="Modelo de LLM principal preferido.")
+    llm_temperature = Column(Float, nullable=True, default=0.7, comment="Temperatura para la generación de texto.")
+    llm_api_base = Column(String(255), nullable=True, comment="URL base opcional para la API del LLM (ej. Ollama, Local).")
+    fast_llm_model = Column(String(255), nullable=True, comment="Modelo de LLM para tareas rápidas.")
+    vision_llm_model = Column(String(255), nullable=True, comment="Modelo de LLM para tareas de visión.")
+    use_prompt_tooling = Column(Boolean, default=False, nullable=False, comment="Si es True, fuerza el uso de documentación de herramientas en el prompt en lugar de Function Calling nativo.")
+    
+    # Campos para MFA
+    mfa_enabled = Column(Boolean, default=False, nullable=False, comment="Indica si el usuario tiene MFA habilitado.")
+    mfa_secret = Column(String(255), nullable=True, comment="Secreto TOTP para MFA.")
 
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 
@@ -545,6 +558,7 @@ class Nota(Base):
     
     title = Column(String, nullable=True)
     content = Column(Text, nullable=False)
+    visual_content = Column(Text, nullable=True, comment="Contenido HTML generado por OnlyOffice para preservar el diseño visual.")
     category = Column(String, default="General")
     created_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
@@ -1047,6 +1061,36 @@ class UserTableRow(Base):
         return f"<UserTableRow(id={self.id}, table_id={self.table_id})>"
 
 
+class UserSecret(Base):
+    """
+    Almacena secretos del usuario (API Keys, tokens externos) cifrados en la base de datos usando pgcrypto.
+    """
+    __tablename__ = "user_secrets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    key_name = Column(String(255), nullable=False, comment="Nombre de la clave (ej. OPENAI_API_KEY)")
+    
+    # Almacenamos el valor cifrado. Pgcrypto con pgp_sym_encrypt devuelve un string (armored) si no se especifica lo contrario.
+    # Usaremos Text para almacenar el resultado de pgp_sym_encrypt.
+    encrypted_value = Column(Text, nullable=False, comment="Valor cifrado con pgcrypto")
+    
+    description = Column(Text, nullable=True, comment="Descripción opcional del secreto")
+    
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+    # Relaciones
+    account = relationship("Account", backref="secrets")
+
+    __table_args__ = (
+        UniqueConstraint('account_id', 'key_name', name='_account_key_uc'),
+    )
+
+    def __repr__(self):
+        return f"<UserSecret(id={self.id}, account_id={self.account_id}, key_name='{self.key_name}')>"
+
+
 # ==============================================================================
 # SECCIÓN 2: FUNCIONES AUXILIARES DE LA BASE DE DATOS
 # ==============================================================================
@@ -1151,7 +1195,7 @@ async def delete_accounts_by_ids(db_session: AsyncSession, account_ids: list[uui
             AgendaEvent, Recordatorio, ProactiveInsight, VerificationCode,
             AnalysisTask, MindmapTask, UploadTask, Task, GitHubDocument,
             UserDocumentTopic, ChatThread, LangchainPgEmbedding, Workspace,
-            AnalyzedPair, GapDevelopmentAnalysis
+            AnalyzedPair, GapDevelopmentAnalysis, UserSecret
         ]
         for model in direct_dependents:
             if hasattr(model, 'account_id'):

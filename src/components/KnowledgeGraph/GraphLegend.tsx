@@ -33,7 +33,7 @@ export const GraphLegend: React.FC<GraphLegendProps> = ({ metadata, getNodeColor
             </CardHeader>
 
             {isExpanded && (
-                <CardContent className="p-3 pt-0 max-h-[300px] overflow-y-auto text-xs">
+                <CardContent className="p-3 pt-0 max-h-[calc(100vh-150px)] overflow-y-auto text-xs">
                     {metadata.nodeTypes.length > 0 && (
                         <div className="mb-3">
                             <h5 className="font-semibold mb-2 text-muted-foreground">Nodos</h5>
@@ -44,7 +44,7 @@ export const GraphLegend: React.FC<GraphLegendProps> = ({ metadata, getNodeColor
                                             className="w-3 h-3 rounded-full border border-border"
                                             style={{ backgroundColor: getNodeColor(item.type) }}
                                         />
-                                        <span className="truncate">{item.type}</span>
+                                        <span>{item.type}</span>
                                     </div>
                                 ))}
                             </div>
@@ -58,7 +58,7 @@ export const GraphLegend: React.FC<GraphLegendProps> = ({ metadata, getNodeColor
                                 {metadata.edgeTypes.map((item) => (
                                     <div key={item.type} className="flex items-center gap-2">
                                         <span className="w-8 h-0.5 bg-muted-foreground/50" />
-                                        <span className="truncate">{item.type}</span>
+                                        <span>{item.type}</span>
                                     </div>
                                 ))}
                             </div>

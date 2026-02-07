@@ -12,6 +12,8 @@ import zipfile
 from fastapi.responses import StreamingResponse
 
 from fastapi import APIRouter, Depends, HTTPException, Response, File, UploadFile, status, Query # Added Query
+from fastapi.concurrency import run_in_threadpool # Added
+import shutil # Added
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -128,14 +130,12 @@ async def get_photo_and_verify_ownership(photo_id: uuid.UUID, current_account: A
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
-async def generate_thumbnail(image_path: str, output_path: str, size: Tuple[int, int] = (256, 256)):
-    """Generates a thumbnail for an image."""
+def generate_thumbnail_sync(image_path: str, output_path: str, size: Tuple[int, int] = (256, 256)):
+    """Generates a thumbnail for an image synchronously."""
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    async with aiofiles.open(image_path, 'rb') as f:
-        content = await f.read()
-        img = Image.open(io.BytesIO(content))
-        img.thumbnail(size)
-        img.save(output_path)
+    img = Image.open(image_path)
+    img.thumbnail(size)
+    img.save(output_path)
 
 # --- Album Endpoints ---
 
@@ -544,18 +544,18 @@ async def upload_photos(
             unique_filename = f"{uuid.uuid4()}-{file.filename}"
             file_path = os.path.join(album_dir, unique_filename)
 
-            async with aiofiles.open(file_path, 'wb') as out_file:
-                content = await file.read()
-                await out_file.write(content)
-
+            # Save the original file using shutil.copyfileobj in a threadpool
+            with open(file_path, 'wb') as buffer:
+                await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
+            
             db_file_path = os.path.join(str(album_id), unique_filename)
 
-            # Generate thumbnail
+            # Generate thumbnail in a threadpool
             thumbnail_dir = os.path.join(THUMBNAIL_ROOT, str(album_id))
             os.makedirs(thumbnail_dir, exist_ok=True)
             thumbnail_filename = f"thumb-{unique_filename}"
             thumbnail_path = os.path.join(thumbnail_dir, thumbnail_filename)
-            await generate_thumbnail(file_path, thumbnail_path)
+            await run_in_threadpool(generate_thumbnail_sync, file_path, thumbnail_path)
             db_thumbnail_path = os.path.join(str(album_id), thumbnail_filename)
 
             # Get the current total number of photos in the album to set the order
@@ -567,6 +567,7 @@ async def upload_photos(
             db.add(new_photo)
             created_photos.append(new_photo)
         except Exception as e:
+            logger.error(f"Error al procesar el archivo {file.filename}: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Error al guardar el archivo {file.filename}: {e}")
 
     await db.commit()
@@ -574,6 +575,271 @@ async def upload_photos(
         await db.refresh(photo)
 
     return created_photos
+
+@router.put("/photos/{photo_id}/favorite", response_model=PhotoResponse, summary="Marcar/desmarcar foto como favorita")
+async def toggle_favorite_photo(
+    photo_id: uuid.UUID,
+    current_account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Alterna el estado de 'favorita' de una foto.
+    """
+    photo = await get_photo_and_verify_ownership(photo_id, current_account, db)
+    photo.is_favorite = not photo.is_favorite
+    await db.commit()
+    await db.refresh(photo)
+    return photo
+
+@router.delete("/photos/{photo_id}", status_code=204, summary="Eliminar una foto")
+async def delete_photo(
+    photo_id: uuid.UUID,
+    current_account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Elimina una foto de un álbum y del disco.
+    """
+    photo = await get_photo_and_verify_ownership(photo_id, current_account, db)
+    
+    # Delete the physical file
+    full_file_path = os.path.join(MEDIA_ROOT, photo.file_path)
+    if os.path.exists(full_file_path):
+        os.remove(full_file_path)
+    else:
+        print(f"Warning: File not found at {full_file_path} but proceeding with DB deletion.")
+
+    await db.delete(photo)
+    await db.commit()
+    
+    return Response(status_code=204)
+
+# --- Shared Link Endpoints ---
+
+@router.post("/albums/{album_id}/share-link", response_model=SharedLinkResponse, summary="Generar un enlace para compartir un álbum")
+async def generate_share_link(
+    album_id: uuid.UUID,
+    link_data: SharedLinkCreate,
+    current_account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Genera un enlace único y compartible para un álbum. Puede ser protegido con contraseña y tener una fecha de caducidad.
+    """
+    album = await db.get(Album, album_id)
+    if not album or album.account_id != current_account.id:
+        raise HTTPException(status_code=404, detail="Álbum no encontrado o no autorizado.")
+
+    token = secrets.token_urlsafe(16) # Generate a URL-safe token
+    password_hash = hash_password(link_data.password) if link_data.password else None
+    expiry_date = datetime.utcnow() + timedelta(days=link_data.expiry_days) if link_data.expiry_days else None
+
+    new_link = SharedAlbumLink(
+        album_id=album_id,
+        token=token,
+        password_hash=password_hash,
+        expiry_date=expiry_date,
+        allow_download=link_data.allow_download # NEW FIELD
+    )
+    db.add(new_link)
+    await db.commit()
+    await db.refresh(new_link)
+
+    return SharedLinkResponse(
+        id=new_link.id,
+        album_id=new_link.album_id,
+        token=new_link.token,
+        has_password=bool(new_link.password_hash),
+        expiry_date=new_link.expiry_date,
+        created_at=new_link.created_at,
+        allow_download=new_link.allow_download # NEW FIELD
+    )
+
+@router.get("/albums/{album_id}/share-links", response_model=List[SharedLinkResponse], summary="Listar enlaces compartidos de un álbum")
+async def get_album_share_links(
+    album_id: uuid.UUID,
+    current_account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Lista todos los enlaces compartidos activos para un álbum específico.
+    """
+    album = await db.get(Album, album_id)
+    if not album or album.account_id != current_account.id:
+        raise HTTPException(status_code=404, detail="Álbum no encontrado o no autorizado.")
+
+    stmt = select(SharedAlbumLink).where(SharedAlbumLink.album_id == album_id)
+    result = await db.execute(stmt)
+    links = result.scalars().all()
+    return [
+        SharedLinkResponse(
+            id=link.id,
+            album_id=link.album_id,
+            token=link.token,
+            has_password=bool(link.password_hash),
+            expiry_date=link.expiry_date,
+            created_at=link.created_at,
+            allow_download=link.allow_download # NEW FIELD
+        )
+        for link in links
+    ]
+
+@router.post("/share/{token}", response_model=AlbumResponse, summary="Acceder a un álbum compartido")
+async def get_shared_album(
+    token: str,
+    access_data: Optional[SharedLinkAccess] = None, # Password for protected links
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Accede a un álbum a través de un enlace compartido. Requiere contraseña si el enlace está protegido.
+    """
+    stmt = select(SharedAlbumLink).where(SharedAlbumLink.token == token)
+    result = await db.execute(stmt)
+    shared_link = result.scalars().first()
+
+    if not shared_link:
+        raise HTTPException(status_code=404, detail="Enlace compartido no encontrado.")
+
+    if shared_link.expiry_date and shared_link.expiry_date < datetime.utcnow():
+        raise HTTPException(status_code=403, detail="Enlace compartido caducado.")
+
+    if shared_link.password_hash:
+        if not access_data or not access_data.password:
+            raise HTTPException(status_code=401, detail="Contraseña requerida para acceder a este álbum.")
+        if hash_password(access_data.password) != shared_link.password_hash:
+            raise HTTPException(status_code=401, detail="Contraseña incorrecta.")
+
+    stmt = (
+        select(Album)
+        .options(selectinload(Album.photos))
+        .where(Album.id == shared_link.album_id)
+    )
+    result = await db.execute(stmt)
+    album = result.scalars().first()
+
+    if not album:
+        raise HTTPException(status_code=404, detail="Álbum asociado no encontrado.")
+
+    # Calculate total_photos for the album
+    total_photos_stmt = select(func.count(Photo.id)).where(Photo.album_id == album.id)
+    total_photos_result = await db.execute(total_photos_stmt)
+    total_photos = total_photos_result.scalar_one()
+
+    # Get paginated photos
+    photos_stmt = (
+        select(Photo)
+        .where(Photo.album_id == album.id)
+        .order_by(Photo.order) # Order by the new 'order' column
+    )
+    photos_result = await db.execute(photos_stmt)
+    album_photos = photos_result.scalars().all()
+
+    photos_response = [
+        PhotoResponse(
+            id=photo.id,
+            album_id=photo.album_id,
+            file_path=photo.file_path,
+            thumbnail_path=photo.thumbnail_path,
+            is_favorite=photo.is_favorite,
+            uploaded_at=photo.uploaded_at,
+            order=photo.order # Assign the new 'order' field
+        ) for photo in album_photos
+    ]
+
+    logger.error(f"[DEBUG] === ENVIANDO {len(photos_response)} FOTOS PARA EL ÁLBUM COMPARTIDO {album.id} ===")
+    print(f"[DEBUG] === ENVIANDO {len(photos_response)} FOTOS PARA EL ÁLBUM COMPARTIDO {album.id} ===")
+    return AlbumResponse(
+        id=album.id,
+        account_id=album.account_id,
+        name=album.name,
+        description=album.description,
+        created_at=album.created_at,
+        updated_at=album.updated_at,
+                    cover_photo_id=album.cover_photo_id,
+                    photos=photos_response,
+                    total_photos=total_photos,
+                    allow_download=shared_link.allow_download # NEW FIELD
+                )
+@router.delete("/share/{token}", status_code=204, summary="Revocar un enlace compartido")
+async def revoke_share_link(
+    token: str,
+    current_account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Revoca un enlace compartido, haciéndolo inaccesible.
+    """
+    stmt = select(SharedAlbumLink).where(SharedAlbumLink.token == token)
+    result = await db.execute(stmt)
+    shared_link = result.scalars().first()
+
+    if not shared_link:
+        raise HTTPException(status_code=404, detail="Enlace compartido no encontrado.")
+
+    album = await db.get(Album, shared_link.album_id)
+    if not album or album.account_id != current_account.id:
+        raise HTTPException(status_code=403, detail="No autorizado para revocar este enlace.")
+
+    await db.delete(shared_link)
+    await db.commit()
+
+    return Response(status_code=204)
+
+@router.get("/albums/{album_id}/download", summary="Descargar un álbum como archivo ZIP")
+async def download_album_as_zip(
+    album_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Descarga todas las fotos de un álbum en un único archivo ZIP.
+    """
+    album_stmt = select(Album).options(selectinload(Album.photos)).where(
+        Album.id == album_id
+    )
+    album_result = await db.execute(album_stmt)
+    album = album_result.scalars().first()
+
+    if not album:
+        raise HTTPException(status_code=404, detail="Álbum no encontrado.")
+
+    zip_io = io.BytesIO()
+    with zipfile.ZipFile(zip_io, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for photo in album.photos:
+            file_path = os.path.join(MEDIA_ROOT, photo.file_path)
+            if os.path.exists(file_path):
+                zipf.write(file_path, os.path.basename(file_path))
+
+    zip_io.seek(0)
+    return StreamingResponse(zip_io, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename={album.name}.zip"})
+
+
+class PhotoReorderRequest(BaseModel):
+    photo_id: uuid.UUID
+    order: int
+
+@router.post("/albums/{album_id}/reorder-photos", status_code=204, summary="Reordenar fotos en un álbum")
+async def reorder_photos(
+    album_id: uuid.UUID,
+    reorder_data: List[PhotoReorderRequest],
+    current_account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Actualiza el orden de las fotos en un álbum.
+    """
+    album = await db.get(Album, album_id)
+    if not album or album.account_id != current_account.id:
+        raise HTTPException(status_code=404, detail="Álbum no encontrado o no autorizado.")
+
+    for item in reorder_data:
+        photo = await db.get(Photo, item.photo_id)
+        if not photo or photo.album_id != album_id:
+            raise HTTPException(status_code=404, detail=f"Foto {item.photo_id} no encontrada en este álbum.")
+        photo.order = item.order
+        db.add(photo) # Marcar la foto como modificada
+
+    await db.commit()
+    return Response(status_code=204)
 
 @router.put("/photos/{photo_id}/favorite", response_model=PhotoResponse, summary="Marcar/desmarcar foto como favorita")
 async def toggle_favorite_photo(

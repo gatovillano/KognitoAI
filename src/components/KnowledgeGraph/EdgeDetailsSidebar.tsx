@@ -317,13 +317,18 @@ export const EdgeDetailsSidebar: React.FC<EdgeDetailsSidebarProps> = ({
                             )}
 
                             {/* ID de la relación */}
-                            <div className="pt-4 border-t">
-                                <p className="text-xs text-muted-foreground">
-                                    ID: {edge.id}
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                    Desde: {edge.from} → Hacia: {edge.to}
-                                </p>
+                            <div className="pt-4 border-t space-y-4">
+                                <div>
+                                    <p className="text-xs text-muted-foreground">
+                                        ID: {edge.id}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                        Desde: {edge.from} → Hacia: {edge.to}
+                                    </p>
+                                </div>
+                                <Button variant="outline" className="w-full" onClick={onClose}>
+                                    Cerrar Detalles
+                                </Button>
                             </div>
                         </div>
                     </ScrollArea>

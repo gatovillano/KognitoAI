@@ -168,7 +168,7 @@ const NoteCollectionAnalysis: React.FC<NoteCollectionAnalysisProps> = ({
 
         {/* TAB: TEMAS E INSIGHTS */}
         <TabsContent value="insights" className="space-y-6 animate-in fade-in-50 duration-500">
-          {analysis.cross_cutting_themes && analysis.cross_cutting_themes.length > 0 && (
+          {Array.isArray(analysis.cross_cutting_themes) && analysis.cross_cutting_themes.length > 0 && (
             <div>
               <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${noteCollectionColors.icon}`}>
                 <Target className="w-5 h-5" />
@@ -189,7 +189,7 @@ const NoteCollectionAnalysis: React.FC<NoteCollectionAnalysisProps> = ({
 
           <Separator />
 
-          {analysis.synthesized_insights && analysis.synthesized_insights.length > 0 && (
+          {Array.isArray(analysis.synthesized_insights) && analysis.synthesized_insights.length > 0 && (
             <div>
               <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-primary">
                 <MessageSquare className="w-5 h-5" />
@@ -210,7 +210,7 @@ const NoteCollectionAnalysis: React.FC<NoteCollectionAnalysisProps> = ({
 
         {/* TAB: ESTRATEGIA Y BRECHAS */}
         <TabsContent value="strategy" className="space-y-6 animate-in fade-in-50 duration-500">
-          {analysis.strategic_recommendations && analysis.strategic_recommendations.length > 0 && (
+          {Array.isArray(analysis.strategic_recommendations) && analysis.strategic_recommendations.length > 0 && (
             <ActionableButton
               title="Recomendaciones Estratégicas"
               description="Pasos clave para capitalizar los hallazgos de la colección de notas."
@@ -228,7 +228,7 @@ const NoteCollectionAnalysis: React.FC<NoteCollectionAnalysisProps> = ({
 
           <Separator />
 
-          {analysis.knowledge_gaps && analysis.knowledge_gaps.length > 0 && (
+          {Array.isArray(analysis.knowledge_gaps) && analysis.knowledge_gaps.length > 0 && (
             <ActionableButton
               title="Brechas de Conocimiento"
               description="Áreas donde se requiere profundizar o conectar más información."

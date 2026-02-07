@@ -99,28 +99,23 @@ class DeepResearchToolLiteLLM(BaseTool):
         else:
             logger.warning("❌ Deep Research module not available. Tool will not function.")
 
-    def _create_litellm_compatible_config(
+    async def _create_litellm_compatible_config(
         self,
         max_iterations: int = 6,
         max_concurrent_units: int = 3
     ) -> Dict[str, Any]:
         """
         Crea una configuración compatible con LiteLLM para Open Deep Research.
-        
-        Esta función adapta los modelos de Kognito AI para que sean usados
-        por Open Deep Research, mapeando la configuración de LiteLLM al
-        formato esperado por el grafo de investigación.
-        
-        Args:
-            max_iterations: Máximo de iteraciones de investigación
-            max_concurrent_units: Máximo de unidades de investigación en paralelo
-            
-        Returns:
-            Diccionario de configuración para el grafo
         """
-        # Obtener los LLMs de Kognito
-        main_llm = get_main_llm()
-        fast_llm = get_fast_llm()
+        from core.llm_manager import get_llm_for_user
+        
+        # Obtener los LLMs de Kognito adaptados al usuario
+        if self.account_id:
+            main_llm = await get_llm_for_user(self.account_id, purpose="main")
+            fast_llm = await get_llm_for_user(self.account_id, purpose="fast")
+        else:
+            main_llm = get_main_llm()
+            fast_llm = get_fast_llm()
         
         if not main_llm:
             raise ValueError("Main LLM not initialized in Kognito AI")
@@ -271,7 +266,7 @@ class DeepResearchToolLiteLLM(BaseTool):
         
         try:
             # Crear configuración usando los LLMs de Kognito
-            config = self._create_litellm_compatible_config(
+            config = await self._create_litellm_compatible_config(
                 max_iterations=max_iterations,
                 max_concurrent_units=max_concurrent_units
             )

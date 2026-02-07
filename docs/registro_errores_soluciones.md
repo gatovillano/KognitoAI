@@ -395,3 +395,40 @@ Se solucionaron tres errores críticos que afectaban la experiencia del usuario 
     2. **Ordenación**: Se añadió una lógica de ordenación para que las `ToolMessage` aparezcan en el mismo orden que las `tool_calls` filtradas.
     3. **Limpieza de Huérfanos**: Se eliminan los mensajes de asistente que quedan vacíos (sin contenido ni llamadas válidas) y se asegura que el historial no termine en un `ToolMessage`.
     4. **Robustez**: Se utiliza un enfoque de ventana deslizante para procesar el historial, lo que permite manejar secuencias complejas de llamadas a herramientas de forma segura.
+
+---
+
+## 03-02-26 - Modelos de OpenRouter (GLM 4.5 Air) no activan el modo de pensamiento o se identifican incorrectamente
+
+- **Error**: Modelos avanzados como GLM 4.5 Air en OpenRouter no mostraban su proceso de pensamiento ("thinking mode") y en ocasiones se identificaban erróneamente como otros modelos (ej. "Claude") debido a configuraciones de ruteo interno.
+- **Causa**:
+    1. **Parámetros no Universales**: OpenRouter requiere parámetros específicos por modelo (como `thinking_mode`, `reasoning` o `reasoning_effort`) que no son parte del estándar base.
+    2. **Streaming no Estandarizado**: Los tokens de razonamiento pueden llegar en campos diferentes según el proveedor (ej. `reasoning_content`, `thought`, `reasoning`), y el sistema de streaming original solo buscaba uno específico.
+- **Solución**:
+    1. **Adaptador Inteligente (`core/llm_manager.py`)**: Se implementó la función `apply_openrouter_model_specific_logic` que inyecta automáticamente los parámetros necesarios según el modelo detectado, incluyendo variaciones para cubrir múltiples versiones del proveedor.
+    2. **Detección Dinámica de Razonamiento (`core/agent.py`)**: Se añadió un sistema de "fallback" en el nodo del modelo que escanea todos los `additional_kwargs` y metadatos de los chunks en busca de cualquier campo que sugiera razonamiento mediante patrones de texto (`think*`, `reason*`, `thought*`).
+    3. **Persistencia de Razonamiento**: Se modificó el flujo para que el contenido de razonamiento capturado se guarde en `additional_kwargs` del mensaje final, permitiendo su transmisión robusta al frontend vía WebSockets.
+
+---
+
+## 03-02-26 - `TypeError` en `GraphDB` Initialization por argumentos faltantes
+
+- **Error**: Se produjo un `TypeError` al intentar inicializar `GraphDB` en la herramienta `graph_cypher_generator_tool`.
+- **Causa**: La función `_get_graph_integration` intentaba instanciar `GraphDB` sin proporcionar los argumentos requeridos (`uri`, `user`, `password`) de la configuración.
+- **Solución**: Se actualizó `tools/graph_cypher_generator_tool.py` para importar `settings` desde `core.config` e inicializar `GraphDB` pasando explícitamente `settings.neo4j_uri`, `settings.neo4j_user` y `settings.neo4j_password`.
+
+---
+
+## 03-02-26 - `TypeError` en `CypherTool` por objeto de tipo `Node` no serializable
+
+- **Error**: Se produjo un `TypeError: Object of type Node is not JSON serializable` al ejecutar la herramienta `cypher_tool`.
+- **Causa**: La herramienta intentaba serializar a JSON el resultado directo de una consulta Neo4j. Los objetos devueltos por el driver de Neo4j (como `Node`, `Relationship` y `Path`) no son tipos estándar de Python y no pueden ser convertidos automáticamente por `json.dumps`.
+- **Solución**: Se implementó el método `_process_results` en `tools/cypher_tool.py` que recorre recursivamente los resultados de la consulta. Este método detecta objetos de Neo4j mediante duck-typing (verificando atributos como `.labels`, `.start_node` o `.nodes`) y los convierte a diccionarios estándar que incluyen el ID y las propiedades, asegurando que toda la respuesta sea serializable a JSON. También se añadió soporte para tipos de fecha (`isoformat`).
+
+---
+
+## 03-02-2026 - `TypeError` en `NaturalQueryInterpreterTool` por argumento `max_retries` inesperado
+
+- **Error**: `TypeError: GenerativeServiceAsyncClient.generate_content() got an unexpected keyword argument 'max_retries'`.
+- **Causa**: Incompatibilidad directa entre el SDK de Google Generative AI (Gemini) y los parámetros de reintento inyectados por LangChain al realizar llamadas directas mediante `langchain_google_genai`. Esto ocurría porque la herramienta instanciaba el modelo de forma independiente, saltándose la capa de abstracción unificada.
+- **Solución**: Se eliminaron todas las dependencias directas de `langchain_google_genai` en las herramientas y utilidades (`natural_query_interpreter_tool.py`, `internal_knowledge_search_tool.py`, `advanced_text_analyzer.py`, `proactive_knowledge_linker.py`). En su lugar, se implementó el uso centralizado de `ChatLiteLLM` a través del `llm_manager.py` usando `get_llm_for_user()` y `get_fast_llm()`. LiteLLM abstrae correctamente estos parámetros y utiliza la configuración global de reintentos del proyecto, eliminando el conflicto técnico.

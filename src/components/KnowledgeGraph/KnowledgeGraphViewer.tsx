@@ -20,7 +20,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
+import { RefreshCw, Search, SlidersHorizontal, X, Volume2, Loader2, Square } from 'lucide-react';
+import { useTextToSpeech } from '@/hooks/useTextToSpeech';
 import './KnowledgeGraphViewer.css';
 
 interface KnowledgeGraphViewerInnerProps {
@@ -38,6 +39,7 @@ const KnowledgeGraphViewerInner = ({ graphData, onNodeSelect, selectedWorkspace 
   const [filterType, setFilterType] = useState('all');
   const [isLoading, setIsLoading] = useState(false);
   const { fitView } = useReactFlow();
+  const { play, stop, isLoading: isTtsLoading, isPlaying: isTtsPlaying, activeText } = useTextToSpeech();
 
   // Colores por tipo de entidad
   const nodeColors = useMemo(() => ({
@@ -64,8 +66,9 @@ const KnowledgeGraphViewerInner = ({ graphData, onNodeSelect, selectedWorkspace 
         data: {
           label: node.label || 'Sin nombre',
           type: node.type || 'default',
-          description: node.title || '',
-          // Puedes añadir más propiedades directamente si las necesitas
+          description: node.description || node.title || node.label || '',
+          confidence: node.confidence || node.properties?.confidence || 0,
+          source: node.source || node.properties?.source || 'Desconocido',
         },
         style: {
           background: nodeColors[nodeType as keyof typeof nodeColors] || nodeColors.default,
@@ -106,33 +109,33 @@ const KnowledgeGraphViewerInner = ({ graphData, onNodeSelect, selectedWorkspace 
       .filter((edge: Edge) => edge.source && edge.target); // Filtrar aristas inválidas
     console.log("🟢 convertGraphData: Aristas convertidas:", flowEdges.length, flowEdges);
 
-  return { nodes: flowNodes, edges: flowEdges };
-}, [nodeColors]);
+    return { nodes: flowNodes, edges: flowEdges };
+  }, [nodeColors]);
 
-useEffect(() => {
-  if (graphData) {
-    console.log("🔵 KnowledgeGraphViewer: graphData recibido en useEffect:", graphData);
-    setIsLoading(true);
-    const { nodes: newNodes, edges: newEdges } = convertGraphData(graphData);
-    console.log("🟢 KnowledgeGraphViewer: Nodos ReactFlow listos para setear:", newNodes.length);
-    console.log("🟢 KnowledgeGraphViewer: Aristas ReactFlow listas para setear:", newEdges.length);
-    setNodes(newNodes);
-    setEdges(newEdges);
-    setIsLoading(false);
-    setTimeout(() => {
-      fitView();
-      console.log("🟢 KnowledgeGraphViewer: fitView ejecutado.");
-    }, 100);
-  } else {
-    console.log("🟡 KnowledgeGraphViewer: graphData es nulo o indefinido en useEffect.");
-    setNodes([]);
-    setEdges([]);
-  }
-}, [graphData, convertGraphData, setNodes, setEdges, fitView]);
+  useEffect(() => {
+    if (graphData) {
+      console.log("🔵 KnowledgeGraphViewer: graphData recibido en useEffect:", graphData);
+      setIsLoading(true);
+      const { nodes: newNodes, edges: newEdges } = convertGraphData(graphData);
+      console.log("🟢 KnowledgeGraphViewer: Nodos ReactFlow listos para setear:", newNodes.length);
+      console.log("🟢 KnowledgeGraphViewer: Aristas ReactFlow listas para setear:", newEdges.length);
+      setNodes(newNodes);
+      setEdges(newEdges);
+      setIsLoading(false);
+      setTimeout(() => {
+        fitView();
+        console.log("🟢 KnowledgeGraphViewer: fitView ejecutado.");
+      }, 100);
+    } else {
+      console.log("🟡 KnowledgeGraphViewer: graphData es nulo o indefinido en useEffect.");
+      setNodes([]);
+      setEdges([]);
+    }
+  }, [graphData, convertGraphData, setNodes, setEdges, fitView]);
 
   const filteredNodes = useMemo(() => {
     return nodes.filter((node: Node) => {
-      const matchesSearch = !searchTerm || 
+      const matchesSearch = !searchTerm ||
         node.data.label.toLowerCase().includes(searchTerm.toLowerCase()) ||
         node.data.description.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesType = filterType === 'all' || node.data.type === filterType;
@@ -148,6 +151,7 @@ useEffect(() => {
   }, [edges, filteredNodes]);
 
   const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
+    console.log("🎯 Nodo seleccionado:", node);
     setSelectedNode(node);
     if (onNodeSelect) {
       onNodeSelect(node);
@@ -219,7 +223,7 @@ useEffect(() => {
               <Button onClick={() => fitView()} className="flex-1">
                 🎯 Centrar vista
               </Button>
-              <Button 
+              <Button
                 onClick={() => { setSearchTerm(''); setFilterType('all'); }}
                 variant="outline"
                 className="flex-1"
@@ -245,8 +249,36 @@ useEffect(() => {
             <CardContent className="space-y-2 text-sm">
               <p><strong>Nombre:</strong> {selectedNode.data.label}</p>
               <p><strong>Tipo:</strong> <Badge style={{ backgroundColor: nodeColors[selectedNode.data.type as keyof typeof nodeColors] }}>{selectedNode.data.type}</Badge></p>
-              <p><strong>Descripción:</strong> {selectedNode.data.description}</p>
-              <p><strong>Confianza:</strong> {Math.round((selectedNode.data.confidence || 0) * 100)}%</p>
+              <div className="flex flex-col gap-2 p-2 rounded-md bg-muted/50 border border-border">
+                <div className="flex items-center justify-between">
+                  <strong className="text-xs uppercase tracking-wider text-muted-foreground">Descripción</strong>
+                  {selectedNode.data.description && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 rounded-full hover:scale-110 transition-all duration-200"
+                      onClick={() => {
+                        if (isTtsPlaying && activeText === selectedNode.data.description) {
+                          stop();
+                        } else {
+                          play(selectedNode.data.description);
+                        }
+                      }}
+                      title={isTtsPlaying && activeText === selectedNode.data.description ? "Detener" : "Escuchar descripción"}
+                    >
+                      {isTtsLoading && activeText === selectedNode.data.description ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                      ) : (isTtsPlaying && activeText === selectedNode.data.description) ? (
+                        <Square className="h-4 w-4 text-primary fill-primary" />
+                      ) : (
+                        <Volume2 className="h-4 w-4 text-primary" />
+                      )}
+                    </Button>
+                  )}
+                </div>
+                <p className="text-sm italic text-foreground/90 leading-relaxed">{selectedNode.data.description || 'Sin descripción disponible'}</p>
+              </div>
+              <p className="mt-2"><strong>Confianza:</strong> {Math.round((selectedNode.data.confidence || 0) * 100)}%</p>
               <p><strong>Documento:</strong> {selectedNode.data.source}</p>
             </CardContent>
           </Card>

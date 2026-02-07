@@ -231,7 +231,9 @@ class KognitoCrewResearcher:
             tasks=[task_research, task_analysis, task_report],
             process=Process.hierarchical,
             manager_agent=manager,
-            verbose=True
+            verbose=True,
+            memory=False,
+            cache=False
         )
 
         logger.info(f"🚀 Iniciando CrewAI para: {research_brief[:50]}...")

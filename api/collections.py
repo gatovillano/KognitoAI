@@ -145,3 +145,37 @@ async def update_collection_endpoint(
     except Exception as e:
         logger.error(f"API: update_collection - Error al actualizar la colección para account_id: {current_account_id}, error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno del servidor al actualizar la colección.")
+
+class CollectionShareRequest(BaseModel):
+    workspace_id: str
+
+@router.post("/collections/{topic}/share", summary="Compartir una colección con un workspace")
+async def share_collection(
+    request: CollectionShareRequest,
+    topic: str = Depends(decoded_topic),
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Permite compartir (asignar) una colección a un workspace específico.
+    """
+    logger.info(f"API: share_collection - Solicitud para compartir la colección '{topic}' con el workspace '{request.workspace_id}' por el usuario {current_account_id}")
+    
+    try:
+        from core.memory_manager import update_collection
+        
+        success = await update_collection(
+            account_id=current_account_id,
+            old_topic_name=topic,
+            workspace_id=request.workspace_id
+        )
+        
+        if not success:
+            raise HTTPException(status_code=400, detail=f"No se pudo compartir la colección '{topic}'. Puede que no exista o que ya esté en el workspace.")
+            
+        return {"message": f"La colección '{topic}' ha sido compartida exitosamente con el workspace."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"API: share_collection - Error al compartir la colección '{topic}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno del servidor al compartir la colección.")

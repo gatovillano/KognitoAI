@@ -114,7 +114,6 @@ class WebSocketManager:
                     del self.heartbeat_tasks[account_id]
 
     async def send_personal_message(self, message: Dict[str, Any], account_id: str, connection_type: Optional[str] = None):
-
         if account_id in self.active_connections:
             connections_to_send: List[WebSocket] = []
             if connection_type and connection_type in self.active_connections[account_id]:

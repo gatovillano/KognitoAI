@@ -22,37 +22,50 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TiptapEditor } from '@/components/TiptapEditor'; // Importar TiptapEditor
 import { ScrollArea } from '@/components/ui/scroll-area'; // Importar ScrollArea
 import apiClient from '@/lib/api';
+import { Globe } from 'lucide-react';
 
 const formSchema = z.object({
-  topic: z.string().min(3, { message: 'La base de conocimiento debe tener al menos 3 caracteres.' }).optional(),
-  files: z.instanceof(FileList).optional(), // Ahora es opcional
-  text_content: z.string().optional(), // Nuevo campo para el contenido de texto
+  topic: z.string().optional(),
+  files: z.any().optional(),
+  text_content: z.string().optional(),
+  web_url: z.string().optional(),
 }).superRefine((data, ctx) => {
-  // Validar condicionalmente: o files o text_content debe estar presente
-  if (!data.files?.length && !data.text_content) {
+  const sources = [
+    data.files && data.files.length > 0,
+    data.text_content && data.text_content.trim().length > 0,
+    data.web_url && data.web_url.trim().length > 0
+  ].filter(Boolean).length;
+
+  if (sources === 0) {
+    const message = 'Debes seleccionar al menos un archivo, introducir texto o una URL.';
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: ['files'] });
+  }
+
+  if (sources > 1) {
+    const message = 'No puedes subir archivos, texto y URL a la vez.';
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: ['files'] });
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: ['text_content'] });
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: ['web_url'] });
+  }
+
+  if (data.topic && data.topic.length > 0 && data.topic.length < 3) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'Debes seleccionar al menos un archivo o introducir texto.',
-      path: ['files'], // Asociar el error al campo files para que se muestre debajo
-    });
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'Debes seleccionar al menos un archivo o introducir texto.',
-      path: ['text_content'], // Asociar el error al campo text_content
+      message: 'La base de conocimiento debe tener al menos 3 caracteres.',
+      path: ['topic'],
     });
   }
-  // Si hay archivos, el campo de texto no debe tener contenido
-  if (data.files?.length && data.text_content) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'No puedes subir archivos y texto a la vez.',
-      path: ['files'],
-    });
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'No puedes subir archivos y texto a la vez.',
-      path: ['text_content'],
-    });
+
+  if (data.web_url && data.web_url.trim().length > 0) {
+    try {
+      new URL(data.web_url);
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Por favor, introduce una URL válida.",
+        path: ['web_url'],
+      });
+    }
   }
 });
 
@@ -94,8 +107,8 @@ function Dropzone({ children, onDrop, onDragOver, onDragLeave, isDragging }: Dro
 
 export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, onUploadStart, defaultTopic, workspaceId }: UploadDocumentDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState('files'); // 'files' o 'text'
-  const [isDragging, setIsDragging] = useState(false); // Nuevo estado para drag and drop
+  const [activeTab, setActiveTab] = useState('files');
+  const [isDragging, setIsDragging] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -103,21 +116,21 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
       topic: 'General',
       files: undefined,
       text_content: '',
+      web_url: '',
     },
   });
 
   const files = form.watch('files');
 
-  // Rellenamos el formulario cuando cambia el estado de apertura o el defaultTopic
   useEffect(() => {
     if (isOpen) {
       form.reset({
-        // Si hay un defaultTopic, lo usamos; si no, el usuario debe escribirlo.
         topic: defaultTopic || 'General',
         files: undefined,
-        text_content: '', // Resetear también el contenido de texto
+        text_content: '',
+        web_url: '',
       });
-      setActiveTab('files'); // Resetear a la pestaña de archivos al abrir
+      setActiveTab('files');
     }
   }, [isOpen, defaultTopic, form]);
 
@@ -137,82 +150,91 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
     const droppedFiles = event.dataTransfer.files;
     if (droppedFiles && droppedFiles.length > 0) {
       form.setValue('files', droppedFiles);
-      form.clearErrors('files'); // Limpiar errores si se sueltan archivos
+      form.clearErrors('files');
     }
   };
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     setIsSubmitting(true);
-
     const topicForUpload = defaultTopic || values.topic || 'General';
-    const fileNames: string[] = [];
-    const formData = new FormData();
-
-    formData.append('topic', topicForUpload);
-    if (workspaceId) {
-      formData.append('workspace_id', workspaceId);
-    }
 
     try {
-      if (activeTab === 'files' && values.files && values.files.length > 0) {
-        for (let i = 0; i < values.files.length; i++) {
-          formData.append('files', values.files[i]);
-          fileNames.push(values.files[i].name);
-        }
+      if (activeTab === 'web' && values.web_url) {
+        onUploadStart([values.web_url], topicForUpload);
+        onOpenChange(false);
+
+        apiClient.post('/api/tools/run', {
+          tool_name: 'add_web_to_rag',
+          url: values.web_url,
+          topic: topicForUpload,
+          workspace_id: workspaceId,
+        }).catch((error: any) => {
+          // Captura errores de la petición inicial (ej. red, 4xx)
+          // Los errores de procesamiento de la tarea se reciben por WebSocket
+          toast.error('Error al iniciar el procesamiento de la URL.', {
+            description: error.response?.data?.detail || 'Por favor, revisa la URL y tu conexión.',
+          });
+          // Aquí podrías querer enviar un evento de fallo por WS si el backend no lo hace
+        });
+
+      } else if (activeTab === 'files' && values.files && values.files.length > 0) {
+        const fileNames = (Array.from(values.files) as File[]).map(f => f.name);
+        const formData = new FormData();
+        formData.append('topic', topicForUpload);
+        if (workspaceId) formData.append('workspace_id', workspaceId);
+        (Array.from(values.files) as File[]).forEach(file => formData.append('files', file));
+
         toast.info('Subiendo documentos...', {
           description: `A la colección: ${topicForUpload}`,
-          id: 'upload-progress'
+        });
+
+        onUploadStart(fileNames, topicForUpload);
+        onOpenChange(false);
+
+        apiClient.post('/api/documents/upload-document', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        }).then(() => {
+          console.log('Upload request sent successfully for', fileNames);
+          // onUploadSuccess es llamado por el websocket en este caso
+        }).catch(error => {
+          toast.error('Error al iniciar la subida de documentos.', {
+            description: 'Por favor, revisa tu conexión e inténtalo de nuevo.',
+          });
+          console.error(error);
         });
 
       } else if (activeTab === 'text' && values.text_content) {
         const textFile = new File([values.text_content], `texto-${Date.now()}.md`, { type: 'text/markdown' });
+        const formData = new FormData();
+        formData.append('topic', topicForUpload);
+        if (workspaceId) formData.append('workspace_id', workspaceId);
         formData.append('files', textFile);
-        fileNames.push(textFile.name);
 
         toast.info('Guardando texto como documento...', {
           description: `En la colección: ${topicForUpload}`,
-          duration: 0,
-          id: 'upload-progress'
+        });
+
+        onUploadStart([textFile.name], topicForUpload);
+        onOpenChange(false);
+
+        apiClient.post('/api/documents/upload-document', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        }).then(() => {
+          console.log('Text content sent successfully');
+        }).catch(error => {
+          toast.error('Error al guardar el texto.', {
+            description: 'Por favor, inténtalo de nuevo.',
+          });
+          console.error(error);
         });
 
       } else {
-        toast.error('Por favor, selecciona al menos un archivo o introduce texto.');
-        setIsSubmitting(false);
-        return;
+        // Este caso debería ser prevenido por la validación del schema
+        toast.error('Por favor, proporciona una fuente de datos.');
       }
-
-      onUploadStart(fileNames, topicForUpload);
-      onOpenChange(false); // Cierra el diálogo inmediatamente
-
-      // La subida ahora ocurre en segundo plano. El componente padre
-      // escuchará los eventos de WebSocket para actualizar el estado.
-      apiClient.post('/api/documents/upload-document', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      }).then(response => {
-        // El éxito se maneja a través de WebSockets, pero podemos loguear aquí si es necesario
-        console.log('Upload request sent successfully for', fileNames);
-        // Opcional: podrías llamar a onUploadSuccess aquí si necesitas hacer algo
-        // general después de que la petición se complete, pero el estado de los
-        // documentos individuales es manejado por WebSockets.
-        onUploadSuccess(fileNames, topicForUpload);
-      }).catch(error => {
-        // Si la petición inicial falla, mostramos un error genérico.
-        // Los fallos de procesamiento de archivos individuales se manejan por WebSockets.
-        toast.error('Error al iniciar la subida de documentos.', {
-          description: 'Por favor, revisa tu conexión e inténtalo de nuevo.',
-        });
-        console.error(error);
-      }).finally(() => {
-        setIsSubmitting(false);
-        form.reset();
-      });
-
     } catch (error) {
-      toast.error('Error al subir/guardar documento', {
+      toast.error('Ha ocurrido un error inesperado.', {
         description: 'Por favor, inténtalo de nuevo.',
-        id: 'upload-progress'
       });
       console.error(error);
     } finally {
@@ -220,21 +242,48 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
     }
   }
 
+  const getSubmitButtonText = () => {
+    if (isSubmitting) {
+      switch (activeTab) {
+        case 'files': return 'Subiendo...';
+        case 'text': return 'Guardando...';
+        case 'web': return 'Añadiendo...';
+        default: return 'Procesando...';
+      }
+    }
+    switch (activeTab) {
+      case 'files': return 'Subir Documento(s)';
+      case 'text': return 'Guardar Conocimiento';
+      case 'web': return 'Añadir desde Web';
+      default: return 'Enviar';
+    }
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl w-full max-h-[90vh] flex flex-col p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle className="text-lg sm:text-xl">Subir Nuevo Documento</DialogTitle>
+          <DialogTitle className="text-lg sm:text-xl">Añadir Conocimiento</DialogTitle>
           <DialogDescription>
             {defaultTopic
-              ? `Los archivos se añadirán a la colección "${defaultTopic}".`
-              : "Crea o selecciona una base de conocimiento para tus nuevos archivos."
+              ? `El contenido se añadirá a la colección "${defaultTopic}".`
+              : "Crea o selecciona una base de conocimiento para tu nuevo contenido."
             }
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="flex-1 flex flex-col space-y-4 overflow-hidden">
-            {/* ---- CAMBIO DE RENDERIZADO: El campo 'topic' solo se muestra si NO hay defaultTopic ---- */}
+          <form 
+            onSubmit={form.handleSubmit(onSubmit, (errors) => {
+              console.error('Validation Errors:', errors);
+              const firstError = Object.values(errors)[0];
+              if (firstError?.message) {
+                toast.error(firstError.message as string);
+              } else {
+                toast.error("Por favor, revisa los campos del formulario.");
+              }
+            })} 
+            className="flex-1 flex flex-col space-y-4 overflow-hidden"
+          >
             {!defaultTopic && (
               <FormField
                 control={form.control}
@@ -251,10 +300,28 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
               />
             )}
 
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
+            <Tabs 
+              value={activeTab} 
+              onValueChange={(val) => {
+                setActiveTab(val);
+                // Limpiar otros campos al cambiar de pestaña para evitar conflictos de validación
+                if (val === 'files') {
+                  form.setValue('text_content', '');
+                  form.setValue('web_url', '');
+                } else if (val === 'text') {
+                  form.setValue('files', undefined);
+                  form.setValue('web_url', '');
+                } else if (val === 'web') {
+                  form.setValue('files', undefined);
+                  form.setValue('text_content', '');
+                }
+              }} 
+              className="w-full"
+            >
+              <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="files">Subir Archivos</TabsTrigger>
                 <TabsTrigger value="text">Añadir Texto</TabsTrigger>
+                <TabsTrigger value="web">Añadir Web</TabsTrigger>
               </TabsList>
               <TabsContent value="files">
                 <Dropzone onDrop={handleDrop} isDragging={isDragging} onDragOver={handleDragOver} onDragLeave={handleDragLeave}>
@@ -270,7 +337,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
                             accept=".pdf,.docx,.txt,.md,.html"
                             onChange={(e) => field.onChange(e.target.files)}
                             disabled={isSubmitting}
-                            className="hidden" // Ocultar el input de archivo original
+                            className="hidden"
                             id="file-upload-input"
                           />
                         </FormControl>
@@ -280,7 +347,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
                               <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L7 9m3-3 3 3" />
                             </svg>
                             <p className="mb-2 text-sm text-muted-foreground"><span className="font-semibold">Haz clic para subir</span> o arrastra y suelta</p>
-                            <p className="text-xs text-muted-foreground">PDF, DOCX, TXT, MD, HTML (MAX. 5MB)</p>
+                            <p className="text-xs text-muted-foreground">PDF, DOCX, TXT, MD, HTML</p>
                           </div>
                         </label>
                         <FormMessage />
@@ -318,18 +385,34 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
                   )}
                 />
               </TabsContent>
+              <TabsContent value="web">
+                <div className="p-4 border-dashed border-2 rounded-lg h-48 flex flex-col justify-center">
+                  <FormField
+                    control={form.control}
+                    name="web_url"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-center block mb-2">URL de la página web</FormLabel>
+                        <FormControl>
+                          <div className="relative">
+                            <Globe className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            <Input placeholder="https://ejemplo.com/articulo" {...field} className="pl-10" />
+                          </div>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </TabsContent>
             </Tabs>
 
             <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
               <Button type="submit" disabled={isSubmitting} className="relative w-full sm:w-auto">
-                {isSubmitting ? (
-                  <>
-                    <span className="absolute left-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                    <span className="pl-6">{activeTab === 'files' ? 'Subiendo...' : 'Guardando...'}</span>
-                  </>
-                ) : (
-                  activeTab === 'files' ? 'Subir Documento' : 'Guardar Conocimiento'
+                {isSubmitting && (
+                  <span className="absolute left-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
                 )}
+                <span className={isSubmitting ? 'pl-6' : ''}>{getSubmitButtonText()}</span>
               </Button>
               <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting} className="w-full sm:w-auto">
                 Cancelar

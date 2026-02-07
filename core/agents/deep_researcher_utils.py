@@ -31,7 +31,11 @@ from core.agents.deep_researcher_config import Configuration, SearchAPI
 from core.agents.deep_researcher_prompts import summarize_webpage_prompt
 from core.agents.deep_researcher_state import ResearchComplete, Summary
 from core.llm_manager import get_fast_llm, get_main_llm
-from core.utils.llm_utils import is_token_limit_exceeded, remove_up_to_last_ai_message # Removed get_model_token_limit
+from core.utils.llm_utils import (
+    is_token_limit_exceeded, 
+    remove_up_to_last_ai_message, 
+    invoke_structured_output
+) # Removed get_model_token_limit
 from core.utils.tool_utils import get_tool_by_name as get_langchain_tool_by_name
 
 logger = logging.getLogger(__name__)
@@ -52,14 +56,17 @@ TAVILY_SEARCH_DESCRIPTION = (
     "A search engine optimized for comprehensive, accurate, and trusted results. "
     "Useful for when you need to answer questions about current events."
 )
-@tool(description=TAVILY_SEARCH_DESCRIPTION)
+@tool
 async def tavily_search(
     queries: List[str],
     max_results: Annotated[int, InjectedToolArg] = 5,
     topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
     config: Optional[RunnableConfig] = None # Changed to Optional
 ) -> str:
-    """Fetch and summarize search results from Tavily search API.
+    """A search engine optimized for comprehensive, accurate, and trusted results. 
+    Useful for when you need to answer questions about current events.
+    
+    Fetch and summarize search results from Tavily search API.
     
     Note: The Tavily search operation itself (via AsyncTavilyClient) does not
     directly use a local LLM. The 'fast LLM' (get_fast_llm()) is specifically
@@ -88,19 +95,15 @@ async def tavily_search(
     if not summarization_llm:
         raise ValueError("Main LLM not initialized for summarization.")
 
-    summarization_model = cast(Runnable[Sequence[BaseMessage], Summary],
-                               summarization_llm.with_structured_output(Summary).with_retry(
-                                   stop_after_attempt=cfg.max_structured_output_retries
-                               ))
-    
     async def noop():
         return None
     
     summarization_tasks = [
         noop() if not result.get("raw_content") 
         else summarize_webpage(
-            summarization_model, 
-            result['raw_content'][:max_char_to_include]
+            summarization_llm, 
+            result['raw_content'][:max_char_to_include],
+            cfg
         )
         for result in unique_results.values()
     ]
@@ -185,15 +188,16 @@ async def tavily_search_async(
     return search_results
 
 @time_function
-async def summarize_webpage(model: Runnable[Sequence[BaseMessage], Summary], webpage_content: str) -> Optional[Summary]:
-    """Summarize webpage content using AI model with timeout protection."""
+async def summarize_webpage(llm: BaseChatModel, webpage_content: str, cfg: Configuration) -> Optional[Summary]:
+    """Summarize webpage content using AI model with timeout protection and structured output fallback."""
     try:
         prompt_content = summarize_webpage_prompt.format(
             webpage_content=webpage_content,
             date=get_today_str()
         )
         
-        summary: Summary = await model.ainvoke([HumanMessage(content=prompt_content)])
+        retry_cfg = {"stop_after_attempt": cfg.max_structured_output_retries}
+        summary: Summary = await invoke_structured_output(llm, Summary, prompt_content, retry_cfg)
         return summary
         
     except asyncio.TimeoutError:
@@ -205,9 +209,12 @@ async def summarize_webpage(model: Runnable[Sequence[BaseMessage], Summary], web
 
 # Reflection Tool Utils
 
-@tool(description="Strategic reflection tool for research planning. Use this ONLY to plan your next ConductResearch calls or to assess findings. DO NOT use this tool as a substitute for actual research delegation.")
+@tool
 def deep_research_think_tool(reflection: str) -> str:
-    """Tool for strategic reflection on research progress and decision-making.
+    """Strategic reflection tool for research planning. Use this ONLY to plan your next ConductResearch calls or to assess findings. 
+    DO NOT use this tool as a substitute for actual research delegation.
+
+    Tool for strategic reflection on research progress and decision-making.
     This tool records your thoughts but does not perform any research.
     """
     return f"Reflection recorded: {reflection}"

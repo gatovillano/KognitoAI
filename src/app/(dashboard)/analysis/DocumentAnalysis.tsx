@@ -167,7 +167,7 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
 
         {/* TAB: TEMAS Y CONCEPTOS */}
         <TabsContent value="themes" className="space-y-6 animate-in fade-in-50 duration-500">
-          {analysis.key_themes && analysis.key_themes.length > 0 && (
+          {Array.isArray(analysis.key_themes) && analysis.key_themes.length > 0 && (
             <div>
               <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${docColors.icon}`}>
                 <Target className="w-5 h-5" />
@@ -189,7 +189,7 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
           <Separator />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {analysis.central_concepts && analysis.central_concepts.length > 0 && (
+            {Array.isArray(analysis.central_concepts) && analysis.central_concepts.length > 0 && (
               <div>
                 <h4 className="text-md font-bold mb-3 flex items-center gap-2">
                   <Brain className="w-4 h-4 text-purple-500" />
@@ -209,7 +209,7 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
               </div>
             )}
 
-            {analysis.keywords && analysis.keywords.length > 0 && (
+            {Array.isArray(analysis.keywords) && analysis.keywords.length > 0 && (
               <div>
                 <h4 className="text-md font-bold mb-3 flex items-center gap-2">
                   <List className="w-4 h-4 text-blue-500" />
@@ -229,7 +229,7 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
 
         {/* TAB: ESTRUCTURA Y ENTIDADES */}
         <TabsContent value="structure" className="space-y-6 animate-in fade-in-50 duration-500">
-          {analysis.document_structure && analysis.document_structure.length > 0 && (
+          {Array.isArray(analysis.document_structure) && analysis.document_structure.length > 0 && (
             <div>
               <h4 className="text-lg font-bold mb-4 flex items-center gap-2">
                 <Layout className="w-5 h-5 text-indigo-500" />
@@ -250,7 +250,7 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
           <Separator />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {analysis.key_entities && analysis.key_entities.length > 0 && (
+            {Array.isArray(analysis.key_entities) && analysis.key_entities.length > 0 && (
               <div>
                 <h4 className="text-md font-bold mb-3 flex items-center gap-2">
                   <Users className="w-4 h-4 text-orange-500" />
@@ -268,7 +268,7 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
             )}
 
             <div className="space-y-4">
-              {analysis.discipline && analysis.discipline.length > 0 && (
+              {Array.isArray(analysis.discipline) && analysis.discipline.length > 0 && (
                 <div>
                   <h4 className="text-md font-bold mb-2">Disciplina / Ámbito</h4>
                   <div className="flex flex-wrap gap-2">
@@ -292,7 +292,7 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
 
         {/* TAB: HALLAZGOS Y ACCIÓN */}
         <TabsContent value="insights" className="space-y-6 animate-in fade-in-50 duration-500">
-          {analysis.knowledge_gaps && analysis.knowledge_gaps.length > 0 && (
+          {Array.isArray(analysis.knowledge_gaps) && analysis.knowledge_gaps.length > 0 && (
             <ActionableButton
               title="Brechas de Conocimiento"
               description="Identifica áreas donde falta información o se requiere más investigación."
@@ -302,7 +302,7 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
             />
           )}
 
-          {analysis.problematic_areas && analysis.problematic_areas.length > 0 && (
+          {Array.isArray(analysis.problematic_areas) && analysis.problematic_areas.length > 0 && (
             <div>
               <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-red-600">
                 <Activity className="w-5 h-5" />
@@ -319,7 +319,7 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
             </div>
           )}
 
-          {analysis.action_items && analysis.action_items.length > 0 && (
+          {Array.isArray(analysis.action_items) && analysis.action_items.length > 0 && (
             <div>
               <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-green-600">
                 <Zap className="w-5 h-5" />
@@ -338,7 +338,7 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
             </div>
           )}
 
-          {analysis.final_reflections && analysis.final_reflections.length > 0 && (
+          {Array.isArray(analysis.final_reflections) && analysis.final_reflections.length > 0 && (
             <Card className="bg-muted/50 border-dashed">
               <CardHeader>
                 <CardTitle className="text-md font-bold flex items-center gap-2">
@@ -360,7 +360,7 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
         {/* TAB: PREGUNTAS */}
         <TabsContent value="questions" className="space-y-6 animate-in fade-in-50 duration-500">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {analysis.exploration_questions && analysis.exploration_questions.length > 0 && (
+            {Array.isArray(analysis.exploration_questions) && analysis.exploration_questions.length > 0 && (
               <ActionableButton
                 title="Preguntas de Exploración"
                 description="Cuestionamientos clave para profundizar en el contenido."
@@ -370,7 +370,7 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
               />
             )}
 
-            {analysis.generated_questions && analysis.generated_questions.length > 0 && (
+            {Array.isArray(analysis.generated_questions) && analysis.generated_questions.length > 0 && (
               <ActionableButton
                 title="Preguntas Generadas"
                 description="Preguntas automáticas basadas en el contexto del documento."

@@ -36,6 +36,9 @@ pandas
 requests
 beautifulsoup4
 
+# === GOOGLE CLOUD SERVICES ===
+google-cloud-texttospeech
+
 # === DEVELOPMENT ===
 pytest
 psutil
