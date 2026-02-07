@@ -5,13 +5,14 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button'; // Importar Button
-import { Volume2, Pencil, Lightbulb, FileText, MoreHorizontal, Link, Download } from 'lucide-react'; // Importar el icono de volumen, el de lápiz, el de enlace y el de descarga
+import { Volume2, Pencil, Lightbulb, FileText, MoreHorizontal, Link, Download, FileType } from 'lucide-react'; // Importar el icono de volumen, el de lápiz, el de enlace y el de descarga
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'; // Reutilizamos nuestro potente renderizador
 import { useState, useEffect } from 'react'; // Importar useState y useEffect
 import apiClient from '@/lib/api'; // Importar apiClient
 import { NoteDialog } from './note-dialog'; // Importar NoteDialog para la edición
+import { useRouter } from 'next/navigation'; // Importar useRouter
 import type { Note } from './page'; // Importamos el tipo de dato 'Note' desde la página principal
 import { DialogFooter } from '@/components/ui/dialog'; // Importar DialogFooter
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; // Importar Select components
@@ -29,6 +30,7 @@ interface ViewNoteDialogProps {
 }
 
 export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: ViewNoteDialogProps) {
+  const router = useRouter(); // Hook para navegación
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isNoteEditDialogOpen, setIsNoteEditDialogOpen] = useState(false); // Estado para el diálogo de edición
   const [isLinkProfileDialogOpen, setIsLinkProfileDialogOpen] = useState(false); // Estado para el diálogo de vincular perfil
@@ -178,6 +180,24 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
     }
   };
 
+  const handleOpenInOnlyOffice = async () => {
+    if (!note) return;
+    const toastId = toast.loading("Preparando documento para OnlyOffice...");
+    try {
+        // Primero convertimos/aseguramos que exista el docx
+        await apiClient.post(`/api/notes/${note.id}/convert-to-word`);
+        
+        toast.dismiss(toastId);
+        // Redirigimos a la página de OnlyOffice
+        // Asumiendo que la ruta es /notes/onlyoffice/[id]
+        router.push(`/notes/onlyoffice/${note.id}`);
+        onOpenChange(false); // Cierra el diálogo actual
+    } catch (error) {
+        toast.error("Error al convertir o abrir en OnlyOffice", { id: toastId });
+        console.error(error);
+    }
+  };
+
   // Si no hay nota para mostrar, no renderizamos nada para evitar errores.
   if (!note) {
     return null;
@@ -218,6 +238,10 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
                   <DropdownMenuItem onClick={handleDownloadPdf}>
                     <Download className="mr-2 h-4 w-4" />
                     Descargar PDF
+                  </DropdownMenuItem>
+                   <DropdownMenuItem onClick={handleOpenInOnlyOffice}>
+                    <FileType className="mr-2 h-4 w-4" />
+                    Abrir en OnlyOffice
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={handleTextToSpeech} disabled={isSpeaking}>
                     <Volume2 className={isSpeaking ? "mr-2 h-4 w-4 animate-pulse text-primary" : "mr-2 h-4 w-4"} />

@@ -366,54 +366,59 @@ export default function NotesPage() {
       <motion.div
         ref={drag as any}
         layout
-        initial={{ opacity: 0, scale: 0.8 }}
+        initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.8 }}
-        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        transition={{ duration: 0.3 }}
         className="h-full"
         style={{ opacity: isDragging ? 0.5 : 1 }}
       >
         <Card
-          className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-[250px]"
+          className="h-[280px] hover:bg-card/60"
           onClick={() => {
             setViewingNote(note);
             setIsViewDialogOpen(true);
           }}
         >
-          <CardHeader className="pb-3">
+          {/* Efecto de resplandor en el hover */}
+          <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
+          <CardHeader className="pb-3 relative z-10">
             <CardTitle className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <div className="p-3 rounded-2xl bg-background/50 border border-border/40 shadow-inner group-hover:scale-110 transition-transform duration-500 flex-shrink-0">
                   <Notebook className="h-5 w-5 text-primary" />
                 </div>
-                <span className="font-semibold text-lg">{note.title || 'Nota sin título'}</span>
+                <span className="font-bold text-lg line-clamp-2 group-hover:text-primary transition-colors leading-tight tracking-tight">
+                  {note.title || 'Nota sin título'}
+                </span>
               </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl hover:bg-primary/10"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <MoreHorizontal className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-[180px]">
+                <DropdownMenuContent align="end" className="w-[180px] rounded-2xl border-border/40 bg-card/95 backdrop-blur-xl">
                   {canEdit && (
                     <>
                       <DropdownMenuItem onClick={(e) => {
                         e.stopPropagation();
                         setEditingNote(note);
                         setIsNoteDialogOpen(true);
-                      }}>
+                      }} className="rounded-xl">
                         <Edit className="mr-2 h-4 w-4" />
                         Editar nota
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={(e) => {
                         e.stopPropagation();
                         setDeletingNote(note);
-                      }}>
+                      }} className="rounded-xl">
                         <Trash2 className="mr-2 h-4 w-4" />
                         Eliminar nota
                       </DropdownMenuItem>
@@ -423,22 +428,22 @@ export default function NotesPage() {
                   <DropdownMenuItem onClick={(e) => {
                     e.stopPropagation();
                     onAnalyzeNote(note);
-                  }}>
+                  }} className="rounded-xl">
                     <Lightbulb className="mr-2 h-4 w-4" />
                     Analizar Nota
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={(e) => {
                     e.stopPropagation();
                     onSummarizeNote(note);
-                  }}>
+                  }} className="rounded-xl">
                     <FileText className="mr-2 h-4 w-4" />
                     Resumir Nota
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator /> {/* Separador para el nuevo botón */}
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={(e) => {
                     e.stopPropagation();
                     onLinkProfile(note);
-                  }}> {/* Nuevo botón */}
+                  }} className="rounded-xl">
                     <Link className="mr-2 h-4 w-4" />
                     Vincular a Perfil
                   </DropdownMenuItem>
@@ -446,27 +451,36 @@ export default function NotesPage() {
               </DropdownMenu>
             </CardTitle>
           </CardHeader>
-          <CardContent className="pt-0 flex-grow overflow-hidden">
-            <div className="text-sm text-muted-foreground line-clamp-4 leading-relaxed">
+          <CardContent className="pt-0 flex-grow overflow-hidden relative z-10">
+            <div className="text-xs text-muted-foreground/80 line-clamp-4 leading-relaxed font-medium">
               {note.content ? (
                 <InlineMarkdownRenderer content={note.content} />
               ) : (
-                <p>Sin contenido</p>
+                <p className="text-muted-foreground/60 italic">Sin contenido</p>
               )}
             </div>
           </CardContent>
-          <CardFooter className="flex justify-between items-center text-xs text-muted-foreground pt-3 mt-auto border-t border-border/50">
-            <span className="truncate pr-2">{note.category}</span>
-            <div className="flex items-center gap-2 flex-shrink-0">
+          <CardFooter className="flex flex-col gap-3 pt-3 mt-auto border-t border-border/20 relative z-10">
+            <div className="flex justify-between items-center w-full text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">
+              <div className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary/40" />
+                <span className="truncate pr-2">{note.category}</span>
+              </div>
+              <span className="flex-shrink-0">{new Date(note.created_at).toLocaleDateString('es-ES', {
+                year: 'numeric', month: 'short', day: 'numeric'
+              })}</span>
+            </div>
+            <div className="flex items-center gap-2 w-full justify-end">
               {note.workspace_name && (
                 <div
-                  className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full"
+                  className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-full border uppercase tracking-wider"
                   style={{
-                    backgroundColor: note.workspace_color ? `${note.workspace_color}20` : '#f3f4f6', // bg-gray-100
+                    backgroundColor: note.workspace_color ? `${note.workspace_color}15` : '#f3f4f620',
+                    borderColor: note.workspace_color ? `${note.workspace_color}40` : '#88888840',
                   }}
                 >
                   <span
-                    className="h-2 w-2 rounded-full"
+                    className="h-1.5 w-1.5 rounded-full"
                     style={{ backgroundColor: note.workspace_color || '#888888' }}
                   ></span>
                   <span style={{ color: note.workspace_color || '#374151' }}>
@@ -474,8 +488,20 @@ export default function NotesPage() {
                   </span>
                 </div>
               )}
-              {note.team_shared && <span title="Compartido con equipo"><Users className="h-4 w-4" /></span>}
-              <span>{new Date(note.created_at).toLocaleDateString()}</span>
+              {note.team_shared && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="p-1.5 rounded-lg bg-primary/10 text-primary">
+                        <Users className="h-3.5 w-3.5" />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Compartido con equipo</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </div>
           </CardFooter>
         </Card>

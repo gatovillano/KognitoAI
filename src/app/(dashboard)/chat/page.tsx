@@ -92,8 +92,8 @@ export default function NewChatPage() {
         onFileUpload={() => {}}
         onRemoveContextItem={() => {}}
         onPaste={() => {}}
-        isUploadingImage={false}
-        uploadedImagePreview={null}
+        isUploadingImages={false}
+        uploadedImagePreviews={[]}
         onRemoveImage={() => {}}
         onImageUpload={() => {}}
         selectedContext={selectedContext}

@@ -137,7 +137,7 @@ const SemanticAnalysis: React.FC<SemanticAnalysisProps> = ({
 
         {/* TAB: TEMAS Y CLUSTERS */}
         <TabsContent value="topics" className="space-y-6 animate-in fade-in-50 duration-500">
-          {semanticData?.temas_transversales && semanticData.temas_transversales.length > 0 && (
+          {Array.isArray(semanticData?.temas_transversales) && semanticData.temas_transversales.length > 0 && (
             <div>
               <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${semanticColors.icon}`}>
                 <Target className="w-5 h-5" />
@@ -156,7 +156,7 @@ const SemanticAnalysis: React.FC<SemanticAnalysisProps> = ({
             </div>
           )}
 
-          {semanticData?.grouped_topics && semanticData.grouped_topics.length > 0 && (
+          {Array.isArray(semanticData?.grouped_topics) && semanticData.grouped_topics.length > 0 && (
             <div>
               <h4 className="text-md font-bold mb-4 flex items-center gap-2">
                 <Network className="w-5 h-5 text-blue-500" />
@@ -180,7 +180,7 @@ const SemanticAnalysis: React.FC<SemanticAnalysisProps> = ({
             </div>
           )}
 
-          {semanticData?.detailed_clusters && semanticData.detailed_clusters.length > 0 && (
+          {Array.isArray(semanticData?.detailed_clusters) && semanticData.detailed_clusters.length > 0 && (
             <div>
               <h4 className="text-md font-bold mb-4 flex items-center gap-2">
                 <BarChart3 className="w-5 h-5 text-emerald-500" />
@@ -217,7 +217,7 @@ const SemanticAnalysis: React.FC<SemanticAnalysisProps> = ({
 
         {/* TAB: CONCEPTOS */}
         <TabsContent value="concepts" className="space-y-6 animate-in fade-in-50 duration-500">
-          {semanticData?.conceptos_centrales && semanticData.conceptos_centrales.length > 0 && (
+          {Array.isArray(semanticData?.conceptos_centrales) && semanticData.conceptos_centrales.length > 0 && (
             <div>
               <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${semanticColors.icon}`}>
                 <Brain className="w-5 h-5" />
@@ -254,7 +254,7 @@ const SemanticAnalysis: React.FC<SemanticAnalysisProps> = ({
 
         {/* TAB: HALLAZGOS */}
         <TabsContent value="insights" className="space-y-6 animate-in fade-in-50 duration-500">
-          {semanticData?.brechas_conocimiento && semanticData.brechas_conocimiento.length > 0 && (
+          {Array.isArray(semanticData?.brechas_conocimiento) && semanticData.brechas_conocimiento.length > 0 && (
             <ActionableButton
               title="Brechas de Conocimiento"
               description="Identifica áreas donde el conocimiento es incompleto o requiere mayor investigación."
@@ -264,7 +264,7 @@ const SemanticAnalysis: React.FC<SemanticAnalysisProps> = ({
             />
           )}
 
-          {semanticData?.problematic_areas && semanticData.problematic_areas.length > 0 && (
+          {Array.isArray(semanticData?.problematic_areas) && semanticData.problematic_areas.length > 0 && (
             <div>
               <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${semanticColors.icon}`}>
                 <AlertTriangle className="w-5 h-5" />

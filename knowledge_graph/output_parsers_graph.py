@@ -137,7 +137,7 @@ class GraphOutputParser:
         return obj
 
     def _format_node(self, node: Dict[str, Any], citation_id: int) -> Tuple[str, Source]:
-        """Formatea un único nodo y crea su objeto Source."""
+        """Formatea un único nodo y crea su objeto Source, mostrando todas sus propiedades."""
         node_id = node.get('id', str(uuid.uuid4()))
         node_type = node.get('type', 'Desconocido')
         name = node.get('name', 'Sin nombre')
@@ -148,6 +148,45 @@ class GraphOutputParser:
         text += f"- **Nombre:** {name}\n"
         if description:
             text += f"- **Descripción:** {description}\n"
+        
+        # Propiedades adicionales que queremos mostrar explícitamente
+        important_props = {
+            'concept': 'Concepto',
+            'category': 'Categoría',
+            'confidence': 'Confianza',
+            'source_document': 'Documento Fuente',
+            'source': 'Fuente',
+            'extraction_method': 'Método de Extracción',
+            'created_at': 'Creado',
+            'dataset_name': 'Dataset',
+            'workspace_id': 'Workspace',
+            'account_id': 'Cuenta'
+        }
+        
+        # Mostrar propiedades importantes si existen
+        for prop_key, prop_label in important_props.items():
+            if prop_key in node and node[prop_key] is not None:
+                value = node[prop_key]
+                # Formatear valores especiales
+                if prop_key == 'confidence' and isinstance(value, (int, float)):
+                    value = f"{value:.2%}" if value <= 1 else f"{value:.2f}"
+                text += f"- **{prop_label}:** {value}\n"
+        
+        # Mostrar otras propiedades no listadas (excluyendo las ya mostradas y las internas)
+        excluded_keys = {'id', 'type', 'name', 'description'} | set(important_props.keys())
+        other_props = {k: v for k, v in node.items() 
+                      if k not in excluded_keys 
+                      and v is not None 
+                      and not k.startswith('_')}
+        
+        if other_props:
+            text += "- **Propiedades Adicionales:**\n"
+            for key, value in other_props.items():
+                # Limitar el tamaño de valores muy largos
+                str_value = str(value)
+                if len(str_value) > 100:
+                    str_value = str_value[:97] + "..."
+                text += f"  - {key}: {str_value}\n"
 
         source = Source(
             id=citation_id,
@@ -160,7 +199,7 @@ class GraphOutputParser:
         return text, source
 
     def _format_relationship(self, rel: Dict[str, Any], nodes_in_path: List[Dict[str, Any]], citation_id: int) -> Tuple[str, Source]:
-        """Formatea una única relación y crea su objeto Source."""
+        """Formatea una única relación y crea su objeto Source, mostrando todas sus propiedades."""
         rel_id = rel.get('id', str(uuid.uuid4()))
         rel_type = rel.get('type', 'RELACIONADO_CON')
         start_node_id = rel.get('start_node')
@@ -173,6 +212,40 @@ class GraphOutputParser:
         text = f"**Relación del Grafo [{citation_id}]:**\n"
         text += f"- De '{start_node_name}' a '{end_node_name}'\n"
         text += f"- **Tipo:** {rel_type}\n"
+        
+        # Propiedades adicionales importantes de las relaciones
+        important_rel_props = {
+            'description': 'Descripción',
+            'weight': 'Peso',
+            'confidence': 'Confianza',
+            'source': 'Fuente',
+            'created_at': 'Creado',
+            'dataset_name': 'Dataset'
+        }
+        
+        # Mostrar propiedades importantes si existen
+        for prop_key, prop_label in important_rel_props.items():
+            if prop_key in rel and rel[prop_key] is not None:
+                value = rel[prop_key]
+                # Formatear valores especiales
+                if prop_key in ['confidence', 'weight'] and isinstance(value, (int, float)):
+                    value = f"{value:.2%}" if value <= 1 else f"{value:.2f}"
+                text += f"- **{prop_label}:** {value}\n"
+        
+        # Mostrar otras propiedades no listadas
+        excluded_keys = {'id', 'type', 'start_node', 'end_node'} | set(important_rel_props.keys())
+        other_props = {k: v for k, v in rel.items() 
+                      if k not in excluded_keys 
+                      and v is not None 
+                      and not k.startswith('_')}
+        
+        if other_props:
+            text += "- **Propiedades Adicionales:**\n"
+            for key, value in other_props.items():
+                str_value = str(value)
+                if len(str_value) > 100:
+                    str_value = str_value[:97] + "..."
+                text += f"  - {key}: {str_value}\n"
 
         source = Source(
             id=citation_id,

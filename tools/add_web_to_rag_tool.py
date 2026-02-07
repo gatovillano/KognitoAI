@@ -4,11 +4,14 @@
 Herramienta simple para añadir contenido web a la base de datos vectorial.
 
 Esta herramienta combina el scraping web con el procesamiento RAG, permitiendo
-al usuario añadir directamente el contenido de una URL a su base de conocimiento.
+al usuario añadir directamente el contenido de una URL a su base de conocimiento,
+con notificaciones en tiempo real a través de WebSockets.
 """
 
 import logging
 import asyncio
+import uuid
+import datetime
 from typing import Any, Type, Optional, Dict
 from urllib.parse import urlparse
 
@@ -18,6 +21,7 @@ from langchain_core.documents import Document
 from langchain_community.document_loaders import WebBaseLoader
 
 from core.memory_manager import process_document_for_rag
+from core.websocket_manager import send_personal_message
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +92,10 @@ class AddWebToRAGTool(BaseTool):
         logger.info(f"🌐 Extrayendo contenido de: {url}")
         
         try:
-            loader = WebBaseLoader(url)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
+            loader = WebBaseLoader(url, requests_kwargs={"headers": headers})
             loop = asyncio.get_event_loop()
             
             # Ejecutar en hilo separado para no bloquear
@@ -133,22 +140,52 @@ class AddWebToRAGTool(BaseTool):
         custom_title: Optional[str] = None,
         **kwargs: Any
     ) -> str:
-        """Ejecuta la herramienta de forma asíncrona."""
+        """Ejecuta la herramienta de forma asíncrona en segundo plano, enviando actualizaciones por WebSocket."""
         
-        logger.info(f"🚀 Iniciando AddWebToRAG para URL: {url}, topic: {topic}, workspace: {self.workspace_id}")
+        task_id = str(uuid.uuid4())
+        
+        await send_personal_message(
+            self.account_id,
+            {
+                "type": "upload_started",
+                "task_id": task_id,
+                "file_names": [url],
+                "topic": topic,
+                "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+            }
+        )
+
+        logger.info(f"🚀 Iniciando AddWebToRAG para URL: {url}, topic: {topic}, task_id: {task_id}")
         
         try:
             if not url.startswith(('http://', 'https://')):
-                return "❌ Error: La URL debe comenzar con http:// o https://"
+                raise ValueError("La URL debe comenzar con http:// o https://")
             
-            try:
-                content, extracted_title = await self._scrape_web_content(url)
-            except Exception as e:
-                return f"❌ Error al extraer contenido de la web: {str(e)}"
+            await send_personal_message(
+                self.account_id,
+                {
+                    "type": "upload_progress",
+                    "task_id": task_id,
+                    "progress": 10,
+                    "message": "Extrayendo contenido de la web..."
+                }
+            )
+
+            content, extracted_title = await self._scrape_web_content(url)
             
             if not content or len(content.strip()) < 50:
-                return "❌ Error: No se pudo extraer contenido suficiente de la URL"
+                raise ValueError("No se pudo extraer contenido suficiente de la URL")
             
+            await send_personal_message(
+                self.account_id,
+                {
+                    "type": "upload_progress",
+                    "task_id": task_id,
+                    "progress": 50,
+                    "message": "Procesando contenido para RAG..."
+                }
+            )
+
             file_name = custom_title or extracted_title or self._extract_domain_name(url)
             
             metadata = {
@@ -170,23 +207,30 @@ class AddWebToRAGTool(BaseTool):
                 workspace_id=self.workspace_id,
             )
             
-            if chunks_added > 0:
-                workspace_info = f" en el workspace '{self.workspace_id}'" if self.workspace_id else ""
-                logger.info(f"✅ Contenido web añadido exitosamente: {chunks_added} chunks")
-                return (
-                    f"✅ ¡Contenido web añadido exitosamente!\n\n"
-                    f"📄 **Título:** {file_name}\n"
-                    f"🌐 **URL:** {url}\n"
-                    f"🏷️ **Tema:** {topic}\n"
-                    f"📊 **Chunks procesados:** {chunks_added}\n"
-                    f"📁 **Ubicación:** Tu base de conocimiento{workspace_info}\n\n"
-                    f"Ya puedes hacer preguntas sobre este contenido."
-                )
-            else:
-                return f"❌ Error: No se pudieron procesar los chunks del contenido web"
-                
+            if chunks_added <= 0:
+                raise ValueError("No se pudieron procesar los chunks del contenido web")
+
+            await send_personal_message(
+                self.account_id,
+                {
+                    "type": "upload_completed",
+                    "task_id": task_id,
+                    "message": f"Contenido de '{file_name}' añadido con éxito."
+                }
+            )
+            logger.info(f"✅ Contenido web añadido exitosamente para task_id: {task_id}")
+            return f"✅ Contenido web añadido exitosamente a la colección {topic}."
+
         except Exception as e:
-            logger.error(f"❌ Error en AddWebToRAGTool: {e}", exc_info=True)
+            logger.error(f"❌ Error en AddWebToRAGTool (task_id: {task_id}): {e}", exc_info=True)
+            await send_personal_message(
+                self.account_id,
+                {
+                    "type": "upload_failed",
+                    "task_id": task_id,
+                    "error_message": str(e)
+                }
+            )
             return f"❌ Error inesperado al procesar la web: {str(e)}"
     
     def _run(
@@ -198,16 +242,17 @@ class AddWebToRAGTool(BaseTool):
     ) -> str:
         """Ejecuta la herramienta de forma síncrona."""
         try:
-            result = asyncio.run(self._arun(
-                url=url,
-                topic=topic,
-                custom_title=custom_title,
-                **kwargs
-            ))
-            return result
-        except RuntimeError as e:
-            logger.warning(f"RuntimeError en _run: {e}. Usar _arun es preferido.")
-            return "❌ Error: No se pudo ejecutar en modo síncrono. Intente en contexto asíncrono."
+            # No es ideal para una herramienta asíncrona con tareas de fondo,
+            # pero se mantiene por compatibilidad.
+            # La ejecución real debería ser a través de un event loop.
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Si ya hay un loop, creamos una tarea. No se 'await'ea aquí.
+                asyncio.create_task(self._arun(url=url, topic=topic, custom_title=custom_title, **kwargs))
+                return "Tarea de adición de web iniciada en segundo plano."
+            else:
+                # Si no hay loop, corremos uno nuevo.
+                return asyncio.run(self._arun(url=url, topic=topic, custom_title=custom_title, **kwargs))
         except Exception as e:
-            logger.error(f"❌ Error en ejecución síncrona: {e}", exc_info=True)
+            logger.error(f"❌ Error en ejecución síncrona de AddWebToRAGTool: {e}", exc_info=True)
             return f"❌ Error al procesar la web: {str(e)}"

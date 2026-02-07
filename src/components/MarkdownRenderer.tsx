@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { marked } from 'marked';
+import { motion } from 'framer-motion';
 import { sentImage } from '@/lib/imageUtils';
 import { toast } from 'sonner';
 import Prism from 'prismjs';
@@ -41,7 +42,6 @@ import 'prismjs/components/prism-matlab';
 import 'prismjs/components/prism-dart';
 import 'prismjs/components/prism-elixir';
 import 'prismjs/components/prism-haskell';
-import mermaid from 'mermaid'; // Importar mermaid
 import { createRoot } from 'react-dom/client';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import MermaidViewer from '@/components/MermaidViewer'; // Importar el nuevo componente
@@ -234,44 +234,71 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
     ? `${fontSize} text-foreground`
     : `${proseSizeClass} max-w-none text-foreground dark:prose-invert`; // Added dark:prose-invert
 
-  // Hidratación de placeholders de citas con componentes React
+  // Hidratación de placeholders (Citas y Mermaid) con componentes React
   useEffect(() => {
-    if (!contentParts || !containerRef.current) return;
+    if (!containerRef.current) return;
 
     const container = containerRef.current;
-    const placeholders = container.querySelectorAll('.source-button-placeholder');
 
-    placeholders.forEach((placeholder) => {
-      if (placeholder.getAttribute('data-hydrated') === 'true') return;
+    // 1. Citas
+    if (contentParts) {
+      const citationPlaceholders = container.querySelectorAll('.source-button-placeholder');
+      citationPlaceholders.forEach((placeholder) => {
+        if (placeholder.getAttribute('data-hydrated') === 'true') return;
 
-      const citationNumber = placeholder.getAttribute('data-citation-number');
-      if (!citationNumber) return;
+        const citationNumber = placeholder.getAttribute('data-citation-number');
+        if (!citationNumber) return;
 
-      const citationPart = contentParts.find(part =>
-        part.type === 'citation' && part.citationNumber === parseInt(citationNumber)
-      );
+        const citationPart = contentParts.find(part =>
+          part.type === 'citation' && part.citationNumber === parseInt(citationNumber)
+        );
 
-      if (citationPart && citationPart.source) {
-        // Marcar como hidratado
-        placeholder.setAttribute('data-hydrated', 'true');
+        if (citationPart && citationPart.source) {
+          placeholder.setAttribute('data-hydrated', 'true');
+          const sourceButton = React.createElement(SourceButton, {
+            source: citationPart.source,
+            citationNumber: citationPart.citationNumber || 0
+          });
+          const reactRoot = createRoot(placeholder);
+          reactRoot.render(sourceButton);
+        }
+      });
+    }
 
-        // Crear el elemento SourceButton
-        const sourceButton = React.createElement(SourceButton, {
-          source: citationPart.source,
-          citationNumber: citationPart.citationNumber || 0
+    // 2. Mermaid
+    const mermaidBlocks = container.querySelectorAll('.mermaid-code-block');
+    mermaidBlocks.forEach((block) => {
+      if (block.getAttribute('data-hydrated') === 'true') return;
+
+      const encodedCode = block.getAttribute('data-mermaid-code');
+      if (!encodedCode) return;
+
+      try {
+        const mermaidCode = decodeURIComponent(encodedCode);
+        block.setAttribute('data-hydrated', 'true');
+
+        const mermaidViewer = React.createElement(MermaidViewer, {
+          mermaidCode: mermaidCode
         });
 
-        // Renderizar el componente React dentro del placeholder
-        const reactRoot = createRoot(placeholder);
-        reactRoot.render(sourceButton);
+        const reactRoot = createRoot(block);
+        reactRoot.render(mermaidViewer);
+      } catch (e) {
+        console.error("Error hydrating mermaid block:", e);
       }
     });
   }, [contentParts, renderedContent]);
 
-  const ContainerElement = inline ? 'span' : 'div';
+
+  const MotionContainer = inline ? (motion.span as any) : (motion.div as any);
 
   return (
-    <ContainerElement className={containerClass} style={{ overflowWrap: 'break-word', margin: 0, padding: 0, ...style }} ref={containerRef} dangerouslySetInnerHTML={{ __html: renderedContent }} />
+    <MotionContainer
+      className={containerClass}
+      style={{ overflowWrap: 'break-word', margin: 0, padding: 0, ...style }}
+      ref={containerRef}
+      dangerouslySetInnerHTML={{ __html: renderedContent }}
+    />
   );
 };
 

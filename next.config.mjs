@@ -29,8 +29,13 @@ const nextConfig = {
         source: '/api/:path*',
         destination: 'https://apibase.gatoslibres.art/api/:path*',
       },
+      {
+        source: '/onlyoffice/:path*',
+        destination: 'http://onlyoffice:80/:path*',
+      },
     ]
   },
+  outputFileTracingRoot: __dirname,
 };
 
 export default nextConfig;

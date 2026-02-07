@@ -28,12 +28,14 @@ langgraph>=0.2.0
 tavily-python>=0.5.0
 langchain-postgres
 langchain-google-vertexai
+crewai>=0.100.0
 
 
 # === AUTENTICACIÓN Y CREDENCIALES ===
 google-auth>=2.20.0
 google-auth-httplib2>=0.1.0
 google-api-python-client>=2.90.0
+google-cloud-texttospeech>=2.16.0  # Google Cloud Text-to-Speech API
 PyJWT>=2.8.0
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.0
@@ -110,11 +112,15 @@ xmltodict
 
 pyicloud
 
+pyotp>=2.9.0
+qrcode>=7.4.0
+
 vobject
 tzlocal
 pendulum
 attrs
 rich
 click
-websocketsopenpyxl>=3.1.0
+websockets
+openpyxl>=3.1.0
 odfpy>=1.4.1

@@ -494,8 +494,8 @@ class HybridGraphProcessor:
                     # Calcular confianza basada en características de la entidad
                     confidence = self._calculate_entity_confidence(ent)
                     
-                    # Generar ID determinista basado en nombre y tipo
-                    entity_id = f"entity_{ent.label_.lower()}_{self._normalize_for_id(entity_text)}"
+                    # Generar ID determinista basado solo en el nombre (permite consolidación entre tipos)
+                    entity_id = f"entity_{self._normalize_for_id(entity_text)}"
                     
                     entity_data = self._add_tenant_ids({
                         "id": entity_id,
@@ -653,8 +653,8 @@ class HybridGraphProcessor:
                             # Mapear labels de GLiNER a tipos compatibles
                             entity_type = self._map_gliner_label_to_type(entity_label)
                             
-                            # Generar ID determinista basado en nombre y tipo
-                            entity_id = f"entity_{entity_type.lower()}_{self._normalize_for_id(entity_text)}"
+                            # Generar ID determinista basado solo en el nombre (permite consolidación entre tipos)
+                            entity_id = f"entity_{self._normalize_for_id(entity_text)}"
                             
                             entity_data = self._add_tenant_ids({
                                 "id": entity_id,
@@ -822,11 +822,9 @@ class HybridGraphProcessor:
             similar_indices = []
             for j in range(i + 1, len(entities)):
                 if j not in processed and similarities[i][j] > threshold:
-                    # Verificar también que sean del mismo tipo o tipos compatibles
-                    type_i = entity.get("type", "")
-                    type_j = entities[j].get("type", "")
-                    
-                    if self._are_compatible_types(type_i, type_j):
+                    # Verificar también que sean del mismo tipo o tipos compatibles, 
+                    # o simplemente nombres idénticos (lo cual indica la misma entidad)
+                    if type_i == type_j or self._are_compatible_types(type_i, type_j) or entity.get("name", "").lower() == entities[j].get("name", "").lower():
                         similar_indices.append(j)
                         processed.add(j)
             

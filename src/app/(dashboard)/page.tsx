@@ -128,7 +128,7 @@ export default function DashboardPage() {
 
   const handleChatSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!chatInput.trim() || isResponding) return;
+    if (!chatInput.trim()) return;
 
     setIsResponding(true);
     try {
@@ -233,7 +233,7 @@ export default function DashboardPage() {
             animate={{ opacity: 1, y: 0 }}
             className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4"
           >
-            <Card className="relative overflow-hidden border-none shadow-md bg-gradient-to-br from-blue-500/5 to-purple-500/5">
+            <Card className="relative overflow-hidden bg-gradient-to-br from-blue-500/5 to-purple-500/5">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total de Análisis</CardTitle>
                 <BarChart3 className="h-4 w-4 text-blue-500" />
@@ -244,7 +244,7 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
 
-            <Card className="relative overflow-hidden border-none shadow-md bg-gradient-to-br from-green-500/5 to-emerald-500/5">
+            <Card className="relative overflow-hidden bg-gradient-to-br from-green-500/5 to-emerald-500/5">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Tasa de Éxito</CardTitle>
                 <Activity className="h-4 w-4 text-green-500" />
@@ -255,7 +255,7 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
 
-            <Card className="relative overflow-hidden border-none shadow-md bg-gradient-to-br from-orange-500/5 to-red-500/5">
+            <Card className="relative overflow-hidden bg-gradient-to-br from-orange-500/5 to-red-500/5">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Procesados</CardTitle>
                 <FileText className="h-4 w-4 text-orange-500" />
@@ -266,7 +266,7 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
 
-            <Card className="relative overflow-hidden border-none shadow-md bg-gradient-to-br from-yellow-500/5 to-amber-500/5">
+            <Card className="relative overflow-hidden bg-gradient-to-br from-yellow-500/5 to-amber-500/5">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Insights Activos</CardTitle>
                 <Sparkles className="h-4 w-4 text-yellow-500" />

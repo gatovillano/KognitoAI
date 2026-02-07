@@ -35,7 +35,6 @@ from pydantic import ValidationError
 from langchain.agents import AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain.agents.output_parsers.tools import ToolsAgentOutputParser
 from langchain.agents.format_scratchpad.tools import format_to_tool_messages
@@ -54,8 +53,8 @@ from core.database import SessionLocal, Account, ChatThread, Workspace
 from utils.db_session import DBSession
 #from utils.helpers import sanitize_html
 from core.config import settings
-from core.citation_models import ToolOutputWithSources, Source, SourceType
-from core.llm_manager import get_main_llm, get_fast_llm
+from core.citation_models import ToolOutputWithSources, Source, SourceType, format_context_with_sources
+from core.llm_manager import get_main_llm, get_fast_llm, get_vision_llm, get_llm_for_user
 from core.prompts import SUMMARIZATION_PROMPT, THREAD_TITLE_PROMPT
 from core.enhanced_memory_manager import EnhancedMemoryManager
 from knowledge_graph.graph_database import GraphDB
@@ -70,6 +69,153 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from core.websocket_manager import send_personal_message # Importar aquí para evitar circular imports
+
+# --- PARSER HÍBRIDO DE TOOL CALLS ---
+def _extract_balanced_json(text: str, start_idx: int) -> Optional[str]:
+    """
+    Extrae un bloque JSON balanceado comenzando desde start_idx.
+    Retorna el string JSON completo o None si no está balanceado.
+    """
+    if start_idx >= len(text) or text[start_idx] != '{':
+        return None
+    
+    depth = 0
+    in_string = False
+    escape_next = False
+    
+    for i in range(start_idx, len(text)):
+        char = text[i]
+        
+        if escape_next:
+            escape_next = False
+            continue
+            
+        if char == '\\':
+            escape_next = True
+            continue
+            
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+            
+        if not in_string:
+            if char == '{':
+                depth += 1
+            elif char == '}':
+                depth -= 1
+                if depth == 0:
+                    return text[start_idx:i+1]
+    
+    return None
+
+def _parse_tool_calls_from_text(text: str, available_tools: List[Any]) -> List[Dict[str, Any]]:
+    """
+    Parser híbrido multi-estrategia para extraer tool calls del texto.
+    Basado en el sistema de Kogniterm que soporta múltiples formatos.
+    
+    Estrategias:
+    A) Patrones explícitos: "LLAMADA_A_HERRAMIENTA: nombre"
+    B) Bloques JSON estructurados: {"name": "...", "args": {...}}
+    C) Formato legacy: nombre_herramienta({args})
+    """
+    tool_calls = []
+    tool_map = {t.name: t for t in available_tools}
+    
+    # ESTRATEGIA A: Patrones explícitos
+    explicit_patterns = [
+        r'LLAMADA_A_HERRAMIENTA:\s*(\w+)',
+        r'Herramienta:\s*(\w+)',
+        r'\[TOOL_CALL\]\s*(\w+)',
+        r'Tool:\s*(\w+)',
+        r'<tool>\s*(\w+)\s*</tool>',
+    ]
+    
+    import re
+    for pattern in explicit_patterns:
+        matches = re.finditer(pattern, text, re.IGNORECASE)
+        for match in matches:
+            tool_name = match.group(1)
+            if tool_name in tool_map:
+                # Buscar JSON de argumentos después del nombre usando extracción balanceada
+                remaining_text = text[match.end():]
+                first_curly = remaining_text.find('{')
+                args = {}
+                if first_curly != -1:
+                    json_str = _extract_balanced_json(remaining_text, first_curly)
+                    if json_str:
+                        try:
+                            args = json.loads(json_str)
+                        except:
+                            pass
+                
+                tool_calls.append({
+                    "id": str(uuid.uuid4()),
+                    "name": tool_name.strip(),
+                    "args": args
+                })
+    
+    # ESTRATEGIA B: Bloques JSON estructurados (más fiable)
+    for i in range(len(text)):
+        if text[i] == '{':
+            json_str = _extract_balanced_json(text, i)
+            if not json_str:
+                continue
+                
+            try:
+                data = json.loads(json_str)
+                
+                # Formato 1: {"name": "...", "args": {...}}
+                name = data.get("name") or data.get("tool") or data.get("function")
+                args = data.get("args") or data.get("arguments") or data.get("parameters") or {}
+                
+                if name and name in tool_map:
+                    tool_calls.append({
+                        "id": str(uuid.uuid4()),
+                        "name": name,
+                        "args": args if isinstance(args, dict) else {}
+                    })
+                    continue
+                
+                # Formato 2: {"tool_name": {...args...}}
+                if len(data) == 1:
+                    potential_name = list(data.keys())[0]
+                    if potential_name in tool_map:
+                        potential_args = data[potential_name]
+                        tool_calls.append({
+                            "id": str(uuid.uuid4()),
+                            "name": potential_name,
+                            "args": potential_args if isinstance(potential_args, dict) else {}
+                        })
+            except json.JSONDecodeError:
+                continue
+    
+    # ESTRATEGIA C: Formato legacy tipo código: nombre_herramienta({args})
+    legacy_pattern = r'(\w+)\s*\((\{.*?\})\)'
+    matches = re.finditer(legacy_pattern, text, re.DOTALL)
+    for match in matches:
+        potential_name = match.group(1)
+        if potential_name in tool_map:
+            try:
+                args = json.loads(match.group(2))
+                tool_calls.append({
+                    "id": str(uuid.uuid4()),
+                    "name": potential_name,
+                    "args": args if isinstance(args, dict) else {}
+                })
+            except:
+                continue
+    
+    # Eliminar duplicados (mismo nombre y args)
+    seen = set()
+    unique_calls = []
+    for tc in tool_calls:
+        key = (tc["name"], json.dumps(tc["args"], sort_keys=True))
+        if key not in seen:
+            seen.add(key)
+            unique_calls.append(tc)
+    
+    return unique_calls
+
 # --- Global singletons for shared dependencies ---
 _graph_db_instance = None
 _enhanced_memory_manager_instance = None
@@ -139,7 +285,8 @@ def sanitize_json_content(content):
 
 
 # --- Configuración del Logger ---
-logger = logging.getLogger(__name__)
+from core.utils.logging_utils import AgentLogger
+logger = AgentLogger(__name__)
 
 
 def convert_langchain_tools_to_openai_format(tools: List[Any]) -> List[Dict[str, Any]]:
@@ -234,7 +381,10 @@ class AgentState(TypedDict):
     # Contexto específico del chat (tablas, grafos, análisis)
     context: Optional[Dict[str, Any]]
     # Datasets seleccionados para la consulta al grafo
+    # Datasets seleccionados para la consulta al grafo
     target_datasets: Optional[List[str]]
+    # Contador de iteraciones (loop protector)
+    loop_count: int
 
 # ==============================================================================
 # SECCIÓN 2: VALIDACIÓN DE HERRAMIENTAS Y MANEJO DE ERRORES
@@ -332,7 +482,7 @@ async def summarize_history_in_background(
     Resume mensajes en segundo plano y añade un resumen al historial, pero NO borra los mensajes previos.
     El resumen se usará solo para el contexto del LLM, pero el historial completo se conserva para el frontend.
     """
-    llm_for_summary = get_fast_llm()
+    llm_for_summary = await get_llm_for_user(account_id, purpose="fast")
     if not llm_for_summary:
         logger.warning("⚠️ No hay LLM disponible para la sumarización en segundo plano.")
         return
@@ -396,6 +546,7 @@ async def update_thread_title_if_needed(thread_id: str, messages: list):
     async with DBSession(SessionLocal) as db:
         thread = await db.get(ChatThread, uuid.UUID(thread_id))
         current_title = thread.title if thread else None
+        account_id = str(thread.account_id) if thread else None
     # Log extra para depuración
     logger.info(f"[TÍTULO][DEBUG] Hilo {thread_id} - Título actual: '{current_title}' - Mensajes reales (sin resumen): {len(messages)}")
     # Si el título es 'Nuevo Chat' y hay al menos 5 mensajes, o si hay 20+ mensajes y el título es distinto
@@ -403,7 +554,7 @@ async def update_thread_title_if_needed(thread_id: str, messages: list):
         
         conversation_text = '\n'.join([extract_text_content(m.content) if hasattr(m, 'content') else str(m) for m in messages[-20:]])
         prompt = THREAD_TITLE_PROMPT.format(conversation_text=conversation_text)
-        llm = get_fast_llm() or get_main_llm()
+        llm = await get_llm_for_user(account_id, purpose="fast") if account_id else (get_fast_llm() or get_main_llm())
         if not llm:
             logger.warning(f"[TÍTULO] No hay LLM disponible para generar título del hilo {thread_id}.")
             return
@@ -417,7 +568,7 @@ async def update_thread_title_if_needed(thread_id: str, messages: list):
             if len(new_title) > 100:
                 new_title = new_title[:97] + "..."
                 
-            logger.info(f"[TÍTULO] Título generado para hilo {thread_id}: '{new_title}'")
+            logger.info(f"[TÍTULO] Título generado para hilo {thread_id}.")
             async with DBSession(SessionLocal) as db:
                 await db.execute(update(ChatThread).where(ChatThread.id == uuid.UUID(thread_id)).values(title=new_title))
         except Exception as e:
@@ -434,6 +585,7 @@ async def force_update_thread_title(thread_id: str):
         if not thread:
             logger.error(f"No se encontró el hilo {thread_id} para forzar la actualización del título.")
             return
+        account_id = str(thread.account_id)
 
         db_url = settings.database_url or os.getenv("DATABASE_URL")
         if not db_url:
@@ -485,7 +637,7 @@ async def force_update_thread_title(thread_id: str):
 
         conversation_text = '\n'.join([extract_text_content(m.content) if hasattr(m, 'content') else str(m) for m in messages[-20:]])
         prompt = THREAD_TITLE_PROMPT.format(conversation_text=conversation_text)
-        llm = get_fast_llm()
+        llm = await get_llm_for_user(account_id, purpose="fast")
         if not llm:
             logger.warning(f"No hay LLM disponible para generar título del hilo {thread_id}.")
             return
@@ -499,7 +651,7 @@ async def force_update_thread_title(thread_id: str):
             if len(new_title) > 100:
                 new_title = new_title[:97] + "..."
 
-            logger.info(f"Nuevo título generado para el hilo {thread_id}: '{new_title}'")
+            logger.info(f"Nuevo título generado para el hilo {thread_id}.")
             
             # Obtener account_id para la notificación ANTES de hacer commit
             account_id = str(thread.account_id)
@@ -578,7 +730,7 @@ async def call_model_node(state: AgentState):
     """
     Nodo principal que invoca al LLM para decidir el siguiente paso (herramienta o respuesta).
     """
-    logger.info(f"--- (Grafo) Nodo: Llama al Modelo para cuenta {state['account_id']} ---")
+    logger.debug(f"--- (Grafo) Nodo: Llama al Modelo para cuenta {state['account_id']} ---")
     
     # --- FIX: Sanitize messages from history to ensure tool_call_ids and names are present ---
     # This prevents crashes if the DB contains messages with null IDs or empty names from previous bugs
@@ -633,65 +785,48 @@ async def call_model_node(state: AgentState):
             if not document_names_for_rag:
                 document_names_for_rag = [context.get("snapshot", {}).get("name", topic)]
     # --- CONSOLIDACIÓN Y RE-INDEXACIÓN DE FUENTES PARA EL LLM ---
-    # Importaciones necesarias para Source, SourceType y format_context_with_sources
-    from typing import List
-    from core.citation_models import Source, SourceType, format_context_with_sources
-
-    # Combinar fuentes de RAG y Grafo, asegurando IDs únicos y secuenciales
+    # Combinar fuentes de todas las ramas (RAG, Proactive, Graph), asegurando IDs secuenciales desde 1
     all_sources_for_llm: List[Source] = []
-    final_sources_for_state = [] # Inicializar para evitar UnboundLocalError
+    final_sources_for_state = []
     
-    # 1. Añadir fuentes de RAG (que ahora vienen del rag_node en state['sources'])
-    rag_sources_dicts = state.get('sources', [])
-    if rag_sources_dicts:
-        for s_dict in rag_sources_dicts:
-            try:
-                # Asegurar que s_dict es un diccionario
-                if hasattr(s_dict, 'dict'):
-                    s_dict = s_dict.dict()
-                elif hasattr(s_dict, 'model_dump'):
-                    s_dict = s_dict.model_dump()
-                
-                # Crear objeto Source
-                source_obj = Source(**s_dict)
-                all_sources_for_llm.append(source_obj)
-            except Exception as e:
-                logger.error(f"Error procesando fuente RAG para LLM: {e}")
+    # 1. Recolectar todas las fuentes disponibles en el estado
+    raw_sources = []
+    # Fuentes de RAG y Proactive (vienen en state['sources'])
+    if state.get('sources'):
+        raw_sources.extend(state['sources'])
+    
+    # Fuentes de Grafo (vienen en state['graph_sources'])
+    if state.get('graph_sources'):
+        raw_sources.extend(state['graph_sources'])
 
-    # 2. Añadir fuentes de Grafo (re-indexando para que sigan a las de RAG)
-    if state.get("graph_sources"):
-        graph_sources_val = state.get("graph_sources")
-        if graph_sources_val:
-            for s_dict in graph_sources_val:
-                # Crear objeto Source desde dict
-                try:
-                    # Asegurarse de que el tipo sea GRAPH
-                    s_dict['type'] = SourceType.GRAPH
-                    source_obj = Source(**s_dict)
-                    # Re-indexar basado en la posición actual en all_sources_for_llm
-                    source_obj.id = len(all_sources_for_llm) + 1
-                    all_sources_for_llm.append(source_obj)
-                except Exception as e:
-                    logger.error(f"Error procesando fuente del grafo: {e}")
+    # 2. Procesar y re-indexar secuencialmente para que el LLM use [1], [2], [3]...
+    for i, s_dict in enumerate(raw_sources, start=1):
+        try:
+            # Asegurar que s_dict es un diccionario de datos
+            if hasattr(s_dict, 'dict'):
+                s_dict = s_dict.dict()
+            elif hasattr(s_dict, 'model_dump'):
+                s_dict = s_dict.model_dump()
+            
+            # Crear una copia para no modificar el original en el historial si es compartido
+            s_dict_copy = s_dict.copy()
+            # ASIGNAR EL NUEVO ID SECUENCIAL
+            s_dict_copy['id'] = i
+            
+            # Crear objeto Source para el formateador
+            source_obj = Source(**s_dict_copy)
+            all_sources_for_llm.append(source_obj)
+            final_sources_for_state.append(s_dict_copy)
+        except Exception as e:
+            logger.error(f"Error procesando fuente {i} para LLM: {e}")
 
-    # 3. Generar el contexto formateado con los nuevos IDs
+    # 3. Generar el contexto formateado con los nuevos IDs [1], [2], ...
     if all_sources_for_llm:
         relevant_memories_text = format_context_with_sources(all_sources_for_llm)
-        
-        # Actualizar final_sources_for_state con los objetos Source (convertidos a dict)
-        
-        existing_urls = set()
-        new_sources = [s.dict() for s in all_sources_for_llm]
-        
-        for ns in new_sources:
-            if ns.get('url') not in existing_urls:
-                final_sources_for_state.append(ns)
-                existing_urls.add(ns.get('url'))
-                
-        logger.info(f"Consolidadas {len(all_sources_for_llm)} fuentes totales para el LLM (RAG + Grafo).")
+        logger.info(f"Consolidadas {len(all_sources_for_llm)} fuentes totales para el LLM (RAG + Grafo) con IDs secuenciales 1-{len(all_sources_for_llm)}.")
     else:
         relevant_memories_text = "No se encontraron memorias o documentos relevantes en la base de conocimiento ni en el grafo."
-    # --- FIN DE LA LÓGICA DE MANEJO DE FUENTES ---
+
         
     from core.prompt_manager import PromptManager
     prompt_manager = PromptManager(settings={"default_system_prompt": settings.default_system_prompt})
@@ -709,112 +844,166 @@ async def call_model_node(state: AgentState):
         tools = state["tools"]
     
     workspace_prompt = None
-    system_prompt_content = prompt_manager.build_system_prompt(
-        user_profile=user_profile,
-        relevant_memories=relevant_memories_text,
-        summary_string="",
-        custom_prompt_from_profile=str(user_profile.system_prompt) if user_profile and user_profile.system_prompt else None,
-        workspace_prompt=None, # Este se rellena después
-        tools=tools,
-        account_id=state['account_id'],
-        telegram_id=state.get('telegram_id'),
-        user_message=user_message,
-        has_explicit_rag_context=has_explicit_rag_context,
-        explicit_document_names=[name for name in document_names_for_rag if name is not None] if document_names_for_rag else None,
-        context=state.get('context') # Pasar el contexto aquí
-    )
-
     if state.get('workspace_id'):
         async with DBSession(SessionLocal) as db:
             workspace = await db.get(Workspace, uuid.UUID(state.get('workspace_id')))
             if workspace and workspace.system_prompt:
                 workspace_prompt = str(workspace.system_prompt)
 
-            system_prompt_content = prompt_manager.build_system_prompt(
-                user_profile=user_profile,
-                relevant_memories=relevant_memories_text,
-                summary_string="",
-                custom_prompt_from_profile=str(user_profile.system_prompt) if user_profile and user_profile.system_prompt else None,
-                workspace_prompt=workspace_prompt, # Ahora sí se usa
-                tools=tools,
-                account_id=state['account_id'],
-                telegram_id=state.get('telegram_id'),
-                user_message=user_message,
-                has_explicit_rag_context=has_explicit_rag_context,
-                explicit_document_names=[str(name) for name in document_names_for_rag if name is not None] if document_names_for_rag else None,
-                context=state.get('context') # Pasar el contexto aquí
-            )
+    # --- CONFIGURACIÓN DE HERRAMIENTAS Y LLM ---
+    # Obtenemos el LLM real del usuario para conocer el modelo exacto
+    llm = await get_llm_for_user(state['account_id'], purpose="main")
     
-    llm = get_main_llm()
-    
-    # --- SOPORTE MULTIMODAL EN CHAT ---
-    # Si el mensaje contiene una imagen, usamos el modelo de visión
-    has_image = False
-    if isinstance(last_message.content, list):
-        for item in last_message.content:
-            if isinstance(item, dict) and item.get("type") == "image_url":
-                has_image = True
-                break
-    
+    # Soporte multimodal (visión) si hay imágenes
+    has_image = any(isinstance(item, dict) and item.get("type") == "image_url" 
+                   for msg in state["messages"][-1:] if isinstance(msg.content, list) 
+                   for item in msg.content)
     if has_image:
-        logger.info("📸 Imagen detectada en el chat. Cambiando al modelo de visión.")
-        llm = get_vision_llm()
-    # --- FIN SOPORTE MULTIMODAL ---
+        llm = await get_llm_for_user(state['account_id'], purpose="vision")
 
-    if not llm:
-        raise ValueError("El LLM principal no está disponible.")
-         
-    # Log del modelo en uso para confirmación visual
+    if not llm: raise ValueError("El LLM no está disponible.")
+    
     model_name = getattr(llm, 'model_name', getattr(llm, 'model', settings.llm_model))
-    logger.info(f"🤖 AGENT EXECUTION: Generando respuesta usando modelo: '{model_name}'")
+    lower_model = model_name.lower()
+    
+    # ESTRATEGIA: Casi todos los modelos modernos (incluyendo :free) soportan tools nativas.
+    # El usuario puede forzar el modo 'prompt_tooling' manualmente desde los ajustes.
+    supports_native_tools = True
+    if user_profile and user_profile.account:
+        supports_native_tools = not getattr(user_profile.account, 'use_prompt_tooling', False)
+    
+    # Inyectamos el manual de herramientas en el prompt si el usuario lo forzó o si es un modelo OSS
+    use_prompt_tooling_guidance = not supports_native_tools or "openrouter" in lower_model or any(x in lower_model for x in ["llama", "mistral", "deepseek"])
 
-    logger.debug(f"DEBUG (agent.py - call_model_node): System Prompt final antes de LLM: {system_prompt_content}")
+    # OPTIMIZACIÓN: Construir el prompt una sola vez con toda la información consolidada
+    system_prompt_content = prompt_manager.build_system_prompt(
+        user_profile=user_profile,
+        relevant_memories=relevant_memories_text,
+        summary_string="",
+        custom_prompt_from_profile=str(user_profile.system_prompt) if user_profile and user_profile.system_prompt else None,
+        workspace_prompt=workspace_prompt, # Se usa si existe
+        tools=tools,
+        account_id=state['account_id'],
+        telegram_id=state.get('telegram_id'),
+        user_message=user_message,
+        has_explicit_rag_context=has_explicit_rag_context,
+        explicit_document_names=[str(name) for name in document_names_for_rag if name is not None] if document_names_for_rag else None,
+        context=state.get('context'), # Pasar el contexto aquí
+        mode="prompt_tooling" if use_prompt_tooling_guidance else None # Usar modo documentación como refuerzo
+    )
+    
+    logger.model_start(model_name)
+    logger.debug(f"DEBUG (agent.py - call_model_node): System Prompt final construido.")
     
     # --- BINDING DE HERRAMIENTAS COMPATIBLE CON CUALQUIER LLM ---
-    # Usamos una conversión explícita a formato OpenAI (tools) porque es el estándar
-    # más robusto para LiteLLM y OpenRouter, asegurando que los campos 'required' se mantengan.
-    try:
-        from langchain_core.utils.function_calling import convert_to_openai_tool
-        
-        openai_tools = []
-        seen_tool_names = set()
-        for tool in tools:
-            try:
-                # convert_to_openai_tool es el método moderno que genera el formato {"type": "function", "function": {...}}
-                tool_dict = convert_to_openai_tool(tool)
-                tool_name = tool_dict["function"]["name"]
-                if tool_name not in seen_tool_names:
-                    openai_tools.append(tool_dict)
-                    seen_tool_names.add(tool_name)
-                else:
-                    logger.warning(f"⚠️ Herramienta duplicada detectada y eliminada: '{tool_name}'")
-            except Exception as e:
-                logger.error(f"❌ Error al convertir herramienta '{tool.name}': {e}")
-
-        logger.info(f"🔧 Vinculando {len(openai_tools)} herramientas al modelo '{model_name}'")
-        logger.debug(f"HERRAMIENTAS A VINCULAR: {[t['function']['name'] for t in openai_tools]}")
-        
-        # Usamos .bind(tools=...) que es lo que LiteLLM espera para casi todos los proveedores
-        # También pasamos 'functions' para modelos legacy de OpenRouter que lo prefieran
-        if openai_tools:
-            # Extraer solo la parte 'function' para el parámetro legacy 'functions'
-            # The 'functions' parameter is for legacy models and can cause duplication with modern APIs like Gemini.
-            # We will only use the 'tools' parameter which is the modern standard.
-            llm_with_tools = llm.bind(tools=openai_tools)
-        else:
-            llm_with_tools = llm
+    # Si el modelo soporta herramientas nativas, procedemos con el bind. Si no, usamos el llm crudo.
+    if supports_native_tools:
+        try:
+            from langchain_core.utils.function_calling import convert_to_openai_tool
             
-        logger.info(f"✅ Herramientas vinculadas correctamente al LLM '{model_name}'")
-    except Exception as e:
-        logger.error(f"❌ Error crítico al vincular herramientas al LLM '{model_name}': {e}", exc_info=True)
+            openai_tools = []
+            seen_tool_names = set()
+            for tool in tools:
+                try:
+                    # convert_to_openai_tool es el método moderno que genera el formato {"type": "function", "function": {...}}
+                    tool_dict = convert_to_openai_tool(tool)
+                    tool_name = tool_dict["function"]["name"]
+                    if tool_name not in seen_tool_names:
+                        openai_tools.append(tool_dict)
+                        seen_tool_names.add(tool_name)
+                    else:
+                        logger.warning(f"⚠️ Herramienta duplicada detectada y eliminada: '{tool_name}'")
+                except Exception as e:
+                    logger.error(f"❌ Error al convertir herramienta '{tool.name}': {e}")
+
+            logger.info(f"🔧 Vinculando {len(openai_tools)} herramientas al modelo '{model_name}'")
+            
+            # Usamos .bind(tools=...) que es lo que LiteLLM espera para casi todos los proveedores
+            if openai_tools:
+                # --- FIX CRÍTICO PARA OPENROUTER Y MODELOS OSS ---
+                # Forzamos tool_choice='auto' para OpenRouter Y para cualquier modelo que no sea nativo de OpenAI/Gemini
+                # Esto soluciona el error 'No endpoints found that support tool use'
+                lower_model = model_name.lower()
+                is_openrouter = "openrouter" in lower_model
+                is_openai = "gpt-" in lower_model and "openrouter" not in lower_model
+                is_gemini = "gemini" in lower_model and "openrouter" not in lower_model
+                
+                if is_openrouter:
+                    logger.info(f"🔧 Forzando tool_choice='auto' y filtrado de proveedores para OpenRouter: {model_name}")
+                    # En OpenRouter, pasar tool_choice="auto" ayuda a LiteLLM a filtrar proveedores que SI soportan herramientas
+                    llm_with_tools = llm.bind(tools=openai_tools, tool_choice="auto")
+                elif not (is_openai or is_gemini):
+                    # Para modelos OSS (Llama, DeepSeek, etc) fuera de OpenRouter también es recomendable
+                    logger.info(f"🔧 Aplicando tool_choice='auto' para modelo especializado: {model_name}")
+                    llm_with_tools = llm.bind(tools=openai_tools, tool_choice="auto")
+                else:
+                    llm_with_tools = llm.bind(tools=openai_tools)
+            else:
+                llm_with_tools = llm
+                
+            logger.info(f"✅ Herramientas vinculadas correctamente al LLM '{model_name}'")
+        except Exception as e:
+            logger.error(f"❌ Error crítico al vincular herramientas al LLM '{model_name}': {e}", exc_info=True)
+            llm_with_tools = llm
+    else:
+        logger.info(f"ℹ️ Usando modelo '{model_name}' SIN vinculación de herramientas nativa (Modo Prompt Tooling)")
         llm_with_tools = llm
 
-    # --- REFUERZO DE INSTRUCCIONES PARA MODELOS NO-GEMINI ---
-    # Los modelos de OpenRouter a veces ignoran los argumentos si el prompt es largo.
-    # Añadimos un recordatorio justo al final del prompt del sistema.
+    # --- REFUERZO DE INSTRUCCIONES PARA MODELOS OSS, REASONING Y OPENROUTER ---
+    # Los modelos de OpenRouter/OSS a veces ignoran el formato de herramientas si no es explícito.
+    # Y los modelos de razonamiento (DeepSeek R1, etc.) a veces se detienen tras pensar sin responder.
     final_system_content = system_prompt_content
-    if "gemini" not in model_name.lower():
-        final_system_content += "\n\n⚠️ **CRITICAL TECHNICAL REMINDER:** If you decide to use a tool, you MUST provide ALL required arguments in the 'args' field. Never send an empty 'args' object {{}} if the tool has required parameters."
+    model_lower = model_name.lower()
+    
+    if "gemini" not in model_lower:
+        is_oss = any(x in model_lower for x in ["oss", "llama", "mistral", "mixtral", "deepseek", "qwen", "phi"])
+        is_openrouter = "openrouter" in model_lower
+        is_reasoning = any(x in model_lower for x in ["r1", "reasoning", "thought", "o1", "o3", "step"])
+        
+        if is_oss or is_openrouter or is_reasoning:
+            logger.info(f"Adding extra instructions for {model_name} (OSS/Reasoning/OpenRouter)")
+            
+            extra_instructions = "\n\n### 🔧 INSTRUCCIONES TÉCNICAS CRÍTICAS:\n\n"
+            
+            if is_reasoning or "deepseek" in model_lower:
+                extra_instructions += (
+                    "**⚠️ REGLA DE RAZONAMIENTO DINÁMICO:**\n"
+                    "Si eres un modelo con capacidad de 'razonamiento' o 'pensamiento' (como DeepSeek R1):\n"
+                    "1. USA el bloque de pensamiento (thinking/reasoning) SOLO si la consulta del usuario es compleja, ambigua o requiere un análisis profundo.\n"
+                    "2. Si la tarea es simple, directa o una continuación obvia, puedes OMITIR el bloque de pensamiento para ser más eficiente.\n"
+                    "3. **SIEMPRE:** Si decides generar un razonamiento, DEBES proporcionar la respuesta final completa inmediatamente después.\n\n"
+                )
+
+            extra_instructions += (
+                "**⚠️ ADVERTENCIA DE HERRAMIENTAS:** args: {} vacío = FALLO GARANTIZADO.\n"
+                "El sistema RECHAZARÁ cualquier tool call sin argumentos.\n\n"
+                "**REGLA ABSOLUTA:** Si decides usar una herramienta, DEBES incluir TODOS los argumentos requeridos.\n"
+                "NUNCA envíes un objeto de argumentos vacío o null.\n\n"
+                "**EJEMPLO CORRECTO de llamada a herramienta web_search:**\n"
+                "```json\n"
+                "{\n"
+                "  \"name\": \"web_search\",\n"
+                "  \"args\": {\n"
+                "    \"query\": \"últimas noticias sobre inteligencia artificial\"\n"
+                "  }\n"
+                "}\n"
+                "```\n\n"
+                "**INSTRUCCIONES:**\n"
+                "1. Si decides usar una herramienta, genera LA LLAMADA INMEDIATAMENTE. No escribas introducciones.\n"
+                "2. El campo 'args' DEBE contener TODOS los parámetros requeridos.\n"
+                "3. NO inventes herramientas que no existen en la lista.\n\n"
+                
+                "**⚠️ FORMATO ALTERNATIVO (USA ESTE SI EL ANTERIOR FALLA):**\n"
+                "Si tienes problemas con el formato JSON para herramientas, usa este formato exacto:\n\n"
+                
+                "LLAMADA_A_HERRAMIENTA: nombre_herramienta\n"
+                "{\"argumento1\": \"valor1\", \"argumento2\": \"valor2\"}\n\n"
+            )
+            # Escapar para LangChain
+            extra_instructions = extra_instructions.replace('{', '{{').replace('}', '}}')
+            final_system_content += extra_instructions
+        else:
+            final_system_content += "\n\n⚠️ **CRITICAL TECHNICAL REMINDER:** Use your internal reasoning/thinking ONLY if the task is complex. Always provide a clear final response. If you use a tool, you MUST provide ALL required arguments."
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", final_system_content),
@@ -830,115 +1019,400 @@ async def call_model_node(state: AgentState):
     target_account_id = "telegram_bot_service" if state.get('telegram_id') else state['account_id']
     conn_type = "chat" if state.get('telegram_id') else None
 
-    # --- LIMPIEZA DE HISTORIAL PARA MISTRAL/OPENROUTER ---
-    # Mistral es extremadamente estricto con el orden y la paridad: 
-    # User -> AI (tool calls) -> Tool (todas las respuestas) -> AI
-    def clean_messages_for_mistral(messages):
-        cleaned = []
-        i = 0
-        while i < len(messages):
-            msg = messages[i]
+    # --- LIMPIEZA DE HISTORIAL ROBUSTA (Mistral/OpenRouter/OSS Compatible) ---
+    def clean_messages_history(messages):
+        """
+        Limpia y normaliza el historial de mensajes para cumplir con las reglas estrictas de 
+        proveedores como Mistral, OpenRouter y modelos OSS.
+        Reglas:
+        1. Elimina todos los SystemMessages (ya proporcionamos uno al principio).
+        2. Une mensajes consecutivos del mismo rol.
+        3. Asegura que cada ToolMessage esté precedido por su AIMessage (tool_calls).
+        4. Elimina mensajes con contenido vacío (a menos que sean tool_calls).
+        5. Asegura que el primer mensaje no-sistema sea del rol 'user'.
+        """
+        if not messages:
+            return []
+
+        # 1. Fase de filtrado y saneamiento inicial
+        sanitized = []
+        for msg in messages:
+            # Ignorar SystemMessages del historial para evitar duplicación y errores de posición
+            if isinstance(msg, SystemMessage):
+                continue
             
-            # 1. Ignorar mensajes vacíos que no sean llamadas a herramientas
-            if not msg.content and not (isinstance(msg, AIMessage) and getattr(msg, 'tool_calls', None)):
-                i += 1
+            # Normalizar contenido
+            content = msg.content
+            if isinstance(content, list):
+                # Filtrar partes de texto vacías en contenido multimodal
+                content = [p for p in content if not (isinstance(p, dict) and p.get("type") == "text" and not p.get("text", "").strip())]
+                if not content: content = ""
+            
+            # Si el contenido es un string vacío y no hay tool_calls, ignorar
+            has_tool_calls = isinstance(msg, AIMessage) and bool(getattr(msg, 'tool_calls', None))
+            if not content and not has_tool_calls and not isinstance(msg, ToolMessage):
                 continue
                 
+            sanitized.append(msg)
+
+        if not sanitized:
+            return []
+
+        # 2. Fase de emparejamiento Assistant -> Tool(s) y fusión de roles consecutivos
+        cleaned = []
+        i = 0
+        while i < len(sanitized):
+            msg = sanitized[i]
+            
             if isinstance(msg, AIMessage) and getattr(msg, 'tool_calls', None):
-                # Encontrado un bloque de llamadas a herramientas. 
-                # Debemos encontrar TODAS sus respuestas inmediatamente después.
+                # Encontrado un bloque de assistant que pide herramientas. 
+                # Debemos encontrar TODAS sus respuestas correspondientes.
                 current_tool_calls = msg.tool_calls
                 call_ids = {tc.get('id') for tc in current_tool_calls if tc.get('id')}
                 
                 responses = []
                 next_i = i + 1
-                while next_i < len(messages):
-                    next_msg = messages[next_i]
+                while next_i < len(sanitized):
+                    next_msg = sanitized[next_i]
                     if isinstance(next_msg, ToolMessage):
                         if next_msg.tool_call_id in call_ids:
                             responses.append(next_msg)
                             call_ids.remove(next_msg.tool_call_id)
                         else:
-                            # ToolMessage que no pertenece a este bloque, ignorar o tratar como huérfano
-                            logger.warning(f"⚠️ ToolMessage huérfano o desordenado detectado: {next_msg.tool_call_id}")
-                    elif isinstance(next_msg, (HumanMessage, AIMessage, SystemMessage)):
-                        # Si encontramos cualquier otro mensaje antes de completar las respuestas,
-                        # Mistral fallará si dejamos llamadas sin respuesta.
+                            # ToolMessage que no pertenece a este bloque, ignorar
+                            logger.warning(f"⚠️ ToolMessage huérfano detectado: {next_msg.tool_call_id}")
+                    elif isinstance(next_msg, (HumanMessage, AIMessage)):
+                        # Otro rol interrumpe, Mistral es estricto: no puede haber llamadas sin respuesta
                         break
                     next_i += 1
                 
-                # Reconstruir el AIMessage solo con las llamadas que SÍ tienen respuesta
+                # Solo incluimos el AIMessage si podemos emparejar al menos una llamada (o tiene contenido)
                 valid_call_ids = {r.tool_call_id for r in responses}
                 filtered_tool_calls = [tc for tc in current_tool_calls if tc.get('id') in valid_call_ids]
                 
-                # Ordenar respuestas para que coincidan con el orden de las llamadas (Mistral strictness)
-                order_map = {tc.get('id'): idx for idx, tc in enumerate(filtered_tool_calls)}
-                responses.sort(key=lambda r: order_map.get(r.tool_call_id, 999))
-                
                 if filtered_tool_calls or msg.content:
-                    # Crear una copia del mensaje con las llamadas filtradas
+                    # Asegurar orden de respuestas (Mistral strictness)
+                    order_map = {tc.get('id'): idx for idx, tc in enumerate(filtered_tool_calls)}
+                    responses.sort(key=lambda r: order_map.get(r.tool_call_id, 999))
+                    
                     new_ai_msg = AIMessage(
-                        content=msg.content,
-                        tool_calls=filtered_tool_calls,
+                        content=msg.content or "",
+                        tool_calls=filtered_tool_calls or [], # Usar [] para evitar error de validación AIMessage
                         additional_kwargs=getattr(msg, 'additional_kwargs', {})
                     )
                     cleaned.append(new_ai_msg)
-                    # Añadir las respuestas encontradas inmediatamente después
                     cleaned.extend(responses)
-                else:
-                    logger.warning("⚠️ Omitiendo AIMessage porque no tiene contenido ni llamadas válidas con respuesta.")
                 
-                # Saltar los mensajes procesados
                 i = next_i
             elif isinstance(msg, ToolMessage):
-                # ToolMessage huérfano (no precedido por su AIMessage)
-                logger.warning(f"⚠️ Omitiendo ToolMessage huérfano: {msg.tool_call_id}")
+                # Ignorar ToolMessages que no fueron procesados en el bloque anterior (huérfanos)
                 i += 1
             else:
-                # Mensajes normales (Human, System, AI sin herramientas)
-                cleaned.append(msg)
+                # Mensaje normal (Human o AI sin tools)
+                # Fusión opcional de roles consecutivos para evitar: User, User... o Assistant, Assistant...
+                if cleaned and type(msg) == type(cleaned[-1]) and not isinstance(msg, ToolMessage):
+                    last_msg = cleaned[-1]
+                    # Fusionar contenidos si son strings
+                    if isinstance(last_msg.content, str) and isinstance(msg.content, str):
+                        last_msg.content += "\n\n" + msg.content
+                        logger.debug(f"🔄 Fusionados dos mensajes consecutivos de tipo {type(msg).__name__}")
+                    else:
+                        # Si no se pueden fusionar fácilmente, los mantenemos (algunos proveedores lo permiten)
+                        cleaned.append(msg)
+                else:
+                    cleaned.append(msg)
                 i += 1
         
+        # 3. Asegurar que el primer mensaje después del sistema sea 'human'
+        while cleaned and not isinstance(cleaned[0], HumanMessage):
+            logger.warning(f"⚠️ Eliminando mensaje inicial no-humano ({type(cleaned[0]).__name__}) para cumplir paridad.")
+            cleaned.pop(0)
+
         return cleaned
 
-    cleaned_messages = clean_messages_for_mistral(state["messages"])
+    cleaned_messages = clean_messages_history(state["messages"])
+    full_ai_message_content = ""
+    full_reasoning_content = "" # Acumulador para razonamiento
+    tool_calls_from_llm = []
+    final_response_message = None
+    in_thinking_tag = False
     
     async for chunk in chain.astream({"messages": cleaned_messages}):
         if isinstance(chunk, AIMessage):
+            # DEBUG: Log del chunk completo para ver el formato crudo
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"🔍 CHUNK CRUDO: content={chunk.content}, tool_calls={chunk.tool_calls}, additional_kwargs={chunk.additional_kwargs}")
+            
+            # 1. Detectar razonamiento (Chain of Thought) en OpenRouter / LiteLLM
+            reasoning_chunk = ""
+            add_kwargs = getattr(chunk, 'additional_kwargs', {})
+            
+            # OpenRouter suele enviarlo en 'reasoning'
+            if "reasoning" in add_kwargs:
+                reasoning_chunk = add_kwargs["reasoning"]
+            # Algunos modelos lo envían en 'thought'
+            elif "thought" in add_kwargs:
+                reasoning_chunk = add_kwargs["thought"]
+            
+            # Fallback a response_metadata
+            if not reasoning_chunk:
+                metadata = getattr(chunk, 'response_metadata', {})
+                if "reasoning_content" in metadata:
+                    reasoning_chunk = metadata["reasoning_content"]
+                elif "reasoning" in metadata:
+                    reasoning_chunk = metadata["reasoning"]
+            
+            # Fallback dinámico: Buscar cualquier campo que sugiera razonamiento
+            if not reasoning_chunk:
+                for key, val in add_kwargs.items():
+                    if any(x in key.lower() for x in ["think", "reason", "thought"]) and isinstance(val, str):
+                        reasoning_chunk = val
+                        break
+            
+            if reasoning_chunk:
+                full_reasoning_content += reasoning_chunk
+                await send_personal_message(target_account_id, {
+                    "type": "reasoning_chunk",
+                    "thread_id": state['thread_id'],
+                    "taskId": state.get("task_id"),
+                    "chunk": reasoning_chunk,
+                    "full_reasoning": full_reasoning_content
+                }, connection_type=conn_type)
+
+            # Log de metadatos para el primer chunk con contenido o tool_calls
+            if not full_ai_message_content and (chunk.content or chunk.tool_calls):
+                logger.debug(f"📊 METADATA DEL PRIMER CHUNK ({model_name}): {getattr(chunk, 'response_metadata', {})}")
+            
+            # 2. Procesar contenido normal y DETECCIÓN DE ETIQUETAS <think>
+            current_content = ""
             if isinstance(chunk.content, str):
-                full_ai_message_content += chunk.content
+                current_content = chunk.content
             elif isinstance(chunk.content, list):
                 for part in chunk.content:
                     if isinstance(part, dict) and part.get("type") == "text":
-                        full_ai_message_content += part.get("text", "")
+                        current_content += part.get("text", "")
+
+            if current_content:
+                # Lógica de detección de etiquetas <think> para modelos como DeepSeek-R1
+                processed_content = ""
+                
+                # Caso simple: El chunk contiene <think>
+                if "<think>" in current_content:
+                    parts = current_content.split("<think>")
+                    processed_content += parts[0] # Texto antes de <think>
+                    in_thinking_tag = True
+                    thinking_part = parts[1]
+                    
+                    # Si también contiene </think> en el mismo chunk
+                    if "</think>" in thinking_part:
+                        subparts = thinking_part.split("</think>")
+                        reasoning_to_send = subparts[0]
+                        full_reasoning_content += reasoning_to_send
+                        in_thinking_tag = False
+                        processed_content += subparts[1] # Texto después de </think>
+                        
+                        # Enviar el razonamiento acumulado en el tag
+                        await send_personal_message(target_account_id, {
+                            "type": "reasoning_chunk",
+                            "thread_id": state['thread_id'],
+                            "taskId": state.get("task_id"),
+                            "chunk": reasoning_to_send,
+                            "full_reasoning": full_reasoning_content
+                        }, connection_type=conn_type)
+                    else:
+                        # Todo el resto del chunk es razonamiento
+                        full_reasoning_content += thinking_part
+                        await send_personal_message(target_account_id, {
+                            "type": "reasoning_chunk",
+                            "thread_id": state['thread_id'],
+                            "taskId": state.get("task_id"),
+                            "chunk": thinking_part,
+                            "full_reasoning": full_reasoning_content
+                        }, connection_type=conn_type)
+                
+                # Caso: Estamos dentro de un tag de pensamiento abierto en chunks anteriores
+                elif in_thinking_tag:
+                    if "</think>" in current_content:
+                        parts = current_content.split("</think>")
+                        reasoning_to_send = parts[0]
+                        full_reasoning_content += reasoning_to_send
+                        in_thinking_tag = False
+                        processed_content += parts[1] # Texto después de </think>
+                        
+                        await send_personal_message(target_account_id, {
+                            "type": "reasoning_chunk",
+                            "thread_id": state['thread_id'],
+                            "taskId": state.get("task_id"),
+                            "chunk": reasoning_to_send,
+                            "full_reasoning": full_reasoning_content
+                        }, connection_type=conn_type)
+                    else:
+                        # Todo el chunk sigue siendo razonamiento
+                        full_reasoning_content += current_content
+                        await send_personal_message(target_account_id, {
+                            "type": "reasoning_chunk",
+                            "thread_id": state['thread_id'],
+                            "taskId": state.get("task_id"),
+                            "chunk": current_content,
+                            "full_reasoning": full_reasoning_content
+                        }, connection_type=conn_type)
+                
+                # Caso normal: Texto sin tags de pensamiento
+                else:
+                    processed_content = current_content
+
+                if processed_content:
+                    full_ai_message_content += processed_content
+                    logger.debug(f"DEBUG (agent.py): Enviando stream_chunk para taskId {state.get('task_id')}")
+                    await send_personal_message(target_account_id, {
+                        "type": "stream_chunk",
+                        "thread_id": state['thread_id'],
+                        "taskId": state.get("task_id"),
+                        "chunk": processed_content,
+                        "full_text": full_ai_message_content
+                    }, connection_type=conn_type)
             
-            if chunk.tool_calls:
-                tool_calls_from_llm.extend(chunk.tool_calls)
-            
-            logger.debug(f"DEBUG (agent.py): Enviando stream_chunk para taskId {state.get('task_id')}: {chunk.content}")
-            await send_personal_message(target_account_id, {
-                "type": "stream_chunk",
-                "thread_id": state['thread_id'],
-                "taskId": state.get("task_id"),
-                "chunk": str(chunk.content or ""),
-                "full_text": full_ai_message_content
-            }, connection_type=conn_type)
+            # 3. Procesar tool calls nativos (USANDO ACUMULADOR MANUAL PARA EVITAR FRAGMENTACIÓN)
+            if hasattr(chunk, 'tool_call_chunks') and chunk.tool_call_chunks:
+                for tc_chunk in chunk.tool_call_chunks:
+                    # Buscar si ya tenemos esta llamada (por su index o ID)
+                    idx = tc_chunk.get("index")
+                    found = False
+                    
+                    for existing_tc in tool_calls_from_llm:
+                        if (idx is not None and existing_tc.get("index") == idx) or (tc_chunk.get("id") and existing_tc.get("id") == tc_chunk.get("id")):
+                            found = True
+                            # Actualizar el existente
+                            if tc_chunk.get("name"):
+                                existing_tc["name"] = tc_chunk["name"]
+                            if tc_chunk.get("args"):
+                                # Unir strings de argumentos (vienen fragmentados)
+                                current_args_str = existing_tc.get("_args_str", "")
+                                new_args_str = tc_chunk["args"]
+                                existing_tc["_args_str"] = current_args_str + new_args_str
+                                try:
+                                    # Intentar parsear el acumulado
+                                    existing_tc["args"] = json.loads(existing_tc["_args_str"])
+                                except:
+                                    pass
+                            if tc_chunk.get("id"):
+                                existing_tc["id"] = tc_chunk["id"]
+                            break
+                    
+                    if not found:
+                        new_tc = {
+                            "name": tc_chunk.get("name", ""),
+                            "args": {},
+                            "_args_str": tc_chunk.get("args", ""),
+                            "id": tc_chunk.get("id"),
+                            "index": idx
+                        }
+                        if new_tc["_args_str"]:
+                            try:
+                                new_tc["args"] = json.loads(new_tc["_args_str"])
+                            except:
+                                pass
+                        tool_calls_from_llm.append(new_tc)
+
+            elif chunk.tool_calls:
+                for tc in chunk.tool_calls:
+                    if tc not in tool_calls_from_llm:
+                        tool_calls_from_llm.append(tc)
             
             final_response_message = chunk
 
-    logger.debug(f"DEBUG (agent.py - call_model_node): Respuesta cruda del LLM (acumulada): {full_ai_message_content}")
+
+    logger.debug(f"DEBUG (agent.py - call_model_node): Respuesta cruda del LLM acumulada.")
     
-    # --- DEBUG: Log detallado de tool_calls ---
+    # --- LOG ULTRA-DETALLADO ---
+    if final_response_message:
+        try:
+            full_data = {
+                "content": full_ai_message_content,
+                "reasoning": full_reasoning_content,
+                "tool_calls": tool_calls_from_llm,
+                "additional_kwargs": getattr(final_response_message, 'additional_kwargs', {}),
+                "response_metadata": getattr(final_response_message, 'response_metadata', {})
+            }
+            logger.debug(f"🔥 DATA COMPLETA DEL MODELO:\n{json.dumps(full_data, indent=2)}")
+        except Exception as e:
+            logger.debug(f"Error al loguear data completa: {e}")
+    
+    # Log de tool calls crudos para debugging
     if tool_calls_from_llm:
-        logger.info(f"🔧 DEBUG: LLM generó {len(tool_calls_from_llm)} tool_calls")
-        for idx, tc in enumerate(tool_calls_from_llm):
-            logger.info(f"🔧 DEBUG: Tool call [{idx}] estructura completa: {json.dumps(tc, ensure_ascii=False, indent=2)}")
-            logger.info(f"🔧 DEBUG: Tool call [{idx}] - name: {tc.get('name')}, id: {tc.get('id')}, args: {tc.get('args')}, arguments: {tc.get('arguments')}")
+        # Usar logger.info simplificado para no saturar
+        logger.info(f"🔍 Herramientas solicitadas por el modelo: {[tc.get('name') for tc in tool_calls_from_llm]}")
+        logger.debug(f"Tool calls recibidos del modelo ({len(tool_calls_from_llm)}): {json.dumps(tool_calls_from_llm, indent=2)}")
+    else:
+        logger.info("ℹ️ No se recibieron tool calls del modelo")
+        if not full_ai_message_content.strip() and full_reasoning_content.strip():
+            logger.warning("⚠️ El modelo generó razonamiento pero la respuesta final está VACÍA. Esto puede deberse a un corte prematuro del proveedor o a instrucciones contradictorias.")
+        logger.debug(f"Contenido de respuesta del modelo: {full_ai_message_content[:500]}...")
+    
     # --- END DEBUG ---
+
+    # --- PARSER HÍBRIDO DE TOOL CALLS (Sistema Kogniterm) ---
+    # Complementar o reemplazar tool calls nativos con parseo del texto
+    # Esto maneja modelos que no formatean correctamente los tool calls
+    
+    logger.info("🔍 Iniciando parser híbrido de tool calls...")
+    combined_text = full_ai_message_content + "\n" + full_reasoning_content
+    parsed_tool_calls = _parse_tool_calls_from_text(combined_text, tools)
+    
+    if parsed_tool_calls:
+        logger.info(f"✅ Parser híbrido extrajo {len(parsed_tool_calls)} tool calls del texto")
+        
+        # Si el modelo no devolvió tool calls nativos, usar los parseados
+        if not tool_calls_from_llm:
+            tool_calls_from_llm = parsed_tool_calls
+            logger.info("📝 Usando tool calls parseados del texto (modelo no devolvió nativos)")
+        else:
+            # Si el modelo devolvió tool calls pero con args vacíos, complementar con los parseados
+            for native_tc in tool_calls_from_llm:
+                if not native_tc.get("args") or native_tc.get("args") == {}:
+                    # Buscar el mismo tool call en los parseados
+                    for parsed_tc in parsed_tool_calls:
+                        if parsed_tc["name"] == native_tc.get("name"):
+                            # Actualizar con los args parseados
+                            native_tc["args"] = parsed_tc["args"]
+                            logger.info(f"🔧 Complementados args vacíos de '{native_tc.get('name')}' con parseo de texto")
+                            break
+
+    # --- FIX: Fusión de Tool Calls Fragmentados (OpenRouter Bug) ---
+    # Algunos modelos envían el nombre en un fragmento y los argumentos en otro con el mismo ID.
+    merged_tool_calls = {}
+    for tc in tool_calls_from_llm:
+        tc_id = tc.get("id")
+        if not tc_id:
+            # Si no tiene ID, le asignamos uno para procesarlo individualmente
+            tc_id = str(uuid.uuid4())
+            tc["id"] = tc_id
+            
+        if tc_id not in merged_tool_calls:
+            merged_tool_calls[tc_id] = tc
+        else:
+            # Fusionar con el existente
+            existing = merged_tool_calls[tc_id]
+            logger.info(f"🔄 Fusionando fragmentos de tool call ID: {tc_id}")
+            
+            # Si el existente no tiene nombre pero el nuevo sí, lo actualizamos
+            if (not existing.get("name")) and tc.get("name"):
+                existing["name"] = tc["name"]
+            
+            # Si el existente no tiene argumentos (o están vacíos) y el nuevo sí tiene, los fusionamos
+            new_args = tc.get("args") or {}
+            if new_args:
+                current_args = existing.get("args") or {}
+                # Fusionar diccionarios de argumentos
+                current_args.update(new_args)
+                existing["args"] = current_args
+                logger.debug(f"✅ Argumentos fusionados para {existing.get('name')}: {existing['args']}")
+
+    final_tool_calls_list = list(merged_tool_calls.values())
 
     # --- FIX: Ensure all tool calls have an ID and normalize arguments ---
     valid_tool_calls = []
-    for tc in tool_calls_from_llm:
+    for tc in final_tool_calls_list:
         # Filtrar tool calls basura (sin nombre o con nombre vacío)
         tc_name = tc.get("name")
         if not tc_name or (isinstance(tc_name, str) and not tc_name.strip()):
@@ -963,20 +1437,43 @@ async def call_model_node(state: AgentState):
                 args = {}
         
         tc["args"] = args if isinstance(args, dict) else {}
+        
+        # ELIMINAR CAMPOS TEMPORALES QUE HACEN FALLAR A LANGCHAIN/PYDANTIC
+        tc.pop("_args_str", None)
+        tc.pop("index", None)
             
         valid_tool_calls.append(tc)
     
     tool_calls_from_llm = valid_tool_calls
     # --- END FIX ---
 
+    # --- FIX: Construcción robusta del mensaje final ---
+    # Asegurar que el razonamiento acumulado se guarde en additional_kwargs
+    final_kwargs = {}
+    if final_response_message and hasattr(final_response_message, 'additional_kwargs'):
+        final_kwargs = final_response_message.additional_kwargs.copy()
+    
+    # Inyectar el razonamiento completo capturado durante el streaming
+    if full_reasoning_content:
+        final_kwargs["reasoning"] = full_reasoning_content
+        # Compatibilidad: Asegurar que exista un campo 'thinking' si el frontend lo busca
+        if "thinking" not in final_kwargs:
+            final_kwargs["thinking"] = {"content": full_reasoning_content}
+
+    tool_calls_to_use = tool_calls_from_llm if tool_calls_from_llm is not None else []
+
     if final_response_message:
         final_ai_message = AIMessage(
             content=full_ai_message_content,
-            tool_calls=tool_calls_from_llm,
-            additional_kwargs=final_response_message.additional_kwargs
+            tool_calls=tool_calls_to_use, # Cambiado para usar la variable segura
+            additional_kwargs=final_kwargs
         )
     else:
-        final_ai_message = AIMessage(content=full_ai_message_content, tool_calls=tool_calls_from_llm)
+        final_ai_message = AIMessage(content=full_ai_message_content, tool_calls=tool_calls_to_use)
+
+    # Añadir razonamiento si existe
+    if full_reasoning_content:
+        final_ai_message.additional_kwargs["reasoning"] = full_reasoning_content
 
     # Adjuntar fuentes y tool_calls a la respuesta del LLM si existen
     if final_sources_for_state: # Usar las fuentes que se han acumulado en final_sources_for_state
@@ -1001,7 +1498,7 @@ async def generate_response_node(state: AgentState):
     Nodo final que simplemente pasa el estado para que el consumidor lo reciba.
     Actúa como un punto de salida nombrado que 'api/chat.py' puede escuchar.
     """
-    logger.info("--- (Grafo) Nodo: Generar Respuesta ---")
+    logger.debug("--- (Grafo) Nodo: Generar Respuesta ---")
     # --- INICIO: Extracción de conocimiento en segundo plano ---
     # Ejecutar el nodo de extracción de forma asíncrona para no bloquear la respuesta
     # y evitar romper el flujo de streaming esperado por la API.
@@ -1012,562 +1509,197 @@ async def generate_response_node(state: AgentState):
 
 async def tool_node(state: AgentState):
     """
-    Ejecuta las herramientas llamadas por el agente y añade los resultados al estado.
-    MODIFICADO: Ahora también extrae y propaga las 'sources' de las herramientas.
+    Ejecuta las herramientas llamadas por el agente en paralelo y añade los resultados al estado.
     """
-    logger.info("--- (Grafo) Nodo: Llamar Herramienta ---")
+    logger.debug(f"--- (Grafo) Nodo: Llamar Herramienta (Paralelo) ---")
     if not isinstance(state["messages"][-1], AIMessage):
         return {}
 
     agent_message = state["messages"][-1]
-    # Asegurarse de que agent_message es un AIMessage antes de acceder a tool_calls
     tool_calls = agent_message.tool_calls if isinstance(agent_message, AIMessage) and hasattr(agent_message, 'tool_calls') else []
     
     if not tool_calls:
         return {}
 
-    # Optimization: Instantiate only the requested tool using get_tool_by_name
-    # tools = await get_all_langchain_tools(...) # Removed to avoid overhead
-    # tool_map = {tool.name: tool for tool in tools} # Removed
+    account_id = state['account_id']
+    telegram_id_int = state.get('telegram_id')
+    telegram_id_str = str(telegram_id_int) if telegram_id_int is not None else None
+    workspace_id = state.get('workspace_id')
+    target_account_id = "telegram_bot_service" if state.get('telegram_id') else state['account_id']
+    conn_type = "chat" if state.get('telegram_id') else None
 
-    # Redundancia eliminada
-    tool_messages = []
-    # Cargar las fuentes existentes del estado para poder añadir nuevas
-    current_sources = state.get("sources") or []
-    # Usar un set para evitar duplicados basados en la URL
-    existing_urls = {s['url'] for s in current_sources if 'url' in s and s['url']}
+    # Obtener todas las herramientas
+    if "tools" in state:
+        all_tools = state["tools"]
+    else:
+        all_tools = await get_all_langchain_tools(
+            account_id=account_id,
+            telegram_id=telegram_id_int,
+            thread_id=state['thread_id'],
+            workspace_id=workspace_id
+        )
+        state["tools"] = all_tools
 
-    for tool_call in tool_calls:
+    # 1. Definir la función de ejecución de una sola herramienta
+    from core.utils.tool_utils import get_tool_by_name
+
+    async def execute_single_tool(tool_call):
         tool_name = tool_call.get("name")
+        tool_args = tool_call.get("args") or tool_call.get("arguments") or {}
+
+        # Inferencia de argumentos faltantes
+        user_query = None
+        for msg in reversed(state["messages"]):
+            if isinstance(msg, HumanMessage):
+                user_query = extract_text_content(msg.content)
+                break
         
-        # Normalizar argumentos: manejar tanto "args" como "arguments"
-        tool_args = tool_call.get("args")
-        if tool_args is None:
-            tool_args = tool_call.get("arguments")
-        if tool_args is None:
-            tool_args = {}
-
-        # Asegurar que web_search siempre tenga un query válido
-        if tool_name == "web_search" and ("query" not in tool_args or not tool_args.get("query")):
-            # Inferir query del mensaje del usuario
-            user_query = None
-            for msg in reversed(state["messages"]):
-                if isinstance(msg, HumanMessage):
-                    user_query = extract_text_content(msg.content)
-                    break
-            if user_query:
-                tool_args["query"] = user_query
-                logger.info(f"🔧 Asignado query inferido para web_search: {user_query}")
-            else:
-                logger.warning("No se pudo encontrar mensaje de usuario para web_search, usando query por defecto")
-                tool_args["query"] = "información general"
-
-        # Asegurar que deep_research siempre tenga un query válido
-        if tool_name == "deep_research" and ("query" not in tool_args or not tool_args.get("query")):
-            # Inferir query del mensaje del usuario
-            user_query = None
-            for msg in reversed(state["messages"]):
-                if isinstance(msg, HumanMessage):
-                    user_query = extract_text_content(msg.content)
-                    break
-            if user_query:
-                tool_args["query"] = user_query
-                logger.info(f"🔧 Asignado query inferido para deep_research: {user_query}")
-            else:
-                logger.warning("No se pudo encontrar mensaje de usuario para deep_research, usando query por defecto")
-                tool_args["query"] = "información general"
-
-        # Asegurar que knowledge_graph siempre tenga un natural_language_query válido
-        if tool_name == "knowledge_graph" and ("natural_language_query" not in tool_args or not tool_args.get("natural_language_query")):
-            # Inferir query del mensaje del usuario
-            user_query = None
-            for msg in reversed(state["messages"]):
-                if isinstance(msg, HumanMessage):
-                    user_query = extract_text_content(msg.content)
-                    break
-            if user_query:
-                tool_args["natural_language_query"] = user_query
-                logger.info(f"🔧 Asignado natural_language_query inferido para knowledge_graph: {user_query}")
-            else:
-                logger.warning("No se pudo encontrar mensaje de usuario para knowledge_graph, usando query por defecto")
-                tool_args["natural_language_query"] = "información general"
-
-        logger.info(f"🔧 Ejecutando tool_call: name={tool_name}, args={json.dumps(tool_args, ensure_ascii=False)}")
+        query_based_tools = {
+            "web_search": "query", "deep_research": "query", "knowledge_graph": "natural_language_query",
+            "comprehensive_web_analyzer": "query", "add_note": "content", "create_document": "content",
+            "add_event": "title", "web_scraper_tool": "url"
+        }
         
-        # Enviar evento tool_start
-        target_account_id = "telegram_bot_service" if state.get('telegram_id') else state['account_id']
-        conn_type = "chat" if state.get('telegram_id') else None
-        logger.debug(f"DEBUG (agent.py): Enviando tool_start para taskId {state.get('task_id')}, tool {tool_name}")
+        if tool_name in query_based_tools:
+            required_arg = query_based_tools[tool_name]
+            val = tool_args.get(required_arg)
+            if val is None or (isinstance(val, str) and not val.strip()):
+                if required_arg == "url":
+                    import re
+                    urls = re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+', user_query or "")
+                    inferred_val = urls[0] if urls else "https://example.com"
+                else:
+                    # Si es create_pdf_tool, intentamos usar el mensaje anterior al tool call si es del modelo
+                    inferred_val = user_query if user_query else "Contenido no especificado"
+                tool_args[required_arg] = inferred_val
+
+        logger.tool_call(tool_name, tool_args)
+        
+        # Evento tool_start
         await send_personal_message(target_account_id, {
-            "type": "tool_start",
-            "taskId": state.get("task_id"),
-            "tool_name": tool_name,
+            "type": "tool_start", "taskId": state.get("task_id"), "tool_name": tool_name, "thread_id": state.get("thread_id")
         }, connection_type=conn_type)
 
-        # Use get_tool_by_name from the new utils location
-        from core.utils.tool_utils import get_tool_by_name
-        
-        # Utilizar herramientas del estado si están disponibles
-        # --- FIX: definir account_id y telegram_id_str ANTES de la rama para evitar uso antes de asignación ---
-        account_id = state['account_id']
-        telegram_id_int = state.get('telegram_id')
-        telegram_id_str = str(telegram_id_int) if telegram_id_int is not None else None
-        workspace_id = state.get('workspace_id')
-
-        if "tools" in state:
-            all_tools = state["tools"]
-        else:
-            all_tools = await get_all_langchain_tools(
-                account_id=account_id,
-                telegram_id=telegram_id_int,
-                thread_id=state['thread_id'], # Usamos thread_id del estado
-                workspace_id=workspace_id
-            )
-            state["tools"] = all_tools
-
         selected_tool = await get_tool_by_name(
-            tool_name=tool_name,
-            all_tools=all_tools,
-            account_id=account_id,
-            telegram_id=telegram_id_str,
-            workspace_id=workspace_id,
-            graph_db=state.get('graph_db'),  # Pasar GraphDB del estado
-            enhanced_memory_manager=state.get('enhanced_memory_manager') # Pasar EnhancedMemoryManager del estado
+            tool_name=tool_name, all_tools=all_tools, account_id=account_id,
+            telegram_id=telegram_id_str, workspace_id=workspace_id,
+            graph_db=state.get('graph_db'), enhanced_memory_manager=state.get('enhanced_memory_manager')
         )
 
         if not selected_tool:
-            logger.error(f"Herramienta '{tool_name}' no encontrada o falló al instanciarse.")
-            tool_messages.append(ToolMessage(
-                content=f"Error: Herramienta '{tool_name}' no encontrada.",
-                tool_call_id=tool_call.get("id") or str(uuid.uuid4())
-            ))
-            # Enviar evento tool_end con error
+            error_msg = f"Error: Herramienta '{tool_name}' no encontrada."
             await send_personal_message(target_account_id, {
-                "type": "tool_end",
-                "taskId": state.get("task_id"),
-                "tool_name": tool_name,
-                "status": "error",
-                "result": f"Error: Herramienta '{tool_name}' no encontrada.",
-                "error": True,
-                "sources": []
+                "type": "tool_end", "taskId": state.get("task_id"), "tool_name": tool_name,
+                "status": "error", "result": error_msg, "error": True, "sources": []
             }, connection_type=conn_type)
-            continue
-        
+            return ToolMessage(content=error_msg, tool_call_id=tool_call.get("id") or str(uuid.uuid4())), []
 
+        # Configuración y reintentos
+        if state.get('tool_error_counts') is None: state['tool_error_counts'] = {}
+        should_stop, stop_message = should_stop_retrying_tool(tool_name, state['tool_error_counts'])
+        if should_stop:
+            await send_personal_message(target_account_id, {
+                "type": "tool_end", "taskId": state.get("task_id"), "tool_name": tool_name,
+                "status": "error", "result": stop_message, "error": True, "sources": []
+            }, connection_type=conn_type)
+            return ToolMessage(content=stop_message, tool_call_id=tool_call.get("id") or str(uuid.uuid4())), []
 
-        # --- INYECCIÓN DE ATRIBUTOS DE CONTEXTO Y CONFIGURACIÓN ---
-        # Crear una RunnableConfig para pasar el contexto y el progress_callback
         async def progress_callback(progress: int, message: str, *args, **kwargs):
             await send_personal_message(target_account_id, {
-                "type": "progress",
-                "taskId": state.get("task_id"),
-                "progress": progress,
-                "message": message,
-                "thread_id": state.get("thread_id")
+                "type": "progress", "taskId": state.get("task_id"), "progress": progress,
+                "message": message, "thread_id": state.get("thread_id")
             }, connection_type=conn_type)
 
-        run_config = RunnableConfig(
-            configurable={
-                "account_id": state['account_id'],
-                "workspace_id": state.get('workspace_id'),
-                "telegram_id": state.get('telegram_id'),
-                "thread_id": state.get('thread_id'),
-                "task_id": state.get('task_id'),
-                "progress_callback": progress_callback,
-                "base_progress": 0, # Se puede ajustar si se necesita un progreso base diferente
-                "max_sub_progress": 100 # Se puede ajustar si se necesita un rango de progreso diferente
-            }
-        )
-        # --- FIN INYECCIÓN ---
-
-        # --- TRACKING DE ERRORES Y PREVENCIÓN DE BUCLES ---
-        # Inicializar el contador de errores si no existe
-        if state.get('tool_error_counts') is None:
-            state['tool_error_counts'] = {}
-        
-        # Verificar si ya se alcanzó el límite de reintentos para esta herramienta
-        should_stop, stop_message = should_stop_retrying_tool(tool_name, state.get('tool_error_counts'))
-        if should_stop:
-            logger.warning(f"🛑 Límite de reintentos alcanzado para '{tool_name}'. Deteniendo ejecución.")
-            tool_messages.append(ToolMessage(
-                content=stop_message,
-                tool_call_id=tool_call.get("id") or str(uuid.uuid4())
-            ))
-            # Enviar evento tool_end con límite alcanzado
-            await send_personal_message(target_account_id, {
-                "type": "tool_end",
-                "taskId": state.get("task_id"),
-                "tool_name": tool_name,
-                "status": "error",
-                "result": stop_message,
-                "error": True,
-                "sources": []
-            }, connection_type=conn_type)
-            continue
-        # --- FIN TRACKING ---
-
-        # --- VALIDACIÓN PRE-EJECUCIÓN DE ARGUMENTOS ---
-        # Validar argumentos ANTES de pasarlos a LangChain para evitar errores internos
-        if not tool_name or tool_name.strip() == "":
-            logger.error(f"❌ Nombre de herramienta vacío o inválido")
-            error_message = """❌ Error: El LLM intentó llamar una herramienta sin especificar su nombre.
-
-💡 INSTRUCCIONES:
-1. Debes especificar el nombre de la herramienta que quieres usar
-2. Revisa la lista de herramientas disponibles
-3. Asegúrate de usar el nombre exacto de la herramienta
-
-Por favor, intenta de nuevo especificando correctamente la herramienta."""
-            
-            tool_messages.append(ToolMessage(
-                content=error_message,
-                tool_call_id=tool_call.get("id") or str(uuid.uuid4())
-            ))
-            
-            await send_personal_message(target_account_id, {
-                "type": "tool_end",
-                "taskId": state.get("task_id"),
-                "tool_name": tool_name or "unknown",
-                "status": "error",
-                "result": error_message,
-                "error": True,
-                "sources": []
-            }, connection_type=conn_type)
-            continue
-        
-        
-        # Validar que los argumentos no estén vacíos para herramientas que requieren parámetros
-        # Usar hasattr para verificar la existencia de args_schema
-        if hasattr(selected_tool, 'args_schema') and selected_tool.args_schema:
-            try:
-                # Acceder al args_schema de forma segura
-                args_schema_instance = selected_tool.args_schema
-                # Obtener los campos requeridos del schema (Pydantic v2 nativo)
-                required_fields = []
-                # Si es una instancia de Pydantic v2
-                if hasattr(args_schema_instance, 'model_fields'):
-                    schema_fields = args_schema_instance.model_fields
-                    required_fields = [
-                        field_name for field_name, field_info in schema_fields.items()
-                        if field_info.is_required()
-                    ]
-                # Si es un diccionario (JSON Schema)
-                elif isinstance(args_schema_instance, dict):
-                    required_fields = args_schema_instance.get('required', [])
-                # Si no es Pydantic v2 ni un diccionario, no hay campos requeridos conocidos
-                else:
-                    required_fields = []
-                
-                # Verificar si faltan campos requeridos
-                missing_fields = []
-                if not tool_args or not isinstance(tool_args, dict):
-                    missing_fields = required_fields
-                else:
-                    missing_fields = [field for field in required_fields if field not in tool_args or tool_args[field] is None or (isinstance(tool_args[field], str) and tool_args[field].strip() == "")]
-                
-                if missing_fields:
-                    logger.warning(f"⚠️ Argumentos faltantes detectados ANTES de ejecutar '{tool_name}': {missing_fields}")
-                    
-                    # Incrementar contador de errores
-                    if state.get('tool_error_counts') is None:
-                        state['tool_error_counts'] = {}
-                    state['tool_error_counts'][tool_name] = state['tool_error_counts'].get(tool_name, 0) + 1
-                    
-                    # Generar mensaje de error detallado y conciso
-                    error_message = f"ERROR: Faltan parámetros obligatorios para '{tool_name}': {', '.join(missing_fields)}. Por favor, vuelve a llamar a la herramienta incluyendo estos campos."
-                    
-                    tool_messages.append(ToolMessage(
-                        content=error_message,
-                        tool_call_id=tool_call.get("id") or str(uuid.uuid4()),
-                        name=tool_name # Crucial para OpenRouter/OpenAI
-                    ))
-                    
-                    await send_personal_message(target_account_id, {
-                        "type": "tool_end",
-                        "taskId": state.get("task_id"),
-                        "tool_name": tool_name,
-                        "status": "error",
-                        "result": error_message,
-                        "error": True,
-                        "sources": []
-                    }, connection_type=conn_type)
-                    continue
-            except Exception as validation_error:
-                # Si hay error en la validación pre-ejecución, solo loguearlo y continuar
-                logger.warning(f"⚠️ Error en validación pre-ejecución de '{tool_name}': {validation_error}")
-        # --- FIN VALIDACIÓN PRE-EJECUCIÓN ---
+        run_config = RunnableConfig(configurable={
+            "account_id": account_id, "workspace_id": workspace_id, "telegram_id": state.get('telegram_id'),
+            "thread_id": state.get('thread_id'), "task_id": state.get('task_id'), "progress_callback": progress_callback
+        })
 
         try:
-            logger.info(f"Ejecutando herramienta '{tool_name}' con argumentos: {tool_args}")
+            if tool_name == "deep_research": selected_tool.progress_callback = progress_callback
             
-            # Inyectar progress_callback si la herramienta es deep_research
-            if tool_name == "deep_research":
-                selected_tool.progress_callback = progress_callback
-                logger.info(f"Inyectado progress_callback en herramienta '{tool_name}'")
-
-            # La salida de la herramienta ahora siempre es un dict (model_dump de ToolOutputWithSources)
             output_dump = await selected_tool.ainvoke(tool_args, config=run_config)
-            logger.info(f"Resultado de la herramienta '{tool_name}': {output_dump}")
             
-            # Asegurar que tool_output siempre sea un objeto ToolOutputWithSources válido
-            tool_output: ToolOutputWithSources
-            context_content: str = ""
+            context_content = ""
             sources_list = []
-
             if isinstance(output_dump, ToolOutputWithSources):
-                tool_output = output_dump
+                context_content = output_dump.context_for_llm
+                sources_list = output_dump.sources
             elif isinstance(output_dump, str):
                 try:
-                    parsed_output = json.loads(output_dump)
-                    # Caso 1: Salida de knowledge_search con 'results'
-                    if "results" in parsed_output and isinstance(parsed_output.get("results"), list):
-                        logger.info(f"Procesando salida estructurada de '{tool_name}' con 'results'.")
-                        context_parts = []
-                        temp_sources = []
-                        for i, result in enumerate(parsed_output["results"], start=1):
-                            context_parts.append(f"Contexto [{i}] - {result.get('metadata', {}).get('file_name', 'Sin título')}:\\n{result.get('content', '')}\\n")
-                            source = Source(
-                                id=i,
-                                title=result.get('metadata', {}).get('file_name', 'Fuente Desconocida'),
-                                url=str(result.get('metadata', {}).get('document_id', '')),
-                                snippet=result.get('content', ''),
-                                type=SourceType.DOCUMENT,
-                                metadata=result.get('metadata', {})
-                            )
-                            temp_sources.append(source)
-                        context_content = "\\n".join(context_parts)
-                        sources_list = temp_sources
-                    # Caso 2: Salida de knowledge_graph con resumen textual
-                    elif tool_name == "knowledge_graph" and "results" in parsed_output and isinstance(parsed_output.get("results"), list) and parsed_output["results"]:
-                        logger.info(f"Procesando salida de knowledge_graph con resumen textual.")
-                        context_parts = []
-                        temp_sources = []
-                        for i, result in enumerate(parsed_output["results"], start=1):
-                            if isinstance(result, dict) and result.get("type") == "summary_text_insight":
-                                # Es un resumen textual del grafo
-                                summary_content = result.get('content', '')
-                                context_parts.append(f"Resumen del Grafo [{i}]:\\n{summary_content}\\n")
-                                source = Source(
-                                    id=i,
-                                    title=f"Resumen del Grafo de Conocimiento - {parsed_output.get('dataset', 'Desconocido')}",
-                                    url=f"graph://summary_{parsed_output.get('dataset', 'unknown')}",
-                                    snippet=summary_content,
-                                    type=SourceType.GRAPH,
-                                    metadata={
-                                        "dataset": parsed_output.get('dataset', ''),
-                                        "node_count": result.get('node_count', 0),
-                                        "relationship_count": result.get('relationship_count', 0)
-                                    }
-                                )
-                                temp_sources.append(source)
-                            else:
-                                # Otros tipos de resultados del grafo
-                                context_parts.append(f"Resultado del Grafo [{i}]:\\n{str(result)}\\n")
-                                source = Source(
-                                    id=i,
-                                    title=f"Resultado del Grafo - {parsed_output.get('dataset', 'Desconocido')}",
-                                    url=f"graph://result_{i}",
-                                    snippet=str(result),
-                                    type=SourceType.GRAPH,
-                                    metadata=result if isinstance(result, dict) else {}
-                                )
-                                temp_sources.append(source)
-                        context_content = "\\n".join(context_parts)
-                        sources_list = temp_sources
-                    # Caso 3: Salida estándar con 'context_for_llm'
-                    elif "context_for_llm" in parsed_output:
-                        logger.info(f"Procesando salida estándar de '{tool_name}' con 'context_for_llm'.")
-                        context_content = parsed_output["context_for_llm"]
-                        sources_list = parsed_output.get("sources", [])
-                    # Fallback para otros JSON
-                    else:
-                        logger.warning(f"La salida JSON de '{tool_name}' no tiene un formato esperado. Usando como texto plano.")
-                        context_content = output_dump
-                    
-                    tool_output = ToolOutputWithSources(context_for_llm=context_content, sources=sources_list)
-
-                except json.JSONDecodeError:
-                    # Fallback para strings que no son JSON
-                    logger.warning(f"La salida de '{tool_name}' no es un JSON válido. Usando como texto plano.")
+                    parsed = json.loads(output_dump)
+                    context_content = parsed.get("context_for_llm", output_dump)
+                    sources_list = parsed.get("sources", [])
+                except:
                     context_content = output_dump
-                    tool_output = ToolOutputWithSources(context_for_llm=context_content, sources=[])
             elif isinstance(output_dump, dict):
-                if "context_for_llm" in output_dump:
-                    context_content = output_dump["context_for_llm"]
-                else:
-                    context_content = json.dumps(output_dump, ensure_ascii=False) # Si no hay, usar el dict como string
-                
-                if "sources" in output_dump:
-                    sources_list = output_dump["sources"]
-
-                tool_output = ToolOutputWithSources(context_for_llm=context_content, sources=sources_list)
+                context_content = output_dump.get("context_for_llm", json.dumps(output_dump))
+                sources_list = output_dump.get("sources", [])
             else:
                 context_content = str(output_dump)
-                tool_output = ToolOutputWithSources(context_for_llm=context_content, sources=[])
 
-            # --- INICIO: Procesamiento de salida de herramienta y extracción de fuentes ---
-            tool_content_for_llm = tool_output.context_for_llm
-            tool_sources_to_add: List[Dict[str, Any]] = []
+            # Re-indexación local
+            tool_sources = []
+            for i, s in enumerate(sources_list):
+                s_dict = s.model_dump() if hasattr(s, 'model_dump') else (s.dict() if hasattr(s, 'dict') else s)
+                tool_sources.append(s_dict)
 
-            if tool_output.sources:
-                logger.info(f"La herramienta '{tool_name}' devolvió {len(tool_output.sources)} fuentes. Re-indexando para mantener coherencia.")
-                
-                # Calcular el offset basado en las fuentes ya existentes en este turno
-                # para que el LLM vea IDs continuos y no repetidos.
-                current_offset = len(current_sources)
-                
-                reindexed_sources = []
-                for i, s in enumerate(tool_output.sources):
-                    s_dict = s.model_dump() if hasattr(s, 'model_dump') else (s.dict() if hasattr(s, 'dict') else s)
-                    old_id = s_dict.get('id')
-                    new_id = current_offset + i + 1
-                    s_dict['id'] = new_id
-                    reindexed_sources.append(s_dict)
-                    
-                    # REGLA CRÍTICA: Si el contenido para el LLM usa el ID viejo, lo actualizamos al nuevo
-                    # Esto evita que el LLM cite [1] refiriéndose a la fuente 1 de la herramienta,
-                    # cuando en realidad ahora es la fuente [N+1] del mensaje total.
-                    if old_id is not None:
-                        old_pattern = f"[{old_id}]"
-                        new_pattern = f"[{new_id}]"
-                        if old_pattern in tool_content_for_llm:
-                            tool_content_for_llm = tool_content_for_llm.replace(old_pattern, new_pattern)
-                        
-                        # También manejar el formato "Contexto [N]"
-                        old_ctx = f"Contexto [{old_id}]"
-                        new_ctx = f"Contexto [{new_id}]"
-                        if old_ctx in tool_content_for_llm:
-                            tool_content_for_llm = tool_content_for_llm.replace(old_ctx, new_ctx)
+            if len(context_content) > 30000:
+                context_content = context_content[:30000] + "\n\n[... TRUNCADO ...]"
 
-                # Añadir las fuentes re-indexadas a la lista global del turno
-                current_sources.extend(reindexed_sources)
-                tool_sources_to_add = reindexed_sources
-            else:
-                tool_sources_to_add = []
-            
-            # --- TRUNCAMIENTO DE SEGURIDAD ---
-            # Si la salida es demasiado larga, puede causar errores de límite de tokens en el LLM (400 Bad Request)
-            MAX_TOOL_OUTPUT_CHARS = 30000 # Límite generoso pero seguro para modelos de 32k+ tokens
-            if len(tool_content_for_llm) > MAX_TOOL_OUTPUT_CHARS:
-                logger.warning(f"⚠️ La salida de la herramienta '{tool_name}' es demasiado larga ({len(tool_content_for_llm)} chars). Truncando a {MAX_TOOL_OUTPUT_CHARS}...")
-                tool_content_for_llm = tool_content_for_llm[:MAX_TOOL_OUTPUT_CHARS] + "\n\n[... CONTENIDO TRUNCADO POR SEGURIDAD DEBIDO A SU EXTENSIÓN ...]"
-            # --- FIN TRUNCAMIENTO ---
-
-            tool_messages.append(ToolMessage(
-                content=tool_content_for_llm,
-                tool_call_id=tool_call.get("id") or str(uuid.uuid4())
-            ))
-            
-            # Enviar evento tool_end con éxito
-            logger.debug(f"DEBUG (agent.py): Enviando tool_end (success) para taskId {state.get('task_id')}, tool {tool_name}")
             await send_personal_message(target_account_id, {
-                "type": "tool_end",
-                "taskId": state.get("task_id"),
-                "tool_name": tool_name,
-                "status": "end",
-                "result": tool_content_for_llm,
-                "sources": tool_sources_to_add, # Enviar las fuentes ya re-indexadas
+                "type": "tool_end", "taskId": state.get("task_id"), "tool_name": tool_name,
+                "status": "end", "result": context_content, "sources": tool_sources, "thread_id": state.get("thread_id")
             }, connection_type=conn_type)
 
+            return ToolMessage(content=context_content, tool_call_id=tool_call.get("id") or str(uuid.uuid4())), tool_sources
 
-        except ValidationError as e:
-            # Error de validación de Pydantic - argumentos incorrectos o faltantes
-            logger.error(f"❌ Error de validación en la herramienta {tool_name}: {e}", exc_info=True)
-            
-            # Incrementar contador de errores para esta herramienta
-            if state.get('tool_error_counts') is None:
-                state['tool_error_counts'] = {}
-            state['tool_error_counts'][tool_name] = state['tool_error_counts'].get(tool_name, 0) + 1
-            
-            # Formatear error para el LLM
-            error_message = format_validation_error_for_llm(e, tool_name, tool_args or {})
-            
-            tool_messages.append(ToolMessage(
-                content=error_message,
-                tool_call_id=tool_call.get("id") or str(uuid.uuid4())
-            ))
-            
-            # Enviar evento tool_end con error de validación
-            logger.debug(f"DEBUG (agent.py): Enviando tool_end (validation_error) para taskId {state.get('task_id')}, tool {tool_name}")
-            await send_personal_message(target_account_id, {
-                "type": "tool_end",
-                "taskId": state.get("task_id"),
-                "tool_name": tool_name,
-                "status": "error",
-                "result": error_message,
-                "error": True,
-                "sources": []
-            }, connection_type=conn_type)
-            
         except Exception as e:
-            # Otros errores generales
-            logger.error(f"Error al ejecutar la herramienta {tool_name}: {e}", exc_info=True)
-            
-            # Incrementar contador de errores para esta herramienta
-            if state.get('tool_error_counts') is None:
-                state['tool_error_counts'] = {}
+            logger.error(f"Error paralelo en {tool_name}: {e}")
             state['tool_error_counts'][tool_name] = state['tool_error_counts'].get(tool_name, 0) + 1
             
-            tool_messages.append(ToolMessage(
-                content=f"Error: {e}",
-                tool_call_id=tool_call.get("id") or str(uuid.uuid4())
-            ))
-            # Enviar evento tool_end con error
-            logger.debug(f"DEBUG (agent.py): Enviando tool_end (error) para taskId {state.get('task_id')}, tool {tool_name}")
+            # Si es un error de validación, usar el formateador especializado
+            if isinstance(e, ValidationError):
+                error_text = format_validation_error_for_llm(e, tool_name, tool_args)
+            else:
+                error_text = f"Error: {e}"
+
             await send_personal_message(target_account_id, {
-                "type": "tool_end",
-                "taskId": state.get("task_id"),
-                "tool_name": tool_name,
-                "status": "error",
-                "result": f"Error: {e}",
-                "error": True,
-                "sources": [] # No hay fuentes en caso de error
+                "type": "tool_end", "taskId": state.get("task_id"), "tool_name": tool_name,
+                "status": "error", "result": error_text, "error": True, "sources": []
             }, connection_type=conn_type)
-            
-    # --- INICIO: Deduplicación y asignación de IDs secuenciales ---
-    deduplicated_sources = []
-    seen_source_identifiers = set()
+            return ToolMessage(content=error_text, tool_call_id=tool_call.get("id") or str(uuid.uuid4())), []
 
-    for source in current_sources:
-        # Crear un identificador único para la deduplicación
-        # Se puede ajustar para usar una combinación de campos si la URL no es suficiente
-        identifier_parts = []
-        if 'url' in source and source['url']:
-            identifier_parts.append(source['url'])
-        if 'type' in source and source['type']:
-            identifier_parts.append(source['type'])
-        if 'name' in source and source['name']:
-            identifier_parts.append(source['name'])
-        if 'title' in source and source['title']:
-            identifier_parts.append(source['title'])
-        
-        source_identifier = "_".join(map(str, identifier_parts))
-        
-        if source_identifier and source_identifier not in seen_source_identifiers:
-            deduplicated_sources.append(source)
-            seen_source_identifiers.add(source_identifier)
-        elif not source_identifier: # Si no hay identificador, añadirla de todos modos (ej. fuentes sin URL)
-             deduplicated_sources.append(source)
+    # 2. Ejecutar todas las llamadas en paralelo
+    tasks = [execute_single_tool(tc) for tc in tool_calls]
+    parallel_results = await asyncio.gather(*tasks)
 
-    final_sources_with_sequential_ids = []
-    for index, source in enumerate(deduplicated_sources, start=1):
-        source_copy = source.copy()
-        if 'id' in source_copy:
-            source_copy['original_id'] = source_copy['id']
-        source_copy['id'] = index
-        final_sources_with_sequential_ids.append(source_copy)
+    # 3. Consolidar resultados
+    tool_messages = []
+    all_new_sources = []
+    for msg, sources in parallel_results:
+        tool_messages.append(msg)
+        all_new_sources.extend(sources)
+
+    # 4. Re-indexación global secuencial
+    # 4. Inserción de nuevas fuentes (evitando duplicados)
+    actual_new_sources_to_return = []
+    current_sources = state.get("sources") or []
+    # Crear conjunto de URLs ya vistas en el estado actual para no duplicar
+    seen_urls = {s.get('url') for s in current_sources if s.get('url')}
     
-    # --- FIN: Deduplicación y asignación de IDs secuenciales ---
+    for s in all_new_sources:
+        url = s.get('url')
+        # Si no tiene URL o la URL no ha sido vista, es nueva
+        if not url or url not in seen_urls:
+            actual_new_sources_to_return.append(s)
+            if url: seen_urls.add(url)
+    
+    logger.info(f"✅ tool_node: Añadiendo {len(actual_new_sources_to_return)} nuevas fuentes al estado. (Total previo: {len(current_sources)})")
 
-    # Devolver los mensajes de la herramienta Y las fuentes actualizadas al estado del grafo
-    # --- INICIO: Extracción de conocimiento en segundo plano ---
-    # Ejecutar el nodo de extracción de forma asíncrona para no bloquear la respuesta
-    # y evitar romper el flujo de streaming esperado por la API.
-    import asyncio
     asyncio.create_task(knowledge_extraction_node(state))
-    # --- FIN: Extracción de conocimiento ---
-
-    return {"messages": tool_messages, "sources": final_sources_with_sequential_ids}
+    # Devolver SOLO las nuevas fuentes, ya que LangGraph usa operator.add
+    return {"messages": tool_messages, "sources": actual_new_sources_to_return, "loop_count": state.get("loop_count", 0) + 1}
 
 # --- 2. Enrutador ---
 
@@ -1578,8 +1710,14 @@ def should_continue(state: AgentState) -> str:
     logger.info("--- (Grafo) Nodo: Enrutamiento ---")
     last_message = state["messages"][-1]
     
+    # Loop protection: máximo 10 iteraciones de herramientas
+    loop_count = state.get("loop_count", 0)
+    if loop_count >= 10:
+        logger.warning(f"⚠️ Alerta de bucle detectada (loop_count={loop_count}). Forzando finalización.")
+        return "generate_response"
+
     if isinstance(last_message, AIMessage) and getattr(last_message, 'tool_calls', None):
-        logger.info("Decisión del enrutador: Llamar a herramienta.")
+        logger.info(f"Decisión del enrutador: Llamar a herramienta (Intento {loop_count + 1}).")
         return "continue"
     
     logger.info("Decisión del enrutador: Generar respuesta final.")
@@ -1611,6 +1749,15 @@ def get_langgraph_agent():
     
     return _compiled_agent_graph
 
+async def merge_context_node(state: AgentState):
+    """
+    Nodo de convergencia que sincroniza las ramas paralelas de RAG y Graph Reasoning.
+    Este nodo simplemente pasa el estado sin modificarlo, pero sirve como punto de
+    sincronización donde LangGraph esperará a que todas las ramas paralelas terminen.
+    """
+    logger.debug("--- (Grafo) Nodo: Merge Context (Convergencia) ---")
+    return {}
+
 def create_langgraph_agent():
     """
     Crea y compila el StateGraph para el agente KAI.
@@ -1622,6 +1769,8 @@ def create_langgraph_agent():
     workflow.add_node("graph_router", graph_router_node) # Nodo de decisión del grafo
     workflow.add_node("graph_reasoning", graph_reasoning_node) # Nodo de ejecución del grafo
     workflow.add_node("rag_node", rag_node) # NUEVO: Nodo de RAG paralelo
+    workflow.add_node("proactive_retrieval", retrieve_proactive_memories_node) # NUEVO: Nodo específico
+    workflow.add_node("merge_context", merge_context_node) # NUEVO: Nodo de convergencia
     workflow.add_node("agent", call_model_node)
     workflow.add_node("action", tool_node)
     workflow.add_node("generateResponse", generate_response_node)
@@ -1632,6 +1781,13 @@ def create_langgraph_agent():
     
     # PARALELISMO: Desde proactive_memory, bifurcamos a RAG y (condicionalmente) al Grafo
     # should_use_graph_reasoning ahora devuelve una lista de nodos destino
+    
+    # IMPORTANTE: Añadimos 'proactive_retrieval' a las destinaciones en should_use_graph_reasoning
+    # O modificamos should_use_graph_reasoning. 
+    # Para ser menos intrusivo, hacemos que 'rag_node' sea el punto de partida paralelo,
+    # pero necesitamos que should_use_graph_reasoning devuelva también 'proactive_retrieval'.
+    # Mejor: Modificamos should_use_graph_reasoning abajo.
+    
     workflow.add_conditional_edges(
         "proactive_memory",
         should_use_graph_reasoning
@@ -1640,9 +1796,13 @@ def create_langgraph_agent():
     # El router siempre pasa al razonamiento
     workflow.add_edge("graph_router", "graph_reasoning")
 
-    # CONVERGENCIA: Tanto RAG como Grafo alimentan al Agente
-    workflow.add_edge("rag_node", "agent")
-    workflow.add_edge("graph_reasoning", "agent")
+    # CONVERGENCIA: Todas las ramas paralelas alimentan al nodo de merge
+    workflow.add_edge("rag_node", "merge_context")
+    workflow.add_edge("proactive_retrieval", "merge_context") # Conectar nuevo nodo
+    workflow.add_edge("graph_reasoning", "merge_context")
+    
+    # El nodo de merge pasa al agente
+    workflow.add_edge("merge_context", "agent")
 
     workflow.add_conditional_edges(
         "agent",
@@ -1722,9 +1882,67 @@ async def graph_reasoning_node(state: AgentState):
 async def knowledge_extraction_node(state: AgentState):
     """
     Ejecuta el nodo de extracción de conocimiento para persistir información en el grafo.
+    Ahora incluye una verificación inteligente para no ejecutarse en cada turno.
     """
     global _knowledge_extraction_node_instance
     
+    # 0. Verificación Inteligente de Relevancia (Selective Memory)
+    messages = state.get("messages", [])
+    if len(messages) < 2:
+        return {}
+
+    last_human = None
+    last_ai = None
+    
+    # Buscar el último par de interacción
+    for msg in reversed(messages):
+        if isinstance(msg, AIMessage) and not last_ai:
+            last_ai = extract_text_content(msg.content)
+        elif isinstance(msg, HumanMessage) and not last_human:
+            last_human = extract_text_content(msg.content)
+        
+        if last_human and last_ai:
+            break
+            
+    if not last_human or not last_ai:
+        return {}
+
+    # Filtro trivial
+    if len(last_human) < 10 and len(last_ai) < 20:
+        return {}
+
+    llm = get_fast_llm()
+    if not llm:
+        logger.warning("No hay LLM rápido para verificar relevancia de memoria. Saltando.")
+        return {}
+
+    check_prompt = f"""
+    Analiza la siguiente interacción y decide si contiene **NUEVO CONOCIMIENTO PERMANENTE** sobre el usuario (hechos, preferencias, relaciones) o el dominio que merezca ser guardado en un Grafo de Conocimiento.
+    
+    Usuario: "{last_human}"
+    Asistente: "{last_ai}"
+    
+    Responde ÚNICAMENTE "SÍ" si hay hechos valiosos y permanentes a extraer.
+    Responde "NO" si es charla trivial, saludos, agradecimientos, preguntas simples o información efímera.
+    
+    Respuesta:
+    """
+    
+    try:
+        decision_response = await llm.ainvoke(check_prompt)
+        decision = str(decision_response.content).strip().upper()
+        
+        if "SÍ" not in decision and "SI" not in decision and "YES" not in decision:
+            logger.info("🧠 Selective Memory: Decisión negativa. No se extraerá conocimiento de este turno.")
+            return {}
+            
+        logger.info("🧠 Selective Memory: Decisión POSITIVA. Procediendo a extracción de conocimiento.")
+        
+    except Exception as e:
+        logger.error(f"Error en chequeo de memoria selectiva: {e}")
+        # En caso de error, ser conservador y no extraer para ahorrar recursos
+        return {}
+
     # 1. Asegurarse de que las dependencias del grafo existan
     state = await ensure_graph_dependencies(state)
     graph_db = state.get('graph_db')
@@ -1735,6 +1953,7 @@ async def knowledge_extraction_node(state: AgentState):
 
     # 2. Inicializar el nodo de extracción si es necesario (singleton)
     if _knowledge_extraction_node_instance is None:
+        from knowledge_graph.knowledge_extraction_node import KnowledgeExtractionNode
         _knowledge_extraction_node_instance = KnowledgeExtractionNode(graph_db)
         logger.info("✅ Instancia de KnowledgeExtractionNode creada.")
 
@@ -1837,23 +2056,23 @@ async def should_use_graph_reasoning(state: AgentState):
     Decide inteligentemente si se debe activar la rama de razonamiento del grafo.
     Utiliza un LLM rápido para analizar si la consulta se beneficiaría de un análisis relacional.
     """
-    destinations = ["rag_node"] # RAG siempre se ejecuta
+    curr_destinations = ["rag_node", "proactive_retrieval"] # SIEMPRE ejecutamos RAG y Proactive Retrieval en paralelo
     
     last_message = state["messages"][-1] if state["messages"] else None
     if not isinstance(last_message, HumanMessage):
-        return destinations
+        return curr_destinations
 
     user_message = extract_text_content(last_message.content)
     
     # 1. Filtro rápido de longitud
     if len(user_message.strip()) < 5:
-        return destinations
+        return curr_destinations
 
     # 2. Decisión vía Fast LLM
     llm = get_fast_llm()
     if not llm:
         logger.warning("No hay LLM rápido disponible para el enrutador de grafo. Usando RAG solamente.")
-        return destinations
+        return curr_destinations
 
     prompt = f"""
 Analiza si la siguiente consulta del usuario requiere explorar relaciones, entidades, conexiones históricas o contexto profundo en un grafo de conocimiento.
@@ -1869,7 +2088,7 @@ Respuesta:"""
         
         if "SÍ" in decision or "SI" in decision or "YES" in decision:
             logger.info(f"🧠 Enrutador Inteligente: Activando rama de Grafo para: '{user_message[:50]}...'")
-            destinations.append("graph_router")
+            curr_destinations.append("graph_router")
         else:
             logger.info(f"🔍 Enrutador Inteligente: Solo RAG para: '{user_message[:50]}...'")
             
@@ -1878,7 +2097,7 @@ Respuesta:"""
         # Fallback: si falla el LLM, podríamos usar el filtro de palabras clave anterior o solo RAG
         # Por seguridad, usaremos solo RAG para no bloquear el flujo
     
-    return destinations
+    return curr_destinations
 
 async def rag_node(state: AgentState):
     """
@@ -2032,7 +2251,7 @@ async def proactive_memory_node(state: AgentState):
     # 3. Decidir si es momento de procesar la memoria proactiva (cada 5 turnos)
     if current_turn_count % 5 != 0:
         logger.info("Saltando memoria proactiva: no es un turno de procesamiento.")
-        return {"turn_count": current_turn_count}
+        return {"turn_count": current_turn_count, "loop_count": 0}
 
     # 4. Preparar el LLM
     llm = get_fast_llm()
@@ -2058,4 +2277,50 @@ async def proactive_memory_node(state: AgentState):
     )
     logger.info("Tarea de memoria proactiva programada en segundo plano. El grafo continuará su ejecución.")
 
-    return {"turn_count": current_turn_count}
+    return {"turn_count": current_turn_count, "loop_count": 0}
+
+async def retrieve_proactive_memories_node(state: AgentState):
+    """
+    Nodo específico para recuperar memorias proactivas guardadas previamente.
+    Se asegura de que estas memorias (user_memory_proactive_llm) sean consideradas.
+    """
+    logger.info("--- (Grafo) Nodo: Recuperación de Memorias Proactivas ---")
+    
+    last_message = state["messages"][-1] if state["messages"] else None
+    if not isinstance(last_message, HumanMessage):
+        return {}
+
+    user_query = extract_text_content(last_message.content)
+    if not user_query:
+        return {}
+
+    try:
+        logger.info(f"🔍 Buscando específicamente memorias proactivas para: '{user_query[:50]}...'")
+        
+        proactive_output = await get_relevant_memories(
+            account_id=state['account_id'],
+            query=user_query,
+            workspace_id=state.get('workspace_id'),
+            content_types=["user_memory_proactive_llm"], # Solo buscar este tipo
+            k=5, # Top 5 es suficiente
+            similarity_threshold=0.65 # Un poco más permisivo
+        )
+        
+        if proactive_output and proactive_output.sources:
+            # Marcar estas fuentes para que el LLM sepa que son proactivas/importantes
+            sources_dicts = []
+            for s in proactive_output.sources:
+                s_dict = s.dict()
+                s_dict["metadata"]["is_proactive"] = True
+                s_dict["metadata"]["source_type_label"] = "Memoria Proactiva"
+                sources_dicts.append(s_dict)
+                
+            logger.info(f"✅ Encontradas {len(sources_dicts)} memorias proactivas relevantes.")
+            return {"sources": sources_dicts}
+        else:
+            logger.info("No se encontraron memorias proactivas relevantes.")
+            return {"sources": []}
+
+    except Exception as e:
+        logger.error(f"❌ Error recuperando memorias proactivas: {e}", exc_info=True)
+        return {"sources": []}

@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { LoginScreen } from '../screens/LoginScreen';
 import { TelegramLoginScreen } from '../screens/TelegramLoginScreen';
 import { HomeScreen } from '../screens/HomeScreen';
+import { CalendarScreen } from '../screens/CalendarScreen';
 import { NoteDetailScreen } from '../screens/NoteDetailScreen';
 import { CreateNoteScreen } from '../screens/CreateNoteScreen';
 import { ActivityIndicator, View } from 'react-native';
@@ -26,7 +27,7 @@ export const Navigation = () => {
 
     return (
         <NavigationContainer>
-            <Stack.Navigator screenOptions={{ headerShown: false }}>
+            <Stack.Navigator id="root" screenOptions={{ headerShown: false }}>
                 {!signed ? (
                     <>
                         <Stack.Screen name="Login" component={LoginScreen} />
@@ -35,6 +36,7 @@ export const Navigation = () => {
                 ) : (
                     <>
                         <Stack.Screen name="Home" component={HomeScreen} />
+                        <Stack.Screen name="Calendar" component={CalendarScreen} />
                         <Stack.Screen name="NoteDetail" component={NoteDetailScreen} />
                         <Stack.Screen name="CreateNote" component={CreateNoteScreen} />
                     </>

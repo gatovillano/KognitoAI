@@ -15,13 +15,17 @@ from utils.db_session import DBSession
 logger = logging.getLogger(__name__)
 
 class AddNoteInput(BaseModel):
-    content: str = Field(..., description="El contenido principal de la nota.")
-    title: str = Field(default="", description="Título opcional para la nota.")
+    content: str = Field(..., description="El contenido principal de la nota. DEBE ser un resumen o el texto completo de lo que el usuario quiere recordar. EJEMPLO: 'Recordar comprar pan'")
+    title: str = Field(default="", description="Título breve para la nota. EJEMPLO: 'Compras'")
     category: str = Field(default="General", description="Categoría para organizar la nota.")
 
 class AddNoteTool(BaseTool):
     name: str = "add_note"
-    description: str = "Guarda una nota de texto en la memoria del usuario. Útil para recordar información importante, ideas o tareas."
+    description: str = (
+        "Guarda una nota de texto. "
+        "REQUERIDO: 'content' (puedes extraerlo del último mensaje del usuario). "
+        "EJEMPLO DE USO: {\"content\": \"contenido de la nota\", \"title\": \"asunto\"}"
+    )
     args_schema: Type[BaseModel] = AddNoteInput
     account_id: str
     workspace_id: Optional[str] = Field(None, description="El ID del espacio de trabajo del usuario.")

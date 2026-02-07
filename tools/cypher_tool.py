@@ -51,11 +51,14 @@ class CypherTool(BaseTool):
         try:
             results = await graph_db.execute_query(query, params)
             
+            # Procesar resultados para asegurar que sean serializables en JSON
+            processed_results = self._process_results(results)
+            
             response_payload = {
                 "status": "success",
                 "query_executed": query,
-                "results_count": len(results) if isinstance(results, list) else 0,
-                "results": results,
+                "results_count": len(processed_results),
+                "results": processed_results,
                 "executed_at": datetime.now().isoformat()
             }
             
@@ -67,3 +70,41 @@ class CypherTool(BaseTool):
                 "message": str(e),
                 "query_attempted": query
             }, ensure_ascii=False)
+
+    def _process_results(self, results: Any) -> Any:
+        """
+        Convierte objetos complejos de Neo4j (Nodes, Relationships, DateTime) 
+        a diccionarios y tipos serializables en JSON.
+        """
+        if isinstance(results, list):
+            return [self._process_results(item) for item in results]
+        elif isinstance(results, dict):
+            return {k: self._process_results(v) for k, v in results.items()}
+        
+        # Detección Duck-typing de Nodo Neo4j
+        if hasattr(results, "labels") and hasattr(results, "items") and callable(results.items):
+            data = {k: self._process_results(v) for k, v in results.items()}
+            # Añadir metadatos útiles
+            data["_id"] = getattr(results, "element_id", getattr(results, "id", None))
+            data["_labels"] = list(results.labels)
+            return data
+            
+        # Detección Duck-typing de Relación Neo4j
+        if hasattr(results, "start_node") and hasattr(results, "end_node") and hasattr(results, "type"):
+            data = {k: self._process_results(v) for k, v in results.items()}
+            data["_id"] = getattr(results, "element_id", getattr(results, "id", None))
+            data["_type"] = results.type
+            return data
+
+        # Detección Duck-typing de Path Neo4j
+        if hasattr(results, "nodes") and hasattr(results, "relationships"):
+            return {
+                "nodes": [self._process_results(n) for n in results.nodes],
+                "relationships": [self._process_results(r) for r in results.relationships]
+            }
+            
+        # Detección de tipos de tiempo (datetime, date, etc)
+        if hasattr(results, "isoformat"):
+            return results.isoformat()
+            
+        return results

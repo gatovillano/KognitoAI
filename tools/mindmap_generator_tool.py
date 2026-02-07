@@ -21,16 +21,14 @@ logger = logging.getLogger(__name__)
 from utils.db_session import DBSession
 
 from pydantic import BaseModel, Field
-from typing import Type
-from langchain_core.tools import BaseTool
-
 class MindmapGeneratorInput(BaseModel):
     document_content: str = Field(..., description="El contenido del documento a analizar.")
     concept_query: str = Field(default="temas clave", description="La consulta para extraer los conceptos clave (ej. 'temas principales', 'conceptos clave').")
     topic_hint: str = Field(default="", description="Una pista sobre el tema principal del documento.")
+
 class MindmapGeneratorTool(BaseTool):
-    name: str = Field(default="mindmap_generator", description="Nombre de la herramienta")
-    description: str = Field(default="""
+    name: str = "mindmap_generator"
+    description: str = """
     Genera un mapa mental visual a partir de un documento.
 
     Args:
@@ -40,15 +38,14 @@ class MindmapGeneratorTool(BaseTool):
 
     Returns:
         Una cadena Base64 de la imagen PNG generada, o una cadena vacía si hay un error.
-    """, description="Descripción de la herramienta")
+    """
     args_schema: Type[BaseModel] = MindmapGeneratorInput
     account_id: Optional[str] = Field(None, description="ID de la cuenta asociada a esta herramienta, inyectado automáticamente.")
     workspace_id: Optional[str] = Field(None, description="ID del espacio de trabajo asociado a esta herramienta, inyectado automáticamente.")
     telegram_id: Optional[int] = Field(None, description="ID de Telegram del usuario asociado a esta herramienta, inyectado automáticamente.")
 
-    def __init__(self, account_id: Optional[str] = None, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.account_id = account_id
 
     async def _arun(self, document_content: str, concept_query: str = "temas clave", topic_hint: str = "") -> str:
         """

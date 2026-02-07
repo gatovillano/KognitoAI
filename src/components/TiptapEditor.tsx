@@ -80,7 +80,7 @@ export const TiptapEditor = ({ content, onChange, fromTeam, containerClassName, 
       }
       debounceTimeoutRef.current = setTimeout(() => {
         onChange((editor.storage as any).markdown.getMarkdown());
-      }, 250);
+      }, 250) as unknown as NodeJS.Timeout;
     },
     onDestroy() {
       if (debounceTimeoutRef.current) {

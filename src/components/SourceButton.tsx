@@ -1,5 +1,5 @@
 import React from 'react';
-import { ExternalLink, File as FileIcon, Share2, NotebookText } from 'lucide-react';
+import { ExternalLink, File as FileIcon, Share2, NotebookText, Github } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { InlineMarkdownRenderer } from './InlineMarkdownRenderer';
 
@@ -8,7 +8,7 @@ export interface Source {
   title: string;
   url: string;
   snippet: string;
-  type: 'web' | 'document' | 'memory' | 'code' | 'database' | 'graph' | 'note';
+  type: 'web' | 'document' | 'memory' | 'code' | 'database' | 'graph' | 'note' | 'github';
   metadata?: Record<string, any>;
   name?: string;
 }
@@ -65,6 +65,12 @@ export const SourceButton: React.FC<{ source: Source; citationNumber: number; on
           color: 'bg-yellow-500/15 text-yellow-600 dark:text-yellow-400 border-yellow-300/50 shadow-[0_0_10px_-3px_rgba(234,179,8,0.3)]',
           label: 'Nota'
         };
+      case 'github':
+        return {
+          icon: <Github className="h-3.5 w-3.5 mr-1" />,
+          color: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-300/50 shadow-[0_0_10px_-3px_rgba(99,102,241,0.3)]',
+          label: 'GitHub'
+        };
       default:
         return {
           icon: <FileIcon className="h-3 w-3 mr-1" />,
@@ -77,7 +83,7 @@ export const SourceButton: React.FC<{ source: Source; citationNumber: number; on
   const { icon, color, label } = getTypeStyles();
 
   const getButtonContent = () => {
-    const commonClasses = `inline-flex items-center text-[10px] font-bold rounded-full px-2 py-0.5 mx-0.5 border transition-all hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-primary/50 leading-none flex-shrink-0 relative top-[-0.1em] ${color}`;
+    const commonClasses = `inline-flex items-center text-[11px] font-bold rounded-full px-2.5 py-0.5 mx-0.5 border transition-all hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-primary/50 leading-none flex-shrink-0 relative top-[-0.1em] shadow-sm ${color}`;
 
     if (source.type === 'web') {
       return (
@@ -102,7 +108,7 @@ export const SourceButton: React.FC<{ source: Source; citationNumber: number; on
             {citationNumber}
           </button>
         </PopoverTrigger>
-        <PopoverContent className="max-w-lg p-0 overflow-hidden shadow-2xl border-border/40 backdrop-blur-xl bg-background/95 rounded-xl">
+        <PopoverContent className="max-w-lg p-0 overflow-hidden shadow-2xl border-border/40 backdrop-blur-xl bg-background/95 rounded-xl max-h-[400px] overflow-y-auto">
           <div className={`p-4 border-b border-border/10 ${color.split(' ')[0]}`}>
             <div className="flex items-center gap-3">
               <div className={`p-2 rounded-xl bg-background/50 shadow-sm border border-white/10`}>
@@ -166,6 +172,10 @@ export const SourceButton: React.FC<{ source: Source; citationNumber: number; on
                     >
                       Ver Insight: {source.title}
                     </button>
+                  ) : source.type === 'github' ? (
+                    <a href={source.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-bold break-all">
+                      Abrir en GitHub: {source.url}
+                    </a>
                   ) : (
                     <span className="font-mono">{source.url}</span>
                   )}

@@ -1,6 +1,7 @@
 # utils/audio_transcriber.py
 
 import logging
+import torch # Importar torch
 import asyncio
 import functools
 from typing import Optional
@@ -15,17 +16,30 @@ from faster_whisper import WhisperModel
 logger = logging.getLogger(__name__)
 
 WHISPER_MODEL_SIZE = "small"
-WHISPER_DEVICE = "cpu"
-WHISPER_COMPUTE_TYPE = "int8"
+# Ya no se usan constantes globales para device y compute_type
+# WHISPER_DEVICE = "cpu"
+# WHISPER_COMPUTE_TYPE = "int8"
 _whisper_model: Optional[WhisperModel] = None
 
 def load_whisper_model():
     """Carga el modelo de transcripción de forma síncrona al inicio de la aplicación."""
     global _whisper_model
     if _whisper_model is None:
+        
+        # Detección de GPU y configuración dinámica
+        use_gpu = torch.cuda.is_available()
+        if use_gpu:
+            device = "cuda"
+            compute_type = "float16"
+            logger.info("✅ GPU detectada. Cargando modelo Whisper en GPU (cuda) con compute_type float16.")
+        else:
+            device = "cpu"
+            compute_type = "int8"
+            logger.warning("⚠️ No se detectó GPU. Cargando modelo Whisper en CPU con compute_type int8.")
+
         logger.info(f"Cargando modelo Faster Whisper: {WHISPER_MODEL_SIZE}...")
         try:
-            _whisper_model = WhisperModel(WHISPER_MODEL_SIZE, device=WHISPER_DEVICE, compute_type=WHISPER_COMPUTE_TYPE)
+            _whisper_model = WhisperModel(WHISPER_MODEL_SIZE, device=device, compute_type=compute_type)
             logger.info("Modelo Faster Whisper cargado y listo.")
         except Exception as e:
             logger.error(f"Error cargando el modelo Faster Whisper: {e}", exc_info=True)

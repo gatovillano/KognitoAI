@@ -8,6 +8,7 @@ import logging
 import os
 from typing import List, Optional, Any
 import importlib
+import asyncio
 
 from langchain_core.tools import Tool
 
@@ -24,19 +25,16 @@ def _import_tool_class(module_name: str, class_name: str):
 	try:
 		module = importlib.import_module(f"tools.{module_name}")
 	except Exception as e:
-		logger.error(
-			"Failed to import tools.%s. Ensure the 'tools' package is on PYTHONPATH in the Docker container. (%s)",
+		logger.warning(
+			"⚠️ Failed to import tools.%s. This tool will not be available. Error: %s",
 			module_name,
-			e,
-			exc_info=True
+			e
 		)
-		# Raise a clear ImportError so failures are visible early
-		raise ImportError(
-			f"Unable to import 'tools.{module_name}'. Make sure the project root is on PYTHONPATH in the container."
-		) from e
-	return getattr(module, class_name)
+		return None
+	return getattr(module, class_name, None)
 
 # Bind all tool classes used below.
+CreateTableTool = _import_tool_class("create_table_tool", "CreateTableTool")
 AddNoteTool = _import_tool_class("add_note_tool", "AddNoteTool")
 AddWebToRAGTool = _import_tool_class("add_web_to_rag_tool", "AddWebToRAGTool")
 AnalyzeCodeForInsightsTool = _import_tool_class("analyze_code_for_insights_tool", "AnalyzeCodeForInsightsTool")
@@ -88,6 +86,7 @@ AnalysisInterpreterTool = _import_tool_class("analysis_interpreter_tool", "Analy
 CypherTool = _import_tool_class("cypher_tool", "CypherTool")
 StructuredDataGeneratorTool = _import_tool_class("structured_data_generator_tool", "StructuredDataGeneratorTool")
 TavilySearchTool = _import_tool_class("tavily_search_tool", "TavilySearchTool")
+CrewResearchTool = _import_tool_class("crew_research_tool", "CrewResearchTool")
 
 
 # Global singletons for shared dependencies
@@ -118,16 +117,16 @@ async def get_shared_dependencies():
             if not _graph_db_instance:
                 _graph_db_instance = GraphDB(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
                 _graph_db_instance.connect()
-                logger.info("✅ Shared GraphDB instance created.")
+                logger.debug("✅ Shared GraphDB instance created.")
             
             if not _graph_integration_instance:
                 _graph_integration_instance = GraphIntegration(_graph_db_instance)
-                logger.info("✅ Shared GraphIntegration instance created.")
+                logger.debug("✅ Shared GraphIntegration instance created.")
 
             if not _knowledge_graph_service_instance:
                 from utils.knowledge_graph_service import KnowledgeGraphService
                 _knowledge_graph_service_instance = KnowledgeGraphService()
-                logger.info("✅ Shared KnowledgeGraphService instance created.")
+                logger.debug("✅ Shared KnowledgeGraphService instance created.")
                 
             return _graph_db_instance, _graph_integration_instance, _knowledge_graph_service_instance
         else:
@@ -210,19 +209,44 @@ async def _instantiate_tool(
             tool_instance = ToolClass(**github_kwargs)
 
         # --- Standard Tools ---
-        elif hasattr(ToolClass, 'model_fields') and 'account_id' in ToolClass.model_fields:
-            tool_kwargs = {'account_id': account_id}
-            if 'telegram_id' in ToolClass.model_fields and telegram_id is not None:
-                tool_kwargs['telegram_id'] = str(telegram_id)
-            if 'thread_id' in ToolClass.model_fields and thread_id is not None:
-                tool_kwargs['thread_id'] = thread_id
-            if 'workspace_id' in ToolClass.model_fields and workspace_id is not None:
-                tool_kwargs['workspace_id'] = workspace_id
-            tool_instance = ToolClass(**tool_kwargs)
-        
-        # --- No-Args Tools ---
         else:
-            tool_instance = ToolClass()
+            # Detect if the tool class expects these arguments
+            expected_args = {}
+            
+            # Use Pydantic's field detection for both v1 and v2
+            fields = set()
+            if hasattr(ToolClass, 'model_fields'): # Pydantic v2
+                fields = set(ToolClass.model_fields.keys())
+            elif hasattr(ToolClass, '__fields__'): # Pydantic v1
+                fields = set(ToolClass.__fields__.keys())
+            
+            # If we didn't find fields, try inspection as fallback
+            if not fields and hasattr(ToolClass, '__annotations__'):
+                fields = set(ToolClass.__annotations__.keys())
+
+            if 'account_id' in fields:
+                expected_args['account_id'] = account_id
+            if 'telegram_id' in fields and telegram_id is not None:
+                expected_args['telegram_id'] = str(telegram_id)
+            if 'thread_id' in fields and thread_id is not None:
+                expected_args['thread_id'] = thread_id
+            if 'workspace_id' in fields and workspace_id is not None:
+                expected_args['workspace_id'] = workspace_id
+            
+            # Special case for CrewResearchTool which might not have account_id in annotations but is required
+            if not expected_args and ToolClass.__name__ == "CrewResearchTool":
+                 expected_args['account_id'] = account_id
+
+            if expected_args:
+                try:
+                    tool_instance = ToolClass(**expected_args)
+                except Exception as e:
+                    logger.warning(f"Failed to instantiate {tool_name} with args {expected_args}: {e}")
+                    # Fallback to no-args just in case, though it will likely fail for mandatory fields
+                    tool_instance = ToolClass()
+            else:
+                # No args tools
+                tool_instance = ToolClass()
 
         return tool_instance
     except Exception as e:
@@ -239,7 +263,7 @@ async def get_all_langchain_tools(
     Recoge, instancia y devuelve una lista de todas las herramientas LangChain disponibles,
     asegurando que no haya duplicados.
     """
-    logger.info("⚙️ Assembling agent toolbox...")
+    logger.debug("⚙️ Assembling agent toolbox...")
     
     # Lista completa de todas las clases de herramientas que se deben intentar instanciar.
     full_tool_classes_to_instantiate = [
@@ -255,30 +279,46 @@ async def get_all_langchain_tools(
         SetReminderTool, UpdateDocumentMetadataTool, UpdateNoteTool, UpdateProfileTool,
         WebScraperTool, ScheduleToolExecutionTool, ListScheduledToolsTool, ContactProfileTool,
         WebSearchTool, HTMLGeneratorTool, ExecuteCommandTool, TableAnalysisTool,
-        AnalysisInterpreterTool, CypherTool, StructuredDataGeneratorTool, TavilySearchTool
+        AnalysisInterpreterTool, CypherTool, StructuredDataGeneratorTool, TavilySearchTool,
+        CreateTableTool, CrewResearchTool
     ]
+    
+    # Filtrar herramientas que no pudieron ser importadas (son None)
+    full_tool_classes_to_instantiate = [cls for cls in full_tool_classes_to_instantiate if cls is not None]
 
     all_instantiated_tools: List[Tool] = []
     failed_tools: List[str] = []
 
     await get_shared_dependencies()
 
-    # 1. Instanciar todas las herramientas estándar de la lista.
-    for ToolClass in full_tool_classes_to_instantiate:
-        tool_instance = await _instantiate_tool(ToolClass, account_id, telegram_id, thread_id, workspace_id)
+    # 1. Instanciar todas las herramientas estándar de la lista en paralelo.
+    tasks = [_instantiate_tool(ToolClass, account_id, telegram_id, thread_id, workspace_id) for ToolClass in full_tool_classes_to_instantiate]
+    instantiated_results = await asyncio.gather(*tasks)
+    
+    for i, tool_instance in enumerate(instantiated_results):
+        tool_cls = full_tool_classes_to_instantiate[i]
         if tool_instance:
             all_instantiated_tools.append(tool_instance)
         else:
-            failed_tools.append(getattr(ToolClass, 'name', ToolClass.__name__))
+            # Obtener un nombre de cadena válido para el fallo
+            cls_name = getattr(tool_cls, 'name', None) or getattr(tool_cls, '__name__', 'UnknownTool')
+            failed_tools.append(str(cls_name))
 
-    # 2. Instanciar herramientas de fábrica (factory tools).
-    try:
-        ddg_module = importlib.import_module("tools.ddg_search_tool")
-        create_ddg_search_tool = getattr(ddg_module, "create_ddg_search_tool")
-        ddg_search_tool_instance = create_ddg_search_tool(account_id=account_id)
-        all_instantiated_tools.append(ddg_search_tool_instance)
-    except Exception as e:
-        logger.error("Failed to import/create DuckDuckGoSearchTool: %s", e, exc_info=True)
+    # 2. Instanciar herramientas de fábrica (factory tools) en paralelo.
+    async def get_ddg_tool():
+        try:
+            ddg_module = importlib.import_module("tools.ddg_search_tool")
+            create_ddg_search_tool = getattr(ddg_module, "create_ddg_search_tool")
+            return create_ddg_search_tool(account_id=account_id)
+        except Exception as e:
+            logger.error("Failed to import/create DuckDuckGoSearchTool: %s", e, exc_info=True)
+            return None
+
+    ddg_task = get_ddg_tool()
+    ddg_tool = await ddg_task
+    if ddg_tool:
+        all_instantiated_tools.append(ddg_tool)
+    else:
         failed_tools.append("DuckDuckGoSearchTool")
 
     try:
@@ -313,11 +353,11 @@ async def get_all_langchain_tools(
             final_tools.append(tool)
             seen_names.add(tool.name)
         else:
-            logger.warning(f"⚠️ Duplicate tool '{tool.name}' removed during final deduplication.")
+            logger.warning(f"Duplicate tool '{tool.name}' removed during final deduplication.")
             
-    logger.info(f"--- 🧰 Toolbox Assembled ({len(final_tools)} tools) ---")
-    logger.info(f"Final tool list: {[tool.name for tool in final_tools]}")
+    logger.debug(f"--- 🧰 Toolbox Assembled ({len(final_tools)} tools) ---")
+    logger.debug(f"Final tool list: {[tool.name for tool in final_tools]}")
     if failed_tools:
-        logger.warning(f"⚠️ Failed to instantiate ({len(failed_tools)}): {', '.join(failed_tools)}")
+        logger.warning(f"Failed to instantiate ({len(failed_tools)}): {', '.join(failed_tools)}")
     
     return final_tools

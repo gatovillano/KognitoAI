@@ -7,7 +7,8 @@ import { DeepResearchAnalysisResult } from '@/lib/models';
 import { Zap, Link2, FileText, AlertTriangle } from 'lucide-react';
 import { SectionTTSButton } from './analysis-detail-dialog';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
-import { Source, ContentPart } from '@/components/SourceButton';
+import { Source, ContentPart, SourceButton } from '@/components/SourceButton';
+import { SourcesTab } from '@/components/SourcesTab';
 
 interface DeepResearchAnalysisProps {
   analysis: DeepResearchAnalysisResult;
@@ -25,6 +26,73 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
   isPlaying,
   activeText
 }) => {
+  // Hooks must be called at the top level, before any early returns.
+  const sources: Source[] = useMemo(() => {
+    if (!analysis || !Array.isArray(analysis.sources)) {
+      console.log('[DeepResearch] No analysis or sources found');
+      return [];
+    }
+    console.log('[DeepResearch] Processing sources:', analysis.sources);
+    return analysis.sources.map(s => ({
+      id: s.id,
+      title: s.title,
+      url: s.url,
+      snippet: s.snippet || 'Sin descripción disponible',
+      type: (s.type as Source['type']) || 'web',
+      metadata: {},
+      name: s.title
+    }));
+  }, [analysis]);
+
+  const reportContent = useMemo(() => {
+    if (!analysis) return '';
+    if (analysis.final_report) return analysis.final_report;
+    return '';
+  }, [analysis]);
+
+  const { contentParts } = useMemo(() => {
+    const processMessageWithCitations = (text: string, allSources: Source[]): { contentParts: ContentPart[] } => {
+      if (!allSources || allSources.length === 0) {
+        console.log('[DeepResearch] No sources available for citation processing');
+        return { contentParts: [{ type: 'text', content: text }] };
+      }
+
+      console.log('[DeepResearch] Processing citations in text. Available sources:', allSources.length);
+      const contentParts: ContentPart[] = [];
+      let lastIndex = 0;
+      const citationRegex = /\[(\d+)\]/g;
+      let match: RegExpExecArray | null;
+      let citationsFound = 0;
+
+      while ((match = citationRegex.exec(text)) !== null) {
+        const citationNumber = parseInt(match[1], 10);
+        const fullMatch = match[0];
+        const index = match.index!;
+        const source = allSources.find(s => s.id == citationNumber);
+
+        if (source) {
+          citationsFound++;
+          console.log(`[DeepResearch] Found citation [${citationNumber}] with source:`, source.title);
+          if (index > lastIndex) {
+            contentParts.push({ type: 'text', content: text.substring(lastIndex, index) });
+          }
+          contentParts.push({ type: 'citation', source: source, citationNumber: citationNumber });
+          lastIndex = index + fullMatch.length;
+        } else {
+          console.warn(`[DeepResearch] Citation [${citationNumber}] not found in sources`);
+        }
+      }
+
+      console.log(`[DeepResearch] Total citations found and processed: ${citationsFound}`);
+      if (lastIndex < text.length) {
+        contentParts.push({ type: 'text', content: text.substring(lastIndex) });
+      }
+      return { contentParts };
+    };
+
+    return processMessageWithCitations(reportContent, sources);
+  }, [reportContent, sources]);
+
   if (!analysis) {
     return (
       <div className="flex flex-col items-center justify-center p-8 border border-dashed border-destructive/50 rounded-lg bg-destructive/5">
@@ -40,72 +108,6 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
     cardTitle: 'text-fuchsia-900 dark:text-fuchsia-100',
     icon: 'text-fuchsia-600',
   };
-
-  // Convertir las fuentes del análisis al tipo Source esperado por MarkdownRenderer
-  const sources: Source[] = useMemo(() => {
-    if (!analysis.sources) return [];
-    return analysis.sources.map(s => ({
-      id: s.id,
-      title: s.title,
-      url: s.url,
-      snippet: s.snippet,
-      type: (s.type as Source['type']) || 'web', // Default to web if type is missing or incompatible
-      metadata: {},
-      name: s.title
-    }));
-  }, [analysis.sources]);
-
-  const processMessageWithCitations = (text: string, allSources: Source[]): { contentParts: ContentPart[] } => {
-    if (!allSources || allSources.length === 0) {
-      return { contentParts: [{ type: 'text', content: text }] };
-    }
-
-    const contentParts: ContentPart[] = [];
-    let lastIndex = 0;
-
-    // Expresión regular para buscar citas como [1], [2], etc.
-    const citationRegex = /\[(\d+)\]/g;
-    let match: RegExpExecArray | null;
-
-    while ((match = citationRegex.exec(text)) !== null) {
-      const citationNumber = parseInt(match[1], 10);
-      const fullMatch = match[0];
-      const index = match.index!;
-
-      const source = allSources.find(s => s.id == citationNumber);
-
-      if (source) {
-        // Añadir el texto antes de la cita
-        if (index > lastIndex) {
-          contentParts.push({ type: 'text', content: text.substring(lastIndex, index) });
-        }
-
-        // Añadir la cita como un componente
-        contentParts.push({ type: 'citation', source: source, citationNumber: citationNumber });
-        lastIndex = index + fullMatch.length;
-      }
-    }
-
-    // Añadir cualquier texto restante después de la última cita
-    if (lastIndex < text.length) {
-      contentParts.push({ type: 'text', content: text.substring(lastIndex) });
-    }
-
-    return { contentParts };
-  };
-
-  // Determine the report content, handling backward compatibility where content might be in 'findings'
-  const reportContent = useMemo(() => {
-    if (analysis.final_report) return analysis.final_report;
-    if (analysis.findings && Array.isArray(analysis.findings) && analysis.findings.length > 0) {
-      return analysis.findings.join('\n\n');
-    }
-    return '';
-  }, [analysis]);
-
-  const { contentParts } = useMemo(() =>
-    processMessageWithCitations(reportContent, sources),
-    [reportContent, sources]);
 
   return (
     <div className="space-y-6">
@@ -144,6 +146,21 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
                 <div className="text-sm text-foreground leading-relaxed">
                   <MarkdownRenderer contentParts={contentParts} fontSize="text-sm" />
                 </div>
+
+                {/* Sección de Fuentes al final del reporte */}
+                {Array.isArray(sources) && sources.length > 0 && (
+                  <div className="mt-6 pt-4 border-t border-border/10">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Link2 className="h-3 w-3 text-primary" />
+                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Fuentes y Referencias</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {sources.map((source, idx) => (
+                        <SourceButton key={idx} source={source} citationNumber={source.id as number} />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           ) : (
@@ -171,37 +188,7 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
 
         {/* TAB: FUENTES */}
         <TabsContent value="sources" className="space-y-6 animate-in fade-in-50 duration-500">
-          {sources.length > 0 ? (
-            <div>
-              <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-600">
-                <Link2 className="w-5 h-5" />
-                Bibliografía y Referencias
-              </h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {sources.map((source, index) => (
-                  <a
-                    key={index}
-                    href={source.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group p-3 rounded-lg border bg-card hover:bg-accent transition-all flex flex-col gap-1 overflow-hidden"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-muted-foreground uppercase">Fuente #{source.id}</span>
-                      <Link2 className="w-3 h-3 text-muted-foreground group-hover:text-primary transition-colors" />
-                    </div>
-                    <p className="font-bold text-sm truncate group-hover:text-primary transition-colors">{source.title || source.url}</p>
-                    <p className="text-[10px] text-muted-foreground truncate">{source.url}</p>
-                  </a>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="text-center py-12 text-muted-foreground">
-              <Link2 className="w-12 h-12 mx-auto mb-4 opacity-20" />
-              <p>No se registraron fuentes externas para esta investigación.</p>
-            </div>
-          )}
+          <SourcesTab sources={sources} />
         </TabsContent>
       </Tabs>
     </div>

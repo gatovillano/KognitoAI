@@ -120,7 +120,7 @@ export default function WorkspacesPage() {
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {workspaces.map((workspace) => (
-              <Card key={workspace.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleCardClick(workspace.id)}>
+              <Card key={workspace.id} className="cursor-pointer hover:border-primary/20" onClick={() => handleCardClick(workspace.id)}>
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-2 min-w-0 flex-1">

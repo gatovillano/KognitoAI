@@ -377,3 +377,5 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
     </div>
   );
 });
+
+GraphVisualization.displayName = 'GraphVisualization';

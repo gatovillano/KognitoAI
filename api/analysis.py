@@ -1219,7 +1219,7 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
                             logger.info(f"Generando título descriptivo para cluster {cluster_id} con {len(data['topics'])} temas")
                             response = await llm_for_summarization.ainvoke([HumanMessage(content=prompt)])
                             content = response.content.strip()
-                            logger.info(f"Respuesta LLM para cluster {cluster_id}: {content[:200]}")
+                            logger.info(f"Respuesta LLM para cluster {cluster_id} recibida.")
 
                             # Parsear la respuesta del LLM (con nuevo formato)
                             lines = content.split('\n')

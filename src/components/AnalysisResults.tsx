@@ -204,7 +204,7 @@ export function AnalysisResults() {
         searchTimeoutRef.current = setTimeout(() => {
             setDebouncedSearchQuery(query);
             if (user && token) fetchAnalyses(true, query, debouncedTopicKeywords);
-        }, 500);
+        }, 500) as unknown as NodeJS.Timeout;
     }, [user, token, fetchAnalyses, debouncedTopicKeywords]);
 
     const updateTopicKeywords = useCallback((keywords: string) => {
@@ -213,7 +213,7 @@ export function AnalysisResults() {
         keywordsTimeoutRef.current = setTimeout(() => {
             setDebouncedTopicKeywords(keywords);
             if (user && token) fetchAnalyses(true, debouncedSearchQuery, keywords);
-        }, 500);
+        }, 500) as unknown as NodeJS.Timeout;
     }, [user, token, fetchAnalyses, debouncedSearchQuery]);
 
     useEffect(() => {
@@ -278,7 +278,7 @@ export function AnalysisResults() {
     ];
 
     const chartData = useMemo(() => {
-        if (!dashboardData?.analysis_stats_by_type) return [];
+        if (!Array.isArray(dashboardData?.analysis_stats_by_type)) return [];
         return dashboardData.analysis_stats_by_type.map(stat => ({
             name: getAnalysisTypeLabel(stat.type),
             Completados: stat.completed,
@@ -288,8 +288,9 @@ export function AnalysisResults() {
 
     const systemStats = useMemo(() => {
         if (!dashboardData) return null;
-        const totalProcessed = dashboardData.analysis_stats_by_type?.reduce((acc, stat) => acc + stat.completed + stat.failed, 0) || 0;
-        const successRate = totalProcessed > 0 ? (dashboardData.analysis_stats_by_type?.reduce((acc, stat) => acc + stat.completed, 0) || 0) / totalProcessed * 100 : 0;
+        const stats = Array.isArray(dashboardData.analysis_stats_by_type) ? dashboardData.analysis_stats_by_type : [];
+        const totalProcessed = stats.reduce((acc, stat) => acc + stat.completed + stat.failed, 0) || 0;
+        const successRate = totalProcessed > 0 ? (stats.reduce((acc, stat) => acc + stat.completed, 0) || 0) / totalProcessed * 100 : 0;
         return {
             totalProcessed,
             successRate: Math.round(successRate),

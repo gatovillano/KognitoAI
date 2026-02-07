@@ -8,11 +8,12 @@ export interface WebSocketMessage {
 
 interface UseWebSocketOptions {
   userId?: string;
+  authToken?: string; // Nuevo: permitir pasar el token directamente
   onMessage?: (message: WebSocketMessage) => void;
 }
 
 export const useWebSocket = (options: UseWebSocketOptions = {}) => {
-  const { userId, onMessage } = options;
+  const { userId, authToken, onMessage } = options;
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -30,15 +31,21 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
   const connect = useCallback(() => {
     console.log('WS: Intentando conectar...');
     try {
-      const token = localStorage.getItem('authToken');
+      const token = authToken || (typeof window !== 'undefined' ? localStorage.getItem('authToken') : null);
+
       if (!token || !userId) {
-        console.error('WS: No hay token de acceso o ID de usuario disponible. No se puede conectar.');
-        setConnectionError('No hay token de acceso o ID de usuario disponible');
+        const missing = [];
+        if (!token) missing.push('token');
+        if (!userId) missing.push('userId');
+
+        console.warn(`WS: Esperando credenciales (${missing.join(', ')}). Abortando conexión.`);
+        // No marcamos como error fatal todavía, solo esperamos
+        setIsConnected(false);
         return;
       }
 
       // Verificar conectividad básica antes de intentar WebSocket
-      if (!navigator.onLine) {
+      if (typeof window !== 'undefined' && !navigator.onLine) {
         console.error('WS: No hay conexión a internet disponible.');
         setConnectionError('No hay conexión a internet. Verifica tu conexión y vuelve a intentar.');
         return;
@@ -127,7 +134,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectAttempts.current++;
             connect();
-          }, delay);
+          }, delay) as unknown as NodeJS.Timeout;
         } else if (reconnectAttempts.current >= maxReconnectAttempts) {
           const errorMessage = 'No se pudo reconectar al servidor después de varios intentos.';
           console.error(`WS: ${errorMessage}`);
@@ -160,7 +167,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       console.error('WS: ❌ Error al crear WebSocket:', error);
       setConnectionError('Error al crear conexión WebSocket');
     }
-  }, [userId]); // Removed onMessage from dependencies
+  }, [userId, authToken]); // Added authToken to dependencies
 
   const disconnect = useCallback(() => {
     console.log('WS: Desconectando WebSocket...');
@@ -188,7 +195,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send('ping');
         }
-      }, 20000);
+      }, 20000) as any;
 
     } else {
       console.log("WS: No userId available yet, skipping WebSocket connection attempt.");
@@ -200,7 +207,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       }
       disconnect();
     };
-  }, [userId, connect, disconnect]);
+  }, [userId, authToken, connect, disconnect]);
 
   return {
     isConnected,

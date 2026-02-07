@@ -5,8 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { X, FileText, Calendar, Tag, Link, Info, Brain, Bookmark, BookmarkCheck } from 'lucide-react';
+import { X, FileText, Calendar, Tag, Link, Info, Brain, Bookmark, BookmarkCheck, Volume2, Loader2, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useTextToSpeech } from '@/hooks/useTextToSpeech';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -25,6 +26,8 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
     onToggleSave,
     isSaved = false
 }) => {
+    const { play, stop, isLoading: isTtsLoading, isPlaying: isTtsPlaying, activeText } = useTextToSpeech();
+
     if (!isOpen || !node) return null;
 
     const formatDate = (dateString: string) => {
@@ -48,16 +51,39 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
             case 'CONCEPTUAL_QUOTE':
                 return (
                     <div className="space-y-4">
-                        <div>
-                            <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+                        <div className="flex items-center justify-between mb-2">
+                            <h4 className="font-semibold text-sm flex items-center gap-2">
                                 <FileText className="h-4 w-4" />
                                 Cita Conceptual
                             </h4>
-                            <div className="bg-muted p-3 rounded-md text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                    {properties.full_text || properties.description || properties.text || node.label || 'No hay cita conceptual disponible.'}
-                                </ReactMarkdown>
-                            </div>
+                            {(properties.full_text || properties.description || properties.text || node.label) && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0 rounded-full hover:bg-primary/10 transition-all"
+                                    onClick={() => {
+                                        const text = properties.full_text || properties.description || properties.text || node.label;
+                                        if (isTtsPlaying && activeText === text) {
+                                            stop();
+                                        } else {
+                                            play(text);
+                                        }
+                                    }}
+                                >
+                                    {isTtsLoading && activeText === (properties.full_text || properties.description || properties.text || node.label) ? (
+                                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                    ) : isTtsPlaying && activeText === (properties.full_text || properties.description || properties.text || node.label) ? (
+                                        <Square className="h-4 w-4 text-primary fill-primary" />
+                                    ) : (
+                                        <Volume2 className="h-4 w-4 text-primary" />
+                                    )}
+                                </Button>
+                            )}
+                        </div>
+                        <div className="bg-muted p-3 rounded-md text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {properties.full_text || properties.description || properties.text || node.label || 'No hay cita conceptual disponible.'}
+                            </ReactMarkdown>
                         </div>
 
                         {properties.extraction_method && (
@@ -136,10 +162,35 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                 return (
                     <div className="space-y-4">
                         <div>
-                            <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
-                                <Info className="h-4 w-4" />
-                                Perfil de Ideas
-                            </h4>
+                            <div className="flex items-center justify-between mb-2">
+                                <h4 className="font-semibold text-sm flex items-center gap-2">
+                                    <Info className="h-4 w-4" />
+                                    Perfil de Ideas
+                                </h4>
+                                {(properties.description || node.label) && (
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 w-8 p-0 rounded-full hover:bg-primary/10 transition-all"
+                                        onClick={() => {
+                                            const text = properties.description || node.label;
+                                            if (isTtsPlaying && activeText === text) {
+                                                stop();
+                                            } else {
+                                                play(text);
+                                            }
+                                        }}
+                                    >
+                                        {isTtsLoading && activeText === (properties.description || node.label) ? (
+                                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                        ) : isTtsPlaying && activeText === (properties.description || node.label) ? (
+                                            <Square className="h-4 w-4 text-primary fill-primary" />
+                                        ) : (
+                                            <Volume2 className="h-4 w-4 text-primary" />
+                                        )}
+                                    </Button>
+                                )}
+                            </div>
                             <div className="bg-muted p-3 rounded-md text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
                                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                     {properties.description || node.label}
@@ -216,7 +267,32 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                 return (
                     <div className="space-y-4">
                         <div>
-                            <h4 className="font-semibold text-sm mb-2">Descripción</h4>
+                            <div className="flex items-center justify-between mb-2">
+                                <h4 className="font-semibold text-sm">Descripción</h4>
+                                {(properties.description || node.title) && (
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 w-8 p-0 rounded-full hover:bg-primary/10 transition-all"
+                                        onClick={() => {
+                                            const text = properties.description || node.title;
+                                            if (isTtsPlaying && activeText === text) {
+                                                stop();
+                                            } else {
+                                                play(text);
+                                            }
+                                        }}
+                                    >
+                                        {isTtsLoading && activeText === (properties.description || node.title) ? (
+                                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                        ) : isTtsPlaying && activeText === (properties.description || node.title) ? (
+                                            <Square className="h-4 w-4 text-primary fill-primary" />
+                                        ) : (
+                                            <Volume2 className="h-4 w-4 text-primary" />
+                                        )}
+                                    </Button>
+                                )}
+                            </div>
                             <div className="text-sm text-muted-foreground prose prose-sm dark:prose-invert max-w-none">
                                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                     {properties.description || node.title || 'Sin descripción disponible'}
@@ -390,10 +466,13 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                             )}
 
                             {/* ID del nodo */}
-                            <div className="pt-4 border-t">
+                            <div className="pt-4 border-t space-y-4">
                                 <p className="text-xs text-muted-foreground">
                                     ID: {node.id}
                                 </p>
+                                <Button variant="outline" className="w-full" onClick={onClose}>
+                                    Cerrar Detalles
+                                </Button>
                             </div>
                         </div>
                     </ScrollArea>

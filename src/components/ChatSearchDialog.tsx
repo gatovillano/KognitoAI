@@ -97,7 +97,7 @@ export function ChatSearchDialog({
       if (isOpen) {
         performSearch(searchTerm);
       }
-    }, 300); // Debounce para no buscar en cada pulsación
+    }, 300) as any; // Debounce para no buscar en cada pulsación
 
     return () => clearTimeout(debounceTimer);
   }, [searchTerm, isOpen, performSearch]);
@@ -107,7 +107,7 @@ export function ChatSearchDialog({
     setSearchTerm('');
     router.push(`/chat/${threadId}`);
   };
-  
+
   const handleMessageClick = (threadId: string, messageText: string) => {
     onOpenChange(false);
     setSearchTerm('');

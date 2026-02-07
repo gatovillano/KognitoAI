@@ -37,7 +37,7 @@ const getStepIcon = (status: string) => {
 const getStatusBadge = (status: string) => {
   switch (status) {
     case 'completed':
-      return <Badge variant="success">Completado</Badge>;
+      return <Badge variant="default">Completado</Badge>;
     case 'failed':
       return <Badge variant="destructive">Fallido</Badge>;
     case 'processing':

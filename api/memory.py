@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
 import datetime # Importar datetime
 
-from core.memory_manager import get_relevant_memories, add_memory_to_vector_db
+from core.memory_manager import get_relevant_memories, add_memory_to_vector_db, get_all_user_memories
 from utils.security import get_current_account_id
 from core.dependencies import get_db_session
 
@@ -50,18 +50,15 @@ async def get_user_vector_memories(
     """
     logger.info(f"Solicitud GET /api/memories recibida para el usuario: {current_account_id}") # Log para depuración
     
-    # Llamar a get_relevant_memories con los content_types específicos
-    tool_output = await get_relevant_memories(
+    # Llamar a get_all_user_memories en lugar de get_relevant_memories
+    docs = await get_all_user_memories(
         account_id=current_account_id,
-        query=".", # Una query genérica para recuperar todas las memorias
-        k=100, # Un límite razonable para mostrar en la UI
-        content_types=["user_memory_proactive_llm", "user_memories", "general_memory"],
-        hybrid_search=False, # No necesitamos búsqueda híbrida para listar
-        reranking=False, # No necesitamos reranking para listar
+        content_types=["user_memory_proactive_llm", "user_memories", "general_memory", "user_memory"],
+        limit=100
     )
     
     memories: List[MemoryResponse] = []
-    for doc in tool_output.sources:
+    for doc in docs:
         # Extraer información relevante de los metadatos de LCDocument
         # Asumiendo que el 'id' puede venir de 'document_id' o generarse si no existe
         memory_id = doc.metadata.get("document_id") or str(uuid.uuid4())
@@ -73,7 +70,7 @@ async def get_user_vector_memories(
             MemoryResponse(
                 id=memory_id,
                 title=title,
-                content=doc.snippet,
+                content=doc.page_content,
                 type=doc.metadata.get("type", "general_memory"),
                 created_at=doc.metadata.get("created_at", datetime.datetime.now().isoformat()),
                 updated_at=doc.metadata.get("updated_at", datetime.datetime.now().isoformat()),

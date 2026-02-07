@@ -143,7 +143,7 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
       if (event) {
         response = await apiClient.put(`/api/agenda/events/${event.id}`, payload);
       } else {
-        response = await apiClient.post('/api/agenda/events', payload);
+        response = await apiClient.post('/api/add-event', payload);
       }
 
       toast.success(event ? '¡Evento actualizado!' : '¡Evento agendado!', { id: toastId });

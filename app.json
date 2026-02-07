@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "52c52534-9a5a-476d-a971-f78949caef8e"
+      }
+    },
+    "android": {
+      "package": "com.gatovillano.kognitoai"
+    }
+  }
+}

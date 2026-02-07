@@ -119,8 +119,8 @@ export function AnalysisView() {
 
     const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
     const [debouncedTopicKeywords, setDebouncedTopicKeywords] = useState('');
-    const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-    const keywordsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const searchTimeoutRef = useRef<number | null>(null);
+    const keywordsTimeoutRef = useRef<number | null>(null);
     const [selectedType, setSelectedType] = useState<string | null>(null);
     const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
     const [showInsightFormModal, setShowInsightFormModal] = useState(false);
@@ -202,7 +202,7 @@ export function AnalysisView() {
         searchTimeoutRef.current = setTimeout(() => {
             setDebouncedSearchQuery(query);
             if (user && token) fetchAnalyses(true, query, debouncedTopicKeywords);
-        }, 500);
+        }, 500) as unknown as number;
     }, [user, token, fetchAnalyses, debouncedTopicKeywords]);
 
     const updateTopicKeywords = useCallback((keywords: string) => {
@@ -211,7 +211,7 @@ export function AnalysisView() {
         keywordsTimeoutRef.current = setTimeout(() => {
             setDebouncedTopicKeywords(keywords);
             if (user && token) fetchAnalyses(true, debouncedSearchQuery, keywords);
-        }, 500);
+        }, 500) as unknown as number;
     }, [user, token, fetchAnalyses, debouncedSearchQuery]);
 
     useEffect(() => {

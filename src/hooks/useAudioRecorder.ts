@@ -88,7 +88,7 @@ export const useAudioRecorder = (): AudioRecorderHook => {
           }
           return;
         }
-        
+
         if (msgStr === 'pong') {
           return;
         }
@@ -119,15 +119,15 @@ export const useAudioRecorder = (): AudioRecorderHook => {
           isIntentionalClosure.current = false; // Reset for next time
           return;
         }
-        
+
         if (reconnectAttempts.current < maxReconnectAttempts) {
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
           console.log(`WS Transcribe: 🔄 Reintentando conexión en ${delay}ms (intento ${reconnectAttempts.current + 1}/${maxReconnectAttempts}).`);
-          
+
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectAttempts.current++;
             startRecording(); // Reintentar la grabación
-          }, delay);
+          }, delay) as unknown as NodeJS.Timeout;
         } else if (reconnectAttempts.current >= maxReconnectAttempts) {
           const errorMessage = 'No se pudo reconectar al servidor de transcripción después de varios intentos.';
           console.error(`WS Transcribe: ${errorMessage}`);

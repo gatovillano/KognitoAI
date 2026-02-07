@@ -409,8 +409,7 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
 
     research_model = cast(Runnable[Sequence[BaseMessage], AIMessage],
                           chat_llm.bind_tools(
-                              lead_researcher_tools,
-                              tool_choice="auto"
+                              lead_researcher_tools
                           ).with_retry(
                               stop_after_attempt=cfg.max_structured_output_retries
                           ))

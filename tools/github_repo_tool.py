@@ -12,6 +12,7 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, ConfigDict
 
 from utils.db_session import DBSession
+from core.citation_models import Source, ToolOutputWithSources, create_github_source, format_context_with_sources
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +78,66 @@ class GitHubRepoTool(BaseTool):
             self.session.headers.update({'Authorization': f'token {self.github_token}'})
         logger.debug("GitHubRepoTool initialized. Version: 2025-07-24_04:42") # Añadir log de versión
     
-    def _run(self, repo_url: str, action: str, path: Optional[str] = None, github_token: Optional[str] = None, collection_topic: Optional[str] = None) -> str:
+    def _run(self, repo_url: str, action: str, path: Optional[str] = None, github_token: Optional[str] = None, collection_topic: Optional[str] = None) -> Any:
         """
-        Ejecuta la acción especificada en el repositorio de GitHub.
-        Esta es la versión síncrona y no debe usar await.
+        Ejecuta la acción especificada en el repositorio de GitHub (síncrono).
+        Devuelve ToolOutputWithSources para incluir metadatos de fuente.
         """
-        logger.debug(f"DEBUG: _run called with repo_url={repo_url}, action={action}")
+        logger.debug(f"DEBUG: _run (sync) called with repo_url={repo_url}, action={action}")
+        
+        try:
+            result_content = ""
+            if action == "list_tree":
+                result_content = self._list_tree(repo_url)
+            elif action == "read_file":
+                if not path:
+                    return "Error: Debes especificar la ruta del archivo para leer."
+                result_content = self._read_file(repo_url, path)
+            elif action == "navigate":
+                if not path:
+                    return "Error: Debes especificar la ruta para navegar."
+                result_content = self._navigate(repo_url, path)
+            elif action == "read_directory":
+                if not path:
+                    return "Error: Debes especificar la ruta del directorio para leer los documentos."
+                result_content = self._read_directory(repo_url, path)
+            elif action == "read_directory_recursively":
+                result_content = self._read_directory_recursively(repo_url, path or "")
+            # Las acciones de knowledge collection suelen ser async, pero si se llaman desde sync, 
+            # tendríamos que usar asyncio.run() o advertir. Por simplicidad devolvemos mensaje de error o intentamos una versión sync si existiera (no existe).
+            elif action in ["add_as_knowledge_collection", "update_knowledge_collection"]:
+                 return "Error: Las acciones de knowledge collection solo están disponibles en modo asíncrono."
+            else:
+                return f"Error: Acción no válida. Las acciones válidas son: list_tree, read_file, navigate, read_directory, read_directory_recursively"
+            
+            # Construir la fuente
+            full_url = repo_url
+            if path:
+                if action == "read_file":
+                    branch = "main"
+                    full_url = f"{repo_url}/blob/{branch}/{path}"
+                elif action in ["navigate", "read_directory", "read_directory_recursively"]:
+                    branch = "main"
+                    full_url = f"{repo_url}/tree/{branch}/{path}"
+            
+            source = create_github_source(
+                file_path=path if path else repo_url,
+                repo_url=full_url,
+                content=str(result_content),
+                node_id=None
+            )
+            source.title = f"{path} ({action})" if path else f"Repo: {repo_url}"
+            source.snippet = f"Result of {action}: " + (str(result_content)[:200] + "..." if len(str(result_content)) > 200 else str(result_content))
+            
+            logger.info(f"✅ Fuente GitHub creada en _run: {source.title}")
+
+            return ToolOutputWithSources(
+                context_for_llm=str(result_content),
+                sources=[source]
+            )
+        except Exception as e:
+            logger.error(f"Error en _run para {repo_url}: {e}", exc_info=True)
+            return f"Error al ejecutar la acción: {e}"
     
     async def _arun(self, repo_url: str, action: str, path: Optional[str] = None, github_token: Optional[str] = None, collection_topic: Optional[str] = None, vectorize: Optional[bool] = False) -> str:
         """
@@ -100,28 +155,59 @@ class GitHubRepoTool(BaseTool):
             self.session.headers.update({'Authorization': f'Bearer {self.github_token}'})
             logger.info("Using github_token to access repo")
         try:
+            result_content = ""
             if action == "list_tree":
-                return self._list_tree(repo_url)
+                result_content = self._list_tree(repo_url)
             elif action == "read_file":
                 if not path:
                     return "Error: Debes especificar la ruta del archivo para leer."
-                return self._read_file(repo_url, path)
+                result_content = self._read_file(repo_url, path)
             elif action == "navigate":
                 if not path:
                     return "Error: Debes especificar la ruta para navegar."
-                return self._navigate(repo_url, path)
+                result_content = self._navigate(repo_url, path)
             elif action == "read_directory":
                 if not path:
                     return "Error: Debes especificar la ruta del directorio para leer los documentos."
-                return self._read_directory(repo_url, path)
+                result_content = self._read_directory(repo_url, path)
             elif action == "read_directory_recursively":
-                return self._read_directory_recursively(repo_url, path or "")
+                result_content = self._read_directory_recursively(repo_url, path or "")
             elif action == "add_as_knowledge_collection":
-                return await self._add_as_knowledge_collection(repo_url, collection_topic, vectorize=vectorize or False)
+                # Este método ya devuelve un string descriptivo, lo tratamos igual
+                result_content = await self._add_as_knowledge_collection(repo_url, collection_topic, vectorize=vectorize or False)
             elif action == "update_knowledge_collection":
-                return await self._update_knowledge_collection(repo_url, collection_topic, vectorize=vectorize or False)
+                result_content = await self._update_knowledge_collection(repo_url, collection_topic, vectorize=vectorize or False)
             else:
                 return f"Error: Acción no válida. Las acciones válidas son: list_tree, read_file, navigate, read_directory, read_directory_recursively, add_as_knowledge_collection, update_knowledge_collection"
+            
+            # Construir la fuente
+            full_url = repo_url
+            if path:
+                # Construir URL web visible (blob para archivos, tree para directorios)
+                if action == "read_file":
+                    # Intentar inferir si es main o master
+                    branch = "main" # Por defecto
+                    full_url = f"{repo_url}/blob/{branch}/{path}"
+                elif action in ["navigate", "read_directory", "read_directory_recursively"]:
+                    branch = "main"
+                    full_url = f"{repo_url}/tree/{branch}/{path}"
+            
+            # Crear objeto Source explícito
+            source = create_github_source(
+                file_path=path if path else repo_url,
+                repo_url=full_url,
+                content=str(result_content), # Asegurar string
+                node_id=None
+            )
+            # Personalizar título y snippet
+            source.title = f"{path} ({action})" if path else f"Repo: {repo_url}"
+            source.snippet = f"Result of {action}: " + (str(result_content)[:200] + "..." if len(str(result_content)) > 200 else str(result_content))
+            
+            # Devolver objeto enriquecido
+            return ToolOutputWithSources(
+                context_for_llm=str(result_content),
+                sources=[source]
+            )
         except Exception as e:
             logger.error(f"Error al ejecutar la acción {action} en el repositorio {repo_url}: {e}", exc_info=True)
             return f"Error al ejecutar la acción: {e}"
@@ -166,7 +252,12 @@ class GitHubRepoTool(BaseTool):
             encoding = response.json()["encoding"]
             if encoding == "base64":
                 import base64
-                content = base64.b64decode(content).decode("utf-8")
+                decoded_content = base64.b64decode(content)
+                try:
+                    content = decoded_content.decode("utf-8")
+                except UnicodeDecodeError:
+                    # Si falla la decodificación, es un archivo binario.
+                    content = f"[Contenido binario no decodificable en UTF-8 (tamaño: {len(decoded_content)} bytes)]"
             return f"Contenido del archivo {file_path}:\n{content}"
         except Exception as e:
             logger.error(f"Error al leer el archivo {file_path} del repositorio {repo_url}: {e}", exc_info=True)

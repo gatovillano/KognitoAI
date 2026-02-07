@@ -85,7 +85,7 @@ class DeepResearchTool(BaseTool):
                 report = final_state["final_report"]
                 raw_sources = final_state.get("sources", [])
                 
-                logger.info(f"Deep research completed. Report preview: {report[:200]}...")
+                logger.info(f"Deep research completed.")
                 logger.info(f"Found {len(raw_sources)} sources to process.")
 
                 # Crear la lista de objetos Source

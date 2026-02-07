@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { MessageSquare, Send, X, Minimize2, Maximize2, Loader2, Sparkles, Settings } from 'lucide-react';
+import { MessageSquare, Send, X, Minimize2, Maximize2, Loader2, Sparkles, Settings, Notebook } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -216,7 +216,7 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
                     <CardHeader className="p-4 bg-primary text-primary-foreground flex flex-row items-center justify-between space-y-0">
                         <div className="flex items-center gap-2">
                             <Sparkles className="h-4 w-4" />
-                            <CardTitle className="text-sm font-bold truncate max-w-[180px]">
+                            <CardTitle className="text-sm font-bold">
                                 Analista IA: {title}
                             </CardTitle>
                         </div>
@@ -245,14 +245,13 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
                                     const allSources = [...(msg.sources || []), ...additionalSources];
                                     const uniqueSources = allSources;
 
+                                    const fullText = msg.chunks?.join('') || msg.text;
                                     const { contentParts } = processMessageWithCitations(
-                                        msg.chunks?.join('') || msg.text,
+                                        fullText,
                                         uniqueSources
                                     );
 
-                                    const hasCitations = msg.sender === 'ai' &&
-                                        (msg.sources && msg.sources.length > 0 || additionalSources.length > 0) &&
-                                        /\[(\d+)\]/.test(msg.chunks?.join('') || msg.text);
+                                    const hasSources = msg.sender === 'ai' && uniqueSources.length > 0;
                                     
                                     return (
                                         <motion.div
@@ -288,20 +287,43 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
                                                             </div>
                                                         )}
                                                         <div className="text-foreground break-words font-sans text-sm leading-relaxed">
-                                                            {hasCitations ? (
+                                                            {hasSources ? (
                                                                 <MarkdownRenderer
                                                                     contentParts={contentParts}
+                                                                    content={fullText}
                                                                     fontSize="text-sm"
                                                                     isStreaming={msg.chunks !== undefined}
                                                                 />
                                                             ) : (
                                                                 <MarkdownRenderer
-                                                                    content={msg.chunks?.join('') || msg.text}
+                                                                    content={fullText}
                                                                     fontSize="text-sm"
                                                                     isStreaming={msg.chunks !== undefined}
                                                                 />
                                                             )}
                                                         </div>
+
+                                                        {/* Sección de Fuentes al final */}
+                                                        {hasSources && (
+                                                            <motion.div
+                                                                initial={{ opacity: 0, y: 5 }}
+                                                                animate={{ opacity: 1, y: 0 }}
+                                                                transition={{ delay: 0.2 }}
+                                                                className="mt-3 pt-3 border-t border-border/10"
+                                                            >
+                                                                <div className="flex items-center gap-2 mb-2">
+                                                                    <div className="p-1 rounded-md bg-primary/10">
+                                                                        <Notebook className="h-3 w-3 text-primary" />
+                                                                    </div>
+                                                                    <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Fuentes</span>
+                                                                </div>
+                                                                <div className="flex flex-wrap gap-1.5">
+                                                                    {uniqueSources.map((source, idx) => (
+                                                                        <SourceButton key={idx} source={source} citationNumber={idx + 1} />
+                                                                    ))}
+                                                                </div>
+                                                            </motion.div>
+                                                        )}
                                                     </div>
                                                 ) : (
                                                     msg.text

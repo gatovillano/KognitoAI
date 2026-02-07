@@ -196,8 +196,8 @@ export function AppShell({ children }: AppShellProps) {
               </div>
             </header>
 
-            <main className="flex-1 p-4 md:p-8 lg:p-10 overflow-y-auto relative z-0 custom-scrollbar">
-              <div className="max-w-7xl mx-auto">
+            <main className={`flex-1 relative z-0 ${isChatContext ? 'overflow-hidden p-0' : 'p-1 md:p-8 lg:p-10 overflow-y-auto custom-scrollbar'}`}>
+              <div className={isChatContext ? 'h-full w-full' : 'max-w-7xl mx-auto'}>
                 {children}
               </div>
             </main>

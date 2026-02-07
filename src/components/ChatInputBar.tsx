@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, memo, useCallback } from 'react';
+import { useState, useRef, useEffect, memo, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -100,15 +100,10 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
 }) => {
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const [isNoteSelectorOpen, setIsNoteSelectorOpen] = useState(false);
-  const [inputValue, setInputValue] = useState(newMessage);
   const [isKnowledgeAnalysisForcedState, setIsKnowledgeAnalysisForcedState] = useState(false);
   const [isWebSearchForcedState, setIsWebSearchForcedState] = useState(false);
   const [isComprehensiveAnalysisForcedState, setIsComprehensiveAnalysisForcedState] = useState(false);
   const [isDeepResearchForcedState, setIsDeepResearchForcedState] = useState(false);
-
-  useEffect(() => {
-    setInputValue(newMessage);
-  }, [newMessage]);
 
   const onToggleKnowledgeAnalysisForced = useCallback(() => {
     setIsKnowledgeAnalysisForcedState(prev => !prev);
@@ -127,7 +122,6 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   }, []);
 
   const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInputValue(e.target.value);
     setNewMessage(e.target.value);
   }, [setNewMessage]);
 
@@ -151,7 +145,6 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     }
 
     onSendMessage(e, messageText);
-    setNewMessage('');
   }, [
     newMessage,
     selectedToolName,
@@ -159,7 +152,6 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     isWebSearchForcedState,
     isComprehensiveAnalysisForcedState,
     isDeepResearchForcedState,
-    setNewMessage, // Added setNewMessage
   ]);
 
   const handleAttachNote = useCallback((note: { title?: string; content: string }) => {
@@ -168,7 +160,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     setIsNoteSelectorOpen(false);
   }, [setNewMessage, newMessage]);
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (newMessage.trim() || currentContext.length > 0 || (uploadedImagePreviews && uploadedImagePreviews.length > 0)) {
@@ -179,41 +171,43 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
       }
     }
     onKeyDown(e);
-  };
+  }, [newMessage, currentContext.length, uploadedImagePreviews, onKeyDown]);
 
   const handleRemoveContextItem = useCallback((item: SelectedContextItem) => {
     onRemoveContextItem(item);
   }, [onRemoveContextItem]);
 
+  // Ajuste de altura del textarea - optimizado
   useEffect(() => {
     const textArea = textAreaRef.current;
-    if (textArea) {
-      const adjustHeight = () => {
-        textArea.style.height = 'auto';
-        const newHeight = textArea.scrollHeight;
-        const maxHeight = 60;
-        if (newHeight > maxHeight) {
-          textArea.style.height = `${maxHeight}px`;
-          textArea.style.overflowY = 'auto';
-        } else {
-          textArea.style.height = `${newHeight}px`;
-          textArea.style.overflowY = 'hidden';
-        }
-      };
-      textArea.addEventListener('input', adjustHeight);
-      return () => textArea.removeEventListener('input', adjustHeight);
-    }
-  }, []);
+    if (!textArea) return;
 
+    const adjustHeight = () => {
+      textArea.style.height = 'auto';
+      const newHeight = textArea.scrollHeight;
+      const maxHeight = 60;
+      if (newHeight > maxHeight) {
+        textArea.style.height = `${maxHeight}px`;
+        textArea.style.overflowY = 'auto';
+      } else {
+        textArea.style.height = `${newHeight}px`;
+        textArea.style.overflowY = 'hidden';
+      }
+    };
+
+    adjustHeight(); // Ajustar al montar y cuando cambia el mensaje
+    textArea.addEventListener('input', adjustHeight);
+    return () => textArea.removeEventListener('input', adjustHeight);
+  }, [newMessage]); // Solo cuando cambia el mensaje
+
+  // Manejo de paste - optimizado
   useEffect(() => {
     const textArea = textAreaRef.current;
-    if (textArea && onPaste) {
-      textArea.addEventListener('paste', onPaste);
-    }
+    if (!textArea || !onPaste) return;
+
+    textArea.addEventListener('paste', onPaste);
     return () => {
-      if (textArea && onPaste) {
-        textArea.removeEventListener('paste', onPaste);
-      }
+      textArea.removeEventListener('paste', onPaste);
     };
   }, [onPaste]);
 
@@ -223,55 +217,67 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     }
   }, [isProcessingAudio]);
 
+  // Memoizar elementos del contexto para evitar re-renderizados
+  const contextItems = useMemo(() => {
+    return currentContext.map((item, index) => (
+      <div key={`${item.id}-${index}`} className="flex-shrink-0 flex items-center gap-2 bg-muted rounded-full px-3 py-1 text-sm">
+        <Paperclip className="h-4 w-4 text-muted-foreground" />
+        <span className="text-foreground">{item.name}</span>
+        <button
+          type="button"
+          onClick={() => handleRemoveContextItem(item)}
+          className="text-muted-foreground hover:text-destructive transition-colors"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    ));
+  }, [currentContext, handleRemoveContextItem]);
+
+  // Memoizar previsualizaciones de imágenes
+  const imagePreviews = useMemo(() => {
+    if (!uploadedImagePreviews || uploadedImagePreviews.length === 0) return null;
+
+    return uploadedImagePreviews.map((preview, index) => (
+      <div key={`img-${index}`} className="relative w-24 h-24">
+        <Image
+          src={preview}
+          alt={`Previsualización de imagen ${index + 1}`}
+          layout="fill"
+          objectFit="cover"
+          className="rounded-md"
+        />
+        <button
+          type="button"
+          onClick={() => onRemoveImage(index)}
+          className="absolute top-1 right-1 bg-gray-900/50 text-white rounded-full p-1 hover:bg-gray-900/75 transition-colors"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+    ));
+  }, [uploadedImagePreviews, onRemoveImage]);
+
 
   return (
     <div className={isFixedPosition ? "fixed bottom-0 w-full md:w-[calc(100%-320px)] right-0 p-2 sm:p-4 md:p-6 bg-transparent z-30" : "relative w-full"}>
       <div className="flex justify-center w-full">
         <form onSubmit={handleSubmit} className="relative w-full">
 
-          <div className="rounded-3xl bg-card border border-border px-3 py-1.5 sm:px-4 sm:py-2 shadow-medium hover:shadow-strong transition-shadow duration-300">
+          <div className="rounded-3xl bg-card border border-border px-2 py-1 sm:px-4 sm:py-2 shadow-medium hover:shadow-strong transition-shadow duration-300">
             {currentContext.length > 0 && (
               <div className="mb-2 flex gap-2 overflow-x-auto pb-2">
-                {currentContext.map((item, index) => (
-                  <div key={index} className="flex-shrink-0 flex items-center gap-2 bg-muted rounded-full px-3 py-1 text-sm">
-                    <Paperclip className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-foreground">{item.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveContextItem(item)}
-                      className="text-muted-foreground hover:text-destructive transition-colors"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
+                {contextItems}
               </div>
             )}
             {uploadedImagePreviews && uploadedImagePreviews.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
-                {uploadedImagePreviews.map((preview, index) => (
-                  <div key={index} className="relative w-24 h-24">
-                    <Image
-                      src={preview}
-                      alt={`Previsualización de imagen ${index + 1}`}
-                      layout="fill"
-                      objectFit="cover"
-                      className="rounded-md"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => onRemoveImage(index)}
-                      className="absolute top-1 right-1 bg-gray-900/50 text-white rounded-full p-1 hover:bg-gray-900/75 transition-colors"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
+                {imagePreviews}
               </div>
             )}
             <Textarea
               ref={textAreaRef}
-              value={inputValue}
+              value={newMessage}
               onKeyDown={handleKeyDown}
               placeholder={inputPlaceholder || (currentContext.length > 0 ? "Escribe tu mensaje..." : "Escribe tu mensaje o selecciona contexto...")}
               autoComplete="on"

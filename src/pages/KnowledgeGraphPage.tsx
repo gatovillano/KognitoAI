@@ -162,7 +162,7 @@ export default function KnowledgeGraphPage() {
 
     if (filteredGraphData && filteredGraphData.nodes.length > 0) {
       return (
-        <div className="h-[70vh] min-h-[500px] w-full">
+        <div className="h-full w-full">
           <GraphVisualization graphData={filteredGraphData} />
         </div>
       );
@@ -193,7 +193,7 @@ export default function KnowledgeGraphPage() {
   };
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-8">
+    <div className="p-4 sm:p-8 space-y-8">
       <div className="flex items-center gap-2">
         <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent spacing-tight">
           Grafo de Conocimiento
@@ -212,7 +212,7 @@ export default function KnowledgeGraphPage() {
         </TooltipProvider>
       </div>
 
-      <Card>
+      <Card className="flex flex-col flex-grow">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Network className="h-6 w-6" />
@@ -222,7 +222,7 @@ export default function KnowledgeGraphPage() {
             </Button>
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col flex-grow">
           <div className="mb-6">
             <div className="flex items-center space-x-2 mb-4">
               <Input
@@ -237,7 +237,7 @@ export default function KnowledgeGraphPage() {
               </Button>
             </div>
             {searchResults.length > 0 && (
-              <div className="bg-muted p-3 rounded-md max-h-40 overflow-y-auto">
+              <div className="bg-muted p-3 rounded-md max-h-[calc(100vh-200px)] overflow-y-auto">
                 <p className="text-sm font-semibold mb-2">Resultados de la búsqueda:</p>
                 {searchResults.map((result) => (
                   <div key={result.id} className="flex items-center justify-between text-sm py-1">
@@ -297,7 +297,9 @@ export default function KnowledgeGraphPage() {
             </div>
           )}
 
-          {renderGraphContent()}
+          <div className="flex-grow w-full">
+            {renderGraphContent()}
+          </div>
         </CardContent>
       </Card>
 

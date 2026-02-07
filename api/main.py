@@ -7,6 +7,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from core.middleware.audit import AuditMiddleware
 import json
 import os
 from utils.patches import apply_patches
@@ -99,6 +100,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Agregar middleware de auditoría
+app.add_middleware(AuditMiddleware)
 
 
 
@@ -262,6 +266,7 @@ app.include_router(chat_router, prefix="/api", tags=["chat"]) # Mover arriba par
 app.include_router(auth_router, prefix="/api", tags=["auth"])
 app.include_router(users_router, prefix="/api", tags=["users"])
 app.include_router(documents_router, prefix="/api/documents", tags=["documents"])
+app.include_router(note_search_router, prefix="/api", tags=["note-search"]) # Mover arriba para prioridad sobre {note_id}
 app.include_router(notes_router, prefix="/api", tags=["notes"])
 app.include_router(agenda_router, prefix="/api", tags=["agenda"])
 from api.workspaces import router as workspaces_router
@@ -276,6 +281,8 @@ from api.telegram import router as telegram_router
 from api.logs import router as logs_router
 from api.scheduled_tools import router as scheduled_tools_router
 from api.tasks import router as tasks_router # Importar el router de tasks
+from api.caldav import router as caldav_router # Importar el router de caldav
+from api.llm import router as llm_router # Importar el router de llm
 
 from api.galleries import router as galleries_router, MEDIA_ROOT
 from api.graph import router as graph_router
@@ -286,6 +293,8 @@ app.include_router(telegram_router, prefix="", tags=["telegram"])
 app.include_router(logs_router, prefix="/api", tags=["logs"])
 app.include_router(scheduled_tools_router, prefix="/api", tags=["scheduled-tools"])
 app.include_router(tasks_router, prefix="/api", tags=["tasks"]) # Incluir el router de tasks
+app.include_router(caldav_router, prefix="/api", tags=["caldav"]) # Incluir el router de caldav
+app.include_router(llm_router, prefix="/api", tags=["llm"]) # Incluir el router de llm
 app.include_router(knowledge_graph_router, prefix="/api/knowledge-graph", tags=["knowledge-graph"])
 app.include_router(graph_router, prefix="/api", tags=["graph"])
 app.include_router(search_router, prefix="/api", tags=["search"])
@@ -294,19 +303,20 @@ app.include_router(forms_router, prefix="/api", tags=["forms"])
 app.include_router(collections_router, prefix="/api", tags=["collections"])
 app.include_router(universal_search_router, prefix="/api", tags=["universal-search"])
 app.include_router(collection_search_router, prefix="/api", tags=["collection-search"])
-app.include_router(note_search_router, prefix="/api", tags=["note-search"])
 app.include_router(memory_router, prefix="/api", tags=["memory"]) # NUEVO: Incluir el router de memory
 app.include_router(tables_router, prefix="/api/tables", tags=["tables"])
 
 from api.tools import router as tools_router
 from api.deep_research import router as deep_research_router
 from api.gap_development import router as gap_development_router
+from api.mfa import router as mfa_router # Importar el router de MFA
 from core.tools import HTMLGeneratorTool # Importar la herramienta HTMLGeneratorTool
 from utils.security import get_current_account_id # Importar get_current_account_id
 
 app.include_router(tools_router, prefix="/api/tools", tags=["tools"])
 app.include_router(deep_research_router, prefix="/api", tags=["deep-research"])
 app.include_router(gap_development_router, prefix="/api", tags=["gap-development"])
+app.include_router(mfa_router, prefix="/api", tags=["mfa"])
 
 class GenerateHTMLRequest(BaseModel):
     content: str = Field(..., description="El contenido en formato Markdown o texto plano.")

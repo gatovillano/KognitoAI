@@ -123,11 +123,6 @@ Instrucción: El usuario está interesado en la información contenida en esta c
 ------------------------------------
 """
 
-        # Escape relevant_memories to prevent unescaped curly braces from causing KeyError
-        # This ensures that any curly braces within the content are treated as literal characters
-        # and not as placeholders for string formatting.
-        escaped_relevant_memories = relevant_memories.replace('{', '{{').replace('}', '}}')
-
         # 1. Construir contexto del usuario
         profile_info = []
         if user_profile:
@@ -155,7 +150,7 @@ Instrucción: El usuario está interesado en la información contenida en esta c
             user_context_parts.extend([
                 "\n--- Memorias y Documentos Relevantes (Base de Conocimiento) ---",
                 rag_instruction,
-                escaped_relevant_memories
+                relevant_memories
             ])
         user_context_parts.append("---------------------------------------------------------")
         user_context_string = "\n".join(user_context_parts)
@@ -182,7 +177,7 @@ Instrucción: El usuario está interesado en la información contenida en esta c
             system_prompt_content = system_prompt_content.format(
                 query=user_message,
                 web_summary="",
-                relevant_memories=escaped_relevant_memories,
+                relevant_memories=relevant_memories,
             )
         except KeyError as e:
             logger.warning(f"No se pudo pre-formatear el prompt, puede contener placeholders desconocidos: {e}")
@@ -191,7 +186,7 @@ Instrucción: El usuario está interesado en la información contenida en esta c
             # Also use the escaped version here if the problematic_placeholder is replaced
             problematic_placeholder = '{relevant_memories if "No se encontraron" not in relevant_memories else "No se encontró información interna relevante."}'
             if problematic_placeholder in system_prompt_content:
-                system_prompt_content = system_prompt_content.replace(problematic_placeholder, escaped_relevant_memories)
+                system_prompt_content = system_prompt_content.replace(problematic_placeholder, relevant_memories)
 
         # 5. Ensamblar el prompt final
         
@@ -212,9 +207,33 @@ Herramientas clave:
 - `web_search(query: str)`: Búsqueda web con Brave Search.
 - `web_scraper_tool(url: str)`: Extrae contenido de URLs.
 - `comprehensive_web_analyzer(query: str)`: Análisis web profundo.
+- `crew_research(query: str)`: Investigación profunda multi-agente (CrewAI). Ideal para temas complejos que requieren reportes narrativos de alta calidad. ✨
 - Otras: gestión de notas, agenda, documentos, imágenes, etc.
 """
-
+        # 5. Generar documentación detallada de las herramientas para modelos que no soportan native tool calling
+        tools_documentation = ""
+        if tools:
+            tools_documentation = "\n\n<b>🛠️ MANUAL DE HERRAMIENTAS DISPONIBLES:</b>\n"
+            tools_documentation += "Si tienes problemas para realizar una llamada técnica, usa este formato exacto en tu respuesta para ejecutar una herramienta:\n"
+            tools_documentation += "LLAMADA_A_HERRAMIENTA: nombre_herramienta\n"
+            tools_documentation += '{"arg1": "valor1", "arg2": "valor2"}\n\n'
+            
+            for tool in tools:
+                try:
+                    name = getattr(tool, 'name', str(tool))
+                    desc = getattr(tool, 'description', "Sin descripción.")
+                    args = ""
+                    if hasattr(tool, 'args'):
+                        args = str(tool.args)
+                    
+                    tools_documentation += f"--- HERRAMIENTA: {name} ---\n"
+                    tools_documentation += f"Descripción: {desc}\n"
+                    if args:
+                        tools_documentation += f"Argumentos técnicos esperados: {args}\n"
+                    tools_documentation += "\n"
+                except:
+                    continue
+            
         final_prompt_parts = [
             context_instructions, # Inyectar instrucciones de contexto al principio
             user_context_string,
@@ -223,6 +242,7 @@ Herramientas clave:
             id_instructions,
             "<hr>",
             tools_capabilities,
+            tools_documentation if mode == "prompt_tooling" else "", # Solo inyectar si se solicita
             "<hr>",
             "<b>Instrucción crítica:</b> Usa herramientas de una en una. No intentes usar más de una herramienta por respuesta. Espera la siguiente interacción.",
             "<hr>",
@@ -230,7 +250,12 @@ Herramientas clave:
             "<hr>",
             CITATION_SYSTEM_PROMPT,
         ]
+        final_prompt_parts.append("\n\nIMPORTANTE: Al citar fuentes, cada número de fuente debe estar entre sus propios corchetes. Por ejemplo, en lugar de [1, 2, 3], formatee como [1][2][3].")
         final_prompt = "\n".join(final_prompt_parts)
+        # --- ESCAPE GLOBAL PARA LANGCHAIN ---
+        # Garantizamos que NADA en el prompt del sistema sea interpretado como variable por LangChain
+        final_prompt = final_prompt.replace('{', '{{').replace('}', '}}')
+        
         logger.debug(f"DEBUG (PromptManager): Prompt final del sistema enviado al LLM:\n{final_prompt}")
         return final_prompt
 

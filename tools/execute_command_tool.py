@@ -26,8 +26,8 @@ class ExecuteCommandTool(BaseTool):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._command_executor = CommandExecutor()
-        self._interrupt_queue = queue.Queue()
+        object.__setattr__(self, '_command_executor', CommandExecutor())
+        object.__setattr__(self, '_interrupt_queue', queue.Queue())
 
     def _run(self, command: str) -> str:
         """

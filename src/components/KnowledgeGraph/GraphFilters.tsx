@@ -30,12 +30,12 @@ export const GraphFilters: React.FC<GraphFiltersProps> = ({
     filteredEdges,
     getNodeColor
 }) => {
-    if (!metadata) return null;
-
     const [isEdgeTypesExpanded, setIsEdgeTypesExpanded] = React.useState(true);
     const [isNodeTypesExpanded, setIsNodeTypesExpanded] = React.useState(true);
     const [nodeFilterMode, setNodeFilterMode] = React.useState<'include' | 'exclude'>('include');
     const [edgeFilterMode, setEdgeFilterMode] = React.useState<'include' | 'exclude'>('include');
+
+    if (!metadata) return null;
 
     const handleNodeTypeToggle = (type: string) => {
         if (nodeFilterMode === 'include') {

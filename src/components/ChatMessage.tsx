@@ -1,18 +1,19 @@
 // ChatMessage.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ReactDOMServer from 'react-dom/server';
 import Image from 'next/image';
-import { motion } from 'framer-motion'; // Importar motion
+import { motion, AnimatePresence } from 'framer-motion'; // Importar motion
 
 
 import { ChatAvatar } from './ChatAvatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, BrainCircuit, ChevronDown, ChevronUp } from 'lucide-react';
 import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon, Notebook, Network, Download } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { Source, SourceButton, ContentPart } from '@/components/SourceButton';
 import { processMessageWithCitations, collectSourcesFromMessage } from '@/lib/chatUtils';
+import { useUserSettings } from '@/contexts/UserSettingsContext';
 
 export interface Artifact {
   id: number;
@@ -32,6 +33,8 @@ interface ChatMessageProps {
     ragContext?: any[];
     sources?: Source[];
     chunks?: string[]; // Añadir esta línea
+    reasoning?: string;
+    reasoning_chunks?: string[];
     tool_code?: string;
   };
   index: number;
@@ -62,11 +65,40 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   children, // Recibir children en las props
   onSourceClick,
 }) => {
+  const { settings } = useUserSettings();
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(msg.text);
+  const [isReasoningExpanded, setIsReasoningExpanded] = useState(false);
 
-  // Usar las funciones utilitarias para recolectar fuentes
-  const { additionalSources, processedRagContext } = collectSourcesFromMessage(msg.sources, msg.ragContext);
+  // Auto-expandir cuando se está pensando y aún no hay respuesta final
+  useEffect(() => {
+    const hasReasoning = (msg.reasoning || (msg.reasoning_chunks && msg.reasoning_chunks.length > 0));
+    const isThinkingOnly = hasReasoning && !msg.text && (!msg.chunks || msg.chunks.length === 0);
+
+    // Si está pensando solamente, expandir
+    if (isThinkingOnly) {
+      setIsReasoningExpanded(true);
+    }
+  }, [msg.reasoning, msg.reasoning_chunks, msg.text, msg.chunks]);
+
+  useEffect(() => {
+    // DEBUG: Verificar si llegan fuentes de GitHub
+    if (msg.sender === 'ai') {
+      console.log('ChatMessage sources debug:', {
+        text: msg.text?.substring(0, 50),
+        sources: msg.sources,
+        ragContext: msg.ragContext
+      });
+    }
+  }, [msg.sources, msg.ragContext, msg.sender, msg.text]);
+
+  // Obtener nombre amigable del modelo
+  const displayModelName = settings?.llm_model
+    ? settings.llm_model.split('/').pop()?.split(':')[0]
+    : 'Assistant';
+
+  // Usar las funciones utilitarias para recolectar fuentes unificadas (msg.sources + ragContext)
+  const { additionalSources: uniqueSources, processedRagContext } = collectSourcesFromMessage(msg.sources, msg.ragContext);
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -83,12 +115,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     setIsEditing(false);
   };
 
-  // Procesar el mensaje con las citas y las fuentes de msg.sources
-  const allSources = [...(msg.sources || []), ...additionalSources];
-  // The backend is now responsible for sending the final, unique list of sources.
-  // The frontend should not perform its own de-duplication.
-  const uniqueSources = allSources;
-
   const { contentParts, uncitedSources } = processMessageWithCitations(
     msg.chunks?.join('') || msg.text,
     uniqueSources
@@ -100,7 +126,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   return (
     <motion.div
       key={index}
-      className="text-base sm:text-lg break-words font-sans p-2 sm:p-4 font-normal transition-all duration-500"
+      className="text-base sm:text-lg break-words font-sans p-1 sm:p-4 font-normal transition-all duration-500 group"
       initial={{ opacity: 0, y: 10 }}
       animate={{
         opacity: 1,
@@ -110,7 +136,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         duration: 0.6,
         ease: "easeOut"
       }}
-      className="group"
     >
       {msg.sender === 'user' ? (
         // Mensaje del usuario
@@ -119,7 +144,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         >
           <div className="flex items-start gap-3 max-w-[100%] mr-4" style={{ marginRight: '20px' }}>
             <div
-              className="rounded-3xl rounded-br-none px-4 py-2 shadow-sm bg-muted/80 backdrop-blur-sm text-foreground border border-border/10 relative min-w-[100px]">
+              className="rounded-3xl rounded-br-none px-3 py-1.5 sm:px-4 sm:py-2 shadow-sm bg-muted/80 backdrop-blur-sm text-foreground border border-border/10 relative min-w-[100px]">
               {/* Cola de la burbuja */}
 
               {isEditing ? (
@@ -241,7 +266,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
               </div>
             </div>
             <div className="flex-1 min-w-0">
-              {(msg.text || msg.tool_code) && (
+              {(msg.text || msg.tool_code || msg.reasoning || (msg.reasoning_chunks && msg.reasoning_chunks.length > 0)) && (
                 <div
                   className="flex items-center gap-2 mb-2"
                 >
@@ -249,7 +274,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                     <span className="font-black text-[10px] uppercase tracking-tighter text-primary">KAI Intelligence</span>
                     <div className="h-1 w-1 rounded-full bg-primary animate-pulse" />
                   </div>
-                  <span className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">Assistant</span>
+                  <span className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">{displayModelName}</span>
                 </div>
               )}
 
@@ -264,6 +289,49 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                   </div>
                 )}
 
+                {/* Bloque de Razonamiento (Chain of Thought) */}
+                {(msg.reasoning || (msg.reasoning_chunks && msg.reasoning_chunks.length > 0)) && (
+                  <div className="mb-4">
+                    <button
+                      onClick={() => setIsReasoningExpanded(!isReasoningExpanded)}
+                      className="flex items-center gap-2 mb-2 hover:bg-primary/10 p-1 px-2 rounded-lg transition-all duration-300 group/thinking"
+                    >
+                      <div className="bg-primary/20 p-1 rounded-md group-hover/thinking:bg-primary/30 transition-colors">
+                        <BrainCircuit className="h-3 w-3 text-primary" />
+                      </div>
+                      <p className="font-black uppercase tracking-widest text-[10px] text-primary/80">Proceso de Pensamiento</p>
+                      <motion.div
+                        animate={{ rotate: isReasoningExpanded ? 180 : 0 }}
+                        transition={{ duration: 0.3 }}
+                      >
+                        <ChevronDown className="h-3 w-3 text-primary/60" />
+                      </motion.div>
+                    </button>
+
+                    <AnimatePresence>
+                      {isReasoningExpanded && (
+                        <motion.div
+                          className="bg-primary/5 dark:bg-primary/10 backdrop-blur-sm rounded-2xl border border-primary/20 p-4 relative overflow-hidden group shadow-inner"
+                          initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                          animate={{ opacity: 1, height: 'auto', marginBottom: 16 }}
+                          exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                          transition={{ duration: 0.4, ease: "easeInOut" }}
+                        >
+                          {/* Efecto decorativo */}
+                          <div className="absolute top-0 left-0 w-1 h-full bg-primary/50" />
+
+                          <div className="text-sm prose dark:prose-invert max-w-none opacity-80 italic font-medium leading-relaxed">
+                            <MarkdownRenderer
+                              content={msg.reasoning || msg.reasoning_chunks?.join('') || ""}
+                              isStreaming={msg.reasoning_chunks !== undefined && msg.reasoning_chunks.length > 0 && !msg.text}
+                            />
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
+
                 {isEditing ? (
                   <textarea
                     value={editedText}
@@ -273,7 +341,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                   />
                 ) : (
                   <motion.div
-                    className="text-foreground break-words font-sans p-2 sm:p-4 font-normal transition-all duration-500"
+                    className="text-foreground break-words font-sans p-1 sm:p-4 font-normal transition-all duration-500"
                     initial={{ opacity: 0, y: 5 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0 }}

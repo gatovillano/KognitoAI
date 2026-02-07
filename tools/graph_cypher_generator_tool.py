@@ -38,7 +38,13 @@ class GraphCypherGeneratorTool(BaseTool):
             # This assumes GraphIntegration can be initialized without arguments.
             # If it needs the graph_db, this will need to be refactored.
             from knowledge_graph.graph_database import GraphDB
-            graph_db = GraphDB()
+            from core.config import settings
+            
+            graph_db = GraphDB(
+                uri=settings.neo4j_uri,
+                user=settings.neo4j_user,
+                password=settings.neo4j_password
+            )
             self._cognee_integration = GraphIntegration(graph_db=graph_db)
         return self._cognee_integration
 

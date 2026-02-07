@@ -11,6 +11,7 @@ interface User {
   username: string | null;
   is_admin: boolean;
   account_id: string; // Añadido account_id
+  has_password: boolean; // Indica si el usuario tiene contraseña
 }
 
 interface AuthContextType {
