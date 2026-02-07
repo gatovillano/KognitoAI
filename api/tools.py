@@ -1,12 +1,13 @@
 import logging
 from typing import Dict, Any, Optional, List
-from fastapi import APIRouter, HTTPException, Depends, Body
+from fastapi import APIRouter, HTTPException, Depends, Body, BackgroundTasks
 from pydantic import BaseModel
 from core.dependencies import get_db_session
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.security import get_current_user
 from tools.knowledge_graph_tool import KnowledgeGraphTool
 from tools.conceptual_processing_tool import ConceptualProcessingTool
+from tools.add_web_to_rag_tool import AddWebToRAGTool
 from core.config import settings
 from knowledge_graph.graph_database import GraphDB
 from knowledge_graph.graph_integration import GraphIntegration
@@ -27,6 +28,7 @@ class ToolRunRequest(BaseModel):
 
 @router.post("/run", summary="Ejecutar una herramienta")
 async def run_tool(
+    background_tasks: BackgroundTasks,
     request: Dict[str, Any] = Body(...),
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session)
@@ -154,6 +156,23 @@ async def run_tool(
             
             result = await tool._arun(db_session=db, **args)
             return {"result": result, "status": "success"}
+
+        elif tool_name == "add_web_to_rag":
+            tool = AddWebToRAGTool(
+                account_id=current_user['account_id'],
+                workspace_id=request.get("workspace_id")
+            )
+            
+            args = request.copy()
+            if "tool_name" in args:
+                del args["tool_name"]
+            
+            if "url" not in args or "topic" not in args:
+                raise HTTPException(status_code=400, detail="Se requieren 'url' y 'topic' para la herramienta add_web_to_rag")
+
+            background_tasks.add_task(tool._arun, **args)
+            
+            return {"status": "success", "message": "El procesamiento del contenido web ha comenzado en segundo plano."}
 
         else:
             raise HTTPException(status_code=404, detail=f"Herramienta '{tool_name}' no encontrada o no soportada en este endpoint.")

@@ -183,7 +183,7 @@ class KnowledgeExtractionNode:
     def _generate_id(self, name: str, type_: str) -> str:
         """Genera un ID consistente con Neo4jAdapter."""
         normalized_name = name.lower().replace(" ", "_").replace("-", "_")
-        return f"{type_.lower()}_{normalized_name}"
+        return f"entity_{normalized_name}"
 
     async def _persist_knowledge(self, data: Dict[str, Any], state: Dict[str, Any]):
         """Guarda las entidades y relaciones en Neo4j."""

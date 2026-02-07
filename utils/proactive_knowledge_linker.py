@@ -21,6 +21,7 @@ from scipy.spatial.distance import cosine
 from core.database import ProactiveInsight, SessionLocal, Nota, Account, AnalyzedPair
 from utils.db_session import DBSession
 from sqlalchemy import select, or_, and_
+from core.config import settings, get_model_name_from_provider_format
 
 from langchain_core.embeddings import Embeddings
 
@@ -28,8 +29,8 @@ from langchain_core.embeddings import Embeddings
 import spacy
 from keybert import KeyBERT
 
-# Importar el modelo de Google Gemini
-from langchain_google_genai import ChatGoogleGenerativeAI
+# Importar el gestor de LLM centralizado
+from core.llm_manager import get_llm_for_user, get_fast_llm
 from langchain_core.messages import HumanMessage
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ logging.getLogger("langchain_community.vectorstores.pgvector").setLevel(logging.
 # --- MODELOS SINGLETON ---
 _nlp_model: Optional["spacy.language.Language"] = None
 _keybert_model: KeyBERT | None = None
-_gemini_model: Optional[ChatGoogleGenerativeAI] = None
+_proactive_llm: Optional[Any] = None
 _embedding_model: Optional[Embeddings] = None
 
 async def get_nlp_model() -> "spacy.language.Language":
@@ -76,18 +77,15 @@ async def get_keybert_model_instance() -> KeyBERT:
     assert _keybert_model is not None
     return _keybert_model
 
-async def get_gemini_model() -> ChatGoogleGenerativeAI:
-    """Carga y devuelve el modelo Gemini 1.5 Flash para summarization, inicializándolo solo una vez."""
-    global _gemini_model
-    if _gemini_model is None:
-        logger.info("Inicializando modelo Gemini...")
-        _gemini_model = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            temperature=0.2,
-            disable_streaming=False  # Habilita streaming
-        )
-        logger.info("Modelo Gemini inicializado.")
-    return _gemini_model
+async def get_proactive_llm(account_id: Optional[str] = None) -> Any:
+    """Carga y devuelve el modelo para análisis proactivo."""
+    global _proactive_llm
+    if account_id:
+        return await get_llm_for_user(account_id, purpose="fast")
+    
+    if _proactive_llm is None:
+        _proactive_llm = get_fast_llm()
+    return _proactive_llm
 
 async def get_embedding_model_instance() -> Embeddings:
     """Obtiene y devuelve la instancia del modelo de embeddings."""
@@ -185,9 +183,9 @@ async def extract_entities(text: str) -> List[Dict[str, str]]:
         return []
 
 # --- NUEVA FUNCIÓN DE ANÁLISIS CON LLM ---
-async def analyze_relationship_with_llm(item_a: Dict[str, Any], item_b: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Usa Gemini para analizar la relación semántica profunda entre dos ítems."""
-    llm = await get_gemini_model()
+async def analyze_relationship_with_llm(item_a: Dict[str, Any], item_b: Dict[str, Any], account_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Usa el LLM para analizar la relación semántica profunda entre dos ítems."""
+    llm = await get_proactive_llm(account_id)
     if not llm: 
         return None
 
@@ -235,9 +233,9 @@ async def analyze_relationship_with_llm(item_a: Dict[str, Any], item_b: Dict[str
         return None
 
 # --- NUEVA FUNCIÓN PARA INTERPRETAR PETICIONES ---
-async def interpret_user_request_for_analysis(user_query: str) -> Dict[str, Any]:
+async def interpret_user_request_for_analysis(user_query: str, account_id: Optional[str] = None) -> Dict[str, Any]:
     """Usa un LLM para traducir la petición del usuario en una acción estructurada."""
-    llm = await get_gemini_model()
+    llm = await get_proactive_llm(account_id)
     if not llm:
         return {"action": "error", "details": "LLM not available"}
 
@@ -281,8 +279,8 @@ async def interpret_user_request_for_analysis(user_query: str) -> Dict[str, Any]
         logger.error(f"Error interpretando la petición del usuario: {e}", exc_info=True)
         return {"action": "error", "details": str(e)}
 
-async def summarize_text(text: str, max_length: int = 130) -> str:
-    """Genera un resumen ejecutivo de un texto largo usando Gemini 1.5 Flash."""
+async def summarize_text(text: str, max_length: int = 130, account_id: Optional[str] = None) -> str:
+    """Genera un resumen ejecutivo de un texto largo usando el LLM."""
     if not text:
         return ""
 
@@ -290,14 +288,14 @@ async def summarize_text(text: str, max_length: int = 130) -> str:
     if len(text) < 100:
         return text
 
-    gemini_model = await get_gemini_model()
-    if not gemini_model:
-        logger.warning("Modelo Gemini para resumen no inicializado. Volviendo a texto truncado.")
+    proactive_llm = await get_proactive_llm(account_id)
+    if not proactive_llm:
+        logger.warning("Modelo para resumen no inicializado. Volviendo a texto truncado.")
         return text[:max_length] + "..." if len(text) > max_length else text
 
     try:
         prompt = f"Por favor, resume el siguiente texto de forma concisa y ejecutiva, manteniendo los puntos clave. El resumen no debe exceder las {max_length} palabras:\n\n{text}"
-        response = await gemini_model.ainvoke([HumanMessage(content=prompt)])
+        response = await proactive_llm.ainvoke([HumanMessage(content=prompt)])
         summary = response.content
         
         if isinstance(summary, str) and len(summary) > max_length:
@@ -388,14 +386,14 @@ async def store_proactive_insight(insight_data: Dict[str, Any]):
     logger.info(f"--- INSIGHT DETECTADO: {insight_data.get('type')} ---")
     logger.info(f"  Cuenta: {insight_data.get('account_id', 'N/A')}")
     logger.info(f"  Tipo de Insight: {insight_data.get('type', 'N/A')}")
-    logger.info(f"  Mensaje: {insight_data.get('insight_message', 'N/A')}")
+    logger.info(f"  Mensaje: [REDACTED]")
     logger.info(f"  Confianza: {insight_data.get('confidence_score', 'N/A'):.2f}")
     logger.info(f"  Sugerencia de Acción: {insight_data.get('action_suggestion', 'N/A')}")
     logger.info(f"  Ítems Relacionados:")
     for item in insight_data.get('related_items', []):
         snippet = item.get('content', '')
         if len(snippet) > 150:
-            snippet = await summarize_text(snippet, max_length=150)
+            snippet = await summarize_text(snippet, max_length=150, account_id=insight_data.get('account_id'))
         logger.info(f"    - ID: {item.get('id', 'N/A')}, Título: '{item.get('title', 'Sin título')}' (Tipo: {item.get('type', 'N/A')}, Cat: {item.get('category', 'N/A')}), Fecha: {item.get('timestamp', 'N/A')}, Snippet: '{snippet}'")
     logger.info(f"-----------------------------------\n")
 
@@ -502,7 +500,7 @@ async def analyze_entry(entry_to_analyze: Dict[str, Any], knowledge_pool: List[D
                 logger.info(f"Par ({entry_id}, {candidate_id}) ya analizado. Saltando.")
                 continue
 
-            analysis = await analyze_relationship_with_llm(entry_to_analyze, candidate)
+            analysis = await analyze_relationship_with_llm(entry_to_analyze, candidate, account_id=account_id)
             if analysis and analysis.get("relationship_type") != "Sin Relación Significativa":
                 relationship_type = analysis.get("relationship_type")
                 insight_data = {

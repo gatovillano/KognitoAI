@@ -116,7 +116,7 @@ class TelegramWebSocketClient:
 
     async def send_message_to_telegram(self, text: str, thread_id: str, image_base64: Optional[str] = None, document_name: Optional[str] = None, event_id: Optional[str] = None):
         """Envía el mensaje final al chat de Telegram correspondiente utilizando send_agent_response."""
-        logger.info(f"Intentando enviar mensaje a Telegram para thread_id: {thread_id}. Contenido: '{text[:100]}...'")
+        logger.info(f"Intentando enviar mensaje a Telegram para thread_id: {thread_id}.")
         
         chat_id = bot_manager.thread_id_to_chat_id_map.get(thread_id)
         if not chat_id:

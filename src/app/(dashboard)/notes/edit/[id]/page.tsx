@@ -98,7 +98,7 @@ export default function EditNotePage() {
     }
   }, [transcript, clearTranscript]);
 
-  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const autoSaveTimeoutRef = useRef<number | null>(null);
 
   const autoSaveNote = useCallback(async (currentTitle: string, currentCategory: string, currentContent: string, isNewNote: boolean) => {
     if (isNewNote) return;
@@ -159,7 +159,7 @@ export default function EditNotePage() {
 
     autoSaveTimeoutRef.current = setTimeout(() => {
       autoSaveNote(title, category, content, noteId === 'new');
-    }, 3000);
+    }, 3000) as any;
 
     return () => {
       if (autoSaveTimeoutRef.current) {
@@ -235,6 +235,9 @@ export default function EditNotePage() {
               <Users className="mr-2 h-4 w-4" /> {isShared ? 'Compartido' : 'Compartir'}
             </Button>
           )}
+          <Button variant="outline" onClick={() => router.push(`/notes/onlyoffice/${noteId}`)}>
+            <Save className="mr-2 h-4 w-4" /> OnlyOffice
+          </Button>
           <Button onClick={handleSave}>
             <Save className="mr-2 h-4 w-4" /> Guardar Nota
           </Button>

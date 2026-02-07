@@ -6,7 +6,7 @@ from typing import List, Optional, Any, Dict
 from datetime import datetime, timezone
 import pandas as pd
 import io
-from fastapi import APIRouter, HTTPException, Depends, status, Query, Body, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, status, Query, Body, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, update
 from pydantic import BaseModel, Field
@@ -299,6 +299,92 @@ async def delete_row(
     await db.delete(row)
     await db.commit()
     return None
+
+@router.post("/import", response_model=TableResponse, status_code=status.HTTP_201_CREATED)
+async def create_table_and_import(
+    name: str = Form(...),
+    description: Optional[str] = Form(None),
+    workspace_id: Optional[str] = Form(None),
+    file: UploadFile = File(...),
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Crea una nueva tabla e importa datos desde un archivo simultáneamente."""
+    try:
+        content = await file.read()
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(content))
+        elif file.filename.endswith(('.xls', '.xlsx')):
+            df = pd.read_excel(io.BytesIO(content))
+        else:
+            raise HTTPException(status_code=400, detail="Formato de archivo no soportado. Use CSV o Excel.")
+
+        # Reemplazar NaN por None para compatibilidad con JSON
+        df = df.where(pd.notnull(df), None)
+        
+        # Generar esquema de columnas automáticamente basado en los datos
+        columns = []
+        for col_name in df.columns:
+            dtype = str(df[col_name].dtype)
+            col_type = "string"
+            if "int" in dtype or "float" in dtype:
+                col_type = "number"
+            elif "bool" in dtype:
+                col_type = "boolean"
+            elif "datetime" in dtype:
+                col_type = "date"
+            
+            columns.append({
+                "name": str(col_name),
+                "type": col_type,
+                "required": False
+            })
+
+        # Manejar workspace_id cuando llega como cadena vacía desde el formulario
+        actual_workspace_id = None
+        if workspace_id and workspace_id.strip() and workspace_id != "undefined":
+            try:
+                actual_workspace_id = uuid.UUID(workspace_id)
+            except ValueError:
+                logger.warning(f"ID de workspace inválido: {workspace_id}. Se ignorará.")
+
+        # Crear la tabla
+        new_table = UserTable(
+            account_id=uuid.UUID(current_account_id),
+            workspace_id=actual_workspace_id,
+            name=name,
+            description=description,
+            columns=columns
+        )
+        db.add(new_table)
+        await db.flush() # Para obtener el ID de la tabla antes de insertar filas
+
+        # Convertir a lista de diccionarios e insertar filas
+        records = df.to_dict(orient='records')
+        for record in records:
+            # Asegurarse de que las claves sean strings y los valores compatibles
+            clean_record = {str(k): v for k, v in record.items()}
+            new_row = UserTableRow(
+                table_id=new_table.id,
+                data=clean_record
+            )
+            db.add(new_row)
+        
+        await db.commit()
+        await db.refresh(new_table)
+        return new_table
+    except ImportError as e:
+        logger.error(f"Falta dependencia para procesar el archivo: {e}")
+        await db.rollback()
+        raise HTTPException(
+            status_code=500, 
+            detail="El servidor no tiene instaladas las dependencias necesarias para procesar este formato de archivo (ej: openpyxl)."
+        )
+    except Exception as e:
+        logger.error(f"Error al crear e importar tabla: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al procesar el archivo: {str(e)}")
+
 
 @router.post("/{table_id}/import", status_code=status.HTTP_201_CREATED)
 async def import_data(

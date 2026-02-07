@@ -21,8 +21,31 @@ export function ImportTableDialog({ isOpen, onOpenChange, onSuccess }: ImportTab
     const [file, setFile] = useState<File | null>(null);
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
-    const [isProcessing, setIsProcessing] = useState(false);
-    const [activeTab, setActiveTab] = useState('import');
+    const [isDragging, setIsDragging] = useState(false);
+    const [isProcessing, setIsProcessing] = useState(false); // Added
+    const [activeTab, setActiveTab] = useState('import'); // Added
+
+    const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        setIsDragging(true);
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragging(false);
+    };
+
+    const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        setIsDragging(false);
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            const selectedFile = e.dataTransfer.files[0];
+            setFile(selectedFile);
+            if (!name) {
+                setName(selectedFile.name.replace(/\.[^/.]+$/, ""));
+            }
+        }
+    };
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
@@ -63,9 +86,10 @@ export function ImportTableDialog({ isOpen, onOpenChange, onSuccess }: ImportTab
             onSuccess();
             onOpenChange(false);
             resetForm();
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error creating table:', error);
-            toast.error('Error al crear la tabla.');
+            const errorMessage = error.response?.data?.detail || 'Error al crear la tabla.';
+            toast.error(errorMessage);
         } finally {
             setIsProcessing(false);
         }
@@ -128,21 +152,43 @@ export function ImportTableDialog({ isOpen, onOpenChange, onSuccess }: ImportTab
                         <TabsContent value="import" className="mt-0">
                             <div className="grid gap-2">
                                 <Label htmlFor="file">Archivo (CSV, XLSX, XLS)</Label>
-                                <div className="flex items-center justify-center w-full">
+                                <div
+                                    className="flex items-center justify-center w-full"
+                                    onDragOver={handleDragOver}
+                                    onDragLeave={handleDragLeave}
+                                    onDrop={handleDrop}
+                                >
                                     <label
                                         htmlFor="file-upload"
-                                        className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${file ? 'border-primary bg-primary/5' : 'border-muted-foreground/25 hover:bg-muted/50'}`}
+                                        className={`flex flex-col items-center justify-center w-full h-36 border-2 border-dashed rounded-lg cursor-pointer transition-all duration-200 ${isDragging
+                                                ? 'border-primary bg-primary/10 scale-[1.02]'
+                                                : file
+                                                    ? 'border-primary bg-primary/5'
+                                                    : 'border-muted-foreground/25 hover:bg-muted/50'
+                                            }`}
                                     >
-                                        <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                                        <div className="flex flex-col items-center justify-center pt-5 pb-6 px-4 text-center">
                                             {file ? (
                                                 <>
-                                                    <CheckCircle2 className="w-8 h-8 mb-2 text-primary" />
-                                                    <p className="text-xs font-medium text-primary truncate max-w-[200px]">{file.name}</p>
+                                                    <div className="bg-primary/20 p-2 rounded-full mb-2">
+                                                        <CheckCircle2 className="w-8 h-8 text-primary" />
+                                                    </div>
+                                                    <p className="text-sm font-semibold text-primary truncate max-w-full">
+                                                        {file.name}
+                                                    </p>
+                                                    <p className="text-xs text-muted-foreground mt-1">
+                                                        Archivo listo para importar
+                                                    </p>
                                                 </>
                                             ) : (
                                                 <>
-                                                    <Upload className="w-8 h-8 mb-2 text-muted-foreground" />
-                                                    <p className="text-xs text-muted-foreground">Haz clic para subir o arrastra y suelta</p>
+                                                    <Upload className={`w-8 h-8 mb-2 transition-colors ${isDragging ? 'text-primary' : 'text-muted-foreground'}`} />
+                                                    <p className="text-sm text-muted-foreground font-medium">
+                                                        {isDragging ? '¡Suéltalo aquí!' : 'Haz clic para subir o arrastra y suelta'}
+                                                    </p>
+                                                    <p className="text-xs text-muted-foreground/60 mt-1">
+                                                        Formatos soportados: CSV, XLSX, XLS
+                                                    </p>
                                                 </>
                                             )}
                                         </div>

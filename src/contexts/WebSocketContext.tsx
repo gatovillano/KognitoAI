@@ -22,7 +22,7 @@ interface WebSocketContextType {
 const WebSocketContext = createContext<WebSocketContextType | undefined>(undefined);
 
 export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const handlersRef = useRef<Set<MessageHandler>>(new Set());
 
   const handleMessage = useCallback((message: WebSocketMessage) => {
@@ -36,7 +36,7 @@ export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
     reconnect,
     disconnect,
     diagnostics
-  } = useWebSocket({ userId: user?.id, onMessage: handleMessage });
+  } = useWebSocket({ userId: user?.id, authToken: token || undefined, onMessage: handleMessage });
 
   const registerMessageHandler = useCallback((handler: MessageHandler) => {
     handlersRef.current.add(handler);

@@ -54,11 +54,11 @@ export const NoteDetailScreen = ({ route, navigation }: any) => {
         },
         link: {
             color: theme.primary,
-            textDecorationLine: 'underline',
+            textDecorationLine: 'underline' as 'underline',
         },
         code_inline: {
             backgroundColor: theme.surface,
-            color: theme.accent,
+            color: theme.text,
             padding: 4,
             borderRadius: 4,
         },
@@ -78,7 +78,7 @@ export const NoteDetailScreen = ({ route, navigation }: any) => {
         tr: {
             borderBottomWidth: 1,
             borderColor: theme.border,
-            flexDirection: 'row',
+            flexDirection: 'row' as 'row',
         },
         th: {
             backgroundColor: theme.surface,

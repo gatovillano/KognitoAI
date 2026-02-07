@@ -22,7 +22,18 @@ import logging
 from typing import Optional, List
 
 # Carga las variables de entorno desde un archivo .env en la raíz del proyecto.
-load_dotenv()
+# Se usa override=True para permitir que los cambios en el archivo montado tomen precedencia.
+load_dotenv(override=True)
+
+def get_model_name_from_provider_format(model_string: str) -> str:
+    """
+    Extrae el nombre del modelo de una cadena con formato 'provider/model'.
+    Si no tiene el formato esperado, devuelve la cadena original.
+    Ejemplo: 'gemini/gemini-2.0-flash' -> 'gemini-2.0-flash'
+    """
+    if "/" in model_string:
+        return model_string.split("/")[-1]
+    return model_string
 
 # Configuración básica de logging para este módulo.
 logger = logging.getLogger(__name__)
@@ -49,8 +60,8 @@ class Config:
         self.llm_api_base: Optional[str] = os.getenv("LLM_API_BASE")
 
         # Mantener compatibilidad hacia atrás (deprecated)
-        self.google_main_model_name: str = os.getenv("GOOGLE_MAIN_MODEL_NAME", "gemini-2.5-flash")
-        self.google_summary_model_name: str = os.getenv("GOOGLE_SUMMARY_MODEL_NAME", "gemini-2.5-flash")
+        self.google_main_model_name: str = get_model_name_from_provider_format(os.getenv("LLM_MODEL", "gemini-2.0-flash"))
+        self.google_summary_model_name: str = get_model_name_from_provider_format(os.getenv("FAST_LLM_MODEL", "gemini-2.0-flash"))
         
         # El modelo de Vertex AI para la generación de imágenes (ej. Imagen 3).
         self.google_image_generation_model_name: str = os.getenv("GOOGLE_IMAGE_GENERATION_MODEL_NAME", "imagegeneration@006")
@@ -74,7 +85,11 @@ class Config:
         self.rate_limit_enabled: bool = os.getenv("RATE_LIMIT_ENABLED", "True").lower() in ('true', '1', 't')
         self.rate_limit_max_requests: int = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", 20))
         self.rate_limit_per_seconds: int = int(os.getenv("RATE_LIMIT_PER_SECONDS", 60))
-        self.deep_research_max_tokens: int = int(os.getenv("DEEP_RESEARCH_MAX_TOKENS", 8192))
+        self.deep_research_max_tokens: int = int(os.getenv("DEEP_RESEARCH_MAX_TOKENS", 16384))
+        
+        # --- Configuración de Razonamiento (Thinking) ---
+        # Permite forzar el razonamiento nativo en modelos OpenRouter incluso si no se detectan automáticamente
+        self.global_force_reasoning: bool = os.getenv("GLOBAL_FORCE_REASONING", "False").lower() in ('true', '1', 't')
 
 
         # --- Configuración de Telegram ---
@@ -110,8 +125,20 @@ class Config:
 
         # ¡NUEVA LÍNEA! La URL de nuestro servidor API para que los clientes sepan a dónde llamar.
         self.api_server_url: str = os.getenv("API_SERVER_URL", "https://apibase.gatoslibres.art")
+        
+        # Determine default internal URL based on environment
+        default_internal = self.api_server_url
+        if os.path.exists("/.dockerenv"):
+            # Inside Docker, default to the internal service name
+            default_internal = "http://core:8000"
+        
+        # ¡NUEVA LÍNEA! URL interna para comunicación entre contenedores (Docker network)
+        self.internal_api_server_url: str = os.getenv("INTERNAL_API_SERVER_URL", default_internal)
         # ¡NUEVA LÍNEA! Un secreto para proteger los endpoints de administración.
         self.admin_secret: str = os.getenv("ADMIN_SECRET", "default-admin-secret")
+        
+        # Clave maestra para el cifrado de datos en la base de datos (pgcrypto)
+        self.db_encryption_key: str = os.getenv("DB_ENCRYPTION_KEY", "super-secret-db-encryption-key")
 
         # --- Configuración de la Base de Datos (PostgreSQL) ---
         self.postgres_user: Optional[str] = os.getenv("POSTGRES_USER")
@@ -141,6 +168,7 @@ class Config:
         # Reranking
         self.reranker_model_name: str = os.getenv("RERANKER_MODEL_NAME", "cross-encoder/ms-marco-MiniLM-L-6-v2")
         self.reranker_top_n: int = int(os.getenv("RERANKER_TOP_N", 5)) # Cuántos documentos rerankear
+        self.reranker_threshold: float = float(os.getenv("RERANKER_THRESHOLD", 0.0)) # Umbral de relevancia para el reranker (logits)
 
         # Búsqueda Híbrida
         self.hybrid_search_bm25_weight: float = float(os.getenv("HYBRID_SEARCH_BM25_WEIGHT", 0.5))
@@ -162,6 +190,10 @@ class Config:
         self.mistral_ocr_api_url: Optional[str] = os.getenv("MISTRAL_OCR_API_URL")
         self.mistral_ocr_api_key: Optional[str] = os.getenv("MISTRAL_OCR_API_KEY")
 
+        # OnlyOffice (Opcional)
+        self.onlyoffice_url: Optional[str] = os.getenv("ONLYOFFICE_URL")
+        self.onlyoffice_jwt_secret: str = os.getenv("ONLYOFFICE_JWT_SECRET", "your-secret-key")
+
         # Modelo de Visión Multimodal (OCR y análisis de imágenes)
         self.vision_model: str = os.getenv("VISION_MODEL", "openrouter/mistralai/mistral-small-3.1-24b-instruct:free")
 
@@ -169,6 +201,13 @@ class Config:
         self.tavily_api_key: Optional[str] = os.getenv("TAVILY_API_KEY")
         self.tavily_search_engine_type: str = os.getenv("TAVILY_SEARCH_ENGINE_TYPE", "tavily")
         self.playwright_service_url: Optional[str] = os.getenv("PLAYWRIGHT_SERVICE_URL") # URL de un servicio Playwright remoto
+
+        # --- Configuración de Google Cloud Text-to-Speech ---
+        self.tts_cache_enabled: bool = os.getenv("TTS_CACHE_ENABLED", "True").lower() in ('true', '1', 't')
+        self.tts_cache_dir: str = os.getenv("TTS_CACHE_DIR", "/tmp/tts_cache")
+        self.tts_cache_max_age_days: int = int(os.getenv("TTS_CACHE_MAX_AGE_DAYS", "30"))
+        self.tts_default_voice: str = os.getenv("TTS_DEFAULT_VOICE", "es-MX-DaliaNeural")
+        self.tts_default_speaking_rate: float = float(os.getenv("TTS_DEFAULT_SPEAKING_RATE", "1.0"))
 
         # --- Configuración de Umbrales para proactive_knowledge_linker_tool ---
         self.DUPLICITY_SIMILARITY_THRESHOLD: float = float(os.getenv("DUPLICITY_SIMILARITY_THRESHOLD", 0.90)) # Umbral para duplicidad (alta similitud)

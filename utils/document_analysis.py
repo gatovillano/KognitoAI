@@ -26,8 +26,8 @@ async def extract_concepts_from_document(document_content: str, concept_query: s
         print("Error: No se pudo obtener la instancia del LLM rápido.")
         return ""
 
-    # Definimos un tamaño de fragmento y solapamiento adecuados para Gemini.
-    # Puedes ajustar estos valores. Gemini tiene una ventana de contexto muy grande,
+    # Definimos un tamaño de fragmento y solapamiento adecuados para el LLM.
+    # Puedes ajustar estos valores. El LLM tiene una ventana de contexto muy grande,
     # pero es bueno mantener los fragmentos manejables para eficiencia y costo.
     CHUNK_SIZE = 10000  # Caracteres por fragmento
     OVERLAP = 1000      # Caracteres de solapamiento entre fragmentos

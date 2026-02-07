@@ -40,7 +40,7 @@ def setup_llm_detailed_logging(log_level: str = "INFO", log_file: Optional[str] 
         "LLMCallback": logging.INFO,  # Nuestro callback personalizado
         "core.agent": logging.INFO,   # Logs del agente
         "langchain.agents.agent": logging.WARNING,  # Mantenemos WARNING para producción
-        "langchain_google_genai": logging.WARNING,  # Mantenemos WARNING para producción
+        "litellm": logging.WARNING,  # Mantenemos WARNING para producción
         "tools.github_repo_tool": logging.INFO, # Cambiado a INFO para producción
     }
 
@@ -111,7 +111,7 @@ def enable_verbose_langchain_logging() -> None:
         "langchain.callbacks.manager",
         "langchain.memory",
         "langchain.prompts",
-        "langchain_google_genai",
+        "litellm",
         "langchain_core",
         "langchain_core.agents",
         "langchain_core.callbacks",

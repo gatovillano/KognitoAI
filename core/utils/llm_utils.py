@@ -1,10 +1,53 @@
-# core/utils/llm_utils.py
+import json
 import logging
-from typing import List
-from langchain_core.messages import AIMessage, BaseMessage, MessageLikeRepresentation, ToolMessage
+import re
+from typing import List, Any, Sequence, cast
+from langchain_core.messages import AIMessage, BaseMessage, MessageLikeRepresentation, ToolMessage, HumanMessage
 from langchain_core.language_models import BaseChatModel # Import BaseChatModel
+from langchain_core.runnables import Runnable
 
 logger = logging.getLogger(__name__)
+
+async def invoke_structured_output(llm: BaseChatModel, schema: Any, prompt: str, retry_config: dict = None) -> Any:
+    """Invokes an LLM with structured output, falling back to manual JSON parsing if needed."""
+    try:
+        # 1. Intentar con el método estándar (herramientas)
+        model = llm.with_structured_output(schema)
+        if retry_config:
+            model = model.with_retry(**retry_config)
+        return await model.ainvoke([HumanMessage(content=prompt)])
+    except Exception as e:
+        error_str = str(e)
+        if "tool_choice" in error_str or "404" in error_str and "Openrouter" in error_str:
+            logger.warning(f"⚠️ [Structured Output] OpenRouter tool_choice error. Falling back to JSON mode.")
+            try:
+                # 2. Intentar con json_mode (más compatible)
+                json_model = llm.with_structured_output(schema, method="json_mode")
+                if retry_config:
+                    json_model = json_model.with_retry(**retry_config)
+                return await json_model.ainvoke([HumanMessage(content=prompt + "\n\nResponde únicamente con un objeto JSON válido.")])
+            except Exception as e2:
+                logger.warning(f"⚠️ [Structured Output] JSON mode also failed: {e2}. Attempting manual parsing.")
+                # 3. Último recurso: Prompt manual y parsing
+                manual_prompt = prompt + "\n\nIMPORTANTE: Responde únicamente con un objeto JSON válido siguiendo este esquema:\n" + str(schema.schema() if hasattr(schema, 'schema') else schema)
+                response = await llm.ainvoke([HumanMessage(content=manual_prompt)])
+                
+                content = response.content if hasattr(response, 'content') else str(response)
+                # Intentar extraer JSON de la respuesta
+                json_match = re.search(r'(\{.*\})', content, re.DOTALL)
+                if json_match:
+                    try:
+                        data = json.loads(json_match.group(1))
+                        return schema(**data) if hasattr(schema, 'parse_obj') or hasattr(schema, '__init__') else data
+                    except Exception as e3:
+                        logger.error(f"❌ [Structured Output] Manual parsing failed: {e3}")
+                        raise e3
+                else:
+                    logger.error(f"❌ [Structured Output] No JSON found in response.")
+                    raise ValueError("No valid JSON found in response")
+        else:
+            raise e
+
 
 def is_token_limit_exceeded(exception: Exception, model_name: str = None) -> bool:
     """Determine if an exception indicates a token/context limit was exceeded."""

@@ -52,14 +52,17 @@ TAVILY_SEARCH_DESCRIPTION = (
     "A search engine optimized for comprehensive, accurate, and trusted results. "
     "Useful for when you need to answer questions about current events."
 )
-@tool(description=TAVILY_SEARCH_DESCRIPTION)
+@tool
 async def tavily_search(
     queries: List[str],
     max_results: Annotated[int, InjectedToolArg] = 5,
     topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
     config: Optional[RunnableConfig] = None # Changed to Optional
 ) -> str:
-    """Fetch and summarize search results from Tavily search API.
+    """A search engine optimized for comprehensive, accurate, and trusted results. 
+    Useful for when you need to answer questions about current events.
+    
+    Fetch and summarize search results from Tavily search API.
     
     Note: The Tavily search operation itself (via AsyncTavilyClient) does not
     directly use a local LLM. The 'fast LLM' (get_fast_llm()) is specifically
@@ -205,9 +208,12 @@ async def summarize_webpage(model: Runnable[Sequence[BaseMessage], Summary], web
 
 # Reflection Tool Utils
 
-@tool(description="Strategic reflection tool for research planning. Use this ONLY to plan your next ConductResearch calls or to assess findings. DO NOT use this tool as a substitute for actual research delegation.")
+@tool
 def deep_research_think_tool(reflection: str) -> str:
-    """Tool for strategic reflection on research progress and decision-making.
+    """Strategic reflection tool for research planning. Use this ONLY to plan your next ConductResearch calls or to assess findings. 
+    DO NOT use this tool as a substitute for actual research delegation.
+
+    Tool for strategic reflection on research progress and decision-making.
     This tool records your thoughts but does not perform any research.
     """
     return f"Reflection recorded: {reflection}"

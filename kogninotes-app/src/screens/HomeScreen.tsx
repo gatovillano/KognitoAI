@@ -194,6 +194,9 @@ export const HomeScreen = ({ navigation }: any) => {
           </Text>
         </View>
         <View style={styles.headerActions}>
+          <TouchableOpacity onPress={() => navigation.navigate('Calendar')} style={styles.actionButton}>
+            <Calendar size={20} color={theme.text} />
+          </TouchableOpacity>
           <TouchableOpacity onPress={toggleTheme} style={styles.actionButton}>
             {isDarkMode ? <Sun size={20} color={theme.text} /> : <Moon size={20} color={theme.text} />}
           </TouchableOpacity>

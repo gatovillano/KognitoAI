@@ -116,7 +116,7 @@ const ComprehensiveWebAnalysis: React.FC<ComprehensiveWebAnalysisProps> = ({
             <div className="grid grid-cols-1 gap-3">
               {parentAnalysis.insights?.map((insight, i) => (
                 <div key={i} className="p-4 rounded-xl border bg-card shadow-sm border-l-4 border-l-sky-500">
-                  <p className="text-sm font-medium">{typeof insight === 'string' ? insight : insight.content}</p>
+                  <p className="text-sm font-medium">{typeof insight === 'string' ? insight : insight.summary}</p>
                 </div>
               ))}
             </div>
@@ -130,7 +130,7 @@ const ComprehensiveWebAnalysis: React.FC<ComprehensiveWebAnalysisProps> = ({
               {parentAnalysis.questions?.map((q, i) => (
                 <div key={i} className="p-4 rounded-xl border bg-card shadow-sm flex gap-3 items-start">
                   <HelpCircle className="w-5 h-5 text-sky-500 mt-0.5" />
-                  <p className="text-sm italic">{typeof q === 'string' ? q : q.question}</p>
+                  <p className="text-sm italic">{typeof q === 'string' ? q : q.issue}</p>
                 </div>
               ))}
             </div>

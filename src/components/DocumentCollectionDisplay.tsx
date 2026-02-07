@@ -3,7 +3,6 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Sparkles, ChevronDown, MoreHorizontal, Network, Brain, ArrowLeft, Info } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -737,120 +736,126 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <History className="h-6 w-6" />
-              Historial de Análisis
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {savedAnalyses.length > 0 ? (
-              <div className="w-full overflow-y-auto">
-                <Accordion type="single" collapsible className="w-full">
-                  {savedAnalyses.map((analysis: any) => (
-                    <AccordionItem value={`item-${analysis.id}`} key={analysis.id}>
-                      <AccordionTrigger>
-                        <div className="flex items-center gap-2 text-left flex-1 min-w-0">
-                          {analysis.file_name.startsWith('Resumen Semántico:') ? <Brain className="h-4 w-4" /> :
-                            analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                          <span className="font-medium truncate">{analysis.file_name}</span>
-                          <span className="ml-auto text-xs text-muted-foreground pr-4">{new Date(analysis.created_at).toLocaleDateString()}</span>
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <History className="h-6 w-6 text-primary" />
+            <h2 className="text-2xl font-bold tracking-tight">Historial de Análisis</h2>
+          </div>
+
+          {savedAnalyses.length > 0 ? (
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {savedAnalyses.map((analysis: any) => {
+                // Determinar el tipo de análisis
+                let analysisType: AnalysisType = 'document';
+                const fileName = analysis.file_name || '';
+                let icon = <FileText className="h-5 w-5 text-blue-500" />;
+                let badgeColor = 'bg-blue-100 text-blue-800 border-blue-200';
+                let typeLabel = 'Documento';
+
+                if (fileName.startsWith('Resumen Semántico:')) {
+                  analysisType = 'semantic_summary';
+                  icon = <Brain className="h-5 w-5 text-indigo-500" />;
+                  badgeColor = 'bg-indigo-100 text-indigo-800 border-indigo-200';
+                  typeLabel = 'Resumen Semántico';
+                } else if (fileName.startsWith('Colección:')) {
+                  analysisType = 'collection';
+                  icon = <FolderKanban className="h-5 w-5 text-green-500" />;
+                  badgeColor = 'bg-green-100 text-green-800 border-green-200';
+                  typeLabel = 'Colección';
+                } else if (fileName.startsWith('Análisis Personalizado:')) {
+                  analysisType = 'custom_analysis';
+                  icon = <Sparkles className="h-5 w-5 text-purple-500" />;
+                  badgeColor = 'bg-purple-100 text-purple-800 border-purple-200';
+                  typeLabel = 'Personalizado';
+                } else if (fileName.startsWith('Análisis de Grafo de Conocimiento:')) {
+                  analysisType = 'knowledge_graph_analysis';
+                  icon = <Network className="h-5 w-5 text-cyan-500" />;
+                  badgeColor = 'bg-cyan-100 text-cyan-800 border-cyan-200';
+                  typeLabel = 'Grafo de Conocimiento';
+                }
+
+                // Obtener el resumen según el tipo
+                let summary = '';
+                if (analysis.result_payload?.collection_summary) {
+                  summary = analysis.result_payload.collection_summary;
+                } else if (analysis.result_payload?.resumen_semantico) {
+                  summary = analysis.result_payload.resumen_semantico;
+                } else if (analysis.result_payload?.graph_summary) {
+                  summary = analysis.result_payload.graph_summary;
+                } else if (analysis.result_payload?.resumen_ejecutivo) {
+                  summary = analysis.result_payload.resumen_ejecutivo;
+                } else if (analysis.result_payload?.analysis_result) {
+                  summary = typeof analysis.result_payload.analysis_result === 'string'
+                    ? analysis.result_payload.analysis_result
+                    : JSON.stringify(analysis.result_payload.analysis_result).substring(0, 200) + '...';
+                }
+
+                return (
+                  <Card
+                    key={analysis.id}
+                    className="group relative cursor-pointer overflow-hidden border-border/40 bg-card/40 backdrop-blur-xl hover:bg-card/60 transition-all duration-500 rounded-[2rem] flex flex-col h-full shadow-sm hover:shadow-2xl hover:shadow-primary/5 hover:-translate-y-1"
+                    onClick={() => {
+                      const newAnalysis: Analysis = {
+                        id: analysis.id,
+                        type: analysisType,
+                        title: fileName,
+                        created_at: analysis.created_at,
+                        result: analysis.result_payload,
+                        full_data: analysis.result_payload,
+                        file_name: fileName,
+                      };
+                      setSelectedAnalysis(newAnalysis);
+                    }}
+                  >
+                    {/* Efecto de resplandor en el hover */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
+                    <CardHeader className="pb-3 relative z-10">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="p-3 rounded-2xl bg-background/50 border border-border/40 shadow-inner group-hover:scale-110 transition-transform duration-500">
+                          {icon}
                         </div>
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <div className="space-y-3">
-                          {/* Mostrar resumen según el tipo de análisis */}
-                          {analysis.file_name.startsWith('Colección:') && analysis.result_payload?.collection_summary && (
-                            <div className="p-3 bg-muted rounded-lg">
-                              <h4 className="font-medium text-sm mb-2">Resumen de la Colección:</h4>
-                              <p className="text-sm text-muted-foreground">
-                                {analysis.result_payload.collection_summary}
-                              </p>
-                            </div>
-                          )}
-
-                          {analysis.file_name.startsWith('Resumen Semántico:') && analysis.result_payload?.resumen_semantico && (
-                            <div className="p-3 bg-muted rounded-lg">
-                              <h4 className="font-medium text-sm mb-2">Resumen Semántico:</h4>
-                              <p className="text-sm text-muted-foreground">
-                                {analysis.result_payload.resumen_semantico}
-                              </p>
-                            </div>
-                          )}
-
-                          {analysis.file_name.startsWith('Análisis Personalizado:') && analysis.result_payload?.analysis_result && (
-                            <div className="p-3 bg-muted rounded-lg">
-                              <h4 className="font-medium text-sm mb-2">Resultado del Análisis:</h4>
-                              <p className="text-sm text-muted-foreground">
-                                {typeof analysis.result_payload.analysis_result === 'string'
-                                  ? analysis.result_payload.analysis_result
-                                  : JSON.stringify(analysis.result_payload.analysis_result).substring(0, 200) + '...'}
-                              </p>
-                            </div>
-                          )}
-
-                          {analysis.file_name.startsWith('Análisis de Grafo de Conocimiento:') && analysis.result_payload?.graph_summary && (
-                            <div className="p-3 bg-muted rounded-lg">
-                              <h4 className="font-medium text-sm mb-2">Resumen del Grafo de Conocimiento:</h4>
-                              <p className="text-sm text-muted-foreground">
-                                {analysis.result_payload.graph_summary}
-                              </p>
-                            </div>
-                          )}
-
-                          {!analysis.file_name.startsWith('Colección:') &&
-                            !analysis.file_name.startsWith('Resumen Semántico:') &&
-                            !analysis.file_name.startsWith('Análisis Personalizado:') &&
-                            !analysis.file_name.startsWith('Análisis de Grafo de Conocimiento:') &&
-                            analysis.result_payload?.resumen_ejecutivo && (
-                              <div className="p-3 bg-muted rounded-lg">
-                                <h4 className="font-medium text-sm mb-2">Resumen Ejecutivo:</h4>
-                                <p className="text-sm text-muted-foreground">
-                                  {analysis.result_payload.resumen_ejecutivo}
-                                </p>
-                              </div>
-                            )}
-
-                          <Button variant="link" className="p-0 h-auto" onClick={() => {
-                            let analysisType: AnalysisType = 'document';
-                            const fileName = analysis.file_name || '';
-
-                            if (fileName.startsWith('Resumen Semántico:')) {
-                              analysisType = 'semantic_summary';
-                            } else if (fileName.startsWith('Colección:')) {
-                              analysisType = 'collection';
-                            } else if (fileName.startsWith('Análisis Personalizado:')) {
-                              analysisType = 'custom_analysis';
-                            } else if (fileName.startsWith('Análisis de Grafo de Conocimiento:')) {
-                              analysisType = 'knowledge_graph_analysis';
-                            }
-
-                            const newAnalysis: Analysis = {
-                              id: analysis.id,
-                              type: analysisType,
-                              title: fileName,
-                              created_at: analysis.created_at,
-                              result: analysis.result_payload,
-                              full_data: analysis.result_payload,
-                              file_name: fileName,
-                            };
-
-                            setSelectedAnalysis(newAnalysis);
-                          }}>
-                            Ver Resultados Detallados →
-                          </Button>
+                        <div className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full border-none ${badgeColor}`}>
+                          {typeLabel}
                         </div>
-                      </AccordionContent>
-                    </AccordionItem>
-                  ))}
-                </Accordion>
+                      </div>
+                      <CardTitle className="text-lg font-bold line-clamp-2 group-hover:text-primary transition-colors leading-tight tracking-tight">
+                        {fileName}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="flex-grow relative z-10">
+                      <div className="text-xs text-muted-foreground/80 line-clamp-3 leading-relaxed font-medium">
+                        {summary || 'Sin resumen disponible'}
+                      </div>
+                      <div className="mt-6 pt-4 border-t border-border/20 flex items-center justify-between text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">
+                        <div className="flex items-center gap-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-primary/40" />
+                          {new Date(analysis.created_at).toLocaleDateString('es-ES', {
+                            year: 'numeric', month: 'short', day: 'numeric'
+                          })}
+                        </div>
+                        <div className="flex items-center gap-1 group-hover:text-primary transition-colors">
+                          <span>Detalles</span>
+                          <ScanSearch className="h-3.5 w-3.5" />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-24 border-2 border-dashed border-border/40 rounded-[2rem] bg-card/20 backdrop-blur-sm">
+              <div className="bg-primary/10 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
+                <History className="h-10 w-10 text-primary/40" />
               </div>
-            ) : (
-              !isLoading && <p className="text-sm text-muted-foreground text-center py-4">No hay análisis guardados para esta vista.</p>
-            )}
-          </CardContent>
-        </Card>
+              <h3 className="text-xl font-bold tracking-tight">No hay análisis guardados</h3>
+              <p className="text-muted-foreground max-w-xs mx-auto mt-2">
+                Los análisis que realices en esta colección aparecerán aquí.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Diálogos */}

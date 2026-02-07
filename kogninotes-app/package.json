@@ -6,7 +6,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "build:apk": "eas build -p android --profile preview"
   },
   "dependencies": {
     "@react-native-masked-view/masked-view": "^0.3.2",
@@ -21,6 +22,7 @@
     "expo-status-bar": "~3.0.9",
     "expo-web-browser": "~15.0.10",
     "lucide-react-native": "^0.562.0",
+    "markdown-it": "^14.1.0",
     "react": "19.1.0",
     "react-native": "0.81.5",
     "react-native-gesture-handler": "~2.28.0",

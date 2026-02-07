@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import Literal, Sequence, cast
+from typing import Any, Literal, Sequence, cast
 
 from langchain_core.messages import (
     AIMessage,
@@ -50,7 +50,15 @@ from core.agents.deep_researcher_utils import (
     deep_research_think_tool,
     execute_tool_safely,
 )
-from core.utils.llm_utils import is_token_limit_exceeded, remove_up_to_last_ai_message, prune_messages_to_fit_token_limit
+from core.utils.llm_utils import (
+    is_token_limit_exceeded, 
+    remove_up_to_last_ai_message, 
+    prune_messages_to_fit_token_limit,
+    invoke_structured_output
+)
+
+
+# --- Helpers ---
 
 
 logger = logging.getLogger(__name__)
@@ -63,22 +71,29 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> dict:
     messages_from_state_list = list(state.get("messages", []))
     current_messages: list[BaseMessage] = [cast(BaseMessage, msg) for msg in messages_from_state_list]
     
-    logger.debug(f"🔍 [DeepResearcher] clarify_with_user - Current messages: {current_messages}")
+    logger.debug(f"🔍 [DeepResearcher] clarify_with_user - Current messages count: {len(current_messages)}")
     
     cfg = Configuration.from_runnable_config(config)
     progress_callback = config.get("configurable", {}).get("progress_callback")
     base_progress = config.get("configurable", {}).get("base_progress", 0)
     max_sub_progress = config.get("configurable", {}).get("max_sub_progress", 100) # Default to 100 if not set
     
-    fast_llm = get_fast_llm()
+    # Get and increment clarification attempts
+    account_id = state.get("account_id")
+    from core.llm_manager import get_llm_for_user
+    
+    if account_id:
+        fast_llm = await get_llm_for_user(account_id, purpose="fast")
+        main_llm = await get_llm_for_user(account_id, purpose="main")
+    else:
+        fast_llm = get_fast_llm()
+        main_llm = get_main_llm()
+
     if not fast_llm:
         raise ValueError("Fast LLM not initialized.")
-
-    main_llm = get_main_llm()
     if not main_llm:
         raise ValueError("Main LLM not initialized.")
 
-    # Get and increment clarification attempts
     clarification_attempts = state.get("clarification_attempts", 0) + 1
     logger.info(f"🔄 [DeepResearcher] Clarification attempt: {clarification_attempts}")
 
@@ -98,36 +113,29 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> dict:
         return {"messages": [AIMessage(content="Error interno: La solicitud para clarificación está vacía.")], "final_report": "PROCEED", "clarification_attempts": clarification_attempts}
 
     prompt = clarify_with_user_instructions.format(messages=get_buffer_string(pruned_messages_for_clarification), date=get_today_str())
-    logger.debug(f"📝 [DeepResearcher] clarify_with_user - Generated prompt: {prompt}")
+    logger.debug(f"📝 [DeepResearcher] clarify_with_user - Prompt generated.")
 
     if not prompt:
         logger.error("❌ [DeepResearcher] clarify_with_user - Prompt is empty. Cannot invoke LLM.")
         return {"messages": [AIMessage(content="Error interno: La solicitud para clarificación está vacía.")], "final_report": "PROCEED", "clarification_attempts": clarification_attempts}
 
     # Try with fast LLM first
-    clarification_model_fast = cast(Runnable[Sequence[BaseMessage], ClarifyWithUser],
-                               fast_llm.with_structured_output(ClarifyWithUser).with_retry(
-                                   stop_after_attempt=cfg.max_structured_output_retries
-                               ))
-
+    retry_cfg = {"stop_after_attempt": cfg.max_structured_output_retries}
+    
     response = None
     try:
-        response = await clarification_model_fast.ainvoke([HumanMessage(content=prompt)])
+        response = await invoke_structured_output(fast_llm, ClarifyWithUser, prompt, retry_cfg)
     except Exception as e:
-        logger.warning(f"⚠️ [DeepResearcher] clarify_with_user - Fast LLM failed with error: {e}. Falling back to Main LLM.")
+        logger.warning(f"⚠️ [DeepResearcher] clarify_with_user - Fast LLM failed: {e}. Falling back to Main LLM.")
         response = None
 
-    # Fallback to main LLM if fast LLM fails or returns None
+    # Fallback to main LLM
     if response is None:
-        logger.warning("⚠️ [DeepResearcher] clarify_with_user - Fast LLM returned None. Falling back to Main LLM.")
-        clarification_model_main = cast(Runnable[Sequence[BaseMessage], ClarifyWithUser],
-                                   main_llm.with_structured_output(ClarifyWithUser).with_retry(
-                                       stop_after_attempt=cfg.max_structured_output_retries
-                                   ))
+        logger.warning("⚠️ [DeepResearcher] clarify_with_user - Trying Main LLM.")
         try:
-            response = await clarification_model_main.ainvoke([HumanMessage(content=prompt)])
+            response = await invoke_structured_output(main_llm, ClarifyWithUser, prompt, retry_cfg)
         except Exception as e:
-            logger.error(f"❌ [DeepResearcher] clarify_with_user - Main LLM attempt also failed: {e}")
+            logger.error(f"❌ [DeepResearcher] clarify_with_user - Main LLM also failed: {e}")
             response = None
 
     # If still None and error was context length related, try fallback LLM
@@ -137,7 +145,9 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> dict:
         if fallback_llm:
             try:
                 clarification_model_fallback = cast(Runnable[Sequence[BaseMessage], ClarifyWithUser],
-                                                   fallback_llm.with_structured_output(ClarifyWithUser).with_retry(
+                                                   fallback_llm.with_structured_output(
+                                                       ClarifyWithUser
+                                                   ).with_retry(
                                                        stop_after_attempt=cfg.max_structured_output_retries
                                                    ))
                 response = await clarification_model_fallback.ainvoke([HumanMessage(content=prompt)])
@@ -180,8 +190,15 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> dic
         logger.info(f"Calling progress_callback in write_research_brief: {progress}%")
         await progress_callback(progress, "Generando el resumen de investigación...", "write_research_brief")
     
-    fast_llm = get_fast_llm()
-    main_llm = get_main_llm()
+    account_id = state.get("account_id")
+    from core.llm_manager import get_llm_for_user
+
+    if account_id:
+        fast_llm = await get_llm_for_user(account_id, purpose="fast")
+        main_llm = await get_llm_for_user(account_id, purpose="main")
+    else:
+        fast_llm = get_fast_llm()
+        main_llm = get_main_llm()
 
     if not fast_llm or not main_llm:
         raise ValueError("LLMs not initialized.")
@@ -203,33 +220,24 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> dic
     )
 
     # Try with fast LLM first
-    research_model_fast = cast(Runnable[Sequence[BaseMessage], ResearchQuestion],
-                          fast_llm.with_structured_output(ResearchQuestion).with_retry(
-                              stop_after_attempt=cfg.max_structured_output_retries
-                          ))
-
-    # Prepare main LLM model for fallback
-    research_model_main = cast(Runnable[Sequence[BaseMessage], ResearchQuestion],
-                          main_llm.with_structured_output(ResearchQuestion).with_retry(
-                              stop_after_attempt=cfg.max_structured_output_retries
-                          ))
-
+    retry_cfg = {"stop_after_attempt": cfg.max_structured_output_retries}
+    
     try:
-        response = await research_model_fast.ainvoke([HumanMessage(content=prompt_content)])
+        response = await invoke_structured_output(fast_llm, ResearchQuestion, prompt_content, retry_cfg)
     except Exception as e:
-        logger.warning(f"⚠️ [DeepResearcher] Fast LLM failed with error: {e}. Falling back to Main LLM.")
+        logger.warning(f"⚠️ [DeepResearcher] write_research_brief - Fast LLM failed: {e}. Falling back to Main LLM.")
         response = None
 
     # Fallback to main LLM if fast LLM fails or returns None
     if response is None or not response.research_brief:
-        logger.warning("⚠️ [DeepResearcher] Fast LLM failed to generate research brief. Falling back to Main LLM.")
+        logger.warning("⚠️ [DeepResearcher] write_research_brief - Trying Main LLM.")
         try:
-            response = await research_model_main.ainvoke([HumanMessage(content=prompt_content)])
+            response = await invoke_structured_output(main_llm, ResearchQuestion, prompt_content, retry_cfg)
         except Exception as e:
-            logger.error(f"❌ [DeepResearcher] Main LLM attempt also failed: {e}")
+            logger.error(f"❌ [DeepResearcher] write_research_brief - Main LLM also failed: {e}")
             response = None
 
-    logger.info(f"📝 [DeepResearcher] write_research_brief - LLM Response: {response}")
+    logger.info(f"📝 [DeepResearcher] write_research_brief - LLM Response received.")
     
     if response is None or not response.research_brief:
         logger.error("[DeepResearcher] write_research_brief - Both LLMs returned None for ResearchQuestion.")
@@ -259,11 +267,14 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
         logger.info(f"Calling progress_callback in final_report_generation: {current_global_progress}%")
         await progress_callback(current_global_progress, "Generando el informe final...", "final_report_generation")
 
-    raw_notes = state.get("raw_notes", [])
-    findings = "\n\n".join(raw_notes)
-    logger.info(f"📝 [DeepResearcher] Generating final report based on {len(raw_notes)} raw findings/notes.")
+    account_id = state.get("account_id")
+    from core.llm_manager import get_llm_for_user
     
-    writer_model = get_main_llm()
+    if account_id:
+        writer_model = await get_llm_for_user(account_id, purpose="main")
+    else:
+        writer_model = get_main_llm()
+
     if not writer_model:
         raise ValueError("Main LLM not initialized.")
 
@@ -286,6 +297,7 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
         findings=findings,
         date=get_today_str(),
     )
+    final_report_prompt += "\n\nIMPORTANTE: Al citar fuentes, cada número de fuente debe estar entre sus propios corchetes. Por ejemplo, en lugar de [1, 2, 3], formatee como [1][2][3]."
     
     try:
         final_report = await writer_model.ainvoke([HumanMessage(content=final_report_prompt)])
@@ -341,7 +353,7 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
                         if action not in recommendations:
                             recommendations.append(action)
     
-    logger.info(f"📄 [DeepResearcher] Final report generated. Preview: {str(final_report.content)[:300]}...")
+    logger.info(f"📄 [DeepResearcher] Final report generated.")
     return {
         "final_report": final_report.content,
         "messages": [final_report],
@@ -381,7 +393,14 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
         logger.info(f"Calling progress_callback in supervisor: {current_global_progress}%")
         await progress_callback(current_global_progress, f"Supervisor: Planificando iteración de investigación {current_iteration + 1}/{total_iterations}", "supervisor")
 
-    llm = get_fast_llm()
+    account_id = state.get("account_id")
+    from core.llm_manager import get_llm_for_user
+    
+    if account_id:
+        llm = await get_llm_for_user(account_id, purpose="fast")
+    else:
+        llm = get_fast_llm()
+
     if not llm:
         raise ValueError("Main LLM not initialized.")
 
@@ -407,13 +426,16 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
         max_researcher_iterations=cfg.max_researcher_iterations
     )
 
-    research_model = cast(Runnable[Sequence[BaseMessage], AIMessage],
-                          chat_llm.bind_tools(
-                              lead_researcher_tools,
-                              tool_choice="auto"
-                          ).with_retry(
-                              stop_after_attempt=cfg.max_structured_output_retries
-                          ))
+    try:
+        research_model = cast(Runnable[Sequence[BaseMessage], AIMessage],
+                              chat_llm.bind_tools(
+                                  lead_researcher_tools
+                              ).with_retry(
+                                  stop_after_attempt=cfg.max_structured_output_retries
+                              ))
+    except Exception as e:
+        logger.warning(f"⚠️ [Supervisor] Error binding tools: {e}. Trying simple bind.")
+        research_model = cast(Runnable[Sequence[BaseMessage], AIMessage], chat_llm.bind_tools(lead_researcher_tools))
 
     messages: list[BaseMessage] = [SystemMessage(content=supervisor_system_prompt)]
     initial_human_message_content = f"Plan research for: {state.get('research_brief', '')}"
@@ -444,7 +466,7 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
         messages, chat_llm, cfg.max_input_tokens
     )
 
-    logger.debug(f"🔍 [DeepResearcher] supervisor - Pruned messages for supervisor: {pruned_messages_for_supervisor}")
+    logger.debug(f"🔍 [DeepResearcher] supervisor - Pruned messages for supervisor count: {len(pruned_messages_for_supervisor)}")
     if not pruned_messages_for_supervisor:
         logger.error("❌ [DeepResearcher] supervisor - Pruned messages list is empty. Cannot invoke LLM.")
         return {"supervisor_messages": state.get("supervisor_messages", []) + [AIMessage(content="Error interno: La lista de mensajes para el supervisor está vacía.")], "research_iterations": state.get("research_iterations", 0) + 1}
@@ -452,7 +474,14 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
     try:
         response: AIMessage = await research_model.ainvoke(pruned_messages_for_supervisor)
     except Exception as e:
-        if is_token_limit_exceeded(e):
+        error_str = str(e)
+        if "tool_choice" in error_str or "404" in error_str and "Openrouter" in error_str:
+            logger.warning(f"⚠️ [Supervisor] OpenRouter tool_choice error detected: {e}. Retrying without strict tool binding...")
+            # Try once more with a simpler bind or without tools if necessary, 
+            # but for supervisor tools are essential. Let's try to bind without extras.
+            simple_model = chat_llm.bind_tools(lead_researcher_tools)
+            response = await simple_model.ainvoke(pruned_messages_for_supervisor)
+        elif is_token_limit_exceeded(e):
             logger.warning("⚠️ [Supervisor] Token limit exceeded. Pruning history and retrying...")
             # Reactive pruning (should be less frequent now)
             pruned_messages = remove_up_to_last_ai_message([cast(BaseMessage, msg) for msg in messages])
@@ -466,7 +495,7 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
 
     if response.tool_calls:
         for tool_call in response.tool_calls:
-            logger.info(f"📋 [Supervisor] LLM decided to call tool: {tool_call['name']} with args: {tool_call['args']}")
+            logger.info(f"📋 [Supervisor] LLM decided to call tool: {tool_call['name']}")
     else:
         logger.warning("[Supervisor] LLM did not generate any tool calls.")
 
@@ -628,7 +657,14 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> dict:
         logger.error("[Researcher] No tools found for research. Aborting.")
         raise ValueError("No tools found for research.")
 
-    llm_instance = get_fast_llm()
+    account_id = state.get("account_id")
+    from core.llm_manager import get_llm_for_user
+    
+    if account_id:
+        llm_instance = await get_llm_for_user(account_id, purpose="main")
+    else:
+        llm_instance = get_main_llm()
+
     if not llm_instance:
         raise ValueError("Main LLM not initialized.")
     chat_llm = cast(BaseChatModel, llm_instance)
@@ -669,12 +705,18 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> dict:
         messages, chat_llm, cfg.max_input_tokens
     )
 
-    logger.info(f"PRUNED MESSAGES FOR RESEARCHER: {pruned_messages_for_researcher}")
+    logger.info(f"PRUNED MESSAGES FOR RESEARCHER: {len(pruned_messages_for_researcher)} messages")
 
     try:
         response: AIMessage = await research_model.ainvoke(pruned_messages_for_researcher)
     except Exception as e:
-        if is_token_limit_exceeded(e):
+        error_str = str(e)
+        if "tool_choice" in error_str or "404" in error_str and "Openrouter" in error_str:
+            logger.warning(f"⚠️ [Researcher] OpenRouter tool_choice error detected: {e}. Retrying with simpler binding...")
+            # Try again with a simpler bind
+            simple_research_model = chat_llm.bind_tools(tools)
+            response = await simple_research_model.ainvoke(pruned_messages_for_researcher)
+        elif is_token_limit_exceeded(e):
             logger.warning(f"⚠️ [Researcher] Token limit exceeded for topic '{state['research_topic']}'. Pruning history and retrying...")
             # Reactive pruning (should be less frequent now)
             pruned_messages = remove_up_to_last_ai_message([cast(BaseMessage, msg) for msg in messages])
@@ -688,7 +730,7 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> dict:
     
     if response.tool_calls:
         for tool_call in response.tool_calls:
-            logger.info(f"🛠️ [Researcher] LLM decided to call tool: {tool_call['name']} with args: {tool_call['args']}")
+            logger.info(f"🛠️ [Researcher] LLM decided to call tool: {tool_call['name']}")
     else:
         logger.warning("[Researcher] LLM did not generate any tool calls for this step.")
     
@@ -735,7 +777,7 @@ async def researcher_tools(state: ResearcherState, config: RunnableConfig) -> di
 
     tool_outputs = []
     for obs, tc in zip(observations, most_recent_message.tool_calls):
-        logger.info(f"🔧 [Researcher Tools] Result for '{tc['name']}': '{str(obs)[:200]}...'")
+        logger.info(f"🔧 [Researcher Tools] Result for '{tc['name']}' received.")
         tool_outputs.append(ToolMessage(content=str(obs), name=tc["name"], tool_call_id=tc["id"]))
 
     return {"researcher_messages": tool_outputs}
@@ -758,7 +800,14 @@ async def compress_research(state: ResearcherState, config: RunnableConfig) -> d
         logger.info(f"Calling progress_callback in compress_research: {final_researcher_progress}% for topic {state['research_topic']}")
         await progress_callback(final_researcher_progress, f"Sintetizando hallazgos para: {state['research_topic']}", f"compress_research_{state['research_topic']}")
 
-    synthesizer_model = get_fast_llm()
+    account_id = state.get("account_id")
+    from core.llm_manager import get_llm_for_user
+    
+    if account_id:
+        synthesizer_model = await get_llm_for_user(account_id, purpose="fast")
+    else:
+        synthesizer_model = get_fast_llm()
+
     if not synthesizer_model:
         raise ValueError("Main LLM not initialized.")
 
@@ -766,6 +815,7 @@ async def compress_research(state: ResearcherState, config: RunnableConfig) -> d
     researcher_messages = [cast(BaseMessage, msg) for msg in state["researcher_messages"]] + [HumanMessage(content=compress_research_simple_human_message)]
     
     compression_prompt = compress_research_system_prompt.format(date=get_today_str())
+    compression_prompt += "\n\nIMPORTANTE: Al citar fuentes, cada número de fuente debe estar entre sus propios corchetes. Por ejemplo, en lugar de [1, 2, 3], formatee como [1][2][3]."
     messages = [SystemMessage(content=compression_prompt)] + researcher_messages
 
     logger.info(f"📚 [Compress Research] Compressing {len(researcher_messages)} messages.")
@@ -773,7 +823,7 @@ async def compress_research(state: ResearcherState, config: RunnableConfig) -> d
 
     raw_notes_content = "\n".join([str(m.content) for m in filter_messages(researcher_messages, include_types=["tool", "ai"])])
 
-    logger.info(f"📦 [Compress Research] Compressed research output preview: '{str(response.content)[:200]}...'")
+    logger.info(f"📦 [Compress Research] Compressed research output received.")
 
     # Extract sources from researcher messages
     sources = []
@@ -782,21 +832,45 @@ async def compress_research(state: ResearcherState, config: RunnableConfig) -> d
             try:
                 content_str = str(msg.content)
                 import re
-                urls = re.findall(r'URL: (https?://\S+)', content_str)
-                titles = re.findall(r'--- SOURCE \d+: (.*?) ---', content_str)
                 
+                # Extract URLs
+                urls = re.findall(r'URL: (https?://\S+)', content_str)
                 if not urls:
                     urls = re.findall(r'https?://[^\s\]\)]+', content_str)
+                
+                # Extract titles
+                titles = re.findall(r'--- SOURCE \d+: (.*?) ---', content_str)
+                
+                # Extract snippets/content - buscar el contenido entre "Content:" y el siguiente "---" o final
+                snippets = re.findall(r'Content:\s*(.*?)(?=(?:---|URL:|$))', content_str, re.DOTALL)
+                
+                # Si no encuentra snippets con ese patrón, intentar extraer cualquier texto descriptivo
+                if not snippets or len(snippets) < len(urls):
+                    # Intentar extraer líneas de texto después de cada URL
+                    snippets = re.findall(r'URL:.*?\n(.*?)(?=(?:URL:|---|\Z))', content_str, re.DOTALL)
                 
                 for i, url in enumerate(urls):
                     title = "Source"
                     if i < len(titles):
                         title = titles[i]
                     
+                    # Obtener snippet y limpiarlo
+                    snippet = ""
+                    if i < len(snippets):
+                        snippet = snippets[i].strip()
+                        # Limpiar el snippet: remover saltos de línea excesivos y limitar longitud
+                        snippet = ' '.join(snippet.split())
+                        if len(snippet) > 300:
+                            snippet = snippet[:300] + "..."
+                    
+                    # Si aún no hay snippet, usar el título como fallback
+                    if not snippet:
+                        snippet = f"Fuente web: {title}"
+                    
                     sources.append({
                         "title": title,
                         "url": url,
-                        "snippet": "",
+                        "snippet": snippet,
                         "type": "web"
                     })
             except Exception as e:

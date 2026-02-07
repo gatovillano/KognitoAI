@@ -8,8 +8,9 @@ from typing import List, Dict, Optional, TypeVar, cast, Type
 # LangChain y Pydantic para robustez y estructura
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import PydanticOutputParser
-from langchain_google_genai import ChatGoogleGenerativeAI
+from core.llm_manager import get_llm_for_user, get_fast_llm
 from pydantic import BaseModel, Field # Usamos pydantic v2
+from typing import List, Dict, Optional, TypeVar, cast, Type, Any
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ class CollectionAnalysis(BaseModel):
     emergent_knowledge_gaps: List[KnowledgeGap] = Field(description="Lista de 5-8 brechas de conocimiento emergentes de la colección en su conjunto, cada una con explicación detallada de por qué existe esta brecha y qué implicaciones tiene.")
     exploration_questions: List[str] = Field(description="Lista de 5-8 preguntas adicionales para explorar a partir de la colección, que el texto inspira pero no responde directamente.")
     problematic_areas: List[str] = Field(description="Una lista de 3 a 5 áreas problemáticas o desafíos comunes/emergentes identificados a través de la colección de documentos.")
-    final_reflections: List[str] = Field(description="3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
+    final_reflections: List[str] = Field(description="3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales, puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
     collection_insights: List[str] = Field(description="3-5 insights únicos que emergen del análisis conjunto de todos los documentos, que no serían evidentes analizando documentos individuales")
     methodological_notes: List[str] = Field(description="2-3 observaciones sobre la metodología, enfoque o perspectiva común en los documentos analizados")
     kai_synthesis: str = Field(description="Una síntesis de alto nivel desde la perspectiva de KAI (Kognito AI) como exocerebro del usuario. Debe ser una reflexión estratégica (150-200 palabras) que conecte el contenido de la colección con el contexto más amplio del conocimiento del usuario, identificando patrones emergentes, oportunidades de acción y valor estratégico único que surge del análisis conjunto.")
@@ -79,28 +80,22 @@ class AdvancedTextAnalyzer:
     Una clase encapsulada para realizar análisis de texto avanzados usando modelos de lenguaje.
     Gestiona la inicialización de modelos y proporciona métodos de análisis robustos.
     """
-    _gemini_model: Optional[ChatGoogleGenerativeAI] = None
-
-    async def _get_model(self) -> ChatGoogleGenerativeAI:
-        """Inicializa el modelo Gemini de forma singleton y asíncrona."""
-        if self._gemini_model is None:
-            logger.info("Inicializando modelo Gemini para análisis de texto avanzado...")
-            # Aquí puedes poner el nombre del modelo que prefieras de tu config
-            self._gemini_model = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash",
-                temperature=0.1,
-                disable_streaming=False  # Habilita streaming
-            )
-            logger.info("Modelo Gemini inicializado.")
-        return self._gemini_model
+    async def _get_model(self, account_id: Optional[str] = None) -> Any:
+        """Obtiene el modelo de análisis (personalizado por usuario o global)."""
+        if account_id:
+            logger.info(f"Obteniendo modelo personalizado para análisis (usuario: {account_id})...")
+            return await get_llm_for_user(account_id, purpose="fast")
+        
+        logger.info("Usando modelo rápido global para análisis de texto avanzado...")
+        return get_fast_llm()
 
     _PydanticType = TypeVar('_PydanticType', bound=BaseModel)
 
-    async def _run_analysis_with_parser(self, prompt: str, output_parser: PydanticOutputParser, pydantic_object: Type[_PydanticType]) -> _PydanticType:
+    async def _run_analysis_with_parser(self, prompt: str, output_parser: PydanticOutputParser, pydantic_object: Type[_PydanticType], account_id: Optional[str] = None) -> _PydanticType:
         """
         Función centralizada y robusta para ejecutar una llamada al LLM y parsear la salida.
         """
-        llm = await self._get_model()
+        llm = await self._get_model(account_id)
         full_prompt = f"{prompt}\n\n{output_parser.get_format_instructions()}"
 
         try:
@@ -128,7 +123,7 @@ class AdvancedTextAnalyzer:
             logger.error(f"Fallo en el pipeline de análisis y parseo del LLM: {e}", exc_info=True)
             raise ValueError(f"No se pudo obtener una respuesta JSON válida del LLM. Error: {e}")
 
-    async def analyze_single_text(self, text: str, document_title: str = "Documento analizado") -> SingleTextAnalysis:
+    async def analyze_single_text(self, text: str, document_title: str = "Documento analizado", account_id: Optional[str] = None) -> SingleTextAnalysis:
         """
         Ejecuta un análisis completo y estructurado sobre un único fragmento de texto.
         """
@@ -212,10 +207,10 @@ class AdvancedTextAnalyzer:
         ---
         """
         parser = PydanticOutputParser(pydantic_object=SingleTextAnalysis)
-        result = await self._run_analysis_with_parser(prompt, parser, SingleTextAnalysis)
+        result = await self._run_analysis_with_parser(prompt, parser, SingleTextAnalysis, account_id=account_id)
         return cast(SingleTextAnalysis, result)
 
-    async def analyze_collection(self, documents: List[Dict[str, str]]) -> CollectionAnalysis:
+    async def analyze_collection(self, documents: List[Dict[str, str]], account_id: Optional[str] = None) -> CollectionAnalysis:
         """
         Analiza una colección de documentos para encontrar temas transversales, conexiones y brechas de conocimiento emergentes.
         """
@@ -288,7 +283,7 @@ class AdvancedTextAnalyzer:
         Colección de documentos:
         {full_context_text}
         """
-        result = await self._run_analysis_with_parser(prompt, output_parser, CollectionAnalysis)
+        result = await self._run_analysis_with_parser(prompt, output_parser, CollectionAnalysis, account_id=account_id)
         return cast(CollectionAnalysis, result)
 
 # --- INSTANCIA ÚNICA ---

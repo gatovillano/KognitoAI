@@ -26,7 +26,8 @@ import { GitHubRepoDialog } from './github-repo-dialog';
 import { EditCollectionDialog } from './edit-collection-dialog';
 import { ShareCollectionDialog } from './share-collection-dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { CollectionDisplay, StaticCollectionCard } from '@/components/CollectionDisplay'; // Import CollectionDisplay and StaticCollectionCard
+import { CollectionDisplay, StaticCollectionCard } from '@/components/CollectionDisplay';
+import { GenericCard } from '@/components/GenericCard'; // Import CollectionDisplay and StaticCollectionCard
 import { DatasetNameDialog } from './dataset-name-dialog';
 import { TablesView } from './tables-view';
 import { AnalysisResults } from '@/components/AnalysisResults';
@@ -415,7 +416,7 @@ export default function RagCollectionsPage() {
     return (
       <motion.div layout className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-8 px-2">
         <AnimatePresence>
-          <StaticCollectionCard
+          <GenericCard
             key="all-documents-card"
             href="/rag/all"
             icon={Library}
@@ -423,7 +424,7 @@ export default function RagCollectionsPage() {
             description="Ver y gestionar todos tus archivos en un solo lugar."
             className="bg-muted"
           />
-          <StaticCollectionCard
+          <GenericCard
             key="repositories-card"
             href="/rag/repositories"
             icon={Github}
@@ -458,7 +459,7 @@ export default function RagCollectionsPage() {
             className="h-full"
           >
             <Card
-              className="group border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center text-center p-6 cursor-pointer h-full"
+              className="border-dashed hover:border-primary hover:bg-primary/5 cursor-pointer h-full flex flex-col items-center justify-center text-center p-6"
               onClick={() => setIsCreateOpen(true)}
             >
               <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/20 transition-colors">

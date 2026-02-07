@@ -48,16 +48,16 @@ class Configuration(BaseModel):
 
     # Model Configuration
     # We can define different models for different tasks
-    summarization_model: str = Field(default="gemini-2.5-flash")
+    summarization_model: str = Field(default=settings.google_summary_model_name)
     summarization_model_max_tokens: int = Field(default=settings.deep_research_max_tokens)
 
-    research_model: str = Field(default="gemini-2.5-flash")
+    research_model: str = Field(default=settings.google_summary_model_name)
     research_model_max_tokens: int = Field(default=settings.deep_research_max_tokens)
 
-    compression_model: str = Field(default="gemini-2.5-flash")
+    compression_model: str = Field(default=settings.google_summary_model_name)
     compression_model_max_tokens: int = Field(default=settings.deep_research_max_tokens)
 
-    final_report_model: str = Field(default="gemini-2.5-flash")
+    final_report_model: str = Field(default=settings.google_summary_model_name)
     final_report_model_max_tokens: int = Field(default=settings.deep_research_max_tokens)
     
     max_content_length: int = Field(default=10000)

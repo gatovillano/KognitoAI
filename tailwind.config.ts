@@ -10,7 +10,7 @@ const config: Config = {
 	theme: {
 		extend: {
 			fontFamily: {
-				sans: ["var(--font-sans)", 'BlinkMacSystemFont', 'ui-sans-serif', 'system-ui', '-apple-system', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', '"Noto Sans"', 'sans-serif', '"Apple Color Emoji"', '"Segoe UI Emoji"', '"Segoe UI Symbol"', '"Noto Color Emoji"'],
+				sans: ["var(--font-sans)", "sans-serif"],
 			},
 			borderRadius: {
 				lg: 'var(--radius)',

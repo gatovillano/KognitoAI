@@ -219,8 +219,8 @@ export default function AnalysisPage() {
   // Estados para debounce de búsqueda
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [debouncedTopicKeywords, setDebouncedTopicKeywords] = useState('');
-  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const keywordsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const searchTimeoutRef = useRef<number | null>(null);
+  const keywordsTimeoutRef = useRef<number | null>(null);
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
 
@@ -349,7 +349,7 @@ export default function AnalysisPage() {
       if (user && token) {
         fetchAnalyses(true, query, debouncedTopicKeywords);
       }
-    }, 500); // 500ms de delay
+    }, 500) as unknown as number;
   }, [user, token, fetchAnalyses, debouncedTopicKeywords]);
 
   // Función para actualizar palabras clave con debounce Y búsqueda automática
@@ -368,7 +368,7 @@ export default function AnalysisPage() {
       if (user && token) {
         fetchAnalyses(true, debouncedSearchQuery, keywords);
       }
-    }, 500); // 500ms de delay
+    }, 500) as unknown as number;
   }, [user, token, fetchAnalyses, debouncedSearchQuery]);
 
   // useEffect solo para carga inicial y cambios de filtros (no búsqueda de texto)
@@ -729,112 +729,94 @@ export default function AnalysisPage() {
                 <motion.div
                   key={analysis.id}
                   layout
-                  initial={{ opacity: 0, scale: 0.8 }}
+                  initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  transition={{ type: "spring", stiffness: 300, damping: 30, delay: index * 0.05 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ duration: 0.3, delay: index * 0.05 }}
                   className="h-full"
                 >
-                  <Card className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full">
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <Card
+                    className="h-full hover:bg-card/60"
+                    onClick={() => handleViewDetails(analysis)}
+                  >
+                    {/* Efecto de resplandor en el hover */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
+                    <CardHeader className="pb-3 relative z-10">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="p-3 rounded-2xl bg-background/50 border border-border/40 shadow-inner group-hover:scale-110 transition-transform duration-500">
                           {getAnalysisIcon(analysis.type)}
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleViewDetails(analysis)}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity gap-1 h-8 px-2"
-                        >
-                          <Eye className="h-3 w-3" />
-                          <span className="text-xs">Ver</span>
-                        </Button>
-                      </div>
-                      <div className="space-y-3">
-                        <CardTitle className="text-lg leading-tight line-clamp-2">{analysis.title}</CardTitle>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge className={`text-xs ${getAnalysisTypeBadgeColor(analysis.type)}`}>
-                            {getAnalysisTypeLabel(analysis.type)}
-                          </Badge>
-                          {analysis.confidence_score && (
-                            <Badge variant="outline" className="text-xs">
-                              Confianza: {(analysis.confidence_score * 100).toFixed(0)}%
-                            </Badge>
-                          )}
+                        <div className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full border-none ${getAnalysisTypeBadgeColor(analysis.type)}`}>
+                          {getAnalysisTypeLabel(analysis.type)}
                         </div>
                       </div>
+                      <CardTitle className="text-lg font-bold line-clamp-2 group-hover:text-primary transition-colors leading-tight tracking-tight">
+                        {analysis.title}
+                      </CardTitle>
+                      {analysis.confidence_score && (
+                        <div className="mt-2">
+                          <Badge variant="outline" className="text-[10px] font-bold uppercase tracking-wider">
+                            Confianza: {(analysis.confidence_score * 100).toFixed(0)}%
+                          </Badge>
+                        </div>
+                      )}
                     </CardHeader>
-                    <CardContent className="pt-0 flex-grow flex flex-col">
-                      <p className="text-sm text-muted-foreground line-clamp-6 mb-4 flex-grow leading-relaxed">
-                        {analysis.summary}
-                      </p>
+
+                    <CardContent className="pt-0 flex-grow flex flex-col relative z-10">
+                      <div className="text-xs text-muted-foreground/80 line-clamp-4 leading-relaxed font-medium mb-4">
+                        {analysis.summary || 'Sin resumen disponible'}
+                      </div>
 
                       {analysis.action_suggestion && (
-                        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                          <p className="text-xs font-medium text-yellow-800 mb-1">Sugerencia:</p>
-                          <p className="text-xs text-yellow-700 line-clamp-2">{analysis.action_suggestion}</p>
+                        <div className="mb-3 p-2.5 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800/40 rounded-xl">
+                          <p className="text-[10px] font-bold text-yellow-800 dark:text-yellow-400 mb-1 uppercase tracking-wider">Sugerencia:</p>
+                          <p className="text-xs text-yellow-700 dark:text-yellow-300 line-clamp-2">{analysis.action_suggestion}</p>
                         </div>
                       )}
 
                       {analysis.related_items && analysis.related_items.length > 0 && (
-                        <div className="mb-4">
-                          <p className="text-xs font-medium text-muted-foreground mb-2">
+                        <div className="mb-3">
+                          <p className="text-[10px] font-bold text-muted-foreground/60 mb-2 uppercase tracking-wider">
                             Elementos relacionados ({analysis.related_items.length})
                           </p>
-                          <div className="flex flex-wrap gap-1">
+                          <div className="flex flex-wrap gap-1.5">
                             {analysis.related_items.slice(0, 3).map((item, idx) => (
-                              <Badge key={idx} variant="secondary" className="text-xs">
+                              <Badge key={idx} variant="secondary" className="text-[10px] font-medium">
                                 {item.title || item.name || `Item ${idx + 1}`}
                               </Badge>
                             ))}
                             {analysis.related_items.length > 3 && (
-                              <Badge variant="outline" className="text-xs">
+                              <Badge variant="outline" className="text-[10px] font-medium">
                                 +{analysis.related_items.length - 3} más
                               </Badge>
                             )}
                           </div>
                         </div>
                       )}
-                      <div className="space-y-2 text-xs text-muted-foreground mt-auto pt-3 border-t border-border/50">
+
+                      <div className="mt-auto pt-3 border-t border-border/20 space-y-2">
                         {analysis.tool_used && (
-                          <div className="mb-2">
-                            <Badge variant="outline" className="text-xs font-mono bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700">
+                          <div>
+                            <Badge variant="outline" className="text-[10px] font-mono bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700">
                               {analysis.tool_used}
                             </Badge>
                           </div>
                         )}
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            <TooltipProvider>
-                              <UITooltip>
-                                <TooltipTrigger asChild>
-                                  <span className="truncate">Creado: {analysis.created_at ? formatDate(analysis.created_at) : 'N/A'}</span>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  <p>Fecha de creación del análisis.</p>
-                                </TooltipContent>
-                              </UITooltip>
-                            </TooltipProvider>
+                        <div className="flex items-center justify-between text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">
+                          <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-primary/40" />
+                            <span className="truncate">
+                              {analysis.created_at ? new Date(analysis.created_at).toLocaleDateString('es-ES', {
+                                year: 'numeric', month: 'short', day: 'numeric'
+                              }) : 'N/A'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 group-hover:text-primary transition-colors">
+                            <span>Detalles</span>
+                            <Eye className="h-3.5 w-3.5" />
                           </div>
                         </div>
-
-                        {analysis.updated_at !== analysis.created_at && (
-                          <div className="flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            <TooltipProvider>
-                              <UITooltip>
-                                <TooltipTrigger asChild>
-                                  <span className="truncate">Actualizado: {analysis.updated_at ? formatDate(analysis.updated_at) : 'N/A'}</span>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  <p>Última actualización del análisis.</p>
-                                </TooltipContent>
-                              </UITooltip>
-                            </TooltipProvider>
-                          </div>
-                        )}
                       </div>
                     </CardContent>
                   </Card>

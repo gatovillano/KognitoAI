@@ -98,7 +98,7 @@ export const LoginScreen = ({ navigation }: any) => {
                         title="Acceder con Telegram"
                         onPress={() => navigation.navigate('TelegramLogin')}
                         variant="outline"
-                        style={[styles.telegramButton, { borderColor: theme.primary }]}
+                        style={{ ...styles.telegramButton, borderColor: theme.primary }}
                     />
                 </View>
 

@@ -120,7 +120,7 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
             </div>
           )}
 
-          {analysis.collection_insights && analysis.collection_insights.length > 0 && (
+          {Array.isArray(analysis.collection_insights) && analysis.collection_insights.length > 0 && (
             <div className="grid grid-cols-1 gap-3 mt-4">
               <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-tight">Insights de Colección</h4>
               {analysis.collection_insights.map((insight, i) => (
@@ -179,7 +179,7 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
 
         {/* TAB: TEMAS Y CONCEPTOS */}
         <TabsContent value="themes" className="space-y-6 animate-in fade-in-50 duration-500">
-          {analysis.cross_cutting_themes && analysis.cross_cutting_themes.length > 0 && (
+          {Array.isArray(analysis.cross_cutting_themes) && analysis.cross_cutting_themes.length > 0 && (
             <div>
               <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${colColors.icon}`}>
                 <Target className="w-5 h-5" />
@@ -201,7 +201,7 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
           <Separator />
 
           <div>
-            {analysis.central_concepts && analysis.central_concepts.length > 0 && (
+            {Array.isArray(analysis.central_concepts) && analysis.central_concepts.length > 0 && (
               <div className="mb-6"> {/* Added margin-bottom for spacing */}
                 <h4 className="text-md font-bold mb-3 flex items-center gap-2">
                   <Brain className="w-4 h-4 text-purple-500" />
@@ -221,7 +221,7 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
               </div>
             )}
 
-            {analysis.concept_relationships && analysis.concept_relationships.length > 0 && (
+            {Array.isArray(analysis.concept_relationships) && analysis.concept_relationships.length > 0 && (
               <div>
                 <h4 className="text-md font-bold mb-3 flex items-center gap-2">
                   <LinkIcon className="w-4 h-4 text-blue-500" />
@@ -244,7 +244,7 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
 
         {/* TAB: CONEXIONES */}
         <TabsContent value="connections" className="space-y-6 animate-in fade-in-50 duration-500">
-          {analysis.identified_connections && analysis.identified_connections.length > 0 ? (
+          {Array.isArray(analysis.identified_connections) && analysis.identified_connections.length > 0 ? (
             <div>
               <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-indigo-600">
                 <LinkIcon className="w-5 h-5" />
@@ -277,7 +277,7 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
 
         {/* TAB: HALLAZGOS Y CRÍTICA */}
         <TabsContent value="insights" className="space-y-6 animate-in fade-in-50 duration-500">
-          {analysis.emergent_knowledge_gaps && analysis.emergent_knowledge_gaps.length > 0 && (
+          {Array.isArray(analysis.emergent_knowledge_gaps) && analysis.emergent_knowledge_gaps.length > 0 && (
             <ActionableButton
               title="Brechas de Conocimiento Emergentes"
               description="Identifica áreas donde falta información en la colección analizada."
@@ -287,7 +287,7 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
             />
           )}
 
-          {analysis.problematic_areas && analysis.problematic_areas.length > 0 && (
+          {Array.isArray(analysis.problematic_areas) && analysis.problematic_areas.length > 0 && (
             <div>
               <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-red-600">
                 <AlertTriangle className="w-5 h-5" />
@@ -304,7 +304,7 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
             </div>
           )}
 
-          {analysis.final_reflections && analysis.final_reflections.length > 0 && (
+          {Array.isArray(analysis.final_reflections) && analysis.final_reflections.length > 0 && (
             <Card className="border-dashed bg-muted/30">
               <CardHeader className="pb-2">
                 <CardTitle className="text-md font-bold flex items-center gap-2">
@@ -328,7 +328,7 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
         {/* TAB: META Y METODOLOGÍA */}
         <TabsContent value="meta" className="space-y-6 animate-in fade-in-50 duration-500">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {analysis.methodological_notes && analysis.methodological_notes.length > 0 && (
+            {Array.isArray(analysis.methodological_notes) && analysis.methodological_notes.length > 0 && (
               <div>
                 <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-600">
                   <Info className="w-5 h-5" />
@@ -344,7 +344,7 @@ const CollectionAnalysis: React.FC<CollectionAnalysisProps> = ({
               </div>
             )}
 
-            {analysis.exploration_questions && analysis.exploration_questions.length > 0 && (
+            {Array.isArray(analysis.exploration_questions) && analysis.exploration_questions.length > 0 && (
               <ActionableButton
                 title="Preguntas de Exploración"
                 description="Cuestionamientos clave para profundizar en la colección."

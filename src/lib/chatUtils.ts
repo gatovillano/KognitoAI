@@ -27,7 +27,9 @@ export const processMessageWithCitations = (text: string, allSources: Source[] |
     const fullMatch = match[0];
     const index = match.index!;
 
-    const source = allSources.find(s => s.id == citationNumber); // Usar == para comparar string | number
+    // Buscar la fuente por índice (citationNumber es 1-based, el array es 0-based)
+    // Opcionalmente también por ID si el ID coincide con el número
+    const source = allSources[citationNumber - 1] || allSources.find(s => s.id == citationNumber);
 
     if (source) {
       // Añadir el texto antes de la cita
@@ -37,7 +39,7 @@ export const processMessageWithCitations = (text: string, allSources: Source[] |
 
       // Añadir la cita como un componente
       contentParts.push({ type: 'citation', source: source, citationNumber: citationNumber });
-      citedSourceIds.add(source.id);
+      citedSourceIds.add(String(source.id));
 
       lastIndex = index + fullMatch.length;
     }
@@ -48,7 +50,7 @@ export const processMessageWithCitations = (text: string, allSources: Source[] |
     contentParts.push({ type: 'text', content: text.substring(lastIndex) });
   }
 
-  const uncitedSources = allSources.filter(s => !citedSourceIds.has(s.id));
+  const uncitedSources = allSources.filter(s => !citedSourceIds.has(String(s.id)));
 
   return { contentParts, uncitedSources };
 };
@@ -61,38 +63,55 @@ export const collectSourcesFromMessage = (
   const additionalSourcesToDisplay: Source[] = [];
   const seenSourceIdentifiers = new Set<string | number>();
 
+  // Debug log para ver qué llega
+  // console.log('collectSourcesFromMessage input:', { sources, ragContext });
+
+  // Función interna para normalizar y detectar tipos de fuentes
+  const normalizeSource = (rawSource: any): Source => {
+    const url = rawSource.url || rawSource.metadata?.document_id || '';
+    const metadata = rawSource.metadata || {};
+
+    // Identificar el tipo base
+    let detectedType: Source['type'] = rawSource.type || metadata.type || 'document';
+
+    // Refuerzo de detección por URL
+    if (url.includes('github.com')) {
+      detectedType = 'github';
+    } else if (url.startsWith('graph://') || url.startsWith('analysis://')) {
+      detectedType = 'graph';
+    } else if (url.startsWith('note://')) {
+      detectedType = 'note';
+    }
+
+    return {
+      id: rawSource.id || (rawSource.metadata?.document_id) || `src-${Math.random().toString(36).substr(2, 9)}`,
+      title: rawSource.name || rawSource.title || (detectedType === 'github' ? 'GitHub Repository' : 'Fuente'),
+      url: url,
+      snippet: rawSource.snippet || rawSource.content || rawSource.page_content || '',
+      type: detectedType,
+      metadata: metadata,
+      name: rawSource.name || rawSource.title || 'Fuente'
+    };
+  };
+
   // Helper para añadir fuentes y evitar duplicados
   const addSourceToDisplay = (source: Source) => {
-    const identifier = source.url ? source.url : `${source.type}-${source.name || source.title}-${source.id}`;
+    // Usar tipo + URL/ID como identificador para evitar colisiones entre diferentes tipos de fuentes
+    const identifier = `${source.type}-${source.url || source.id}`;
     if (!seenSourceIdentifiers.has(identifier)) {
       additionalSourcesToDisplay.push(source);
       seenSourceIdentifiers.add(identifier);
     }
   };
 
-  // Process ragContext
-  if (ragContext && Array.isArray(ragContext)) {
-    ragContext.forEach((ragItem) => {
-      let ragId: number | string;
-      if (typeof ragItem.id === 'number') {
-        ragId = ragItem.id;
-      } else if (ragItem.metadata?.document_id) {
-        ragId = ragItem.metadata.document_id;
-      } else {
-        ragId = `rag-${Math.random().toString(36).substr(2, 9)}`; // Generate unique ID if not numeric
-      }
+  // 1. Process explicit sources
+  if (sources && Array.isArray(sources)) {
+    sources.forEach(s => addSourceToDisplay(normalizeSource(s)));
+  }
 
-      const newSource: Source = {
-        id: ragId,
-        title: ragItem.name || ragItem.title || 'Contexto RAG',
-        url: ragItem.url || ragItem.metadata?.document_id || '',
-        snippet: ragItem.snippet || ragItem.content || '',
-        type: ragItem.type || ragItem.metadata?.type || 'document',
-        metadata: ragItem.metadata || {},
-        name: ragItem.name || ragItem.title || 'Contexto RAG',
-      };
-      addSourceToDisplay(newSource);
-    });
+  // 2. Process ragContext
+  if (ragContext && Array.isArray(ragContext)) {
+    ragContext.forEach(s => addSourceToDisplay(normalizeSource(s)));
   }
 
   return {

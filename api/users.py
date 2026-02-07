@@ -4,15 +4,17 @@ import logging
 import uuid
 from typing import List, Optional, AsyncGenerator
 
-from fastapi import APIRouter, HTTPException, Depends, status, Query
+from fastapi import APIRouter, HTTPException, Depends, status, Query, Body
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from core.database import SessionLocal, Account, PlatformIdentity, delete_accounts_by_ids
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.dependencies import get_db_session # Importar dependencia centralizada
-from api.schemas import UserSettingsResponse, UserSettingsUpdateRequest
+from api.schemas import UserSettingsResponse, UserSettingsUpdateRequest, UserPasswordUpdateRequest, UserSecretRequest, UserSecretResponse
+from utils.security import get_password_hash, verify_password
+from core.repositories.secret_repository import SecretRepository
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -38,6 +40,7 @@ class UserProfileResponse(BaseModel):
     username: Optional[str]
     telegram_id: Optional[int] = None  # Añadimos para el frontend
     is_admin: bool = False  # Añadimos el campo is_admin
+    has_password: bool = False # Indica si el usuario tiene contraseña establecida
 
     class Config:
         from_attributes = True  # Habilita compatibilidad con ORM de SQLAlchemy
@@ -73,7 +76,8 @@ async def read_users_me(current_account_id: str = Depends(get_current_account_id
         email=account.email,  # type: ignore
         username=account.username,  # type: ignore
         telegram_id=telegram_id,
-        is_admin=bool(account.is_admin)  # type: ignore
+        is_admin=bool(account.is_admin),  # type: ignore
+        has_password=bool(account.hashed_password)
     )
 
 
@@ -99,7 +103,14 @@ async def get_user_settings(current_account_id: str = Depends(get_current_accoun
         notifications_email=account.notifications_email,
         notifications_push=account.notifications_push,
         language=account.language,
-        privacy_data_sharing=account.privacy_data_sharing
+        privacy_data_sharing=account.privacy_data_sharing,
+        llm_provider=account.llm_provider,
+        llm_model=account.llm_model,
+        llm_temperature=account.llm_temperature,
+        llm_api_base=account.llm_api_base,
+        fast_llm_model=account.fast_llm_model,
+        vision_llm_model=account.vision_llm_model,
+        use_prompt_tooling=account.use_prompt_tooling
     )
 
 @router.put("/users/me/settings", response_model=UserSettingsResponse, summary="Actualizar configuración del usuario actual")
@@ -134,8 +145,116 @@ async def update_user_settings(
         notifications_email=account.notifications_email,
         notifications_push=account.notifications_push,
         language=account.language,
-        privacy_data_sharing=account.privacy_data_sharing
+        privacy_data_sharing=account.privacy_data_sharing,
+        llm_provider=account.llm_provider,
+        llm_model=account.llm_model,
+        llm_temperature=account.llm_temperature,
+        llm_api_base=account.llm_api_base,
+        fast_llm_model=account.fast_llm_model,
+        vision_llm_model=account.vision_llm_model,
+        use_prompt_tooling=account.use_prompt_tooling
     )
+
+@router.put("/users/me/password", summary="Actualizar contraseña del usuario")
+async def update_user_password(
+    password_update: UserPasswordUpdateRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Permite al usuario establecer o cambiar su contraseña.
+    Si el usuario ya tiene contraseña, debe proporcionar la actual.
+    """
+    account = await db.get(Account, uuid.UUID(current_account_id))
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
+
+    # Si el usuario ya tiene contraseña, verificar la actual
+    if account.hashed_password:
+        if not password_update.current_password:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Debes proporcionar tu contraseña actual.")
+        if not verify_password(password_update.current_password, account.hashed_password):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La contraseña actual es incorrecta.")
+    
+    # Establecer la nueva contraseña
+    account.hashed_password = get_password_hash(password_update.new_password)
+    
+    await db.commit()
+    
+    return {"message": "Contraseña actualizada correctamente."}
+    
+# --- Endpoints para la Gestión de Secretos (API Keys) ---
+
+@router.get("/users/me/secrets", response_model=List[UserSecretResponse], summary="Listar secretos del usuario actual")
+async def list_user_secrets(
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Lista los nombres de los secretos (API Keys) que el usuario ha guardado.
+    No devuelve los valores reales por seguridad.
+    """
+    from core.database import UserSecret
+    stmt = select(UserSecret).where(UserSecret.account_id == uuid.UUID(current_account_id))
+    result = await db.execute(stmt)
+    secrets = result.scalars().all()
+    
+    # Necesitamos desencriptar para mostrar un fragmento (máscara)
+    repo = SecretRepository(db)
+    response = []
+    for s in secrets:
+        decrypted = await repo.get_decrypted_secret(uuid.UUID(current_account_id), s.key_name)
+        masked = f"{decrypted[:8]}...{decrypted[-4:]}" if decrypted and len(decrypted) > 12 else "****"
+        response.append(UserSecretResponse(
+            key_name=s.key_name,
+            description=s.description,
+            masked_value=masked,
+            created_at=s.created_at.isoformat(),
+            updated_at=s.updated_at.isoformat()
+        ))
+    return response
+
+@router.post("/users/me/secrets", response_model=UserSecretResponse, summary="Crear o actualizar un secreto")
+async def set_user_secret(
+    secret_req: UserSecretRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Guarda o actualiza un secreto (API Key) cifrado para el usuario.
+    """
+    repo = SecretRepository(db)
+    secret_obj = await repo.set_secret(
+        account_id=uuid.UUID(current_account_id),
+        key_name=secret_req.key_name,
+        value=secret_req.value,
+        description=secret_req.description
+    )
+    
+    masked = f"{secret_req.value[:8]}...{secret_req.value[-4:]}" if len(secret_req.value) > 12 else "****"
+    
+    return UserSecretResponse(
+        key_name=secret_obj.key_name,
+        description=secret_obj.description,
+        masked_value=masked,
+        created_at=secret_obj.created_at.isoformat(),
+        updated_at=secret_obj.updated_at.isoformat()
+    )
+
+@router.delete("/users/me/secrets/{key_name}", summary="Eliminar un secreto")
+async def delete_user_secret(
+    key_name: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Elimina un secreto guardado.
+    """
+    repo = SecretRepository(db)
+    deleted = await repo.delete_secret(uuid.UUID(current_account_id), key_name)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Secreto no encontrado.")
+    return {"message": f"Secreto '{key_name}' eliminado correctamente."}
 
 
 # --- Endpoints de Administración de Usuarios (Solo para Admins) ---

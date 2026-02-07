@@ -65,7 +65,7 @@ const ProactiveInsightAnalysis: React.FC<ProactiveInsightAnalysisProps> = ({
         <Lightbulb className={`w-6 h-6 ${insightColors.icon}`} />
         <h3 className="text-2xl font-bold">Insight Proactivo de KAI</h3>
       </div>
-      
+
       {/* Summary Header with Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
@@ -81,7 +81,7 @@ const ProactiveInsightAnalysis: React.FC<ProactiveInsightAnalysisProps> = ({
             </div>
           </CardContent>
         </Card>
-        
+
         <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-green-200">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
@@ -102,7 +102,7 @@ const ProactiveInsightAnalysis: React.FC<ProactiveInsightAnalysisProps> = ({
             </div>
           </CardContent>
         </Card>
-        
+
         <Card className="bg-gradient-to-br from-purple-50 to-violet-50 border-purple-200">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
@@ -112,7 +112,7 @@ const ProactiveInsightAnalysis: React.FC<ProactiveInsightAnalysisProps> = ({
               <div>
                 <p className="text-xs font-medium text-purple-600 uppercase tracking-wide">Elementos Relacionados</p>
                 <p className="text-lg font-bold text-purple-900">
-                  {analysis.related_items?.length || 0}
+                  {Array.isArray(analysis.related_items) ? analysis.related_items.length : 0}
                 </p>
               </div>
             </div>
@@ -209,14 +209,14 @@ const ProactiveInsightAnalysis: React.FC<ProactiveInsightAnalysisProps> = ({
 
         {/* TAB: RELACIONADOS */}
         <TabsContent value="related" className="space-y-6 animate-in fade-in-50 duration-500">
-          {analysis.related_items && analysis.related_items.length > 0 ? (
+          {Array.isArray(analysis.related_items) && analysis.related_items.length > 0 ? (
             <div>
               <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-600">
                 <Link2 className="w-5 h-5" />
                 Elementos del Exocerebro Conectados
               </h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {analysis.related_items && analysis.related_items.length > 0 ? (
+                {Array.isArray(analysis.related_items) && analysis.related_items.length > 0 ? (
                   analysis.related_items.map((item, index) => (
                     <div key={index} className="p-4 rounded-xl border bg-card shadow-sm hover:shadow-md transition-shadow">
                       <h5 className="font-bold text-sm mb-2 flex items-center gap-2">

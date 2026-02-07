@@ -280,16 +280,23 @@ class GraphIntegration:
                 # MODO CONCEPTUAL (LLM-Driven)
                 # ═══════════════════════════════════════════════════════════════
                 from knowledge_graph.conceptual_graph_processor import ConceptualGraphProcessor
+                from core.llm_manager import get_llm_for_user
                 
-                llm = get_main_llm()
+                if account_id:
+                    llm = await get_llm_for_user(account_id, purpose="main")
+                    fast_llm = await get_llm_for_user(account_id, purpose="fast")
+                else:
+                    llm = get_main_llm()
+                    fast_llm = get_fast_llm()
+
                 if not llm:
                     tracker.set_error("LLM principal no disponible para procesamiento conceptual.")
                     raise ValueError("LLM principal no disponible para procesamiento conceptual.")
                 
-                logger.info(f"💡 LLM principal disponible: {llm is not None}, Fast LLM disponible: {get_fast_llm() is not None} antes de instanciar ConceptualGraphProcessor.")
+                logger.info(f"💡 LLM principal para account {account_id}: {llm is not None}. Iniciando ConceptualGraphProcessor.")
                 conceptual_processor = ConceptualGraphProcessor(
                     llm=llm, 
-                    fast_llm=get_fast_llm(),
+                    fast_llm=fast_llm,
                     neo4j_adapter=self.hybrid_adapter,
                     progress_tracker=tracker
                 )
@@ -1071,61 +1078,60 @@ class GraphIntegration:
                     formatted_output.append(self._format_path(record["path"]))
             return formatted_output
         elif return_type == "summary" or return_type == "stats":
-            if formatted_output: # Si ya hay resultados formateados (ej. de una query que devuelve algo específico)
+            if formatted_output and not (all_nodes or all_relationships): 
                 return formatted_output
             
-            # Generar un resumen más descriptivo si no hay resultados específicos ya formateados
+            # Generar un resumen más descriptivo incluyendo propiedades si hay pocos resultados
             if all_nodes or all_relationships:
                 summary_text = f"Resultados encontrados en el grafo para el dataset '{dataset_name}':\n"
                 
                 if all_nodes:
-                    summary_text += f"- Nodos ({len(all_nodes)}): "
-                    node_summaries = []
-                    # Agrupar nodos por etiqueta y contar
-                    node_label_counts = {}
-                    for node in all_nodes.values():
-                        label = node.get('labels', ['Unknown'])[0]
-                        node_label_counts[label] = node_label_counts.get(label, 0) + 1
-                    
-                    # Añadir los 3 tipos de nodos más frecuentes
-                    sorted_node_labels = sorted(node_label_counts.items(), key=lambda item: item[1], reverse=True)[:3]
-                    for label, count in sorted_node_labels:
-                        node_summaries.append(f"{count} {label.replace('_', ' ').title()}")
-                    
-                    # Añadir ejemplos de nombres si no hay demasiados tipos
-                    if len(all_nodes) <= 5: # No más de 5 nodos para listar nombres individualmente
-                        node_names = [node.get('name', node.get('concept', 'Unnamed')) for node in all_nodes.values()]
-                        summary_text += f"{', '.join(node_names)}.\n"
-                    elif node_summaries:
-                        summary_text += f"Tipos principales: {', '.join(node_summaries)}.\n"
+                    summary_text += f"- Nodos ({len(all_nodes)}):\n"
+                    # Si hay pocos nodos, listar sus propiedades principales
+                    if len(all_nodes) <= 10:
+                        for node in all_nodes.values():
+                            name = node.get('name') or node.get('concept') or 'Sin nombre'
+                            label = node.get('labels', ['Entidad'])[0]
+                            # Filtrar propiedades para el resumen
+                            excluded = {"name", "concept", "labels", "element_id", "id", "dataset_name", "account_id", "workspace_id"}
+                            props = {k: v for k, v in node.items() if k not in excluded and v}
+                            props_str = f" ({', '.join([f'{k}: {v}' for k, v in props.items()])})" if props else ""
+                            summary_text += f"  * [{label}] {name}{props_str}\n"
                     else:
-                        summary_text += "Múltiples nodos de varios tipos.\n"
+                        # Agrupar por etiqueta si hay muchos
+                        node_label_counts = {}
+                        for node in all_nodes.values():
+                            label = node.get('labels', ['Unknown'])[0]
+                            node_label_counts[label] = node_label_counts.get(label, 0) + 1
+                        
+                        sorted_labels = sorted(node_label_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+                        summary_text += "  * Tipos principales: " + ", ".join([f"{count} {label}" for label, count in sorted_labels]) + "\n"
 
                 if all_relationships:
-                    summary_text += f"- Relaciones ({len(all_relationships)}): "
-                    rel_summaries = []
-                    # Agrupar relaciones por tipo y contar
-                    rel_type_counts = {}
-                    for rel in all_relationships.values():
-                        rel_type = rel.get('type', 'UNKNOWN_RELATIONSHIP')
-                        rel_type_counts[rel_type] = rel_type_counts.get(rel_type, 0) + 1
-                    
-                    # Añadir los 3 tipos de relaciones más frecuentes
-                    sorted_rel_types = sorted(rel_type_counts.items(), key=lambda item: item[1], reverse=True)[:3]
-                    for rel_type, count in sorted_rel_types:
-                        rel_summaries.append(f"{count} '{rel_type.replace('_', ' ').title()}'")
-                    
-                    if rel_summaries:
-                        summary_text += f"Tipos principales: {', '.join(rel_summaries)}.\n"
+                    summary_text += f"- Relaciones ({len(all_relationships)}):\n"
+                    if len(all_relationships) <= 10:
+                        for rel in all_relationships.values():
+                            rel_type = rel.get('type', 'RELATED')
+                            source = all_nodes.get(rel.get('start_node_element_id'), {}).get('name', 'Nodo')
+                            target = all_nodes.get(rel.get('end_node_element_id'), {}).get('name', 'Nodo')
+                            desc = rel.get('description', '')
+                            desc_str = f": {desc}" if desc else ""
+                            summary_text += f"  * {source} -[:{rel_type}]-> {target}{desc_str}\n"
                     else:
-                        summary_text += "Múltiples relaciones de varios tipos.\n"
+                        rel_type_counts = {}
+                        for rel in all_relationships.values():
+                            rel_type = rel.get('type', 'UNKNOWN')
+                            rel_type_counts[rel_type] = rel_type_counts.get(rel_type, 0) + 1
+                        
+                        sorted_rels = sorted(rel_type_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+                        summary_text += "  * Tipos principales: " + ", ".join([f"{count} {rel_type}" for rel_type, count in sorted_rels]) + "\n"
                 
-                # Devolver el resumen como un resultado único
                 return [{
                     "type": "summary_text_insight",
                     "content": summary_text.strip(),
                     "node_count": len(all_nodes),
-                    "relationship_count": len(all_relationships)
+                    "relationship_count": len(all_relationships),
+                    "detailed_results": list(all_nodes.values())[:20] # Incluir algunos datos crudos por si el LLM los necesita
                 }]
             else:
                 return [{
@@ -1144,30 +1150,31 @@ class GraphIntegration:
             properties["labels"] = list(node.labels)
             properties["element_id"] = node.element_id
 
-            # Incluir propiedades clave para el LLM
-            properties["name"] = properties.get("name", properties.get("concept", "Unnamed Node"))
-            properties["description"] = properties.get("description", properties.get("full_text", ""))
-            properties["category"] = properties.get("category", "")
+            # Asegurar propiedades clave para el LLM sin sobrescribir si ya existen con valores útiles
+            if "name" not in properties:
+                properties["name"] = properties.get("concept", "Unnamed Node")
+            if "description" not in properties:
+                properties["description"] = properties.get("full_text", "")
+            if "category" not in properties:
+                properties["category"] = ""
 
-        elif isinstance(node, dict): # Es un diccionario (posiblemente de un registro .data())
-            properties = {k: v for k, v in node.items() if k not in ["labels", "element_id"]} # Evitar duplicados
-            properties["labels"] = node.get("labels", ["Unknown"])
-            properties["element_id"] = node.get("element_id", str(node.get("id", "unknown_id")))
+        elif isinstance(node, dict): # Es un diccionario
+            properties = node.copy()
+            if "labels" not in properties:
+                properties["labels"] = ["Unknown"]
+            if "element_id" not in properties:
+                properties["element_id"] = str(properties.get("id", "unknown_id"))
 
-            # Asegurar que 'id' exista y sea string para compatibilidad futura si se usa
+            # Asegurar que 'id' exista
             if "id" not in properties:
                 properties["id"] = properties["element_id"]
 
-            # Incluir propiedades clave para el LLM desde el diccionario
-            properties["name"] = properties.get("name", properties.get("concept", "Unnamed Node"))
-            properties["description"] = properties.get("description", properties.get("full_text", ""))
-            properties["category"] = properties.get("category", "")
         else:
-            # Manejar tipos inesperados de forma más robusta
-            error_msg = f"Tipo de nodo inesperado en _node_to_dict: {type(node)}."
+            # Manejar tipos inesperados
+            error_msg = f"Tipo de nodo inesperado: {type(node)}."
             logger.error(error_msg + f" Valor: {node}")
             properties = {
-                "element_id": f"ERROR_NODE_{str(node)}", # Prefijo para identificar fácilmente
+                "element_id": f"ERROR_NODE_{str(node)}",
                 "labels": ["Error"],
                 "name": error_msg,
                 "original_value": str(node)

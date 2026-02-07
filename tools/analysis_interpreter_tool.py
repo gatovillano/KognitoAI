@@ -18,19 +18,55 @@ class AnalysisInterpreterTool(BaseTool):
     name: str = "analysis_interpreter_tool"
     description: str = "Intérprete de Análisis de Datos. Toma resultados técnicos y estadísticos y los traduce a un lenguaje natural comprensible, extrayendo insights y conclusiones clave."
     args_schema: Type[BaseModel] = AnalysisInterpreterInput
+    account_id: Optional[str] = None # Add account_id as an attribute
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError("AnalysisInterpreterTool no soporta ejecución síncrona.")
+
+    async def _create_litellm_compatible_config(
+        self,
+        max_iterations: int = 6,
+        max_concurrent_units: int = 3
+    ) -> Dict[str, Any]:
+        from core.llm_manager import get_llm_for_user
+        
+        # Obtener los LLMs de Kognito adaptados al usuario
+        if self.account_id:
+            main_llm = await get_llm_for_user(self.account_id, purpose="main")
+            fast_llm = await get_llm_for_user(self.account_id, purpose="fast")
+        else:
+            main_llm = get_main_llm()
+            fast_llm = get_fast_llm()
+        
+        # This config structure is typically for tools that use LiteLLM directly
+        # For AnalysisInterpreterTool, we primarily need the main_llm for ainvoking
+        return {
+            "main_llm": main_llm,
+            "fast_llm": fast_llm,
+            "max_iterations": max_iterations,
+            "max_concurrent_units": max_concurrent_units
+        }
 
     async def _arun(
         self,
         analysis_results: str,
         user_question: Optional[str] = None,
         context_description: Optional[str] = None,
+        account_id: Optional[str] = None,
+        max_iterations: int = 6, # Added for _create_litellm_compatible_config
+        max_concurrent_units: int = 3, # Added for _create_litellm_compatible_config
         **kwargs
     ) -> str:
-        llm = get_main_llm()
+        # Store account_id for use in _create_litellm_compatible_config
+        self.account_id = account_id
         
+        # Create configuration using Kognito LLMs
+        config = await self._create_litellm_compatible_config(
+            max_iterations=max_iterations,
+            max_concurrent_units=max_concurrent_units
+        )
+        llm = config["main_llm"] # Get the main LLM from the config
+
         prompt = f"""
         Eres un Analista de Datos Senior y Consultor Estratégico. 
         Tu objetivo es interpretar los siguientes resultados técnicos de un análisis de datos y presentarlos de forma clara, profesional y accionable.

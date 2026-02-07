@@ -34,6 +34,7 @@ import { Label } from '@/components/ui/label';
 import apiClient from '@/lib/api';
 import { GraphFilters } from '@/components/KnowledgeGraph/GraphFilters';
 import { NodeDetailsSidebar } from '@/components/KnowledgeGraph/NodeDetailsSidebar';
+import { EdgeDetailsSidebar } from '@/components/KnowledgeGraph/EdgeDetailsSidebar';
 import { GraphProcessingProgress } from '@/components/GraphProcessingProgress';
 import { GraphMetadata, GraphFilters as GraphFiltersType } from '@/types/graph';
 import { getNodeColor } from '@/utils/graphUtils';
@@ -603,7 +604,7 @@ export function GraphView() {
 
     if (graphData && graphData.nodes && graphData.nodes.length > 0) {
       return (
-        <div className="flex-1 w-full relative">
+        <div className="w-full h-full relative">
           <GraphVisualization
             ref={graphVisualizationRef} // Asignar la ref
             graphData={graphData}
@@ -642,8 +643,8 @@ export function GraphView() {
   };
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-8 flex flex-col h-full">
-      <div className="flex items-center gap-2">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto flex flex-col h-screen overflow-hidden">
+      <div className="flex items-center gap-2 mb-4">
         <h2 className="text-3xl font-bold tracking-tight">
           Grafos de Conocimiento
         </h2>
@@ -652,7 +653,7 @@ export function GraphView() {
         </Button>
       </div>
 
-      <Card className="flex flex-col flex-1">
+      <Card className="flex flex-col flex-1 overflow-hidden">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Network className="h-6 w-6" />
@@ -692,7 +693,7 @@ export function GraphView() {
             </div>
           </CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-col flex-1">
+        <CardContent className="flex flex-col flex-1 overflow-hidden">
           <div className="mb-6">
             <div className="flex items-center space-x-2 mb-4">
               <Input
@@ -911,35 +912,33 @@ export function GraphView() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 flex flex-col h-full">
-            <div className={`transition-all duration-300 ${isFiltersExpanded ? 'lg:col-span-4' : 'lg:col-span-1'}`}>
-              <div className="sticky top-4">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold">Filtros</h3>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setIsFiltersExpanded(!isFiltersExpanded)}
-                    className="h-8 w-8 p-0"
-                  >
-                    {isFiltersExpanded ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  </Button>
-                </div>
-                <div className={`${isFiltersExpanded ? 'block' : 'hidden'}`}>
-                  <GraphFilters
-                    metadata={metadata}
-                    filters={filters}
-                    onFiltersChange={setFilters}
-                    totalNodes={metadata?.nodeTypes.reduce((acc, t) => acc + t.count, 0) || 0}
-                    totalEdges={metadata?.edgeTypes.reduce((acc, t) => acc + t.count, 0) || 0}
-                    filteredNodes={graphData?.nodes.length || 0}
-                    filteredEdges={graphData?.edges.length || 0}
-                    getNodeColor={getNodeColor}
-                  />
-                </div>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 overflow-hidden">
+            <div className={`transition-all duration-300 ${isFiltersExpanded ? 'lg:col-span-4' : 'lg:col-span-1'} flex flex-col overflow-hidden`}>
+              <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                <h3 className="text-lg font-semibold">Filtros</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsFiltersExpanded(!isFiltersExpanded)}
+                  className="h-8 w-8 p-0"
+                >
+                  {isFiltersExpanded ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                </Button>
               </div>
+              <ScrollArea className={`flex-1 ${isFiltersExpanded ? 'block' : 'hidden'}`}>
+                <GraphFilters
+                  metadata={metadata}
+                  filters={filters}
+                  onFiltersChange={setFilters}
+                  totalNodes={metadata?.nodeTypes.reduce((acc, t) => acc + t.count, 0) || 0}
+                  totalEdges={metadata?.edgeTypes.reduce((acc, t) => acc + t.count, 0) || 0}
+                  filteredNodes={graphData?.nodes.length || 0}
+                  filteredEdges={graphData?.edges.length || 0}
+                  getNodeColor={getNodeColor}
+                />
+              </ScrollArea>
             </div>
-            <div className={`${isFiltersExpanded ? 'lg:col-span-8' : 'lg:col-span-11'} border rounded-lg overflow-hidden bg-background flex flex-col flex-1`}>
+            <div className={`${isFiltersExpanded ? 'lg:col-span-8' : 'lg:col-span-11'} border rounded-lg overflow-hidden bg-background flex flex-col`}>
               {renderGraphContent()}
             </div>
           </div>
@@ -956,10 +955,12 @@ export function GraphView() {
       />
 
       {/* Panel de detalles del edge */}
-      <NodeDetailsSidebar
+      <EdgeDetailsSidebar
         edge={selectedEdge}
         onClose={handleCloseEdgeDetails}
         isOpen={isEdgeDetailsOpen}
+        sourceNode={graphData?.nodes.find(n => n.id === selectedEdge?.from)}
+        targetNode={graphData?.nodes.find(n => n.id === selectedEdge?.to)}
       />
 
       {/* Indicador de progreso de procesamiento */}

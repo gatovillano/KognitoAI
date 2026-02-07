@@ -18,13 +18,11 @@ from langchain_community.chat_message_histories import PostgresChatMessageHistor
 from langchain_core.messages import HumanMessage, AIMessage
 from datetime import datetime, timezone # Importar datetime y timezone
 
-# Usamos el nombre del servicio Docker y el puerto interno correcto.
-TTS_SERVICE_URL = "http://openai-edge-tts:5050/v1/audio/speech"
-
 from sqlalchemy import update, Integer, cast, func, text
 
 
 from utils.audio_transcriber import transcribe_audio_file, StreamingTranscriber, get_whisper_model
+from utils.google_tts import generate_speech_streaming, get_tts_client
 from utils.security import get_current_account_id, get_current_user, get_current_user_from_websocket_query_param, decode_access_token # Añadido decode_access_token
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
@@ -59,7 +57,7 @@ class ChatRequest(BaseModel):
     thread_id: str
     account_id: str
     telegram_id: Optional[int] = None  # Hacemos telegram_id opcional
-    user_message: str
+    user_message: Optional[str] = None
     image_base64: Optional[str] = None
     images_base64: Optional[List[str]] = None
     document_url: Optional[str] = None  # Campo para URL de documentos
@@ -91,6 +89,7 @@ class Message(BaseModel):
     images_base64: Optional[List[str]] = None
     document_url: Optional[str] = None
     sources: Optional[List[Source]] = None # Añadido para incluir las fuentes
+    reasoning: Optional[str] = None # Añadido para persistir el pensamiento del LLM
 
 class PaginatedChatMessagesResponse(BaseModel):
     total: int
@@ -286,7 +285,8 @@ async def get_messages_for_thread(
                     created_at=msg.additional_kwargs.get("created_at", datetime.now(timezone.utc)),
                     image_base64=image_contents[0] if image_contents else None,
                     images_base64=image_contents if len(image_contents) > 1 else None,
-                    sources=message_sources # Asignar las fuentes extraídas
+                    sources=message_sources, # Asignar las fuentes extraídas
+                    reasoning=msg.additional_kwargs.get("reasoning") or msg.additional_kwargs.get("think") # Extraer razonamiento
                 ))
 
         # Sort messages by created_at in ascending order
@@ -420,6 +420,7 @@ async def search_chat_messages(
                 "thread_title": thread_title,
                 "content": text_content,
                 "sender": sender,
+                "reasoning": additional_kwargs.get("reasoning") or additional_kwargs.get("think"),
                 "created_at": created_at.isoformat()
             })
 
@@ -526,10 +527,61 @@ async def generate_all_thread_titles(
         logger.error(f"Error al iniciar la generación de todos los títulos para la cuenta {current_account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Ocurrió un error al iniciar el proceso.")
 
+def _split_text_into_chunks(text: str, max_length: int = 1500) -> List[str]:
+    """
+    Splits a long text into smaller chunks of a maximum length.
+    Tries to split at natural sentence breaks like '.', '?', '!', or newlines.
+    """
+    if not text or not text.strip():
+        return []
+
+    if len(text) <= max_length:
+        return [text]
+
+    chunks = []
+    while len(text) > 0:
+        if len(text) <= max_length:
+            chunks.append(text)
+            break
+
+        # Find the best split point by searching backwards from max_length
+        split_pos = -1
+        # Prioritize sentence-ending punctuation
+        for delimiter in ['.', '?', '!']:
+            pos = text.rfind(delimiter, 0, max_length)
+            if pos != -1:
+                split_pos = pos + 1
+                break
+        
+        # If not found, try newlines or other punctuation
+        if split_pos == -1:
+            for delimiter in ['\n', ';', ',']:
+                pos = text.rfind(delimiter, 0, max_length)
+                if pos != -1:
+                    split_pos = pos + 1
+                    break
+
+        # If still no natural break found, hard split at a space
+        if split_pos == -1:
+            pos = text.rfind(' ', 0, max_length)
+            if pos != -1:
+                split_pos = pos + 1
+            else:
+                # Absolute last resort: hard split at max_length
+                split_pos = max_length
+        
+        chunk = text[:split_pos]
+        text = text[split_pos:]
+        chunks.append(chunk)
+
+    return [c.strip() for c in chunks if c.strip()]
+
+
 @router.post("/text-to-speech", summary="Generar audio desde texto")
 async def text_to_speech(request: TextToSpeechRequest):
     """
-    Recibe texto, lo envía al servicio interno de TTS y devuelve el audio como un stream.
+    Recibe texto, lo envía al servicio Google Cloud TTS y devuelve el audio como un stream.
+    Maneja textos largos dividiéndolos en fragmentos y utiliza caché para evitar regeneraciones.
     """
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="El texto no puede estar vacío.")
@@ -550,30 +602,69 @@ async def text_to_speech(request: TextToSpeechRequest):
     text_to_speak = re.sub(r'\s+', ' ', text_to_speak).strip()
 
     if not text_to_speak:
-        return StreamingResponse(BytesIO(), media_type="audio/wav")
+        return StreamingResponse(BytesIO(), media_type="audio/mpeg")
 
-    # Parámetros para open-edgetts.
-    tts_payload = {
-        'input': text_to_speak,
-        'voice': request.voice if request.voice else 'es-MX-DaliaNeural',
-        'model': 'edge-tts',
-        'speed': 1.0,
-    }
+    text_chunks = _split_text_into_chunks(text_to_speak)
 
+    async def generate_audio_stream():
+        """Genera el stream de audio usando Google Cloud TTS para cada fragmento."""
+        try:
+            async for audio_chunk in generate_speech_streaming(
+                text_chunks=text_chunks,
+                voice=request.voice if request.voice else 'es-MX-DaliaNeural',
+                speaking_rate=1.0,
+                audio_format="mp3",
+                use_cache=True
+            ):
+                yield audio_chunk
+        except Exception as e:
+            logger.error(f"❌ Error generando audio con Google TTS: {e}")
+            raise HTTPException(status_code=500, detail=f"Error al generar audio: {str(e)}")
+
+    return StreamingResponse(generate_audio_stream(), media_type="audio/mpeg")
+
+
+@router.get("/text-to-speech/cache-stats", summary="Obtener estadísticas del caché de TTS")
+async def get_tts_cache_stats():
+    """
+    Endpoint para obtener estadísticas del caché de audios TTS.
+    """
     try:
-        async with httpx.AsyncClient() as client:
-            # Hacemos una petición POST al servicio de TTS
-            response = await client.post(TTS_SERVICE_URL, json=tts_payload, timeout=30.0)     
-            response.raise_for_status()
-            # Devolvemos el contenido de audio directamente como un stream
-            return StreamingResponse(BytesIO(response.content), media_type="audio/wav")
+        client = get_tts_client()
+        stats = client.get_cache_stats()
+        
+        if stats:
+            return {
+                "success": True,
+                "stats": stats
+            }
+        else:
+            return {
+                "success": True,
+                "message": "El caché está deshabilitado",
+                "stats": None
+            }
+    except Exception as e:
+        logger.error(f"Error obteniendo estadísticas del caché TTS: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener estadísticas: {str(e)}")
 
-    except httpx.RequestError as e:
-        logger.error(f"Error de red contactando el servicio TTS: {e}")
-        raise HTTPException(status_code=503, detail="El servicio de voz no está disponible.")
-    except httpx.HTTPStatusError as e:
-        logger.error(f"El servicio TTS devolvió un error {e.response.status_code}: {e.response.text}")
-        raise HTTPException(status_code=502, detail="Error en el servicio de generación de voz.")
+
+@router.post("/text-to-speech/clear-cache", summary="Limpiar caché de TTS")
+async def clear_tts_cache():
+    """
+    Endpoint para limpiar las entradas expiradas del caché de TTS.
+    """
+    try:
+        client = get_tts_client()
+        client.clear_cache()
+        
+        return {
+            "success": True,
+            "message": "Caché de TTS limpiado exitosamente"
+        }
+    except Exception as e:
+        logger.error(f"Error limpiando caché TTS: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al limpiar caché: {str(e)}")
 
 @router.post("/transcribe-audio")
 async def transcribe_audio(file: UploadFile = File(...)):
@@ -712,7 +803,7 @@ async def handle_chat_form(
     thread_id: str = Form(...),
     account_id: str = Form(...),
     telegram_id: Optional[int] = Form(None),
-    user_message: str = Form(...),
+    user_message: Optional[str] = Form(None),
     image_base64: Optional[str] = Form(None),
     images_base64: Optional[List[str]] = Form(None),
     document_url: Optional[str] = Form(None),
@@ -793,7 +884,7 @@ async def create_and_run_agent_streaming(
     thread_id: str,
     task_id: str, # Nuevo taskId para seguimiento
     telegram_id: Optional[int],
-    user_message: str,
+    user_message: Optional[str],
     image_base64: Optional[str] = None,
     images_base64: Optional[List[str]] = None,
     document_url: Optional[str] = None,
@@ -861,7 +952,9 @@ async def create_and_run_agent_streaming(
         # --- Construcción del Mensaje Multimodal ---
         # Langchain espera una lista de dicts o strings para el contenido multimodal.
         # Los dicts deben tener la estructura esperada por el modelo (e.g., {"type": "image_url", "image_url": {"url": "..."}})
-        content_parts: List[Union[str, Dict[str, Any]]] = [{"type": "text", "text": user_message}]
+        # Asegurarse de que el mensaje no sea None para evitar errores de validación en LangChain
+        safe_user_message = user_message if user_message is not None else ""
+        content_parts: List[Union[str, Dict[str, Any]]] = [{"type": "text", "text": safe_user_message}]
         if image_base64:
             logger.info("Adjuntando imagen al mensaje para el LLM.")
             content_parts.append({
@@ -889,6 +982,7 @@ async def create_and_run_agent_streaming(
             "sources": [],
             "thread_id": thread_id, # Añadir thread_id al estado inicial
             "context": context, # Inyectar el contexto
+            "loop_count": 0, # Inicializar contador de bucles
         }
 
         # Asegurarse de que el historial de mensajes se inicialice con el mensaje del usuario
@@ -899,7 +993,7 @@ async def create_and_run_agent_streaming(
         )
         await chat_message_history.aadd_messages([sanitized_human_message])
 
-        config: RunnableConfig = {"configurable": {"thread_id": thread_id}} # Castear a RunnableConfig
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id}, "recursion_limit": 100} # Castear a RunnableConfig con límite aumentado
         final_graph_state = None
         full_response_text = ""
         
@@ -977,6 +1071,7 @@ async def create_and_run_agent_streaming(
         # por la lógica en core/agent.py (específicamente en tool_node y call_model_node).
         # Aquí, simplemente extraemos las fuentes del AIMessage final.
         final_sources = final_ai_message.additional_kwargs.get("sources", [])
+        final_reasoning = final_ai_message.additional_kwargs.get("reasoning", "")
         
         logger.info(f"DEBUG (create_and_run_agent_streaming): Fuentes finales extraídas del AIMessage: {final_sources}")
         
@@ -985,6 +1080,7 @@ async def create_and_run_agent_streaming(
             "thread_id": thread_id,
             "taskId": task_id,
             "text": full_response_text,
+            "reasoning": final_reasoning,
             "sources": final_sources,
         }, connection_type=conn_type)
 

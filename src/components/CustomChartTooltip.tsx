@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 
 interface CustomTooltipProps {
   active?: boolean;
-  payload?: any[];
+  payload?: readonly any[];
   label?: string | number;
 }
 

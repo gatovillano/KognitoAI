@@ -53,6 +53,8 @@ interface ChatMessageType {
   ragContext?: SelectedContextItem[];
   sources?: Source[];
   chunks?: string[];
+  reasoning?: string; // Nuevo campo para el razonamiento completo
+  reasoning_chunks?: string[]; // Para el streaming del razonamiento
   tool_code?: string;
   taskId?: string; // Añadir taskId aquí
 }
@@ -213,13 +215,20 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef(null);
   const justRestoredScrollRef = useRef(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevScrollHeightRef = useRef<number | null>(null); // Initialize with current value
 
-  const scrollToBottom = useCallback((smooth: boolean) => {
-    if (scrollAreaRef.current) {
-      scrollAreaRef.current.scrollTo({
-        top: scrollAreaRef.current.scrollHeight,
-        behavior: smooth ? 'smooth' : 'auto',
+  const scrollToBottom = useCallback((behavior: 'smooth' | 'auto' = 'auto') => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({
+        behavior: behavior,
+        block: 'end',
+      });
+    } else if (scrollAreaRef.current) {
+      const container = scrollAreaRef.current;
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: behavior,
       });
     }
   }, []);
@@ -228,7 +237,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   useEffect(() => {
     if (isResponding || toolName || isDeepResearchActive || backgroundTasks.length > 0) {
       // Use a small timeout to ensure the DOM has updated with the new indicator
-      setTimeout(() => scrollToBottom(true), 100);
+      // Durante indicators usamos smooth porque es un salto único
+      setTimeout(() => scrollToBottom('smooth'), 100);
     }
   }, [isResponding, toolName, isDeepResearchActive, backgroundTasks.length, scrollToBottom]);
 
@@ -240,7 +250,10 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
       const { type, taskId, ...data } = message;
 
-      if (data.thread_id && data.thread_id !== threadIdRef.current) {
+      // Filtrar mensajes por thread_id para evitar que aparezcan en ventanas equivocadas
+      const messageThreadId = data.thread_id || (data as any).thread_id;
+      if (messageThreadId && threadIdRef.current && messageThreadId !== threadIdRef.current) {
+        console.debug(`[WebSocket] Descartando mensaje tipo ${type} para hilo ${messageThreadId} (actual: ${threadIdRef.current})`);
         return;
       }
 
@@ -264,10 +277,48 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 created_at: new Date().toISOString(),
                 sources: [],
                 chunks: [],
+                reasoning_chunks: [],
                 taskId: taskId, // Añadir taskId al mensaje
               });
             }
             break;
+
+          case 'reasoning_chunk': {
+            setIsThinking(false);
+            let chunkMessageIndex = updatedMessages.findIndex(msg => msg.taskId === taskId);
+
+            if (chunkMessageIndex === -1 && taskId) {
+              updatedMessages.push({
+                text: '',
+                sender: 'ai',
+                created_at: new Date().toISOString(),
+                sources: [],
+                chunks: [],
+                reasoning_chunks: [],
+                taskId: taskId,
+              });
+              chunkMessageIndex = updatedMessages.length - 1;
+            }
+
+            if (taskId && (data.chunk !== undefined || (data as any).full_reasoning !== undefined) && chunkMessageIndex !== -1) {
+              const existingMessage = updatedMessages[chunkMessageIndex];
+              let newReasoning = existingMessage.reasoning || "";
+
+              if ((data as any).full_reasoning !== undefined) {
+                newReasoning = (data as any).full_reasoning;
+              } else {
+                newReasoning += data.chunk;
+              }
+
+              updatedMessages[chunkMessageIndex] = {
+                ...existingMessage,
+                reasoning: newReasoning,
+                reasoning_chunks: [...(existingMessage.reasoning_chunks || []), data.chunk],
+              };
+            }
+            requestAnimationFrame(() => scrollToBottom('auto'));
+            break;
+          }
 
           case 'stream_chunk': {
             setIsThinking(false);
@@ -311,7 +362,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             } else {
               console.error("[CommonChat DEBUG] Dropping chunk. Data:", data, `Index: ${chunkMessageIndex}`);
             }
-            requestAnimationFrame(() => scrollToBottom(true));
+            requestAnimationFrame(() => scrollToBottom('auto'));
             break;
           }
 
@@ -421,7 +472,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     async (e?: React.FormEvent, messageTextFromInput?: string) => {
       if (e) e.preventDefault();
       const messageToProcess = messageTextFromInput || newMessageRef.current;
-      if ((!messageToProcess.trim() && selectedContext.length === 0 && uploadedImages.length === 0) || isRespondingRef.current) return;
+      if (!messageToProcess.trim() && selectedContext.length === 0 && uploadedImages.length === 0) return;
 
       if (!user?.id) {
         toast.error('Error: Usuario no autenticado.');
@@ -438,7 +489,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           const formData = new FormData();
           formData.append('thread_id', newThreadId);
           formData.append('account_id', user.id);
-          formData.append('user_message', messageToProcess);
+          formData.append('user_message', messageToProcess || '');
           if (selectedContext.length > 0) {
             formData.append('rag_context', JSON.stringify(selectedContext.map(item => ({ type: item.type, id: item.id }))));
           }
@@ -480,7 +531,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         images_base64: uploadedImages.map(img => img.base64),
       };
       setMessages((prev) => [...prev, userMessage]);
-      requestAnimationFrame(() => scrollToBottom(true));
+      requestAnimationFrame(() => scrollToBottom('smooth'));
       setNewMessage('');
       if (uploadedImages.length > 0) {
         uploadedImages.forEach(img => URL.revokeObjectURL(img.preview));
@@ -492,7 +543,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         const formData = new FormData();
         formData.append('thread_id', threadId);
         formData.append('account_id', user.id);
-        formData.append('user_message', messageToProcess);
+        formData.append('user_message', messageToProcess || '');
         if (selectedContext.length > 0) {
           formData.append('rag_context', JSON.stringify(selectedContext.map(item => ({ type: item.type, id: item.id }))));
         }
@@ -515,7 +566,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         setIsResponding(false);
       }
     },
-    [user, threadId, selectedContext, router, scrollToBottom, setNewMessage, uploadedImages]
+    [user, threadId, selectedContext, router, scrollToBottom, uploadedImages]
   );
 
   const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -645,7 +696,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       toast.error('No se pudo acceder al micrófono. Asegúrate de dar permisos.');
       setIsRecording(false);
     }
-  }, [setRecordingMimeType, setMediaRecorder, setIsRecording, setIsProcessingAudio, setNewMessage]); // Se añaden las dependencias para evitar closures viciados
+  }, [setRecordingMimeType, setMediaRecorder, setIsRecording, setIsProcessingAudio]); // setNewMessage removido - es estable
 
   const handleStopRecording = useCallback(async () => {
     if (mediaRecorder && mediaRecorder.state === 'recording') {
@@ -666,15 +717,13 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   }, []);
 
   const handleRetry = useCallback(async (text: string) => {
-    if (isRespondingRef.current) return;
-
     try {
       setIsResponding(true);
 
       const formData = new FormData();
       formData.append('thread_id', threadId);
       formData.append('account_id', user?.id || '');
-      formData.append('user_message', text);
+      formData.append('user_message', text || '');
       if (selectedContext.length > 0) {
         formData.append('rag_context', JSON.stringify(selectedContext.map(item => ({ type: item.type, id: item.id }))));
       }
@@ -856,6 +905,24 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     setIsUploadingFile(false);
   }, [workspaceId]);
 
+  // Memoizar las previsualizaciones de imágenes para evitar recrear el array en cada render
+  const uploadedImagePreviews = useMemo(() => {
+    return uploadedImages.map(img => img.preview);
+  }, [uploadedImages]);
+
+  // Callbacks estables para funciones inline
+  const handleKeyDown = useCallback(() => { }, []);
+  const handleToggleKnowledgeAnalysis = useCallback(() => { }, []);
+  const handleToggleWebSearch = useCallback(() => { }, []);
+  const handleToggleComprehensiveAnalysis = useCallback(() => { }, []);
+  const handleToggleDeepResearch = useCallback(() => { }, []);
+  const handlePaste = useCallback(() => { }, []);
+
+  // Callback para remover imagen por índice
+  const handleRemoveImageByIndex = useCallback((index: number) => {
+    handleRemoveImage(index);
+  }, [handleRemoveImage]);
+
   // Main effect for loading a thread's data
   useEffect(() => {
     const fetchChatData = async () => {
@@ -907,7 +974,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   useEffect(() => {
     if (!isLoading) {
       // Use a small timeout to ensure the DOM has updated with the messages
-      setTimeout(() => scrollToBottom(false), 150);
+      setTimeout(() => scrollToBottom('smooth'), 150);
     }
   }, [isLoading, scrollToBottom]);
 
@@ -961,10 +1028,10 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   }
 
   return (
-    <div className="flex h-screen bg-transparent overflow-x-hidden">
-      <div className="flex flex-col h-full w-full">
-        <div ref={scrollAreaRef} className="flex-1 overflow-y-auto">
-          <div className="p-2 sm:p-4 md:p-6 space-y-3 sm:space-y-6 w-full md:max-w-6xl mx-auto">
+    <div className="flex h-full bg-transparent overflow-hidden">
+      <div className="flex flex-col h-full w-full overflow-hidden">
+        <div ref={scrollAreaRef} className="flex-1 overflow-y-auto min-h-0">
+          <div className="p-1 sm:p-4 md:p-6 space-y-3 sm:space-y-6 w-full md:max-w-6xl mx-auto">
             <div>
               {hasMoreMessages && (
                 <div ref={topSentinelRef} className="flex justify-center p-4">
@@ -1010,10 +1077,11 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                   <BackgroundTaskIndicator task={task} />
                 </div>
               ))}
+              <div ref={messagesEndRef} className="h-4 w-full" />
             </div>
           </div>
         </div>
-        <div className="w-full md:max-w-6xl mx-auto px-2 pb-2 sm:px-4 sm:pb-4">
+        <div className="w-full md:max-w-6xl mx-auto px-1 pb-2 sm:px-4 sm:pb-6">
           <div className="relative">
             <ChatInputBar
               newMessage={newMessage}
@@ -1023,25 +1091,25 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               currentContext={selectedContext}
               isUploadingFile={isUploadingFile}
               isUploadingImages={isUploadingImages}
-              uploadedImagePreviews={uploadedImages.map(img => img.preview)}
+              uploadedImagePreviews={uploadedImagePreviews}
               isKnowledgeAnalysisActive={selectedContext.length > 0}
               isWebSearchActive={isWebSearchActive}
               isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
               isDeepResearchActive={isDeepResearchActive}
               setNewMessage={setNewMessage}
               onSendMessage={handleSendMessage}
-              onKeyDown={() => { }}
-              onToggleKnowledgeAnalysis={() => { }}
-              onToggleWebSearch={() => { }}
-              onToggleComprehensiveAnalysis={() => { }}
-              onToggleDeepResearch={() => { }}
+              onKeyDown={handleKeyDown}
+              onToggleKnowledgeAnalysis={handleToggleKnowledgeAnalysis}
+              onToggleWebSearch={handleToggleWebSearch}
+              onToggleComprehensiveAnalysis={handleToggleComprehensiveAnalysis}
+              onToggleDeepResearch={handleToggleDeepResearch}
               onStartRecording={handleStartRecording}
               onStopRecording={handleStopRecording}
               onFileUpload={handleFileUpload}
               onImageUpload={handleImageUpload}
-              onRemoveImage={() => handleRemoveImage(0)}
+              onRemoveImage={handleRemoveImageByIndex}
               onRemoveContextItem={handleRemoveContextItem}
-              onPaste={() => { }}
+              onPaste={handlePaste}
               isFixedPosition={false}
               workspaceId={workspaceId}
             >

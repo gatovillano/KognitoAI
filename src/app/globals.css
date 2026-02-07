@@ -12,20 +12,25 @@
 @layer base {
   :root {
     /* --- MODO CLARO - Paleta Moderna y Elegante --- */
-    --background: 0 0% 98%; /* Fondo principal más suave */
-    --foreground: 220 13% 9%; /* Texto principal gris oscuro más suave */
+    --background: 0 0% 98%;
+    /* Fondo principal más suave */
+    --foreground: 220 13% 9%;
+    /* Texto principal gris oscuro más suave */
 
-    --card: 0 0% 100%; /* Blanco para tarjetas normales */
+    --card: 0 0% 100%;
+    /* Blanco para tarjetas normales */
     --card-foreground: 220 13% 9%;
 
     /* Nueva variable para sidebar y elementos de navegación */
-    --card-elevated: 220 14% 97%; /* Gris muy claro para sidebar/barra superior */
+    --card-elevated: 220 14% 97%;
+    /* Gris muy claro para sidebar/barra superior */
 
     --popover: 0 0% 100%;
     --popover-foreground: 220 13% 9%;
 
     /* Primario basado en el logo de Kognito - azul a cyan */
-    --primary: 200 100% 50%; /* Cyan del logo */
+    --primary: 200 100% 50%;
+    /* Cyan del logo */
     --primary-foreground: 0 0% 98%;
 
     /* Secundario más neutro y elegante */
@@ -47,14 +52,17 @@
     /* Bordes más sutiles y modernos */
     --border: 220 13% 91%;
     --input: 220 13% 91%;
-    --ring: 200 100% 50%; /* Ring color basado en el cyan del logo */
+    --ring: 200 100% 50%;
+    /* Ring color basado en el cyan del logo */
 
     /* Radio de bordes más moderno */
     --radius: 0.875rem;
-    --user-bubble: 220 14% 96%; /* Gris claro más elegante para la burbuja del usuario */
+    --user-bubble: 220 14% 96%;
+    /* Gris claro más elegante para la burbuja del usuario */
 
     /* Variables para efectos modernos - modo claro - Colores del logo Kognito */
-    --gradient-primary: linear-gradient(135deg, hsl(220 100% 60%) 0%, hsl(200 100% 50%) 100%); /* Azul a cyan como el logo */
+    --gradient-primary: linear-gradient(135deg, hsl(220 100% 60%) 0%, hsl(200 100% 50%) 100%);
+    /* Azul a cyan como el logo */
     --gradient-secondary: linear-gradient(135deg, hsl(0 0% 98%) 0%, hsl(220 14% 96%) 100%);
     --shadow-soft: 0 2px 8px -2px hsl(220 13% 9% / 0.08);
     --shadow-medium: 0 4px 16px -4px hsl(220 13% 9% / 0.12);
@@ -63,21 +71,26 @@
 
   .dark {
     /* --- MODO OSCURO - Paleta Moderna y Elegante --- */
-    --background: 222 13% 11%; /* Fondo principal más cálido */
-    --foreground: 220 9% 89%; /* Texto principal más suave */
+    --background: 222 13% 11%;
+    /* Fondo principal más cálido */
+    --foreground: 220 9% 89%;
+    /* Texto principal más suave */
 
     /* Tarjetas con mejor contraste */
-    --card: 222 13% 8%; /* Color para tarjetas normales */
+    --card: 222 13% 8%;
+    /* Color para tarjetas normales */
     --card-foreground: 220 9% 89%;
 
     /* Nueva variable para sidebar y elementos de navegación en modo oscuro */
-    --card-elevated: 222 13% 10%; /* Ligeramente más claro que las tarjetas normales */
+    --card-elevated: 222 13% 10%;
+    /* Ligeramente más claro que las tarjetas normales */
 
     --popover: 222 13% 8%;
     --popover-foreground: 220 9% 89%;
 
     /* Primario basado en el logo de Kognito - modo oscuro */
-    --primary: 200 100% 50%; /* Cyan del logo */
+    --primary: 200 100% 50%;
+    /* Cyan del logo */
     --primary-foreground: 220 9% 89%;
 
     /* Secundario más refinado */
@@ -99,14 +112,17 @@
     /* Bordes más sutiles */
     --border: 222 13% 16%;
     --input: 222 13% 16%;
-    --ring: 200 100% 50%; /* Ring color basado en el cyan del logo */
+    --ring: 200 100% 50%;
+    /* Ring color basado en el cyan del logo */
 
     /* Radio moderno */
     --radius: 0.875rem;
-    --user-bubble: 222 13% 16%; /* Gris elegante para la burbuja del usuario */
+    --user-bubble: 222 13% 16%;
+    /* Gris elegante para la burbuja del usuario */
 
     /* Variables para efectos modernos - modo oscuro - Colores del logo Kognito */
-    --gradient-primary: linear-gradient(135deg, hsl(220 100% 60%) 0%, hsl(200 100% 50%) 100%); /* Azul a cyan como el logo */
+    --gradient-primary: linear-gradient(135deg, hsl(220 100% 60%) 0%, hsl(200 100% 50%) 100%);
+    /* Azul a cyan como el logo */
     --gradient-secondary: linear-gradient(135deg, hsl(222 13% 8%) 0%, hsl(222 13% 16%) 100%);
     --shadow-soft: 0 2px 8px -2px hsl(0 0% 0% / 0.2);
     --shadow-medium: 0 4px 16px -4px hsl(0 0% 0% / 0.3);
@@ -125,11 +141,14 @@
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
 
-    font-weight: 300; /* Hacer la fuente más fina */
-    line-height: 1.75; /* Aumentar el espaciado entre líneas */
+    font-weight: 300;
+    /* Hacer la fuente más fina */
+    line-height: 1.75;
+    /* Aumentar el espaciado entre líneas */
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
@@ -366,8 +385,15 @@
 }
 
 @keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-10px); }
+
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
 }
 
 .pulse-glow {
@@ -375,8 +401,13 @@
 }
 
 @keyframes pulse-glow {
-  from { box-shadow: 0 0 20px rgba(0, 191, 255, 0.3); }
-  to { box-shadow: 0 0 30px rgba(0, 191, 255, 0.6); }
+  from {
+    box-shadow: 0 0 20px rgba(0, 191, 255, 0.3);
+  }
+
+  to {
+    box-shadow: 0 0 30px rgba(0, 191, 255, 0.6);
+  }
 }
 
 .hover-lift {
@@ -404,19 +435,22 @@
 }
 
 .shimmer {
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.1),
-    transparent
-  );
+  background: linear-gradient(90deg,
+      transparent,
+      rgba(255, 255, 255, 0.1),
+      transparent);
   background-size: 200% 100%;
   animation: shimmer 2s infinite;
 }
 
 @keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
 }
 
 .micro-interaction {
@@ -432,18 +466,23 @@
 }
 
 .my-masonry-grid {
-  display: -webkit-box; /* Not needed if autoprefixing */
-  display: -ms-flexbox; /* Not needed if autoprefixing */
+  display: -webkit-box;
+  /* Not needed if autoprefixing */
+  display: -ms-flexbox;
+  /* Not needed if autoprefixing */
   display: flex;
-  margin-left: -16px; /* gutter size offset */
+  margin-left: -16px;
+  /* gutter size offset */
   width: auto;
 }
+
 .my-masonry-grid_column {
-  padding-left: 16px; /* gutter size */
+  padding-left: 16px;
+  /* gutter size */
   background-clip: padding-box;
 }
 
 /* Style your items */
-.my-masonry-grid_column > div {
+.my-masonry-grid_column>div {
   margin-bottom: 16px;
 }

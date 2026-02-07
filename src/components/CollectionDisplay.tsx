@@ -189,7 +189,7 @@ export const CollectionDisplay = ({
       className="h-full w-full"
     >
       <Card
-        className={`group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full ${className || ''}`}
+        className={`cursor-pointer h-full hover:border-primary/20 ${className || ''}`}
         onClick={handleCardClick}
       >
         <CardHeader className="pb-3">
@@ -290,7 +290,7 @@ export const StaticCollectionCard = ({
       className="h-full w-full"
     >
       <Link href={href} className="h-full block">
-        <Card className={`group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 flex flex-col h-full ${className || ''}`}>
+        <Card className={`cursor-pointer h-full hover:border-primary/20 ${className || ''}`}>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-start gap-3 flex-wrap overflow-hidden">
               <div className="flex items-center gap-3 min-w-0">

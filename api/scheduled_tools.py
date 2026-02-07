@@ -139,7 +139,8 @@ async def create_scheduled_tool(
         available_tools = {
             'daily_analysis': _get_daily_analysis_function,
             'daily_insights': _get_daily_insights_function,
-            'weekly_cleanup': _get_weekly_cleanup_function
+            'weekly_cleanup': _get_weekly_cleanup_function,
+            'key_rotation_check': _get_key_rotation_check_function
         }
         
         if request.tool_name not in available_tools:
@@ -343,8 +344,9 @@ async def get_scheduled_tools_status(
         
         available_tools = [
             'daily_analysis',
-            'daily_insights', 
-            'weekly_cleanup'
+            'daily_insights',
+            'weekly_cleanup',
+            'key_rotation_check'
         ]
         
         return ScheduledToolsStatusResponse(
@@ -412,3 +414,20 @@ def _get_weekly_cleanup_function():
         # Aquí puedes agregar lógica específica de limpieza
         return "Limpieza semanal completada"
     return weekly_cleanup_task
+
+def _get_key_rotation_check_function():
+    """Retorna la función para verificar rotación de claves."""
+    async def key_rotation_check_task(account_id: str, **kwargs):
+        from core.utils.key_rotation import KeyRotationManager
+        from utils.db_session import DBSession
+        from core.database import SessionLocal
+        
+        logger.info("Ejecutando verificación de rotación de claves")
+        async with DBSession(SessionLocal) as session:
+            manager = KeyRotationManager(session)
+            expiring_keys = await manager.check_expiring_keys()
+            if expiring_keys:
+                await manager.notify_expiring_keys(expiring_keys)
+                return f"Se encontraron {len(expiring_keys)} claves que requieren rotación."
+            return "No se encontraron claves expiradas."
+    return key_rotation_check_task

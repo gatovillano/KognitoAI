@@ -68,7 +68,7 @@ const CodeAnalysis: React.FC<CodeAnalysisProps> = ({
 
         {/* TAB: ARQUITECTURA */}
         <TabsContent value="architecture" className="space-y-6 animate-in fade-in-50 duration-500 w-full min-w-0">
-          {analysis.code_structure && analysis.code_structure.length > 0 && (
+          {Array.isArray(analysis.code_structure) && analysis.code_structure.length > 0 && (
             <div>
               <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${codeColors.icon}`}>
                 <Layout className="w-5 h-5" />
@@ -94,7 +94,7 @@ const CodeAnalysis: React.FC<CodeAnalysisProps> = ({
 
           <Separator />
 
-          {analysis.design_patterns && analysis.design_patterns.length > 0 && (
+          {Array.isArray(analysis.design_patterns) && analysis.design_patterns.length > 0 && (
             <div>
               <h4 className="text-lg font-bold mb-4 flex items-center gap-2">
                 <Puzzle className="w-5 h-5 text-purple-500" />
@@ -114,7 +114,7 @@ const CodeAnalysis: React.FC<CodeAnalysisProps> = ({
 
         {/* TAB: DEPENDENCIAS */}
         <TabsContent value="dependencies" className="space-y-6 animate-in fade-in-50 duration-500 w-full min-w-0">
-          {analysis.dependencies && analysis.dependencies.length > 0 ? (
+          {Array.isArray(analysis.dependencies) && analysis.dependencies.length > 0 ? (
             <div>
               <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-blue-600">
                 <Box className="w-5 h-5" />
@@ -142,7 +142,7 @@ const CodeAnalysis: React.FC<CodeAnalysisProps> = ({
 
         {/* TAB: PROBLEMAS */}
         <TabsContent value="issues" className="space-y-6 animate-in fade-in-50 duration-500 w-full min-w-0">
-          {analysis.potential_issues && analysis.potential_issues.length > 0 ? (
+          {Array.isArray(analysis.potential_issues) && analysis.potential_issues.length > 0 ? (
             <div>
               <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-red-600">
                 <AlertTriangle className="w-5 h-5" />
@@ -171,7 +171,7 @@ const CodeAnalysis: React.FC<CodeAnalysisProps> = ({
 
         {/* TAB: MEJORAS */}
         <TabsContent value="recommendations" className="space-y-6 animate-in fade-in-50 duration-500 w-full min-w-0">
-          {analysis.recommendations && analysis.recommendations.length > 0 ? (
+          {Array.isArray(analysis.recommendations) && analysis.recommendations.length > 0 ? (
             <div>
               <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-green-600">
                 <Zap className="w-5 h-5" />

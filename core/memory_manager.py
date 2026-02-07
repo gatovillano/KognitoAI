@@ -148,14 +148,14 @@ async def _run_semantic_search(
             query_params["k"] = k
 
             if db_session:
-                logger.info(f"DEBUG SQL (Semantic Search): Query: {sql_query}") # Nuevo log
-                logger.info(f"DEBUG SQL (Semantic Search): Params: {query_params}") # Nuevo log
+                logger.debug(f"SQL (Semantic Search): Query: {sql_query}")
+                logger.debug(f"SQL (Semantic Search): Params: {query_params}")
                 results = await db_session.execute(text(sql_query), query_params)
                 rows = results.fetchall()
             else:
                 async with DBSession(SessionLocal) as session:
-                    logger.info(f"DEBUG SQL (Semantic Search): Query: {sql_query}") # Nuevo log
-                    logger.info(f"DEBUG SQL (Semantic Search): Params: {query_params}") # Nuevo log
+                    logger.debug(f"SQL (Semantic Search): Query: {sql_query}")
+                    logger.debug(f"SQL (Semantic Search): Params: {query_params}")
                     results = await session.execute(text(sql_query), query_params)
                     rows = results.fetchall()
 
@@ -191,14 +191,14 @@ async def _run_semantic_search(
             ).order_by("similarity_score").limit(k)
             
             if db_session:
-                logger.info(f"DEBUG SQL (Notes Semantic Search): Query: {note_query}") # Nuevo log
-                logger.info(f"DEBUG SQL (Notes Semantic Search): Params: {note_query.compile().params}") # Nuevo log
+                logger.debug(f"SQL (Notes Semantic Search): Query: {note_query}")
+                logger.debug(f"SQL (Notes Semantic Search): Params: {note_query.compile().params}")
                 note_results = await db_session.execute(note_query)
                 note_rows = note_results.all()
             else:
                 async with DBSession(SessionLocal) as session:
-                    logger.info(f"DEBUG SQL (Notes Semantic Search): Query: {note_query}") # Nuevo log
-                    logger.info(f"DEBUG SQL (Notes Semantic Search): Params: {note_query.compile().params}") # Nuevo log
+                    logger.debug(f"SQL (Notes Semantic Search): Query: {note_query}")
+                    logger.debug(f"SQL (Notes Semantic Search): Params: {note_query.compile().params}")
                     note_results = await session.execute(note_query)
                     note_rows = note_results.all()
 
@@ -296,14 +296,14 @@ async def _run_fts_search(
             query_params["k"] = k
 
             if db_session:
-                logger.info(f"DEBUG SQL (FTS Search): Query: {sql_query}") # Nuevo log
-                logger.info(f"DEBUG SQL (FTS Search): Params: {query_params}") # Nuevo log
+                logger.debug(f"SQL (FTS Search): Query: {sql_query}")
+                logger.debug(f"SQL (FTS Search): Params: {query_params}")
                 results = await db_session.execute(text(sql_query), query_params)
                 rows = results.fetchall()
             else:
                 async with DBSession(SessionLocal) as session:
-                    logger.info(f"DEBUG SQL (FTS Search): Query: {sql_query}") # Nuevo log
-                    logger.info(f"DEBUG SQL (FTS Search): Params: {query_params}") # Nuevo log
+                    logger.debug(f"SQL (FTS Search): Query: {sql_query}")
+                    logger.debug(f"SQL (FTS Search): Params: {query_params}")
                     results = await session.execute(text(sql_query), query_params)
                     rows = results.fetchall()
 
@@ -346,14 +346,14 @@ async def _run_fts_search(
             ).order_by(text("rank_score DESC")).limit(k)
 
             if db_session:
-                logger.info(f"DEBUG SQL (Notes FTS Search): Query: {note_query}") # Nuevo log
-                logger.info(f"DEBUG SQL (Notes FTS Search): Params: {note_query.compile().params}") # Nuevo log
+                logger.debug(f"SQL (Notes FTS Search): Query: {note_query}")
+                logger.debug(f"SQL (Notes FTS Search): Params: {note_query.compile().params}")
                 note_results = await db_session.execute(note_query)
                 note_rows = note_results.all()
             else:
                 async with DBSession(SessionLocal) as session:
-                    logger.info(f"DEBUG SQL (Notes FTS Search): Query: {note_query}") # Nuevo log
-                    logger.info(f"DEBUG SQL (Notes FTS Search): Params: {note_query.compile().params}") # Nuevo log
+                    logger.debug(f"SQL (Notes FTS Search): Query: {note_query}")
+                    logger.debug(f"SQL (Notes FTS Search): Params: {note_query.compile().params}")
                     note_results = await session.execute(note_query)
                     note_rows = note_results.all()
 
@@ -382,6 +382,70 @@ async def _run_fts_search(
         return []
 
 
+async def get_all_user_memories(
+    account_id: str,
+    content_types: List[str] = ["user_memories", "general_memory", "user_memory"],
+    limit: int = 100
+) -> List[LCDocument]:
+    """
+    Recupera todas las memorias de un usuario sin búsqueda semántica,
+    ordenadas por fecha de creación (si está disponible) o por inserción.
+    """
+    logger.info(f"Recuperando todas las memorias para la cuenta {account_id}")
+    try:
+        async with DBSession(SessionLocal) as session:
+            # Construir la consulta SQL directa
+            # Nota: cmetadata es un JSONB, así que podemos consultar campos dentro de él si es necesario
+            # Pero para "todas", solo filtramos por account_id y content_type
+            
+            sql_query = """
+                SELECT
+                    document,
+                    cmetadata,
+                    topic,
+                    category,
+                    workspace_id
+                FROM langchain_pg_embedding
+                WHERE account_id = :account_id
+                AND content_type = ANY(:content_types)
+                ORDER BY (cmetadata->>'created_at') DESC NULLS LAST
+                LIMIT :limit
+            """
+
+            params = {
+                "account_id": account_id,
+                "content_types": content_types,
+                "limit": limit
+            }
+            
+            result = await session.execute(text(sql_query), params)
+            rows = result.fetchall()
+            
+            docs = []
+            for row in rows:
+                doc_content, doc_metadata, topic, cat, ws_id = row
+                
+                if isinstance(doc_metadata, str):
+                    try:
+                        doc_metadata = json.loads(doc_metadata)
+                    except json.JSONDecodeError:
+                        doc_metadata = {}
+                elif not isinstance(doc_metadata, dict):
+                    doc_metadata = {}
+
+                if topic is not None: doc_metadata['topic'] = topic
+                if cat is not None: doc_metadata['category'] = cat
+                if ws_id is not None: doc_metadata['workspace_id'] = str(ws_id)
+                
+                docs.append(LCDocument(page_content=doc_content, metadata=doc_metadata))
+                
+            return docs
+
+    except Exception as e:
+        logger.error(f"❌ Error al recuperar todas las memorias: {e}", exc_info=True)
+        return []
+
+
 async def get_relevant_memories(
     account_id: str,
     query: str,
@@ -407,7 +471,7 @@ async def get_relevant_memories(
     try:
         # Definir los content_types que se buscarán.
         if content_types is None:
-            content_types = ["user_memories", "user_documents", "user_notes"]
+            content_types = ["user_memories", "user_documents", "user_notes", "user_memory_proactive_llm"]
         
         # Asegurar que explicit_document_ids sean strings para evitar errores de validación de Pydantic
         if explicit_document_ids:
@@ -527,13 +591,12 @@ async def get_relevant_memories(
             else:
                 final_retrieved_docs = await semantic_retriever.ainvoke(query)
 
-        # Reranking
         if reranking:
-            logger.info(f"✨ Iniciando reranking de {len(final_retrieved_docs)} documentos para la consulta: '{query[:50]}...'")
+            logger.debug(f"✨ Iniciando reranking de {len(final_retrieved_docs)} documentos para la consulta: '{query[:50]}...'")
             reranker = Reranker() # Asegúrate de que se instancia correctamente
-            logger.info("Reranker instanciado. Ejecutando rerank...")
+            logger.debug("Reranker instanciado. Ejecutando rerank...")
             final_retrieved_docs = await reranker.rerank(query, final_retrieved_docs) # Removed top_n
-            logger.info(f"✅ Reranking completado. Documentos finales después de rerank: {len(final_retrieved_docs)}")
+            logger.debug(f"✅ Reranking completado. Documentos finales después de rerank: {len(final_retrieved_docs)}")
         
         # Convertir a ToolOutputWithSources (ya implementado)
         final_content_list = []
@@ -654,10 +717,11 @@ async def get_user_profile(account_id: str) -> Optional[Perfil]:
     """
     Obtiene el perfil de un usuario a partir de su account_id universal.
     """
-    logger.info(f"Obteniendo perfil para la cuenta ID: {account_id}")
+    logger.debug(f"Obteniendo perfil para la cuenta ID: {account_id}")
     async with DBSession(SessionLocal) as db:
         try:
-            stmt = select(Perfil).filter_by(account_id=account_id)
+            # Usar joinedload para precargar la cuenta y evitar DetachedInstanceError
+            stmt = select(Perfil).options(joinedload(Perfil.account)).filter_by(account_id=account_id)
             result = await db.execute(stmt)
             perfil = result.scalars().first()
             if not perfil:
@@ -674,6 +738,10 @@ async def get_user_profile(account_id: str) -> Optional[Perfil]:
                     db.add(perfil)
                     await db.commit()
                     await db.refresh(perfil)
+                    # Volver a cargar con el joinedload después del refresh
+                    stmt = select(Perfil).options(joinedload(Perfil.account)).filter_by(account_id=account_id)
+                    result = await db.execute(stmt)
+                    perfil = result.scalars().first()
                     logger.info(
                         f"✅ Perfil vacío creado para la cuenta ID: {account_id}."
                     )

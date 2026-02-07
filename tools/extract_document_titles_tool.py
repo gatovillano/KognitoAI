@@ -248,9 +248,9 @@ class ExtractDocumentTitlesTool(BaseTool):
                                 f"\n\nFragmento:\n{content}"
                             )
                             try:
-                                logger.info(f"Enviando prompt al LLM para extracción de título:\n---\n{prompt}\n---")
+                                logger.info(f"Enviando prompt al LLM para extracción de título.")
                                 response = await llm.ainvoke(prompt)
-                                logger.info(f"Respuesta recibida del LLM: {response}")
+                                logger.info(f"Respuesta recibida del LLM para extracción de título.")
                                 # Extraer el contenido de texto del objeto AIMessage
                                 potential_title = response.content if hasattr(response, 'content') else str(response)
                                 potential_title = potential_title.strip()
