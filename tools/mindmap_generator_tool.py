@@ -5,9 +5,9 @@ from pydantic import Field
 
 import asyncio
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Type
 
-from langchain_core.tools import Tool
+from langchain_core.tools import BaseTool
 
 # Importa la función extract_concepts_from_document desde utils/document_analysis.py
 from utils.document_analysis import extract_concepts_from_document

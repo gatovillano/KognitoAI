@@ -386,3 +386,110 @@ Se ha incrementado el límite de recursión del motor de agentes LangGraph para 
 - **Aumento de Límite de Recursión (`api/chat.py`)**:
   - Se configuró explícitamente el parámetro `recursion_limit` a **100** (aumentando desde el valor por defecto de 25) al invocar el grafo del agente.
   - Esto soluciona los errores `Recursion limit of 25 reached` reportados en logs, permitiendo que el agente ejecute cadenas de razonamiento largas, bucles de corrección y flujos de investigación profunda sin fallos prematuros.
+
+---
+
+## 08-02-26 Corrección de Error de `tool_choice` en OpenRouter para Salida Estructurada 🛠️
+
+Se ha solucionado un error crítico que impedía a modelos servidos a través de OpenRouter (como Llama 3.1, DeepSeek, etc.) ejecutar herramientas.
+
+- **Causa del Error**: La función `invoke_structured_output` intentaba usar `with_structured_output` y luego `json_mode`, pero ambos métodos fallaban porque internamente enviaban un parámetro `tool_choice` que ciertos modelos de OpenRouter no aceptan, resultando en un error 404.
+- **Solución (`core/utils/llm_utils.py`)**:
+  - Se ha modificado la lógica de manejo de errores en `invoke_structured_output`.
+  - Ahora, cuando se detecta el error específico de `tool_choice` de OpenRouter, el sistema **salta directamente al método de fallback manual**.
+  - Este método manual consiste en instruir al modelo a través del prompt para que devuelva un JSON y luego se parsea la respuesta, evitando por completo el uso del parámetro `tool_choice`.
+  - Esto asegura que la generación de salida estructurada funcione de manera robusta con todos los modelos, incluidos los de OpenRouter que tienen esta limitación.
+---
+
+## 08-02-26 Mejora de la Robustez en la Generación de Salida Estructurada 🧠💪
+
+Se ha mejorado la fiabilidad de la generación de salida estructurada (JSON) desde los modelos de lenguaje, especialmente los más pequeños o rápidos, que a veces fallaban en seguir las instrucciones.
+
+- **Causa del Error**: El método de fallback manual en `invoke_structured_output` no era lo suficientemente explícito, causando que algunos LLMs devolvieran la definición del esquema en lugar de los datos solicitados, lo que resultaba en un error de validación (`Manual parsing failed`).
+- **Solución (`core/utils/llm_utils.py`)**:
+  - Se ha refactorizado el prompt del método de fallback manual.
+  - Ahora, el prompt **genera dinámicamente un ejemplo de JSON** basado en el esquema Pydantic requerido.
+  - Este ejemplo muestra al LLM exactamente qué formato se espera, incluyendo los nombres de los campos y tipos de datos de ejemplo.
+  - Al proporcionar un ejemplo concreto, se reduce drásticamente la ambigüedad y se guía al modelo para que produzca una salida JSON válida y conforme al esquema, solucionando los errores de validación.
+---
+
+## 08-02-26 Estabilización del Agente Investigador y Conexión de Telegram 🕵️‍♂️🔌
+
+Se han solucionado dos errores de validación críticos en el agente `DeepResearcher` que causaban la caída del servicio `kognito_core` y, como consecuencia, la pérdida de conexión del bot de Telegram.
+
+- **Error 1: `KnowledgeSearchInput` (Entrada de Búsqueda de Conocimiento)**
+  - **Causa**: El LLM generaba un texto con formato de lista (ej. `'["ley"]'`) para el filtro `filter_topics`, pero la herramienta esperaba una lista real (`['ley']`), causando un error de validación.
+  - **Solución (`tools/knowledge_search_tool.py`)**: Se añadió un validador de Pydantic al modelo de entrada. Este validador ahora convierte automáticamente el texto en una lista antes de la validación, haciendo la herramienta más robusta frente a las inconsistencias de formato del LLM.
+
+- **Error 2: `WebSearchTool` (Herramienta de Búsqueda Web)**
+  - **Causa**: La herramienta `WebSearchTool` era instanciada con un `account_id` que no era de tipo `string` (probablemente `None`), lo que provocaba un error de validación.
+  - **Solución (`tools/web_search_tool.py`)**: Se modificó la herramienta para que el `account_id` sea opcional y se añadió una verificación al inicio de su ejecución. Si el `account_id` no es válido, la herramienta ahora devuelve un mensaje de error controlado en lugar de fallar.
+
+- **Impacto General**: Al resolver estos errores, se estabiliza el servicio `kognito_core`, lo que a su vez garantiza que la conexión WebSocket con el `telegram_client` se mantenga activa, restaurando la funcionalidad del bot de Telegram.
+---
+
+## 08-02-26 Corrección de `UnboundLocalError` en la Generación del Informe Final del Agente Investigador 📄✍️
+
+Se ha solucionado un error `UnboundLocalError` que ocurría en la etapa final de la generación de informes del agente `DeepResearcher`.
+
+- **Causa del Error**: La función `final_report_generation` intentaba acceder a una variable local `findings` para construir el informe, pero esta variable nunca se inicializaba. Los resultados de la investigación se encontraban en el estado del agente (`state`), pero no se estaban cargando en la variable local.
+- **Solución (`core/agents/deep_researcher.py`)**: Se añadió una línea al principio de la función `final_report_generation` para inicializar la variable `findings`. Esta línea recupera las notas de investigación (`state.get("notes", [])`) del estado del agente y las une en un único texto, asegurando que los hallazgos estén disponibles para la creación del informe final y evitando el error.
+---
+
+## 08-02-26 Corrección de Fallo en `json_mode` para Salida Estructurada 🛠️
+
+Se ha corregido un error en `core/utils/llm_utils.py` donde el fallback a `json_mode` fallaba con el mensaje `Received unsupported arguments {'method': 'json_mode'}`.
+
+- **Causa del Error**: El argumento `method="json_mode"` se pasaba explícitamente a `llm.with_structured_output` en el bloque de fallback, pero el LLM subyacente no lo soportaba.
+- **Solución (`core/utils/llm_utils.py`)**: Se eliminó el argumento `method="json_mode"` del fallback. Ahora, `llm.with_structured_output(schema)` se llama sin un método específico, permitiendo que el LLM utilice su mecanismo predeterminado para la salida estructurada. Si esto falla, el sistema recurrirá al parseo manual de JSON, que ya está implementado.
+
+---
+
+## 08-02-26 Mejora de la Robustez en la Generación de Salida Estructurada (Fallback Consolidado) 🧠💪
+
+Se ha mejorado la fiabilidad de la generación de salida estructurada (JSON) consolidando la lógica de fallback.
+
+- **Causa del Error**: La función `invoke_structured_output` tenía múltiples bloques `try-except` anidados, lo que hacía que el manejo de errores fuera menos directo y no garantizaba que el fallback manual de JSON fuera el último recurso para *cualquier* fallo en la salida estructurada.
+- **Solución (`core/utils/llm_utils.py`)**: Se refactorizó la función `invoke_structured_output` para tener un único bloque `try-except` principal. Si el intento inicial de `llm.with_structured_output(schema)` falla por cualquier razón (incluyendo errores de servicio o de argumentos no soportados), el control pasa directamente a la lógica de parseo manual de JSON. Esto simplifica el flujo y asegura que el sistema siempre intentará el parseo manual como último recurso para obtener una salida estructurada.
+
+---
+
+## 08-02-26 Corrección de `ValidationError` en `WebSearchTool` por `account_id` 🛠️
+
+Se ha solucionado un `ValidationError` en `WebSearchTool` que ocurría cuando el `account_id` no era una cadena de texto válida.
+
+- **Causa del Error**: La herramienta `WebSearchTool` requiere un `account_id` de tipo `str`, pero en `ComprehensiveWebAnalysisTool` se estaba pasando un valor que no era una cadena (posiblemente `None` o un tipo inesperado), lo que provocaba un error de validación al intentar instanciar `WebSearchTool`.
+- **Solución (`tools/comprehensive_web_analysis_tool.py`)**: Se añadió una verificación explícita del tipo de `effective_account_id` antes de llamar a `get_web_search_tool`. Ahora, si `effective_account_id` no es una cadena de texto válida o está vacío, se registra un error y se devuelve un mensaje de error al usuario, evitando la `ValidationError` y asegurando que `WebSearchTool` siempre reciba un `account_id` válido.
+
+---
+
+## 08-02-26 Corrección del Contador de Turnos para Memoria Proactiva 🔄
+
+Se ha corregido el problema donde el contador de turnos (`turn_count`) para la memoria proactiva no se incrementaba correctamente, registrando cada turno como "1".
+
+- **Causa del Error**: La variable `turn_count` en el `AgentState` estaba definida pero no se incrementaba explícitamente en el flujo del agente.
+- **Solución (`core/agent.py`)**: Se añadió una línea al inicio de la función `call_model_node` para incrementar `state['turn_count']` en cada llamada. Esto asegura que el contador se actualice con cada ciclo de procesamiento de la IA para una entrada de usuario, lo cual es fundamental para la gestión de la memoria proactiva.
+
+---
+
+## 08-02-26 Conversión Explícita de `account_id` a String en `ComprehensiveWebAnalysisTool` 🛠️
+
+Se ha solucionado un `ValidationError` en `WebSearchTool` que ocurría porque `account_id` no era una cadena de texto válida al ser pasado desde `ComprehensiveWebAnalysisTool`.
+
+- **Causa del Error**: Aunque `ComprehensiveWebAnalysisTool` definía `account_id` como `Optional[str]`, en algunos casos, un objeto `UUID` (o similar) se asignaba a `self.account_id`. Cuando este valor se pasaba a `get_web_search_tool` (que espera un `str`), se producía un error de validación.
+- **Solución (`tools/comprehensive_web_analysis_tool.py`)**: Se añadió una conversión explícita a `str` para `self.account_id` al asignarlo a `effective_account_id` dentro del método `_arun`. Esto garantiza que `effective_account_id` sea siempre una cadena de texto (o `None`), resolviendo el error de validación en `WebSearchTool`.
+
+---
+## 08-02-26 Corrección de `ValidationError` en `ToolMessage` por `tool_call_id` nulo 🛠️
+
+Se ha solucionado un `ValidationError` en `ToolMessage` que ocurría en el agente `DeepResearcher` cuando el `tool_call_id` era `None`.
+
+- **Causa del Error**: En la función `supervisor_tools` de `core/agents/deep_researcher.py`, al construir `ToolMessage`, el campo `tool_call_id` podía ser `None` si el LLM no lo proporcionaba o si había un problema en la estructura del `tool_call`. Esto generaba un error de validación en Pydantic.
+- **Solución (`core/agents/deep_researcher.py`)**:
+  - Se importó el módulo `uuid` para la generación de identificadores únicos.
+  - Se modificó la función `supervisor_tools` para asegurar que `tool_call_id` siempre tenga un valor válido. Si `tc.get("id")` es `None`, se genera un UUID (`uuid.uuid4()`) y se utiliza como `tool_call_id`.
+  - Este cambio se aplicó en tres puntos clave dentro de `supervisor_tools`:
+    - Al procesar herramientas que no son `ConductResearch`.
+    - Al procesar los resultados de las tareas `ConductResearch` ejecutadas en paralelo.
+    - Al construir la lista final de `ToolMessages` en el orden original.
+  - Esto garantiza que todas las `ToolMessage` creadas tengan un `tool_call_id` válido, evitando el `ValidationError`.
