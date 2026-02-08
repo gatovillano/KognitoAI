@@ -197,7 +197,25 @@ async def summarize_webpage(llm: BaseChatModel, webpage_content: str, cfg: Confi
         )
         
         retry_cfg = {"stop_after_attempt": cfg.max_structured_output_retries}
-        summary: Summary = await invoke_structured_output(llm, Summary, prompt_content, retry_cfg)
+        summary: Optional[Summary] = None
+        
+        try:
+            summary = await invoke_structured_output(llm, Summary, prompt_content, retry_cfg)
+        except Exception as e:
+            error_str = str(e)
+            if "tool_choice" in error_str and "Openrouter" in error_str:
+                logger.warning(f"⚠️ [Summarize Webpage] OpenRouter tool_choice error. Retrying with json_mode.")
+                try:
+                    # Forcing json_mode for providers that support it but fail with tool_choice
+                    model_with_json = llm.with_structured_output(Summary, method="json_mode")
+                    summary = await model_with_json.ainvoke([HumanMessage(content=prompt_content)])
+                except Exception as e2:
+                    logger.warning(f"⚠️ [Summarize Webpage] Retry with json_mode failed: {e2}. The original error will be re-raised.")
+                    raise e # re-raise original error
+            else:
+                # It's not an OpenRouter error, just raise it to be caught by the outer block
+                raise e
+
         return summary
         
     except asyncio.TimeoutError:

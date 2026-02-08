@@ -74,12 +74,18 @@ class WebScraperTool(BaseTool):
             El contenido textual de la página web o un mensaje de error.
         """
         logger.info(f"Ejecutando WebScraperTool para la URL: '{url}'")
+        # Normalizar URLs de ArXiv: web3.arxiv.org suele dar problemas de DNS.
+        if "web3.arxiv.org" in url:
+            new_url = url.replace("web3.arxiv.org", "arxiv.org")
+            logger.info(f"Redirigiendo URL de ArXiv de '{url}' a '{new_url}' para mayor estabilidad.")
+            url = new_url
+
         try:
             # Detect if the URL is a PDF
-            is_pdf = url.lower().endswith('.pdf')
+            is_pdf = url.lower().endswith('.pdf') or '/pdf/' in url.lower()
             
             if is_pdf:
-                logger.info(f"Detectado PDF. Usando PyPDFLoader para: {url}")
+                logger.info(f"Detectado PDF (posible). Usando PyPDFLoader para: {url}")
                 from langchain_community.document_loaders import PyPDFLoader
                 loader = PyPDFLoader(url)
             else:
@@ -93,7 +99,7 @@ class WebScraperTool(BaseTool):
                     None,  # None usa el ThreadPoolExecutor por defecto.
                     loader.load
                 ),
-                timeout=20.0  # Aumentado a 20 segundos para PDFs pesados
+                timeout=25.0  # Aumentado ligeramente para PDFs pesados
             )
 
             if not docs:
@@ -113,8 +119,13 @@ class WebScraperTool(BaseTool):
             return content
         except asyncio.TimeoutError:
             logger.error(f"Timeout en WebScraperTool para la URL '{url}'")
-            return f"Ocurrió un error de timeout al intentar leer el contenido de la URL: {url}"
+            return f"Ocurrió un error de timeout al intentar leer el contenido de la URL: {url}. El sitio podría estar lento o bloqueando la conexión."
         except Exception as e:
+            error_str = str(e)
+            if "NameResolutionError" in error_str or "Failed to resolve" in error_str:
+                logger.error(f"Error de resolución DNS para la URL '{url}': {e}")
+                return f"No se pudo encontrar el servidor para la dirección: {url}. Por favor, verifica que la URL sea correcta."
+            
             logger.error(f"Error en WebScraperTool para la URL '{url}': {e}", exc_info=True)
             return f"Ocurrió un error al intentar leer el contenido de la URL: {e}"
 

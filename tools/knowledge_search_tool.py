@@ -7,6 +7,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+from pydantic import BaseModel, Field, validator
+
 class KnowledgeSearchInput(BaseModel):
     query: str = Field(description="La consulta de búsqueda para encontrar información relevante.")
     content_types: Optional[List[str]] = Field(None, description="Lista de tipos de contenido para filtrar la búsqueda (ej. 'document', 'note').")
@@ -17,6 +19,22 @@ class KnowledgeSearchInput(BaseModel):
     reranking: bool = Field(True, description="Si se deben reordenar los resultados para mejorar la relevancia.")
     document_name: Optional[str] = Field(None, description="Nombre exacto de un documento para focalizar la búsqueda.")
     document_id: Optional[str] = Field(None, description="ID único de un documento para focalizar la búsqueda.")
+
+    @validator('filter_topics', 'content_types', pre=True, allow_reuse=True)
+    def parse_stringified_list(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            try:
+                loaded_v = json.loads(v)
+                if isinstance(loaded_v, list):
+                    return loaded_v
+                return [str(loaded_v)]
+            except json.JSONDecodeError:
+                return [v]
+        if isinstance(v, list):
+            return v
+        return [str(v)]
 
 class KnowledgeSearchTool(BaseTool):
     name: str = "knowledge_search"
