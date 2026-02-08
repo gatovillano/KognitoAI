@@ -67,7 +67,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
     ) -> str:
         """Executes the comprehensive analysis tool asynchronously."""
         # Usar account_id y workspace_id de los atributos de la instancia
-        effective_account_id = self.account_id
+        effective_account_id = str(self.account_id) if self.account_id is not None else None
         effective_workspace_id = self.workspace_id
 
         # Log para debugging
@@ -92,6 +92,12 @@ class ComprehensiveWebAnalysisTool(BaseTool):
 
             # Step 1: Web Search
             logger.info("Step 1: Performing web search...")
+            
+            # Ensure effective_account_id is a string before passing it
+            if not isinstance(effective_account_id, str) or not effective_account_id:
+                logger.error(f"Error: effective_account_id is not a valid string: {effective_account_id}")
+                return "Error: No se pudo obtener un account_id válido para la búsqueda web."
+
             web_search_tool_instance = get_web_search_tool(account_id=effective_account_id)
             if web_search_tool_instance._arun is None:
                 logger.error("Error: web_search_tool_instance._arun is None. This should not happen.")

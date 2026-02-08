@@ -18,35 +18,59 @@ async def invoke_structured_output(llm: BaseChatModel, schema: Any, prompt: str,
         return await model.ainvoke([HumanMessage(content=prompt)])
     except Exception as e:
         error_str = str(e)
-        if "tool_choice" in error_str or "404" in error_str and "Openrouter" in error_str:
-            logger.warning(f"⚠️ [Structured Output] OpenRouter tool_choice error. Falling back to JSON mode.")
-            try:
-                # 2. Intentar con json_mode (más compatible)
-                json_model = llm.with_structured_output(schema, method="json_mode")
-                if retry_config:
-                    json_model = json_model.with_retry(**retry_config)
-                return await json_model.ainvoke([HumanMessage(content=prompt + "\n\nResponde únicamente con un objeto JSON válido.")])
-            except Exception as e2:
-                logger.warning(f"⚠️ [Structured Output] JSON mode also failed: {e2}. Attempting manual parsing.")
-                # 3. Último recurso: Prompt manual y parsing
-                manual_prompt = prompt + "\n\nIMPORTANTE: Responde únicamente con un objeto JSON válido siguiendo este esquema:\n" + str(schema.schema() if hasattr(schema, 'schema') else schema)
-                response = await llm.ainvoke([HumanMessage(content=manual_prompt)])
-                
-                content = response.content if hasattr(response, 'content') else str(response)
-                # Intentar extraer JSON de la respuesta
-                json_match = re.search(r'(\{.*\})', content, re.DOTALL)
-                if json_match:
-                    try:
-                        data = json.loads(json_match.group(1))
-                        return schema(**data) if hasattr(schema, 'parse_obj') or hasattr(schema, '__init__') else data
-                    except Exception as e3:
-                        logger.error(f"❌ [Structured Output] Manual parsing failed: {e3}")
-                        raise e3
+        logger.warning(f"⚠️ [Structured Output] Standard structured output method failed: {e}. Attempting manual JSON parsing fallback.")
+
+        # Manual parsing logic (moved here as the ultimate fallback)
+        schema_definition = schema.schema() if hasattr(schema, 'schema') else {}
+        schema_json = json.dumps(schema_definition, indent=2)
+
+        # Crear un ejemplo dinámico para guiar al LLM
+        example = {}
+        if schema_definition and 'properties' in schema_definition:
+            for prop, details in schema_definition['properties'].items():
+                prop_type = details.get('type')
+                description = details.get('description', f'un valor para {prop}')
+                if prop_type == 'string':
+                    example[prop] = f"Un valor de tipo string que representa {description}"
+                elif prop_type == 'boolean':
+                    example[prop] = False
+                elif prop_type == 'integer' or prop_type == 'number':
+                    example[prop] = 0
+                elif prop_type == 'array':
+                    example[prop] = []
                 else:
-                    logger.error(f"❌ [Structured Output] No JSON found in response.")
-                    raise ValueError("No valid JSON found in response")
+                    example[prop] = "..."
+        
+        example_json = json.dumps(example, indent=2, ensure_ascii=False)
+
+        manual_prompt = (
+            f"{prompt}\n\n"
+            f"IMPORTANTE: Tu respuesta DEBE ser únicamente un objeto JSON válido que se ajuste al siguiente esquema. No incluyas ninguna otra explicación, texto introductorio o markdown.\n\n"
+            f"Esquema JSON requerido:\n{schema_json}\n\n"
+            f"Ejemplo de un objeto JSON con el formato correcto:\n{example_json}\n\n"
+            f"Ahora, basándote en la conversación, genera el objeto JSON final:"
+        )
+        
+        response = await llm.ainvoke([HumanMessage(content=manual_prompt)])
+        
+        content = response.content if hasattr(response, 'content') else str(response)
+        # Intentar extraer JSON de la respuesta
+        json_match = re.search(r'(\{.*\})', content, re.DOTALL)
+        if json_match:
+            try:
+                data = json.loads(json_match.group(1))
+                # Usar parse_obj si está disponible (Pydantic V2), si no, usar el constructor
+                if hasattr(schema, 'parse_obj'):
+                    return schema.parse_obj(data)
+                # Pydantic V1/V2 __init__
+                return schema(**data)
+            except Exception as e3:
+                logger.error(f"❌ [Structured Output] Manual parsing failed: {e3}")
+                raise e3
         else:
-            raise e
+            logger.error(f"❌ [Structured Output] No JSON found in response after manual prompting.")
+            raise ValueError("No valid JSON found in response after manual prompting")
+
 
 
 def is_token_limit_exceeded(exception: Exception, model_name: str = None) -> bool:

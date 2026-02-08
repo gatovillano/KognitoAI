@@ -118,7 +118,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({ sources, onSourceClick }
                 </Badge>
             </div>
 
-            <div className="grid gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {sources.map((source, idx) => {
                     const icon = getTypeIcon(source.type);
                     const label = getTypeLabel(source.type);
@@ -127,24 +127,24 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({ sources, onSourceClick }
                     const linkText = getLinkText(source);
 
                     return (
-                        <Card key={idx} className="overflow-hidden hover:shadow-lg transition-shadow duration-300">
+                        <Card key={idx} className="overflow-hidden hover:shadow-lg hover:bg-muted/50 transition-all duration-300 rounded-none">
                             <CardContent className="p-0">
-                                <div className={`p-4 border-b border-border/10 ${color.split(' ')[0]}`}>
+                                <div className={`p-3 border-b border-border/10 ${color.split(' ')[0]}`}>
                                     <div className="flex items-start justify-between gap-3">
                                         <div className="flex items-start gap-3 flex-1 min-w-0">
-                                            <div className="p-2 rounded-xl bg-background/50 shadow-sm border border-white/10 flex-shrink-0">
+                                            <div className="p-2 rounded-none bg-background/50 shadow-sm border border-white/10 flex-shrink-0">
                                                 {icon}
                                             </div>
                                             <div className="flex flex-col min-w-0 flex-1">
-                                                <div className="font-bold text-base leading-tight break-words tracking-tight">
-                                                    {source.title}
-                                                </div>
-                                                <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                                    <Badge className={`text-[10px] uppercase tracking-widest font-bold border ${color}`}>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="font-semibold text-base leading-tight break-words tracking-tight text-foreground">
+                                                        {source.title}
+                                                    </div>
+                                                    <Badge className={`text-[9px] uppercase tracking-widest font-bold border ${color} px-1.5 py-0.5 rounded-none`}>
                                                         {label}
                                                     </Badge>
                                                     {source.id && (
-                                                        <span className="text-[10px] font-mono opacity-40">#{source.id}</span>
+                                                        <span className="text-xs text-muted-foreground opacity-50">ID: {source.id}</span>
                                                     )}
                                                 </div>
                                             </div>
@@ -152,34 +152,34 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({ sources, onSourceClick }
                                     </div>
                                 </div>
 
-                                <div className="p-4 space-y-3">
+                                <div className="p-3 space-y-2">
                                     {source.metadata?.topic && (
-                                        <div className="text-[10px] font-bold bg-muted px-2 py-0.5 rounded-md w-fit text-muted-foreground">
+                                        <div className="text-[10px] font-bold bg-muted px-1.5 py-0.5 rounded-none w-fit text-muted-foreground">
                                             COLECCIÓN: {source.metadata.topic}
                                         </div>
                                     )}
 
-                                    <div className="text-sm text-muted-foreground leading-relaxed">
+                                    <div className="text-sm text-muted-foreground leading-relaxed mb-2">
                                         <InlineMarkdownRenderer content={source.snippet} />
                                     </div>
 
                                     {source.metadata?.similarity_score && (
                                         <div className="flex items-center gap-2 pt-2">
-                                            <div className="h-1.5 flex-1 bg-muted rounded-full overflow-hidden">
+                                            <div className="h-1.5 flex-1 bg-muted rounded-none overflow-hidden">
                                                 <div
                                                     className="h-full bg-primary transition-all duration-1000"
                                                     style={{ width: `${Math.round(source.metadata.similarity_score * 100)}%` }}
                                                 />
                                             </div>
-                                            <span className="text-[10px] font-bold text-primary whitespace-nowrap">
+                                            <span className="text-sm font-bold text-primary whitespace-nowrap">
                                                 {Math.round(source.metadata.similarity_score * 100)}% Relevancia
                                             </span>
                                         </div>
                                     )}
 
                                     {source.url && (
-                                        <div className="pt-3 border-t border-border/10">
-                                            <div className="text-[9px] font-black text-muted-foreground uppercase tracking-widest mb-2">
+                                        <div className="pt-2 border-t border-border/10">
+                                            <div className="text-[9px] font-black text-muted-foreground uppercase tracking-widest mb-1">
                                                 Origen
                                             </div>
                                             <div className="flex items-center gap-2">

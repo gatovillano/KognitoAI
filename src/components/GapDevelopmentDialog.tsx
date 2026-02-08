@@ -266,7 +266,7 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
                       </div>
                       <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Fuentes de Investigación</span>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {processedSources.map((source, idx) => (
                         <SourceButton
                           key={idx}

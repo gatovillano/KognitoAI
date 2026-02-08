@@ -1,6 +1,7 @@
 # core/agents/deep_researcher.py
 
 import asyncio
+import uuid
 import json
 import logging
 import os
@@ -126,8 +127,19 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> dict:
     try:
         response = await invoke_structured_output(fast_llm, ClarifyWithUser, prompt, retry_cfg)
     except Exception as e:
-        logger.warning(f"⚠️ [DeepResearcher] clarify_with_user - Fast LLM failed: {e}. Falling back to Main LLM.")
-        response = None
+        error_str = str(e)
+        if "tool_choice" in error_str and "Openrouter" in error_str:
+            logger.warning(f"⚠️ [DeepResearcher] clarify_with_user - OpenRouter tool_choice error. Retrying with json_mode.")
+            try:
+                # Forcing json_mode for providers that support it but fail with tool_choice
+                model_with_json = fast_llm.with_structured_output(ClarifyWithUser, method="json_mode")
+                response = await model_with_json.ainvoke([HumanMessage(content=prompt)])
+            except Exception as e2:
+                logger.warning(f"⚠️ [DeepResearcher] clarify_with_user - Retry with json_mode failed: {e2}. Falling back to Main LLM.")
+                response = None
+        else:
+            logger.warning(f"⚠️ [DeepResearcher] clarify_with_user - Fast LLM failed: {e}. Falling back to Main LLM.")
+            response = None
 
     # Fallback to main LLM
     if response is None:
@@ -225,8 +237,18 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> dic
     try:
         response = await invoke_structured_output(fast_llm, ResearchQuestion, prompt_content, retry_cfg)
     except Exception as e:
-        logger.warning(f"⚠️ [DeepResearcher] write_research_brief - Fast LLM failed: {e}. Falling back to Main LLM.")
-        response = None
+        error_str = str(e)
+        if "tool_choice" in error_str and "Openrouter" in error_str:
+            logger.warning(f"⚠️ [DeepResearcher] write_research_brief - OpenRouter tool_choice error. Retrying with json_mode.")
+            try:
+                model_with_json = fast_llm.with_structured_output(ResearchQuestion, method="json_mode")
+                response = await model_with_json.ainvoke([HumanMessage(content=prompt_content)])
+            except Exception as e2:
+                logger.warning(f"⚠️ [DeepResearcher] write_research_brief - Retry with json_mode failed: {e2}. Falling back to Main LLM.")
+                response = None
+        else:
+            logger.warning(f"⚠️ [DeepResearcher] write_research_brief - Fast LLM failed: {e}. Falling back to Main LLM.")
+            response = None
 
     # Fallback to main LLM if fast LLM fails or returns None
     if response is None or not response.research_brief:
@@ -284,6 +306,9 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
     pruned_messages_for_report = await prune_messages_to_fit_token_limit(
         current_messages_list, writer_model, cfg.max_input_tokens, keep_ratio=0.3
     )
+
+    # Retrieve findings from the state
+    findings = "\n\n".join(state.get("notes", []))
 
     # Truncate findings if they are excessively large (approx 100k chars ~ 25k tokens)
     max_findings_chars = 100000
@@ -588,10 +613,16 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
             elif tc["name"] == "deep_research_think_tool":
                 content = f"Thought processed: {tc['args'].get('reflection', 'No reflection provided.')}"
             
+            # Ensure tool_call_id is never None
+            tool_call_id = tc.get("id")
+            if tool_call_id is None:
+                tool_call_id = str(uuid.uuid4()) # Generate a UUID if ID is missing
+                logger.warning(f"⚠️ [Supervisor Tools] Missing tool_call_id for tool '{tc['name']}'. Generated UUID: {tool_call_id}")
+
             tool_results_map[i] = ToolMessage(
                 content=content,
                 name=tc["name"],
-                tool_call_id=tc["id"]
+                tool_call_id=tool_call_id
             )
 
     # 2. Execute parallel research tasks if any
@@ -603,10 +634,17 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
         # Store parallel results in the map
         for idx, result in zip(conduct_research_indices, parallel_results):
             compressed_result = result.get("compressed_research", "Error: No compressed research found.")
+            
+            # Ensure tool_call_id is never None
+            tool_call_id = tool_calls[idx].get("id")
+            if tool_call_id is None:
+                tool_call_id = str(uuid.uuid4()) # Generate a UUID if ID is missing
+                logger.warning(f"⚠️ [Supervisor Tools] Missing tool_call_id for tool '{tool_calls[idx]['name']}'. Generated UUID: {tool_call_id}")
+
             tool_results_map[idx] = ToolMessage(
                 content=compressed_result,
                 name=tool_calls[idx]["name"],
-                tool_call_id=tool_calls[idx]["id"],
+                tool_call_id=tool_call_id,
             )
             
             # Collect notes and sources
@@ -620,7 +658,17 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
     # 3. Construct the final list of ToolMessages in the ORIGINAL order
     for i in range(len(tool_calls)):
         if i in tool_results_map:
-            all_tool_messages.append(tool_results_map[i])
+            # Ensure tool_call_id is never None
+            tool_call_id = tool_calls[i].get("id")
+            if tool_call_id is None:
+                tool_call_id = str(uuid.uuid4()) # Generate a UUID if ID is missing
+                logger.warning(f"⚠️ [Supervisor Tools] Missing tool_call_id for tool '{tool_calls[i]['name']}'. Generated UUID: {tool_call_id}")
+
+            all_tool_messages.append(ToolMessage(
+                content=tool_results_map[i].content, # Use content from the map
+                name=tool_calls[i]["name"],
+                tool_call_id=tool_call_id
+            ))
 
     update_payload["supervisor_messages"] = all_tool_messages
     return update_payload
