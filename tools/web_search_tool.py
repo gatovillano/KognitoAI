@@ -38,7 +38,7 @@ class WebSearchTool(BaseTool):
     Herramienta para realizar búsquedas en la web utilizando Brave Search.
     Es un wrapper simple sobre la herramienta BraveSearch de LangChain.
     """
-    account_id: str
+    account_id: Optional[str] = None
     workspace_id: Optional[str] = None
     telegram_id: Optional[int] = None
     thread_id: Optional[str] = None
@@ -76,6 +76,13 @@ class WebSearchTool(BaseTool):
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
         **kwargs: Any
     ) -> dict:
+        if not self.account_id:
+            output = ToolOutputWithSources(
+                context_for_llm="Error: La herramienta de búsqueda web requiere un 'account_id' para funcionar.",
+                sources=[]
+            )
+            return output.model_dump()
+
         logger.info(f"🏹 Realizando búsqueda en Brave con la consulta: '{query}'")
         
         if not self._brave_search_tool:

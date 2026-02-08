@@ -482,14 +482,14 @@ async def get_relevant_memories(
             # collection_id: uuid.UUID # Eliminado
             k: int
             similarity_threshold: float
-            filter_topics: Optional[List[str]]
-            filter_document_ids: Optional[List[str]]
+            filter_topics: Optional[List[str]] = None
+            filter_document_ids: Optional[List[str]] = None
             account_id: str
-            workspace_id: Optional[str]
-            content_types: Optional[List[str]] # Nuevo
-            category: Optional[str]
-            explicit_document_ids: Optional[List[str]]
-            db_session: Optional[AsyncSession] # Optimization
+            workspace_id: Optional[str] = None
+            content_types: Optional[List[str]] = None # Nuevo
+            category: Optional[str] = None
+            explicit_document_ids: Optional[List[str]] = None
+            db_session: Optional[Any] = None # Optimization - Changed to Any to avoid Pydantic validation issues with AsyncSession
 
             def _get_relevant_documents(self, query_str: str, **kwargs) -> List[LCDocument]:
                 return []
@@ -521,14 +521,14 @@ async def get_relevant_memories(
             
             # collection_id: uuid.UUID # Eliminado
             k: int
-            filter_topics: Optional[List[str]]
-            filter_document_ids: Optional[List[str]]
+            filter_topics: Optional[List[str]] = None
+            filter_document_ids: Optional[List[str]] = None
             account_id: str
-            workspace_id: Optional[str]
-            content_types: Optional[List[str]] # Nuevo
-            category: Optional[str]
-            explicit_document_ids: Optional[List[str]]
-            db_session: Optional[AsyncSession] # Optimization
+            workspace_id: Optional[str] = None
+            content_types: Optional[List[str]] = None # Nuevo
+            category: Optional[str] = None
+            explicit_document_ids: Optional[List[str]] = None
+            db_session: Optional[Any] = None # Optimization - Changed to Any to avoid Pydantic validation issues with AsyncSession
 
             def _get_relevant_documents(self, query_str: str, **kwargs) -> List[LCDocument]:
                 return []

@@ -731,6 +731,11 @@ async def call_model_node(state: AgentState):
     Nodo principal que invoca al LLM para decidir el siguiente paso (herramienta o respuesta).
     """
     logger.debug(f"--- (Grafo) Nodo: Llama al Modelo para cuenta {state['account_id']} ---")
+    logger.debug(f"DEBUG (call_model_node): account_id={state.get('account_id')}, telegram_id={state.get('telegram_id')}, workspace_id={state.get('workspace_id')}")
+    
+    # --- TURN COUNT LOGIC REMOVED FROM HERE (Now handled in proactive_memory_node) ---
+    # turn_count is now calculated based on history to ensure persistence
+
     
     # --- FIX: Sanitize messages from history to ensure tool_call_ids and names are present ---
     # This prevents crashes if the DB contains messages with null IDs or empty names from previous bugs
@@ -786,18 +791,51 @@ async def call_model_node(state: AgentState):
                 document_names_for_rag = [context.get("snapshot", {}).get("name", topic)]
     # --- CONSOLIDACIÓN Y RE-INDEXACIÓN DE FUENTES PARA EL LLM ---
     # Combinar fuentes de todas las ramas (RAG, Proactive, Graph), asegurando IDs secuenciales desde 1
+    # PRIORIDAD DE ORDEN: 1. RAG Context (adjuntos), 2. Graph Sources, 3. Tool/Proactive Sources
+    # Esto asegura que los IDs sean estables si el agente decide llamar a herramientas después
     all_sources_for_llm: List[Source] = []
     final_sources_for_state = []
-    
-    # 1. Recolectar todas las fuentes disponibles en el estado
+    seen_source_identifiers = set()
+
+    def get_source_identifier(s: Dict[str, Any]) -> str:
+        s_type = s.get('type', 'web')
+        s_url = s.get('url') or s.get('id') or ''
+        return f"{s_type}:{s_url}"
+
     raw_sources = []
-    # Fuentes de RAG y Proactive (vienen en state['sources'])
-    if state.get('sources'):
-        raw_sources.extend(state['sources'])
     
-    # Fuentes de Grafo (vienen en state['graph_sources'])
+    # 1. Procesar RAG Context (Documentos adjuntos explícitamente por el usuario)
+    if state.get('rag_context'):
+        for item in state['rag_context']:
+            # Normalizar para que parezca una fuente citable
+            normalized = {
+                "id": item.get('id'),
+                "title": item.get('name') or item.get('title') or "Documento Adjunto",
+                "url": item.get('url') or item.get('id') or f"document://{item.get('id')}",
+                "snippet": item.get('content') or item.get('snippet') or "",
+                "type": item.get('type', 'document'),
+                "metadata": item.get('metadata', {})
+            }
+            ident = get_source_identifier(normalized)
+            if ident not in seen_source_identifiers:
+                raw_sources.append(normalized)
+                seen_source_identifiers.add(ident)
+
+    # 2. Procesar Fuentes de Grafo (vienen en state['graph_sources'])
     if state.get('graph_sources'):
-        raw_sources.extend(state['graph_sources'])
+        for s in state['graph_sources']:
+            ident = get_source_identifier(s)
+            if ident not in seen_source_identifiers:
+                raw_sources.append(s)
+                seen_source_identifiers.add(ident)
+
+    # 3. Procesar Fuentes de RAG General y Herramientas (vienen en state['sources'])
+    if state.get('sources'):
+        for s in state['sources']:
+            ident = get_source_identifier(s)
+            if ident not in seen_source_identifiers:
+                raw_sources.append(s)
+                seen_source_identifiers.add(ident)
 
     # 2. Procesar y re-indexar secuencialmente para que el LLM use [1], [2], [3]...
     for i, s_dict in enumerate(raw_sources, start=1):
@@ -2235,18 +2273,22 @@ async def proactive_memory_node(state: AgentState):
     last_message = state["messages"][-1]
     if not isinstance(last_message, HumanMessage):
         logger.info("Saltando memoria proactiva: el último mensaje no es del usuario.")
-        # Devolver el incremento de turn_count
-        return {"turn_count": state.get('turn_count', 0) + 1}
+        # Calculamos el turno actual incluso si saltamos para mantener el estado consistente
+        calc_turn = len([m for m in state["messages"] if isinstance(m, HumanMessage)])
+        return {"turn_count": calc_turn}
 
     user_content = extract_text_content(last_message.content)
     if not user_content or len(user_content.strip()) < 10:
         logger.info("Saltando memoria proactiva: contenido del usuario muy corto o vacío.")
-        return {"turn_count": state.get('turn_count', 0) + 1}
+        calc_turn = len([m for m in state["messages"] if isinstance(m, HumanMessage)])
+        return {"turn_count": calc_turn}
 
-    # 2. Incrementar el contador de turnos
-    current_turn_count = state.get('turn_count', 0) + 1
-    state['turn_count'] = current_turn_count
-    logger.info(f"Contador de turnos: {current_turn_count}")
+    # 2. Calcular el contador de turnos real basado en el número de mensajes del usuario en el historial
+    # Esto asegura que el contador sea persistente incluso si el estado del grafo se reinicia
+    from langchain_core.messages import HumanMessage
+    current_turn_count = len([m for m in state["messages"] if isinstance(m, HumanMessage)])
+    logger.info(f"Contador de turnos real (basado en mensajes humanos): {current_turn_count}")
+
 
     # 3. Decidir si es momento de procesar la memoria proactiva (cada 5 turnos)
     if current_turn_count % 5 != 0:
