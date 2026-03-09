@@ -132,8 +132,6 @@ class MultiQueryRetriever:
                 query=original_query,
                 filter_topics=topics,
                 workspace_id=workspace_id,
-                team_id=team_id,
-                visibility_teams=visibility_teams,
                 filter_document_ids=document_ids,
                 k=k,
                 hybrid_search=True,

@@ -16,6 +16,7 @@ import { useRouter } from 'next/navigation'; // Importar useRouter
 import type { Note } from './page'; // Importamos el tipo de dato 'Note' desde la página principal
 import { DialogFooter } from '@/components/ui/dialog'; // Importar DialogFooter
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; // Importar Select components
+import { useUserSettings } from '@/contexts/UserSettingsContext';
 
 interface ContactProfile {
   id: string;
@@ -31,6 +32,7 @@ interface ViewNoteDialogProps {
 
 export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: ViewNoteDialogProps) {
   const router = useRouter(); // Hook para navegación
+  const { settings } = useUserSettings();
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isNoteEditDialogOpen, setIsNoteEditDialogOpen] = useState(false); // Estado para el diálogo de edición
   const [isLinkProfileDialogOpen, setIsLinkProfileDialogOpen] = useState(false); // Estado para el diálogo de vincular perfil
@@ -97,7 +99,26 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
 
     setIsSpeaking(true);
     try {
-      const response = await apiClient.post('/api/text-to-speech', { text: note.content }, {
+      // Construir payload con configuración TTS del usuario
+      const ttsPayload: any = { text: note.content };
+
+      // Si el usuario tiene configuración TTS personalizada, usarla
+      if (settings) {
+        if (settings.tts_provider) {
+          ttsPayload.provider = settings.tts_provider;
+        }
+        if (settings.tts_voice) {
+          ttsPayload.voice = settings.tts_voice;
+        }
+        if (settings.tts_speed) {
+          ttsPayload.speed = settings.tts_speed;
+        }
+        if (settings.tts_region) {
+          ttsPayload.region = settings.tts_region;
+        }
+      }
+
+      const response = await apiClient.post('/api/text-to-speech', ttsPayload, {
         responseType: 'blob', // Importante para manejar la respuesta como un blob de audio
       });
 
@@ -180,23 +201,7 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
     }
   };
 
-  const handleOpenInOnlyOffice = async () => {
-    if (!note) return;
-    const toastId = toast.loading("Preparando documento para OnlyOffice...");
-    try {
-        // Primero convertimos/aseguramos que exista el docx
-        await apiClient.post(`/api/notes/${note.id}/convert-to-word`);
-        
-        toast.dismiss(toastId);
-        // Redirigimos a la página de OnlyOffice
-        // Asumiendo que la ruta es /notes/onlyoffice/[id]
-        router.push(`/notes/onlyoffice/${note.id}`);
-        onOpenChange(false); // Cierra el diálogo actual
-    } catch (error) {
-        toast.error("Error al convertir o abrir en OnlyOffice", { id: toastId });
-        console.error(error);
-    }
-  };
+
 
   // Si no hay nota para mostrar, no renderizamos nada para evitar errores.
   if (!note) {
@@ -239,10 +244,7 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
                     <Download className="mr-2 h-4 w-4" />
                     Descargar PDF
                   </DropdownMenuItem>
-                   <DropdownMenuItem onClick={handleOpenInOnlyOffice}>
-                    <FileType className="mr-2 h-4 w-4" />
-                    Abrir en OnlyOffice
-                  </DropdownMenuItem>
+
                   <DropdownMenuItem onClick={handleTextToSpeech} disabled={isSpeaking}>
                     <Volume2 className={isSpeaking ? "mr-2 h-4 w-4 animate-pulse text-primary" : "mr-2 h-4 w-4"} />
                     Reproducir Audio
@@ -257,7 +259,7 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
             Creada el: {new Date(note.created_at).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}
           </DialogDescription>
         </DialogHeader>
-        
+
         {/* Usamos ScrollArea para que el contenido de la nota sea navegable si es muy largo */}
         <ScrollArea className="max-h-[65vh] mt-4 pr-6">
           <div className="py-4 text-xl">

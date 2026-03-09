@@ -3,6 +3,7 @@
 import logging
 import time
 import asyncio
+import os
 import torch # Importar torch
 from collections import deque
 from threading import Lock
@@ -147,6 +148,29 @@ def get_vision_llm() -> Optional[ChatLiteLLM]:
     return _vision_llm_instance or _main_agent_llm_instance
 
 
+def normalize_openrouter_model_name(model_name: str) -> str:
+    """
+    Normaliza el nombre del modelo para OpenRouter.
+    
+    Asegura que el modelo tenga el formato 'organizacion/modelo' requerido por OpenRouter.
+    Si es un modelo nativo (aurora, pony), le añade el prefijo 'openrouter/'.
+    """
+    # Si ya tiene el prefijo de proveedor (ej: 'openai/' o 'openrouter/'), no tocarlo
+    if "/" in model_name and not model_name.startswith("openrouter/"):
+        # Pero si el usuario puso algo como 'openai/gpt-4o' y estamos en OpenRouter,
+        # lo dejamos pasar ya que OpenRouter acepta IDs de otros proveedores.
+        return model_name
+
+    native_models = ["aurora-alpha", "pony-alpha", "step-3.5-flash:free"]
+    
+    model_lower = model_name.lower()
+    # Si es un modelo nativo sin prefijo, añadírselo para tener el ID completo de OpenRouter
+    if any(native in model_lower for native in native_models) and not "/" in model_name:
+        return f"openrouter/{model_name}"
+        
+    return model_name
+
+
 def apply_openrouter_model_specific_logic(model_name: str, llm_kwargs: dict):
     """
     Aplica configuraciones específicas según el modelo para OpenRouter.
@@ -158,20 +182,21 @@ def apply_openrouter_model_specific_logic(model_name: str, llm_kwargs: dict):
     model_lower = model_name.lower()
     
     # 1. Detección de modelos de razonamiento (Reasoning/Thinking)
-    # Incluimos una lista más amplia y detección por prefijos comunes
-    reasoning_keywords = [
-        "-r1", "o1-", "o3-", "deepseek-r1", "reasoning", "thought", 
-        "thinking", "step-", "llama-3-sonar", "mixtral-8x7b-instruct-v0.1-reasoning",
-        "gemini-2.0-flash-thinking", "claude-3-7-sonnet" # Anticipando Claude 3.7 que puede tener thinking
-    ]
+    # Solo habilitamos si el modelo es específicamente de razonamiento (o1, deepseek-r1)
+    # o si se solicita explícitamente mediante una flag del sistema (que por defecto es False).
+    reasoning_models = ["-r1", "o1-", "o3-", "deepseek-r1", "thinking-cloud"]
     
-    is_reasoning_model = any(x in model_lower for x in reasoning_keywords)
+    is_reasoning_model = any(x in model_lower for x in reasoning_models)
     
-    # También forzamos si el usuario tiene un ajuste global o el modelo es claramente de la familia R1/O1
-    if is_reasoning_model or model_lower.startswith(("r1-", "o1-", "o3-")) or settings.global_force_reasoning:
+    if is_reasoning_model or settings.global_force_reasoning:
         # Habilitamos el rastro de razonamiento nativo de OpenRouter
         llm_kwargs["extra_body"]["include_reasoning"] = True
         logger.info(f"🧠 Habilitando razonamiento nativo (Force: {settings.global_force_reasoning}) para: {model_name}")
+    else:
+        # Por defecto, NO incluir razonamiento para evitar romper modos JSON y estructurados
+        # OpenRouter recomienda mandar False si queremos asegurar que no se cuele texto de razonamiento
+        llm_kwargs["extra_body"]["include_reasoning"] = False
+        logger.info(f"🧠 Razonamiento nativo DESHABILITADO para: {model_name} (estabilidad JSON)")
 
     # 2. Adaptadores específicos para plataformas de inferencia
     # Algunos modelos requieren flags específicos para mostrar el bloque de pensamiento
@@ -206,23 +231,31 @@ async def get_llm_for_user(account_id: str, purpose: str = "main") -> Optional[C
             if not account:
                 return get_main_llm()
 
-            # Determinar qué modelo usar
+            # Determinar qué modelo y proveedor usar
             model_target = account.llm_model
-            if purpose == "fast" and account.fast_llm_model:
-                model_target = account.fast_llm_model
-            elif purpose == "vision" and account.vision_llm_model:
-                model_target = account.vision_llm_model
+            provider_target = account.llm_provider
+
+            if purpose == "fast":
+                if account.fast_llm_model:
+                    model_target = account.fast_llm_model
+                if account.fast_llm_provider:
+                    provider_target = account.fast_llm_provider
+            elif purpose == "vision":
+                if account.vision_llm_model:
+                    model_target = account.vision_llm_model
+                if account.vision_llm_provider:
+                    provider_target = account.vision_llm_provider
 
             # Si el usuario no tiene proveedor o modelo configurado, usar global
-            if not account.llm_provider or not model_target:
+            if not provider_target or not model_target:
                 if purpose == "fast": return get_fast_llm()
                 if purpose == "vision": return get_vision_llm()
                 return get_main_llm()
 
             # 2. Obtener API Key de los secretos
             repo = SecretRepository(db)
-            provider = account.llm_provider.upper()
-            key_name = f"{provider}_API_KEY"
+            provider_env_name = provider_target.upper()
+            key_name = f"{provider_env_name}_API_KEY"
             api_key = await repo.get_decrypted_secret(account.id, key_name)
 
             # Si no hay API key y el proveedor requiere una (casi todos menos ollama), 
@@ -237,20 +270,31 @@ async def get_llm_for_user(account_id: str, purpose: str = "main") -> Optional[C
                 "max_retries": 0,
                 "rate_limiter": gemini_rate_limiter,
                 "max_tokens": settings.deep_research_max_tokens,
+                "timeout": settings.llm_request_timeout,
             }
 
             if api_key:
                 llm_kwargs["api_key"] = api_key
             
             # --- FIX: Manejo específico para OpenRouter ---
-            if account.llm_provider.lower() == "openrouter":
+            if provider_target.lower() == "openrouter":
                 llm_kwargs["api_base"] = "https://openrouter.ai/api/v1"
-                # LiteLLM prefiere el prefijo openrouter/ para evitar confusiones de proveedores
-                if not model_target.startswith("openrouter/"):
-                    llm_kwargs["model_name"] = f"openrouter/{model_target}"
+                
+                # Paso 1: Obtener el ID real del modelo (ej: 'openrouter/aurora-alpha' o 'anthropic/claude-3')
+                actual_id = normalize_openrouter_model_name(model_target)
+                
+                # Paso 2: Para LiteLLM, el formato final debe ser 'openrouter/ID_REAL'
+                # Si actual_id ya empieza por openrouter/, no lo duplicamos
+                if actual_id.startswith("openrouter/"):
+                    llm_kwargs["model_name"] = actual_id
+                else:
+                    llm_kwargs["model_name"] = f"openrouter/{actual_id}"
+                
+                # Forzar el proveedor para evitar errores internos de LiteLLM
+                llm_kwargs["custom_llm_provider"] = "openrouter"
                 
                 # Aplicar lógica de adaptador universal según el modelo
-                apply_openrouter_model_specific_logic(model_target, llm_kwargs)
+                apply_openrouter_model_specific_logic(actual_id, llm_kwargs)
                 
                 # Headers recomendados por OpenRouter para mejor soporte y visibilidad
                 if "extra_headers" not in llm_kwargs:
@@ -259,9 +303,11 @@ async def get_llm_for_user(account_id: str, purpose: str = "main") -> Optional[C
                 llm_kwargs["extra_headers"]["X-Title"] = "Kognito AI"
                 
                 logger.info(f"OpenRouter: {llm_kwargs['model_name']} (Con adaptadores y headers)")
-            elif account.llm_api_base:
+            elif account.llm_api_base and ("http" in account.llm_api_base):
+                # Solo usar api_base si parece una URL válida (contiene http)
+                # Esto previene el uso de valores accidentales como correos electrónicos
                 llm_kwargs["api_base"] = account.llm_api_base
-            elif "ollama" in account.llm_provider.lower():
+            elif "ollama" in provider_target.lower():
                 # Fallback para ollama si no se especifica base
                 llm_kwargs["api_base"] = "http://localhost:11434"
 
@@ -338,6 +384,7 @@ async def initialize_llms():
             "max_retries": 0, # We handle rate limiting, so disable litellm's retries for this
             "rate_limiter": gemini_rate_limiter, # Pass the compliant rate limiter
             "max_tokens": settings.deep_research_max_tokens, # Allow for massive reports
+            "timeout": settings.llm_request_timeout,
         }
         
         if use_gpu:
@@ -347,15 +394,40 @@ async def initialize_llms():
         if settings.llm_api_base:
             llm_kwargs["api_base"] = settings.llm_api_base
         
-        if "gpt" in settings.llm_model.lower() or "openai" in settings.llm_model.lower():
-            logger.info("🔧 Applying OpenAI/GPT specific config.")
-        elif "gemini" in settings.llm_model.lower():
+        # Configurar proveedor específico según el formato del modelo
+        model_lower = settings.llm_model.lower()
+        
+        if "openrouter" in model_lower:
+            logger.info("🔧 Applying OpenRouter specific config for main LLM.")
+            apply_openrouter_model_specific_logic(settings.llm_model, llm_kwargs)
+        elif "anthropic" in model_lower:
+            logger.info("🔧 Applying Anthropic specific config.")
+            llm_kwargs["provider"] = "anthropic"
+        elif "groq" in model_lower:
+            logger.info("🔧 Applying Groq specific config.")
+            llm_kwargs["provider"] = "groq"
+        elif "deepseek" in model_lower:
+            logger.info("🔧 Applying DeepSeek specific config.")
+            llm_kwargs["provider"] = "deepseek"
+        elif "mistral" in model_lower:
+            logger.info("🔧 Applying Mistral specific config.")
+            llm_kwargs["provider"] = "mistral"
+        elif "cerebras" in model_lower:
+            logger.info("🔧 Applying Cerebras specific config.")
+            llm_kwargs["provider"] = "cerebras"
+        elif "vertex" in model_lower or "google_vertex" in model_lower:
+            logger.info("🔧 Applying Vertex AI specific config.")
+            llm_kwargs["provider"] = "vertex_ai"
+            if settings.google_project_id:
+                llm_kwargs["vertex_project_id"] = settings.google_project_id
+        elif "azure" in model_lower:
+            logger.info("🔧 Applying Azure OpenAI specific config.")
+            llm_kwargs["provider"] = "azure"
+        elif "gemini" in model_lower:
             logger.info("🔧 Applying Gemini specific config.")
             llm_kwargs["provider"] = "google_ai_studio"
-        elif "openrouter" in settings.llm_model.lower():
-            logger.info("🔧 Applying OpenRouter specific config for main LLM.")
-            # Aplicar lógica de adaptador universal
-            apply_openrouter_model_specific_logic(settings.llm_model, llm_kwargs)
+        elif "openai" in model_lower or "gpt" in model_lower:
+            logger.info("🔧 Applying OpenAI/GPT specific config.")
 
         main_llm = ChatLiteLLM(**llm_kwargs)
         _main_agent_llm_instance = main_llm
@@ -373,6 +445,7 @@ async def initialize_llms():
             "verbose": False,
             "max_retries": 0,
             "rate_limiter": gemini_rate_limiter, # Use the same rate limiter instance
+            "timeout": settings.llm_request_timeout,
         }
 
         if use_gpu:
@@ -380,11 +453,30 @@ async def initialize_llms():
 
         if settings.llm_api_base:
             fast_llm_kwargs["api_base"] = settings.llm_api_base
-
-        if "openrouter" in settings.fast_llm_model.lower():
+        
+        # Configurar proveedor específico según el formato del modelo
+        fast_model_lower = settings.fast_llm_model.lower()
+        
+        if "openrouter" in fast_model_lower:
             logger.info("🔧 Applying OpenRouter specific config for fast LLM.")
-            # Aplicar lógica de adaptador universal
             apply_openrouter_model_specific_logic(settings.fast_llm_model, fast_llm_kwargs)
+        elif "anthropic" in fast_model_lower:
+            logger.info("🔧 Applying Anthropic specific config for fast LLM.")
+            fast_llm_kwargs["provider"] = "anthropic"
+        elif "groq" in fast_model_lower:
+            logger.info("🔧 Applying Groq specific config for fast LLM.")
+            fast_llm_kwargs["provider"] = "groq"
+        elif "deepseek" in fast_model_lower:
+            logger.info("🔧 Applying DeepSeek specific config for fast LLM.")
+            fast_llm_kwargs["provider"] = "deepseek"
+        elif "mistral" in fast_model_lower:
+            logger.info("🔧 Applying Mistral specific config for fast LLM.")
+            fast_llm_kwargs["provider"] = "mistral"
+        elif "gemini" in fast_model_lower:
+            logger.info("🔧 Applying Gemini specific config for fast LLM.")
+            fast_llm_kwargs["provider"] = "google_ai_studio"
+        elif "openai" in fast_model_lower or "gpt" in fast_model_lower:
+            logger.info("🔧 Applying OpenAI/GPT specific config for fast LLM.")
 
         fast_llm = ChatLiteLLM(**fast_llm_kwargs)
         _fast_task_llm_instance = fast_llm
@@ -402,13 +494,29 @@ async def initialize_llms():
             "verbose": False,
             "max_retries": 0,
             "rate_limiter": gemini_rate_limiter,
+            "timeout": settings.llm_request_timeout,
         }
         
         if use_gpu:
             vision_llm_kwargs["device"] = "cuda"
-
-        if "openrouter" in settings.vision_model.lower():
+        
+        # Configurar proveedor específico según el formato del modelo
+        vision_model_lower = settings.vision_model.lower()
+        
+        if "openrouter" in vision_model_lower:
             logger.info("🔧 Applying OpenRouter specific config for vision LLM.")
+            apply_openrouter_model_specific_logic(settings.vision_model, vision_llm_kwargs)
+        elif "anthropic" in vision_model_lower:
+            logger.info("🔧 Applying Anthropic specific config for vision LLM.")
+            vision_llm_kwargs["provider"] = "anthropic"
+        elif "groq" in vision_model_lower:
+            logger.info("🔧 Applying Groq specific config for vision LLM.")
+            vision_llm_kwargs["provider"] = "groq"
+        elif "gemini" in vision_model_lower:
+            logger.info("🔧 Applying Gemini specific config for vision LLM.")
+            vision_llm_kwargs["provider"] = "google_ai_studio"
+        elif "openai" in vision_model_lower or "gpt" in vision_model_lower:
+            logger.info("🔧 Applying OpenAI/GPT specific config for vision LLM.")
 
         vision_llm = ChatLiteLLM(**vision_llm_kwargs)
         _vision_llm_instance = vision_llm

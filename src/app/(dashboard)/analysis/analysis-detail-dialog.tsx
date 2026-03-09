@@ -1,9 +1,10 @@
+import { ShareAnalysisDialog } from '@/components/ShareAnalysisDialog';
 import { MessageSquare } from 'lucide-react';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Analysis, AnalysisType, Insight, Question, CollectionAnalysis, DocumentAnalysisResult as SingleTextAnalysis, CollectionConnection, ThemeReference, ThemeQuote, CodeAnalysisResultFrontend, NoteCollectionAnalysisResult, NoteAnalysisResult, DeepResearchAnalysisResult, ProactiveInsightResult, ComprehensiveWebAnalysisResult, ScopedRagAnalysisResult } from '@/lib/models';
-import { Lightbulb, Workflow, ScrollText, Megaphone, Target, BarChart3, TrendingUp, FlaskConical, Puzzle, Goal, LibraryBig, Bot, CircleCheck, Info, Sparkles, XCircle, FileWarning, HelpCircle, Brain, Network, Volume2, Loader2, Pause, Calendar, AlertTriangle, Expand, Atom, FileText, Settings, GitBranch, Activity, Trash2, Zap, ExternalLink } from 'lucide-react';
+import { Lightbulb, Workflow, ScrollText, Megaphone, Target, BarChart3, TrendingUp, FlaskConical, Puzzle, Goal, LibraryBig, Bot, CircleCheck, Info, Sparkles, XCircle, FileWarning, HelpCircle, Brain, Network, Volume2, Loader2, Pause, Calendar, AlertTriangle, Expand, Atom, FileText, Settings, GitBranch, Activity, Trash2, Zap, ExternalLink, Download } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -690,6 +691,9 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
   const [sliderQuestions, setSliderQuestions] = useState<string[]>([]);
   const [sliderTitle, setSliderTitle] = useState('');
 
+  // Estado para el diálogo de compartir análisis
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+
   // Estados para el diálogo simple de notas
   const [isSimpleListDialogOpen, setIsSimpleListDialogOpen] = useState(false);
   const [simpleListTitle, setSimpleListTitle] = useState("");
@@ -699,6 +703,83 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
   const [simpleListColor, setSimpleListColor] = useState("");
 
   const { play, stop, isLoading, isPlaying, activeText } = useTextToSpeech();
+  const [isPdfExporting, setIsPdfExporting] = useState(false);
+
+  const exportToPdf = async () => {
+    if (!currentAnalysis) return;
+    setIsPdfExporting(true);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
+
+      // Map generic analysis data to the expected format for the Deep Research PDF endpoint
+      let content = currentAnalysis.summary || "";
+      let recommendations: string[] = [];
+      let sources: any[] = [];
+
+      // Helper to extract fields from a data object
+      const extractFromObject = (obj: any) => {
+        if (!obj) return;
+        if (obj.final_report) content = obj.final_report;
+        else if (obj.executive_summary && !content) content = obj.executive_summary;
+
+        if (obj.recommendations && Array.isArray(obj.recommendations) && obj.recommendations.length > 0) {
+          recommendations = obj.recommendations;
+        }
+        if (obj.sources && Array.isArray(obj.sources) && obj.sources.length > 0) {
+          sources = obj.sources;
+        }
+      };
+
+      // 1. Try result
+      if (currentAnalysis.result) {
+        extractFromObject(currentAnalysis.result);
+        if ((currentAnalysis.result as any).report) {
+          extractFromObject((currentAnalysis.result as any).report);
+        }
+      }
+
+      // 2. Try full_data (often contains the complete structure for gap_development/deep_research)
+      if (currentAnalysis.full_data) {
+        let fd = currentAnalysis.full_data;
+        if (typeof fd === 'string') {
+          try { fd = JSON.parse(fd); } catch (e) { console.error("Error parsing full_data", e); }
+        }
+
+        if (typeof fd === 'object') {
+          extractFromObject(fd);
+          if (fd.report) {
+            extractFromObject(fd.report);
+          }
+        }
+      }
+
+      if (!content) {
+        toast.error("No se encontró contenido detallado para exportar.");
+        setIsPdfExporting(false);
+        return;
+      }
+
+      const response = await apiClient.post('/api/deep_research/export_pdf', {
+        title: currentAnalysis.title || "Informe de Análisis",
+        final_report: content,
+        sources: sources,
+        recommendations: recommendations
+      });
+
+      const data = response.data;
+      if (data.url) {
+        window.open(data.url, '_blank');
+      } else {
+        toast.error("No se pudo generar el PDF");
+      }
+    } catch (error) {
+      console.error("Error exporting PDF:", error);
+      toast.error("Error al exportar PDF");
+    } finally {
+      setIsPdfExporting(false);
+    }
+  };
+
 
   const getAnalysisTextForSpeech = useCallback(() => {
     if (!currentAnalysis) return '';
@@ -1262,6 +1343,9 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                   <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(true)} className="text-muted-foreground hover:text-primary hover:bg-primary/10" title="Chatear con este análisis">
                     <MessageSquare className="h-4 w-4" />
                   </Button>
+                  <Button variant="ghost" size="icon" onClick={() => setIsShareDialogOpen(true)} className="text-muted-foreground hover:text-primary hover:bg-primary/10" title="Compartir análisis">
+                    <ExternalLink className="h-4 w-4" />
+                  </Button>
                   {onAnalysisDeleted && (
                     <Button variant="ghost" size="icon" onClick={handleConfirmDelete} className="text-muted-foreground hover:text-destructive hover:bg-destructive/10">
                       <Trash2 className="h-4 w-4" />
@@ -1321,6 +1405,15 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                   Ver Preguntas
                 </Button>
               )}
+              <Button
+                variant="outline"
+                onClick={exportToPdf}
+                disabled={isPdfExporting}
+                className="gap-2"
+              >
+                {isPdfExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                Exportar PDF
+              </Button>
               <Button onClick={() => onOpenChange(false)}>Cerrar</Button>
             </div>
           </div>
@@ -1380,6 +1473,14 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
         items={simpleListItems}
         icon={simpleListIcon}
         colorClass={simpleListColor}
+      />
+
+      {/* Diálogo de compartir análisis */}
+      <ShareAnalysisDialog
+        isOpen={isShareDialogOpen}
+        onOpenChange={setIsShareDialogOpen}
+        analysisId={currentAnalysis.id}
+        analysisTitle={currentAnalysis.title}
       />
 
     </Dialog>

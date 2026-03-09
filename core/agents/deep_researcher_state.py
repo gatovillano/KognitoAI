@@ -15,7 +15,11 @@ class ConductResearch(BaseModel):
     )
 
 class ResearchComplete(BaseModel):
-    """Call this tool to indicate that the research is complete."""
+    """Call this tool to indicate that the research is complete and all necessary information has been gathered."""
+    reason: str = Field(
+        description="Brief explanation of why the research is complete and what key findings were gathered.",
+        default="Research completed successfully."
+    )
 
 class Summary(BaseModel):
     """Research summary with key findings."""
@@ -48,6 +52,11 @@ def override_reducer(current_value, new_value):
     if isinstance(new_value, dict) and new_value.get("type") == "override":
         return new_value.get("value", new_value)
     else:
+        # Handle None as initial state value (before any data has been set)
+        if current_value is None:
+            return new_value if new_value is not None else []
+        if new_value is None:
+            return current_value
         return operator.add(current_value, new_value)
 
 class AgentInputState(TypedDict):
@@ -64,6 +73,7 @@ class AgentState(TypedDict):
     raw_notes: Annotated[List[str], override_reducer]
     notes: Annotated[List[str], override_reducer]
     final_report: str
+    visual_schema: Optional[str]
     sources: Annotated[List[dict], override_reducer]
     recommendations: Annotated[List[str], override_reducer]
     clarification_attempts: int
@@ -77,6 +87,7 @@ class SupervisorState(TypedDict):
     research_iterations: int
     raw_notes: Annotated[List[str], override_reducer]
     sources: Annotated[List[dict], override_reducer]
+    visual_schema: Optional[str]
 
 class ResearcherState(TypedDict):
     """State for individual researchers conducting research."""

@@ -6,33 +6,40 @@
 # incluso para contraseñas cortas.
 try:
     import bcrypt
+
     # 1. Arreglar el error de atributo __about__
     if not hasattr(bcrypt, "__about__"):
+
         class BcryptAbout:
             __version__ = bcrypt.__version__
+
         bcrypt.__about__ = BcryptAbout()
-    
+
     # 2. Monkey-patch de hashpw para truncar automáticamente a 72 bytes
     # Esto evita que passlib falle en sus comprobaciones internas de "wrap bug".
     _original_hashpw = bcrypt.hashpw
+
     def _patched_hashpw(password, salt):
         if isinstance(password, str):
-            password = password.encode('utf-8')
+            password = password.encode("utf-8")
         if len(password) > 72:
             password = password[:72]
         return _original_hashpw(password, salt)
+
     bcrypt.hashpw = _patched_hashpw
-    
+
     # 3. Lo mismo para checkpw por seguridad
     _original_checkpw = bcrypt.checkpw
+
     def _patched_checkpw(password, hashed_password):
         if isinstance(password, str):
-            password = password.encode('utf-8')
+            password = password.encode("utf-8")
         if len(password) > 72:
             password = password[:72]
         return _original_checkpw(password, hashed_password)
+
     bcrypt.checkpw = _patched_checkpw
-    
+
 except ImportError:
     pass
 # --------------------------------------------
@@ -57,46 +64,59 @@ from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 
 from core.config import settings
-from core.database import get_db_session, Account, Workspace, WorkspacePermission # Importar WorkspacePermission
-from sqlalchemy.ext.asyncio import AsyncSession # Importar AsyncSession
-from sqlalchemy import select # Importar select
-import uuid # Importar uuid
-from typing import List # Importar List
+from core.database import (
+    get_db_session,
+    Account,
+    Workspace,
+    WorkspacePermission,
+)  # Importar WorkspacePermission
+from sqlalchemy.ext.asyncio import AsyncSession  # Importar AsyncSession
+from sqlalchemy import select, or_, func  # Importar select, or_ y func
+import uuid  # Importar uuid
+from typing import List  # Importar List
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG) # AÑADIR ESTA LÍNEA
+logger.setLevel(logging.DEBUG)  # AÑADIR ESTA LÍNEA
 
 # 1. Contexto de Hasheo de Contraseña
 # Usamos bcrypt, que es el estándar recomendado.
 # Se añade truncate_error=False para evitar el error de 72 bytes de bcrypt.
 pwd_context = CryptContext(
-    schemes=["bcrypt"], 
+    schemes=["bcrypt"],
     deprecated="auto",
-    bcrypt__truncate_error=False  # Esto permite contraseñas de más de 72 caracteres truncándolas (comportamiento estándar de bcrypt)
+    bcrypt__truncate_error=False,  # Esto permite contraseñas de más de 72 caracteres truncándolas (comportamiento estándar de bcrypt)
 )
 
 # 2. Esquema de Autenticación OAuth2
 # Esto le dice a FastAPI cómo esperar el token (en el header "Authorization: Bearer <token>")
+from fastapi.security import OAuth2PasswordBearer, HTTPBasic, HTTPBasicCredentials
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
-oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
-from fastapi import WebSocket, WebSocketException # Añadido
-from starlette.websockets import WebSocketDisconnect # Añadido
+oauth2_scheme_optional = OAuth2PasswordBearer(
+    tokenUrl="/api/auth/login", auto_error=False
+)
+basic_scheme_optional = HTTPBasic(auto_error=False)
+from fastapi import WebSocket, WebSocketException  # Añadido
+from starlette.websockets import WebSocketDisconnect  # Añadido
 
 # --- Funciones de Contraseña ---
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verifica una contraseña plana contra su versión hasheada."""
     if not plain_password:
         return False
-    
+
     try:
-        # El límite real de bcrypt es 72 BYTES. 
+        # El límite real de bcrypt es 72 BYTES.
         # Truncamos a nivel de bytes para asegurar compatibilidad total.
-        pw_bytes = plain_password.encode('utf-8')
+        pw_bytes = plain_password.encode("utf-8")
         if len(pw_bytes) > 72:
-            logger.warning(f"⚠️ Contraseña de login truncada de {len(pw_bytes)} a 72 bytes.")
+            logger.warning(
+                f"⚠️ Contraseña de login truncada de {len(pw_bytes)} a 72 bytes."
+            )
             pw_bytes = pw_bytes[:72]
-        
+
         return pwd_context.verify(pw_bytes, hashed_password)
     except Exception as e:
         logger.error(f"❌ Error crítico en verify_password: {e}", exc_info=True)
@@ -105,24 +125,29 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
             return pwd_context.verify(plain_password[:50], hashed_password)
         raise
 
+
 def get_password_hash(password: str) -> str:
     """Genera el hash de una contraseña."""
     if not password:
         return ""
-        
+
     try:
         # Truncamos a 72 bytes al crear el hash también.
-        pw_bytes = password.encode('utf-8')
+        pw_bytes = password.encode("utf-8")
         if len(pw_bytes) > 72:
-            logger.warning(f"⚠️ Nueva contraseña truncada de {len(pw_bytes)} a 72 bytes para el hash.")
+            logger.warning(
+                f"⚠️ Nueva contraseña truncada de {len(pw_bytes)} a 72 bytes para el hash."
+            )
             pw_bytes = pw_bytes[:72]
-            
+
         return pwd_context.hash(pw_bytes)
     except Exception as e:
         logger.error(f"❌ Error crítico en get_password_hash: {e}", exc_info=True)
         raise
 
+
 # --- Funciones de Token JWT ---
+
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     """Crea un nuevo token de acceso JWT."""
@@ -131,23 +156,28 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
         expire = datetime.now(timezone.utc) + expires_delta
     else:
         expire = datetime.now(timezone.utc) + timedelta(days=settings.jwt_expiry_days)
-    
+
     to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
-    
+
     encoded_jwt = jwt.encode(to_encode, settings.jwt_secret_key, algorithm="HS256")
     return encoded_jwt
+
 
 def decode_access_token(token: str) -> Optional[dict]:
     """
     Decodifica un token JWT y devuelve el payload.
-    
+
     Returns:
         El payload (dict) si el token es válido, o None si ha expirado o es inválido.
     """
     logger.debug(f"🔑 DEBUG: Token recibido en decode_access_token: {token[:50]}...")
-    logger.debug(f"🔑 DEBUG: Usando JWT_SECRET_KEY que empieza con: {settings.jwt_secret_key[:10]}...")
+    logger.debug(
+        f"🔑 DEBUG: Usando JWT_SECRET_KEY que empieza con: {settings.jwt_secret_key[:10]}..."
+    )
     logger.debug(f"🔑 DEBUG: Intentando decodificar token: {token[:50]}...")
-    logger.debug(f"🔑 DEBUG: Usando JWT_SECRET_KEY que empieza con: {settings.jwt_secret_key[:10]}... (longitud: {len(settings.jwt_secret_key)})")
+    logger.debug(
+        f"🔑 DEBUG: Usando JWT_SECRET_KEY que empieza con: {settings.jwt_secret_key[:10]}... (longitud: {len(settings.jwt_secret_key)})"
+    )
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=["HS256"])
         logger.debug(f"✅ DEBUG: Token decodificado exitosamente. Payload: {payload}")
@@ -159,12 +189,14 @@ def decode_access_token(token: str) -> Optional[dict]:
         logger.error(f"❌ Error de decodificación de JWT: {e}", exc_info=True)
         return None
 
+
 # --- Dependencia de FastAPI ---
+
 
 async def get_current_account_id(token: str = Depends(oauth2_scheme)) -> str:
     """
     Dependencia de FastAPI para proteger endpoints.
-    
+
     Extrae el token del header, lo valida y devuelve el account_id.
     Si el token es inválido o no se proporciona, lanza una HTTPException 401.
     """
@@ -173,11 +205,11 @@ async def get_current_account_id(token: str = Depends(oauth2_scheme)) -> str:
         detail="No se pudieron validar las credenciales",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
+
     logger.info(f"🔑 DEBUG: Token recibido en get_current_account_id: {token[:50]}...")
-    
+
     payload = decode_access_token(token)
-    
+
     if payload is None:
         logger.warning("❌ Payload es None después de decodificar el token.")
         raise credentials_exception
@@ -186,13 +218,83 @@ async def get_current_account_id(token: str = Depends(oauth2_scheme)) -> str:
     if account_id is None:
         logger.warning("❌ account_id es None en el payload del token.")
         raise credentials_exception
-    
+
     logger.info(f"✅ account_id extraído del token: {account_id}")
     return account_id
 
+
+async def get_current_account_id_caldav(
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    basic: Optional[HTTPBasicCredentials] = Depends(basic_scheme_optional),
+    session: AsyncSession = Depends(get_db_session),
+) -> str:
+    """
+    Dependencia híbrida para CalDAV: admite Bearer (JWT) o Basic Auth.
+    """
+    logger = logging.getLogger(__name__)
+
+    # 1. Intentar con Bearer token (JWT)
+    if token:
+        payload = decode_access_token(token)
+        if payload:
+            account_id = payload.get("sub")
+            if account_id:
+                logger.info(
+                    f"[CalDAV Auth] Bearer token válido para account: {account_id}"
+                )
+                return account_id
+
+    # 2. Intentar con Basic Auth
+    if basic:
+        # Normalizar el identificador a minúsculas
+        identifier = basic.username.lower() if basic.username else ""
+        password = basic.password
+
+        logger.info(f"[CalDAV Auth] Intentando Basic Auth para: {identifier}")
+
+        # Buscar por email o por username de forma insensible a mayúsculas
+        query = select(Account).where(
+            or_(
+                func.lower(Account.email) == identifier,
+                func.lower(Account.username) == identifier,
+            )
+        )
+        result = await session.execute(query)
+        account = result.scalars().first()
+
+        if account:
+            logger.info(
+                f"[CalDAV Auth] Cuenta encontrada para: {identifier} (ID: {account.id})"
+            )
+            if account.hashed_password and verify_password(
+                password, account.hashed_password
+            ):
+                logger.info(
+                    f"[CalDAV Auth] Contraseña verificada para: {identifier}, devolviendo account_id: {account.id}"
+                )
+                return str(account.id)
+            else:
+                logger.warning(
+                    f"[CalDAV Auth] Contraseña incorrecta para: {identifier}"
+                )
+        else:
+            logger.warning(
+                f"[CalDAV Auth] No se encontró cuenta para el identificador: {identifier}"
+            )
+
+    # 3. Si ambos fallan, lanzar 401 con cabecera WWW-Authenticate para Basic
+    logger.error(
+        "[CalDAV Auth] Autenticación fallida: Sin token o Basic Auth inválido."
+    )
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Credenciales de CalDAV inválidas o ausentes.",
+        headers={"WWW-Authenticate": "Basic realm='CalDAV API'"},
+    )
+
+
 async def get_current_admin_account(
-    token: str = Depends(oauth2_scheme),
-    session: AsyncSession = Depends(get_db_session)
+    token: str = Depends(oauth2_scheme), session: AsyncSession = Depends(get_db_session)
 ) -> Account:
     """
     Dependencia de FastAPI para obtener el objeto Account del administrador actual.
@@ -210,11 +312,10 @@ async def get_current_admin_account(
     account_id: str = payload.get("sub")
     if account_id is None:
         raise credentials_exception
-    
+
     try:
         query = select(Account).where(
-            Account.id == account_id,
-            Account.is_active == True
+            Account.id == account_id, Account.is_active == True
         )
         result = await session.execute(query)
         user_account = result.scalars().first()
@@ -222,9 +323,9 @@ async def get_current_admin_account(
         if not user_account or not user_account.is_admin:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="No tienes permisos de administrador para acceder a este recurso."
+                detail="No tienes permisos de administrador para acceder a este recurso.",
             )
-        
+
         return user_account
 
     except HTTPException:
@@ -233,38 +334,47 @@ async def get_current_admin_account(
         logger.error(f"Error obteniendo el objeto Account del administrador: {e}")
         raise credentials_exception
 
+
 class PIISanitizer:
     """
     Clase para detectar y redactar Información de Identificación Personal (PII).
     """
-    EMAIL_REGEX = re.compile(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+')
-    PHONE_REGEX = re.compile(r'\+?\d{1,4}[-.\s]?\(?\d{1,3}?\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}')
+
+    EMAIL_REGEX = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
+    PHONE_REGEX = re.compile(
+        r"\+?\d{1,4}[-.\s]?\(?\d{1,3}?\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}"
+    )
     # Regex simple para detectar posibles secretos o claves
-    SECRET_REGEX = re.compile(r'(?i)(api[_-]?key|secret|password|token|auth|credential)["\s:]+([^\s,;"]{8,})')
+    SECRET_REGEX = re.compile(
+        r'(?i)(api[_-]?key|secret|password|token|auth|credential)["\s:]+([^\s,;"]{8,})'
+    )
 
     @classmethod
     def sanitize(cls, text: str) -> str:
         """Redacta PII de una cadena de texto."""
         if not isinstance(text, str):
             return str(text)
-        
+
         sanitized = text
         # Redactar Emails
         sanitized = cls.EMAIL_REGEX.sub("[EMAIL_REDACTED]", sanitized)
+
         # Redactar Teléfonos (con cuidado de no borrar IDs numéricos cortos)
         def phone_replacer(match):
             group = match.group(0)
             if len(group.strip()) > 7:
                 return "[PHONE_REDACTED]"
             return group
+
         sanitized = cls.PHONE_REGEX.sub(phone_replacer, sanitized)
-        
+
         # Redactar Secretos
         def secret_replacer(match):
             key_part = match.group(1)
             return f"{key_part}: [SECRET_REDACTED]"
+
         sanitized = cls.SECRET_REGEX.sub(secret_replacer, sanitized)
-        
+
         return sanitized
 
     @classmethod
@@ -278,6 +388,7 @@ class PIISanitizer:
             return cls.sanitize(data)
         return data
 
+
 def verify_token_ws(token: str) -> str:
     """
     Verifica un token JWT para WebSockets y devuelve el account_id.
@@ -287,9 +398,9 @@ def verify_token_ws(token: str) -> str:
         status_code=status.HTTP_403_FORBIDDEN,
         detail="No se pudieron validar las credenciales WebSocket",
     )
-    
+
     payload = decode_access_token(token)
-    
+
     if payload is None:
         logger.warning("❌ Payload es None después de decodificar el token WebSocket.")
         raise credentials_exception
@@ -297,6 +408,8 @@ def verify_token_ws(token: str) -> str:
     account_id: str = payload.get("sub")
     if account_id is None:
         logger.warning("❌ account_id es None en el payload del token WebSocket.")
+
+
 async def get_websocket_token(websocket: WebSocket) -> str:
     """
     Extrae y valida el token JWT de la conexión WebSocket.
@@ -305,68 +418,85 @@ async def get_websocket_token(websocket: WebSocket) -> str:
     try:
         token: str = websocket.headers.get("Authorization")
         if not token:
-            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason="Token de autenticación no proporcionado")
-        
+            raise WebSocketException(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="Token de autenticación no proporcionado",
+            )
+
         scheme, credentials = token.split(" ")
         if scheme.lower() != "bearer":
-            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason="Esquema de autenticación no soportado")
-        
+            raise WebSocketException(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="Esquema de autenticación no soportado",
+            )
+
         payload = decode_access_token(credentials)
         if payload is None:
-            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason="Token inválido o expirado")
-        
+            raise WebSocketException(
+                code=status.WS_1008_POLICY_VIOLATION, reason="Token inválido o expirado"
+            )
+
         account_id: str = payload.get("sub")
         if account_id is None:
-            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason="ID de cuenta no encontrado en el token")
-        
+            raise WebSocketException(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="ID de cuenta no encontrado en el token",
+            )
+
         return account_id
     except WebSocketException:
         raise
     except Exception as e:
         logger.error(f"Error al obtener token de WebSocket: {e}", exc_info=True)
-        raise WebSocketException(code=status.WS_1011_INTERNAL_ERROR, reason="Error interno del servidor al procesar el token")
+        raise WebSocketException(
+            code=status.WS_1011_INTERNAL_ERROR,
+            reason="Error interno del servidor al procesar el token",
+        )
         raise credentials_exception
-    
+
     logger.debug(f"✅ DEBUG: account_id extraído del token WebSocket: {account_id}")
     return account_id
+
 
 async def _get_user_from_token_payload(payload: dict, session: AsyncSession) -> dict:
     """
     Función auxiliar para obtener la información del usuario a partir de un payload de token decodificado.
     """
-    from core.database import Account # Necesitamos importar Account para el tipo
+    from core.database import Account  # Necesitamos importar Account para el tipo
 
     account_id: str = payload.get("sub")
     if account_id is None:
         logger.warning("❌ account_id es None en el payload del token.")
-        return None # O lanzar una excepción específica
+        return None  # O lanzar una excepción específica
 
     try:
         query = select(Account).where(
-            Account.id == account_id,
-            Account.is_active == True
+            Account.id == account_id, Account.is_active == True
         )
         result = await session.execute(query)
         user_account = result.scalars().first()
 
         if not user_account:
-            return None # O lanzar una excepción específica
-        
+            return None  # O lanzar una excepción específica
+
         return {
-            "account_id": str(user_account.id), # Convertir UUID a str
+            "account_id": str(user_account.id),  # Convertir UUID a str
             "email": user_account.email,
             "username": user_account.username,
             "is_active": user_account.is_active,
-            "created_at": user_account.created_at.isoformat() # Convertir datetime a str
+            "created_at": user_account.created_at.isoformat(),  # Convertir datetime a str
         }
 
     except Exception as e:
-        logger.error(f"Error obteniendo información del usuario desde el payload: {e}", exc_info=True)
-        return None # O lanzar una excepción específica
+        logger.error(
+            f"Error obteniendo información del usuario desde el payload: {e}",
+            exc_info=True,
+        )
+        return None  # O lanzar una excepción específica
+
 
 async def get_current_active_account(
-    token: str = Depends(oauth2_scheme),
-    session: AsyncSession = Depends(get_db_session)
+    token: str = Depends(oauth2_scheme), session: AsyncSession = Depends(get_db_session)
 ) -> Account:
     """
     Dependencia de FastAPI para obtener el objeto Account completo del usuario actual.
@@ -387,18 +517,17 @@ async def get_current_active_account(
     account_id: str = payload.get("sub")
     if account_id is None:
         raise credentials_exception
-    
+
     try:
         query = select(Account).where(
-            Account.id == account_id,
-            Account.is_active == True
+            Account.id == account_id, Account.is_active == True
         )
         result = await session.execute(query)
         user_account = result.scalars().first()
 
         if not user_account:
             raise credentials_exception
-        
+
         return user_account
 
     except Exception as e:
@@ -408,7 +537,7 @@ async def get_current_active_account(
 
 async def get_optional_current_active_account(
     token: Optional[str] = Depends(oauth2_scheme_optional),
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
 ) -> Optional[Account]:
     """
     Dependencia de FastAPI para obtener opcionalmente el objeto Account completo del usuario actual.
@@ -426,24 +555,23 @@ async def get_optional_current_active_account(
     account_id: str = payload.get("sub")
     if account_id is None:
         return None
-    
+
     try:
         query = select(Account).where(
-            Account.id == account_id,
-            Account.is_active == True
+            Account.id == account_id, Account.is_active == True
         )
         result = await session.execute(query)
         user_account = result.scalars().first()
-        
+
         return user_account
 
     except Exception as e:
         logger.error(f"Error obteniendo el objeto Account opcional del usuario: {e}")
         return None
 
+
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    session: AsyncSession = Depends(get_db_session)
+    token: str = Depends(oauth2_scheme), session: AsyncSession = Depends(get_db_session)
 ) -> dict:
     """
     Dependencia de FastAPI para obtener información completa del usuario actual.
@@ -467,9 +595,9 @@ async def get_current_user(
         raise credentials_exception
     return user_info
 
+
 async def get_current_user_from_websocket_query_param(
-    websocket: WebSocket,
-    session: AsyncSession = Depends(get_db_session)
+    websocket: WebSocket, session: AsyncSession = Depends(get_db_session)
 ) -> dict:
     """
     Dependencia de FastAPI para obtener información completa del usuario actual desde un WebSocket,
@@ -493,32 +621,35 @@ async def get_current_user_from_websocket_query_param(
         raise credentials_exception
     return user_info
 
-import uuid # Importar uuid
+
+import uuid  # Importar uuid
+
 
 async def check_workspace_permission(
-    account_id: str,
-    workspace_id: str,
-    db: AsyncSession,
-    required_roles: List[str]
+    account_id: str, workspace_id: str, db: AsyncSession, required_roles: List[str]
 ) -> bool:
     """
     Verifica si el account_id tiene los permisos requeridos para acceder al workspace_id.
     """
     if not workspace_id:
-        return False # No se puede verificar el permiso sin un workspace_id
+        return False  # No se puede verificar el permiso sin un workspace_id
 
     stmt = select(WorkspacePermission).where(
         WorkspacePermission.account_id == uuid.UUID(account_id),
-        WorkspacePermission.workspace_id == uuid.UUID(workspace_id)
+        WorkspacePermission.workspace_id == uuid.UUID(workspace_id),
     )
     result = await db.execute(stmt)
     permission = result.scalar_one_or_none()
 
     if not permission or permission.role not in required_roles:
-        logger.warning(f"Permiso denegado para account {account_id} en workspace {workspace_id} con roles {required_roles}. Rol actual: {permission.role if permission else 'N/A'}")
+        logger.warning(
+            f"Permiso denegado para account {account_id} en workspace {workspace_id} con roles {required_roles}. Rol actual: {permission.role if permission else 'N/A'}"
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permiso denegado. No tienes acceso a este workspace o tu rol no es el adecuado."
+            detail="Permiso denegado. No tienes acceso a este workspace o tu rol no es el adecuado.",
         )
-    logger.info(f"Permiso concedido para account {account_id} en workspace {workspace_id} con rol {permission.role}.")
+    logger.info(
+        f"Permiso concedido para account {account_id} en workspace {workspace_id} con rol {permission.role}."
+    )
     return True

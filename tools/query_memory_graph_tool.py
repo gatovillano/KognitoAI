@@ -57,16 +57,23 @@ class QueryMemoryGraphTool(BaseTool):
         if not self._graph_integration:
             return "Error: La integración con el grafo de conocimiento no está disponible."
 
-        logger.info(f"🧠 Consultando el grafo de memorias para la cuenta {self.account_id} con la consulta: '{query}'")
+        # Asegurarse de que account_id sea un string válido
+        account_id_value = str(self.account_id) if self.account_id else None
+        if not account_id_value or account_id_value == "None":
+            logger.error("❌ account_id no está definido correctamente")
+            return "Error: No se pudo determinar el ID de cuenta para la búsqueda."
+
+        logger.info(f"🧠 Consultando el grafo de memorias para la cuenta {account_id_value} con la consulta: '{query}'")
         
-        dataset_name = f"agent_memories_{self.account_id.replace('-', '_')}"
+        dataset_name = f"agent_memories_{account_id_value.replace('-', '_')}"
 
         try:
             # Usar el método de búsqueda de la integración de grafos
             search_result = await self._graph_integration.search_knowledge_graph(
                 query=query,
                 dataset_name=dataset_name,
-                return_type="summary" # Pedir un resumen en lenguaje natural
+                return_type="summary", # Pedir un resumen en lenguaje natural
+                account_id=account_id_value  # Pasar explícitamente el account_id
             )
             
             if not search_result or not search_result.get('results'):

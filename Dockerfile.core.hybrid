@@ -8,6 +8,7 @@ ENV PYTHONUNBUFFERED 1
 ENV PYTHONPATH /app:/app/external_agents/open_deep_research/src
 
 # Instalar dependencias del sistema esenciales (algunas ya estarán en la imagen de PyTorch, pero las mantenemos por si acaso)
+# Incluye dependencias para WeasyPrint (generación de PDFs)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
@@ -16,6 +17,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     ffmpeg \
+    libcairo2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf2.0-0 \
+    libffi-dev \
+    shared-mime-info \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -23,21 +30,16 @@ WORKDIR /app
 # Copiar requirements
 COPY requirements.txt ./
 
-# Instalar dependencias en etapas para evitar conflictos de resolución
-# Etapa 1: Core frameworks y base de datos
-RUN pip install --no-cache-dir --timeout 300 --retries 3 \
-    fastapi>=0.100.0 \
-    uvicorn>=0.20.0 \
-    sqlalchemy[asyncio]>=2.0.0 \
-    psycopg[async]>=3.1.0 \
-    psycopg2-binary>=2.9.0 \
-    alembic>=1.12.0 \
-    pydantic[email]>=2.0.0
+# Anular posibles restricciones de la imagen base
+ENV PIP_CONSTRAINT=""
 
-# Etapa 3: Instalación de todas las dependencias desde requirements.txt
-# Desinstalamos requests primero para evitar conflictos con la versión preinstalada en la imagen base
-RUN pip uninstall -y requests && \
-    pip install --no-cache-dir --timeout 300 --retries 3 -r requirements.txt
+# Instalar dependencias en etapas para evitar conflictos de resolución
+# Forzamos la actualización de requests primero para que coincida con lo que pide langchain-community
+RUN pip install --no-cache-dir --timeout 300 --retries 3 \
+    --upgrade 'requests>=2.32.5'
+
+# Instalar todas las dependencias desde requirements.txt
+RUN pip install --no-cache-dir --timeout 300 --retries 3 -r requirements.txt
 
 # Etapa 4: Paquetes grandes de ML/NLP (instalar al final para evitar conflictos)
 RUN pip install --no-cache-dir --timeout 300 --retries 3 \
@@ -47,6 +49,8 @@ RUN pip install --no-cache-dir --timeout 300 --retries 3 \
 # Instalar modelo de spaCy
 RUN python -m pip install https://github.com/explosion/spacy-models/releases/download/es_core_news_sm-3.7.0/es_core_news_sm-3.7.0-py3-none-any.whl
 
+# Pre-descargar el modelosigue sin  de embeddings interno para autonomía total (Sentence Transformers)
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/paraphrase-multilingual-mpnet-base-v2')"
 
 # Copiar código
 COPY . .

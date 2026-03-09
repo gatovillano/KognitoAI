@@ -11,6 +11,7 @@ export interface Source {
   type: 'web' | 'document' | 'memory' | 'code' | 'database' | 'graph' | 'note' | 'github';
   metadata?: Record<string, any>;
   name?: string;
+  is_cited?: boolean;
 }
 
 export interface ContentPart {

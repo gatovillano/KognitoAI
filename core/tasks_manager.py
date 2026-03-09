@@ -44,6 +44,7 @@ class TasksManager:
             "status": task.status,
             "created_at": task.created_at.isoformat(),
             "updated_at": task.updated_at.isoformat(),
+            "etag": f'"{task.id}-{int(task.updated_at.timestamp())}"', # ETag para CalDAV
             "account_id": str(task.account_id),
             "workspace_id": str(task.workspace_id) if task.workspace_id else None,
             "linked_profiles": linked_profiles_data

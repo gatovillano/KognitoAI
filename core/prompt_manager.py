@@ -17,7 +17,9 @@ from core.prompts import (
     KAI_SYSTEM_PROMPT,
     SUMMARIZATION_PROMPT,
     THREAD_TITLE_PROMPT,
-    ENRICHED_PROMPT_TEMPLATE
+    ENRICHED_PROMPT_TEMPLATE,
+    HTML_DESIGN_PROMPT,
+    TELEGRAM_FORMATTING_PROMPT
 )
 from core.citation_models import CITATION_SYSTEM_PROMPT # Importar CITATION_SYSTEM_PROMPT
 
@@ -107,10 +109,50 @@ Instrucción: Prioriza el uso de `knowledge_graph_tool` para realizar consultas 
 -------------------------------
 """
             elif ctx_type == "analysis":
+                # Extraer contenido detallado del análisis si está disponible en el snapshot
+                analysis_result = ctx_snapshot.get("result", {}) if isinstance(ctx_snapshot.get("result"), dict) else ctx_snapshot
+                
+                content_parts = []
+                
+                # 1. Título y Resumen
+                title = ctx_snapshot.get('title') or analysis_result.get('title') or 'Sin título'
+                summary = analysis_result.get('summary') or ctx_snapshot.get('summary')
+                if summary:
+                    content_parts.append(f"RESUMEN EJECUTIVO:\n{summary}")
+                
+                # 2. Hallazgos (Findings)
+                findings = analysis_result.get('findings') or ctx_snapshot.get('findings')
+                if findings:
+                    if isinstance(findings, list):
+                        findings_text = "\n".join([f"- {f}" for f in findings])
+                    else:
+                        findings_text = str(findings)
+                    content_parts.append(f"HALLAZGOS CLAVE:\n{findings_text}")
+                
+                # 3. Reporte Final (el más importante)
+                final_report = analysis_result.get('final_report') or ctx_snapshot.get('final_report')
+                if final_report:
+                    content_parts.append(f"INFORME DETALLADO:\n{final_report}")
+                
+                # 4. Recomendaciones
+                recommendations = analysis_result.get('recommendations') or ctx_snapshot.get('recommendations')
+                if recommendations:
+                    if isinstance(recommendations, list):
+                        rec_text = "\n".join([f"- {r}" for r in recommendations])
+                    else:
+                        rec_text = str(recommendations)
+                    content_parts.append(f"ACCIONES Y RECOMENDACIONES:\n{rec_text}")
+
+                analysis_content = "\n\n".join(content_parts) if content_parts else "No se pudo extraer el contenido detallado del informe."
+
                 context_instructions = f"""
 --- CONTEXTO DE ANÁLISIS ACTIVO ---
-El usuario está revisando el informe de análisis: '{ctx_snapshot.get('title', 'Sin título')}'.
-Instrucción: Ayuda al usuario a interpretar los hallazgos de este análisis. No inventes datos que no estén en el informe.
+El usuario está revisando el informe de análisis: '{title}'.
+
+CONTENIDO DEL INFORME:
+{analysis_content}
+
+Instrucción: Ayuda al usuario a interpretar los hallazgos de este análisis detallado arriba. Responde preguntas basadas en esta información. No inventes datos que no estén en el informe. Si el usuario pide más detalle sobre algo no cubierto, puedes ofrecerte a realizar una nueva búsqueda web específica.
 -------------------------------
 """
             elif ctx_type == "collection":
@@ -207,8 +249,12 @@ Herramientas clave:
 - `web_search(query: str)`: Búsqueda web con Brave Search.
 - `web_scraper_tool(url: str)`: Extrae contenido de URLs.
 - `comprehensive_web_analyzer(query: str)`: Análisis web profundo.
-- `crew_research(query: str)`: Investigación profunda multi-agente (CrewAI). Ideal para temas complejos que requieren reportes narrativos de alta calidad. ✨
+- `deep_research(query: str)`: Investigación profunda multi-agente. Ideal para temas complejos que requieren reportes narrativos de alta calidad. ✨
 - Otras: gestión de notas, agenda, documentos, imágenes, etc.
+
+**Reglas de Terminación:**
+- Si acabas de recibir un reporte de `deep_research`, **NO** utilices la herramienta de nuevo inmediatamente para el mismo tema. Proporciona la respuesta al usuario basándote en el reporte recibido.
+- Tu objetivo es finalizar la investigación y responder, no entrar en un bucle infinito de búsquedas.
 """
         # 5. Generar documentación detallada de las herramientas para modelos que no soportan native tool calling
         tools_documentation = ""
@@ -234,22 +280,35 @@ Herramientas clave:
                 except:
                     continue
             
-        final_prompt_parts = [
-            context_instructions, # Inyectar instrucciones de contexto al principio
+        final_prompt_parts = []
+        if telegram_id:
+            final_prompt_parts.extend([
+                TELEGRAM_FORMATTING_PROMPT,
+                "<hr>",
+            ])
+        else:
+            final_prompt_parts.extend([
+                "💎 **MODO DE DISEÑO PREMIUM ACTIVADO** 💎",
+                HTML_DESIGN_PROMPT, # Prioridad absoluta al principio
+                "<hr>",
+            ])
+            
+        final_prompt_parts.extend([
+            context_instructions,
             user_context_string,
             summary_string,
             "<hr>",
             id_instructions,
             "<hr>",
             tools_capabilities,
-            tools_documentation if mode == "prompt_tooling" else "", # Solo inyectar si se solicita
+            tools_documentation if mode == "prompt_tooling" else "",
             "<hr>",
             "<b>Instrucción crítica:</b> Usa herramientas de una en una. No intentes usar más de una herramienta por respuesta. Espera la siguiente interacción.",
             "<hr>",
             system_prompt_content,
             "<hr>",
             CITATION_SYSTEM_PROMPT,
-        ]
+        ])
         final_prompt_parts.append("\n\nIMPORTANTE: Al citar fuentes, cada número de fuente debe estar entre sus propios corchetes. Por ejemplo, en lugar de [1, 2, 3], formatee como [1][2][3].")
         final_prompt = "\n".join(final_prompt_parts)
         # --- ESCAPE GLOBAL PARA LANGCHAIN ---

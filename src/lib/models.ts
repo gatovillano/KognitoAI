@@ -217,6 +217,10 @@ export interface SemanticAnalysisResult {
 
 export interface DeepResearchAnalysisResult {
   final_report: string;
+  summary: string;
+  findings: string;
+  recommendations: string[];
+  visual_schema?: string;
   sources: Array<{
     id: number;
     title: string;
@@ -224,7 +228,6 @@ export interface DeepResearchAnalysisResult {
     snippet: string;
     type: string;
   }>;
-  recommendations: string[];
 }
 
 export interface ProactiveInsightResult {

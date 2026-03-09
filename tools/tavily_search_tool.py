@@ -12,6 +12,7 @@ from langchain_core.callbacks import AsyncCallbackManagerForToolRun
 
 # Importamos las clases necesarias
 from core.citation_models import Source, ToolOutputWithSources
+from core.agents.deep_researcher_utils import generate_stable_id
 
 try:
     from tavily import TavilyClient
@@ -120,7 +121,7 @@ class TavilySearchTool(BaseTool):
         sources: List[Source] = []
         for idx, result in enumerate(results, 1):
             source = create_web_source(
-                source_id=idx,
+                source_id=generate_stable_id(result.get('url', ''), prefix="web"),
                 title=result.get('title', 'Sin título'),
                 url=result.get('url', ''),
                 snippet=result.get('content', 'Sin descripción disponible')

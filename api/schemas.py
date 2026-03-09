@@ -26,8 +26,21 @@ class UserSettingsResponse(BaseModel):
     llm_temperature: Optional[float]
     llm_api_base: Optional[str]
     fast_llm_model: Optional[str]
+    fast_llm_provider: Optional[str]
     vision_llm_model: Optional[str]
+    vision_llm_provider: Optional[str]
     use_prompt_tooling: bool
+    # Campos de TTS
+    tts_provider: Optional[str]
+    tts_model: Optional[str]
+    tts_voice: Optional[str]
+    tts_speed: Optional[float]
+    tts_region: Optional[str]
+    # Campos de Embeddings
+    embedding_provider: Optional[str]
+    embedding_model: Optional[str]
+    embedding_api_key_name: Optional[str]
+    embedding_api_base: Optional[str]
 
     class Config:
         from_attributes = True
@@ -53,8 +66,21 @@ class UserSettingsUpdateRequest(BaseModel):
     llm_temperature: Optional[float] = None
     llm_api_base: Optional[str] = None
     fast_llm_model: Optional[str] = None
+    fast_llm_provider: Optional[str] = None
     vision_llm_model: Optional[str] = None
+    vision_llm_provider: Optional[str] = None
     use_prompt_tooling: Optional[bool] = None
+    # Campos de TTS
+    tts_provider: Optional[str] = None
+    tts_model: Optional[str] = None
+    tts_voice: Optional[str] = None
+    tts_speed: Optional[float] = None
+    tts_region: Optional[str] = None
+    # Campos de Embeddings
+    embedding_provider: Optional[str] = None
+    embedding_model: Optional[str] = None
+    embedding_api_key_name: Optional[str] = None
+    embedding_api_base: Optional[str] = None
 
 class UserPasswordUpdateRequest(BaseModel):
     """Define la estructura de datos para actualizar la contraseña."""

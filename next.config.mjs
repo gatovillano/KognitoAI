@@ -19,6 +19,20 @@ const nextConfig = {
     minimumCacheTTL: 600,
   },
   transpilePackages: ['react-dnd', 'react-dnd-html5-backend'],
+  async redirects() {
+    return [
+      {
+        source: '/.well-known/caldav',
+        destination: '/api/caldav/',
+        permanent: true,
+      },
+      {
+        source: '/.well-known/carddav',
+        destination: '/api/caldav/',
+        permanent: true,
+      },
+    ];
+  },
   async rewrites() {
     return [
       {

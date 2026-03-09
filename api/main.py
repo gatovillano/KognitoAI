@@ -2,7 +2,7 @@ import logging
 import asyncio # Added
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, status, Depends
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -58,6 +58,8 @@ logging.getLogger('api.knowledge_graph').setLevel(logging.WARNING)
 logging.getLogger('utils.security').setLevel(logging.WARNING) # Silenciar logs de seguridad
 logging.getLogger('uvicorn.access').setLevel(logging.WARNING) # Silenciar logs de acceso de uvicorn
 logging.getLogger('uvicorn.error').setLevel(logging.WARNING) # Silenciar logs de error de uvicorn
+logging.getLogger('watchfiles.main').setLevel(logging.WARNING) # Silenciar watchfiles (reload)
+logging.getLogger('apscheduler').setLevel(logging.WARNING) # Silenciar scheduler
 
 # Configurar logging detallado para LangChain y componentes del LLM
 from utils.llm_logging_config import setup_llm_detailed_logging, create_llm_log_filename, enable_verbose_langchain_logging, disable_noisy_loggers
@@ -158,7 +160,7 @@ async def shutdown_event():
 # Middleware para registrar solicitudes que resultan en error 405
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    logger.info(f"Incoming request: {request.method} {request.url}")
+    logger.debug(f"Incoming request: {request.method} {request.url}")
     response = await call_next(request)
     if response.status_code == 405:
         logger.warning(f"Method Not Allowed (405) for request: {request.method} {request.url}")
@@ -259,6 +261,16 @@ async def serve_telegram_panel():
         raise HTTPException(status_code=404, detail="Panel de control no encontrado.")
     return FileResponse(panel_path)
 
+@app.api_route("/.well-known/caldav", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PROPFIND", "PROPPATCH", "REPORT"], include_in_schema=False)
+async def well_known_caldav(request: Request):
+    """Redirección estándar para descubrimiento automático de CalDAV."""
+    return RedirectResponse(url="/api/caldav/", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+@app.api_route("/.well-known/carddav", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PROPFIND", "PROPPATCH", "REPORT"], include_in_schema=False)
+async def well_known_carddav(request: Request):
+    """Redirección estándar para descubrimiento automático de CardDAV (opcional, redirigido a CalDAV por ahora)."""
+    return RedirectResponse(url="/api/caldav/", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
 # Incluir routers de los módulos
 # Incluir routers de los módulos
 app.include_router(chat_router, prefix="/api", tags=["chat"]) # Mover arriba para dar prioridad a las rutas de chat
@@ -276,6 +288,8 @@ app.include_router(workspaces_router, prefix="/api", tags=["workspaces"])
 app.include_router(contact_profiles_router, prefix="/api", tags=["contact-profiles"])
 from api.analysis import router as analysis_router
 app.include_router(analysis_router, prefix="/api", tags=["analysis"])
+from api.analysis_share import router as analysis_share_router
+app.include_router(analysis_share_router, prefix="/api/analysis/share", tags=["analysis-share"])
 from api.github import router as github_router
 from api.telegram import router as telegram_router
 from api.logs import router as logs_router

@@ -46,13 +46,15 @@ const MermaidViewer: React.FC<MermaidViewerProps> = ({ mermaidCode }) => {
           svgElement.style.display = 'block';
         }
       } catch (error) {
-        console.error('Error rendering mermaid diagram:', error);
-        container.innerHTML = `
-          <div class="p-4 border border-red-200 rounded bg-red-50 dark:bg-red-900/10 dark:border-red-800 w-full h-full overflow-auto text-red-600 dark:text-red-400">
-            <p class="text-sm font-medium mb-2">Error al renderizar diagrama:</p>
-            <pre class="text-xs p-2 bg-gray-100 dark:bg-gray-800 rounded whitespace-pre-wrap font-mono">${mermaidCode}</pre>
-          </div>
-        `;
+        // En lugar de mostrar un error ruidoso en la interfaz (que genera las "bombas" de Mermaid),
+        // simplemente ocultamos el contenedor para los bloques de código que Mermaid no pueda parsear.
+        container.style.display = 'none';
+
+        // Si el contenedor padre es el div que tiene las clases de estilo del grupo, también lo ocultamos
+        const parentViewer = container.closest('.my-4.w-full') as HTMLElement;
+        if (parentViewer) {
+          parentViewer.style.display = 'none';
+        }
       }
     }
   }, [mermaidCode]);

@@ -31,6 +31,7 @@ class Source(BaseModel):
     Representa una fuente individual que puede ser citada en una respuesta.
     Attributes:
         id: Identificador único de la fuente (usado para citas [1], [2], etc.)
+        is_cited: Indica si la fuente fue citada en la respuesta
         title: Título descriptivo de la fuente
         url: URL o identificador de la fuente (puede ser URL web, path de archivo, etc.)
         snippet: Fragmento de texto relevante de la fuente
@@ -42,6 +43,7 @@ class Source(BaseModel):
     url: str = Field(..., description="URL o identificador de la fuente")
     snippet: str = Field(..., description="Fragmento relevante de la fuente")
     type: SourceType = Field(default=SourceType.WEB, description="Tipo de fuente")
+    is_cited: bool = Field(default=False, description="Indica si la fuente fue citada en la respuesta")
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="Metadatos adicionales")
 
 
@@ -54,10 +56,15 @@ class ToolOutputWithSources(BaseModel):
         context_for_llm: Texto formateado para incluir en el prompt del LLM
         sources: Lista de fuentes que pueden ser citadas
         summary: Resumen opcional de la información encontrada
+        visual_schema: Esquema visual opcional (HTML/CSS)
+        recommendations: Lista de recomendaciones generadas
     """
     context_for_llm: str = Field(..., description="Contexto formateado para el LLM con referencias [1], [2], etc.")
     sources: List[Source] = Field(default_factory=list, description="Lista de fuentes citables")
     summary: Optional[str] = Field(default=None, description="Resumen opcional de la información")
+    visual_schema: Optional[str] = Field(default=None, description="Esquema visual opcional (HTML/CSS)")
+    recommendations: List[str] = Field(default_factory=list, description="Lista de recomendaciones opcionales")
+
 
 
 class CitationResponse(BaseModel):
@@ -69,10 +76,15 @@ class CitationResponse(BaseModel):
         response_text: Texto de respuesta generado por el LLM (puede incluir citas [1], [2])
         sources: Lista de fuentes citadas en la respuesta
         has_citations: Indica si la respuesta contiene citas
+        visual_schema: Esquema visual para renderizado especial
+        recommendations: Lista de recomendaciones estratégicas
     """
     response_text: str = Field(..., description="Respuesta del LLM")
     sources: List[Source] = Field(default_factory=list, description="Fuentes citadas")
     has_citations: bool = Field(default=False, description="Indica si hay citas en la respuesta")
+    visual_schema: Optional[str] = Field(default=None, description="Esquema visual opcional")
+    recommendations: List[str] = Field(default_factory=list, description="Lista de recomendaciones")
+
     @property
     def source_count(self) -> int:
         """Retorna el número de fuentes disponibles."""
