@@ -47,13 +47,16 @@ class CreatePDFTool(BaseTool):
     """
     name: str = "create_pdf_tool"
     description: str = (
-        "Crea un documento PDF profesional y estilizado. "
-        "REGLAS DE FORMATO OBLIGATORIAS:\n"
-        "1. USA HTML SIEMPRE: Escribe el contenido en HTML y establece 'is_html' en True.\n"
-        "2. ESTRUCTURA: Usa etiquetas <h2>, <h3>, <p>, <ul>/<li>.\n"
-        "3. TABLAS: Usa etiquetas <table> para datos estructurados.\n"
-        "4. DIAGRAMAS: Soporta Mermaid. Usa bloques ```mermaid ... ``` o <pre><code>graph ...</code></pre>. "
-        "Se convertirán automáticamente en imágenes de alta calidad en el PDF."
+        "Genera documentos PDF de CALIDAD PROFESIONAL y diseño avanzado. "
+        "REGLAS DE DISEÑO OBLIGATORIAS PARA EL AGENTE:\n"
+        "1. ESTRUCTURA PREMIUM: Usa 'is_html=True' y envía un HTML completo.\n"
+        "2. PORTADA IMPACTANTE: Usa <div class='cover'><h1>Título</h1><p>Subtítulo</p></div> al inicio.\n"
+        "3. COMPONENTES VISUALES: Usa clases CSS disponibles:\n"
+        "   - <div class='card'> para resaltar secciones o datos clave.\n"
+        "   - <div class='info-box'>, <div class='warning-box'> para notas o advertencias.\n"
+        "   - <div class='grid-2'> para diseños de dos columnas.\n"
+        "4. TABLAS: Usa <table> con <thead> para datos comparativos.\n"
+        "5. DIAGRAMAS: Incluye bloques ```mermaid para visualizaciones automáticas."
     )
     
     # Standard context attributes
@@ -139,131 +142,170 @@ class CreatePDFTool(BaseTool):
 
 
     def _get_modern_css(self) -> str:
-        """Returns a modern CSS string for the PDF styling."""
+        """Returns a high-end professional CSS string for the PDF styling."""
         return """
         @page {
             size: A4;
-            margin: 1.5cm;
+            margin: 2cm;
             @top-right {
                 content: "Página " counter(page) " de " counter(pages);
-                font-family: 'DejaVu Sans', sans-serif;
-                font-size: 7pt;
-                color: #999;
+                font-family: 'Inter', sans-serif;
+                font-size: 8pt;
+                color: #a0aec0;
             }
             @bottom-left {
-                content: element(footer);
+                content: "Generado por KAI AI System";
+                font-family: 'Inter', sans-serif;
+                font-size: 8pt;
+                color: #a0aec0;
             }
         }
+        
+        :root {
+            --primary: #2563eb;
+            --secondary: #64748b;
+            --dark: #1e293b;
+            --light: #f8fafc;
+            --border: #e2e8f0;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+        }
+
         body {
-            font-family: 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', 'DejaVu Sans', Arial, sans-serif;
-            line-height: 1.5;
-            color: #2d3436;
+            font-family: 'Inter', 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: var(--dark);
             background-color: #fff;
-            font-size: 10pt;
+            font-size: 10.5pt;
+        }
+
+        /* Cover Page */
+        .cover {
+            height: 25cm;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            text-align: center;
+            border-bottom: 8px solid var(--primary);
+            page-break-after: always;
+            margin-top: -1cm;
+        }
+        .cover h1 {
+            font-size: 36pt;
+            color: var(--dark);
+            margin-bottom: 0.2em;
+            border: none;
+        }
+        .cover p {
+            font-size: 14pt;
+            color: var(--secondary);
+            text-align: center;
         }
 
         h1 {
-            color: #2d3436;
-            border-bottom: 2.5px solid #0984e3;
-            padding-bottom: 8px;
-            margin-top: 0;
-            font-size: 18pt;
+            color: var(--dark);
+            border-bottom: 3px solid var(--primary);
+            padding-bottom: 0.3em;
+            margin-top: 1.5em;
+            font-size: 22pt;
             font-weight: 800;
-            letter-spacing: -0.5px;
         }
 
         h2 {
-            color: #0984e3;
-            margin-top: 1.5em;
-            border-bottom: 1px solid #dfe6e9;
-            padding-bottom: 4px;
-            font-size: 14pt;
+            color: var(--primary);
+            margin-top: 1.8em;
+            font-size: 16pt;
             font-weight: 700;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.2em;
         }
 
         h3 {
-            color: #636e72;
-            margin-top: 1.2em;
-            font-size: 11pt;
+            color: var(--secondary);
+            margin-top: 1.5em;
+            font-size: 12pt;
             font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
 
-        p {
-            margin-bottom: 0.8em;
-            text-align: justify;
+        p { margin-bottom: 1em; text-align: justify; }
+
+        /* Component: Card */
+        .card {
+            background: var(--light);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5em;
+            margin: 1.5em 0;
+            page-break-inside: avoid;
         }
+
+        /* Component: Boxes */
+        .info-box, .warning-box, .error-box {
+            padding: 1em 1.5em;
+            border-radius: 8px;
+            margin: 1.5em 0;
+            border-left: 5px solid;
+            page-break-inside: avoid;
+        }
+        .info-box { background: #eff6ff; border-color: var(--primary); color: #1e40af; }
+        .warning-box { background: #fffbeb; border-color: var(--warning); color: #92400e; }
+        .error-box { background: #fef2f2; border-color: var(--error); color: #991b1b; }
+
+        /* Grid Layout */
+        .grid-2 {
+            display: flex;
+            gap: 20px;
+            margin: 1.5em 0;
+        }
+        .grid-2 > div { flex: 1; }
 
         code {
-            background-color: #f1f2f6;
-            padding: 1px 3px;
-            border-radius: 3px;
-            font-family: 'DejaVu Sans Mono', monospace;
-            font-size: 0.85em;
-            color: #d63031;
+            background-color: #f1f5f9;
+            padding: 0.2em 0.4em;
+            border-radius: 4px;
+            font-family: 'Fira Code', 'DejaVu Sans Mono', monospace;
+            font-size: 0.9em;
+            color: #be185d;
         }
 
         pre {
-            background-color: #2d3436;
-            color: #f1f2f6;
-            padding: 10px;
-            border-radius: 6px;
-            overflow-x: auto;
-            margin-bottom: 1.2em;
-            font-size: 8pt;
-            line-height: 1.3;
-            border-left: 4px solid #0984e3;
-        }
-
-        blockquote {
-            margin: 1em 0;
-            padding: 8px 16px;
-            border-left: 4px solid #0984e3;
-            color: #636e72;
-            font-style: italic;
-            background-color: #f9f9f9;
-            border-radius: 0 4px 4px 0;
+            background-color: #0f172a;
+            color: #f8fafc;
+            padding: 1.2em;
+            border-radius: 10px;
+            font-size: 9pt;
+            margin-bottom: 1.5em;
+            border-left: 5px solid var(--primary);
+            white-space: pre-wrap;
         }
 
         table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 1.5em;
-            font-size: 8.5pt;
+            margin: 2em 0;
+            font-size: 9.5pt;
         }
-
-        th, td {
-            padding: 8px 10px;
-            border: 1px solid #dfe6e9;
-            text-align: left;
-        }
-
         th {
-            background-color: #f1f2f6;
+            background-color: #f1f5f9;
+            color: var(--dark);
             font-weight: 700;
-            color: #2d3436;
-        }
-
-        tr:nth-child(even) {
-            background-color: #fafafa;
-        }
-
-        .footer {
-            position: running(footer);
-            font-size: 7pt;
-            color: #b2bec3;
             text-align: left;
-            border-top: 1px solid #dfe6e9;
-            padding-top: 4px;
+            padding: 12px;
+            border-bottom: 2px solid var(--border);
         }
-
-        /* List styles */
-        ul, ol {
-            margin-bottom: 1em;
-            padding-left: 1.5em;
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
         }
+        tr:nth-child(even) { background-color: #f8fafc; }
 
-        li {
-            margin-bottom: 0.3em;
+        .mermaid-diagram {
+            background: #fff !important;
+            border: 1px solid var(--border) !important;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
         }
         """
 

@@ -7,6 +7,22 @@ const config: Config = {
 		"./src/components/**/*.{js,ts,jsx,tsx,mdx}",
 		"./src/app/**/*.{js,ts,jsx,tsx,mdx}",
 	],
+	safelist: [
+		{
+			pattern: /^(bg|text|border|from|to)-(blue|orange|red|green|gray|cyan|emerald|indigo|violet|slate)-(50|100|200|300|400|500|600|700|800|900|950)$/,
+		},
+		{
+			pattern: /^border-(l|r|t|b|x|y)-([0-8])$/,
+		},
+		'rounded-xl',
+		'rounded-2xl',
+		'rounded-3xl',
+		'shadow-md',
+		'shadow-lg',
+		'shadow-xl',
+		'backdrop-blur-md',
+		'backdrop-blur-sm',
+	],
 	theme: {
 		extend: {
 			fontFamily: {

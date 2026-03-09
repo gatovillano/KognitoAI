@@ -246,7 +246,7 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
                                     const uniqueSources = allSources;
 
                                     const fullText = msg.chunks?.join('') || msg.text;
-                                    const { contentParts } = processMessageWithCitations(
+                                    const { contentParts, citedSources, uncitedSources } = processMessageWithCitations(
                                         fullText,
                                         uniqueSources
                                     );

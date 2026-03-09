@@ -5,6 +5,8 @@ import logging
 import os
 import time
 import warnings
+import hashlib
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Dict, List, Literal, Optional, Sequence, cast
 
@@ -335,6 +337,25 @@ def get_tavily_api_key(config: Optional[RunnableConfig]): # Changed to Optional
     if api_key:
         return api_key
     return os.getenv("TAVILY_API_KEY")
+
+def generate_stable_id(url: str, prefix: str = "src") -> str:
+    """
+    Genera un ID único y estable basado en hash de URL.
+    Ejemplo: "src_a1b2c3d4e5f6"
+
+    Args:
+        url: URL de la fuente
+        prefix: Prefijo para identificar tipo (src, doc, web, github, etc.)
+
+    Returns:
+        ID estable de 12 caracteres hex + prefijo
+    """
+    if not url:
+        return f"{prefix}_{str(uuid.uuid4())[:12]}"
+
+    hash_obj = hashlib.md5(url.encode('utf-8'))
+    short_hash = hash_obj.hexdigest()[:12]
+    return f"{prefix}_{short_hash}"
 
 async def execute_tool_safely(tool, args, config: Optional[RunnableConfig]): # Changed to Optional
     """Safely execute a tool with error handling."""

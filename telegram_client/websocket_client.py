@@ -6,7 +6,7 @@ import json
 import logging
 import websockets
 import base64
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 import jwt
 from io import BytesIO # Importar BytesIO
@@ -18,7 +18,8 @@ from core.config import settings
 from telegram_client.bot_manager import bot_manager
 from utils.helpers import markdown_to_telegram_html
 from utils.paginator import split_text_into_pages
-from telegram_client.handlers.message_handlers import send_agent_response, GENERATED_IMAGE_KEY, DOCUMENT_NAME_KEY, EVENT_ID_FOR_SCHEDULING_KEY, PAGINATOR_SESSIONS_KEY
+from telegram_client.handlers.message_handlers import send_agent_response, GENERATED_IMAGE_KEY, DOCUMENT_NAME_KEY, EVENT_ID_FOR_SCHEDULING_KEY, PAGINATOR_SESSIONS_KEY, send_typing_heartbeat
+from telegram.constants import ChatAction
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,26 @@ class TelegramWebSocketClient:
         self.websocket = None
         self.is_running = False
         self.accumulated_messages: Dict[str, str] = {}
+        self.typing_tasks: Dict[int, asyncio.Task] = {}
+        self.typing_events: Dict[int, asyncio.Event] = {}
+        self.tool_status_messages: Dict[str, int] = {} # taskId -> message_id
+
+    def _get_tool_icon(self, tool_name: str) -> str:
+        icons = {
+            "web_search": "🔍",
+            "deep_research": "🧬",
+            "comprehensive_web_analyzer": "📊",
+            "web_scraper_tool": "🕸️",
+            "knowledge_graph": "🕸️",
+            "knowledge_search": "🧠",
+            "add_note": "📝",
+            "get_notes": "📚",
+            "calendar": "📅",
+            "terminal": "💻",
+            "file_editor": "📝",
+            "image_generation": "🎨"
+        }
+        return icons.get(tool_name, "⚙️")
 
     async def connect(self):
         """Establece la conexión WebSocket y la mantiene."""
@@ -81,9 +102,13 @@ class TelegramWebSocketClient:
             logger.warning(f"Mensaje WebSocket recibido sin thread_id: {data}")
             return
 
+        chat_id = bot_manager.thread_id_to_chat_id_map.get(thread_id)
+
         if message_type == "stream_start":
             logger.info(f"Inicio de stream para thread_id: {thread_id}, taskId: {task_id}")
             self.accumulated_messages[thread_id] = ""
+            if chat_id:
+                await self._start_typing(chat_id)
         
         elif message_type == "stream_chunk":
             chunk = data.get("chunk", "")
@@ -91,30 +116,84 @@ class TelegramWebSocketClient:
                 logger.warning(f"Recibido 'stream_chunk' para thread_id '{thread_id}' sin un 'stream_start' previo. Inicializando acumulador.")
                 self.accumulated_messages[thread_id] = ""
             self.accumulated_messages[thread_id] += chunk
+            # Asegurar que el typing siga activo si recibimos chunks
+            if chat_id: await self._start_typing(chat_id)
         
+        elif message_type == "tool_start":
+            tool_name = data.get("tool_name", "herramienta")
+            icon = self._get_tool_icon(tool_name)
+            if chat_id:
+                try:
+                    await self._start_typing(chat_id)
+                    msg = await bot_manager.bot.send_message(
+                        chat_id=chat_id,
+                        text=f"{icon} <i>Ejecutando {tool_name}...</i>",
+                        parse_mode='HTML'
+                    )
+                    self.tool_status_messages[task_id] = msg.message_id
+                except Exception as e:
+                    logger.warning(f"No se pudo enviar mensaje de estado de herramienta: {e}")
+
+        elif message_type == "tool_end":
+            if task_id in self.tool_status_messages and chat_id:
+                try:
+                    # Borrar el mensaje de estado después de que la herramienta termine
+                    await bot_manager.bot.delete_message(
+                        chat_id=chat_id,
+                        message_id=self.tool_status_messages.pop(task_id)
+                    )
+                except Exception as e:
+                    logger.debug(f"No se pudo borrar mensaje de estado de herramienta: {e}")
+
         elif message_type == "stream_end":
             logger.info(f"Fin de stream para thread_id: {thread_id}, taskId: {task_id}")
+            if chat_id: await self._stop_typing(chat_id)
+            
             final_message = self.accumulated_messages.pop(thread_id, "")
             
             # Extraer posibles datos adicionales del mensaje final
             image_base64_from_stream = data.get("image_base64")
             document_name_from_stream = data.get("document_name")
             event_id_from_stream = data.get("event_id")
+            sources = data.get("sources", [])
 
             await self.send_message_to_telegram(
                 final_message,
                 thread_id,
                 image_base64=image_base64_from_stream,
                 document_name=document_name_from_stream,
-                event_id=event_id_from_stream
+                event_id=event_id_from_stream,
+                sources=sources
             )
         
         elif message_type == "error":
             error_message = data.get("error_message", "Error desconocido")
             logger.error(f"Error recibido del backend para thread_id: {thread_id}: {error_message}")
+            if chat_id: await self._stop_typing(chat_id)
             await self.send_message_to_telegram(f"Lo siento, ocurrió un error: {error_message}", thread_id)
 
-    async def send_message_to_telegram(self, text: str, thread_id: str, image_base64: Optional[str] = None, document_name: Optional[str] = None, event_id: Optional[str] = None):
+    async def _start_typing(self, chat_id: int):
+        """Inicia el heartbeat de typing para un chat específico si no está activo."""
+        if chat_id not in self.typing_tasks or self.typing_tasks[chat_id].done():
+            stop_event = asyncio.Event()
+            self.typing_events[chat_id] = stop_event
+            task = asyncio.create_task(send_typing_heartbeat(self.application, chat_id, stop_event))
+            self.typing_tasks[chat_id] = task
+            logger.debug(f"Iniciado typing heartbeat para chat_id {chat_id}")
+
+    async def _stop_typing(self, chat_id: int):
+        """Detiene el heartbeat de typing para un chat específico."""
+        if chat_id in self.typing_events:
+            self.typing_events[chat_id].set()
+            if chat_id in self.typing_tasks:
+                try:
+                    await self.typing_tasks[chat_id]
+                except Exception: pass
+                self.typing_tasks.pop(chat_id)
+            self.typing_events.pop(chat_id)
+            logger.debug(f"Detenido typing heartbeat para chat_id {chat_id}")
+
+    async def send_message_to_telegram(self, text: str, thread_id: str, image_base64: Optional[str] = None, document_name: Optional[str] = None, event_id: Optional[str] = None, sources: Optional[List[Dict[str, Any]]] = None):
         """Envía el mensaje final al chat de Telegram correspondiente utilizando send_agent_response."""
         logger.info(f"Intentando enviar mensaje a Telegram para thread_id: {thread_id}.")
         
@@ -149,6 +228,21 @@ class TelegramWebSocketClient:
             user_data[EVENT_ID_FOR_SCHEDULING_KEY] = event_id
             logger.info(f"Event ID '{event_id}' inyectado en user_data para thread_id: {thread_id}")
 
+        # Formatear fuentes si existen
+        if sources:
+            sources_text = "\n\n<b>📚 Fuentes consultadas:</b>\n"
+            seen_urls = set()
+            count = 1
+            for s in sources:
+                url = s.get("url")
+                title = s.get("title") or url
+                if url and url not in seen_urls:
+                    sources_text += f"{count}. <a href=\"{url}\">{title}</a>\n"
+                    seen_urls.add(url)
+                    count += 1
+            if count > 1:
+                text += sources_text
+
         try:
             # Llamar a la nueva función de ayuda
             if bot_manager.bot is None:
@@ -180,7 +274,10 @@ class TelegramWebSocketClient:
         """Detiene el cliente WebSocket."""
         self.is_running = False
         if self.websocket:
-            asyncio.create_task(self.websocket.close())
+            try:
+                # Usar una tarea para cerrar sin bloquear el bucle
+                asyncio.create_task(self.websocket.close())
+            except Exception: pass
 
 # Instancia única del cliente WebSocket para el bot
 # Se inicializará en run_telegram_bot.py

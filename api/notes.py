@@ -38,9 +38,7 @@ from bs4 import BeautifulSoup
 from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from core.onlyoffice_service import OnlyOfficeService
-from utils.onlyoffice_client import onlyoffice_client
-from fastapi import Request
+
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -56,9 +54,7 @@ def get_notes_manager(db: AsyncSession = Depends(get_db_session)) -> NotesManage
     """Inyecta una instancia del gestor de notas."""
     return NotesManager(db)
 
-def get_onlyoffice_service(db: AsyncSession = Depends(get_db_session)) -> OnlyOfficeService:
-    """Inyecta una instancia del servicio de OnlyOffice."""
-    return OnlyOfficeService(db)
+
 
 # --- Modelos Pydantic para la API ---
 
@@ -112,19 +108,6 @@ class GeneratePdfRequest(BaseModel):
 
 class LinkNoteToWorkspaceRequest(BaseModel):
     workspace_id: str # El ID del workspace al que se quiere vincular
-
-class OnlyOfficeConfigResponse(BaseModel):
-    document: dict
-    documentType: str
-    editorConfig: dict
-    token: str
-    type: str = "desktop"
-    width: Optional[str] = "100%"
-    height: Optional[str] = "100%"
-    onlyoffice_url: Optional[str] = None
-
-    class Config:
-        extra = "allow"
 
 # --- Endpoints de la API ---
 
@@ -736,77 +719,4 @@ async def convert_note_to_word(
 
     return {"message": "Nota convertida a Word correctamente", "file_path": file_path}
 
-# --- OnlyOffice Integration ---
 
-@router.get("/notes/{note_id}/onlyoffice-config")
-async def get_onlyoffice_config(
-    note_id: int,
-    current_account_id: str = Depends(get_current_account_id),
-    service: OnlyOfficeService = Depends(get_onlyoffice_service)
-):
-    """
-    Genera la configuración necesaria para inicializar el editor de OnlyOffice.
-    """
-    config = await service.get_editor_config(note_id, current_account_id)
-    if not config:
-        raise HTTPException(status_code=404, detail="Configuración no encontrada o nota no autorizada.")
-    
-    return JSONResponse(config)
-
-@router.api_route("/notes/{note_id}/download-raw", methods=["GET", "HEAD"])
-async def download_note_raw(
-    note_id: int,
-    service: OnlyOfficeService = Depends(get_onlyoffice_service)
-):
-    """
-    Endpoint para que OnlyOffice descargue el contenido de la nota en formato DOCX.
-    """
-    buffer = await service.get_raw_document(note_id)
-    if not buffer:
-        raise HTTPException(status_code=404, detail="Nota no encontrada.")
-    
-    return StreamingResponse(
-        buffer,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f"attachment; filename=note_{note_id}.docx"}
-    )
-
-@router.post("/notes/onlyoffice-callback")
-async def onlyoffice_callback(
-    request: Request,
-    note_id: int,
-    account_id: str,
-    service: OnlyOfficeService = Depends(get_onlyoffice_service)
-):
-    """
-    Callback que OnlyOffice llama cuando ocurren eventos en el documento.
-    Implementa validación de firma digital (JWT).
-    """
-    try:
-        # Intentar obtener los datos del cuerpo
-        body = await request.json()
-        token = body.get("token")
-        
-        # Si no hay token en el cuerpo, buscar en el header
-        if not token:
-            auth_header = request.headers.get("Authorization")
-            if auth_header and auth_header.startswith("Bearer "):
-                token = auth_header[7:]
-
-        # Si hay token, lo verificamos
-        data = body
-        if token:
-            verified_data = onlyoffice_client.verify_token(token)
-            if not verified_data:
-                logger.error(f"🚨 [OnlyOffice] Firma digital inválida para callback de nota {note_id}")
-                raise HTTPException(status_code=403, detail="Firma inválida")
-            # El payload de OnlyOffice suele estar en verified_data o en verified_data['payload']
-            data = verified_data if "status" in verified_data else verified_data.get("payload", body)
-
-        # Delegar procesamiento al servicio
-        remote_ip = request.client.host if request.client else "unknown"
-        result = await service.handle_callback(note_id, account_id, data, remote_ip=remote_ip)
-        return JSONResponse(result)
-    except Exception as e:
-        logger.error(f"⚠️ [OnlyOffice] Error procesando callback: {e}")
-        return JSONResponse({"error": 1, "message": str(e)})

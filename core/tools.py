@@ -86,7 +86,7 @@ AnalysisInterpreterTool = _import_tool_class("analysis_interpreter_tool", "Analy
 CypherTool = _import_tool_class("cypher_tool", "CypherTool")
 StructuredDataGeneratorTool = _import_tool_class("structured_data_generator_tool", "StructuredDataGeneratorTool")
 TavilySearchTool = _import_tool_class("tavily_search_tool", "TavilySearchTool")
-CrewResearchTool = _import_tool_class("crew_research_tool", "CrewResearchTool")
+
 
 
 # Global singletons for shared dependencies
@@ -151,6 +151,16 @@ async def _instantiate_tool(
     try:
         tool_instance = None
         tool_name = getattr(ToolClass, 'name', ToolClass.__name__)
+
+        # Detect fields for the tool class (for attribute injection later)
+        fields = set()
+        if hasattr(ToolClass, 'model_fields'): # Pydantic v2
+            fields = set(ToolClass.model_fields.keys())
+        elif hasattr(ToolClass, '__fields__'): # Pydantic v1
+            fields = set(ToolClass.__fields__.keys())
+        # If we didn't find fields, try inspection as fallback
+        if not fields and hasattr(ToolClass, '__annotations__'):
+            fields = set(ToolClass.__annotations__.keys())
 
         # --- Dependency Injection for Graph Tools ---
         if ToolClass == KnowledgeGraphTool:
@@ -233,9 +243,7 @@ async def _instantiate_tool(
             if 'workspace_id' in fields and workspace_id is not None:
                 expected_args['workspace_id'] = workspace_id
             
-            # Special case for CrewResearchTool which might not have account_id in annotations but is required
-            if not expected_args and ToolClass.__name__ == "CrewResearchTool":
-                 expected_args['account_id'] = account_id
+
 
             if expected_args:
                 try:
@@ -247,6 +255,18 @@ async def _instantiate_tool(
             else:
                 # No args tools
                 tool_instance = ToolClass()
+
+        # Ensure that account_id, workspace_id, telegram_id, thread_id are set on the instance
+        # if the tool class defines these fields, even if the constructor didn't accept them.
+        if tool_instance is not None:
+            if 'account_id' in fields:
+                tool_instance.account_id = account_id
+            if 'workspace_id' in fields:
+                tool_instance.workspace_id = workspace_id
+            if 'telegram_id' in fields:
+                tool_instance.telegram_id = telegram_id
+            if 'thread_id' in fields:
+                tool_instance.thread_id = thread_id
 
         return tool_instance
     except Exception as e:
@@ -280,7 +300,8 @@ async def get_all_langchain_tools(
         WebScraperTool, ScheduleToolExecutionTool, ListScheduledToolsTool, ContactProfileTool,
         WebSearchTool, HTMLGeneratorTool, ExecuteCommandTool, TableAnalysisTool,
         AnalysisInterpreterTool, CypherTool, StructuredDataGeneratorTool, TavilySearchTool,
-        CreateTableTool, CrewResearchTool
+        CreateTableTool
+
     ]
     
     # Filtrar herramientas que no pudieron ser importadas (son None)
@@ -333,7 +354,7 @@ async def get_all_langchain_tools(
                 web_search_tool=web_search_tool,
                 add_web_to_rag_tool=add_web_to_rag_tool,
                 account_id=account_id,
-                telegram_id=telegram_id,
+                telegram_id=str(telegram_id) if telegram_id is not None else None,
                 thread_id=thread_id,
                 workspace_id=workspace_id
             )

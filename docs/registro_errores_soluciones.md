@@ -100,7 +100,8 @@ Este documento sirve como una bitácora para registrar los errores encontrados d
 ## 2025-08-03 - Solución de `TypeError` en la Instanciación de Herramientas
 
 - **Error**: Se produjo un `TypeError: Can't instantiate abstract class ... with abstract method _run` al intentar instanciar `DocumentRAGTool` y `VectorDBSearchTool`.
-- **Causa**: Las clases `DocumentRAGTool` y `VectorDBSearchTool` heredan de `langchain_core.tools.BaseTool`, que es una clase abstracta que requiere la implementación del método síncrono `_run()`. Aunque estas herramientas utilizan `_arun()` para la lógica asíncrona, la ausencia de una implementación de `_run()` hacía que Python las considerara abstractas y no permitiera su instanciación.
+- **Causa**: Las clases `DocumentRAGTool` y `VectorDBSearchTool` heredan de `langchain_core.tools.BaseTool`, que es una clase abstracta que requiere la implementación del método síncrono `_run()`.
+Aunque estas herramientas utilizan `_arun()` para la lógica asíncrona, la ausencia de una implementación de `_run()` hacía que Python las considerara abstractas y no permitiera su instanciación.
 - **Solución**: Se añadió una implementación básica del método `_run()` a `tools/document_rag_tool.py` y `tools/vector_db_search_tool.py`. Esta implementación simplemente envuelve la llamada a `_arun()` utilizando `asyncio.run()`, permitiendo que las herramientas sean instanciadas correctamente y manteniendo el enfoque asíncrono del proyecto.
 
 ## 2025-08-03 - Solución de `KeyError` en `PromptTemplate` de LangChain
@@ -432,3 +433,60 @@ Se solucionaron tres errores críticos que afectaban la experiencia del usuario 
 - **Error**: `TypeError: GenerativeServiceAsyncClient.generate_content() got an unexpected keyword argument 'max_retries'`.
 - **Causa**: Incompatibilidad directa entre el SDK de Google Generative AI (Gemini) y los parámetros de reintento inyectados por LangChain al realizar llamadas directas mediante `langchain_google_genai`. Esto ocurría porque la herramienta instanciaba el modelo de forma independiente, saltándose la capa de abstracción unificada.
 - **Solución**: Se eliminaron todas las dependencias directas de `langchain_google_genai` en las herramientas y utilidades (`natural_query_interpreter_tool.py`, `internal_knowledge_search_tool.py`, `advanced_text_analyzer.py`, `proactive_knowledge_linker.py`). En su lugar, se implementó el uso centralizado de `ChatLiteLLM` a través del `llm_manager.py` usando `get_llm_for_user()` y `get_fast_llm()`. LiteLLM abstrae correctamente estos parámetros y utiliza la configuración global de reintentos del proyecto, eliminando el conflicto técnico.
+
+---
+
+## 08-02-26 - El razonamiento nativo de los LLMs no se muestra en el frontend
+
+- **Error**: El bloque de "Proceso de Pensamiento" no aparecía en la interfaz de usuario, aunque el LLM sí estaba generando el razonamiento.
+- **Causa**: Había una ruptura en el flujo de datos del razonamiento desde el backend hasta el frontend.
+    1. El `AIMessage` final en `core/agent.py` no siempre incluía el `full_reasoning_content` en sus `additional_kwargs`.
+    2. El manejador de eventos `stream_end` en `src/components/CommonChat.tsx` no estaba conservando el campo `reasoning` al actualizar el estado del mensaje final.
+- **Solución**:
+    1. **Backend (`core/agent.py`)**: Se modificó la construcción del `final_ai_message` para asegurar que `full_reasoning_content` siempre se añada a `additional_kwargs` si existe.
+    2. **Frontend (`src/components/CommonChat.tsx`)**: Se actualizó el `case 'stream_end'` en el manejador de WebSocket para que el campo `reasoning` se propague al estado final del mensaje, permitiendo que `ChatMessage.tsx` lo renderice.
+    3. **Robustez (`core/llm_manager.py`)**: Se amplió la lista de palabras clave para la detección de modelos con capacidad de razonamiento para incluir modelos más nuevos como "claude-3.5-sonnet" y "gemma-2".
+
+---
+
+## 15-02-2026 - Compatibilidad NumPy y LangChain
+
+- **Error**: Se produjeron errores críticos al iniciar `kognito_core` (conflicto de versión de NumPy) y `kognito_telegram_client` (ImportError de LangChain).
+- **Causa**:
+    1. La imagen base de Docker includía NumPy 2.x, incompatible con módulos compilados para 1.x.
+    2. `langchain_community.embeddings` ha sido refactorizado en versiones recientes, eliminando `LiteLLMEmbeddings` y causando fallos en cascada al importar el paquete.
+- **Solución**:
+    1. Se forzó `numpy<2` en `requirements.txt` y en el contenedor.
+    2. Se refactorizó `core/embedding_manager.py` para usar `litellm` directamente, eliminando la dependencia de `langchain_community.embeddings`.
+
+---
+
+## 21-02-26 - `SyntaxError` en `core/prompts.py` por cadena mal cerrada
+
+- **Error**: Se produjo un `SyntaxError: invalid character '⚠' (U+26A0)` al iniciar el servicio `kognito_core`.
+- **Causa**: Durante una edición masiva de `core/prompts.py`, se cerró accidentalmente una cadena de triple comilla (`"""`) de forma prematura en la constante `HTML_DESIGN_PROMPT`. Esto dejó varios bloques de código HTML y caracteres especiales (como emojis) fuera de cualquier cadena, siendo interpretados erróneamente por Python como código fuente inválidado.
+- **Solución**: Se corrigió la estructura de la constante `HTML_DESIGN_PROMPT` en `core/prompts.py`, eliminando el cierre prematuro de la cadena y unificando todas las instrucciones de diseño HTML en una única declaración de triple comilla válida. Esto permite que el archivo se importe correctamente y que los servicios vuelvan a estar operativos.
+
+---
+
+## 23-02-26 - `TypeError: unhashable type: 'dict'` en `core/agent.py`
+
+- **Error**: El agente fallaba al ejecutar el método `_parse_tool_calls_from_text` lanzando una excepción de tipo no hasheable.
+- **Causa**: En el manejo de la respuesta JSON del LLM, el campo `name` o `function` se capturaba como un diccionario en los formatos estilo OpenAI, lo que causaba error al comprobar `name in tool_map` (ya que un dict no puede ser clave ni comparado en un diccionario de esa manera).
+- **Solución**: Se añadió código para desempaquetar el diccionario anidado (formato `{"function": {"name": "...", "arguments": "{...}"}}`), validando que `name` sea un String puro antes de pasarlo a la validación, y decodificando el string de `arguments` a objeto JSON si correspondía para dejar los parámetros limpios.
+
+---
+
+## 25-02-26 - `httpx.InvalidURL` en Gemini por `api_base` incorrecto
+
+- **Error**: Se produjo un error `httpx.InvalidURL: Invalid URL: 'stola@disroot.org'` al intentar usar modelos de Gemini.
+- **Causa**: El campo `llm_api_base` en la configuración del usuario estaba siendo poblado accidentalmente con el valor de `PGADMIN_DEFAULT_EMAIL` (u otra variable de entorno no deseada) debido a una falta de validación en la lógica de construcción de los parámetros del LLM. Gemini (vía LiteLLM) intentaba usar este string como base para la URL de la API, resultando en un error de formato.
+- **Solución**: Se modificó `core/llm_manager.py` para añadir una validación estricta al asignar `api_base`. Ahora, el valor solo se utiliza si contiene la cadena `"http"`, asegurando que sea una URL válida. Si el valor en la base de datos es inválido (como un email), el sistema lo ignora y utiliza los valores predeterminados seguros. Además, se limpió la lógica de selección de proveedores para evitar colisiones entre configuraciones globales y de usuario.
+
+---
+
+## 25-02-26 - `SyntaxError: invalid decimal literal` en `core/agents/deep_researcher_prompts.py`
+
+- **Error**: Se produjo un `SyntaxError: invalid decimal literal` al iniciar el servicio `kognito_core`.
+- **Causa**: Durante la implementación de la nueva funcionalidad de "Esquema Visual", se realizó una edición en `core/agents/deep_researcher_prompts.py` que accidentalmente eliminó la declaración de la variable `final_report_generation_prompt = """` y las comillas de apertura. Esto provocó que el texto del prompt fuera interpretado como código Python, fallando en la primera línea que contenía una numeración (ej. `1. **Estética...`), la cual Python intentó interpretar como un literal decimal inválido.
+- **Solución**: Se restauró la definición de la variable `final_report_generation_prompt` y las comillas triples de apertura en el lugar correcto. Se verificó que el bloque de texto del prompt esté correctamente contenido dentro de la cadena, permitiendo que el archivo sea importado sin errores de sintaxis.

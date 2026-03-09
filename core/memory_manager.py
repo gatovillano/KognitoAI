@@ -25,6 +25,7 @@ from sqlalchemy import select, text, create_engine, delete, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List, Union, Dict, Any, Tuple
 from pydantic.fields import FieldInfo
+from pydantic import validator
 import datetime
 
 import uuid
@@ -244,6 +245,12 @@ async def _run_fts_search(
     Realiza una búsqueda de texto completo (FTS) en la base de datos, filtrando por account_id y content_types.
     """
     processed_results: List[LCDocument] = []
+    
+    # Asegurar que query sea un string
+    if isinstance(query, list):
+        query = " ".join(str(q) for q in query)
+    elif not isinstance(query, str):
+        query = str(query)
     
     try:
         # Búsqueda en langchain_pg_embedding
@@ -491,6 +498,15 @@ async def get_relevant_memories(
             explicit_document_ids: Optional[List[str]] = None
             db_session: Optional[Any] = None # Optimization - Changed to Any to avoid Pydantic validation issues with AsyncSession
 
+            # Validator to normalize workspace_id to string or None
+            @validator('workspace_id', pre=True, always=True)
+            def normalize_workspace_id(cls, v):
+                if v is None:
+                    return None
+                if isinstance(v, str):
+                    return v if v.strip() else None
+                return str(v) if v else None
+
             def _get_relevant_documents(self, query_str: str, **kwargs) -> List[LCDocument]:
                 return []
 
@@ -529,6 +545,15 @@ async def get_relevant_memories(
             category: Optional[str] = None
             explicit_document_ids: Optional[List[str]] = None
             db_session: Optional[Any] = None # Optimization - Changed to Any to avoid Pydantic validation issues with AsyncSession
+
+            # Validator to normalize workspace_id to string or None
+            @validator('workspace_id', pre=True, always=True)
+            def normalize_workspace_id(cls, v):
+                if v is None:
+                    return None
+                if isinstance(v, str):
+                    return v if v.strip() else None
+                return str(v) if v else None
 
             def _get_relevant_documents(self, query_str: str, **kwargs) -> List[LCDocument]:
                 return []

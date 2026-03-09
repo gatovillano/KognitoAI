@@ -5,6 +5,7 @@ import uuid
 import json
 import logging
 import os
+import re
 from typing import Any, Literal, Sequence, cast
 
 from langchain_core.messages import (
@@ -50,6 +51,7 @@ from core.agents.deep_researcher_utils import (
     get_today_str,
     deep_research_think_tool,
     execute_tool_safely,
+    generate_stable_id,
 )
 from core.utils.llm_utils import (
     is_token_limit_exceeded, 
@@ -67,7 +69,7 @@ logger = logging.getLogger(__name__)
 # --- Main Graph Nodes ---
 
 async def clarify_with_user(state: AgentState, config: RunnableConfig) -> dict:
-    logger.info("--- [DeepResearcher] Node: clarify_with_user ---")
+    logger.debug("--- [DeepResearcher] Node: clarify_with_user ---")
     # Explicitly convert to list to ensure it's iterable and not a problematic generator
     messages_from_state_list = list(state.get("messages", []))
     current_messages: list[BaseMessage] = [cast(BaseMessage, msg) for msg in messages_from_state_list]
@@ -96,12 +98,12 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> dict:
         raise ValueError("Main LLM not initialized.")
 
     clarification_attempts = state.get("clarification_attempts", 0) + 1
-    logger.info(f"🔄 [DeepResearcher] Clarification attempt: {clarification_attempts}")
+    logger.debug(f"🔄 [DeepResearcher] Clarification attempt: {clarification_attempts}")
 
     # Send initial progress update
     if progress_callback:
         progress = int(base_progress + max_sub_progress * 0.05)
-        logger.info(f"Calling progress_callback in clarify_with_user: {progress}%")
+        logger.debug(f"Calling progress_callback in clarify_with_user: {progress}%")
         await progress_callback(progress, "Verificando claridad de la consulta...", "clarify_with_user")
     
     # Proactively prune messages to fit within the token limit
@@ -190,7 +192,7 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> dict:
 
 
 async def write_research_brief(state: AgentState, config: RunnableConfig) -> dict:
-    logger.info("--- [DeepResearcher] Node: write_research_brief ---")
+    logger.debug("--- [DeepResearcher] Node: write_research_brief ---")
     cfg = Configuration.from_runnable_config(config)
     progress_callback = config.get("configurable", {}).get("progress_callback")
     base_progress = config.get("configurable", {}).get("base_progress", 0)
@@ -199,7 +201,7 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> dic
     if progress_callback:
         # This node takes 5% of the total range (from 5% to 10%)
         progress = int(base_progress + max_sub_progress * 0.10)
-        logger.info(f"Calling progress_callback in write_research_brief: {progress}%")
+        logger.debug(f"Calling progress_callback in write_research_brief: {progress}%")
         await progress_callback(progress, "Generando el resumen de investigación...", "write_research_brief")
     
     account_id = state.get("account_id")
@@ -259,24 +261,24 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> dic
             logger.error(f"❌ [DeepResearcher] write_research_brief - Main LLM also failed: {e}")
             response = None
 
-    logger.info(f"📝 [DeepResearcher] write_research_brief - LLM Response received.")
+    logger.debug(f"📝 [DeepResearcher] write_research_brief - LLM Response received.")
     
-    if response is None or not response.research_brief:
-        logger.error("[DeepResearcher] write_research_brief - Both LLMs returned None for ResearchQuestion.")
+    if response is None or not getattr(response, 'research_brief', None):
+        logger.error(f"[DeepResearcher] write_research_brief - Both LLMs returned None or invalid response for ResearchQuestion. Response: {response}")
         return {"research_brief": "Error: LLM failed to generate a research brief."}
     
     # Send progress update after successful brief generation
     if progress_callback:
         progress = int(base_progress + max_sub_progress * 0.12)
-        logger.info(f"Calling progress_callback after research brief: {progress}%")
+        logger.debug(f"Calling progress_callback after research brief: {progress}%")
         await progress_callback(progress, "Resumen de investigación generado. Iniciando investigación...", "write_research_brief_complete")
     
     return {"research_brief": response.research_brief}
 
 
 async def final_report_generation(state: AgentState, config: RunnableConfig) -> dict:
-    """Generates the final comprehensive research report."""
-    logger.info("--- [DeepResearcher] Node: final_report_generation ---")
+    """Generates the final comprehensive research report divided into sections."""
+    logger.debug("--- [DeepResearcher] Node: final_report_generation ---")
     cfg = Configuration.from_runnable_config(config)
     progress_callback = config.get("configurable", {}).get("progress_callback")
     base_progress = config.get("configurable", {}).get("base_progress", 0)
@@ -286,7 +288,7 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
         # This node takes the final 10% of the main graph's progress (from 90% to 100%)
         # So, its base_progress will be 90% of the main range.
         current_global_progress = int(base_progress + max_sub_progress * 0.90)
-        logger.info(f"Calling progress_callback in final_report_generation: {current_global_progress}%")
+        logger.debug(f"Calling progress_callback in final_report_generation: {current_global_progress}%")
         await progress_callback(current_global_progress, "Generando el informe final...", "final_report_generation")
 
     account_id = state.get("account_id")
@@ -352,17 +354,45 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
     # Use sources directly from state, populated by supervisor/researchers
     sources = state.get("sources", [])
     
-    # Deduplicate sources based on URL
-    unique_sources = []
-    seen_urls = set()
-    for source in sources:
-        if source['url'] not in seen_urls:
-            unique_sources.append(source)
-            seen_urls.add(source['url'])
+    logger.debug(f"📄 [DeepResearcher] Sources received in final_report_generation: {len(sources)}")
+    for i, s in enumerate(sources):
+        logger.debug(f"📄 [DeepResearcher] Source {i+1}: {s.get('title', 'No title')} - {s.get('url', 'No URL')[:50]}...")
     
-    # Re-assign IDs to be sequential
-    for i, source in enumerate(unique_sources):
-        source['id'] = i + 1
+    # Deduplicate sources based on URL while merging metadata from duplicates
+    unique_sources = []
+    seen_urls: Dict[str, dict] = {}
+    for source in sources:
+        url = source.get('url')
+        if not url:
+            # Keep sources without URL as-is
+            unique_sources.append(source)
+            continue
+        
+        if url not in seen_urls:
+            # First occurrence: add as-is
+            unique_sources.append(source)
+            seen_urls[url] = source
+        else:
+            # Duplicate: ensure same ID and merge metadata, then add duplicate
+            existing = seen_urls[url]
+            # Ensure the duplicate uses the same ID as the first (stable ID)
+            source['id'] = existing['id']
+            
+            # Merge metadata
+            if 'metadata' not in existing:
+                existing['metadata'] = {}
+            if 'metadata' not in source:
+                source['metadata'] = {}
+            
+            # Merge tool_names (combine without duplicates)
+            existing_tools = set(existing['metadata'].get('tool_names', []))
+            new_tools = set(source['metadata'].get('tool_names', []))
+            merged_tools = list(existing_tools | new_tools)
+            existing['metadata']['tool_names'] = merged_tools
+
+            # Add the duplicate to the list (with merged metadata)
+
+            unique_sources.append(source)
     
     sources = unique_sources
 
@@ -378,19 +408,65 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
                         if action not in recommendations:
                             recommendations.append(action)
     
-    logger.info(f"📄 [DeepResearcher] Final report generated.")
+    # Parse the final report into sections
+    report_content = final_report.content
+    # Mark which sources are cited in the report text
+    citation_numbers = set()
+    for match in re.findall(r'\[(\d+)\]', report_content):
+        try:
+            num = int(match)
+            citation_numbers.add(num)
+        except ValueError:
+            continue
+    
+    for idx, source in enumerate(sources):
+        source['is_cited'] = (idx + 1) in citation_numbers
+    summary = ""
+    findings = ""
+    recommendations_section = ""
+
+    # Extract Summary (Resumen Ejecutivo)
+    summary_match = re.search(r"Resumen Ejecutivo.*?(?=Introducción|Introducción, Metodología y Marco Teórico|$)", report_content, re.DOTALL | re.IGNORECASE)
+    if summary_match:
+        summary = summary_match.group(0).strip()
+        # Remove the section title to clean it up
+        summary = re.sub(r"^.*?Resumen Ejecutivo", "", summary, flags=re.DOTALL | re.IGNORECASE).strip()
+    
+    # Extract Findings (Introducción, Metodología, Análisis Temático, Integración, Conclusión)
+    findings_match = re.search(r"(Introducción|Introducción, Metodología y Marco Teórico).*?(?=Implicaciones Estratégicas|Recomendaciones|Bibliografía|$)", report_content, re.DOTALL | re.IGNORECASE)
+    if findings_match:
+        findings = findings_match.group(0).strip()
+    
+    # Extract Recommendations (Implicaciones Estratégicas, Proyecciones y Recomendaciones)
+    recommendations_match = re.search(r"(Implicaciones Estratégicas|Recomendaciones).*?(?=Conclusión|Bibliografía|$)", report_content, re.DOTALL | re.IGNORECASE)
+    if recommendations_match:
+        recommendations_section = recommendations_match.group(0).strip()
+    
+    # Extract Visual Schema
+    visual_schema = ""
+    schema_match = re.search(r"<visual_schema>(.*?)</visual_schema>", report_content, re.DOTALL | re.IGNORECASE)
+    if schema_match:
+        visual_schema = schema_match.group(1).strip()
+        # Clean up the report content by removing the schema tag
+        report_content = re.sub(r"<visual_schema>.*?</visual_schema>", "", report_content, flags=re.DOTALL | re.IGNORECASE).strip()
+
+    logger.info(f"📄 [DeepResearcher] Final report generated with sections: Summary ({len(summary)} chars), Findings ({len(findings)} chars), Recommendations ({len(recommendations_section)} chars), Visual Schema ({len(visual_schema)} chars), {len(sources)} sources, {len(recommendations)} think-tool recommendations")
+    
     return {
-        "final_report": final_report.content,
+        "final_report": report_content,  # Keep full report for backward compatibility
+        "summary": summary if summary else report_content[:1000] + "...",  # Fallback if no summary section
+        "findings": findings if findings else report_content,  # Fallback if no findings section
+        "recommendations": recommendations if recommendations else ([recommendations_section] if recommendations_section else []),  # Fallback to extracted recommendations
         "messages": [final_report],
         "sources": sources,
-        "recommendations": recommendations
+        "visual_schema": visual_schema if visual_schema else None,
     }
 
 # --- Supervisor Sub-Graph Nodes ---
 
 async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
     """Plans research strategy and delegates to researchers."""
-    logger.info("--- [DeepResearcher] Node: supervisor ---")
+    logger.debug("--- [DeepResearcher] Node: supervisor ---")
     cfg = Configuration.from_runnable_config(config)
     progress_callback = config.get("configurable", {}).get("progress_callback")
     base_progress = config.get("configurable", {}).get("base_progress", 0)
@@ -415,7 +491,7 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
         progress_within_supervisor_range = max(5, (current_iteration / total_iterations) * effective_supervisor_range)
         current_global_progress = int(supervisor_range_start + progress_within_supervisor_range)
         
-        logger.info(f"Calling progress_callback in supervisor: {current_global_progress}%")
+        logger.debug(f"Calling progress_callback in supervisor: {current_global_progress}%")
         await progress_callback(current_global_progress, f"Supervisor: Planificando iteración de investigación {current_iteration + 1}/{total_iterations}", "supervisor")
 
     account_id = state.get("account_id")
@@ -466,10 +542,10 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
     initial_human_message_content = f"Plan research for: {state.get('research_brief', '')}"
 
     if not state.get("supervisor_messages"):
-        logger.info("First supervisor run. Planning initial research.")
+        logger.debug("First supervisor run. Planning initial research.")
         messages.append(HumanMessage(content=initial_human_message_content))
     else:
-        logger.info(f"Supervisor continuing with {len(state['supervisor_messages'])} previous messages.")
+        logger.debug(f"Supervisor continuing with {len(state['supervisor_messages'])} previous messages.")
         valid_messages = [cast(BaseMessage, msg) for msg in state["supervisor_messages"] if isinstance(msg, (AIMessage, HumanMessage, SystemMessage, ToolMessage))]
         messages.extend(valid_messages)
         
@@ -520,7 +596,7 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
 
     if response.tool_calls:
         for tool_call in response.tool_calls:
-            logger.info(f"📋 [Supervisor] LLM decided to call tool: {tool_call['name']}")
+            logger.debug(f"📋 [Supervisor] LLM decided to call tool: {tool_call['name']}")
     else:
         logger.warning("[Supervisor] LLM did not generate any tool calls.")
 
@@ -531,7 +607,7 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
 
 async def supervisor_tools(state: SupervisorState, config: RunnableConfig, researcher_subgraph: Pregel) -> dict:
     """Executes tools called by the supervisor."""
-    logger.info("--- [DeepResearcher] Node: supervisor_tools ---")
+    logger.debug("--- [DeepResearcher] Node: supervisor_tools ---")
     cfg = Configuration.from_runnable_config(config)
     progress_callback = config.get("configurable", {}).get("progress_callback")
     base_progress = config.get("configurable", {}).get("base_progress", 0)
@@ -547,16 +623,16 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
     if progress_callback:
         # We can allocate a small initial percentage for tool execution setup, e.g., 5% of the supervisor's effective range
         current_global_progress = int(supervisor_range_start + effective_supervisor_range * 0.05)
-        logger.info(f"Calling progress_callback in supervisor_tools: {current_global_progress}%")
+        logger.debug(f"Calling progress_callback in supervisor_tools: {current_global_progress}%")
         await progress_callback(current_global_progress, "Supervisor: Preparando herramientas de investigación...", "supervisor_tools")
 
     if not most_recent_message.tool_calls:
         logger.warning("[Supervisor Tools] No tool calls in the last message. Checking iteration count.")
         if state["research_iterations"] > cfg.max_researcher_iterations:
-            logger.info("[Supervisor Tools] Max iterations reached. Ending research.")
+            logger.debug("[Supervisor Tools] Max iterations reached. Ending research.")
             return {"notes": get_notes_from_tool_calls(state["supervisor_messages"])}
         else:
-            logger.info("[Supervisor Tools] Not at max iterations. Returning to supervisor.")
+            logger.debug("[Supervisor Tools] Not at max iterations. Returning to supervisor.")
             return {"supervisor_messages": state["supervisor_messages"]}
 
     all_tool_messages = []
@@ -566,7 +642,7 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
     update_payload = {}
 
     tool_calls = most_recent_message.tool_calls
-    logger.info(f"[Supervisor Tools] Processing {len(tool_calls)} tool calls in exact order.")
+    logger.debug(f"[Supervisor Tools] Processing {len(tool_calls)} tool calls in exact order.")
 
     # Prepare to store results in a way that maintains order
     tool_results_map = {}
@@ -627,9 +703,9 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
 
     # 2. Execute parallel research tasks if any
     if conduct_research_tasks:
-        logger.info(f"🚀 [Supervisor Tools] Starting {len(conduct_research_tasks)} parallel research tasks.")
+        logger.debug(f"🚀 [Supervisor Tools] Starting {len(conduct_research_tasks)} parallel research tasks.")
         parallel_results = await asyncio.gather(*conduct_research_tasks)
-        logger.info("✅ [Supervisor Tools] All parallel research tasks completed.")
+        logger.debug("✅ [Supervisor Tools] All parallel research tasks completed.")
         
         # Store parallel results in the map
         for idx, result in zip(conduct_research_indices, parallel_results):
@@ -671,14 +747,20 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
             ))
 
     update_payload["supervisor_messages"] = all_tool_messages
+    
+    # Ensure sources are included in the return payload
+    if "sources" not in update_payload:
+        update_payload["sources"] = []
+    
+    logger.debug(f"🎨 [Supervisor Tools] Total sources being returned: {len(update_payload['sources'])}")
     return update_payload
 
 # --- Researcher Sub-Graph Nodes ---
 
 async def researcher(state: ResearcherState, config: RunnableConfig) -> dict:
     """Conducts focused research on a specific topic."""
-    logger.info(f"--- [DeepResearcher] Node: researcher ---")
-    logger.info(f"🔍 [Researcher] Researching topic: '{state['research_topic']}'")
+    logger.debug(f"--- [DeepResearcher] Node: researcher ---")
+    logger.debug(f"🔍 [Researcher] Researching topic: '{state['research_topic']}'")
     cfg = Configuration.from_runnable_config(config)
     progress_callback = config.get("configurable", {}).get("progress_callback")
     base_progress = config.get("configurable", {}).get("base_progress", 0)
@@ -697,7 +779,7 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> dict:
         
         current_global_progress = int(base_progress + current_progress_within_researcher_range)
         
-        logger.info(f"Calling progress_callback in researcher: {current_global_progress}% for topic {state['research_topic']}")
+        logger.debug(f"Calling progress_callback in researcher: {current_global_progress}% for topic {state['research_topic']}")
         await progress_callback(current_global_progress, f"Investigando: {state['research_topic']} (Paso {current_tool_iteration + 1}/{total_tool_calls})", f"researcher_{state['research_topic']}")
     
     tools = await get_all_tools(config)
@@ -819,6 +901,74 @@ async def researcher_tools(state: ResearcherState, config: RunnableConfig) -> di
     observations = await asyncio.gather(*tool_execution_tasks)
     logger.info("✅ [Researcher Tools] All tools executed.")
 
+    # --- REAL-TIME FINDINGS REPORTING ---
+    if progress_callback:
+        found_sources = []
+        for obs in observations:
+            try:
+                # 1. Check for structured ToolOutputWithSources format
+                if hasattr(obs, 'sources') or (isinstance(obs, dict) and "sources" in obs):
+                    obs_sources = obs.sources if hasattr(obs, 'sources') else obs["sources"]
+                    if isinstance(obs_sources, list):
+                        for s in obs_sources:
+                            s_dict = s.model_dump() if hasattr(s, 'model_dump') else (s if isinstance(s, dict) else {})
+                            if s_dict.get("url"):
+                                found_sources.append({
+                                    "title": s_dict.get("title", s_dict.get("url")),
+                                    "url": s_dict.get("url"),
+                                    "snippet": str(s_dict.get("snippet", "")),
+                                    "type": s_dict.get("type", "web")
+                                })
+                # 2. Extract from raw content via Regex if no structured sources found
+                else:
+                    content_str = str(obs)
+                    # Pattern: Markdown style [Title](URL)
+                    md_matches = list(re.finditer(r"\[([^\]]+)\]\((https?://[^\s\)]+)\)", content_str))
+                    for match in md_matches:
+                        found_sources.append({
+                            "title": match.group(1).strip(),
+                            "url": match.group(2).strip(),
+                            "snippet": "",
+                            "type": "web"
+                        })
+            except Exception as e:
+                logger.error(f"⚠️ [Researcher Tools] Error extracting real-time sources: {e}")
+
+        if found_sources:
+            # Deduplicate by URL
+            unique_found = []
+            seen_urls = set()
+            for s in found_sources:
+                if s["url"] not in seen_urls:
+                    unique_found.append(s)
+                    seen_urls.add(s["url"])
+            
+            logger.info(f"📡 [Researcher Tools] Reporting {len(unique_found)} real-time findings for topic: {state['research_topic']}")
+            
+            # Formatear hallazgos como Markdown para el stream de chat
+            findings_md = f"\n\n#### ✨ Descubrimientos para: {state['research_topic']}\n"
+            for s in unique_found:
+                title = s.get("title", s.get("url", "Fuente")).strip()
+                url = s.get("url")
+                snippet = s.get("snippet", "").strip()
+                
+                # Crear link Markdown con snippet opcional
+                findings_md += f"- **[{title}]({url})**"
+                if snippet:
+                    # Limpiar snippet de saltos de línea excesivos y truncarlo si es muy largo
+                    clean_snippet = " ".join(snippet.split())
+                    if len(clean_snippet) > 200:
+                        clean_snippet = clean_snippet[:197] + "..."
+                    findings_md += f": _{clean_snippet}_"
+                findings_md += "\n"
+            
+            await progress_callback(
+                int(progress_at_end_of_tools), 
+                f"Hallazgos para: {state['research_topic']}", 
+                data={"stream_chunk": findings_md}
+            )
+    # --- END REAL-TIME FINDINGS REPORTING ---
+
     if progress_callback:
         logger.info(f"Calling progress_callback in researcher_tools: {int(progress_at_end_of_tools)}% for topic {state['research_topic']}")
         await progress_callback(int(progress_at_end_of_tools), f"Herramientas ejecutadas para: {state['research_topic']}", f"researcher_tools_end_{state['research_topic']}")
@@ -826,10 +976,102 @@ async def researcher_tools(state: ResearcherState, config: RunnableConfig) -> di
     tool_outputs = []
     for obs, tc in zip(observations, most_recent_message.tool_calls):
         logger.info(f"🔧 [Researcher Tools] Result for '{tc['name']}' received.")
-        tool_outputs.append(ToolMessage(content=str(obs), name=tc["name"], tool_call_id=tc["id"]))
+        
+        # Check if the observation is a ToolOutputWithSources object or dict
+        is_tool_output = False
+        if hasattr(obs, 'context_for_llm') and hasattr(obs, 'sources'):
+            is_tool_output = True
+        elif isinstance(obs, dict) and "context_for_llm" in obs and "sources" in obs:
+            is_tool_output = True
+            
+        if is_tool_output:
+            # It's a ToolOutputWithSources object or dict
+            logger.info(f"✅ [Researcher Tools] Tool '{tc['name']}' returned ToolOutputWithSources format.")
+            
+            # Extract attributes safely whether it's object or dict
+            if isinstance(obs, dict):
+                obs_sources = obs.get("sources", [])
+                obs_context = obs.get("context_for_llm", "")
+                obs_summary = obs.get("summary")
+            else:
+                obs_sources = obs.sources
+                obs_context = obs.context_for_llm
+                obs_summary = getattr(obs, "summary", None)
+            
+            logger.info(f"✅ [Researcher Tools] Extracted {len(obs_sources)} sources.")
+
+            # Convert Source objects to dicts for JSON serialization
+            sources_dicts = []
+            for source in obs_sources:
+                if hasattr(source, 'model_dump'):
+                    sources_dicts.append(source.model_dump())
+                elif isinstance(source, dict):
+                    sources_dicts.append(source)
+                else:
+                    logger.warning(f"⚠️ [Researcher Tools] Unexpected source type: {type(source)}")
+            
+            # Create a structured content that includes both context and sources
+            structured_content = {
+                "context_for_llm": obs_context,
+                "sources": sources_dicts,
+                "summary": obs_summary
+            }
+            
+            # Serialize to JSON string for ToolMessage
+            import json
+            # Ensure we produce valid JSON string
+            content_str = json.dumps(structured_content, ensure_ascii=False)
+            tool_outputs.append(ToolMessage(content=content_str, name=tc["name"], tool_call_id=tc["id"]))
+        else:
+            # Regular tool output, convert to string
+            # IMPORTANT: If it's a dict/list, use json.dumps to ensure it's valid JSON for subsequent parsing
+            if isinstance(obs, (dict, list)):
+                try:
+                    content_str = json.dumps(obs, ensure_ascii=False)
+                except Exception:
+                    content_str = str(obs)
+            else:
+                content_str = str(obs)
+                
+            tool_outputs.append(ToolMessage(content=content_str, name=tc["name"], tool_call_id=tc["id"]))
 
     return {"researcher_messages": tool_outputs}
 
+
+
+    def _normalize_source_dict(source_dict: dict, tool_name: str, tool_call_id: str | None, message_index: int) -> dict:
+        """Normaliza un dict de fuente: asegura id, metadata y tipo."""
+        # Asegurar que el dict tenga los campos mínimos
+        if "url" not in source_dict or not source_dict["url"]:
+            # Fallback: generar ID único sin URL
+            source_id = generate_stable_id("", prefix="unknown")
+        else:
+            url = source_dict["url"]
+            source_type = source_dict.get("type", "web").lower()
+            source_id = generate_stable_id(url, prefix=source_type)
+        
+        # Inicializar metadata si no existe
+        metadata = source_dict.get("metadata", {})
+        # Añadir información del origen
+        if "tool_names" not in metadata:
+            metadata["tool_names"] = []
+        if tool_name and tool_name not in metadata["tool_names"]:
+            metadata["tool_names"].append(tool_name)
+        if tool_call_id and "tool_call_id" not in metadata:
+            metadata["tool_call_id"] = tool_call_id
+        if "message_index" not in metadata:
+            metadata["message_index"] = message_index
+        
+        # Construir dict normalizado
+        normalized = {
+            "title": source_dict.get("title", ""),
+            "url": source_dict.get("url", ""),
+            "snippet": source_dict.get("snippet", ""),
+            "type": source_dict.get("type", "web").lower(),
+            "id": source_id,
+            "metadata": metadata
+        }
+        return normalized
 
 async def compress_research(state: ResearcherState, config: RunnableConfig) -> dict:
     """Compresses and synthesizes research findings."""
@@ -872,62 +1114,254 @@ async def compress_research(state: ResearcherState, config: RunnableConfig) -> d
     raw_notes_content = "\n".join([str(m.content) for m in filter_messages(researcher_messages, include_types=["tool", "ai"])])
 
     logger.info(f"📦 [Compress Research] Compressed research output received.")
-
+    logger.info(f"🔍 [Compress Research] Researcher messages count: {len(researcher_messages)}")
+    logger.info(f"🔍 [Compress Research] Raw notes content length: {len(raw_notes_content)}")
+    
     # Extract sources from researcher messages
     sources = []
-    for msg in researcher_messages:
-        if isinstance(msg, ToolMessage) and msg.name == "tavily_search":
+    
+    # Lista de herramientas que pueden devolver fuentes ( расширенная lista)
+    search_tool_names = [
+        "tavily_search_tool",
+        "web_search",
+        "ddg_search_tool",
+        "multi_query_search",
+        "tavily_search",
+        "brave_search_tool",
+        "brave_search",
+        "google_search",
+        "google_search_tool",
+        "bing_search",
+        "arxiv_search",
+        "knowledge_graph_search",
+        "comprehensive_web_analyzer",
+        # Nuevas herramientas añadidas
+        "knowledge_graph",
+        "knowledge_graph_tool",
+        "KnowledgeGraphTool",
+        "knowledge_search",
+        "KnowledgeSearchTool",
+        "web_scraper",
+        "WebScraperTool",
+        "graph_cypher",
+        "GraphCypherGeneratorTool",
+        "rag_search",
+        "rag_tool",
+        "document_search",
+    ]
+    
+    # Debug: Mostrar todos los nombres de herramientas encontrados
+    tool_names_found = set()
+    for msg_idx, msg in enumerate(researcher_messages):
+        if isinstance(msg, ToolMessage):
+            tool_names_found.add(msg.name)
+            logger.debug(f"🔍 [Compress Research] Found ToolMessage: name={msg.name}")
+    logger.info(f"🔍 [Compress Research] Tool names found in messages: {tool_names_found}")
+    
+    for msg_idx, msg in enumerate(researcher_messages):
+        if isinstance(msg, ToolMessage):
+            # Intentar extraer fuentes de cualquier herramienta que devuelva un formato estructurado
+            # No limitamos solo a herramientas de búsqueda conocidas
+            is_search_tool = msg.name in search_tool_names
             try:
-                content_str = str(msg.content)
-                import re
+                # The content of the ToolMessage is often a string representation of a list of dicts
+                # or sometimes it's already a list of dicts.
+                content = msg.content
                 
-                # Extract URLs
-                urls = re.findall(r'URL: (https?://\S+)', content_str)
-                if not urls:
-                    urls = re.findall(r'https?://[^\s\]\)]+', content_str)
-                
-                # Extract titles
-                titles = re.findall(r'--- SOURCE \d+: (.*?) ---', content_str)
-                
-                # Extract snippets/content - buscar el contenido entre "Content:" y el siguiente "---" o final
-                snippets = re.findall(r'Content:\s*(.*?)(?=(?:---|URL:|$))', content_str, re.DOTALL)
-                
-                # Si no encuentra snippets con ese patrón, intentar extraer cualquier texto descriptivo
-                if not snippets or len(snippets) < len(urls):
-                    # Intentar extraer líneas de texto después de cada URL
-                    snippets = re.findall(r'URL:.*?\n(.*?)(?=(?:URL:|---|\Z))', content_str, re.DOTALL)
-                
-                for i, url in enumerate(urls):
-                    title = "Source"
-                    if i < len(titles):
-                        title = titles[i]
-                    
-                    # Obtener snippet y limpiarlo
-                    snippet = ""
-                    if i < len(snippets):
-                        snippet = snippets[i].strip()
-                        # Limpiar el snippet: remover saltos de línea excesivos y limitar longitud
-                        snippet = ' '.join(snippet.split())
-                        if len(snippet) > 300:
-                            snippet = snippet[:300] + "..."
-                    
-                    # Si aún no hay snippet, usar el título como fallback
-                    if not snippet:
-                        snippet = f"Fuente web: {title}"
-                    
-                    sources.append({
-                        "title": title,
-                        "url": url,
-                        "snippet": snippet,
-                        "type": "web"
-                    })
+                # 1. If content is a string, try to parse it as JSON
+                if isinstance(content, str):
+                    try:
+                        # It might be a JSON string, so let's parse it.
+                        content = json.loads(content)
+                    except json.JSONDecodeError:
+                        # FALLBACK: If it's not JSON, try to extract sources via Regex
+                        logger.info(f"🔍 [Compress Research] Content is not JSON for tool '{msg.name}'. Attempting regex extraction...")
+                        
+                        # Pattern 1: Tavily / Generic (--- SOURCE 1: Title --- URL: ...)
+                        tavily_matches = list(re.finditer(r"--- SOURCE \d+: (.*?) ---\s+URL: (https?://\S+)", str(msg.content)))
+                        for match in tavily_matches:
+                            title = match.group(1).strip()
+                            url = match.group(2).strip()
+                            if not any(s['url'] == url for s in sources):
+                                source_raw = {
+                                    "title": title,
+                                    "url": url,
+                                    "snippet": "",
+                                    "type": "web"
+                                }
+                                sources.append(_normalize_source_dict(source_raw, msg.name, msg.tool_call_id, msg_idx))
+                                logger.info(f"✅ [Compress Research] Added source via Regex (Format 1): {title} - {url[:50]}...")
+                        
+                        # Pattern 2: Markdown style [Title](URL)
+                        md_matches = list(re.finditer(r"\[([^\]]+)\]\((https?://[^\s\)]+)\)", str(msg.content)))
+                        for match in md_matches:
+                            title = match.group(1).strip()
+                            url = match.group(2).strip()
+                            if not any(s['url'] == url for s in sources):
+                                source_raw = {
+                                    "title": title,
+                                    "url": url,
+                                    "snippet": "",
+                                    "type": "web"
+                                }
+                                sources.append(_normalize_source_dict(source_raw, msg.name, msg.tool_call_id, msg_idx))
+                                logger.info(f"✅ [Compress Research] Added source via Regex (Format 2): {title} - {url[:50]}...")
+
+                        if not tavily_matches and not md_matches:
+                            logger.debug(f"⚠️ [Compress Research] No sources found via regex in non-JSON content for '{msg.name}'.")
+                        
+                        continue # Done with this message
+
+                # 2. PRIORITY: Check if it's our new structured format with context_for_llm and sources
+                # Este formato viene de tavily_search y otras herramientas que usan ToolOutputWithSources
+                if isinstance(content, dict) and "context_for_llm" in content and "sources" in content:
+                    logger.info(f"✅ [Compress Research] Found structured ToolOutputWithSources format from '{msg.name}'")
+                    sources_list = content["sources"]
+                    if isinstance(sources_list, list):
+                        for source_dict in sources_list:
+                            if isinstance(source_dict, dict):
+                                url = source_dict.get("url")
+                                title = source_dict.get("title")
+                                snippet = source_dict.get("snippet", "")
+                                source_type = source_dict.get("type", "web")
+                                
+                                if url and title:
+                                    source_raw = {
+                                        "title": title,
+                                        "url": url,
+                                        "snippet": str(snippet),
+                                        "type": source_type
+                                    }
+                                    sources.append(_normalize_source_dict(source_raw, msg.name, msg.tool_call_id, msg_idx))
+                                    logger.info(f"✅ [Compress Research] Added source from structured format: {title} - {url[:50]}...")
+                    continue  # Skip to next message after processing structured format
+
+                # 3. Si el contenido es un dict que tiene una clave 'sources' (común en nuestras herramientas personalizadas)
+                if isinstance(content, dict) and "sources" in content:
+                    content = content["sources"]
+
+
+                # 2. Now, content should be a list of dictionaries or a list of strings (URLs).
+                # Extraer fuentes de cualquier herramienta que devuelva un formato estructurado
+                if isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict):
+                            url = item.get("url") or item.get("link") or item.get("href") or item.get("source") or item.get("uri")
+                            title = item.get("title") or item.get("name") or item.get("header") or item.get("text")
+                            snippet = item.get("snippet") or item.get("summary") or item.get("content") or item.get("description") or item.get("text", "")
+                            
+                            # Detectar tipo de fuente
+                            source_type = "web"
+                            if url:
+                                if url.startswith("graph://") or url.startswith("analysis://"):
+                                    source_type = "graph"
+                                elif url.startswith("memory://"):
+                                    source_type = "memory"
+                                elif url.startswith("note://"):
+                                    source_type = "note"
+                                elif "github.com" in url:
+                                    source_type = "github"
+                            
+                            # Si tiene URL y título, o si es una herramienta de búsqueda y tiene URL
+                            if url and (title or is_search_tool):
+                                # Normalizar título si falta pero tenemos URL
+                                if not title:
+                                    title = url.split('/')[-1] or url
+                                
+                                source_raw = {
+                                    "title": title,
+                                    "url": url,
+                                    "snippet": str(snippet),
+                                    "type": source_type
+                                }
+                                sources.append(_normalize_source_dict(source_raw, msg.name, msg.tool_call_id, msg_idx))
+                                logger.info(f"✅ [Compress Research] Added source: {title} - {url[:50]}...")
+                        elif isinstance(item, str) and (item.startswith("http") or item.startswith("analysis://")):
+                            # Caso especial: lista de strings (URLs), común en comprehensive_web_analyzer
+                            url = item
+                            title = url.split('/')[-1] or url
+                            source_raw = {
+                                "title": title,
+                                "url": url,
+                                "snippet": "",
+                                "type": "web"
+                            }
+                            sources.append(_normalize_source_dict(source_raw, msg.name, msg.tool_call_id, msg_idx))
+                            logger.info(f"✅ [Compress Research] Added string source: {url[:50]}...")
+                elif isinstance(content, dict) and is_search_tool:
+                    # Algunos resultados pueden venir como un dict único (ej: respuesta de una API de búsqueda)
+                    # Intentar extraer fuentes de cualquier dict que tenga URLs
+                    url = content.get("url") or content.get("link") or content.get("source") or content.get("href")
+                    title = content.get("title") or content.get("name") or content.get("header")
+                    if url and title:
+                        # Detectar tipo de fuente
+                        source_type = "web"
+                        if url.startswith("graph://") or url.startswith("analysis://"):
+                            source_type = "graph"
+                        elif url.startswith("memory://"):
+                            source_type = "memory"
+                        elif url.startswith("note://"):
+                            source_type = "note"
+                        
+                        source_raw = {
+                            "title": title,
+                            "url": url,
+                            "snippet": str(content.get("snippet", "") or content.get("summary", "") or content.get("description", "")),
+                            "type": source_type
+                        }
+                        sources.append(_normalize_source_dict(source_raw, msg.name, msg.tool_call_id, msg_idx))
+                        logger.info(f"✅ [Compress Research] Added source from dict: {title} - {url[:50]}...")
+                else:
+                    # También intentar extraer URLs de cualquier contenido que parezca tener enlaces
+                    if not is_search_tool and content:
+                        # Intentar encontrar URLs en el contenido
+                        url_matches = re.findall(r'https?://[^\s\]">]+', str(content))
+                        for url in url_matches[:5]:  # Limitar a 5 URLs por mensaje
+                            if not any(s['url'] == url for s in sources):
+                                source_raw = {
+                                    "title": url.split('/')[-1] or url,
+                                    "url": url,
+                                    "snippet": "",
+                                    "type": "web"
+                                }
+                                sources.append(_normalize_source_dict(source_raw, msg.name, msg.tool_call_id, msg_idx))
+                                logger.info(f"✅ [Compress Research] Added source from regex: {url[:50]}...")
+                    elif is_search_tool:
+                        logger.warning(f"⚠️ [Compress Research] ToolMessage content for '{msg.name}' was not a list/dict after parsing. Type: {type(content)}")
+
             except Exception as e:
-                logger.warning(f"Error extracting sources in compress_research: {e}")
+                logger.error(f"❌ [Compress Research] Error processing sources from tool {msg.name}: {e}")
+
+    # Deduplicate sources at researcher level (fusion metadata on duplicates)
+    unique_researcher_sources = []
+    seen_urls: Dict[str, dict] = {}
+    for s in sources:
+        url = s["url"]
+        if url not in seen_urls:
+            unique_researcher_sources.append(s)
+            seen_urls[url] = s
+        else:
+            # Fusionar metadatos: mantener primer ID, combinar tool_names
+            existing = seen_urls[url]
+            # Mantener el ID del primer origen encontrado
+            s["id"] = existing["id"]
+            # Fusionar tool_names (si existen)
+            if "metadata" in existing and "tool_names" in existing["metadata"]:
+                if "metadata" not in s:
+                    s["metadata"] = {}
+                if "tool_names" not in s["metadata"]:
+                    s["metadata"]["tool_names"] = []
+                # Agregar tool_names que no existan
+                for tool in existing["metadata"]["tool_names"]:
+                    if tool not in s["metadata"]["tool_names"]:
+                        s["metadata"]["tool_names"].append(tool)
+            # Usar la versión fusionada
+            unique_researcher_sources.append(s)
 
     return {
         "compressed_research": str(response.content),
         "raw_notes": [raw_notes_content],
-        "sources": sources
+        "sources": unique_researcher_sources
     }
 
 # --- Graph Compilation ---

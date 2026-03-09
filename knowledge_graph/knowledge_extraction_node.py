@@ -3,6 +3,7 @@
 import logging
 import json
 import asyncio
+import uuid
 from typing import Dict, Any, List, Optional
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
@@ -15,28 +16,38 @@ from core.config import settings
 logger = logging.getLogger(__name__)
 
 KNOWLEDGE_EXTRACTION_PROMPT = """
-**Tarea**: Eres un experto en extracción de conocimiento. Tu objetivo es refinar las entidades extraídas y, sobre todo, identificar las RELACIONES significativas entre ellas basándote en la conversación.
-
-**Entidades detectadas previamente (GLiNER)**:
-{gliner_entities}
+**Tarea**: Eres un experto en extracción de conocimiento y síntesis conceptual. Tu objetivo es transformar la conversación en un grafo de conocimiento rico que capture tanto detalles granulares como ideas de gran envergadura (Conceptual Insights).
 
 **Instrucciones**:
-1. **Refina Entidades**: Revisa las entidades detectadas por GLiNER. Si falta alguna importante (conceptos abstractos, hechos específicos) que no sea una entidad nombrada estándar, añádela.
-2. **Extrae Relaciones**: Identifica cómo se conectan las entidades entre sí basándote en el mensaje del usuario y la respuesta del asistente.
-   - Cada relación debe tener: `source` (nombre entidad origen), `target` (nombre entidad destino), `type` (MAYÚSCULAS, ej. INTERESTED_IN, WORKS_ON, USES, LIKES), y una breve `description`.
-3. **Sé preciso**: No inventes información. Solo extrae lo que es explícito o claramente implícito.
+1. **Identifica Entidades (Micro)**: Personas, organizaciones, tecnologías, herramientas, etc.
+2. **Extrae Citas Conceptuales (Macro)**: Busca "Ideas Maestras", conclusiones estratégicas o citas de gran envergadura que el usuario o el asistente hayan expresado. No te limites a palabras sueltas; captura la frase o párrafo que contiene la "esencia" de la idea.
+   - Estas se etiquetarán como `CONCEPTUAL_QUOTE`.
+3. **Define Relaciones**: Conecta las entidades y las citas conceptuales. 
+   - Usa tipos como `REFINES`, `PROPOSES`, `CONTRADICTS`, `SUPPORTS`, `PART_OF`.
+4. **Perfiles de Idea**: Si detectas un conjunto de ideas relacionadas que forman un concepto mayor, identifícalo como un perfil de idea central (`IDEA_PROFILE`).
 
-**Interacción**:
+**Interacción Actual**:
 - Usuario: "{user_message}"
 - Asistente: "{ai_message}"
 
+**Previas Entidades detectadas (Sugerencia)**:
+{gliner_entities}
+
 **Responde ÚNICAMENTE con este formato JSON**:
 {{
+    "conceptual_insights": [
+        {{
+            "concept": "Nombre del concepto/idea principal",
+            "full_text": "La cita completa o idea de gran envergadura expresada",
+            "category": "teoría/estrategia/metodología/conclusión",
+            "importance": "alta/media"
+        }}
+    ],
     "entities": [
         {{
-            "name": "Nombre de la entidad",
+            "name": "Nombre entidad",
             "type": "TIPO",
-            "description": "Breve descripción"
+            "description": "Contexto"
         }}
     ],
     "relationships": [
@@ -44,7 +55,7 @@ KNOWLEDGE_EXTRACTION_PROMPT = """
             "source": "Nombre origen",
             "target": "Nombre destino",
             "type": "TIPO_RELACION",
-            "description": "Descripción de la conexión"
+            "description": "Por qué se conectan"
         }}
     ]
 }}
@@ -186,71 +197,89 @@ class KnowledgeExtractionNode:
         return f"entity_{normalized_name}"
 
     async def _persist_knowledge(self, data: Dict[str, Any], state: Dict[str, Any]):
-        """Guarda las entidades y relaciones en Neo4j."""
+        """Guarda las entidades, relaciones y citas conceptuales en Neo4j."""
         account_id = state.get("account_id")
         workspace_id = state.get("workspace_id")
-        # Nombre del dataset más amigable para la visualización en la UI
+        # Nombre del dataset para memorias conversacionales
         dataset_name = "Agent Memories"
 
         entities = data.get("entities", [])
         relationships = data.get("relationships", [])
+        conceptual_insights = data.get("conceptual_insights", [])
 
-        if not entities and not relationships:
+        if not entities and not relationships and not conceptual_insights:
             return
 
-        # Mapa para buscar IDs por nombre de entidad para las relaciones
-        # Clave: nombre original, Valor: ID generado
+        # Mapa para buscar IDs por nombre de entidad/concepto
         name_to_id_map = {}
-
         formatted_entities = []
+
+        # 1. Procesar Entidades Granulares
         for ent in entities:
             name = ent.get("name")
             type_ = ent.get("type", "ENTITY").upper()
-            
-            if not name:
-                continue
+            if not name: continue
                 
             entity_id = self._generate_id(name, type_)
             name_to_id_map[name] = entity_id
             
             formatted_entities.append({
-                "id": entity_id, # ID explícito
+                "id": entity_id,
                 "type": type_,
-                "name": name, # Top level name
-                "dataset_name": dataset_name, # Top level dataset_name
+                "name": name,
+                "dataset_name": dataset_name,
                 "properties": {
                     "name": name,
                     "description": ent.get("description"),
                     "account_id": account_id,
                     "workspace_id": workspace_id,
-                    "dataset_name": dataset_name
+                    "dataset_name": dataset_name,
+                    "source": "conversation"
                 }
             })
 
+        # 2. Procesar Citas Conceptuales (Ideas de Envergadura)
+        for insight in conceptual_insights:
+            concept = insight.get("concept")
+            full_text = insight.get("full_text")
+            if not concept or not full_text: continue
+
+            insight_id = f"insight_{uuid.uuid4().hex[:12]}"
+            name_to_id_map[concept] = insight_id
+
+            formatted_entities.append({
+                "id": insight_id,
+                "type": "CONCEPTUAL_QUOTE",
+                "name": concept,
+                "dataset_name": dataset_name,
+                "properties": {
+                    "name": concept,
+                    "concept": concept,
+                    "full_text": full_text,
+                    "category": insight.get("category", "general"),
+                    "importance": insight.get("importance", "media"),
+                    "account_id": account_id,
+                    "workspace_id": workspace_id,
+                    "dataset_name": dataset_name,
+                    "source": "conversation_insight"
+                }
+            })
+
+        # 3. Procesar Relaciones
         formatted_relationships = []
         for rel in relationships:
             source_name = rel.get("source")
             target_name = rel.get("target")
             
-            # Intentar resolver IDs
             source_id = name_to_id_map.get(source_name)
             target_id = name_to_id_map.get(target_name)
-            
-            # Si no encontramos el ID en las entidades extraídas, intentamos generarlo
-            # asumiendo un tipo genérico o intentando inferirlo (limitación actual)
-            # Para mayor robustez, si la entidad no está en la lista 'entities', 
-            # deberíamos quizás crearla o ignorar la relación.
-            # Por ahora, generaremos un ID asumiendo que si existiera tendría ese formato.
-            # Pero esto es arriesgado si no sabemos el tipo.
-            # Mejor estrategia: Solo crear relación si ambas entidades están en el lote actual
-            # O si podemos confiar en que existen.
             
             if source_id and target_id:
                 formatted_relationships.append({
                     "source_id": source_id,
                     "target_id": target_id,
                     "type": rel.get("type", "RELATED_TO").upper(),
-                    "dataset_name": dataset_name, # Top level dataset_name
+                    "dataset_name": dataset_name,
                     "properties": {
                         "description": rel.get("description"),
                         "account_id": account_id,
@@ -266,6 +295,6 @@ class KnowledgeExtractionNode:
                 account_id=account_id,
                 workspace_id=workspace_id
             )
-            logger.info(f"✅ Conocimiento persistido: {len(formatted_entities)} entidades, {len(formatted_relationships)} relaciones.")
+            logger.info(f"✅ Conocimiento persistido: {len(formatted_entities)} entidades/insights, {len(formatted_relationships)} relaciones.")
         except Exception as e:
             logger.error(f"Error persistiendo conocimiento: {e}")

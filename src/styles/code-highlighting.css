@@ -1,0 +1,197 @@
+/* -- ESTILO VENTANA macOS PARA BLOQUES DE CÓDIGO (.prose pre) -- */
+
+/* Contenedor principal del bloque de código */
+.prose pre {
+    position: relative;
+    background: #111827 !important;
+    /* Fondo gris muy oscuro moderno (Gris 900 de Tailwind) */
+    color: #e5e7eb !important;
+    /* Texto gris claro casi blanco */
+    border-radius: 0.75rem;
+    /* Bordes redondeados modernos */
+    padding: 3.5rem 1.25rem 1.25rem 1.25rem !important;
+    /* Espacio extra arriba para la barra superior tipo Mac */
+    margin: 2em 0;
+    overflow-x: auto;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    /* Sombra pesada pero difuminada, look premium */
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Pseudo-elemento para crear la barra superior de ventana macOS */
+.prose pre::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 2.5rem;
+    /* Altura de la barra */
+    background: rgba(255, 255, 255, 0.05);
+    /* Fondo muy sutil translúcido para la barra */
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    /* Separador delicado */
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* Pseudo-elemento para dibujar los tres botones clásicos de Mac (rojo, amarillo, verde) usando sombras-box */
+.prose pre::after {
+    content: '';
+    position: absolute;
+    top: 0.85rem;
+    left: 1rem;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    /* Botón rojo (base), botón amarillo (sombra 1), botón verde (sombra 2) */
+    background: #ff5f56;
+    box-shadow: 20px 0 0 #ffbd2e, 40px 0 0 #27c93f;
+    pointer-events: none;
+    z-index: 11;
+}
+
+/* Nombre del lenguaje encima de la barra (depende del data-language inyectado en MarkdownRenderer) */
+.prose pre[data-language]::before {
+    content: attr(data-language);
+    position: absolute;
+    top: 0.6rem;
+    right: 1.25rem;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.4);
+    background: transparent;
+    border: none;
+}
+
+/* Contenido de código dentro del bloque */
+.prose pre code {
+    font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+    font-size: 0.875rem !important;
+    /* Texto legible y nítido */
+    line-height: 1.6 !important;
+    background: transparent !important;
+    text-shadow: none !important;
+    /* Elimina cualquier sombra text-shadow por defecto que ensucia la legibilidad */
+}
+
+/* -- ESTILOS SEMÁNTICOS TIPO "ONE DARK PRO" PARA PRISMJS -- */
+/* Se reescriben los colores de Prism predeterminados para que armonicen mejor con fondos dark y den un look "PRO" */
+
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+    color: #7f848e !important;
+    /* Gris de comentario moderno */
+    font-style: italic;
+}
+
+.token.punctuation {
+    color: #abb2bf !important;
+}
+
+.token.namespace {
+    opacity: .7;
+}
+
+.token.property,
+.token.keyword,
+.token.tag {
+    color: #c678dd !important;
+    /* Púrpura brillante */
+}
+
+.token.class-name {
+    color: #e5c07b !important;
+    /* Amarillo oscuro / dorado para clases */
+}
+
+.token.boolean,
+.token.constant {
+    color: #d19a66 !important;
+    /* Naranja base */
+}
+
+.token.symbol,
+.token.deleted {
+    color: #e06c75 !important;
+    /* Rojo / Coral */
+}
+
+.token.number {
+    color: #d19a66 !important;
+    /* Naranja numérico */
+}
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+    color: #98c379 !important;
+    /* Verde agradable a la vista */
+}
+
+.token.variable {
+    color: #e06c75 !important;
+    /* Rojo para variables como en JS/React */
+}
+
+.token.operator,
+.token.entity,
+.token.url {
+    color: #56b6c2 !important;
+    /* Cyan claro para operadores lógicos */
+}
+
+.token.attr-value {
+    color: #98c379 !important;
+    /* Verde igual al string normal */
+}
+
+.token.function {
+    color: #61afef !important;
+    /* Azul eléctrico para funciones */
+}
+
+.token.regex,
+.token.important {
+    color: #c678dd !important;
+    /* Rosa / Púrpura agresivo */
+}
+
+.token.important,
+.token.bold {
+    font-weight: bold;
+}
+
+.token.italic {
+    font-style: italic;
+}
+
+/* BARRA DE DESPLAZAMIENTO (SCROLLBAR) PARA EL BLOQUE DE CÓDIGO */
+.prose pre::-webkit-scrollbar {
+    height: 8px;
+    /* Scrollbar horizontal fino */
+    width: 8px;
+}
+
+.prose pre::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    /* Raíl súper sutil */
+    border-radius: 0 0 0.75rem 0.75rem;
+}
+
+.prose pre::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+}
+
+.prose pre::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.4);
+}
