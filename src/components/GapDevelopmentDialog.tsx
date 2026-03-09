@@ -13,7 +13,8 @@ import { useWebSocketContext } from '@/contexts/WebSocketContext';
 import { Zap, Loader2, Sparkles, FileText, Target, ExternalLink, Lightbulb, Notebook } from 'lucide-react';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { Source, SourceButton } from './SourceButton';
-import { processMessageWithCitations } from '@/lib/chatUtils';
+import { SourcesTab } from './SourcesTab';
+import { processMessageWithCitations, collectSourcesFromMessage } from '@/lib/chatUtils';
 
 interface GapDevelopmentDialogProps {
   gapId: string;
@@ -31,6 +32,23 @@ interface GapDevelopmentStatus {
   question?: string;
 }
 
+/**
+ * Normaliza los hallazgos a un array de strings.
+ * El backend devuelve 'findings' como string, pero el frontend espera un array.
+ */
+const normalizeFindings = (findings: any): string[] => {
+  if (!findings) return [];
+  if (Array.isArray(findings)) return findings;
+  if (typeof findings === 'string') {
+    // Dividir por párrafos (doble salto de línea) y filtrar vacíos
+    return findings
+      .split(/\n\s*\n/)
+      .map(f => f.trim())
+      .filter(f => f.length > 0);
+  }
+  return [];
+};
+
 export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: GapDevelopmentDialogProps) {
   const [developmentStatus, setDevelopmentStatus] = useState<GapDevelopmentStatus | null>(null);
   const [progressValue, setProgressValue] = useState(0);
@@ -47,22 +65,15 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
       const report = developmentStatus.report;
       const rawSources = report.sources || [];
 
-      // Convertir fuentes del reporte al formato Source esperado
-      const formattedSources: Source[] = rawSources.map((s: any, idx: number) => ({
-        id: idx + 1,
-        title: s.title || s.url || `Fuente ${idx + 1}`,
-        url: s.url || '',
-        snippet: s.snippet || s.content || '',
-        type: 'web', // Por defecto web si viene de investigación profunda
-        metadata: { relevance: s.relevance }
-      }));
+      // Usar collectSourcesFromMessage para normalizar y unificar fuentes
+      const { additionalSources } = collectSourcesFromMessage(rawSources);
+      setProcessedSources(additionalSources);
 
-      setProcessedSources(formattedSources);
-
-      // Procesar el resumen con citas si las hay
-      const { contentParts: parts } = processMessageWithCitations(
-        report.summary || "",
-        formattedSources
+      // Procesar el informe final con citas si las hay
+      // El backend manda tanto 'summary' como 'final_report'
+      const { contentParts: parts, citedSources, uncitedSources } = processMessageWithCitations(
+        report.final_report || report.summary || "",
+        additionalSources
       );
       setContentParts(parts);
     }
@@ -247,49 +258,37 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
 
                 <TabsContent value="findings">
                   <div className="space-y-4">
-                    {report.findings?.map((finding: string, index: number) => (
+                    {normalizeFindings(report.findings).map((finding: string, index: number) => (
                       <div key={index} className="p-4 rounded-xl bg-card border border-border/50 flex gap-4">
                         <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">
                           {index + 1}
                         </span>
                         <p className="text-sm leading-relaxed">{finding}</p>
                       </div>
-                    )) || <p className="text-muted-foreground text-center py-8">No hay hallazgos disponibles.</p>}
+                    ))}
+                    {normalizeFindings(report.findings).length === 0 && (
+                      <p className="text-muted-foreground text-center py-8">No hay hallazgos disponibles.</p>
+                    )}
                   </div>
                 </TabsContent>
 
                 <TabsContent value="sources">
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="p-1 rounded-md bg-primary/10">
-                        <Notebook className="h-3 w-3 text-primary" />
-                      </div>
-                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Fuentes de Investigación</span>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {processedSources.map((source, idx) => (
-                        <SourceButton
-                          key={idx}
-                          source={source}
-                          citationNumber={idx + 1}
-                        />
-                      ))}
-                    </div>
-
-                    {processedSources.length === 0 && (
-                      <p className="text-muted-foreground text-center py-8">No hay fuentes disponibles.</p>
-                    )}
+                  <div className="space-y-4 pt-4">
+                    <SourcesTab sources={processedSources} />
                   </div>
                 </TabsContent>
 
                 <TabsContent value="recommendations">
                   <div className="space-y-4">
-                    {report.recommendations?.map((rec: string, index: number) => (
+                    {normalizeFindings(report.recommendations).map((rec: string, index: number) => (
                       <div key={index} className="p-4 rounded-xl bg-green-500/5 border border-green-500/20 flex gap-4">
                         <Sparkles className="h-5 w-5 text-green-600 flex-shrink-0" />
                         <p className="text-sm text-green-800 dark:text-green-300 leading-relaxed">{rec}</p>
                       </div>
-                    )) || <p className="text-muted-foreground text-center py-8">No hay recomendaciones disponibles.</p>}
+                    ))}
+                    {normalizeFindings(report.recommendations).length === 0 && (
+                      <p className="text-muted-foreground text-center py-8">No hay recomendaciones disponibles.</p>
+                    )}
                   </div>
                 </TabsContent>
               </div>

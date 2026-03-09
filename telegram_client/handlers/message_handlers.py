@@ -26,7 +26,7 @@ import tempfile
 import os
 import base64
 import json
-from typing import Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union, Generator
 import httpx
 from io import BytesIO
 import uuid
@@ -40,6 +40,7 @@ from telegram.ext import (
     CallbackContext,
     ConversationHandler,
     CommandHandler,
+    ApplicationHandlerStop,
 )
 from telegram.constants import ChatAction, ParseMode
 
@@ -88,11 +89,18 @@ async def get_whisper_model() -> Optional[WhisperModel]:
             _whisper_model = None
     return _whisper_model
 
-async def send_typing_heartbeat(context: CallbackContext, chat_id: int, stop_event: asyncio.Event):
+async def send_typing_heartbeat(application_or_context: Union[Application, CallbackContext], chat_id: int, stop_event: asyncio.Event):
     """Envía una acción 'typing' cada 4 segundos para indicar que el bot está procesando."""
+    bot = application_or_context.bot if hasattr(application_or_context, 'bot') else getattr(application_or_context, 'bot', None)
+    
+    # Si recibimos un application directamente (vía WebSocket client)
+    if not bot and hasattr(application_or_context, 'bot'):
+        bot = application_or_context.bot
+
     while not stop_event.is_set():
         try:
-            await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            if bot:
+                await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
             await asyncio.sleep(4)
         except (asyncio.CancelledError, telegram_error.NetworkError):
             break
@@ -190,14 +198,26 @@ async def send_agent_response(bot, chat_id, user_id, text, user_data):
 
     # 5. Si no hay nada de lo anterior o falló, enviar como texto simple con formato HTML.
     formatted_text = markdown_to_telegram_html(text)
-    pages = split_text_into_pages(formatted_text, 4096)
+    # Usamos 4000 en lugar de 4096 para dejar margen a las etiquetas HTML que añaden bytes.
+    pages = split_text_into_pages(formatted_text, 4000)
     for i, page in enumerate(pages):
         try:
             await bot.send_message(chat_id=chat_id, text=page, parse_mode='HTML', disable_web_page_preview=True)
             if i < len(pages) - 1:
                 await asyncio.sleep(0.5)
         except telegram_error.BadRequest as e:
-            logger.warning(f"Error al enviar mensaje de texto con HTML: {e}")
+            logger.warning(f"Error al enviar mensaje con formato HTML (BadRequest): {e}. Reintentando como texto plano...")
+            try:
+                # Fallback: enviar el texto sin ningún formato si el HTML falla
+                import re
+                plain_text = re.sub(r'<[^>]+>', '', page)
+                plain_pages = split_text_into_pages(plain_text, 4000)
+                for j, plain_page in enumerate(plain_pages):
+                    await bot.send_message(chat_id=chat_id, text=plain_page, disable_web_page_preview=True)
+                    if j < len(plain_pages) - 1:
+                        await asyncio.sleep(0.5)
+            except Exception as fallback_e:
+                logger.error(f"Error definitivo al enviar mensaje como texto plano: {fallback_e}", exc_info=True)
 
 async def handle_chat_response(update: Update, context: CallbackContext, response_text: str) -> None:
     """
@@ -450,9 +470,12 @@ async def process_and_get_response(update: Update, context: CallbackContext, use
         logger.error(f"[DEBUG TELEGRAM OUT][ERROR] Mensaje escapado a enviar: {repr(error_msg)}")
         await update.message.reply_text(error_msg)
     finally:
-        # Asegurarse de que el indicador "escribiendo..." siempre se detenga.
-        typing_stop_event.set()
-        await typing_task
+        # Solo detenemos el typing si NO se envió la solicitud exitosamente
+        # Si se envió, el WebSocket tomará el relevo. 
+        # Pero por seguridad, si llegamos aquí y no hay task_id o hubo error, detenemos.
+        if 'task_id' not in locals():
+            typing_stop_event.set()
+            await typing_task
     
     return None # Importante: Retornar None para detener la propagación.
 
@@ -497,7 +520,7 @@ async def text_message_handler(update: Update, context: CallbackContext) -> None
     user_data: Dict[str, Any] = context.user_data if context.user_data is not None else {}
     if GENERATED_IMAGE_KEY in user_data:
         await handle_chat_response(update, context, response_text="¡Hecho! He generado la imagen.")
-    return None # Importante: Retornar None para detener la propagación.
+    raise ApplicationHandlerStop() # Importante: Retornar ApplicationHandlerStop para detener la propagación.
 
 async def voice_message_handler(update: Update, context: CallbackContext) -> None:
     """Manejador para mensajes de voz."""
@@ -536,7 +559,7 @@ async def voice_message_handler(update: Update, context: CallbackContext) -> Non
         logger.error(f"Error procesando mensaje de voz de {message.from_user.id}: {e}", exc_info=True)
         await message.reply_text("Hubo un error al procesar tu mensaje de voz. Por favor, intenta de nuevo.")
     
-    return None # Importante: Retornar None para detener la propagación.
+    raise ApplicationHandlerStop() # Importante: Retornar ApplicationHandlerStop para detener la propagación.
 
 async def photo_message_handler(update: Update, context: CallbackContext) -> None:
     """Manejador para mensajes que contienen una foto."""
@@ -563,7 +586,7 @@ async def photo_message_handler(update: Update, context: CallbackContext) -> Non
         logger.error(f"Error procesando foto de {message.from_user.id}: {e}", exc_info=True)
         await message.reply_text("Hubo un error al procesar tu imagen. Por favor, intenta de nuevo.")
     
-    return None # Importante: Retornar None para detener la propagación.
+    raise ApplicationHandlerStop() # Importante: Retornar ApplicationHandlerStop para detener la propagación.
 
 def register_message_handlers(application: Application) -> None:
     """Registra todos los manejadores de mensajes en la aplicación."""

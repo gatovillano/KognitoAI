@@ -67,7 +67,8 @@ class DeepResearchTool(BaseTool):
 
             inputs = {
                 "messages": [HumanMessage(content=query)],
-                "account_id": self.account_id
+                "account_id": self.account_id,
+                "sources": [],  # Inicializar explícitamente para que override_reducer funcione correctamente
             }
 
             logger.info("Invoking Deep Research graph with inputs: %s", inputs)
@@ -77,39 +78,57 @@ class DeepResearchTool(BaseTool):
             
             if final_state and "final_report" in final_state:
                 if final_state["final_report"] == "CLARIFICATION":
-                    clarification_content = final_state["messages"][-1].content
+                    clarification_content = final_state["messages"][-1].content if final_state.get("messages") else None
+                    if not clarification_content:
+                        clarification_content = "El proceso de investigación profunda requiere clarificación adicional por parte del usuario, pero no se ha proporcionado un mensaje específico."
                     logger.info("Deep research requires clarification. Returning message: %s", clarification_content)
                     # Devolver en el formato esperado por el agente, pero sin fuentes
-                    return ToolOutputWithSources(context_for_llm=clarification_content, sources=[]).model_dump()
+                    return ToolOutputWithSources(context_for_llm=str(clarification_content), sources=[]).model_dump()
                 
                 report = final_state["final_report"]
                 raw_sources = final_state.get("sources", [])
                 
+                # No es necesario desempaquetar fuentes, el backend ya envía la lista directamente
+                
                 logger.info(f"Deep research completed.")
-                logger.info(f"Found {len(raw_sources)} sources to process.")
+                logger.info(f"Found {len(raw_sources)} raw sources in state.")
 
                 # Crear la lista de objetos Source
                 sources_list: List[Source] = []
-                if raw_sources:
+                if isinstance(raw_sources, list):
                     for i, raw_source in enumerate(raw_sources, start=1):
-                        # Asegurarse de que raw_source es un diccionario
                         if isinstance(raw_source, dict):
+                            # Intentamos obtener snippet de 'snippet' primero, luego 'content'
+                            snippet_text = raw_source.get("snippet") or raw_source.get("content") or "No hay contenido disponible."
+                            
+                            # Leer el tipo real de la fuente, con fallback a WEB
+                            raw_type = raw_source.get("type", "web")
+                            try:
+                                source_type = SourceType(raw_type) if raw_type else SourceType.WEB
+                            except ValueError:
+                                source_type = SourceType.WEB
+                            
                             source_obj = Source(
                                 id=i,
                                 title=raw_source.get("title", "Fuente Desconocida"),
                                 url=raw_source.get("url", ""),
-                                snippet=raw_source.get("content", "No hay contenido disponible."),
-                                type=SourceType.WEB # Deep research siempre usa fuentes web
+                                snippet=str(snippet_text),
+                                type=source_type
                             )
                             sources_list.append(source_obj)
+                            logger.debug(f"✅ Fuente procesada: {source_obj.title} (type={source_type})")
                         else:
                             logger.warning(f"Elemento de fuente inesperado no es un diccionario: {raw_source}")
+                else:
+                    logger.warning(f"⚠️ raw_sources no es una lista después del desempaquetado: {type(raw_sources)}")
 
 
-                # Crear el objeto de salida con fuentes
+                # Crear el objeto de salida con fuentes, esquema y recomendaciones
                 tool_output = ToolOutputWithSources(
-                    context_for_llm=report,
-                    sources=sources_list
+                    context_for_llm=str(report) if report else "La investigación se completó pero el informe generado está vacío.",
+                    sources=sources_list,
+                    visual_schema=final_state.get("visual_schema"),
+                    recommendations=final_state.get("recommendations", [])
                 )
                 
                 # Devolver el diccionario serializado
@@ -121,12 +140,17 @@ class DeepResearchTool(BaseTool):
                         title = f"Investigación Profunda: {query[:50]}..."
                         
                         # Prepare result payload similar to api/analysis.py
+                        # Deserializar formato de "override" para fuentes
+                        final_sources = raw_sources
+                        if isinstance(final_sources, dict) and final_sources.get("type") == "override":
+                            final_sources = final_sources.get("value", [])
+                        
                         result_payload = {
-                            "report": {
-                                "final_report": report,
-                                "sources": raw_sources,
-                                "recommendations": final_state.get("recommendations", [])
-                            },
+                            "final_report": report,
+                            # Usar los objetos Source ya normalizados (con type='web') en lugar de los dicts crudos del grafo
+                            "sources": [s.model_dump() for s in sources_list],
+                            "recommendations": final_state.get("recommendations", []),
+                            "visual_schema": final_state.get("visual_schema"),
                             "tool_used": "deep_research_tool.py",
                             "analysis_metadata": {
                                 "tool_used": "deep_research_tool.py",

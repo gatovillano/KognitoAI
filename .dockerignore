@@ -12,6 +12,7 @@ docker-compose*.yml
 
 # Node.js
 node_modules
+.next
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -25,6 +26,7 @@ __pycache__
 *.pyd
 .Python
 env
+.venv
 pip-log.txt
 pip-delete-this-directory.txt
 .tox
@@ -64,11 +66,13 @@ tmp
 temp
 .tmp
 .temp
+.kogniterm
 
 # Documentation
 README.md
 docs/
 *.md
+kogninotes-app
 
 # Tests
 tests/

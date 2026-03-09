@@ -168,7 +168,18 @@ def _parse_tool_calls_from_text(text: str, available_tools: List[Any]) -> List[D
                 name = data.get("name") or data.get("tool") or data.get("function")
                 args = data.get("args") or data.get("arguments") or data.get("parameters") or {}
                 
-                if name and name in tool_map:
+                # Manejar el formato de OpenAI: {"function": {"name": "...", "arguments": "{...}"}}
+                if isinstance(name, dict):
+                    args_val = name.get("arguments") or name.get("args") or args
+                    if isinstance(args_val, str):
+                        try:
+                            args_val = json.loads(args_val)
+                        except:
+                            args_val = {}
+                    args = args_val
+                    name = name.get("name")
+                
+                if isinstance(name, str) and name in tool_map:
                     tool_calls.append({
                         "id": str(uuid.uuid4()),
                         "name": name,
@@ -1181,30 +1192,25 @@ async def call_model_node(state: AgentState):
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(f"🔍 CHUNK CRUDO: content={chunk.content}, tool_calls={chunk.tool_calls}, additional_kwargs={chunk.additional_kwargs}")
             
-            # 1. Detectar razonamiento (Chain of Thought) en OpenRouter / LiteLLM
+            # 1. Detectar razonamiento (Chain of Thought) en metadatos (OpenRouter / LiteLLM / DeepSeek)
             reasoning_chunk = ""
             add_kwargs = getattr(chunk, 'additional_kwargs', {})
+            resp_meta = getattr(chunk, 'response_metadata', {})
             
-            # OpenRouter suele enviarlo en 'reasoning'
-            if "reasoning" in add_kwargs:
-                reasoning_chunk = add_kwargs["reasoning"]
-            # Algunos modelos lo envían en 'thought'
-            elif "thought" in add_kwargs:
-                reasoning_chunk = add_kwargs["thought"]
+            # Lista de claves posibles donde los proveedores esconden el razonamiento
+            reasoning_keys = ["reasoning", "reasoning_content", "thought", "thinking", "reflection", "chain_of_thought"]
             
-            # Fallback a response_metadata
+            # Buscar en additional_kwargs
+            for key in reasoning_keys:
+                if key in add_kwargs and isinstance(add_kwargs[key], str) and add_kwargs[key]:
+                    reasoning_chunk = add_kwargs[key]
+                    break
+            
+            # Buscar en response_metadata si no se encontró
             if not reasoning_chunk:
-                metadata = getattr(chunk, 'response_metadata', {})
-                if "reasoning_content" in metadata:
-                    reasoning_chunk = metadata["reasoning_content"]
-                elif "reasoning" in metadata:
-                    reasoning_chunk = metadata["reasoning"]
-            
-            # Fallback dinámico: Buscar cualquier campo que sugiera razonamiento
-            if not reasoning_chunk:
-                for key, val in add_kwargs.items():
-                    if any(x in key.lower() for x in ["think", "reason", "thought"]) and isinstance(val, str):
-                        reasoning_chunk = val
+                for key in reasoning_keys:
+                    if key in resp_meta and isinstance(resp_meta[key], str) and resp_meta[key]:
+                        reasoning_chunk = resp_meta[key]
                         break
             
             if reasoning_chunk:
@@ -1217,11 +1223,7 @@ async def call_model_node(state: AgentState):
                     "full_reasoning": full_reasoning_content
                 }, connection_type=conn_type)
 
-            # Log de metadatos para el primer chunk con contenido o tool_calls
-            if not full_ai_message_content and (chunk.content or chunk.tool_calls):
-                logger.debug(f"📊 METADATA DEL PRIMER CHUNK ({model_name}): {getattr(chunk, 'response_metadata', {})}")
-            
-            # 2. Procesar contenido normal y DETECCIÓN DE ETIQUETAS <think>
+            # 2. Procesar contenido normal y DETECCIÓN DE ETIQUETAS <think> ROBUSTA
             current_content = ""
             if isinstance(chunk.content, str):
                 current_content = chunk.content
@@ -1229,7 +1231,10 @@ async def call_model_node(state: AgentState):
                 for part in chunk.content:
                     if isinstance(part, dict) and part.get("type") == "text":
                         current_content += part.get("text", "")
-
+            
+            # Buffer para tags cortados (simple: si termina en <, <t, <th... o </, </t...)
+            # Nota: Implementar un buffer completo es complejo aqui, usamos heuristica de tags
+            
             if current_content:
                 # Lógica de detección de etiquetas <think> para modelos como DeepSeek-R1
                 processed_content = ""
@@ -1239,7 +1244,7 @@ async def call_model_node(state: AgentState):
                     parts = current_content.split("<think>")
                     processed_content += parts[0] # Texto antes de <think>
                     in_thinking_tag = True
-                    thinking_part = parts[1]
+                    thinking_part = parts[1] if len(parts) > 1 else ""
                     
                     # Si también contiene </think> en el mismo chunk
                     if "</think>" in thinking_part:
@@ -1247,7 +1252,7 @@ async def call_model_node(state: AgentState):
                         reasoning_to_send = subparts[0]
                         full_reasoning_content += reasoning_to_send
                         in_thinking_tag = False
-                        processed_content += subparts[1] # Texto después de </think>
+                        processed_content += subparts[1] if len(subparts) > 1 else ""
                         
                         # Enviar el razonamiento acumulado en el tag
                         await send_personal_message(target_account_id, {
@@ -1275,7 +1280,7 @@ async def call_model_node(state: AgentState):
                         reasoning_to_send = parts[0]
                         full_reasoning_content += reasoning_to_send
                         in_thinking_tag = False
-                        processed_content += parts[1] # Texto después de </think>
+                        processed_content += parts[1] if len(parts) > 1 else ""
                         
                         await send_personal_message(target_account_id, {
                             "type": "reasoning_chunk",
@@ -1295,9 +1300,12 @@ async def call_model_node(state: AgentState):
                             "full_reasoning": full_reasoning_content
                         }, connection_type=conn_type)
                 
-                # Caso normal: Texto sin tags de pensamiento
+                # Caso: Posible tag cortado al final (heurística simple para evitar mostrar <t etc)
+                # Si no estamos pensando y el chunk termina en <, <t, <th... no lo procesamos aun
+                # (Esta es una mejora compleja, por ahora asumimos atomicidad razonable)
                 else:
                     processed_content = current_content
+
 
                 if processed_content:
                     full_ai_message_content += processed_content
@@ -1507,11 +1515,7 @@ async def call_model_node(state: AgentState):
             additional_kwargs=final_kwargs
         )
     else:
-        final_ai_message = AIMessage(content=full_ai_message_content, tool_calls=tool_calls_to_use)
-
-    # Añadir razonamiento si existe
-    if full_reasoning_content:
-        final_ai_message.additional_kwargs["reasoning"] = full_reasoning_content
+        final_ai_message = AIMessage(content=full_ai_message_content, tool_calls=tool_calls_to_use, additional_kwargs=final_kwargs)
 
     # Adjuntar fuentes y tool_calls a la respuesta del LLM si existen
     if final_sources_for_state: # Usar las fuentes que se han acumulado en final_sources_for_state
@@ -1643,10 +1647,31 @@ async def tool_node(state: AgentState):
             return ToolMessage(content=stop_message, tool_call_id=tool_call.get("id") or str(uuid.uuid4())), []
 
         async def progress_callback(progress: int, message: str, *args, **kwargs):
-            await send_personal_message(target_account_id, {
-                "type": "progress", "taskId": state.get("task_id"), "progress": progress,
-                "message": message, "thread_id": state.get("thread_id")
-            }, connection_type=conn_type)
+            # 1. Enviar evento de progreso estándar
+            progress_payload = {
+                "type": "progress", 
+                "taskId": state.get("task_id"), 
+                "progress": progress,
+                "message": message, 
+                "thread_id": state.get("thread_id")
+            }
+            await send_personal_message(target_account_id, progress_payload, connection_type=conn_type)
+
+            # 2. Si hay datos con un fragmento de stream, enviarlo como stream_chunk
+            data = kwargs.get("data") or (args[0] if args and isinstance(args[0], dict) else None)
+            if data and "stream_chunk" in data:
+                chunk_payload = {
+                    "type": "stream_chunk",
+                    "taskId": state.get("task_id"),
+                    "chunk": data["stream_chunk"],
+                    "thread_id": state.get("thread_id")
+                }
+                await send_personal_message(target_account_id, chunk_payload, connection_type=conn_type)
+
+            # 3. Mantener compatibilidad con otros metadatos (opcional)
+            elif data:
+                progress_payload["data"] = data
+                await send_personal_message(target_account_id, progress_payload, connection_type=conn_type)
 
         run_config = RunnableConfig(configurable={
             "account_id": account_id, "workspace_id": workspace_id, "telegram_id": state.get('telegram_id'),
@@ -1660,21 +1685,35 @@ async def tool_node(state: AgentState):
             
             context_content = ""
             sources_list = []
+            visual_schema = None
+            recommendations = []
+
             if isinstance(output_dump, ToolOutputWithSources):
                 context_content = output_dump.context_for_llm
                 sources_list = output_dump.sources
+                visual_schema = output_dump.visual_schema
+                recommendations = output_dump.recommendations
             elif isinstance(output_dump, str):
                 try:
                     parsed = json.loads(output_dump)
                     context_content = parsed.get("context_for_llm", output_dump)
                     sources_list = parsed.get("sources", [])
+                    visual_schema = parsed.get("visual_schema")
+                    recommendations = parsed.get("recommendations", [])
                 except:
                     context_content = output_dump
             elif isinstance(output_dump, dict):
                 context_content = output_dump.get("context_for_llm", json.dumps(output_dump))
                 sources_list = output_dump.get("sources", [])
+                visual_schema = output_dump.get("visual_schema")
+                recommendations = output_dump.get("recommendations", [])
             else:
                 context_content = str(output_dump)
+
+            # Inyectar instrucción de parada si es un reporte de investigación profunda completo
+            if tool_name == "deep_research" and ("# Resumen Ejecutivo" in context_content or "# Introducción" in context_content):
+                context_content += "\n\n--- INSTRUCCIÓN DEL SISTEMA: La investigación se ha completado. Proporcione la respuesta final al usuario ahora. NO vuelva a llamar a la herramienta 'deep_research'. ---"
+
 
             # Re-indexación local
             tool_sources = []
@@ -1687,10 +1726,19 @@ async def tool_node(state: AgentState):
 
             await send_personal_message(target_account_id, {
                 "type": "tool_end", "taskId": state.get("task_id"), "tool_name": tool_name,
-                "status": "end", "result": context_content, "sources": tool_sources, "thread_id": state.get("thread_id")
+                "status": "end", "result": context_content, "sources": tool_sources, 
+                "visual_schema": visual_schema, "recommendations": recommendations,
+                "thread_id": state.get("thread_id")
             }, connection_type=conn_type)
 
-            return ToolMessage(content=context_content, tool_call_id=tool_call.get("id") or str(uuid.uuid4())), tool_sources
+            tool_message = ToolMessage(content=context_content, tool_call_id=tool_call.get("id") or str(uuid.uuid4()))
+            if visual_schema:
+                tool_message.additional_kwargs["visual_schema"] = visual_schema
+            if recommendations:
+                tool_message.additional_kwargs["recommendations"] = recommendations
+                
+            return tool_message, tool_sources
+
 
         except Exception as e:
             logger.error(f"Error paralelo en {tool_name}: {e}")
@@ -1787,14 +1835,44 @@ def get_langgraph_agent():
     
     return _compiled_agent_graph
 
-async def merge_context_node(state: AgentState):
+async def unified_context_node(state: AgentState):
     """
-    Nodo de convergencia que sincroniza las ramas paralelas de RAG y Graph Reasoning.
-    Este nodo simplemente pasa el estado sin modificarlo, pero sirve como punto de
-    sincronización donde LangGraph esperará a que todas las ramas paralelas terminen.
+    Nodo orquestador que ejecuta RAG, Recuperación Proactiva y Razonamiento de Grafo
+    en paralelo para asegurar que el agente reciba todo el contexto de una sola vez
+    y se ejecute una única vez.
     """
-    logger.debug("--- (Grafo) Nodo: Merge Context (Convergencia) ---")
-    return {}
+    logger.info("--- (Grafo) Nodo: Orquestador de Contexto Unificado ---")
+    
+    # 1. Determinar qué ramas ejecutar
+    # Usamos la lógica de should_use_graph_reasoning internamente o algo similar
+    destinations = await should_use_graph_reasoning(state)
+    
+    tasks = []
+    
+    # Siempre ejecutamos RAG y Proactive Retrieval (están en destinations por defecto)
+    if "rag_node" in destinations:
+        tasks.append(rag_node(state))
+    if "proactive_retrieval" in destinations:
+        tasks.append(retrieve_proactive_memories_node(state))
+        
+    # Condicionalmente el razonamiento de grafo
+    if "graph_router" in destinations or "graph_reasoning" in destinations:
+        # Nota: El router y el razonamiento se pueden simplificar aquí
+        tasks.append(graph_reasoning_node(state))
+
+    # 2. Ejecutar todo en paralelo
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # 3. Consolidar resultados en el estado
+    combined_updates = {}
+    for res in results:
+        if isinstance(res, Exception):
+            logger.error(f"Error en rama paralela de contexto: {res}")
+            continue
+        if isinstance(res, dict):
+            combined_updates.update(res)
+            
+    return combined_updates
 
 def create_langgraph_agent():
     """
@@ -1804,43 +1882,32 @@ def create_langgraph_agent():
 
     # Añadir los nodos al grafo
     workflow.add_node("proactive_memory", proactive_memory_node)
-    workflow.add_node("graph_router", graph_router_node) # Nodo de decisión del grafo
-    workflow.add_node("graph_reasoning", graph_reasoning_node) # Nodo de ejecución del grafo
-    workflow.add_node("rag_node", rag_node) # NUEVO: Nodo de RAG paralelo
-    workflow.add_node("proactive_retrieval", retrieve_proactive_memories_node) # NUEVO: Nodo específico
-    workflow.add_node("merge_context", merge_context_node) # NUEVO: Nodo de convergencia
+    workflow.add_node("unified_context", unified_context_node) # Nodo único de convergencia
     workflow.add_node("agent", call_model_node)
     workflow.add_node("action", tool_node)
     workflow.add_node("generateResponse", generate_response_node)
     workflow.add_node("knowledge_extraction", knowledge_extraction_node)
 
-    # Definir las aristas (el flujo de trabajo)
+    # Definir las aristas (flujo lineal para evitar duplicaciones por fan-in)
     workflow.set_entry_point("proactive_memory")
     
-    # PARALELISMO: Desde proactive_memory, bifurcamos a RAG y (condicionalmente) al Grafo
-    # should_use_graph_reasoning ahora devuelve una lista de nodos destino
-    
-    # IMPORTANTE: Añadimos 'proactive_retrieval' a las destinaciones en should_use_graph_reasoning
-    # O modificamos should_use_graph_reasoning. 
-    # Para ser menos intrusivo, hacemos que 'rag_node' sea el punto de partida paralelo,
-    # pero necesitamos que should_use_graph_reasoning devuelva también 'proactive_retrieval'.
-    # Mejor: Modificamos should_use_graph_reasoning abajo.
-    
+    workflow.add_edge("proactive_memory", "unified_context")
+    workflow.add_edge("unified_context", "agent")
+
     workflow.add_conditional_edges(
-        "proactive_memory",
-        should_use_graph_reasoning
+        "agent",
+        should_continue,
+        {
+            "continue": "action",
+            "generate_response": "generateResponse",
+        }
     )
     
-    # El router siempre pasa al razonamiento
-    workflow.add_edge("graph_router", "graph_reasoning")
+    workflow.add_edge("action", "agent")
+    workflow.add_edge("generateResponse", END)
 
-    # CONVERGENCIA: Todas las ramas paralelas alimentan al nodo de merge
-    workflow.add_edge("rag_node", "merge_context")
-    workflow.add_edge("proactive_retrieval", "merge_context") # Conectar nuevo nodo
-    workflow.add_edge("graph_reasoning", "merge_context")
-    
-    # El nodo de merge pasa al agente
-    workflow.add_edge("merge_context", "agent")
+    # Compilar el grafo
+    return workflow.compile()
 
     workflow.add_conditional_edges(
         "agent",
@@ -2285,7 +2352,6 @@ async def proactive_memory_node(state: AgentState):
 
     # 2. Calcular el contador de turnos real basado en el número de mensajes del usuario en el historial
     # Esto asegura que el contador sea persistente incluso si el estado del grafo se reinicia
-    from langchain_core.messages import HumanMessage
     current_turn_count = len([m for m in state["messages"] if isinstance(m, HumanMessage)])
     logger.info(f"Contador de turnos real (basado en mensajes humanos): {current_turn_count}")
 

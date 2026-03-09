@@ -122,7 +122,6 @@ services:
     restart: always
     environment:
       NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-https://apibase.gatoslibres.art}"
-      NEXT_PUBLIC_ONLYOFFICE_URL: "${ONLYOFFICE_URL:-https://kognito.gatoslibres.art/onlyoffice}"
     # 📍 IMPORTANTE: Frontend accesible en http://localhost:8880
     # (El puerto 3000 que aparece en logs es interno del contenedor)
     ports:
@@ -239,47 +238,7 @@ services:
         cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-neo4j} -f /init_neo4j_indexes.cypher || true
       "
 
-  # 8. Mensajería para OnlyOffice (RabbitMQ)
-  rabbitmq:
-    image: rabbitmq:3-management-alpine
-    container_name: rabbitmq
-    restart: always
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
-    deploy:
-      resources:
-        limits:
-          memory: 1024M
-    networks:
-      - kognito_network
 
-  # 9. OnlyOffice Document Server
-  onlyoffice:
-    image: onlyoffice/documentserver:latest
-    container_name: kognito_onlyoffice
-    restart: always
-    ports:
-      - "8081:80" # Acceso al editor en localhost:8081
-    environment:
-      - DB_TYPE=postgres
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_NAME=${POSTGRES_DB:-kognito_db}
-      - DB_USER=${POSTGRES_USER:-postgres}
-      - DB_PWD=${POSTGRES_PASSWORD:-postgres}
-      - AMQP_URI=amqp://guest:guest@rabbitmq:5672
-      - REDIS_SERVER_HOST=redis
-      - REDIS_SERVER_PORT=6379
-      - JWT_ENABLED=true
-      - JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-your-secret-key}
-      - JWT_HEADER=Authorization
-    depends_on:
-      - db
-      - redis
-      - rabbitmq
-    networks:
-      - kognito_network
 
 networks:
   kognito_network:

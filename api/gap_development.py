@@ -171,11 +171,17 @@ async def run_gap_development_analysis(
                     "question": clarification_question
                 }
             
-            # Estructurar el informe según el formato requerido por el frontend
+             # Estructurar el informe según el formato requerido por el frontend
+            # Deserializar formato de "override" para fuentes
+            final_sources = final_state.get("sources", [])
+            if isinstance(final_sources, dict) and final_sources.get("type") == "override":
+                final_sources = final_sources.get("value", [])
+            
             report_data = {
-                "summary": final_state.get("final_report", "")[:500],  # Resumen corto para la lista
+                "summary": final_state.get("summary", final_state.get("final_report", "")[:500]),  # Resumen corto para la lista
+                "findings": final_state.get("findings", final_state.get("final_report", "")),  # Hallazgos detallados
                 "final_report": final_state.get("final_report", ""),  # Texto completo para el componente
-                "sources": final_state.get("sources", []),
+                "sources": final_sources,
                 "recommendations": final_state.get("recommendations", [])
             }
             

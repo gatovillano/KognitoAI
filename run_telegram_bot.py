@@ -20,8 +20,9 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-
-
+# Configuración de logs inmediata
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Límite máximo para el tamaño de la imagen en base64 (5MB)
 # Aproximadamente, 5MB de texto base64 equivalen a ~3.6MB de datos binarios.
@@ -125,6 +126,10 @@ async def lifespan(app: FastAPI):
             )
 
     if ptb_app.updater:
+        # Iniciar la aplicación y el procesamiento de mensajes
+        logger.info("Iniciando aplicación de Telegram (ptb_app.start())...")
+        await ptb_app.start()
+
         # Iniciar polling y añadir el callback síncrono.
         logger.info("Iniciando updater.start_polling()...")
         polling_task = asyncio.create_task(ptb_app.updater.start_polling(drop_pending_updates=True, error_callback=done_callback))
@@ -159,6 +164,9 @@ async def lifespan(app: FastAPI):
             logger.info("Deteniendo polling de Telegram...")
             await app.state.ptb_app.updater.stop()
             logger.info("✅ Polling de Telegram detenido.")
+            logger.info("Deteniendo aplicación de Telegram (ptb_app.stop())...")
+            await app.state.ptb_app.stop()
+            logger.info("✅ Aplicación de Telegram detenida.")
         
         # 3. Cancelar tareas en segundo plano
         if hasattr(app.state, 'background_tasks') and app.state.background_tasks:
@@ -267,19 +275,18 @@ async def bot_create_thread_endpoint(request: BotCreateThreadRequest):
 
 
 if __name__ == "__main__":
-    # Intentar ejecutar con Uvicorn para la API interna
+    # Iniciar Uvicorn para la API interna. El bot se iniciará mediante el lifespan.
+    logger.info("🚀 Iniciando servidor de Telegram (API interna + Bot)...")
     try:
-        logger.info("Iniciando Uvicorn en el puerto 9090...")
         uvicorn.run(
             "run_telegram_bot:internal_api",
             host="0.0.0.0",
             port=9090,
             reload=False,
-            workers=1
+            workers=1,
+            log_level="info"
         )
     except Exception as e:
-        logger.error(f"❌ Error al iniciar Uvicorn: {e}. Intentando modo de solo bot...")
-        # Fallback: Mantener el proceso vivo si Uvicorn falla
-        import time
-        while True:
-            time.sleep(3600)
+        logger.error(f"❌ ERROR CRÍTICO al iniciar el servicio: {e}", exc_info=True)
+        sys.exit(1)
+

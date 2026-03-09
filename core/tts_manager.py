@@ -1,20 +1,3 @@
-# utils/google_tts.py
-
-"""
-Módulo de utilidad para Text-to-Speech (TTS) usando Google Cloud Text-to-Speech API.
-
-Este módulo proporciona funciones para convertir texto a audio utilizando
-la API de Google Cloud Text-to-Speech, con soporte para múltiples voces,
-configuraciones de audio y caché de audios generados.
-
-Responsabilidades:
-- Generar audio a partir de texto usando Google Cloud TTS
-- Manejar múltiples idiomas y voces
-- Proporcionar streaming de audio para textos largos
-- Gestionar caché de audios para evitar regeneraciones
-- Gestionar errores y reintentos
-"""
-
 import logging
 import os
 import hashlib
@@ -22,17 +5,25 @@ import json
 from typing import Optional, List, AsyncGenerator, Dict, Any
 from datetime import datetime, timedelta
 from pathlib import Path
-from io import BytesIO
+from abc import ABC, abstractmethod
 import asyncio
+import uuid # Añadido para UUIDs
+
+# Para Azure TTS
+import azure.cognitiveservices.speech as speechsdk # Añadido para Azure TTS
+
+# Para la configuración y secretos
+from core.config import settings # Añadido para settings
+from core.repositories.secret_repository import SecretRepository # Añadido para SecretRepository
+from core.database import SessionLocal # Necesario para obtener la configuración del usuario
 
 from google.cloud import texttospeech
 from google.oauth2 import service_account
 from google.api_core.exceptions import GoogleAPICallError, RetryError
 
-
 logger = logging.getLogger(__name__)
 
-
+# --- TTS Cache (reutilizado de google_tts.py) ---
 class TTSCache:
     """
     Sistema de caché para audios generados por TTS.
@@ -231,14 +222,79 @@ class TTSCache:
             'max_age_days': self.max_age_days
         }
 
-
-class GoogleTTSClient:
+# --- Interfaz Abstracta TTSService ---
+class TTSService(ABC):
     """
-    Cliente para interactuar con Google Cloud Text-to-Speech API.
+    Interfaz abstracta para servicios de Text-to-Speech.
+    Define los métodos que cualquier implementación de TTS debe proporcionar.
+    """
     
-    Esta clase encapsula la lógica de generación de audio y proporciona
-    métodos para convertir texto a voz con diferentes configuraciones,
-    incluyendo soporte para caché de audios.
+    @abstractmethod
+    async def synthesize_speech(
+        self,
+        text: str,
+        voice: Optional[str] = None,
+        speaking_rate: float = 1.0,
+        pitch: float = 0.0,
+        volume_gain_db: float = 0.0,
+        audio_format: str = "mp3",
+        use_cache: bool = True
+    ) -> bytes:
+        """
+        Convierte texto a audio.
+        
+        Args:
+            text: Texto a convertir a voz
+            voice: Código de voz a utilizar
+            speaking_rate: Velocidad de habla
+            pitch: Tono de voz
+            volume_gain_db: Ganancia de volumen en dB
+            audio_format: Formato de audio
+            use_cache: Si se debe usar el caché
+            
+        Returns:
+            Bytes del audio generado
+        """
+        pass
+    
+    @abstractmethod
+    async def synthesize_speech_streaming(
+        self,
+        text_chunks: List[str],
+        voice: Optional[str] = None,
+        speaking_rate: float = 1.0,
+        audio_format: str = "mp3",
+        use_cache: bool = True
+    ) -> AsyncGenerator[bytes, None]:
+        """
+        Genera audio en streaming para múltiples fragmentos de texto.
+        
+        Args:
+            text_chunks: Lista de fragmentos de texto a convertir
+            voice: Código de voz a utilizar
+            speaking_rate: Velocidad de habla
+            audio_format: Formato de audio
+            use_cache: Si se debe usar el caché
+            
+        Yields:
+            Bytes de audio para cada fragmento
+        """
+        pass
+    
+    @abstractmethod
+    def get_cache_stats(self) -> Optional[Dict[str, Any]]:
+        """Obtiene estadísticas del caché si está habilitado."""
+        pass
+    
+    @abstractmethod
+    def clear_cache(self):
+        """Limpia el caché de audios."""
+        pass
+
+# --- Implementación de GoogleTTSService ---
+class GoogleTTSService(TTSService):
+    """
+    Implementación de TTSService para Google Cloud Text-to-Speech.
     """
     
     # Mapeo de códigos de voz simplificados a nombres completos de Google Cloud
@@ -294,7 +350,7 @@ class GoogleTTSClient:
     # Voz por defecto
     DEFAULT_VOICE = 'es-MX-DaliaNeural'
     
-    def __init__(self, cache_enabled: bool = True, cache_dir: Optional[str] = None):
+    def __init__(self, cache_enabled: bool = True, cache_dir: Optional[str] = None, api_key: Optional[str] = None):
         """
         Inicializa el cliente de Google Cloud Text-to-Speech.
         
@@ -336,7 +392,8 @@ class GoogleTTSClient:
         except Exception as e:
             logger.error(f"❌ Error al inicializar el cliente de Google Cloud TTS: {e}")
             # Si falla, intentar usar API Key si existe (algunas APIs de Google lo permiten como fallback)
-            api_key = os.getenv("GOOGLE_API_KEY")
+            # Prioridad: 1. API Key pasada explícitamente, 2. Variable de entorno GOOGLE_API_KEY
+            api_key = api_key or os.getenv("GOOGLE_API_KEY")
             if api_key:
                 try:
                     self.client = texttospeech.TextToSpeechClient(client_options={"api_key": api_key})
@@ -526,49 +583,275 @@ class GoogleTTSClient:
         if self.cache:
             self.cache.clear_expired()
 
+# --- Implementación de AzureTTSService ---
+class AzureTTSService(TTSService):
+    """
+    Implementación de TTSService para Azure Cognitive Services Speech.
+    """
+    DEFAULT_VOICE = "es-MX-DaliaNeural" # Voz por defecto para Azure
+    
+    def __init__(self, cache_enabled: bool = True, cache_dir: Optional[str] = None, api_key: Optional[str] = None, region: Optional[str] = None):
+        if not api_key:
+            raise ValueError("API Key de Azure es requerida para AzureTTSService.")
+        if not region:
+            raise ValueError("Región de Azure es requerida para AzureTTSService.")
+            
+        self.speech_config = speechsdk.SpeechConfig(subscription=api_key, region=region)
+        # Configurar el formato de salida de audio
+        self.speech_config.set_speech_synthesis_output_format(speechsdk.SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3)
+        
+        self.cache: Optional[TTSCache] = None
+        if cache_enabled:
+            self.cache = TTSCache(cache_dir=cache_dir)
+        
+        logger.info(f"✅ Cliente de Azure TTS inicializado para región '{region}'.")
+
+    async def synthesize_speech(
+        self,
+        text: str,
+        voice: Optional[str] = None,
+        speaking_rate: float = 1.0,
+        pitch: float = 0.0, # Azure no soporta pitch directamente en SpeechSynthesizer, se haría con SSML
+        volume_gain_db: float = 0.0, # Azure no soporta volume_gain_db directamente, se haría con SSML
+        audio_format: str = "mp3", # El formato ya está configurado en SpeechConfig
+        use_cache: bool = True
+    ) -> bytes:
+        
+        # Verificar caché primero
+        if use_cache and self.cache and text:
+            cached_audio = self.cache.get(text, voice or self.DEFAULT_VOICE, speaking_rate, audio_format)
+            if cached_audio:
+                logger.info(f"✅ Audio recuperado de caché ({len(cached_audio)} bytes)")
+                return cached_audio
+
+        # Crear un sintetizador de voz
+        audio_config = speechsdk.audio.AudioOutputConfig(use_default_speaker=True) # No se usa para obtener bytes
+        synthesizer = speechsdk.SpeechSynthesizer(speech_config=self.speech_config, audio_config=None) # audio_config=None para obtener el resultado en memoria
+
+        # Configurar la voz y la velocidad
+        ssml_text = f"""
+        <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="http://www.microsoft.com/mstts" xml:lang="en-US">
+            <voice name="{voice or self.DEFAULT_VOICE}">
+                <prosody rate="{speaking_rate:.2f}">
+                    {text}
+                </prosody>
+            </voice>
+        </speak>
+        """
+        
+        result = await asyncio.to_thread(lambda: synthesizer.speak_ssml_async(ssml_text).get())
+        
+        if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+            audio_content = result.audio_data
+            # Guardar en caché
+            if use_cache and self.cache and text:
+                self.cache.set(text, voice or self.DEFAULT_VOICE, speaking_rate, audio_format, audio_content)
+            logger.info(f"✅ Audio generado exitosamente con Azure TTS: {len(audio_content)} bytes")
+            return audio_content
+        elif result.reason == speechsdk.ResultReason.Canceled:
+            cancellation_details = result.cancellation_details
+            error_message = f"Síntesis de voz de Azure cancelada: {cancellation_details.reason}"
+            if cancellation_details.reason == speechsdk.CancellationReason.Error:
+                error_message += f". Código de error: {cancellation_details.error_details}"
+            logger.error(f"❌ {error_message}")
+            raise Exception(error_message)
+        else:
+            error_message = f"Error desconocido en la síntesis de voz de Azure: {result.reason}"
+            logger.error(f"❌ {error_message}")
+            raise Exception(error_message)
+
+    async def synthesize_speech_streaming(
+        self,
+        text_chunks: List[str],
+        voice: Optional[str] = None,
+        speaking_rate: float = 1.0,
+        audio_format: str = "mp3",
+        use_cache: bool = True
+    ) -> AsyncGenerator[bytes, None]:
+        for i, chunk in enumerate(text_chunks):
+            if not chunk or not chunk.strip():
+                continue
+            try:
+                audio_content = await self.synthesize_speech(
+                    text=chunk,
+                    voice=voice,
+                    speaking_rate=speaking_rate,
+                    audio_format=audio_format,
+                    use_cache=use_cache
+                )
+                yield audio_content
+                logger.debug(f"✅ Fragmento {i+1}/{len(text_chunks)} procesado por Azure TTS")
+            except Exception as e:
+                logger.error(f"❌ Error procesando fragmento {i+1} con Azure TTS: {e}")
+                continue
+    
+    def get_cache_stats(self) -> Optional[Dict[str, Any]]:
+        if self.cache:
+            return self.cache.get_stats()
+        return None
+    
+    def clear_cache(self):
+        if self.cache:
+            self.cache.clear_expired()
+
+# --- TTSServiceFactory ---
+class TTSServiceFactory:
+    """
+    Fábrica para obtener instancias de TTSService.
+    """
+    
+    _instances: Dict[str, TTSService] = {} # Para mantener singletons por tipo de servicio
+    
+    @staticmethod
+    async def get_service(
+        provider: str, 
+        cache_enabled: bool = True, 
+        cache_dir: Optional[str] = None,
+        api_key_name: Optional[str] = None,
+        region: Optional[str] = None, # Para Azure
+        account_id: Optional[uuid.UUID] = None # Para obtener secretos del usuario
+    ) -> TTSService:
+        """
+        Obtiene una instancia del servicio TTS especificado.
+        
+        Args:
+            provider: Nombre del proveedor de TTS (ej: "google", "azure")
+            cache_enabled: Si se debe habilitar el caché
+            cache_dir: Directorio para el caché (None para usar default)
+            api_key_name: Nombre de la clave API en UserSecret (si aplica).
+            region: Región de Azure (si aplica).
+            account_id: ID de la cuenta para recuperar secretos específicos del usuario.
+            
+        Returns:
+            Una instancia de TTSService
+            
+        Raises:
+            ValueError: Si el proveedor no es soportado
+        """
+        provider_lower = provider.lower()
+        
+        # Crear una clave única para la instancia basada en la configuración
+        instance_key = f"{provider_lower}-{cache_enabled}-{cache_dir}-{api_key_name}-{region}-{account_id}"
+        
+        if instance_key not in TTSServiceFactory._instances:
+            # Recuperar API Key si es necesario
+            api_key = None
+            
+            # Si no se proporciona api_key_name, intentar inferirlo por el proveedor
+            if not api_key_name:
+                if provider_lower == "azure":
+                    api_key_name = "AZURE_TTS_KEY"
+                elif provider_lower == "openai":
+                    api_key_name = "OPENAI_API_KEY"
+                elif provider_lower == "google":
+                    api_key_name = "GOOGLE_API_KEY"
+
+            if api_key_name and account_id:
+                async with SessionLocal() as db:
+                    secret_repo = SecretRepository(db)
+                    api_key = await secret_repo.get_decrypted_secret(account_id, api_key_name)
+                    if not api_key:
+                        logger.warning(f"⚠️ API Key '{api_key_name}' no encontrada para la cuenta {account_id}.")
+            
+            if provider_lower == "google":
+                TTSServiceFactory._instances[instance_key] = GoogleTTSService(
+                    cache_enabled=cache_enabled, 
+                    cache_dir=cache_dir,
+                    api_key=api_key
+                )
+            elif provider_lower == "azure":
+                TTSServiceFactory._instances[instance_key] = AzureTTSService(
+                    cache_enabled=cache_enabled,
+                    cache_dir=cache_dir,
+                    api_key=api_key,
+                    region=region if region else settings.azure_speech_region # Usar la región de settings si no se especifica
+                )
+            # Aquí se añadirían otros proveedores en el futuro
+            # elif provider_lower == "openai":
+            #     TTSServiceFactory._instances[provider_lower] = OpenAITTSService(...)
+            else:
+                raise ValueError(f"Proveedor de TTS '{provider}' no soportado.")
+                
+        return TTSServiceFactory._instances[instance_key]
 
 # Instancia global del cliente (singleton)
-_tts_client: Optional[GoogleTTSClient] = None
+_tts_client: Optional[TTSService] = None
 
 
-def get_tts_client(cache_enabled: bool = True, cache_dir: Optional[str] = None) -> GoogleTTSClient:
+async def get_tts_client(
+    provider: str = "google", 
+    cache_enabled: bool = True, 
+    cache_dir: Optional[str] = None,
+    api_key_name: Optional[str] = None,
+    region: Optional[str] = None,
+    account_id: Optional[uuid.UUID] = None
+) -> TTSService:
     """
     Obtiene la instancia global del cliente TTS.
     
     Args:
+        provider: Nombre del proveedor de TTS (ej: "google", "azure")
         cache_enabled: Si se debe habilitar el caché
         cache_dir: Directorio para el caché
+        api_key_name: Nombre de la clave API en UserSecret (si aplica).
+        region: Región de Azure (si aplica).
+        account_id: ID de la cuenta para recuperar secretos específicos del usuario.
         
     Returns:
-        Instancia de GoogleTTSClient
+            Instancia de TTSService
     """
     global _tts_client
-    if _tts_client is None:
-        _tts_client = GoogleTTSClient(cache_enabled=cache_enabled, cache_dir=cache_dir)
+    # Si no se especifica un proveedor, o si el proveedor es el mismo que el cliente global
+    # y la configuración es la misma, devolver la instancia global.
+    # Esto es una simplificación, en un sistema más complejo se podría querer
+    # un singleton por cada combinación de proveedor/configuración.
+    if _tts_client is None or _tts_client.__class__.__name__.lower().replace("ttsservice", "") != provider.lower():
+        _tts_client = await TTSServiceFactory.get_service(
+            provider=provider, 
+            cache_enabled=cache_enabled, 
+            cache_dir=cache_dir,
+            api_key_name=api_key_name,
+            region=region,
+            account_id=account_id
+        )
     return _tts_client
 
 
+# Funciones de conveniencia (adaptadas para usar la fábrica)
 async def generate_speech(
     text: str,
+    provider: str = "google",
     voice: Optional[str] = None,
     speaking_rate: float = 1.0,
     audio_format: str = "mp3",
-    use_cache: bool = True
+    use_cache: bool = True,
+    api_key_name: Optional[str] = None,
+    region: Optional[str] = None,
+    account_id: Optional[uuid.UUID] = None
 ) -> bytes:
     """
     Función de conveniencia para generar audio a partir de texto.
     
     Args:
         text: Texto a convertir
+        provider: Proveedor de TTS a usar
         voice: Código de voz
         speaking_rate: Velocidad de habla
         audio_format: Formato de audio
         use_cache: Si se debe usar el caché
+        api_key_name: Nombre de la clave API en UserSecret (si aplica).
+        region: Región de Azure (si aplica).
+        account_id: ID de la cuenta para recuperar secretos específicos del usuario.
         
     Returns:
         Bytes del audio generado
     """
-    client = get_tts_client()
+    client = await get_tts_client(
+        provider=provider, 
+        api_key_name=api_key_name, 
+        region=region, 
+        account_id=account_id
+    )
     return await client.synthesize_speech(
         text=text,
         voice=voice,
@@ -580,25 +863,38 @@ async def generate_speech(
 
 async def generate_speech_streaming(
     text_chunks: List[str],
+    provider: str = "google",
     voice: Optional[str] = None,
     speaking_rate: float = 1.0,
     audio_format: str = "mp3",
-    use_cache: bool = True
+    use_cache: bool = True,
+    api_key_name: Optional[str] = None,
+    region: Optional[str] = None,
+    account_id: Optional[uuid.UUID] = None
 ) -> AsyncGenerator[bytes, None]:
     """
     Función de conveniencia para generar audio en streaming.
     
     Args:
         text_chunks: Lista de fragmentos de texto
+        provider: Proveedor de TTS a usar
         voice: Código de voz
         speaking_rate: Velocidad de habla
         audio_format: Formato de audio
         use_cache: Si se debe usar el caché
+        api_key_name: Nombre de la clave API en UserSecret (si aplica).
+        region: Región de Azure (si aplica).
+        account_id: ID de la cuenta para recuperar secretos específicos del usuario.
         
     Yields:
         Bytes de audio para cada fragmento
     """
-    client = get_tts_client()
+    client = await get_tts_client(
+        provider=provider, 
+        api_key_name=api_key_name, 
+        region=region, 
+        account_id=account_id
+    )
     async for chunk in client.synthesize_speech_streaming(
         text_chunks=text_chunks,
         voice=voice,

@@ -63,10 +63,26 @@ export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
     </WebSocketContext.Provider>
   );
 };
+// Default no-op implementation when context is not available
+const noopContext: WebSocketContextType = {
+  isConnected: false,
+  connectionError: null,
+  reconnect: () => { },
+  disconnect: () => { },
+  registerMessageHandler: () => () => { },
+  diagnostics: {
+    readyState: WebSocket.CLOSED,
+    url: undefined,
+    reconnectAttempts: 0,
+    lastError: undefined
+  }
+};
+
 export const useWebSocketContext = () => {
   const context = useContext(WebSocketContext);
+  // Return no-op context instead of throwing error
   if (context === undefined) {
-    throw new Error('useWebSocketContext must be used within a WebSocketProvider');
+    return noopContext;
   }
   return context;
 };

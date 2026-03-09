@@ -4,9 +4,34 @@ import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface UserSettings {
+  // Campos de Módulos y Preferencias
   profiles_enabled: boolean;
   galleries_enabled: boolean;
   forms_enabled: boolean;
+  theme: string;
+  notifications_email: boolean;
+  notifications_push: boolean;
+  language: string;
+  privacy_data_sharing: boolean;
+  // Campos de LLM
+  llm_provider: string;
+  llm_model: string;
+  llm_temperature: number;
+  llm_api_base: string;
+  fast_llm_model: string;
+  vision_llm_model: string;
+  use_prompt_tooling: boolean;
+  // Campos de TTS
+  tts_provider: string;
+  tts_model: string;
+  tts_voice: string;
+  tts_speed: number;
+  tts_region: string;
+  // Campos de Embeddings
+  embedding_provider: string;
+  embedding_model: string;
+  embedding_api_key_name: string;
+  embedding_api_base: string;
   [key: string]: any; // Allow for other settings
 }
 

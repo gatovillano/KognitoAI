@@ -120,11 +120,14 @@ class GitHubRepoTool(BaseTool):
                     branch = "main"
                     full_url = f"{repo_url}/tree/{branch}/{path}"
             
+            source_id = hashlib.sha256(full_url.encode()).hexdigest()[:8] # Usar los primeros 8 caracteres del hash
+            
             source = create_github_source(
-                file_path=path if path else repo_url,
-                repo_url=full_url,
-                content=str(result_content),
-                node_id=None
+                source_id=source_id,
+                title=f"{path} ({action})" if path else f"Repo: {repo_url}",
+                url=full_url,
+                snippet=f"Result of {action}: " + (str(result_content)[:200] + "..." if len(str(result_content)) > 200 else str(result_content)),
+                metadata={"file_path": path, "repo_url": repo_url}
             )
             source.title = f"{path} ({action})" if path else f"Repo: {repo_url}"
             source.snippet = f"Result of {action}: " + (str(result_content)[:200] + "..." if len(str(result_content)) > 200 else str(result_content))
@@ -193,11 +196,13 @@ class GitHubRepoTool(BaseTool):
                     full_url = f"{repo_url}/tree/{branch}/{path}"
             
             # Crear objeto Source explícito
+            source_id = hashlib.sha256(full_url.encode()).hexdigest()[:8] # Usar los primeros 8 caracteres del hash
             source = create_github_source(
-                file_path=path if path else repo_url,
-                repo_url=full_url,
-                content=str(result_content), # Asegurar string
-                node_id=None
+                source_id=source_id,
+                title=f"{path} ({action})" if path else f"Repo: {repo_url}",
+                url=full_url,
+                snippet=f"Result of {action}: " + (str(result_content)[:200] + "..." if len(str(result_content)) > 200 else str(result_content)),
+                metadata={"file_path": path, "repo_url": repo_url}
             )
             # Personalizar título y snippet
             source.title = f"{path} ({action})" if path else f"Repo: {repo_url}"

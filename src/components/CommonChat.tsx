@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSearch } from '@/contexts/SearchContext';
+import { useUserSettings } from '@/contexts/UserSettingsContext';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -163,6 +164,7 @@ function LoadingIndicator({
 
 export function CommonChat({ threadId, workspaceId, initialMessage, initialRagContext }: CommonChatProps) {
   const { user } = useAuth();
+  const { settings } = useUserSettings();
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [files, setFiles] = useState<File[]>([]);
@@ -380,18 +382,25 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 chunks: undefined, // Eliminar chunks una vez finalizado
                 taskId: undefined, // Eliminar taskId una vez finalizado
                 sources: (data as any).sources || finalMessage.sources || [], // Asegurar que las fuentes se persistan
+                reasoning: (data as any).reasoning || finalMessage.reasoning, // Añadir el campo reasoning
               };
             }
             break;
 
           case 'tool_start': {
             const toolStartMessage = data as ToolStatusMessage;
-            if (toolStartMessage.tool_name === 'deep_research') { // Asumiendo que 'deep_research' es el nombre de la herramienta
+            if (toolStartMessage.tool_name === 'deep_research') {
               setIsDeepResearchActive(true);
             }
             setToolName(toolStartMessage.tool_name);
             setReactState('ejecutando');
-            setIsThinking(true); // Keep thinking indicator active while tool is running
+            setIsThinking(true);
+
+            // FILTRO: No añadir mensaje de texto al chat si es la investigación profunda
+            if (toolStartMessage.tool_name === 'deep_research') {
+              break;
+            }
+
             if (toolStartMessage.task_id && messageIndex === -1) {
               setBackgroundTasks((prev) => {
                 const currentTaskId = toolStartMessage.task_id as string;
@@ -407,7 +416,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 created_at: new Date().toISOString(),
                 sources: [],
                 tool_code: undefined,
-                taskId: toolStartMessage.task_id, // Añadir taskId al mensaje de herramienta
+                taskId: toolStartMessage.task_id,
               });
             }
             break;
@@ -419,9 +428,16 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               setIsDeepResearchActive(false);
             }
             setToolName(undefined);
-            setReactState(undefined); // Reset reactState on tool end
+            setReactState(undefined);
+
             if (toolEndMessage.task_id) {
               setBackgroundTasks((prev) => prev.filter((t) => t.taskId !== toolEndMessage.task_id));
+
+              // FILTRO: No actualizar ni mostrar notificaciones de herramienta si es la investigación profunda
+              if (toolEndMessage.tool_name === 'deep_research') {
+                break;
+              }
+
               const toolMessageIndex = updatedMessages.findIndex(msg => msg.taskId === toolEndMessage.task_id);
               if (toolMessageIndex !== -1) {
                 const finalToolMessage = updatedMessages[toolMessageIndex];
@@ -429,11 +445,15 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                   ...finalToolMessage,
                   text: toolEndMessage.status === 'end' ? toolEndMessage.result || `Herramienta ${toolEndMessage.tool_name} finalizada.` : `Error en herramienta ${toolEndMessage.tool_name}: ${toolEndMessage.error || "Error desconocido."}`,
                   sources: toolEndMessage.sources || [],
-                  taskId: undefined, // Eliminar taskId una vez finalizado
+                  taskId: undefined,
                 };
               }
             }
-            toast[toolEndMessage.status === 'end' ? 'success' : 'error'](`Herramienta ${toolEndMessage.tool_name || 'una herramienta'} ${toolEndMessage.status === 'end' ? 'completada' : 'falló'}.`);
+
+            // Only show toast for other tools
+            if (toolEndMessage.tool_name !== 'deep_research') {
+              toast[toolEndMessage.status === 'end' ? 'success' : 'error'](`Herramienta ${toolEndMessage.tool_name || 'una herramienta'} ${toolEndMessage.status === 'end' ? 'completada' : 'falló'}.`);
+            }
             break;
           }
 
@@ -772,7 +792,27 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
     try {
       const cleanText = stripMarkdown(text);
-      const response = await apiClient.post('/api/text-to-speech', { text: cleanText }, {
+
+      // Construir payload con configuración TTS del usuario
+      const ttsPayload: any = { text: cleanText };
+
+      // Si el usuario tiene configuración TTS personalizada, usarla
+      if (settings) {
+        if (settings.tts_provider) {
+          ttsPayload.provider = settings.tts_provider;
+        }
+        if (settings.tts_voice) {
+          ttsPayload.voice = settings.tts_voice;
+        }
+        if (settings.tts_speed) {
+          ttsPayload.speed = settings.tts_speed;
+        }
+        if (settings.tts_region) {
+          ttsPayload.region = settings.tts_region;
+        }
+      }
+
+      const response = await apiClient.post('/api/text-to-speech', ttsPayload, {
         responseType: 'blob', // Importante para recibir el audio como Blob
       });
 
@@ -826,7 +866,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         currentAudioRef.current = null;
       }
     }
-  }, [isAudioLoading, playingMessageIndex, isAudioPaused]);
+  }, [isAudioLoading, playingMessageIndex, isAudioPaused, settings]);
 
   const handleRemoveContextItem = useCallback((itemToRemove: SelectedContextItem) => {
     setSelectedContext(prev => prev.filter(item => item.id !== itemToRemove.id));

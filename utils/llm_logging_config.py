@@ -37,11 +37,11 @@ def setup_llm_detailed_logging(log_level: str = "INFO", log_file: Optional[str] 
 
     # Configurar loggers específicos con propagación controlada
     loggers_config = {
-        "LLMCallback": logging.INFO,  # Nuestro callback personalizado
-        "core.agent": logging.INFO,   # Logs del agente
+        "LLMCallback": logging.WARNING,  # Nuestro callback personalizado
+        "core.agent": logging.WARNING,   # Logs del agente
         "langchain.agents.agent": logging.WARNING,  # Mantenemos WARNING para producción
         "litellm": logging.WARNING,  # Mantenemos WARNING para producción
-        "tools.github_repo_tool": logging.INFO, # Cambiado a INFO para producción
+        "tools.github_repo_tool": logging.WARNING, # Cambiado a WARNING para producción
     }
 
     for logger_name, level in loggers_config.items():

@@ -69,20 +69,23 @@ export function ContextSelectorButton({ onContextSelected, currentContext, works
       }));
 
       // Agrupar documentos por topic y colecciones por su nombre
-      const groupedItems: { [key: string]: { topic: string; items: SelectedContextItem[] } } = {};
+      const groupedItems: { [key: string]: { id: string; topic: string; items: SelectedContextItem[] } } = {};
+      let groupIdCounter = 0; // To generate unique IDs for groups
 
       fetchedCollections.forEach((col: SelectedContextItem) => {
-        if (!groupedItems[col.topic!]) {
-          groupedItems[col.topic!] = { topic: col.topic!, items: [] };
+        const topicKey = col.topic || 'Sin categoría'; // Fallback for collections
+        if (!groupedItems[topicKey]) {
+          groupedItems[topicKey] = { id: `group-${groupIdCounter++}`, topic: topicKey, items: [] };
         }
-        groupedItems[col.topic!].items.push(col);
+        groupedItems[topicKey].items.push(col);
       });
 
       fetchedDocuments.forEach((doc: SelectedContextItem) => {
-        if (!groupedItems[doc.topic!]) {
-          groupedItems[doc.topic!] = { topic: doc.topic!, items: [] };
+        const topicKey = doc.topic || 'Sin categoría'; // Fallback for documents
+        if (!groupedItems[topicKey]) {
+          groupedItems[topicKey] = { id: `group-${groupIdCounter++}`, topic: topicKey, items: [] };
         }
-        groupedItems[doc.topic!].items.push(doc);
+        groupedItems[topicKey].items.push(doc);
       });
       
       setCollections(Object.values(groupedItems));
@@ -116,7 +119,7 @@ export function ContextSelectorButton({ onContextSelected, currentContext, works
     });
   };
 
-  const handleSelectGroup = (group: { topic: string; items: SelectedContextItem[] }) => {
+  const handleSelectGroup = (group: { id: string; topic: string; items: SelectedContextItem[] }) => {
     setSelectedDocuments(prev => {
       const allItemsInGroupSelected = group.items.every(item => isItemSelected(item));
       if (allItemsInGroupSelected) {
@@ -145,7 +148,7 @@ export function ContextSelectorButton({ onContextSelected, currentContext, works
     return selectedDocuments.some(d => d.id === item.id && d.type === item.type);
   };
 
-  const isGroupSelected = (group: { topic: string; items: SelectedContextItem[] }) => {
+  const isGroupSelected = (group: { id: string; topic: string; items: SelectedContextItem[] }) => {
     return group.items.every(item => isItemSelected(item));
   };
 
@@ -180,7 +183,7 @@ export function ContextSelectorButton({ onContextSelected, currentContext, works
           ) : (
             <div className="p-2">
               {collections.map((group) => (
-                <Collapsible key={group.topic} open={expandedTopics[group.topic]} onOpenChange={() => toggleTopicExpansion(group.topic)}>
+                <Collapsible key={group.id} open={expandedTopics[group.topic]} onOpenChange={() => toggleTopicExpansion(group.topic)}>
                   <CollapsibleTrigger asChild>
                     <div className="flex items-center space-x-2 p-2 hover:bg-muted rounded-md cursor-pointer">
                       <ChevronRight className={`h-4 w-4 transition-transform ${expandedTopics[group.topic] ? 'rotate-90' : ''}`} />

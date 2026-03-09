@@ -490,8 +490,8 @@ class EntityQualityReviewer:
             # Query para cambiar el tipo y label
             query = f"""
             MATCH (n {{id: $entity_id}})
-            REMOVE n:{entity.get("type", "Entity")}
-            SET n:{new_type}
+            REMOVE n:`{entity.get("type", "Entity")}`
+            SET n:`{new_type}`
             SET n.type = $new_type
             SET n.corrected_at = $timestamp
             SET n.correction_reason = $reason

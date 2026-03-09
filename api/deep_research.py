@@ -9,6 +9,8 @@ from core.agents.deep_researcher import compile_deep_researcher_graph
 from core.llm_manager import get_main_llm
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.messages import BaseMessage 
+from langchain_core.prompts import ChatPromptTemplate
+from tools.create_pdf_tool import CreatePDFTool 
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,13 @@ class DeepResearchRequest(BaseModel):
 class ClarificationResponse(BaseModel):
     run_id: str
     user_response: str
+    account_id: str = "api_user"
+
+class DeepResearchPDFExportRequest(BaseModel):
+    title: str
+    final_report: str
+    sources: List[dict] = []
+    recommendations: List[str] = []
     account_id: str = "api_user"
 
 async def get_llm_instance() -> BaseLanguageModel:
@@ -86,12 +95,20 @@ async def run_deep_research(
                 return {"status": "clarification_needed", "message": clarification_question, "run_id": run_id}
             
             logger.info(f"Deep research completed successfully for run_id: {run_id}")
+             # Deserializar formato de "override" para fuentes
+            final_sources = final_state.get("sources", [])
+            if isinstance(final_sources, dict) and final_sources.get("type") == "override":
+                final_sources = final_sources.get("value", [])
+            
             return {
                 "status": "success", 
                 "report": {
                     "final_report": final_state.get("final_report"),
-                    "sources": final_state.get("sources", []),
-                    "recommendations": final_state.get("recommendations", [])
+                    "summary": final_state.get("summary", ""),
+                    "findings": final_state.get("findings", ""),
+                    "recommendations": final_state.get("recommendations", []),
+                    "sources": final_sources,
+                    "visual_schema": final_state.get("visual_schema")
                 }
             }
         else:
@@ -146,12 +163,18 @@ async def clarify_deep_research(
                 return {"status": "clarification_needed", "message": clarification_question, "run_id": request.run_id}
             
             logger.info(f"Deep research completed successfully for run_id: {request.run_id} after clarification.")
+             # Deserializar formato de "override" para fuentes
+            final_sources = final_state.get("sources", [])
+            if isinstance(final_sources, dict) and final_sources.get("type") == "override":
+                final_sources = final_sources.get("value", [])
+            
             return {
                 "status": "success", 
                 "report": {
                     "final_report": final_state.get("final_report"),
-                    "sources": final_state.get("sources", []),
-                    "recommendations": final_state.get("recommendations", [])
+                    "sources": final_sources,
+                    "recommendations": final_state.get("recommendations", []),
+                    "visual_schema": final_state.get("visual_schema")
                 }
             }
         else:
@@ -161,3 +184,108 @@ async def clarify_deep_research(
     except Exception as e:
         logger.error(f"Error in /deep_research/clarify endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {e}")
+
+@router.post("/deep_research/export_pdf")
+async def export_deep_research_pdf(
+    request: DeepResearchPDFExportRequest,
+    llm_instance: BaseLanguageModel = Depends(get_llm_instance)
+):
+    """
+    Genera un PDF profesional a partir de los resultados de una investigación profunda
+    utilizando un LLM para formatear el contenido y la herramienta CreatePDFTool.
+    """
+    try:
+        # 1. Preparar las herramientas
+        pdf_tool = CreatePDFTool()
+        
+        # 2. Configurar el LLM con la herramienta
+        # Usamos bind_tools para que el LLM sepa que puede usar esta herramienta
+        llm_with_tools = llm_instance.bind_tools([pdf_tool])
+        
+        # 3. Construir el prompt para el LLM
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """Eres un experto en diseño y maquetación de documentos profesionales.
+Tu tarea es tomar la información de una investigación profunda y formatearla en un documento HTML elegante y bien estructurado.
+DEBES usar la herramienta 'create_pdf_tool' para generar el PDF final.
+
+INSTRUCCIONES DE FORMATO HTML:
+- Usa etiquetas HTML semánticas (h1, h2, ul, li, p, strong).
+- El título del documento ({title}) debe ser un <h1> centrado.
+- Incluye una sección 'Resumen Ejecutivo' (h2).
+- Si hay 'Hallazgos Clave', inclúyelos en una lista o secciones claras.
+- Si hay 'Recomendaciones', úsalas para una sección de 'Próximos Pasos' o 'Recomendaciones'.
+- Al final, agrega una sección 'Fuentes Consultadas' (h2) con una lista de enlaces.
+- Usa estilos CSS en línea sutiles si es necesario, pero la herramienta ya aplica estilos modernos.
+- NO agregues etiquetas <html>, <head> o <body>, solo el contenido del cuerpo (divs, h1, etc.), ya que la herramienta agrega la estructura base.
+
+INSTRUCCIONES DE HERRAMIENTA:
+- DEBES llamar a 'create_pdf_tool'.
+- Argumento 'is_html': True
+- Argumento 'content': Tu código HTML generado.
+- Argumento 'title': El título del reporte.
+- Argumento 'filename': Un nombre de archivo seguro basado en el título.
+"""),
+            ("user", """Genera el PDF para este reporte:
+
+Título: {title}
+
+Resumen del Reporte:
+{summary}
+
+Recomendaciones:
+{recommendations}
+
+Fuentes:
+{sources}
+
+Procede a generar el PDF.""")
+        ])
+        
+        # Formatear datos para el prompt
+        sources_text = "\n".join([f"- {s.get('title', 'Fuente')}: {s.get('url', '#')}" for s in request.sources])
+        recommendations_text = "\n".join([f"- {r}" for r in request.recommendations])
+        
+        logger.info(f"Invoking LLM to generate PDF for research: {request.title}")
+        
+        chain = prompt | llm_with_tools
+        
+        result = await chain.ainvoke({
+            "title": request.title,
+            "summary": request.final_report,
+            "recommendations": recommendations_text,
+            "sources": sources_text
+        })
+        
+        # 5. Procesar la respuesta (buscar tool call)
+        # El resultado será un AIMessage que puede contener tool_calls
+        if hasattr(result, 'tool_calls') and result.tool_calls:
+            tool_call = result.tool_calls[0] # Tomamos la primera llamada
+            if tool_call['name'] == 'create_pdf_tool':
+                tool_args = tool_call['args']
+                logger.info("LLM decided to call create_pdf_tool. Executing...")
+                
+                # Ejecutar la herramienta
+                tool_output = await pdf_tool._arun(**tool_args)
+                
+                # create_pdf_tool devuelve un dict con 'context_for_llm' y 'sources'
+                # En 'sources' viene el PDF generado con su URL
+                
+                if tool_output and "sources" in tool_output and tool_output["sources"]:
+                    pdf_source = tool_output["sources"][0]
+                    return {
+                        "status": "success",
+                        "url": pdf_source["url"],
+                        "filename": pdf_source["metadata"].get("filename", "document.pdf")
+                    }
+                else:
+                     # Fallback: a veces la herramienta falla silenciosamente o devuelve otro formato
+                     logger.error(f"Tool executed but returned unexpected format: {tool_output}")
+                     raise HTTPException(status_code=500, detail="Tool execution failed to return a PDF URL.")
+        
+        # Si no hubo llamada a herramienta
+        logger.warning("LLM did not call the CreatePDFTool. Result content: " + str(result.content))
+        return {"status": "error", "detail": "LLM failed to generate PDF call. It might have just replied with text."}
+
+    except Exception as e:
+        logger.error(f"Error generating PDF: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

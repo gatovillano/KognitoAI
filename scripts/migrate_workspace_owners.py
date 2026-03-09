@@ -8,8 +8,7 @@ from sqlalchemy.orm import sessionmaker
 # Add the project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from core.models import Workspace, WorkspacePermission
-from core.database import DATABASE_URL
+from core.database import Workspace, WorkspacePermission, database_url as DATABASE_URL
 
 def migrate_workspace_owners():
     """

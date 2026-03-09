@@ -109,8 +109,19 @@ async def get_user_settings(current_account_id: str = Depends(get_current_accoun
         llm_temperature=account.llm_temperature,
         llm_api_base=account.llm_api_base,
         fast_llm_model=account.fast_llm_model,
+        fast_llm_provider=account.fast_llm_provider,
         vision_llm_model=account.vision_llm_model,
-        use_prompt_tooling=account.use_prompt_tooling
+        vision_llm_provider=account.vision_llm_provider,
+        use_prompt_tooling=account.use_prompt_tooling,
+        tts_provider=account.tts_provider,
+        tts_model=account.tts_model,
+        tts_voice=account.tts_voice,
+        tts_speed=account.tts_speed,
+        tts_region=account.tts_region, # Añadido campo tts_region
+        embedding_provider=account.embedding_provider, # Añadido campo embedding_provider
+        embedding_model=account.embedding_model, # Añadido campo embedding_model
+        embedding_api_key_name=account.embedding_api_key_name, # Añadido campo embedding_api_key_name
+        embedding_api_base=account.embedding_api_base # Añadido campo embedding_api_base
     )
 
 @router.put("/users/me/settings", response_model=UserSettingsResponse, summary="Actualizar configuración del usuario actual")
@@ -151,8 +162,19 @@ async def update_user_settings(
         llm_temperature=account.llm_temperature,
         llm_api_base=account.llm_api_base,
         fast_llm_model=account.fast_llm_model,
+        fast_llm_provider=account.fast_llm_provider,
         vision_llm_model=account.vision_llm_model,
-        use_prompt_tooling=account.use_prompt_tooling
+        vision_llm_provider=account.vision_llm_provider,
+        use_prompt_tooling=account.use_prompt_tooling,
+        tts_provider=account.tts_provider,
+        tts_model=account.tts_model,
+        tts_voice=account.tts_voice,
+        tts_speed=account.tts_speed,
+        tts_region=account.tts_region, # Añadido campo tts_region
+        embedding_provider=account.embedding_provider, # Añadido campo embedding_provider
+        embedding_model=account.embedding_model, # Añadido campo embedding_model
+        embedding_api_key_name=account.embedding_api_key_name, # Añadido campo embedding_api_key_name
+        embedding_api_base=account.embedding_api_base # Añadido campo embedding_api_base
     )
 
 @router.put("/users/me/password", summary="Actualizar contraseña del usuario")

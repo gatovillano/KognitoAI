@@ -4,11 +4,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { DeepResearchAnalysisResult } from '@/lib/models';
-import { Zap, Link2, FileText, AlertTriangle } from 'lucide-react';
+import { Zap, Link2, FileText, AlertTriangle, LayoutDashboard } from 'lucide-react';
 import { SectionTTSButton } from './analysis-detail-dialog';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { Source, ContentPart, SourceButton } from '@/components/SourceButton';
 import { SourcesTab } from '@/components/SourcesTab';
+import { processMessageWithCitations, collectSourcesFromMessage } from '@/lib/chatUtils';
 
 interface DeepResearchAnalysisProps {
   analysis: DeepResearchAnalysisResult;
@@ -27,22 +28,35 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
   activeText
 }) => {
   // Hooks must be called at the top level, before any early returns.
-  const sources: Source[] = useMemo(() => {
-    if (!analysis || !Array.isArray(analysis.sources)) {
-      console.log('[DeepResearch] No analysis or sources found');
-      return [];
+  const { additionalSources: uniqueSources } = useMemo(() => {
+    if (!analysis) {
+      return { additionalSources: [] };
     }
-    console.log('[DeepResearch] Processing sources:', analysis.sources);
-    return analysis.sources.map(s => ({
-      id: s.id,
-      title: s.title,
-      url: s.url,
-      snippet: s.snippet || 'Sin descripción disponible',
-      type: (s.type as Source['type']) || 'web',
-      metadata: {},
-      name: s.title
+
+    // Las fuentes pueden venir de analysis.sources directamente.
+    // Soportamos tanto objetos Source normalizados (con type) como dicts crudos del grafo (sin type).
+    let rawSources: any[] = [];
+
+    if (Array.isArray(analysis.sources) && analysis.sources.length > 0) {
+      rawSources = analysis.sources;
+    } else {
+      console.log('[DeepResearch] No se encontraron fuentes en analysis.sources:', analysis.sources);
+      return { additionalSources: [] };
+    }
+
+    // Normalizar: asignar type='web' si no tiene el campo type, para que SourceButton lo procese correctamente
+    const normalizedSources = rawSources.map((s: any) => ({
+      ...s,
+      type: s.type || 'web',
+      snippet: s.snippet || s.content || '',
     }));
+
+    console.log(`[DeepResearch] Fuentes normalizadas: ${normalizedSources.length}`, normalizedSources);
+
+    // Usar collectSourcesFromMessage para deduplicar
+    return collectSourcesFromMessage(normalizedSources as any[]);
   }, [analysis]);
+
 
   const reportContent = useMemo(() => {
     if (!analysis) return '';
@@ -51,47 +65,8 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
   }, [analysis]);
 
   const { contentParts } = useMemo(() => {
-    const processMessageWithCitations = (text: string, allSources: Source[]): { contentParts: ContentPart[] } => {
-      if (!allSources || allSources.length === 0) {
-        console.log('[DeepResearch] No sources available for citation processing');
-        return { contentParts: [{ type: 'text', content: text }] };
-      }
-
-      console.log('[DeepResearch] Processing citations in text. Available sources:', allSources.length);
-      const contentParts: ContentPart[] = [];
-      let lastIndex = 0;
-      const citationRegex = /\[(\d+)\]/g;
-      let match: RegExpExecArray | null;
-      let citationsFound = 0;
-
-      while ((match = citationRegex.exec(text)) !== null) {
-        const citationNumber = parseInt(match[1], 10);
-        const fullMatch = match[0];
-        const index = match.index!;
-        const source = allSources.find(s => s.id == citationNumber);
-
-        if (source) {
-          citationsFound++;
-          console.log(`[DeepResearch] Found citation [${citationNumber}] with source:`, source.title);
-          if (index > lastIndex) {
-            contentParts.push({ type: 'text', content: text.substring(lastIndex, index) });
-          }
-          contentParts.push({ type: 'citation', source: source, citationNumber: citationNumber });
-          lastIndex = index + fullMatch.length;
-        } else {
-          console.warn(`[DeepResearch] Citation [${citationNumber}] not found in sources`);
-        }
-      }
-
-      console.log(`[DeepResearch] Total citations found and processed: ${citationsFound}`);
-      if (lastIndex < text.length) {
-        contentParts.push({ type: 'text', content: text.substring(lastIndex) });
-      }
-      return { contentParts };
-    };
-
-    return processMessageWithCitations(reportContent, sources);
-  }, [reportContent, sources]);
+    return processMessageWithCitations(reportContent, uniqueSources);
+  }, [reportContent, uniqueSources]);
 
   if (!analysis) {
     return (
@@ -104,36 +79,53 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
   }
 
   const gapColors = {
-    cardBg: 'bg-fuchsia-50/50 border-fuchsia-100 dark:bg-fuchsia-900/10 dark:border-fuchsia-900/50',
-    cardTitle: 'text-fuchsia-900 dark:text-fuchsia-100',
-    icon: 'text-fuchsia-600',
+    cardBg: 'bg-card border-border/40 dark:bg-card/40 dark:border-border/20',
+    cardTitle: 'text-foreground',
+    icon: 'text-primary',
   };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2 mb-2">
-        <FileText className={`w-6 h-6 ${gapColors.icon}`} />
-        <h3 className="text-2xl font-bold">Investigación Profunda de Brechas</h3>
+        <div className="p-2 rounded-xl bg-primary/10">
+          <FileText className={`w-6 h-6 ${gapColors.icon}`} />
+        </div>
+        <div>
+          <h3 className="text-2xl font-black tracking-tight">Investigación Profunda</h3>
+          <p className="text-xs text-muted-foreground uppercase tracking-widest font-bold">Análisis Detallado Basado en Evidencia</p>
+        </div>
       </div>
 
       <Tabs defaultValue="report" className="w-full">
-        <TabsList className="grid w-full grid-cols-2 mb-8">
-          <TabsTrigger value="report" className="gap-2">
-            <FileText className="w-4 h-4" />
-            <span className="hidden sm:inline">Reporte</span>
+        <TabsList className="grid w-full grid-cols-3 mb-8 h-14 bg-muted/40 p-1.5 rounded-2xl border border-border/50 backdrop-blur-md">
+          <TabsTrigger value="report" className="gap-2.5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-primary transition-all duration-300">
+            <FileText className="w-4.5 h-4.5" />
+            <span className="font-bold">Informe Detallado</span>
           </TabsTrigger>
-          <TabsTrigger value="sources" className="gap-2">
-            <Link2 className="w-4 h-4" />
-            <span className="hidden sm:inline">Fuentes</span>
+          <TabsTrigger value="schema" className="gap-2.5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-primary transition-all duration-300">
+            <LayoutDashboard className="w-4.5 h-4.5" />
+            <span className="font-bold">Esquema Visual</span>
+          </TabsTrigger>
+          <TabsTrigger value="sources" className="gap-2.5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-primary transition-all duration-300">
+            <Link2 className="w-4.5 h-4.5" />
+            <span className="font-bold">Fuentes</span>
+            {uniqueSources.length > 0 && (
+              <Badge variant="secondary" className="ml-1 px-1.5 h-5 min-w-5 flex items-center justify-center rounded-full text-[10px] bg-primary/10 text-primary border-none text-xs">
+                {uniqueSources.length}
+              </Badge>
+            )}
           </TabsTrigger>
         </TabsList>
 
         {/* TAB: REPORTE */}
-        <TabsContent value="report" className="space-y-4 animate-in fade-in-50 duration-500">
+        <TabsContent value="report" className="space-y-4 animate-in fade-in-50 slide-in-from-left-4 duration-500">
           {reportContent ? (
-            <Card className={`${gapColors.cardBg} border-none shadow-md`}>
-              <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                <CardTitle className={`text-lg font-bold ${gapColors.cardTitle}`}>Informe Detallado</CardTitle>
+            <Card className={`${gapColors.cardBg} border shadow-2xl shadow-primary/5 rounded-[2.5rem] overflow-hidden`}>
+              <CardHeader className="pb-4 flex flex-row items-center justify-between bg-muted/20 border-b border-border/10 px-8 py-6">
+                <div className="flex items-center gap-3">
+                  <div className="h-3 w-3 rounded-full bg-primary shadow-[0_0_10px_rgba(var(--primary),0.5)] animate-pulse" />
+                  <CardTitle className={`text-sm font-black uppercase tracking-[0.2em] ${gapColors.cardTitle}`}>Análisis Ejecutivo</CardTitle>
+                </div>
                 <SectionTTSButton
                   text={reportContent}
                   play={play}
@@ -142,21 +134,23 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
                   activeText={activeText}
                 />
               </CardHeader>
-              <CardContent>
-                <div className="text-sm text-foreground leading-relaxed">
-                  <MarkdownRenderer contentParts={contentParts} fontSize="text-sm" />
+              <CardContent className="p-8 sm:p-10">
+                <div className="text-foreground leading-relaxed prose prose-slate dark:prose-invert max-w-none">
+                  <MarkdownRenderer contentParts={contentParts} fontSize="text-sm sm:text-base lg:text-lg" />
                 </div>
 
                 {/* Sección de Fuentes al final del reporte */}
-                {Array.isArray(sources) && sources.length > 0 && (
-                  <div className="mt-6 pt-4 border-t border-border/10">
-                    <div className="flex items-center gap-2 mb-3">
-                      <Link2 className="h-3 w-3 text-primary" />
-                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Fuentes y Referencias</span>
+                {uniqueSources.length > 0 && (
+                  <div className="mt-12 pt-8 border-t border-border/10">
+                    <div className="flex items-center gap-2 mb-6">
+                      <div className="p-1.5 rounded-lg bg-primary/10">
+                        <Link2 className="h-4 w-4 text-primary" />
+                      </div>
+                      <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">Referencias de Investigación</span>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      {sources.map((source, idx) => (
-                        <SourceButton key={idx} source={source} citationNumber={source.id as number} />
+                    <div className="flex flex-wrap gap-3">
+                      {uniqueSources.map((source, idx) => (
+                        <SourceButton key={idx} source={source} citationNumber={idx + 1} />
                       ))}
                     </div>
                   </div>
@@ -164,21 +158,26 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
               </CardContent>
             </Card>
           ) : (
-            <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-muted rounded-xl bg-muted/30">
-              <FileText className="w-10 h-10 text-muted-foreground mb-3 opacity-50" />
-              <p className="text-muted-foreground font-medium">No hay contenido de informe disponible.</p>
-              <p className="text-xs text-muted-foreground mt-1">Es posible que el análisis no haya generado un reporte final.</p>
+            <div className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-muted rounded-3xl bg-muted/10">
+              <div className="bg-background p-4 rounded-full shadow-sm mb-4">
+                <FileText className="w-10 h-10 text-muted-foreground opacity-20" />
+              </div>
+              <p className="text-muted-foreground font-bold">No hay contenido de informe disponible</p>
+              <p className="text-xs text-muted-foreground mt-1">El análisis está vacío o no generó un reporte final.</p>
             </div>
           )}
 
-          {/* @ts-ignore: kai_synthesis might exist on runtime object even if not in type definition yet */}
+          {/* @ts-ignore */}
           {analysis.kai_synthesis && (
-            <div className="mt-6 p-5 rounded-xl bg-gradient-to-br from-fuchsia-500/10 to-purple-500/10 border border-fuchsia-500/20 shadow-inner">
-              <h4 className="text-sm font-bold uppercase tracking-wider text-fuchsia-600 dark:text-fuchsia-400 mb-2 flex items-center gap-2">
+            <div className="mt-8 p-6 rounded-3xl bg-gradient-to-br from-primary/5 via-fuchsia-500/5 to-purple-500/5 border border-primary/20 shadow-xl relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <Zap className="w-12 h-12 text-primary" />
+              </div>
+              <h4 className="text-sm font-black uppercase tracking-widest text-primary mb-3 flex items-center gap-2">
                 <Zap className="w-4 h-4" />
-                Síntesis de KAI
+                Perspectiva de Inteligencia (KAI)
               </h4>
-              <p className="text-sm italic text-foreground/90 leading-relaxed">
+              <p className="text-sm sm:text-base italic text-foreground/80 leading-relaxed relative z-10">
                 {/* @ts-ignore */}
                 {analysis.kai_synthesis}
               </p>
@@ -186,9 +185,129 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
           )}
         </TabsContent>
 
+        {/* TAB: ESQUEMA */}
+        <TabsContent value="schema" className="space-y-4 animate-in fade-in-50 slide-in-from-bottom-6 duration-700">
+          {analysis.visual_schema ? (
+            <div className="relative group">
+              {/* Fondo decorativo de 'Lienzo' */}
+              <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:20px_20px] opacity-[0.15] pointer-events-none rounded-[3rem]" />
+
+              <div className="rounded-[3rem] overflow-hidden border border-border/40 shadow-2xl bg-card/80 backdrop-blur-sm min-h-[500px] flex flex-col relative z-10">
+                <div className="bg-muted/30 border-b border-border/10 px-8 py-4 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <LayoutDashboard className="w-4 h-4 text-primary" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Lienzo Esquema Visual</span>
+                  </div>
+                  <div className="flex gap-1">
+                    <div className="w-2 h-2 rounded-full bg-red-400/20" />
+                    <div className="w-2 h-2 rounded-full bg-amber-400/20" />
+                    <div className="w-2 h-2 rounded-full bg-green-400/20" />
+                  </div>
+                </div>
+
+                <div
+                  className="visual-schema-content p-8 sm:p-12 overflow-auto max-h-[75vh] custom-scrollbar selection:bg-primary/20"
+                  dangerouslySetInnerHTML={{ __html: analysis.visual_schema }}
+                />
+              </div>
+
+              <style jsx global>{`
+                .visual-schema-content {
+                  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+                  color: inherit;
+                  line-height: 1.6;
+                }
+                .visual-schema-content img {
+                  max-width: 100%;
+                  height: auto;
+                  border-radius: 1.5rem;
+                  box-shadow: 0 10px 30px -10px rgba(0,0,0,0.1);
+                  margin: 2rem auto;
+                  display: block;
+                }
+                .visual-schema-content table {
+                  width: 100%;
+                  border-collapse: separate;
+                  border-spacing: 0;
+                  margin: 2rem 0;
+                  border: 1px solid rgba(128, 128, 128, 0.1);
+                  border-radius: 1rem;
+                  overflow: hidden;
+                  background: rgba(var(--card), 0.5);
+                }
+                .visual-schema-content th {
+                  background: rgba(var(--primary), 0.05);
+                  font-weight: 800;
+                  text-transform: uppercase;
+                  font-size: 0.75rem;
+                  letter-spacing: 0.05em;
+                  padding: 1rem;
+                  border-bottom: 2px solid rgba(var(--primary), 0.1);
+                  text-align: left;
+                }
+                .visual-schema-content td {
+                  padding: 1rem;
+                  border-bottom: 1px solid rgba(128, 128, 128, 0.05);
+                  font-size: 0.875rem;
+                }
+                .visual-schema-content tr:last-child td {
+                  border-bottom: none;
+                }
+                .visual-schema-content h1, .visual-schema-content h2, .visual-schema-content h3 {
+                  font-weight: 900;
+                  letter-spacing: -0.02em;
+                  margin-top: 2.5rem;
+                  margin-bottom: 1rem;
+                  color: hsl(var(--foreground));
+                }
+                .visual-schema-content h1 { font-size: 2rem; border-left: 4px solid hsl(var(--primary)); padding-left: 1rem; }
+                .visual-schema-content h2 { font-size: 1.5rem; }
+                .visual-schema-content h3 { font-size: 1.25rem; }
+                
+                .visual-schema-content p {
+                  margin-bottom: 1.25rem;
+                  opacity: 0.9;
+                }
+                
+                .visual-schema-content ul, .visual-schema-content ol {
+                  margin-bottom: 1.5rem;
+                  padding-left: 1.5rem;
+                }
+                .visual-schema-content li {
+                  margin-bottom: 0.5rem;
+                }
+                
+                /* Estilo de lienzo técnico */
+                .custom-scrollbar::-webkit-scrollbar {
+                  width: 6px;
+                  height: 6px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-track {
+                  background: transparent;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb {
+                  background: hsl(var(--primary) / 0.1);
+                  border-radius: 10px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                  background: hsl(var(--primary) / 0.3);
+                }
+              `}</style>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-muted rounded-3xl bg-muted/10">
+              <div className="bg-background p-4 rounded-full shadow-sm mb-4">
+                <LayoutDashboard className="w-10 h-10 text-muted-foreground opacity-20" />
+              </div>
+              <p className="text-muted-foreground font-bold">No hay esquema visual disponible</p>
+              <p className="text-xs text-muted-foreground mt-1">Este análisis no incluye una representación gráfica.</p>
+            </div>
+          )}
+        </TabsContent>
+
         {/* TAB: FUENTES */}
         <TabsContent value="sources" className="space-y-6 animate-in fade-in-50 duration-500">
-          <SourcesTab sources={sources} />
+          <SourcesTab sources={uniqueSources} />
         </TabsContent>
       </Tabs>
     </div>
