@@ -23,29 +23,29 @@ class AgentLogger:
         self.logger = logging.getLogger(name)
 
     def node_start(self, node_name: str, account_id: str):
-        self.logger.info(f"{Colors.BOLD}{Colors.CYAN}⟳ [GRAFO]{Colors.ENDC} Nodo: {Colors.BOLD}{node_name}{Colors.ENDC} (Cuenta: {account_id})")
+        self.logger.debug(f"{Colors.BOLD}{Colors.CYAN}⟳ [GRAFO]{Colors.ENDC} Nodo: {Colors.BOLD}{node_name}{Colors.ENDC} (Cuenta: {account_id})")
 
     def model_start(self, model_name: str):
-        self.logger.info(f"{Colors.GREEN}🤖 [LLM]{Colors.ENDC} Generando con: {Colors.BOLD}{model_name}{Colors.ENDC}")
+        self.logger.debug(f"{Colors.GREEN}🤖 [LLM]{Colors.ENDC} Generando con: {Colors.BOLD}{model_name}{Colors.ENDC}")
 
     def tool_call(self, tool_name: str, args: Any):
         # Truncar argumentos largos para limpieza
         args_str = json.dumps(args, ensure_ascii=False)
         if len(args_str) > 150:
             args_str = args_str[:147] + "..."
-        self.logger.info(f"{Colors.BLUE}🛠️ [TOOL]{Colors.ENDC} Ejecutando: {Colors.BOLD}{tool_name}{Colors.ENDC} | Args: {args_str}")
+        self.logger.debug(f"{Colors.BLUE}🛠️ [TOOL]{Colors.ENDC} Ejecutando: {Colors.BOLD}{tool_name}{Colors.ENDC} | Args: {args_str}")
 
     def tool_result(self, tool_name: str, success: bool, error_msg: Optional[str] = None):
         if success:
-            self.logger.info(f"{Colors.GREEN}✅ [TOOL]{Colors.ENDC} Completado: {tool_name}")
+            self.logger.debug(f"{Colors.GREEN}✅ [TOOL]{Colors.ENDC} Completado: {tool_name}")
         else:
             self.logger.error(f"{Colors.FAIL}❌ [TOOL]{Colors.ENDC} Falló: {tool_name} | Error: {error_msg}")
 
     def inference(self, tool_name: str, arg_name: str, value: str):
-        self.logger.info(f"{Colors.WARNING}💡 [AI]{Colors.ENDC} Inferido {arg_name} para {tool_name}: {value[:50]}...")
+        self.logger.debug(f"{Colors.WARNING}💡 [AI]{Colors.ENDC} Inferido {arg_name} para {tool_name}: {value[:50]}...")
 
     def info(self, msg: str):
-        self.logger.info(f"ℹ️ {msg}")
+        self.logger.debug(f"ℹ️ {msg}")
 
     def warning(self, msg: str):
         self.logger.warning(f"⚠️ {msg}")

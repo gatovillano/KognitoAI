@@ -3,11 +3,11 @@
 import json
 import logging
 import asyncio
-from typing import Any, Type, List, Optional, cast
+from typing import Any, Type, List, Optional, Dict, cast
 import re
 
 from langchain_core.tools import Tool
-from core.citation_models import ToolOutputWithSources, Source # <-- Añadir Source aquí
+from core.citation_models import ToolOutputWithSources, Source, SourceType
 
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
@@ -53,7 +53,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
     telegram_id: Optional[str] = Field(None, description="El ID del usuario de Telegram, si la solicitud proviene de Telegram.")
     thread_id: Optional[str] = Field(None, description="El ID del hilo de conversación, si aplica.")
 
-    def _extract_urls(self, search_results: List[Source]) -> List[str]:
+    def _extract_urls(self, search_results: List[Dict]) -> List[str]:
         """Extracts URLs from a list of Source objects."""
         urls = [source['url'] for source in search_results if 'url' in source and source['url']]
         logger.info(f"Extracted {len(urls)} URLs from search results: {urls}")
@@ -110,7 +110,7 @@ class ComprehensiveWebAnalysisTool(BaseTool):
                 logger.warning("Web search did not yield results or failed. Returning raw search results.")
                 # Si no hay resultados de búsqueda, no tiene sentido continuar el bucle.
                 if not combined_web_content_accumulated.strip():
-                    return search_results_obj.context_for_llm
+                    return search_results_obj.get('context_for_llm', '')
                 else:
                     break # Si ya hay contenido acumulado, intentar finalizar con lo que se tiene.
 
@@ -347,7 +347,26 @@ class ComprehensiveWebAnalysisTool(BaseTool):
             logger.error(f"Error saving Comprehensive Web Analysis to DB: {e}", exc_info=True)
             # We don't fail the tool execution just because DB save failed, but we log it.
 
-        return final_report
+        # Return the final report with sources included as ToolOutputWithSources
+        # Convertir las URLs a objetos Source
+        source_objects = []
+        for i, url in enumerate(urls_to_scrape_accumulated):
+            display_name = url.split("//")[1].split("/")[0] if "//" in url else url
+            source_objects.append(Source(
+                id=i + 1,
+                title=display_name,
+                url=url,
+                snippet=f"Fuente analizada en la investigación web sobre: {original_query[:100]}",
+                type=SourceType.WEB,
+                metadata={"analysis_type": "comprehensive_web_analysis"}
+            ))
+        
+        # Retornar como ToolOutputWithSources
+        return ToolOutputWithSources(
+            context_for_llm=final_report,
+            sources=source_objects,
+            summary=final_report[:500] + "..." if len(final_report) > 500 else final_report
+        )
 
     def _run(self, **kwargs: Any) -> str:
         """Redirige la ejecución síncrona al método asíncrono."""

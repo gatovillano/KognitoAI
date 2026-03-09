@@ -1,15 +1,21 @@
 // src/lib/chatUtils.ts
-// Utility functions for chat components to handle citations and sources processing
+// Utility functions for chat components to handle citations and sources processing.
+// Triggering a rebuild to solve a potential cache issue.
 
 import { Source, ContentPart } from '@/components/SourceButton';
 
-export const processMessageWithCitations = (text: string, allSources: Source[] | undefined): {
+export const processMessageWithCitations = (text: string | any[], allSources: Source[] | undefined): {
   contentParts: ContentPart[];
+  citedSources: Source[];
   uncitedSources: Source[]
 } => {
-  if (!allSources || allSources.length === 0) {
-    return {
-      contentParts: [{ type: 'text', content: text }],
+  // Normalizar el texto a string
+  const textString = Array.isArray(text)
+    ? text.join('\n\n')
+    : (typeof text === 'string' ? text : JSON.stringify(text));
+
+  if (!allSources || allSources.length === 0) {    return {
+      citedSources: [],
       uncitedSources: []
     };
   }
@@ -22,7 +28,7 @@ export const processMessageWithCitations = (text: string, allSources: Source[] |
   const citationRegex = /\[(\d+)\]/g;
   let match: RegExpExecArray | null;
 
-  while ((match = citationRegex.exec(text)) !== null) {
+  while ((match = citationRegex.exec(textString)) !== null) {
     const citationNumber = parseInt(match[1], 10);
     const fullMatch = match[0];
     const index = match.index!;
@@ -34,7 +40,7 @@ export const processMessageWithCitations = (text: string, allSources: Source[] |
     if (source) {
       // Añadir el texto antes de la cita
       if (index > lastIndex) {
-        contentParts.push({ type: 'text', content: text.substring(lastIndex, index) });
+        contentParts.push({ type: 'text', content: textString.substring(lastIndex, index) });
       }
 
       // Añadir la cita como un componente
@@ -46,13 +52,14 @@ export const processMessageWithCitations = (text: string, allSources: Source[] |
   }
 
   // Añadir cualquier texto restante después de la última cita
-  if (lastIndex < text.length) {
-    contentParts.push({ type: 'text', content: text.substring(lastIndex) });
+  if (lastIndex < textString.length) {
+    contentParts.push({ type: 'text', content: textString.substring(lastIndex) });
   }
 
+  const citedSources = allSources.filter(s => citedSourceIds.has(String(s.id)));
   const uncitedSources = allSources.filter(s => !citedSourceIds.has(String(s.id)));
 
-  return { contentParts, uncitedSources };
+  return { contentParts, citedSources, uncitedSources };
 };
 
 // Helper function to collect and deduplicate sources from various message fields

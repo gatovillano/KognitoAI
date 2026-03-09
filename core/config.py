@@ -78,7 +78,7 @@ class Config:
         self.llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", 0.7))
         self.ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text:q4_K_M") # Modelo de embedding de Ollama cuantizado
         self.ollama_api_url: str = os.getenv("OLLAMA_API_URL", "http://host.docker.internal:11434") # URL por defecto para acceder al host desde Docker
-        self.llm_request_timeout: int = int(os.getenv("LLM_REQUEST_TIMEOUT", 120)) # Nuevo: Tiempo de espera para las solicitudes al LLM en segundos
+        self.llm_request_timeout: int = int(os.getenv("LLM_REQUEST_TIMEOUT", 300)) # Nuevo: Tiempo de espera para las solicitudes al LLM en segundos
         self.llm_max_retries: int = int(os.getenv("LLM_MAX_RETRIES", 3)) # Nuevo: Número máximo de reintentos para llamadas al LLM
         
         # --- Configuración de Rate Limiting y Tokens ---
@@ -98,6 +98,9 @@ class Config:
         
         # URL de la WebApp (el panel de control).
         self.webapp_url: Optional[str] = os.getenv("TELEGRAM_WEBAPP_URL")
+        
+        # URL del Frontend (para generar enlaces compartidos, etc.)
+        self.frontend_url: Optional[str] = os.getenv("FRONTEND_URL")
         
         # IDs de administrador para comandos restringidos (separados por comas).
         admin_ids_str = os.getenv("ADMIN_TELEGRAM_IDS", "")
@@ -190,9 +193,7 @@ class Config:
         self.mistral_ocr_api_url: Optional[str] = os.getenv("MISTRAL_OCR_API_URL")
         self.mistral_ocr_api_key: Optional[str] = os.getenv("MISTRAL_OCR_API_KEY")
 
-        # OnlyOffice (Opcional)
-        self.onlyoffice_url: Optional[str] = os.getenv("ONLYOFFICE_URL")
-        self.onlyoffice_jwt_secret: str = os.getenv("ONLYOFFICE_JWT_SECRET", "your-secret-key")
+
 
         # Modelo de Visión Multimodal (OCR y análisis de imágenes)
         self.vision_model: str = os.getenv("VISION_MODEL", "openrouter/mistralai/mistral-small-3.1-24b-instruct:free")

@@ -7,19 +7,19 @@ echo "🔄 Reiniciando el servicio core con el nuevo archivo .env..."
 
 # Detener el servicio core
 echo "🛑 Deteniendo el servicio core..."
-docker-compose stop core
+docker compose stop core
 
 # Reconstruir el servicio core (esto copiará el nuevo archivo .env)
 echo "🔨 Reconstruyendo el servicio core..."
-docker-compose build core
+docker compose build core
 
 # Iniciar el servicio core
 echo "▶️ Iniciando el servicio core..."
-docker-compose up -d core
+docker compose up -d core
 
 # Verificar que el servicio esté corriendo
 echo "✅ Verificando que el servicio core esté corriendo..."
-docker-compose ps core
+docker compose ps core
 
 echo "🎉 Servicio core reiniciado exitosamente con el nuevo archivo .env"
 echo "📝 Los cambios en el modelo LLM deberían estar activos ahora"

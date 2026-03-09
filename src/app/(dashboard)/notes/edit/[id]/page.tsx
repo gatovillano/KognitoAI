@@ -235,9 +235,7 @@ export default function EditNotePage() {
               <Users className="mr-2 h-4 w-4" /> {isShared ? 'Compartido' : 'Compartir'}
             </Button>
           )}
-          <Button variant="outline" onClick={() => router.push(`/notes/onlyoffice/${noteId}`)}>
-            <Save className="mr-2 h-4 w-4" /> OnlyOffice
-          </Button>
+
           <Button onClick={handleSave}>
             <Save className="mr-2 h-4 w-4" /> Guardar Nota
           </Button>

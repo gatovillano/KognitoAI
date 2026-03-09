@@ -153,23 +153,293 @@
   }
 }
 
-/* Aggressive override for strong, code, and headings in dark mode */
-.dark strong,
-.dark code {
-  color: hsl(var(--card-foreground)) !important;
-  background-color: transparent !important;
+/* --- ESTILOS PREMIUM PARA MARKDOWN (.prose) --- */
+.prose {
+  /* Tipografía general */
+  line-height: 1.8;
+  color: hsl(var(--foreground) / 0.9);
 }
 
-.dark .prose h1,
-.dark .prose h2,
-.dark .prose h3,
-.dark .prose h4 {
-  color: hsl(var(--card-foreground)) !important;
+/* Encabezados y títulos con peso y diseño moderno */
+.prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+  color: hsl(var(--foreground));
+  font-weight: 700;
+  margin-top: 1.8em;
+  margin-bottom: 0.8em;
+  letter-spacing: -0.02em;
 }
 
+.prose h1 { 
+  font-size: 2.25em; 
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.prose h2 { 
+  font-size: 1.75em; 
+  border-bottom: 1px solid hsl(var(--border) / 0.5);
+  padding-bottom: 0.3em;
+}
+.prose h3 { font-size: 1.35em; color: hsl(var(--primary)); }
+
+/* Listas más limpias y espaciadas */
+.prose ul, .prose ol {
+  padding-left: 1.5em;
+  margin-top: 0.8em;
+  margin-bottom: 0.8em;
+}
+.prose li {
+  margin-bottom: 0.4em;
+  position: relative;
+}
+.prose li::marker {
+  color: hsl(var(--primary));
+  font-weight: 600;
+}
+
+/* Citas (Blockquotes) con diseño Glassmorphism elegante */
+.prose blockquote {
+  margin: 1.5em 0;
+  padding: 1em 1.5em;
+  border-left: 4px solid hsl(var(--primary));
+  background: hsl(var(--card) / 0.4);
+  backdrop-filter: blur(8px);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  color: hsl(var(--foreground) / 0.8);
+  font-style: italic;
+  box-shadow: 0 4px 6px -1px hsl(var(--shadow-soft) / 0.05);
+}
+.prose blockquote p:first-of-type { margin-top: 0; }
+.prose blockquote p:last-of-type { margin-bottom: 0; }
+
+/* Enlaces con subrayado interactivo animado */
+.prose a {
+  color: hsl(var(--primary));
+  text-decoration: none;
+  font-weight: 500;
+  position: relative;
+  transition: color 0.2s ease;
+}
+.prose a::after {
+  content: '';
+  position: absolute;
+  width: 100%;
+  transform: scaleX(0);
+  height: 2px;
+  bottom: -2px;
+  left: 0;
+  background-color: hsl(var(--primary));
+  transform-origin: bottom right;
+  transition: transform 0.3s ease-out;
+}
+.prose a:hover {
+  color: hsl(var(--primary) / 0.8);
+}
+.prose a:hover::after {
+  transform: scaleX(1);
+  transform-origin: bottom left;
+}
+
+/* Tablas con bordes redondeados, estilo sin aristas duras y filas alternas */
+.prose table {
+  width: 100%;
+  margin: 2em 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-soft);
+  border: 1px solid hsl(var(--border) / 0.5);
+  background: hsl(var(--card));
+}
+.prose thead {
+  background: hsl(var(--muted) / 0.8);
+}
+.prose th {
+  padding: 1em;
+  font-weight: 600;
+  text-align: left;
+  border-bottom: 2px solid hsl(var(--border));
+  color: hsl(var(--foreground));
+}
+.prose td {
+  padding: 0.85em 1em;
+  border-bottom: 1px solid hsl(var(--border) / 0.3);
+  vertical-align: top;
+}
+.prose tr:last-child td {
+  border-bottom: none;
+}
+.prose tbody tr:nth-child(even) {
+  background: hsl(var(--muted) / 0.3);
+}
+.prose tbody tr:hover {
+  background: hsl(var(--primary) / 0.05);
+  transition: background-color 0.2s ease;
+}
+
+/* Negritas e Itálicas más prominentes pero sutiles */
+.prose strong {
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+/* Estilos de código en línea */
+.prose :not(pre) > code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.85em;
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+  padding: 0.2em 0.4em;
+  border-radius: 0.3em;
+  font-weight: 500;
+  border: 1px solid hsl(var(--primary) / 0.2);
+}
+
+/* Modo oscuro explícito para asegurar consistencia */
+.dark .prose {
+  color: hsl(var(--foreground));
+}
+.dark .prose h1, .dark .prose h2, .dark .prose h3, .dark .prose h4 {
+  color: hsl(var(--card-foreground));
+}
 .dark .prose a {
-  color: #7dd3fc !important;
+  color: #7dd3fc;
 }
+.dark .prose a::after {
+  background-color: #7dd3fc;
+}
+.dark .prose blockquote {
+  background: hsl(var(--muted) / 0.5);
+  border-left-color: #7dd3fc;
+}
+.dark .prose :not(pre) > code {
+  background: hsl(var(--muted));
+  color: #e2e8f0;
+  border-color: hsl(var(--border));
+}
+
+/* --- CORRECCIÓN DE TEMAS PARA HTML DEL AGENTE (Premium HTML) --- */
+.premium-html-content {
+  transition: all 0.3s ease;
+}
+
+.dark .premium-html-content {
+  color-scheme: dark;
+}
+
+/* 1. ESTRATEGIA CATCH-ALL: Fondos Claros y Medios (Cualquier color 50 a 400 de Tailwind) */
+.dark .premium-html-content [class*="bg-"][class$="-50"],
+.dark .premium-html-content [class*="bg-"][class$="-100"],
+.dark .premium-html-content [class*="bg-"][class$="-200"],
+.dark .premium-html-content [class*="bg-"][class$="-300"],
+.dark .premium-html-content [class*="bg-"][class$="-400"],
+.dark .premium-html-content [class*="bg-"][class*="-50/"],
+.dark .premium-html-content [class*="bg-"][class*="-100/"],
+.dark .premium-html-content [class*="bg-"][class*="-200/"],
+.dark .premium-html-content [class*="bg-"][class*="-300/"],
+.dark .premium-html-content [class*="bg-"][class*="-400/"],
+.dark .premium-html-content .bg-white,
+.dark .premium-html-content .bg-card,
+.dark .premium-html-content [style*="background"] {
+  background-color: hsl(var(--card) / 0.85) !important;
+  color: hsl(var(--foreground)) !important;
+  border-color: hsl(var(--border) / 0.4) !important;
+  backdrop-filter: blur(4px);
+}
+
+/* 2. ESTRATEGIA CATCH-ALL: Textos Medios y Oscuros (Cualquier color 500 a 950 de Tailwind) */
+.dark .premium-html-content [class*="text-"][class$="-500"],
+.dark .premium-html-content [class*="text-"][class$="-600"],
+.dark .premium-html-content [class*="text-"][class$="-700"],
+.dark .premium-html-content [class*="text-"][class$="-800"],
+.dark .premium-html-content [class*="text-"][class$="-900"],
+.dark .premium-html-content [class*="text-"][class$="-950"],
+.dark .premium-html-content [class*="text-"][class*="-500/"],
+.dark .premium-html-content [class*="text-"][class*="-600/"],
+.dark .premium-html-content [class*="text-"][class*="-700/"],
+.dark .premium-html-content [class*="text-"][class*="-800/"],
+.dark .premium-html-content [class*="text-"][class*="-900/"],
+.dark .premium-html-content [class*="text-"][class*="-950/"],
+.dark .premium-html-content .text-black,
+.dark .premium-html-content [style*="color"] {
+  color: hsl(var(--foreground)) !important;
+}
+
+/* 3. ESTRATEGIA CATCH-ALL: Todos los Bordes */
+.dark .premium-html-content [class*="border-"][class$="-50"],
+.dark .premium-html-content [class*="border-"][class$="-100"],
+.dark .premium-html-content [class*="border-"][class$="-200"],
+.dark .premium-html-content [class*="border-"][class$="-300"],
+.dark .premium-html-content [class*="border-"][class$="-400"],
+.dark .premium-html-content [class*="border-"][class$="-500"],
+.dark .premium-html-content [class*="border-"][class$="-600"],
+.dark .premium-html-content [class*="border-"][class$="-700"],
+.dark .premium-html-content [class*="border-"][class$="-800"],
+.dark .premium-html-content [class*="border-"][class$="-900"],
+.dark .premium-html-content .border-black,
+.dark .premium-html-content .border-white {
+  border-color: hsl(var(--border) / 0.5) !important;
+}
+
+/* 4. Rescate de Iconos y SVGs que el agente manda con colores fijos */
+.dark .premium-html-content svg path[fill="#000"],
+.dark .premium-html-content svg path[fill="black"],
+.dark .premium-html-content svg path[stroke="#000"],
+.dark .premium-html-content svg path[stroke="black"] {
+  fill: hsl(var(--primary)) !important;
+  stroke: hsl(var(--primary)) !important;
+}
+
+/* 5. Asegurar legibilidad en Tablas y otros elementos complejos */
+.dark .premium-html-content table, 
+.dark .premium-html-content thead, 
+.dark .premium-html-content tr, 
+.dark .premium-html-content td {
+  background-color: transparent !important;
+  border-color: hsl(var(--border) / 0.4) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+.dark .premium-html-content thead tr {
+  background-color: hsl(var(--muted) / 0.6) !important;
+}
+
+.dark .premium-html-content tr:nth-child(even) {
+  background-color: hsl(var(--muted) / 0.3) !important;
+}
+
+/* 6. Variables de Prose para coherencia visual */
+.dark .premium-html-content.prose {
+  --tw-prose-body: hsl(var(--foreground));
+  --tw-prose-headings: hsl(var(--foreground));
+  --tw-prose-lead: hsl(var(--muted-foreground));
+  --tw-prose-links: hsl(var(--primary));
+  --tw-prose-bold: hsl(var(--foreground));
+  --tw-prose-counters: hsl(var(--muted-foreground));
+  --tw-prose-bullets: hsl(var(--muted-foreground));
+  --tw-prose-hr: hsl(var(--border));
+  --tw-prose-quotes: hsl(var(--foreground));
+  --tw-prose-quote-borders: hsl(var(--border));
+  --tw-prose-captions: hsl(var(--muted-foreground));
+  --tw-prose-code: hsl(var(--foreground));
+  --tw-prose-pre-code: hsl(var(--foreground));
+  --tw-prose-pre-bg: hsl(var(--muted));
+  --tw-prose-th-borders: hsl(var(--border));
+  --tw-prose-td-borders: hsl(var(--border));
+}
+
+/* 7. Sombras Premium en modo oscuro */
+.dark .premium-html-content .shadow-sm,
+.dark .premium-html-content .shadow,
+.dark .premium-html-content .shadow-md,
+.dark .premium-html-content .shadow-lg,
+.dark .premium-html-content .shadow-xl {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -2px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* ---------------------------------------------------------------- */
 
 /* Estilos de código movidos a code-highlighting.css
 .dark .prose pre {

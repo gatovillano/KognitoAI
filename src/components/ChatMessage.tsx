@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion'; // Importar motion
 import { ChatAvatar } from './ChatAvatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ExternalLink, BrainCircuit, ChevronDown, ChevronUp } from 'lucide-react';
 import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon, Notebook, Network, Download } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
@@ -115,7 +116,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     setIsEditing(false);
   };
 
-  const { contentParts, uncitedSources } = processMessageWithCitations(
+  const { contentParts, citedSources, uncitedSources } = processMessageWithCitations(
     msg.chunks?.join('') || msg.text,
     uniqueSources
   );
@@ -350,53 +351,95 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                       ease: "easeOut"
                     }}
                   >
-                    {msg.sender === 'ai' && uniqueSources.length > 0 ? (
-                      (() => {
+                    {msg.sender === 'ai' && uniqueSources.length > 0 ? (() => {
                         const fullText = msg.chunks?.join('') || msg.text;
-                        const { contentParts } = processMessageWithCitations(fullText, uniqueSources);
+                        const { contentParts, citedSources, uncitedSources } = processMessageWithCitations(fullText, uniqueSources);
 
-                        // Si no se encontraron citas en el texto, pero hay fuentes, 
-                        // MarkdownRenderer manejará el texto normal, y nosotros mostramos la sección de fuentes abajo.
                         return (
-                          <MarkdownRenderer
-                            contentParts={contentParts}
-                            content={fullText}
-                            fontSize="text-sm sm:text-base"
-                            isStreaming={msg.chunks !== undefined}
-                          />
+                          <>
+                            <MarkdownRenderer
+                              contentParts={contentParts}
+                              content={fullText}
+                              fontSize="text-sm sm:text-base"
+                              isStreaming={msg.chunks !== undefined}
+                            />
+                            {/* Sección de Fuentes al final */}
+                            {(citedSources.length > 0 || uncitedSources.length > 0) && (
+                              <motion.div
+                                initial={{ opacity: 0, y: 5 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.3 }}
+                                className="mt-4 pt-4 border-t border-border/10"
+                              >
+                                <div className="flex items-center gap-2 mb-3">
+                                  <div className="p-1 rounded-md bg-primary/10">
+                                    <Notebook className="h-3 w-3 text-primary" />
+                                  </div>
+                                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                                    Fuentes y Resultados RAG
+                                  </span>
+                                  <span className="text-[10px] text-muted-foreground/70">
+                                    ({citedSources.length} citadas de {uniqueSources.length} totales)
+                                  </span>
+                                </div>
+
+                                {/* Fuentes Citadas (Siempre visibles) */}
+                                {citedSources.length > 0 && (
+                                  <div className="flex flex-wrap gap-2 mb-2">
+                                    {citedSources.map((source, idx) => (
+                                      <SourceButton
+                                        key={source.id || idx}
+                                        source={source}
+                                        citationNumber={source.citationNumber || idx + 1}
+                                        onSourceClick={onSourceClick}
+                                      />
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* Fuentes No Citadas (Colapsable) */}
+                                {uncitedSources.length > 0 && (
+                                  <Collapsible>
+                                    <CollapsibleTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 px-3 text-xs gap-2 text-muted-foreground hover:text-foreground mb-2"
+                                      >
+                                        <ChevronDown className="h-3 w-3" />
+                                        <span>
+                                          {uncitedSources.length} fuente{uncitedSources.length > 1 ? 's' : ''} adicional{uncitedSources.length > 1 ? 'es' : ''} no citada{uncitedSources.length > 1 ? 's' : ''}
+                                        </span>
+                                      </Button>
+                                    </CollapsibleTrigger>
+                                    <CollapsibleContent>
+                                      <div className="flex flex-wrap gap-2">
+                                        {uncitedSources.map((source, idx) => (
+                                          <SourceButton
+                                            key={source.id || `uncited-${idx}`}
+                                            source={source}
+                                            citationNumber={null}
+                                            onSourceClick={onSourceClick}
+                                          />
+                                        ))}
+                                      </div>
+                                    </CollapsibleContent>
+                                  </Collapsible>
+                                )}
+                              </motion.div>
+                            )}
+                          </>
                         );
-                      })()
-                    ) : (
-                      <MarkdownRenderer
-                        content={msg.chunks?.join('') || msg.text}
-                        fontSize="text-sm sm:text-base"
-                        isStreaming={msg.chunks !== undefined}
-                      />
-                    )}
-                  </motion.div>
+                      })() : (
+                        <MarkdownRenderer
+                          content={msg.chunks?.join('') || msg.text}
+                          fontSize="text-sm sm:text-base"
+                          isStreaming={msg.chunks !== undefined}
+                        />
+                      )}
+                    </motion.div>
                 )}
 
-                {/* Sección de Fuentes al final */}
-                {msg.sender === 'ai' && uniqueSources.length > 0 && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3 }}
-                    className="mt-4 pt-4 border-t border-border/10"
-                  >
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="p-1 rounded-md bg-primary/10">
-                        <Notebook className="h-3 w-3 text-primary" />
-                      </div>
-                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Fuentes y Resultados RAG</span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {uniqueSources.map((source, idx) => (
-                        <SourceButton key={idx} source={source} citationNumber={idx + 1} onSourceClick={onSourceClick} />
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
 
                 {msg.document_url && (
                   <div className="mt-4">

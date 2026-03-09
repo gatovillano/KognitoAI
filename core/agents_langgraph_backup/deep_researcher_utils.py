@@ -261,6 +261,10 @@ async def get_all_tools(config: Optional[RunnableConfig]): # Changed to Optional
         graph_cypher.account_id = account_id
         knowledge_search.account_id = account_id
         knowledge_search.workspace_id = workspace_id
+        knowledge_graph.account_id = account_id
+        knowledge_graph.workspace_id = workspace_id
+        comprehensive_analyzer.account_id = account_id
+        comprehensive_analyzer.workspace_id = workspace_id
     else:
         logger.warning("⚠️ account_id no encontrado en la configuración del runnable. Las herramientas que lo requieran fallarán.")
 

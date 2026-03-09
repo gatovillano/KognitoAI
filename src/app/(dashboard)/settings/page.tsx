@@ -14,7 +14,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import apiClient from '@/lib/api'; // Importar apiClient
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Edit, Trash2, Eye, Calendar, User } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, Calendar, User, Sparkles, Brain, Zap, Image as ImageIcon } from 'lucide-react';
 
 interface Memory {
   id: string;
@@ -29,7 +29,7 @@ interface Memory {
 
 
 const LLM_PROVIDERS = [
-  { id: 'google', name: 'Google (Gemini)', env_key: 'GOOGLE_API_KEY' },
+  { id: 'gemini', name: 'Google AI Studio', env_key: 'GOOGLE_API_KEY' },
   { id: 'openai', name: 'OpenAI (GPT)', env_key: 'OPENAI_API_KEY' },
   { id: 'anthropic', name: 'Anthropic (Claude)', env_key: 'ANTHROPIC_API_KEY' },
   { id: 'openrouter', name: 'OpenRouter', env_key: 'OPENROUTER_API_KEY' },
@@ -38,7 +38,7 @@ const LLM_PROVIDERS = [
 ];
 
 const MODELS_BY_PROVIDER: Record<string, string[]> = {
-  google: ['gemini/gemini-2.0-flash', 'gemini/gemini-1.5-flash', 'gemini/gemini-1.5-pro'],
+  gemini: ['gemini/gemini-2.0-flash', 'gemini/gemini-1.5-flash', 'gemini/gemini-1.5-pro', 'gemini/gemini-2.0-flash-exp'],
   openai: ['openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4-turbo'],
   anthropic: ['anthropic/claude-3-5-sonnet-20240620', 'anthropic/claude-3-opus-20240229', 'anthropic/claude-3-haiku-20240307'],
   openrouter: [
@@ -48,6 +48,44 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
   ],
   ollama: ['ollama/llama3.1', 'ollama/mistral', 'ollama/phi3', 'ollama/gemma2'],
   mistral: ['mistral/mistral-large-latest', 'mistral/mistral-small-latest'],
+};
+
+const TTS_PROVIDERS = [
+  { id: 'google', name: 'Google Cloud TTS', env_key: 'GOOGLE_APPLICATION_CREDENTIALS' },
+  { id: 'openai', name: 'OpenAI TTS', env_key: 'OPENAI_API_KEY' },
+  { id: 'azure', name: 'Azure TTS', env_key: 'AZURE_TTS_KEY' },
+];
+
+const TTS_VOICES_BY_PROVIDER: Record<string, string[]> = {
+  google: [
+    'es-MX-DaliaNeural', 'es-MX-JorgeNeural', 'es-MX-AndresNeural', 'es-MX-FernandaNeural',
+    'es-ES-ElviraNeural', 'es-ES-AlvaroNeural',
+    'en-US-Neural2-A', 'en-US-Neural2-C', 'en-US-Neural2-D', 'en-US-Neural2-E',
+  ],
+  openai: ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'],
+  azure: [
+    'es-MX-DaliaNeural', 'es-MX-JorgeNeural', 'es-MX-CandelaNeural', 'es-MX-GerardoNeural',
+    'es-ES-ElviraNeural', 'es-ES-AlvaroNeural', 'es-ES-LaiaNeural', 'es-ES-ArnauNeural',
+    'en-US-JennyNeural', 'en-US-GuyNeural', 'en-US-AriaNeural', 'en-US-DavisNeural',
+  ],
+};
+
+const EMBEDDING_PROVIDERS = [
+  { id: 'kognito-internal', name: 'Kognito Interno', env_key: null },
+  { id: 'ollama', name: 'Ollama (Local)', env_key: null },
+  { id: 'openai', name: 'OpenAI Embeddings', env_key: 'OPENAI_API_KEY' },
+  { id: 'google', name: 'Google Embeddings', env_key: 'GOOGLE_API_KEY' },
+];
+
+const SEARCH_PROVIDERS = [
+  { id: 'tavily', name: 'Tavily Search', env_key: 'TAVILY_API_KEY' },
+];
+
+const EMBEDDING_MODELS_BY_PROVIDER: Record<string, string[]> = {
+  'kognito-internal': ['paraphrase-multilingual-mpnet-base-v2'],
+  ollama: ['nomic-embed-text', 'llama3', 'mistral'],
+  openai: ['text-embedding-ada-002', 'text-embedding-3-small', 'text-embedding-3-large'],
+  google: ['text-embedding-004', 'text-embedding-gecko'],
 };
 
 interface UserSecret {
@@ -61,45 +99,166 @@ const LLMSettingsForm: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [secrets, setSecrets] = useState<UserSecret[]>([]);
   const [newKey, setNewKey] = useState({ provider: '', value: '' });
-  const [providerModels, setProviderModels] = useState<any[]>([]);
-  const [loadingModels, setLoadingModels] = useState(false);
 
   const [localLLM, setLocalLLM] = useState({
-    llm_provider: settings?.llm_provider || 'google',
+    llm_provider: settings?.llm_provider || 'gemini',
     llm_model: settings?.llm_model || 'gemini/gemini-2.0-flash',
     llm_temperature: settings?.llm_temperature || 0.7,
     llm_api_base: settings?.llm_api_base || '',
     fast_llm_model: settings?.fast_llm_model || 'gemini/gemini-2.0-flash',
+    fast_llm_provider: settings?.fast_llm_provider || 'gemini',
     vision_llm_model: settings?.vision_llm_model || 'gemini/gemini-2.0-flash',
+    vision_llm_provider: settings?.vision_llm_provider || 'gemini',
+    use_prompt_tooling: settings?.use_prompt_tooling || false,
   });
 
-  const fetchModels = async (provider: string) => {
-    setLoadingModels(true);
+  const [localTTS, setLocalTTS] = useState({
+    tts_provider: settings?.tts_provider || 'google',
+    tts_model: settings?.tts_model || 'tts-1', // OpenAI default
+    tts_voice: settings?.tts_voice || 'es-MX-DaliaNeural', // Google default
+    tts_speed: settings?.tts_speed || 1.0,
+    tts_region: settings?.tts_region || '', // Nuevo campo para Azure
+  });
+
+  const [localEmbedding, setLocalEmbedding] = useState({
+    embedding_provider: settings?.embedding_provider || 'kognito-internal',
+    embedding_model: settings?.embedding_model || 'paraphrase-multilingual-mpnet-base-v2',
+    embedding_api_key_name: settings?.embedding_api_key_name || '',
+    embedding_api_base: settings?.embedding_api_base || '',
+  });
+
+  const [mainModels, setMainModels] = useState<any[]>([]);
+  const [fastModels, setFastModels] = useState<any[]>([]);
+  const [visionModels, setVisionModels] = useState<any[]>([]);
+  const [loadingModels, setLoadingModels] = useState({ main: false, fast: false, vision: false });
+
+  const fetchModels = async (provider: string, type: 'main' | 'fast' | 'vision') => {
+    setLoadingModels(prev => ({ ...prev, [type]: true }));
     try {
       const resp = await apiClient.get(`/api/llm/models/${provider}`);
-      setProviderModels(resp.data);
+      const models = resp?.data || [];
+      if (type === 'main') setMainModels(models);
+      else if (type === 'fast') setFastModels(models);
+      else if (type === 'vision') setVisionModels(models);
     } catch (e) {
-      console.error('Error fetching models:', e);
+      console.error(`Error fetching ${type} models for ${provider}:`, e);
     } finally {
-      setLoadingModels(false);
+      setLoadingModels(prev => ({ ...prev, [type]: false }));
     }
   };
 
-  useEffect(() => {
-    if (localLLM.llm_provider) {
-      fetchModels(localLLM.llm_provider);
+  const renderModelItem = (m: any, currentProvider: string) => {
+    const isString = typeof m === 'string';
+    const id = isString ? m : m.id;
+    const name = isString ? m : (m.name || m.id);
+    const isGemini = currentProvider === 'gemini' || id.startsWith('gemini/');
+    const isOpenRouter = currentProvider === 'openrouter' || id.startsWith('openrouter/');
+
+    if (isOpenRouter || isGemini) {
+      let badgeColor = "bg-blue-500/10 text-blue-500 border-blue-500/20";
+      let badgeText = "OpenRouter";
+      let borderColor = "border-blue-500";
+      let bgColor = "bg-blue-500/5";
+
+      if (isGemini) {
+        badgeText = "Google";
+        badgeColor = "bg-red-500/10 text-red-500 border-red-500/20";
+        borderColor = "border-red-500";
+        bgColor = "bg-red-500/5";
+      } else if (id.toLowerCase().includes('free')) {
+        badgeText = "FREE";
+        badgeColor = "bg-green-500/10 text-green-500 border-green-500/20";
+        borderColor = "border-green-500";
+        bgColor = "bg-green-500/5";
+      } else if (id.toLowerCase().includes('claude') || id.toLowerCase().includes('anthropic')) {
+        badgeText = "Anthropic";
+        badgeColor = "bg-orange-500/10 text-orange-500 border-orange-500/20";
+        borderColor = "border-orange-500";
+        bgColor = "bg-orange-500/5";
+      } else if (id.toLowerCase().includes('gemini') || id.toLowerCase().includes('google')) {
+        badgeText = "Google";
+        badgeColor = "bg-red-500/10 text-red-500 border-red-500/20";
+        borderColor = "border-red-500";
+        bgColor = "bg-red-500/5";
+      } else if (id.toLowerCase().includes('mistral')) {
+        badgeText = "Mistral";
+        badgeColor = "bg-purple-500/10 text-purple-500 border-purple-500/20";
+        borderColor = "border-purple-500";
+        bgColor = "bg-purple-500/5";
+      }
+
+      return (
+        <SelectItem
+          key={id}
+          value={id}
+          className={`mb-2 border-l-4 ${borderColor} ${bgColor} hover:bg-accent focus:bg-accent transition-all duration-200 cursor-pointer rounded-r-md mx-1`}
+        >
+          <div className="flex flex-col py-1.5 w-full">
+            <div className="flex items-center justify-between w-full gap-4">
+              <span className="font-bold text-sm tracking-tight">{name}</span>
+              <Badge variant="outline" className={`text-[9px] px-1.5 py-0 h-4 uppercase font-extrabold tracking-wider ${badgeColor}`}>
+                {badgeText}
+              </Badge>
+            </div>
+            {(m.context_length || m.pricing) && (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-[10px] text-muted-foreground/70 font-medium">
+                  {m.context_length ? `${(m.context_length / 1024).toFixed(0)}k contexto` : ''}
+                </span>
+                {id.toLowerCase().includes('free') && (
+                  <span className="text-[10px] text-green-600 font-bold">Sin costo</span>
+                )}
+              </div>
+            )}
+          </div>
+        </SelectItem>
+      );
     }
+
+    return (
+      <SelectItem key={id} value={id}>
+        {name}
+      </SelectItem>
+    );
+  };
+
+  useEffect(() => {
+    if (localLLM.llm_provider) fetchModels(localLLM.llm_provider, 'main');
   }, [localLLM.llm_provider]);
+
+  useEffect(() => {
+    if (localLLM.fast_llm_provider) fetchModels(localLLM.fast_llm_provider, 'fast');
+  }, [localLLM.fast_llm_provider]);
+
+  useEffect(() => {
+    if (localLLM.vision_llm_provider) fetchModels(localLLM.vision_llm_provider, 'vision');
+  }, [localLLM.vision_llm_provider]);
 
   useEffect(() => {
     if (settings) {
       setLocalLLM({
-        llm_provider: settings.llm_provider || 'google',
+        llm_provider: settings.llm_provider || 'gemini',
         llm_model: settings.llm_model || 'gemini/gemini-2.0-flash',
         llm_temperature: settings.llm_temperature || 0.7,
         llm_api_base: settings.llm_api_base || '',
         fast_llm_model: settings.fast_llm_model || 'gemini/gemini-2.0-flash',
+        fast_llm_provider: settings.fast_llm_provider || 'gemini',
         vision_llm_model: settings.vision_llm_model || 'gemini/gemini-2.0-flash',
+        vision_llm_provider: settings.vision_llm_provider || 'gemini',
+        use_prompt_tooling: settings.use_prompt_tooling || false,
+      });
+      setLocalTTS({
+        tts_provider: settings.tts_provider || 'google',
+        tts_model: settings.tts_model || 'tts-1',
+        tts_voice: settings.tts_voice || 'es-MX-DaliaNeural',
+        tts_speed: settings.tts_speed || 1.0,
+        tts_region: settings.tts_region || '',
+      });
+      setLocalEmbedding({
+        embedding_provider: settings.embedding_provider || 'kognito-internal',
+        embedding_model: settings.embedding_model || 'paraphrase-multilingual-mpnet-base-v2',
+        embedding_api_key_name: settings.embedding_api_key_name || '',
+        embedding_api_base: settings.embedding_api_base || '',
       });
     }
   }, [settings]);
@@ -117,19 +276,17 @@ const LLMSettingsForm: React.FC = () => {
     fetchSecrets();
   }, []);
 
-  const handleSaveLLM = async (e: React.FormEvent) => {
+  const handleSaveAllSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
       await updateSettings({
-        llm_provider: localLLM.llm_provider,
-        llm_model: localLLM.llm_model,
-        llm_temperature: localLLM.llm_temperature,
-        llm_api_base: localLLM.llm_api_base,
-        fast_llm_model: localLLM.fast_llm_model,
-        vision_llm_model: localLLM.vision_llm_model,
+        ...localLLM,
+        ...localTTS,
+        ...localEmbedding,
+        tts_region: localTTS.tts_provider === 'azure' ? localTTS.tts_region : undefined, // Solo enviar si es Azure
       });
-      toast.success('Configuración de IA guardada');
+      toast.success('Configuración de IA, TTS y Embeddings guardada');
     } catch (e) {
       toast.error('Error al guardar configuración');
     } finally {
@@ -139,16 +296,46 @@ const LLMSettingsForm: React.FC = () => {
 
   const handleSaveKey = async () => {
     if (!newKey.provider || !newKey.value) return;
-    try {
-      const providerObj = LLM_PROVIDERS.find(p => p.id === newKey.provider);
-      if (!providerObj?.env_key) return;
 
+    let envKey: string | null = null;
+    let description: string = `API Key para ${newKey.provider}`;
+
+    const llmProvider = LLM_PROVIDERS.find(p => p.id === newKey.provider);
+    const ttsProvider = TTS_PROVIDERS.find(p => p.id === newKey.provider);
+    const embeddingProvider = EMBEDDING_PROVIDERS.find(p => p.id === newKey.provider);
+    const searchProvider = SEARCH_PROVIDERS.find(p => p.id === newKey.provider);
+
+    if (llmProvider) envKey = llmProvider.env_key;
+    else if (ttsProvider) {
+      if (newKey.provider === 'azure') {
+        // Para Azure, necesitamos guardar la clave y la región por separado si es necesario
+        // Aquí asumimos que newKey.provider es 'azure' y newKey.value es la clave
+        // La región se manejará como parte de la configuración de usuario, no como un secreto separado
+        envKey = 'AZURE_TTS_KEY'; // Nombre de la clave para Azure
+        description = `API Key para Azure TTS`;
+      } else {
+        envKey = ttsProvider.env_key;
+        description = `API Key para ${ttsProvider.name}`;
+      }
+    }
+    else if (embeddingProvider) envKey = embeddingProvider.env_key;
+    else if (searchProvider) {
+      envKey = searchProvider.env_key;
+      description = `API Key para ${searchProvider.name}`;
+    }
+
+    if (!envKey) {
+      toast.error('Proveedor no válido o sin clave de entorno asociada.');
+      return;
+    }
+
+    try {
       await apiClient.post('/api/users/me/secrets', {
-        key_name: providerObj.env_key,
+        key_name: envKey,
         value: newKey.value,
-        description: `API Key para ${providerObj.name}`
+        description: description
       });
-      toast.success(`API Key de ${providerObj.name} guardada`);
+      toast.success(`API Key de ${newKey.provider} guardada`);
       setNewKey({ provider: '', value: '' });
       fetchSecrets();
     } catch (e) {
@@ -162,116 +349,180 @@ const LLMSettingsForm: React.FC = () => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20">IA</Badge>
-            Modelo y Proveedor
+            Modelo y Proveedor (LLM)
           </CardTitle>
           <CardDescription>
             Configura el motor de inteligencia artificial que potenciará tus interacciones.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Proveedor de IA</Label>
-                <Select
-                  value={localLLM.llm_provider}
-                  onValueChange={(v) => {
-                    const firstModel = MODELS_BY_PROVIDER[v]?.[0] || ''; // Fallback to static if dynamic not ready
-                    setLocalLLM(prev => ({
-                      ...prev,
-                      llm_provider: v,
-                      llm_model: firstModel,
-                      fast_llm_model: firstModel,
-                      vision_llm_model: firstModel
-                    }));
-                  }}
-                >
-                  <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-colors">
-                    <SelectValue placeholder="Selecciona un proveedor" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {LLM_PROVIDERS.map(p => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+          <div className="space-y-6">
+            {/* SECCIÓN MODELO PRINCIPAL */}
+            <div className="p-4 rounded-xl bg-primary/5 border border-primary/10 space-y-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Brain className="h-5 w-5 text-primary" />
+                <h3 className="font-bold text-sm uppercase tracking-wider text-primary">Modelo Principal (Razonamiento)</h3>
               </div>
 
-              <div className="space-y-2">
-                <Label>Modelo Principal (Razonamiento)</Label>
-                <Select
-                  value={localLLM.llm_model}
-                  onValueChange={(v) => setLocalLLM(prev => ({ ...prev, llm_model: v }))}
-                >
-                  <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-colors">
-                    <SelectValue placeholder="Selecciona un modelo" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-[300px]">
-                    {loadingModels ? (
-                      <SelectItem value="loading" disabled>Cargando modelos...</SelectItem>
-                    ) : providerModels.length > 0 ? (
-                      providerModels.map(m => (
-                        <SelectItem key={m.id} value={m.id}>{m.name || m.id}</SelectItem>
-                      ))
-                    ) : (
-                      (MODELS_BY_PROVIDER[localLLM.llm_provider] || []).map(m => (
-                        <SelectItem key={m} value={m}>{m}</SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-[11px] font-bold uppercase text-muted-foreground">Proveedor</Label>
+                  <Select
+                    value={localLLM.llm_provider}
+                    onValueChange={(v) => {
+                      const firstModel = MODELS_BY_PROVIDER[v]?.[0] || '';
+                      setLocalLLM(prev => ({
+                        ...prev,
+                        llm_provider: v,
+                        llm_model: firstModel
+                      }));
+                    }}
+                  >
+                    <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-primary/20">
+                      <SelectValue placeholder="Proveedor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LLM_PROVIDERS.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-[11px] font-bold uppercase text-muted-foreground">Modelo</Label>
+                  <Select
+                    value={localLLM.llm_model}
+                    onValueChange={(v) => setLocalLLM(prev => ({ ...prev, llm_model: v }))}
+                  >
+                    <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-primary/20">
+                      <SelectValue placeholder="Modelo" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[300px] p-2">
+                      {loadingModels.main ? (
+                        <SelectItem value="loading" disabled>Cargando modelos...</SelectItem>
+                      ) : mainModels.length > 0 ? (
+                        mainModels.map(m => renderModelItem(m, localLLM.llm_provider))
+                      ) : (
+                        (MODELS_BY_PROVIDER[localLLM.llm_provider] || []).map(m => renderModelItem(m, localLLM.llm_provider))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            {/* SECCIÓN MODELO RÁPIDO */}
+            <div className="p-4 rounded-xl bg-orange-500/5 border border-orange-500/10 space-y-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Zap className="h-5 w-5 text-orange-500" />
+                <h3 className="font-bold text-sm uppercase tracking-wider text-orange-500">Modelo Rápido (Sumarización)</h3>
               </div>
 
-              <div className="space-y-2">
-                <Label>Modelo Rápido (Sumarización/Títulos)</Label>
-                <Select
-                  value={localLLM.fast_llm_model}
-                  onValueChange={(v) => setLocalLLM(prev => ({ ...prev, fast_llm_model: v }))}
-                >
-                  <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-colors">
-                    <SelectValue placeholder="Selecciona un modelo" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-[300px]">
-                    {loadingModels ? (
-                      <SelectItem value="loading" disabled>Cargando modelos...</SelectItem>
-                    ) : providerModels.length > 0 ? (
-                      providerModels.map(m => (
-                        <SelectItem key={m.id} value={m.id}>{m.name || m.id}</SelectItem>
-                      ))
-                    ) : (
-                      (MODELS_BY_PROVIDER[localLLM.llm_provider] || []).map(m => (
-                        <SelectItem key={m} value={m}>{m}</SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-[11px] font-bold uppercase text-muted-foreground">Proveedor</Label>
+                  <Select
+                    value={localLLM.fast_llm_provider}
+                    onValueChange={(v) => {
+                      const firstModel = MODELS_BY_PROVIDER[v]?.[0] || '';
+                      setLocalLLM(prev => ({
+                        ...prev,
+                        fast_llm_provider: v,
+                        fast_llm_model: firstModel
+                      }));
+                    }}
+                  >
+                    <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-orange-500/20">
+                      <SelectValue placeholder="Proveedor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LLM_PROVIDERS.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-[11px] font-bold uppercase text-muted-foreground">Modelo</Label>
+                  <Select
+                    value={localLLM.fast_llm_model}
+                    onValueChange={(v) => setLocalLLM(prev => ({ ...prev, fast_llm_model: v }))}
+                  >
+                    <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-orange-500/20">
+                      <SelectValue placeholder="Modelo" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[300px] p-2">
+                      {loadingModels.fast ? (
+                        <SelectItem value="loading" disabled>Cargando modelos...</SelectItem>
+                      ) : fastModels.length > 0 ? (
+                        fastModels.map(m => renderModelItem(m, localLLM.fast_llm_provider))
+                      ) : (
+                        (MODELS_BY_PROVIDER[localLLM.fast_llm_provider] || []).map(m => renderModelItem(m, localLLM.fast_llm_provider))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            {/* SECCIÓN MODELO DE VISIÓN */}
+            <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/10 space-y-4">
+              <div className="flex items-center gap-2 mb-2">
+                <ImageIcon className="h-5 w-5 text-blue-500" />
+                <h3 className="font-bold text-sm uppercase tracking-wider text-blue-500">Modelo de Visión (Imágenes)</h3>
               </div>
 
-              <div className="space-y-2">
-                <Label>Modelo de Visión (Imágenes)</Label>
-                <Select
-                  value={localLLM.vision_llm_model}
-                  onValueChange={(v) => setLocalLLM(prev => ({ ...prev, vision_llm_model: v }))}
-                >
-                  <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-colors">
-                    <SelectValue placeholder="Selecciona un modelo" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-[300px]">
-                    {loadingModels ? (
-                      <SelectItem value="loading" disabled>Cargando modelos...</SelectItem>
-                    ) : providerModels.length > 0 ? (
-                      providerModels.map(m => (
-                        <SelectItem key={m.id} value={m.id}>{m.name || m.id}</SelectItem>
-                      ))
-                    ) : (
-                      (MODELS_BY_PROVIDER[localLLM.llm_provider] || []).map(m => (
-                        <SelectItem key={m} value={m}>{m}</SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-[11px] font-bold uppercase text-muted-foreground">Proveedor</Label>
+                  <Select
+                    value={localLLM.vision_llm_provider}
+                    onValueChange={(v) => {
+                      const firstModel = MODELS_BY_PROVIDER[v]?.[0] || '';
+                      setLocalLLM(prev => ({
+                        ...prev,
+                        vision_llm_provider: v,
+                        vision_llm_model: firstModel
+                      }));
+                    }}
+                  >
+                    <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-blue-500/20">
+                      <SelectValue placeholder="Proveedor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LLM_PROVIDERS.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
+                <div className="space-y-2">
+                  <Label className="text-[11px] font-bold uppercase text-muted-foreground">Modelo</Label>
+                  <Select
+                    value={localLLM.vision_llm_model}
+                    onValueChange={(v) => setLocalLLM(prev => ({ ...prev, vision_llm_model: v }))}
+                  >
+                    <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-blue-500/20">
+                      <SelectValue placeholder="Modelo" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[300px] p-2">
+                      {loadingModels.vision ? (
+                        <SelectItem value="loading" disabled>Cargando modelos...</SelectItem>
+                      ) : visionModels.length > 0 ? (
+                        visionModels.map(m => renderModelItem(m, localLLM.vision_llm_provider))
+                      ) : (
+                        (MODELS_BY_PROVIDER[localLLM.vision_llm_provider] || []).map(m => renderModelItem(m, localLLM.vision_llm_provider))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-border/50 space-y-4">
               <div className="space-y-2">
                 <Label className="flex justify-between">
                   <span>Creatividad (Temperatura)</span>
@@ -284,10 +535,14 @@ const LLMSettingsForm: React.FC = () => {
                   onChange={(e) => setLocalLLM(prev => ({ ...prev, llm_temperature: parseFloat(e.target.value) }))}
                   className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
                 />
-                <div className="flex justify-between text-[10px] text-muted-foreground uppercase tracking-widest">
-                  <span>Preciso</span>
-                  <span>Creativo</span>
-                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="use_prompt_tooling"
+                  checked={localLLM.use_prompt_tooling}
+                  onCheckedChange={(checked) => setLocalLLM(prev => ({ ...prev, use_prompt_tooling: checked }))}
+                />
+                <Label htmlFor="use_prompt_tooling">Forzar Tooling por Prompt (Experimental)</Label>
               </div>
             </div>
 
@@ -304,16 +559,197 @@ const LLMSettingsForm: React.FC = () => {
                   Útil para Ollama local o proxies personalizados.
                 </p>
               </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-              <div className="pt-4">
-                <Button onClick={handleSaveLLM} disabled={loading} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20">
-                  {loading ? 'Guardando...' : 'Aplicar Cambios de Modelo'}
-                </Button>
+      {/* Configuración de TTS */}
+      <Card className="border-none shadow-md bg-gradient-to-br from-card to-secondary/20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20">TTS</Badge>
+            Text-to-Speech (Voz)
+          </CardTitle>
+          <CardDescription>
+            Configura el servicio de conversión de texto a voz.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Proveedor de TTS</Label>
+                <Select
+                  value={localTTS.tts_provider}
+                  onValueChange={(v) => {
+                    const firstVoice = TTS_VOICES_BY_PROVIDER[v]?.[0] || '';
+                    setLocalTTS(prev => ({ ...prev, tts_provider: v, tts_voice: firstVoice }));
+                  }}
+                >
+                  <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-colors">
+                    <SelectValue placeholder="Selecciona un proveedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TTS_PROVIDERS.map(p => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {localTTS.tts_provider === 'azure' && (
+                <div className="space-y-2">
+                  <Label>Región de Azure</Label>
+                  <Input
+                    placeholder="eastus"
+                    value={localTTS.tts_region || ''}
+                    onChange={(e) => setLocalTTS(prev => ({ ...prev, tts_region: e.target.value }))}
+                    className="bg-background/50 backdrop-blur-sm border-primary/20"
+                  />
+                  <p className="text-[11px] text-muted-foreground italic">
+                    Ej: eastus, westus2, southeastasia.
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label>Voz</Label>
+                <Select
+                  value={localTTS.tts_voice}
+                  onValueChange={(v) => setLocalTTS(prev => ({ ...prev, tts_voice: v }))}
+                >
+                  <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-colors">
+                    <SelectValue placeholder="Selecciona una voz" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[300px]">
+                    {(TTS_VOICES_BY_PROVIDER[localTTS.tts_provider] || []).map(v => (
+                      <SelectItem key={v} value={v}>{v}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="flex justify-between">
+                  <span>Velocidad de Habla</span>
+                  <span className="text-green-500 font-mono">{localTTS.tts_speed}x</span>
+                </Label>
+                <input
+                  type="range"
+                  min="0.5" max="2.0" step="0.1"
+                  value={localTTS.tts_speed}
+                  onChange={(e) => setLocalTTS(prev => ({ ...prev, tts_speed: parseFloat(e.target.value) }))}
+                  className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-green-500"
+                />
+                <div className="flex justify-between text-[10px] text-muted-foreground uppercase tracking-widest">
+                  <span>Lento</span>
+                  <span>Rápido</span>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-4">
+              {/* Aquí se podría añadir un campo para tts_model si los proveedores lo soportan */}
+              {/* <div className="space-y-2">
+                <Label>Modelo TTS</Label>
+                <Input
+                  placeholder="tts-1"
+                  value={localTTS.tts_model}
+                  onChange={(e) => setLocalTTS(prev => ({ ...prev, tts_model: e.target.value }))}
+                  className="bg-background/50 backdrop-blur-sm border-primary/20"
+                />
+              </div> */}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Configuración de Embeddings */}
+      <Card className="border-none shadow-md bg-gradient-to-br from-card to-secondary/20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Badge variant="outline" className="bg-purple-500/10 text-purple-500 border-purple-500/20">Embeddings</Badge>
+            Generación de Embeddings
+          </CardTitle>
+          <CardDescription>
+            Configura el servicio para generar representaciones vectoriales de texto.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Proveedor de Embeddings</Label>
+                <Select
+                  value={localEmbedding.embedding_provider}
+                  onValueChange={(v) => {
+                    const firstModel = EMBEDDING_MODELS_BY_PROVIDER[v]?.[0] || '';
+                    setLocalEmbedding(prev => ({ ...prev, embedding_provider: v, embedding_model: firstModel }));
+                  }}
+                >
+                  <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-colors">
+                    <SelectValue placeholder="Selecciona un proveedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {EMBEDDING_PROVIDERS.map(p => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Modelo de Embeddings</Label>
+                <Select
+                  value={localEmbedding.embedding_model}
+                  onValueChange={(v) => setLocalEmbedding(prev => ({ ...prev, embedding_model: v }))}
+                >
+                  <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-colors">
+                    <SelectValue placeholder="Selecciona un modelo" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[300px]">
+                    {(EMBEDDING_MODELS_BY_PROVIDER[localEmbedding.embedding_provider] || []).map(m => (
+                      <SelectItem key={m} value={m}>{m}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>API Key Name (Opcional)</Label>
+                <Input
+                  placeholder="OPENAI_API_KEY"
+                  value={localEmbedding.embedding_api_key_name}
+                  onChange={(e) => setLocalEmbedding(prev => ({ ...prev, embedding_api_key_name: e.target.value }))}
+                  className="bg-background/50 backdrop-blur-sm border-primary/20"
+                />
+                <p className="text-[11px] text-muted-foreground italic">
+                  Nombre de la clave API guardada en tus secretos (ej. OPENAI_API_KEY).
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>API Base URL (Opcional)</Label>
+                <Input
+                  placeholder="http://localhost:11434"
+                  value={localEmbedding.embedding_api_base}
+                  onChange={(e) => setLocalEmbedding(prev => ({ ...prev, embedding_api_base: e.target.value }))}
+                  className="bg-background/50 backdrop-blur-sm border-primary/20"
+                />
+                <p className="text-[11px] text-muted-foreground italic">
+                  Útil para Ollama local o proxies personalizados.
+                </p>
               </div>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      <div className="pt-4">
+        <Button onClick={handleSaveAllSettings} disabled={loading} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20">
+          {loading ? 'Guardando...' : 'Guardar Todas las Configuraciones de IA'}
+        </Button>
+      </div>
 
       <Card className="border-none shadow-md bg-secondary/5">
         <CardHeader>
@@ -327,7 +763,7 @@ const LLMSettingsForm: React.FC = () => {
               <Select value={newKey.provider} onValueChange={(v) => setNewKey(prev => ({ ...prev, provider: v }))}>
                 <SelectTrigger><SelectValue placeholder="Proveedor" /></SelectTrigger>
                 <SelectContent>
-                  {LLM_PROVIDERS.filter(p => p.env_key).map(p => (
+                  {[...LLM_PROVIDERS, ...TTS_PROVIDERS, ...EMBEDDING_PROVIDERS, ...SEARCH_PROVIDERS].filter(p => p.env_key).map(p => (
                     <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                   ))}
                 </SelectContent>

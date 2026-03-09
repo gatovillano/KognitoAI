@@ -146,9 +146,24 @@ class Account(Base):
     llm_temperature = Column(Float, nullable=True, default=0.7, comment="Temperatura para la generación de texto.")
     llm_api_base = Column(String(255), nullable=True, comment="URL base opcional para la API del LLM (ej. Ollama, Local).")
     fast_llm_model = Column(String(255), nullable=True, comment="Modelo de LLM para tareas rápidas.")
+    fast_llm_provider = Column(String(50), nullable=True, comment="Proveedor de LLM para tareas rápidas.")
     vision_llm_model = Column(String(255), nullable=True, comment="Modelo de LLM para tareas de visión.")
+    vision_llm_provider = Column(String(50), nullable=True, comment="Proveedor de LLM para tareas de visión.")
     use_prompt_tooling = Column(Boolean, default=False, nullable=False, comment="Si es True, fuerza el uso de documentación de herramientas en el prompt en lugar de Function Calling nativo.")
+
+    # Configuraciones de TTS Personalizadas
+    tts_provider = Column(String(50), nullable=True, comment="Proveedor de TTS preferido (e.g., 'openai', 'elevenlabs').")
+    tts_model = Column(String(255), nullable=True, comment="Modelo de TTS preferido.")
+    tts_voice = Column(String(255), nullable=True, comment="Voz de TTS preferida.")
+    tts_speed = Column(Float, nullable=True, default=1.0, comment="Velocidad de la generación de voz (e.g., 1.0).")
+    tts_region = Column(String(50), nullable=True, comment="Región del servicio de TTS (e.g., 'eastus' para Azure).")
     
+    # Configuraciones de Embeddings Personalizadas
+    embedding_provider = Column(String(50), nullable=True, comment="Proveedor de Embeddings preferido (e.g., 'ollama', 'openai', 'google').")
+    embedding_model = Column(String(255), nullable=True, comment="Modelo de Embeddings preferido.")
+    embedding_api_key_name = Column(String(255), nullable=True, comment="Nombre de la clave API en UserSecret para el proveedor de Embeddings.")
+    embedding_api_base = Column(String(255), nullable=True, comment="URL base opcional para la API de Embeddings (ej. Ollama, Local).")
+
     # Campos para MFA
     mfa_enabled = Column(Boolean, default=False, nullable=False, comment="Indica si el usuario tiene MFA habilitado.")
     mfa_secret = Column(String(255), nullable=True, comment="Secreto TOTP para MFA.")
@@ -558,7 +573,7 @@ class Nota(Base):
     
     title = Column(String, nullable=True)
     content = Column(Text, nullable=False)
-    visual_content = Column(Text, nullable=True, comment="Contenido HTML generado por OnlyOffice para preservar el diseño visual.")
+    visual_content = Column(Text, nullable=True, comment="Contenido HTML generado preservando el diseño visual.")
     category = Column(String, default="General")
     created_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
@@ -1089,6 +1104,27 @@ class UserSecret(Base):
 
     def __repr__(self):
         return f"<UserSecret(id={self.id}, account_id={self.account_id}, key_name='{self.key_name}')>"
+
+
+# --- Model for Shared Analysis Links ---
+class SharedAnalysisLink(Base):
+    """
+    Almacena enlaces compartidos para informes de análisis.
+    Permite compartir un análisis con usuarios que no tienen cuenta en la plataforma.
+    """
+    __tablename__ = 'shared_analysis_links'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    analysis_id = Column(UUID(as_uuid=True), nullable=False, index=True, comment="ID del análisis compartido")
+    token = Column(String(64), unique=True, nullable=False, index=True, comment="Token único para el enlace compartido")
+    password_hash = Column(String(255), nullable=True, comment="Hash de contraseña si el enlace está protegido")
+    expiry_date = Column(DateTime(timezone=True), nullable=True, comment="Fecha de expiración del enlace")
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"), nullable=False)
+    allow_download = Column(Boolean, default=True, nullable=False, comment="Permitir descargar PDF del análisis")
+
+    def __repr__(self):
+        return f"<SharedAnalysisLink(id={self.id}, analysis_id={self.analysis_id}, token='{self.token[:16]}...' )>"
 
 
 # ==============================================================================

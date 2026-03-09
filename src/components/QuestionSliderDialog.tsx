@@ -53,6 +53,23 @@ interface GapDevelopmentStatus {
   question?: string;
 }
 
+/**
+ * Normaliza los hallazgos a un array de strings.
+ * El backend devuelve 'findings' como string, pero el frontend espera un array.
+ */
+const normalizeFindings = (findings: any): string[] => {
+  if (!findings) return [];
+  if (Array.isArray(findings)) return findings;
+  if (typeof findings === 'string') {
+    // Dividir por párrafos (doble salto de línea) y filtrar vacíos
+    return findings
+      .split(/\n\s*\n/)
+      .map(f => f.trim())
+      .filter(f => f.length > 0);
+  }
+  return [];
+};
+
 export const SourceButton: React.FC<{ source: Source; citationNumber: number }> = ({ source, citationNumber }) => {
   const getIcon = () => {
     switch (source.type) {
@@ -312,7 +329,7 @@ export function QuestionSliderDialog({ isOpen, onOpenChange, questions, title, a
                     <CardContent className="p-0">
                       <div className="prose prose-sm dark:prose-invert max-w-none text-lg leading-relaxed text-foreground/90">
                         {(() => {
-                          const { contentParts } = processMessageWithCitations(report.summary || "", report.sources);
+                          const { contentParts, citedSources, uncitedSources } = processMessageWithCitations(report.summary || "", report.sources);
                           return <MarkdownRenderer contentParts={contentParts} fontSize="text-lg" />;
                         })()}
                       </div>
@@ -322,7 +339,7 @@ export function QuestionSliderDialog({ isOpen, onOpenChange, questions, title, a
 
                 <TabsContent value="findings" className="m-0">
                   <div className="grid gap-4">
-                    {report.findings?.map((finding: string, i: number) => (
+                    {normalizeFindings(report.findings).map((finding: string, i: number) => (
                       <motion.div
                         key={i}
                         initial={{ opacity: 0, x: -10 }}
@@ -339,55 +356,68 @@ export function QuestionSliderDialog({ isOpen, onOpenChange, questions, title, a
                           </div>
                         </div>
                       </motion.div>
-                    )) || <p className="text-muted-foreground text-center py-8">No hay hallazgos detallados.</p>}
+                    ))}
+                    {normalizeFindings(report.findings).length === 0 && (
+                      <p className="text-muted-foreground text-center py-8">No hay hallazgos detallados.</p>
+                    )}
                   </div>
                 </TabsContent>
 
                 <TabsContent value="sources" className="m-0">
                   <div className="grid gap-3">
-                    {report.sources?.map((source: any, i: number) => (
-                      <a
-                        key={i}
-                        href={source.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center justify-between p-4 rounded-xl bg-card border border-border/50 hover:bg-accent/50 transition-all group"
-                      >
-                        <div className="flex items-center gap-3 overflow-hidden">
-                          <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500">
-                            <ExternalLink className="h-4 w-4" />
+                    {Array.isArray(report.sources) && report.sources.length > 0 ? (
+                      report.sources.map((source: any, i: number) => (
+                        <a
+                          key={i}
+                          href={source.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center justify-between p-4 rounded-xl bg-card border border-border/50 hover:bg-accent/50 transition-all group"
+                        >
+                          <div className="flex items-center gap-3 overflow-hidden">
+                            <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500">
+                              <ExternalLink className="h-4 w-4" />
+                            </div>
+                            <span className="text-sm font-medium truncate">{source.url}</span>
                           </div>
-                          <span className="text-sm font-medium truncate">{source.url}</span>
-                        </div>
-                        <Badge variant="secondary" className="ml-2">
-                          Relevancia: {source.relevance}/10
-                        </Badge>
-                      </a>
-                    )) || <p className="text-muted-foreground text-center py-8">No se citaron fuentes externas.</p>}
+                          <Badge variant="secondary" className="ml-2">
+                            Relevancia: {source.relevance}/10
+                          </Badge>
+                        </a>
+                      ))
+                    ) : (
+                      <p className="text-muted-foreground text-center py-8">No se citaron fuentes externas.</p>
+                    )}
                   </div>
                 </TabsContent>
 
                 <TabsContent value="recommendations" className="m-0">
                   <div className="grid gap-4">
-                    {report.recommendations?.map((rec: string, i: number) => (
-                      <motion.div
-                        key={i}
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: i * 0.1 }}
-                        className="p-5 rounded-xl bg-green-500/5 border border-green-500/20 flex gap-4"
-                      >
-                        <div className="p-2 h-fit rounded-lg bg-green-500/10 text-green-600">
-                          <Sparkles className="h-5 w-5" />
-                        </div>
-                        <div className="flex-1">
-                          <h5 className="font-semibold text-green-800 dark:text-green-400 mb-1">Recomendación</h5>
-                          <div className="text-sm text-green-700/90 dark:text-green-300/90 leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{rec}</ReactMarkdown>
+                    {Array.isArray(report.recommendations) && report.recommendations.length > 0 ? (
+                      report.recommendations.map((rec: string, i: number) => (
+                        <motion.div
+                          key={i}
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ delay: i * 0.1 }}
+                          className="p-5 rounded-xl bg-green-500/5 border border-green-500/20 flex gap-4"
+                        >
+                          <div className="p-2 h-fit rounded-lg bg-green-500/10 text-green-600">
+                            <Sparkles className="h-5 w-5" />
                           </div>
-                        </div>
-                      </motion.div>
-                    )) || <p className="text-muted-foreground text-center py-8">No hay recomendaciones específicas.</p>}
+                          <div className="flex-1">
+                            <h5 className="font-semibold text-green-800 dark:text-green-400 mb-1">Recomendación</h5>
+                            <div className="text-sm text-green-700/90 dark:text-green-300/90 leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{rec}</ReactMarkdown>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))
+                    ) : (
+                      <p className="text-muted-foreground text-center py-8">
+                        {typeof report.recommendations === 'string' ? report.recommendations : "No hay recomendaciones específicas."}
+                      </p>
+                    )}
                   </div>
                 </TabsContent>
               </div>

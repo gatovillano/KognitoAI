@@ -191,7 +191,7 @@ class Neo4jAdapter:
                     type_query = f"""
                     UNWIND $entities AS entity
                     MERGE (n:Entity {{id: entity.id}})
-                    SET n:{entity_type},
+                    SET n:`{entity_type}`,
                         n.name = entity.name,
                         n.type = entity.type,
                         n.description = entity.description,

@@ -1,26 +1,42 @@
-import json
 import logging
+import json
 import re
-from typing import List, Any, Sequence, cast
+from typing import Any, Optional, Union, List, TypeVar, Type, Sequence, cast
 from langchain_core.messages import AIMessage, BaseMessage, MessageLikeRepresentation, ToolMessage, HumanMessage
-from langchain_core.language_models import BaseChatModel # Import BaseChatModel
+from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
 
-logger = logging.getLogger(__name__)
+# Usar el logger de la aplicación para mayor visibilidad
+logger = logging.getLogger("core.utils.llm_utils")
+# Forzar nivel WARNING para producción
+logger.setLevel(logging.WARNING)
 
 async def invoke_structured_output(llm: BaseChatModel, schema: Any, prompt: str, retry_config: dict = None) -> Any:
     """Invokes an LLM with structured output, falling back to manual JSON parsing if needed."""
     try:
         # 1. Intentar con el método estándar (herramientas)
+        # Deshabilitamos streaming para asegurar captura completa en logs y estabilidad JSON
         model = llm.with_structured_output(schema)
+        if hasattr(model, 'streaming'):
+             model.streaming = False
+        
         if retry_config:
             model = model.with_retry(**retry_config)
-        return await model.ainvoke([HumanMessage(content=prompt)])
+        
+        # Intentar invocar con un HumanMessage explícito para evitar confusiones de tipo
+        result = await model.ainvoke([HumanMessage(content=prompt)])
+        
+        if result is None:
+            logger.warning("⚠️ [Structured Output] Standard method returned None. Forcing manual fallback.")
+            raise ValueError("LLM returned None in structured output mode")
+            
+        logger.debug(f"✅ [Structured Output] Standard method succeeded.")
+        return result
     except Exception as e:
         error_str = str(e)
-        logger.warning(f"⚠️ [Structured Output] Standard structured output method failed: {e}. Attempting manual JSON parsing fallback.")
+        logger.warning(f"⚠️ [Structured Output] Standard method failed: {e}. Body: {error_str[:500]}. Attempting manual fallback.")
 
-        # Manual parsing logic (moved here as the ultimate fallback)
+        # Manual parsing logic
         schema_definition = schema.schema() if hasattr(schema, 'schema') else {}
         schema_json = json.dumps(schema_definition, indent=2)
 
@@ -45,17 +61,42 @@ async def invoke_structured_output(llm: BaseChatModel, schema: Any, prompt: str,
 
         manual_prompt = (
             f"{prompt}\n\n"
-            f"IMPORTANTE: Tu respuesta DEBE ser únicamente un objeto JSON válido que se ajuste al siguiente esquema. No incluyas ninguna otra explicación, texto introductorio o markdown.\n\n"
+            f"IMPORTANTE: Tu respuesta DEBE ser únicamente un objeto JSON válido que se ajuste al siguiente esquema. No incluyas ninguna otra explicación, texto introductorio, bloques de razonamiento o markdown fuera del JSON.\n\n"
             f"Esquema JSON requerido:\n{schema_json}\n\n"
             f"Ejemplo de un objeto JSON con el formato correcto:\n{example_json}\n\n"
             f"Ahora, basándote en la conversación, genera el objeto JSON final:"
         )
         
-        response = await llm.ainvoke([HumanMessage(content=manual_prompt)])
+        # Crear una versión del LLM sin streaming y sin razonamiento para el fallback manual
+        llm_no_stream = llm.copy() if hasattr(llm, 'copy') else llm
+        if hasattr(llm_no_stream, 'streaming'):
+            llm_no_stream.streaming = False
+        
+        # Forzar extra_body para desactivar razonamiento si es un ChatLiteLLM
+        if hasattr(llm_no_stream, 'extra_body'):
+            if not llm_no_stream.extra_body:
+                llm_no_stream.extra_body = {}
+            llm_no_stream.extra_body["include_reasoning"] = False
+        
+        response = await llm_no_stream.ainvoke([HumanMessage(content=manual_prompt)])
         
         content = response.content if hasattr(response, 'content') else str(response)
-        # Intentar extraer JSON de la respuesta
-        json_match = re.search(r'(\{.*\})', content, re.DOTALL)
+        logger.debug(f"🔍 [Structured Output] Manual fallback raw content: {content[:500]}...")
+        
+        # Limpieza previa: eliminar bloques de código markdown si existen
+        clean_content = content.strip()
+        if clean_content.startswith("```json"):
+            clean_content = clean_content[7:]
+        elif clean_content.startswith("```"):
+            clean_content = clean_content[3:]
+        
+        if clean_content.endswith("```"):
+            clean_content = clean_content[:-3]
+            
+        clean_content = clean_content.strip()
+
+        # Intentar extraer JSON de la respuesta (ahora más flexible)
+        json_match = re.search(r'(\{.*\})', clean_content, re.DOTALL)
         if json_match:
             try:
                 data = json.loads(json_match.group(1))
@@ -65,10 +106,10 @@ async def invoke_structured_output(llm: BaseChatModel, schema: Any, prompt: str,
                 # Pydantic V1/V2 __init__
                 return schema(**data)
             except Exception as e3:
-                logger.error(f"❌ [Structured Output] Manual parsing failed: {e3}")
+                logger.error(f"❌ [Structured Output] Manual parsing/validation failed: {e3}. Data: {json_match.group(1)}")
                 raise e3
         else:
-            logger.error(f"❌ [Structured Output] No JSON found in response after manual prompting.")
+            logger.error(f"❌ [Structured Output] No JSON found in response after manual prompting. Content: {content[:200]}...")
             raise ValueError("No valid JSON found in response after manual prompting")
 
 
@@ -165,7 +206,7 @@ async def prune_messages_to_fit_token_limit(
 
     summary_message_str = ""
     if messages_to_summarize:
-        logger.info(f"Summarizing {len(messages_to_summarize)} older messages...")
+        logger.debug(f"Summarizing {len(messages_to_summarize)} older messages...")
         from core.llm_manager import get_fast_llm
         from langchain_core.messages import SystemMessage
         from langchain_core.prompts import ChatPromptTemplate
@@ -186,7 +227,7 @@ async def prune_messages_to_fit_token_limit(
             try:
                 summary_response = await chain.ainvoke({"messages_to_summarize": formatted_messages})
                 summary_message_str = f"Summary of earlier conversation:\n{summary_response.content}"
-                logger.info("✅ [LLM Utils] Summarization complete.")
+                logger.debug("✅ [LLM Utils] Summarization complete.")
             except Exception as e:
                 logger.error(f"❌ [LLM Utils] Error during summarization: {e}. Proceeding without summary.")
 
@@ -213,5 +254,5 @@ async def prune_messages_to_fit_token_limit(
             except Exception:
                 pass
     
-    logger.info(f"✅ [LLM Utils] Pruning complete. Messages reduced to {len(final_messages)} messages ({final_tokens} tokens).")
+    logger.debug(f"✅ [LLM Utils] Pruning complete. Messages reduced to {len(final_messages)} messages ({final_tokens} tokens).")
     return final_messages

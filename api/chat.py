@@ -22,11 +22,11 @@ from sqlalchemy import update, Integer, cast, func, text
 
 
 from utils.audio_transcriber import transcribe_audio_file, StreamingTranscriber, get_whisper_model
-from utils.google_tts import generate_speech_streaming, get_tts_client
+from core.tts_manager import generate_speech_streaming, get_tts_client # Importar desde el nuevo módulo
 from utils.security import get_current_account_id, get_current_user, get_current_user_from_websocket_query_param, decode_access_token # Añadido decode_access_token
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
-from core.database import SessionLocal, ChatThread, settings, Workspace
+from core.database import SessionLocal, ChatThread, settings, Workspace, Account
 from core.llm_manager import get_main_llm
 from tools.add_web_to_rag_tool import AddWebToRAGTool
 from tools.ddg_search_tool import create_ddg_search_tool
@@ -103,6 +103,9 @@ class TextToSpeechRequest(BaseModel):
     """Define la estructura de datos para una solicitud de conversión de texto a voz."""
     text: str
     voice: Optional[str] = None  # Voz opcional para la conversión
+    provider: str = "google" # Nuevo campo para el proveedor de TTS
+    speed: Optional[float] = None  # Velocidad del habla
+    region: Optional[str] = None  # Región para Azure TTS
 
 class PinThreadRequest(BaseModel):
     """Define la estructura de datos para una solicitud de fijar/desfijar un hilo de chat."""
@@ -578,14 +581,46 @@ def _split_text_into_chunks(text: str, max_length: int = 1500) -> List[str]:
 
 
 @router.post("/text-to-speech", summary="Generar audio desde texto")
-async def text_to_speech(request: TextToSpeechRequest):
+async def text_to_speech(
+    request: TextToSpeechRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
     """
-    Recibe texto, lo envía al servicio Google Cloud TTS y devuelve el audio como un stream.
-    Maneja textos largos dividiéndolos en fragmentos y utiliza caché para evitar regeneraciones.
+    Recibe texto, lo envía al servicio TTS configurado (del usuario o por defecto)
+    y devuelve el audio como un stream. Maneja textos largos dividiéndolos en
+    fragmentos y utiliza caché para evitar regeneraciones.
     """
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="El texto no puede estar vacío.")
 
+    # Cargar configuración por defecto del usuario
+    account = await db.get(Account, uuid.UUID(current_account_id))
+    
+    # Valores de la solicitud (si vienen) o de la cuenta (si existen) o valores por defecto
+    effective_provider = request.provider
+    effective_voice = request.voice
+    effective_speed = request.speed
+    effective_region = request.region
+
+    if account:
+        if not effective_provider:
+            effective_provider = account.tts_provider or "google"
+        if not effective_voice:
+            effective_voice = account.tts_voice
+        if effective_speed is None: # Comprobar None específicamente porque 0.0 es un valor válido aunque raro
+            effective_speed = account.tts_speed if account.tts_speed is not None else 1.0
+        if not effective_region:
+            effective_region = account.tts_region
+    else:
+        # Fallback total si no hay cuenta ni datos en request
+        effective_provider = effective_provider or "google"
+        effective_speed = effective_speed if effective_speed is not None else 1.0
+
+    # Asegurarnos de que tenemos una voz por defecto si sigue siendo None
+    if not effective_voice:
+        effective_voice = 'es-MX-DaliaNeural'
+    
     # Pre-procesar el texto para eliminar elementos no deseados
     text_to_speak = request.text
     # 1. Eliminar bloques de código cercados (```...```)
@@ -607,30 +642,33 @@ async def text_to_speech(request: TextToSpeechRequest):
     text_chunks = _split_text_into_chunks(text_to_speak)
 
     async def generate_audio_stream():
-        """Genera el stream de audio usando Google Cloud TTS para cada fragmento."""
+        """Genera el stream de audio usando el servicio TTS configurado para cada fragmento."""
         try:
             async for audio_chunk in generate_speech_streaming(
                 text_chunks=text_chunks,
-                voice=request.voice if request.voice else 'es-MX-DaliaNeural',
-                speaking_rate=1.0,
+                provider=effective_provider,
+                voice=effective_voice if effective_voice else 'es-MX-DaliaNeural',
+                speaking_rate=effective_speed,
                 audio_format="mp3",
-                use_cache=True
+                use_cache=True,
+                region=effective_region,  # Pasar la región para Azure TTS
+                account_id=uuid.UUID(current_account_id) # Pasar account_id para recuperar secretos
             ):
                 yield audio_chunk
         except Exception as e:
-            logger.error(f"❌ Error generando audio con Google TTS: {e}")
+            logger.error(f"❌ Error generando audio con el proveedor {effective_provider} TTS: {e}")
             raise HTTPException(status_code=500, detail=f"Error al generar audio: {str(e)}")
 
     return StreamingResponse(generate_audio_stream(), media_type="audio/mpeg")
 
 
 @router.get("/text-to-speech/cache-stats", summary="Obtener estadísticas del caché de TTS")
-async def get_tts_cache_stats():
+async def get_tts_cache_stats(provider: str = Query("google", description="Proveedor de TTS para obtener estadísticas del caché")):
     """
-    Endpoint para obtener estadísticas del caché de audios TTS.
+    Endpoint para obtener estadísticas del caché de audios TTS para un proveedor específico.
     """
     try:
-        client = get_tts_client()
+        client = get_tts_client(provider=provider)
         stats = client.get_cache_stats()
         
         if stats:
@@ -641,29 +679,33 @@ async def get_tts_cache_stats():
         else:
             return {
                 "success": True,
-                "message": "El caché está deshabilitado",
+                "message": "El caché está deshabilitado o no disponible para este proveedor",
                 "stats": None
             }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error obteniendo estadísticas del caché TTS: {e}")
+        logger.error(f"Error obteniendo estadísticas del caché TTS para el proveedor {provider}: {e}")
         raise HTTPException(status_code=500, detail=f"Error al obtener estadísticas: {str(e)}")
 
 
 @router.post("/text-to-speech/clear-cache", summary="Limpiar caché de TTS")
-async def clear_tts_cache():
+async def clear_tts_cache(provider: str = Query("google", description="Proveedor de TTS para limpiar el caché")):
     """
-    Endpoint para limpiar las entradas expiradas del caché de TTS.
+    Endpoint para limpiar las entradas expiradas del caché de TTS para un proveedor específico.
     """
     try:
-        client = get_tts_client()
+        client = get_tts_client(provider=provider)
         client.clear_cache()
         
         return {
             "success": True,
-            "message": "Caché de TTS limpiado exitosamente"
+            "message": f"Caché de TTS para {provider} limpiado exitosamente"
         }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error limpiando caché TTS: {e}")
+        logger.error(f"Error limpiando caché TTS para el proveedor {provider}: {e}")
         raise HTTPException(status_code=500, detail=f"Error al limpiar caché: {str(e)}")
 
 @router.post("/transcribe-audio")

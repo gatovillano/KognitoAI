@@ -5,7 +5,10 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 
+import { useUserSettings } from '@/contexts/UserSettingsContext';
+
 export const useTextToSpeech = () => {
+  const { settings } = useUserSettings();
   const [isLoading, setIsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -49,22 +52,41 @@ export const useTextToSpeech = () => {
     if (audioRef.current) {
       stopPlayback();
     }
-    
+
     setActiveText(text);
     setIsLoading(true);
     setIsPlaying(false);
     setIsPaused(false);
 
     try {
-      const response = await apiClient.post('/api/text-to-speech', { text }, {
+      // Construir payload con configuración TTS del usuario
+      const ttsPayload: any = { text };
+
+      // Si el usuario tiene configuración TTS personalizada, usarla
+      if (settings) {
+        if (settings.tts_provider) {
+          ttsPayload.provider = settings.tts_provider;
+        }
+        if (settings.tts_voice) {
+          ttsPayload.voice = settings.tts_voice;
+        }
+        if (settings.tts_speed) {
+          ttsPayload.speed = settings.tts_speed;
+        }
+        if (settings.tts_region) {
+          ttsPayload.region = settings.tts_region;
+        }
+      }
+
+      const response = await apiClient.post('/api/text-to-speech', ttsPayload, {
         responseType: 'blob',
       });
       const audioBlob = new Blob([response.data], { type: 'audio/wav' });
       const audioUrl = URL.createObjectURL(audioBlob);
-      
+
       audioRef.current = new Audio(audioUrl);
       audioRef.current.play();
-      
+
       setIsLoading(false);
       setIsPlaying(true);
 
