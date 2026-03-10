@@ -12,9 +12,28 @@ from core.config import settings
 from knowledge_graph.graph_database import GraphDB
 from knowledge_graph.graph_integration import GraphIntegration
 
+from core.skill_manager import SkillManager
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+@router.get("/available", summary="Listar todas las herramientas disponibles")
+async def list_available_tools(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Lista todas las habilidades (Skills) descubiertas por el SkillManager.
+    Devuelve sus nombres y descripciones extraídas de los archivos .md.
+    """
+    try:
+        skill_manager = SkillManager()
+        # Escaneamos el directorio de skills
+        skills_info = await skill_manager.get_skills_metadata()
+        return {"skills": skills_info}
+    except Exception as e:
+        logger.error(f"Error listando herramientas disponibles: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 class ToolRunRequest(BaseModel):
     tool_name: str

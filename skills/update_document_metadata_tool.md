@@ -1,0 +1,1 @@
+El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM.

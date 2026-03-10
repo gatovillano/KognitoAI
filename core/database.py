@@ -163,6 +163,7 @@ class Account(Base):
     embedding_model = Column(String(255), nullable=True, comment="Modelo de Embeddings preferido.")
     embedding_api_key_name = Column(String(255), nullable=True, comment="Nombre de la clave API en UserSecret para el proveedor de Embeddings.")
     embedding_api_base = Column(String(255), nullable=True, comment="URL base opcional para la API de Embeddings (ej. Ollama, Local).")
+    disabled_skills = Column(JSONB, nullable=True, server_default=text("'[]'::jsonb"), comment="Lista de IDs de skills desactivadas por el usuario.")
 
     # Campos para MFA
     mfa_enabled = Column(Boolean, default=False, nullable=False, comment="Indica si el usuario tiene MFA habilitado.")

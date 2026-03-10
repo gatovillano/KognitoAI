@@ -1,0 +1,1 @@
+La consulta de búsqueda para encontrar notas relevantes.

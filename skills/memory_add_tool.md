@@ -1,0 +1,1 @@
+El texto o información específica que debe ser guardado en la memoria a largo plazo.

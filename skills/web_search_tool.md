@@ -1,0 +1,1 @@
+La consulta de búsqueda que se enviará al motor de búsqueda. Debe ser una cadena de texto clara y específica sobre lo que quieres buscar.

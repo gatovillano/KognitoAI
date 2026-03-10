@@ -1,0 +1,1 @@
+La consulta o pregunta para buscar en el grafo de conocimiento de memorias personales.

@@ -1,0 +1,1 @@
+Lista de diccionarios que representan las filas de datos. Cada diccionario debe tener las mismas claves (columnas).

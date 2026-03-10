@@ -1,0 +1,1 @@
+La fecha o período para el cual se consulta la agenda. Puede ser
