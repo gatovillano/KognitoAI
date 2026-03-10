@@ -1,0 +1,1 @@
+Los resultados del análisis en formato JSON (estadísticas, predicciones, etc.)

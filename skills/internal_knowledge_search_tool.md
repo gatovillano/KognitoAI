@@ -1,0 +1,1 @@
+La consulta completa del usuario en lenguaje natural.

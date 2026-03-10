@@ -1,0 +1,1 @@
+El texto o la acción específica que se debe recordar.

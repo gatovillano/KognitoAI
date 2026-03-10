@@ -32,6 +32,7 @@ interface UserSettings {
   embedding_model: string;
   embedding_api_key_name: string;
   embedding_api_base: string;
+  disabled_skills: string[];
   [key: string]: any; // Allow for other settings
 }
 
@@ -79,7 +80,7 @@ export const UserSettingsProvider = ({ children }: { children: ReactNode }) => {
     if (!settings) return;
 
     const originalSettings = { ...settings };
-    setSettings(prev => prev ? { ...prev, ...updates } : null);
+    setSettings((prev: UserSettings | null) => prev ? { ...prev, ...updates } : null);
 
     try {
       await apiClient.put('/api/users/me/settings', updates);
