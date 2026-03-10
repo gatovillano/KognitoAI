@@ -1,0 +1,1 @@
+El historial de conversación a analizar. Si no se proporciona, se analizarán las memorias y conversaciones recientes del usuario.

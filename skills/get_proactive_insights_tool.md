@@ -1,0 +1,1 @@
+El número máximo de insights a recuperar. Por defecto es 5.
