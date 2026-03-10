@@ -1,0 +1,1 @@
+El contenido a convertir. DEBE ser un texto largo y estructurado. PREFERIBLEMENTE HTML con etiquetas estructuradas (h2, p, ul, table). NUNCA envíes este campo vacío.

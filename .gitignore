@@ -27,3 +27,5 @@ config/neo4j/neo4j.conf
 kogniterm_history.json
 llm_context.md
 .kogniterm
+cuda_installer.run
+cuda-keyring_1.1-1_all.deb

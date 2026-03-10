@@ -121,7 +121,8 @@ async def get_user_settings(current_account_id: str = Depends(get_current_accoun
         embedding_provider=account.embedding_provider, # Añadido campo embedding_provider
         embedding_model=account.embedding_model, # Añadido campo embedding_model
         embedding_api_key_name=account.embedding_api_key_name, # Añadido campo embedding_api_key_name
-        embedding_api_base=account.embedding_api_base # Añadido campo embedding_api_base
+        embedding_api_base=account.embedding_api_base,
+        disabled_skills=account.disabled_skills
     )
 
 @router.put("/users/me/settings", response_model=UserSettingsResponse, summary="Actualizar configuración del usuario actual")
@@ -174,7 +175,8 @@ async def update_user_settings(
         embedding_provider=account.embedding_provider, # Añadido campo embedding_provider
         embedding_model=account.embedding_model, # Añadido campo embedding_model
         embedding_api_key_name=account.embedding_api_key_name, # Añadido campo embedding_api_key_name
-        embedding_api_base=account.embedding_api_base # Añadido campo embedding_api_base
+        embedding_api_base=account.embedding_api_base,
+        disabled_skills=account.disabled_skills
     )
 
 @router.put("/users/me/password", summary="Actualizar contraseña del usuario")

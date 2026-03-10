@@ -41,6 +41,7 @@ class UserSettingsResponse(BaseModel):
     embedding_model: Optional[str]
     embedding_api_key_name: Optional[str]
     embedding_api_base: Optional[str]
+    disabled_skills: Optional[list] = []
 
     class Config:
         from_attributes = True
@@ -81,6 +82,7 @@ class UserSettingsUpdateRequest(BaseModel):
     embedding_model: Optional[str] = None
     embedding_api_key_name: Optional[str] = None
     embedding_api_base: Optional[str] = None
+    disabled_skills: Optional[list] = None
 
 class UserPasswordUpdateRequest(BaseModel):
     """Define la estructura de datos para actualizar la contraseña."""

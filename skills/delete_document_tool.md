@@ -1,0 +1,1 @@
+El nombre exacto del archivo a eliminar. Se puede omitir si se proporciona un

@@ -1,0 +1,1 @@
+El contenido principal de la nota. DEBE ser un resumen o el texto completo de lo que el usuario quiere recordar. EJEMPLO:

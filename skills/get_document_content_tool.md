@@ -1,0 +1,1 @@
+El nombre exacto del archivo del cual se debe recuperar el contenido completo.

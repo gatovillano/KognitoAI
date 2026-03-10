@@ -1,0 +1,1 @@
+Una pregunta en lenguaje natural sobre el grafo de conocimiento. Ej:

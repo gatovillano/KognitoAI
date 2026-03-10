@@ -14,7 +14,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import apiClient from '@/lib/api'; // Importar apiClient
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Edit, Trash2, Eye, Calendar, User, Sparkles, Brain, Zap, Image as ImageIcon } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, Calendar, User, Sparkles, Brain, Zap, Image as ImageIcon, Wrench, Puzzle } from 'lucide-react';
 
 interface Memory {
   id: string;
@@ -94,6 +94,86 @@ interface UserSecret {
   masked_value: string;
 }
 
+interface SkillMetadata {
+  id: string;
+  description: string;
+}
+
+const SkillsSettings: React.FC = () => {
+  const { settings, updateSettings } = useUserSettings();
+  const [availableSkills, setAvailableSkills] = useState<SkillMetadata[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchSkills = async () => {
+      try {
+        const response = await apiClient.get<{ skills: SkillMetadata[] }>('/api/tools/available');
+        setAvailableSkills(response.data.skills);
+      } catch (error) {
+        console.error('Error fetching skills:', error);
+        toast.error('Error al cargar las habilidades disponibles.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchSkills();
+  }, []);
+
+  const toggleSkill = async (skillId: string) => {
+    if (!settings) return;
+
+    const isDisabled = settings.disabled_skills?.includes(skillId);
+    const newDisabledSkills = isDisabled
+      ? settings.disabled_skills.filter(id => id !== skillId)
+      : [...(settings.disabled_skills || []), skillId];
+
+    try {
+      await updateSettings({ disabled_skills: newDisabledSkills });
+      toast.success(`Habilidad ${isDisabled ? 'activada' : 'desactivada'} correctamente.`);
+    } catch (error) {
+      toast.error('Error al actualizar el estado de la habilidad.');
+    }
+  };
+
+  if (loading) return <div className="p-8 text-center">Cargando habilidades...</div>;
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {availableSkills.map((skill: SkillMetadata) => {
+        const isEnabled = !settings?.disabled_skills?.includes(skill.id);
+        return (
+          <Card key={skill.id} className={`overflow-hidden transition-all duration-300 ${isEnabled ? 'border-primary/20 bg-primary/5' : 'opacity-70 grayscale border-muted-foreground/20'}`}>
+            <CardHeader className="pb-2">
+              <div className="flex justify-between items-start">
+                <div className="flex items-center gap-2">
+                  <div className={`p-2 rounded-lg ${isEnabled ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'}`}>
+                    <Wrench className="h-5 w-5" />
+                  </div>
+                  <CardTitle className="text-sm font-bold uppercase tracking-tight">{skill.id.replace(/_/g, ' ')}</CardTitle>
+                </div>
+                <Switch
+                  checked={isEnabled}
+                  onCheckedChange={() => toggleSkill(skill.id)}
+                />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-muted-foreground line-clamp-3 leading-relaxed">
+                {skill.description || 'Sin descripción disponible.'}
+              </p>
+              <div className="mt-4 flex items-center justify-between">
+                <Badge variant={isEnabled ? 'default' : 'secondary'} className="text-[10px] uppercase font-bold px-2 py-0">
+                  {isEnabled ? 'Activo' : 'Desactivado'}
+                </Badge>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
+    </div>
+  );
+};
+
 const LLMSettingsForm: React.FC = () => {
   const { settings, updateSettings } = useUserSettings();
   const [loading, setLoading] = useState(false);
@@ -138,7 +218,7 @@ const LLMSettingsForm: React.FC = () => {
       const resp = await apiClient.get(`/api/llm/models/${provider}`);
       const models = resp?.data || [];
       if (type === 'main') setMainModels(models);
-      else if (type === 'fast') setFastModels(models);
+      else if (type === 'fast') setFastModels((prev: any[]) => [...models]);
       else if (type === 'vision') setVisionModels(models);
     } catch (e) {
       console.error(`Error fetching ${type} models for ${provider}:`, e);
@@ -1051,6 +1131,7 @@ const SettingsPage: React.FC = () => {
           <TabsTrigger value="llm-config">Modelos e IA</TabsTrigger>
           <TabsTrigger value="modules-preferences">Módulos y Preferencias</TabsTrigger>
           <TabsTrigger value="memories">Memorias</TabsTrigger>
+          <TabsTrigger value="skills">Skills</TabsTrigger>
           <TabsTrigger value="security">Seguridad</TabsTrigger>
           <TabsTrigger value="sync">Sincronización</TabsTrigger>
         </TabsList>
