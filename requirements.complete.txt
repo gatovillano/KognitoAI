@@ -22,11 +22,11 @@ email-validator>=2.0.0
 langchain>=0.3.0,<0.4.0
 langchain-core>=0.3.0,<0.4.0
 langchain-community>=0.3.0,<0.3.28
-langchain-google-genai>=1.0.0
-langgraph>=0.0.40
-langchain-postgres>=0.0.6
-langchain-google-vertexai>=3.2.2
-langchain-openai>=1.1.9
+langchain-google-genai
+langgraph
+langchain-postgres
+langchain-google-vertexai
+langchain-openai
 azure-cognitiveservices-speech
 
 # === AUTENTICACIÓN Y CREDENCIALES ===

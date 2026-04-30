@@ -20,7 +20,12 @@ import {
   ListTodo,
   Lightbulb,
   Share2,
-  Search
+  Search,
+  FileText,
+  Folder,
+  FileType,
+  Edit3,
+  Trash2
 } from 'lucide-react';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import { Analysis } from '@/lib/models';
@@ -59,6 +64,16 @@ interface Collection {
   workspace_color?: string; // Nuevo campo
 }
 
+interface OnlyOfficeDocument {
+  id: string;
+  filename: string;
+  extension: string;
+  created_at: string;
+  updated_at: string;
+  workspace_id: string;
+  folder_id: string | null;
+}
+
 interface Workspace {
   id: string;
   name: string;
@@ -81,6 +96,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const [agendaEvents, setAgendaEvents] = useState<AgendaEvent[]>([]); // New state for agenda events
   const [tasks, setTasks] = useState<TaskResponse[]>([]); // New state for tasks
   const [notes, setNotes] = useState<Note[]>([]); // New state for notes
+  const [onlyofficeDocuments, setOnlyofficeDocuments] = useState<OnlyOfficeDocument[]>([]);
   const [viewMode, setViewMode] = useState<'list' | 'kanban' | 'gantt'>('list'); // New state for view mode
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -230,13 +246,14 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const fetchInitialData = useCallback(async () => {
     setLoading(true);
     try {
-      // Fetch workspace info, collections, events, tasks, and notes in parallel
+      // Fetch workspace info, collections, events, tasks, notes, and onlyoffice docs in parallel
       console.log('DEBUG: Fetching collections with workspace_id:', workspaceId);
-      const [wsResponse, collectionsResponse, itemsResponse, notesResponse] = await Promise.all([
+      const [wsResponse, collectionsResponse, itemsResponse, notesResponse, onlyOfficeResponse] = await Promise.all([
         apiClient.get(`/api/workspaces/${workspaceId}`),
         apiClient.get(`/api/collections`, { params: { workspace_id: workspaceId } }),
         apiClient.get(`/api/workspaces/${workspaceId}/items`),
-        apiClient.post('/api/notes/list-notes', { workspace_id: workspaceId })
+        apiClient.post('/api/notes/list-notes', { workspace_id: workspaceId }),
+        apiClient.get('/api/onlyoffice/list', { params: { workspace_id: workspaceId } })
       ]);
 
       setWorkspace(wsResponse.data);
@@ -247,6 +264,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
       setTasks(items.filter((item: any) => item.type === 'task'));
 
       setNotes(notesResponse.data.notes);
+      setOnlyofficeDocuments(onlyOfficeResponse.data);
 
       // Fetch the first page of chats separately
       await fetchChats(0, true);
@@ -465,6 +483,46 @@ export default function WorkspaceDashboard({ params }: PageProps) {
         alert('Error al asociar la colección existente. El identificador de la colección no es válido o no se puede asociar. Por favor, intenta crear una nueva colección con el mismo nombre si es necesario.');
       }
     }
+  };
+
+  const handleOnlyOfficeClick = (doc: OnlyOfficeDocument) => {
+    router.push(`/documents?open=${doc.id}`);
+  };
+
+  const handleDeleteOnlyOfficeDoc = async (docId: string) => {
+    if (confirm('¿Estás seguro de que deseas eliminar este documento?')) {
+      try {
+        await apiClient.delete(`/api/onlyoffice/${docId}`);
+        setOnlyofficeDocuments(prev => prev.filter(d => d.id !== docId));
+      } catch (error) {
+        console.error('Error deleting onlyoffice document:', error);
+        alert('Error al eliminar el documento.');
+      }
+    }
+  };
+
+  const handleOnlyOfficeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.[0]) return;
+    
+    const file = e.target.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('workspace_id', workspaceId);
+
+    try {
+      await apiClient.post('/api/onlyoffice/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      // Refresh documents
+      const onlyOfficeResponse = await apiClient.get('/api/onlyoffice/list', { params: { workspace_id: workspaceId } });
+      setOnlyofficeDocuments(onlyOfficeResponse.data);
+    } catch (error) {
+      console.error('Error uploading onlyoffice document:', error);
+      alert('Error al subir el documento.');
+    }
+    
+    // Reset input
+    e.target.value = '';
   };
 
   const handleOpenRenameCollectionDialog = (collection: Collection) => {
@@ -897,6 +955,88 @@ export default function WorkspaceDashboard({ params }: PageProps) {
         <p className="text-xs text-muted-foreground/70 mt-4 text-center">
           Las colecciones están aisladas y solo son accesibles dentro de este workspace
         </p>
+      </div>
+
+      {/* Documentos Section (NEW) */}
+      <div className="mb-12">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h2 className="text-xl sm:text-2xl font-semibold flex items-center">
+              <FileText className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+              Documentos del Workspace
+            </h2>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">Archivos editables de OnlyOffice</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="file"
+              id="workspace-onlyoffice-upload"
+              className="hidden"
+              onChange={handleOnlyOfficeUpload}
+              accept=".docx,.xlsx,.pptx,.doc,.xls,.ppt,.txt,.csv"
+            />
+            <Button asChild size="sm" className="text-xs cursor-pointer">
+              <label htmlFor="workspace-onlyoffice-upload" className="flex items-center gap-1.5 cursor-pointer">
+                <Plus className="h-3.5 w-3.5" />
+                Subir Documento
+              </label>
+            </Button>
+          </div>
+        </div>
+
+        {onlyofficeDocuments.length === 0 ? (
+          <div className="text-center py-16 border-2 border-dashed border-border rounded-xl">
+            <FileText className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
+            <h3 className="text-xl font-semibold mb-2 text-muted-foreground">No hay documentos aún</h3>
+            <p className="text-muted-foreground mb-6 max-w-md mx-auto text-sm">
+              Sube documentos de Office para editarlos colaborativamente en este workspace.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {onlyofficeDocuments.map((doc) => (
+              <Card key={doc.id} className="group hover:border-primary/30 transition-all cursor-pointer" onClick={() => handleOnlyOfficeClick(doc)}>
+                <CardHeader className="p-4 pb-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-3 overflow-hidden">
+                      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <FileType className="h-5 w-5 text-primary" />
+                      </div>
+                      <div className="overflow-hidden">
+                        <CardTitle className="text-sm font-semibold truncate" title={doc.filename}>
+                          {doc.filename}
+                        </CardTitle>
+                        <p className="text-[10px] text-muted-foreground uppercase">{doc.extension}</p>
+                      </div>
+                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOnlyOfficeClick(doc); }}>
+                          <Edit3 className="mr-2 h-4 w-4" />
+                          Editar
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteOnlyOfficeDoc(doc.id); }} className="text-destructive">
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Eliminar
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-4 pt-0">
+                  <div className="flex items-center justify-between mt-2 text-[10px] text-muted-foreground">
+                    <span>{new Date(doc.updated_at).toLocaleDateString()}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Agenda Section (NEW) */}

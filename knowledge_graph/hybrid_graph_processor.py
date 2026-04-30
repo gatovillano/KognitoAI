@@ -162,7 +162,8 @@ class HybridGraphProcessor:
             if self.sentence_transformer is None:
                 raise ValueError("No se pudo obtener el modelo de embeddings de Ollama")
             
-            logger.info(f"✅ Modelo de embeddings Ollama inicializado: {self.sentence_transformer.model}")
+            model_name = getattr(self.sentence_transformer, 'model', None) or getattr(self.sentence_transformer.service, 'model_name', 'desconocido')
+            logger.info(f"✅ Modelo de embeddings inicializado: {model_name}")
 
         except Exception as e:
             logger.error(f"❌ Error inicializando embeddings de Ollama: {e}")
@@ -824,7 +825,15 @@ class HybridGraphProcessor:
                 if j not in processed and similarities[i][j] > threshold:
                     # Verificar también que sean del mismo tipo o tipos compatibles, 
                     # o simplemente nombres idénticos (lo cual indica la misma entidad)
-                    if type_i == type_j or self._are_compatible_types(type_i, type_j) or entity.get("name", "").lower() == entities[j].get("name", "").lower():
+                    type_i = entity.get("type", "")
+                    type_j = entities[j].get("type", "")
+                    # Evitar error si alguna de las entidades no tiene tipo definido
+                    if type_i == "" or type_j == "":
+                        # Si falta tipo, comparar solo por nombre
+                        if entity.get("name", "").lower() == entities[j].get("name", "").lower():
+                            similar_indices.append(j)
+                            processed.add(j)
+                    elif type_i == type_j or self._are_compatible_types(type_i, type_j) or entity.get("name", "").lower() == entities[j].get("name", "").lower():
                         similar_indices.append(j)
                         processed.add(j)
             

@@ -1,1 +1,0 @@
-El ID numérico único de la nota que se va a eliminar.

@@ -18,14 +18,20 @@ alembic>=1.12.0
 # === PYDANTIC Y VALIDACIÓN ===
 pydantic[email]>=2.0.0
 email-validator>=2.0.0
+slowapi==0.1.9
+bleach==6.1.0
 
 # === LANGCHAIN Y LÓGICA DE IA ===
 # Sincronizado para ecosistema LangChain 0.3.x + LiteLLM Universal
 langchain>=0.3.27,<0.4.0
+langchain-core>=0.3.74,<0.4.0
 langchain-community>=0.3.27,<0.4.0
-langchain-postgres>=0.0.1
+langchain-postgres>=0.0.12
+langchain-text-splitters>=0.3.0
 litellm>=1.0.0
-langgraph>=0.2.0,<0.3.0
+langgraph>=0.2.65
+langgraph-prebuilt>=0.1.0
+langchain-mcp-adapters>=0.0.1
 tavily-python>=0.5.0
 azure-cognitiveservices-speech
 
@@ -57,6 +63,7 @@ fastuuid==0.14.0
 jiter==0.12.0
 openai==2.8.1
 tenacity>=8.2.0
+paramiko>=3.0.0
 
 # === PROCESAMIENTO DE AUDIO Y DOCUMENTOS ===
 faster-whisper>=0.9.0
@@ -122,6 +129,7 @@ rich
 click
 websockets
 openpyxl>=3.1.0
+python-pptx>=1.0.0
 odfpy>=1.4.1
 
 # Force cache invalidation 2026-02-13

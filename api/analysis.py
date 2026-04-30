@@ -1,5 +1,5 @@
 import logging
-from langchain.schema.messages import HumanMessage
+from langchain_core.messages import HumanMessage
 import uuid
 from typing import List, Optional, cast, Dict
 from datetime import datetime, timedelta, timezone
@@ -20,8 +20,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 import numpy as np
 from collections import Counter
-from utils.embeddings import get_embedding_model
-from utils.proactive_knowledge_linker import get_text_embedding # Importar get_text_embedding desde proactive_knowledge_linker
+from utils.embeddings import get_embedding_model, get_text_embedding # Importar get_text_embedding desde utils.embeddings
 from core.dependencies import get_db_session
 from utils.db_session import DBSession
 from core.notes_manager import NotesManager
@@ -1767,7 +1766,7 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
             await db_session.commit()
 
             # 5. Generar resumen ejecutivo consolidado
-            from tools.analyze_code_for_insights_tool import AnalyzeCodeForInsightsTool
+            from skills.analysis_and_insights_skill.scripts.analyze_code_for_insights_tool import AnalyzeCodeForInsightsTool
             
             # Crear un resumen de todos los chunks para el formatted_result
             summary_parts = []
@@ -2394,14 +2393,15 @@ async def run_proactive_insight_generation_and_save(task_id: str, account_id: st
 
             logger.info(f"Iniciando generación proactiva de insights para tarea {task_id} (account: {account_id})")
 
-            from utils.proactive_knowledge_linker import run_batch_analysis_job
-            await run_batch_analysis_job(
-                account_id_filter=account_id,
-                since_timestamp=since_timestamp,
-                topic_keywords=topic_keywords,
-                top_k=top_k,
-                thread_id=thread_id
-            )
+            # from utils.proactive_knowledge_linker import run_batch_analysis_job
+            # await run_batch_analysis_job(
+            #     account_id_filter=account_id,
+            #     since_timestamp=since_timestamp,
+            #     topic_keywords=topic_keywords,
+            #     top_k=top_k,
+            #     thread_id=thread_id
+            # )
+            logger.warning("⚠️ Generación proactiva de insights saltada: proactive_knowledge_linker no disponible.")
 
             # Guardar el resultado (si aplica) y marcar como 'completed'
             # Para insights proactivos, el resultado ya se guarda en ProactiveInsight, aquí solo actualizamos el estado de la tarea.
@@ -2792,7 +2792,6 @@ Realiza un análisis personalizado del siguiente documento con estas especificac
                 raise ValueError("LLM no disponible para análisis personalizado.")
 
             # Realizar el análisis
-            from langchain.schema.messages import HumanMessage
             response = await llm.ainvoke([HumanMessage(content=prompt)])
             analysis_content = response.content.strip()
 

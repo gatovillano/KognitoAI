@@ -1,1 +1,0 @@
-La URL completa de la página web a añadir. Debe comenzar con http:// o https://

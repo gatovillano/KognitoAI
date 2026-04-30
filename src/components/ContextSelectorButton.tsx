@@ -43,8 +43,10 @@ export function ContextSelectorButton({ onContextSelected, currentContext, works
   const fetchDocuments = useCallback(async () => {
     setIsLoading(true);
     try {
-      const apiParams = { workspace_id: workspaceId || null };
-      console.log('DEBUG ContextSelectorButton: workspaceId before API call:', workspaceId);
+      const apiParams: { workspace_id?: string | null } = {};
+      if (workspaceId) {
+        apiParams.workspace_id = workspaceId;
+      }
       
       const [collectionsRes, documentsRes] = await Promise.all([
         apiClient.get('/api/collections', { params: { ...apiParams } }),
@@ -99,10 +101,10 @@ export function ContextSelectorButton({ onContextSelected, currentContext, works
   }, [workspaceId]);
 
   useEffect(() => {
-    if (isOpen && documents.length === 0) {
+    if (isOpen) {
       fetchDocuments();
     }
-  }, [isOpen, documents.length, workspaceId, fetchDocuments]); // Añadir workspaceId a las dependencias
+  }, [isOpen, workspaceId, fetchDocuments]);
 
   const toggleTopicExpansion = (topic: string) => {
     setExpandedTopics(prev => ({ ...prev, [topic]: !prev[topic] }));
@@ -119,7 +121,7 @@ export function ContextSelectorButton({ onContextSelected, currentContext, works
     });
   };
 
-  const handleSelectGroup = (group: { id: string; topic: string; items: SelectedContextItem[] }) => {
+  const handleSelectGroup = (group: { topic: string; items: SelectedContextItem[] }) => {
     setSelectedDocuments(prev => {
       const allItemsInGroupSelected = group.items.every(item => isItemSelected(item));
       if (allItemsInGroupSelected) {
@@ -148,7 +150,7 @@ export function ContextSelectorButton({ onContextSelected, currentContext, works
     return selectedDocuments.some(d => d.id === item.id && d.type === item.type);
   };
 
-  const isGroupSelected = (group: { id: string; topic: string; items: SelectedContextItem[] }) => {
+  const isGroupSelected = (group: { topic: string; items: SelectedContextItem[] }) => {
     return group.items.every(item => isItemSelected(item));
   };
 
@@ -183,7 +185,7 @@ export function ContextSelectorButton({ onContextSelected, currentContext, works
           ) : (
             <div className="p-2">
               {collections.map((group) => (
-                <Collapsible key={group.id} open={expandedTopics[group.topic]} onOpenChange={() => toggleTopicExpansion(group.topic)}>
+                <Collapsible key={group.topic} open={expandedTopics[group.topic]} onOpenChange={() => toggleTopicExpansion(group.topic)}>
                   <CollapsibleTrigger asChild>
                     <div className="flex items-center space-x-2 p-2 hover:bg-muted rounded-md cursor-pointer">
                       <ChevronRight className={`h-4 w-4 transition-transform ${expandedTopics[group.topic] ? 'rotate-90' : ''}`} />

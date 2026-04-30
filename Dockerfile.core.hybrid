@@ -1,14 +1,13 @@
 # Dockerfile.core.hybrid
 # Versión optimizada que incluye dependencias para pipeline híbrido sin problemas de build
 
-FROM nvcr.io/nvidia/pytorch:25.03-py3
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 ENV PYTHONPATH /app:/app/external_agents/open_deep_research/src
 
-# Instalar dependencias del sistema esenciales (algunas ya estarán en la imagen de PyTorch, pero las mantenemos por si acaso)
-# Incluye dependencias para WeasyPrint (generación de PDFs)
+# Instalar dependencias del sistema esenciales
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
@@ -20,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
-    libgdk-pixbuf2.0-0 \
+    libgdk-pixbuf-2.0-0 \
     libffi-dev \
     shared-mime-info \
     && rm -rf /var/lib/apt/lists/*
@@ -30,21 +29,31 @@ WORKDIR /app
 # Copiar requirements
 COPY requirements.txt ./
 
+# Instalar PyTorch y dependencias de NVIDIA por separado
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
 # Anular posibles restricciones de la imagen base
 ENV PIP_CONSTRAINT=""
 
 # Instalar dependencias en etapas para evitar conflictos de resolución
 # Forzamos la actualización de requests primero para que coincida con lo que pide langchain-community
+RUN pip install --no-cache-dir --timeout 300 --retries 3 --upgrade pip setuptools wheel
+
 RUN pip install --no-cache-dir --timeout 300 --retries 3 \
-    --upgrade 'requests>=2.32.5'
+    --upgrade 'requests>=2.32.5' 'langchain-core>=0.3.74' 'langchain>=0.3.27' 'langchain-community>=0.3.27' 'langgraph>=0.2.65' 'langgraph-prebuilt>=0.1.0'
 
 # Instalar todas las dependencias desde requirements.txt
 RUN pip install --no-cache-dir --timeout 300 --retries 3 -r requirements.txt
 
-# Etapa 4: Paquetes grandes de ML/NLP (instalar al final para evitar conflictos)
+# Etapa 4: Paquetes grandes de ML/NLP y asegurar LangGraph
 RUN pip install --no-cache-dir --timeout 300 --retries 3 \
     spacy>=3.7.0 \
-    transformers>=4.30.0
+    transformers>=4.30.0 \
+    'langgraph>=0.2.65' \
+    'langgraph-prebuilt>=0.1.0'
+
+# Verificación de instalación de LangGraph (fallará el build si no está bien instalado)
+RUN python -c "import langgraph; from langgraph.prebuilt import ToolNode; print('✅ LangGraph y su módulo prebuilt están disponibles')"
 
 # Instalar modelo de spaCy
 RUN python -m pip install https://github.com/explosion/spacy-models/releases/download/es_core_news_sm-3.7.0/es_core_news_sm-3.7.0-py3-none-any.whl

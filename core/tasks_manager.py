@@ -59,7 +59,8 @@ class TasksManager:
         end_date: Optional[datetime] = None, # Nuevo campo
         is_completed: Optional[bool] = False, # Añadido para consistencia con CalDAV
         workspace_id: Optional[str] = None,
-        task_id: Optional[int] = None
+        task_id: Optional[uuid.UUID] = None,
+        caldav_uid: Optional[str] = None
     ) -> Task: # Devolver el objeto Task directamente para ScheduleEvent
         """
         Añade una nueva tarea a la base de datos.
@@ -72,6 +73,7 @@ class TasksManager:
             start_date=start_date, # Nuevo campo
             end_date=end_date, # Nuevo campo
             is_completed=is_completed,
+            caldav_uid=caldav_uid,
             workspace_id=uuid.UUID(workspace_id) if workspace_id else None
         )
         self.db_session.add(new_task)
@@ -138,6 +140,8 @@ class TasksManager:
                 )
             )
         
+        # Filtros de fecha (para Gantt y CalDAV)
+        # Note: can use due_date or start_date/end_date. For CalDAV we usually care about the period.
         if is_completed is not None:
             stmt = stmt.where(Task.is_completed == is_completed)
         if status:
@@ -164,6 +168,7 @@ class TasksManager:
         is_completed: Optional[bool] = None,
         workspace_id: Optional[str] = None,
         status: Optional[str] = None,  # Añadido parámetro status
+        caldav_uid: Optional[str] = None,
         linked_profiles: Optional[List[str]] = None,
     ) -> Optional[Task]: # Devolver el objeto Task
         """
@@ -213,6 +218,8 @@ class TasksManager:
             task.workspace_id = uuid.UUID(workspace_id) if workspace_id else None
         if status is not None:
             task.status = status
+        if caldav_uid is not None:
+            task.caldav_uid = caldav_uid
         
         # Lógica para linked_profiles
         if linked_profiles is not None:
@@ -309,11 +316,31 @@ class TasksManager:
         
         return task
         
-    async def get_tasks_as_dicts(self, account_id: str, include_completed: bool = False) -> List[Dict[str, Any]]:
+    async def get_task_by_caldav_uid(self, account_id: str, caldav_uid: str) -> Optional[Task]:
+        """
+        Obtiene una tarea por su CalDAV UID.
+        """
+        account_uuid = uuid.UUID(account_id)
+        stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
+            Task.caldav_uid == caldav_uid,
+            Task.account_id == account_uuid
+        )
+        result = await self.db_session.execute(stmt)
+        return result.scalars().first()
+
+    async def get_tasks_as_dicts(
+        self, 
+        account_id: str, 
+        include_completed: bool = False, 
+        start_date: Optional[datetime] = None, 
+        end_date: Optional[datetime] = None,
+        workspace_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
         Recupera tareas de un usuario y las devuelve como una lista de diccionarios.
         Si include_completed es False (por defecto), solo recupera tareas no completadas.
-        Incluye tareas personales y de todos los workspaces a los que el usuario tiene acceso.
+        Si workspace_id se proporciona, recupera tareas de ese workspace específico.
+        Si es "personal" o "default", recupera tareas personales.
         """
         from sqlalchemy import or_
         from core.database import WorkspacePermission
@@ -321,22 +348,41 @@ class TasksManager:
         async with DBSession(SessionLocal) as db:
             account_uuid = uuid.UUID(account_id)
             
-            # Obtener workspaces accesibles
-            accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(
-                WorkspacePermission.account_id == account_uuid
-            )
-            result = await db.execute(accessible_workspaces_stmt)
-            accessible_workspace_ids = [row[0] for row in result.fetchall()]
-            
-            stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
-                or_(
-                    Task.account_id == account_uuid,  # Tareas personales del usuario
-                    Task.workspace_id.in_(accessible_workspace_ids)  # Tareas de workspaces compartidos
+            if workspace_id and workspace_id not in ["personal", "default"]:
+                # Filtrar por un workspace específico
+                workspace_uuid = uuid.UUID(workspace_id)
+                stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
+                    Task.workspace_id == workspace_uuid
                 )
-            )
+            elif workspace_id in ["personal", "default"]:
+                # Filtrar solo tareas personales
+                stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
+                    Task.account_id == account_uuid,
+                    Task.workspace_id == None
+                )
+            else:
+                # Comportamiento por defecto: obtener todas las accesibles
+                accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(
+                    WorkspacePermission.account_id == account_uuid
+                )
+                result = await db.execute(accessible_workspaces_stmt)
+                accessible_workspace_ids = [row[0] for row in result.fetchall()]
+                
+                stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
+                    or_(
+                        Task.account_id == account_uuid,  # Tareas personales del usuario
+                        Task.workspace_id.in_(accessible_workspace_ids)  # Tareas de workspaces compartidos
+                    )
+                )
+            
             if not include_completed:
                 stmt = stmt.where(Task.is_completed == False)
             
+            if start_date:
+                stmt = stmt.where(or_(Task.due_date >= start_date, Task.end_date >= start_date))
+            if end_date:
+                stmt = stmt.where(or_(Task.due_date <= end_date, Task.start_date <= end_date))
+
             stmt = stmt.order_by(desc(Task.created_at))
             result = await db.execute(stmt)
             tasks = result.scalars().all()
@@ -410,13 +456,21 @@ async def create_task(
     end_date: Optional[datetime] = None, # Nuevo campo
     is_completed: Optional[bool] = False,
     workspace_id: Optional[str] = None,
-    task_id: Optional[int] = None
+    task_id: Optional[str] = None,
+    caldav_uid: Optional[str] = None
 ) -> Tuple[bool, str, Task | None]:
     """Wrapper para TasksManager.create_task."""
     async with DBSession(SessionLocal) as db:
         manager = TasksManager(db)
         try:
-            new_task = await manager.create_task(account_id, description, due_date, start_date, end_date, is_completed, workspace_id, task_id)
+            # Convertir task_id a UUID si es posible
+            task_uuid = None
+            if task_id:
+                try:
+                    task_uuid = uuid.UUID(task_id)
+                except ValueError:
+                    pass # Dejar como None si no es un UUID válido
+            new_task = await manager.create_task(account_id, description, due_date, start_date, end_date, is_completed, workspace_id, task_uuid, caldav_uid)
             return True, "Tarea creada exitosamente.", new_task
         except Exception as e:
             logger.error(f"Error al crear tarea: {e}", exc_info=True)
@@ -446,6 +500,7 @@ async def update_task_db(
     is_completed: Optional[bool] = None,
     workspace_id: Optional[str] = None,
     status: Optional[str] = None,  # Añadido parámetro status
+    caldav_uid: Optional[str] = None,
     linked_profiles: Optional[List[str]] = None,
 ) -> Optional[Task]:
     """Wrapper para TasksManager.update_task."""
@@ -453,7 +508,7 @@ async def update_task_db(
     try:
         # Convertir task_id a UUID
         task_uuid = uuid.UUID(task_id)
-        return await manager.update_task(account_id, task_uuid, summary, description, due_date, start_date, end_date, is_completed, workspace_id, status, linked_profiles)
+        return await manager.update_task(account_id, task_uuid, summary, description, due_date, start_date, end_date, is_completed, workspace_id, status, caldav_uid, linked_profiles)
     except ValueError:
         logger.warning(f"ID de tarea inválido: {task_id}")
         return None
@@ -476,8 +531,15 @@ async def delete_task(account_id: str, task_id: str) -> Tuple[bool, str]: # task
             logger.error(f"Error al eliminar tarea: {e}", exc_info=True)
             return False, f"Error al eliminar tarea: {e}"
 
-async def get_tasks_as_dicts(account_id: str, include_completed: bool = False) -> List[Dict[str, Any]]:
-    """Wrapper para TasksManager.get_tasks_as_dicts."""
+async def get_task_by_caldav_uid(account_id: str, caldav_uid: str) -> Optional[Task]:
+    """Wrapper para TasksManager.get_task_by_caldav_uid."""
     async with DBSession(SessionLocal) as db:
         manager = TasksManager(db)
-        return await manager.get_tasks_as_dicts(account_id, include_completed)
+        return await manager.get_task_by_caldav_uid(account_id, caldav_uid)
+
+async def get_tasks_as_dicts(account_id: str, include_completed: bool = False, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Wrapper para TasksManager.get_tasks_as_dicts."""
+    async with DBSession(SessionLocal) as db:
+        acc_uuid = uuid.UUID(account_id) if isinstance(account_id, str) else account_id
+        manager = TasksManager(db)
+        return await manager.get_tasks_as_dicts(str(acc_uuid), include_completed, start_date, end_date, workspace_id)

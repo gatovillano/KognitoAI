@@ -1,1 +1,0 @@
-La ruta del archivo de imagen local del cual se desea eliminar el fondo.

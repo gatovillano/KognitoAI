@@ -11,12 +11,15 @@ const nextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'apibase.gatoslibres.art',
+        hostname: 'apibase.cuerpolibre.cl',
         port: '',
         pathname: '/media/**',
       },
     ],
     minimumCacheTTL: 600,
+  },
+  experimental: {
+    allowedDevOrigins: ['kognito.cuerpolibre.cl', 'webapp3.cuerpolibre.cl'],
   },
   transpilePackages: ['react-dnd', 'react-dnd-html5-backend'],
   async redirects() {
@@ -37,15 +40,15 @@ const nextConfig = {
     return [
       {
         source: '/media/:path*',
-        destination: 'https://apibase.gatoslibres.art/media/:path*',
+        destination: 'https://apibase.cuerpolibre.cl/media/:path*',
       },
       {
         source: '/api/:path*',
-        destination: 'https://apibase.gatoslibres.art/api/:path*',
+        destination: 'https://apibase.cuerpolibre.cl/api/:path*',
       },
       {
         source: '/onlyoffice/:path*',
-        destination: 'http://onlyoffice:80/:path*',
+        destination: 'http://host.docker.internal:8081/:path*',
       },
     ]
   },

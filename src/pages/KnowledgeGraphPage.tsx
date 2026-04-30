@@ -52,9 +52,16 @@ export default function KnowledgeGraphPage() {
       return null;
     }
 
-    // Si no hay límites, devolver todos los datos
+    // Si no hay límites, devolver todos los datos con conversión de edges
     if (maxNodes >= graphData.nodes.length) {
-      return graphData;
+      return {
+        ...graphData,
+        edges: graphData.edges.map(edge => ({
+          ...edge,
+          from: edge.source,
+          to: edge.target
+        }))
+      };
     }
 
     // Calcular el grado (número de conexiones) de cada nodo
@@ -110,7 +117,11 @@ export default function KnowledgeGraphPage() {
 
     return {
       nodes: filteredNodes,
-      edges: filteredEdges,
+      edges: filteredEdges.map(edge => ({
+        ...edge,
+        from: edge.source,
+        to: edge.target
+      })),
       metadata: graphData.metadata
     };
   }, [graphData, maxNodes, maxHops]);

@@ -14,14 +14,14 @@ import uuid
 from sqlalchemy import select, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_postgres import PGVector
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 from core.database import SessionLocal, Nota, LangchainPgCollection
 from utils.db_session import DBSession
 from core.llm_manager import get_fast_llm
 from utils.embeddings import get_embedding_model
 from core.config import settings
-from langchain.schema.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from core.memory_manager import get_relevant_memories # Añadir esta importación aquí
 
 logger = logging.getLogger(__name__)

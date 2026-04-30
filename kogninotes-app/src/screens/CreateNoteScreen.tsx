@@ -10,7 +10,8 @@ import {
     KeyboardAvoidingView,
     Platform,
     ActivityIndicator,
-    Alert
+    Alert,
+    StatusBar
 } from 'react-native';
 import { colors, lightColors, spacing, borderRadius } from '../theme/colors';
 import { notesService } from '../api/notesService';
@@ -78,47 +79,68 @@ export const CreateNoteScreen = ({ navigation }: any) => {
 
     return (
         <View style={[styles.container, { backgroundColor: theme.background }]}>
+            <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+            
             <LinearGradient
-                colors={[theme.primary, theme.background]}
+                colors={[theme.primary + '20', theme.background]}
                 start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 0.2 }}
+                end={{ x: 0.5, y: 0.3 }}
                 style={styles.gradientHeader}
             />
 
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
                 style={styles.flex}
             >
                 <View style={styles.header}>
-                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-                        <ChevronLeft size={28} color={theme.text} />
-                    </TouchableOpacity>
-                    <Text style={[styles.headerTitle, { color: theme.text }]}>Editor Avanzado</Text>
+                    <View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginRight: 10 }}>
+                                <ChevronLeft size={24} color={theme.text} />
+                            </TouchableOpacity>
+                            <Text style={[styles.welcomeText, { color: theme.text }]}>Nueva Nota</Text>
+                        </View>
+                        <View style={styles.countRow}>
+                            <Type size={12} color={theme.primary} />
+                            <Text style={[styles.countText, { color: theme.textMuted }]}>
+                                Captura tus ideas y conocimientos
+                            </Text>
+                        </View>
+                    </View>
+
                     <TouchableOpacity
                         onPress={handleSave}
                         disabled={loading}
-                        style={[styles.saveButton, { backgroundColor: theme.primary }, loading && styles.disabledButton]}
+                        style={[
+                            styles.actionButton, 
+                            { backgroundColor: theme.surface, borderColor: theme.border },
+                            loading && { opacity: 0.7 }
+                        ]}
                     >
                         {loading ? (
-                            <ActivityIndicator size="small" color="#fff" />
+                            <ActivityIndicator size="small" color={theme.primary} />
                         ) : (
-                            <Save size={24} color="#fff" />
+                            <Save size={20} color={theme.primary} />
                         )}
                     </TouchableOpacity>
                 </View>
 
-                <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+                <ScrollView
+                    style={styles.content}
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={{ paddingBottom: 120 }}
+                >
                     {/* Workspace Selector */}
                     <View style={styles.section}>
                         <View style={styles.sectionHeader}>
-                            <Layout size={18} color={theme.primary} />
+                            <Layout size={16} color={theme.primary} />
                             <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>Espacio de Trabajo</Text>
                         </View>
                         {fetchingWorkspaces ? (
                             <ActivityIndicator size="small" color={theme.primary} />
                         ) : (
                             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.workspaceList}>
-                                {/* BLINDAJE: Doble verificación de array */}
                                 {(Array.isArray(workspaces) ? workspaces : []).map((ws) => (
                                     <TouchableOpacity
                                         key={ws.id}
@@ -126,13 +148,16 @@ export const CreateNoteScreen = ({ navigation }: any) => {
                                         style={[
                                             styles.workspaceChip,
                                             { backgroundColor: theme.surface, borderColor: theme.border },
-                                            selectedWorkspace === ws.id && { backgroundColor: ws.color || theme.primary, borderColor: ws.color || theme.primary }
+                                            selectedWorkspace === ws.id && { 
+                                                backgroundColor: (ws.color || theme.primary) + '15', 
+                                                borderColor: ws.color || theme.primary 
+                                            }
                                         ]}
                                     >
                                         <Text style={[
                                             styles.workspaceText,
                                             { color: theme.textMuted },
-                                            selectedWorkspace === ws.id && styles.activeWorkspaceText
+                                            selectedWorkspace === ws.id && { color: ws.color || theme.primary, fontWeight: '700' }
                                         ]}>
                                             {ws.name}
                                         </Text>
@@ -142,43 +167,39 @@ export const CreateNoteScreen = ({ navigation }: any) => {
                         )}
                     </View>
 
-                    {/* Category Input */}
-                    <View style={styles.section}>
-                        <View style={styles.sectionHeader}>
-                            <Tag size={18} color={theme.primary} />
-                            <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>Categoría</Text>
-                        </View>
-                        <TextInput
-                            style={[styles.categoryInput, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }]}
-                            placeholder="Ej: Ideas, Reunión, Personal..."
-                            placeholderTextColor={theme.textMuted}
-                            value={category}
-                            onChangeText={setCategory}
-                        />
-                    </View>
-
-                    {/* Title Editor */}
-                    <View style={[styles.editorContainer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                        <View style={styles.sectionHeader}>
-                            <Type size={18} color={theme.primary} />
-                            <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>Título de la Nota</Text>
-                        </View>
+                    {/* Editor Container */}
+                    <View style={[styles.editorCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                        {/* Title Editor */}
                         <TextInput
                             style={[styles.titleInput, { color: theme.text }]}
-                            placeholder="Escribe un título impactante..."
-                            placeholderTextColor={theme.textMuted}
+                            placeholder="Título de la nota..."
+                            placeholderTextColor={theme.textMuted + '80'}
                             value={title}
                             onChangeText={setTitle}
                             multiline
                         />
 
-                        <View style={[styles.divider, { backgroundColor: theme.border }]} />
+                        <View style={[styles.divider, { backgroundColor: theme.border + '50' }]} />
+
+                        {/* Category & Metadata Row */}
+                        <View style={styles.metaInputRow}>
+                            <Tag size={16} color={theme.textMuted} style={{ marginRight: 8 }} />
+                            <TextInput
+                                style={[styles.categoryInput, { color: theme.text }]}
+                                placeholder="Añadir categoría..."
+                                placeholderTextColor={theme.textMuted + '60'}
+                                value={category}
+                                onChangeText={setCategory}
+                            />
+                        </View>
+
+                        <View style={[styles.divider, { backgroundColor: theme.border + '30', marginBottom: spacing.md }]} />
 
                         {/* Content Editor */}
                         <TextInput
                             style={[styles.contentInput, { color: theme.text }]}
                             placeholder="Empieza a escribir tus pensamientos (soporta Markdown)..."
-                            placeholderTextColor={theme.textMuted}
+                            placeholderTextColor={theme.textMuted + '60'}
                             value={content}
                             onChangeText={setContent}
                             multiline
@@ -207,29 +228,45 @@ const styles = StyleSheet.create({
     },
     header: {
         flexDirection: 'row',
-        alignItems: 'center',
         justifyContent: 'space-between',
-        paddingTop: spacing.xl * 2,
-        paddingHorizontal: spacing.md,
-        paddingBottom: spacing.md,
+        alignItems: 'center',
+        paddingTop: Platform.OS === 'ios' ? 60 : 50,
+        paddingHorizontal: spacing.lg,
+        marginBottom: spacing.lg,
     },
-    headerTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
+    welcomeText: {
+        fontSize: 28,
+        fontWeight: '800',
+        letterSpacing: -0.8,
     },
-    backButton: {
-        padding: spacing.sm,
+    countRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 4,
     },
-    saveButton: {
-        padding: spacing.sm,
-        borderRadius: borderRadius.md,
-        elevation: 4,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
+    countText: {
+        fontSize: 13,
+        marginLeft: 6,
+        fontWeight: '500',
     },
-    disabledButton: {
-        opacity: 0.6,
+    actionButton: {
+        width: 44,
+        height: 44,
+        borderRadius: 14,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.1,
+                shadowRadius: 8,
+            },
+            android: {
+                elevation: 4,
+            }
+        })
     },
     content: {
         flex: 1,
@@ -244,58 +281,71 @@ const styles = StyleSheet.create({
         marginBottom: spacing.sm,
     },
     sectionLabel: {
-        fontSize: 14,
-        fontWeight: '600',
+        fontSize: 12,
+        fontWeight: '700',
         marginLeft: spacing.xs,
         textTransform: 'uppercase',
-        letterSpacing: 1,
+        letterSpacing: 0.5,
     },
     workspaceList: {
-        flexDirection: 'row',
         marginTop: spacing.xs,
     },
     workspaceChip: {
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.sm,
-        borderRadius: borderRadius.full,
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 14,
         marginRight: spacing.sm,
         borderWidth: 1,
     },
     workspaceText: {
         fontSize: 14,
-        fontWeight: '500',
+        fontWeight: '600',
     },
-    activeWorkspaceText: {
-        color: '#fff',
-        fontWeight: 'bold',
-    },
-    categoryInput: {
-        borderRadius: borderRadius.md,
-        padding: spacing.md,
-        fontSize: 15,
-        borderWidth: 1,
-    },
-    editorContainer: {
-        borderRadius: borderRadius.lg,
+    editorCard: {
+        borderRadius: 24,
         padding: spacing.lg,
-        marginBottom: spacing.xl * 2,
         borderWidth: 1,
-        minHeight: 400,
+        minHeight: 500,
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 10 },
+                shadowOpacity: 0.05,
+                shadowRadius: 15,
+            },
+            android: {
+                elevation: 3,
+            }
+        })
     },
     titleInput: {
-        fontSize: 24,
-        fontWeight: 'bold',
+        fontSize: 26,
+        fontWeight: '800',
         marginBottom: spacing.md,
         padding: 0,
+        letterSpacing: -0.5,
     },
     divider: {
         height: 1,
-        marginBottom: spacing.lg,
+        marginBottom: spacing.md,
+    },
+    metaInputRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: spacing.sm,
+    },
+    categoryInput: {
+        flex: 1,
+        fontSize: 15,
+        fontWeight: '600',
+        paddingVertical: 4,
     },
     contentInput: {
-        fontSize: 16,
-        lineHeight: 24,
+        fontSize: 17,
+        lineHeight: 26,
         padding: 0,
+        flex: 1,
         minHeight: 300,
+        fontWeight: '400',
     },
 });

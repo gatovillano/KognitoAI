@@ -36,7 +36,7 @@ from sqlalchemy import Table, MetaData, update
 from sqlalchemy.orm import selectinload, joinedload
 from langchain_core.retrievers import BaseRetriever # Nueva importación
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 import tiktoken # Importar tiktoken
 
 def num_tokens_from_string(string: str, encoding_name: str = "cl100k_base") -> int:
@@ -175,7 +175,9 @@ async def _run_semantic_search(
                 if cat is not None: doc_metadata['category'] = cat
                 if ws_id is not None: doc_metadata['workspace_id'] = str(ws_id)
                 
-                processed_results.append((LCDocument(page_content=doc_content, metadata=doc_metadata), similarity_score))
+                # Convertir distancia L2 a similitud: 1 / (1 + distancia) para que mayor sea mejor
+                similarity = 1.0 / (1.0 + similarity_score) if similarity_score is not None else 0.0
+                processed_results.append((LCDocument(page_content=doc_content, metadata=doc_metadata), similarity))
 
         # Búsqueda en la tabla de Notas si se especifica
         if content_types and "user_notes" in content_types:
@@ -205,7 +207,7 @@ async def _run_semantic_search(
 
                 for nota, score in note_rows:
                     # El score de l2_distance es menor cuanto más similar, lo convertimos a similitud
-                    similarity = 1 - score
+                    similarity = 1.0 / (1.0 + score) if score is not None else 0.0
                     if similarity >= similarity_threshold:
                         doc = LCDocument(
                             page_content=nota.content,
@@ -453,6 +455,68 @@ async def get_all_user_memories(
         return []
 
 
+async def get_document_chunks(
+    account_id: str,
+    document_ids: List[str],
+    limit: int = 20
+) -> List[LCDocument]:
+    """
+    Recupera fragmentos de documentos específicos por sus IDs, ordenados por índice de fragmento.
+    Útil para recuperar contexto cuando el usuario selecciona documentos explícitamente.
+    """
+    if not document_ids:
+        return []
+        
+    try:
+        async with DBSession(SessionLocal) as session:
+            sql_query = """
+                SELECT
+                    document,
+                    cmetadata,
+                    topic,
+                    category,
+                    workspace_id
+                FROM langchain_pg_embedding
+                WHERE account_id = :account_id
+                AND cmetadata->>'document_id' = ANY(:document_ids)
+                ORDER BY (cmetadata->>'chunk_index')::int ASC NULLS LAST
+                LIMIT :limit
+            """
+
+            params = {
+                "account_id": account_id,
+                "document_ids": document_ids,
+                "limit": limit
+            }
+            
+            result = await session.execute(text(sql_query), params)
+            rows = result.fetchall()
+            
+            docs = []
+            for row in rows:
+                doc_content, doc_metadata, topic, cat, ws_id = row
+                
+                if isinstance(doc_metadata, str):
+                    try:
+                        doc_metadata = json.loads(doc_metadata)
+                    except json.JSONDecodeError:
+                        doc_metadata = {}
+                elif not isinstance(doc_metadata, dict):
+                    doc_metadata = {}
+
+                if topic is not None: doc_metadata['topic'] = topic
+                if cat is not None: doc_metadata['category'] = cat
+                if ws_id is not None: doc_metadata['workspace_id'] = str(ws_id)
+                
+                docs.append(LCDocument(page_content=doc_content, metadata=doc_metadata))
+                
+            return docs
+
+    except Exception as e:
+        logger.error(f"❌ Error al recuperar fragmentos de documentos {document_ids}: {e}", exc_info=True)
+        return []
+
+
 async def get_relevant_memories(
     account_id: str,
     query: str,
@@ -604,7 +668,13 @@ async def get_relevant_memories(
                 db_session=session_fts
             )
 
-            from langchain.retrievers import EnsembleRetriever
+            try:
+                from langchain.retrievers.ensemble import EnsembleRetriever
+            except ImportError:
+                try:
+                    from langchain_community.retrievers.ensemble import EnsembleRetriever
+                except ImportError:
+                    from langchain_classic.retrievers.ensemble import EnsembleRetriever
 
             final_retrieved_docs: List[LCDocument] = []
             if hybrid_search:
@@ -674,7 +744,8 @@ async def _update_embedding_columns_after_insert(
     category: str | None = None,
     workspace_id: str | None = None,
     telegram_id: Optional[str] = None,
-    thread_id: Optional[str] = None
+    thread_id: Optional[str] = None,
+    document_id: Optional[str] = None
 ) -> int:
     """
     Actualiza las nuevas columnas optimizadas después de insertar embeddings.
@@ -686,19 +757,27 @@ async def _update_embedding_columns_after_insert(
         Número de filas actualizadas.
     """
     try:
-        logger.info(f"🔄 Actualizando columnas optimizadas para {file_name}")
+        logger.info(f"🔄 Actualizando columnas optimizadas para {file_name} (doc_id: {document_id})")
 
-        # Construir la consulta de actualización
-        update_query = """
+        # Construir las cláusulas de actualización
+        update_clauses = [
+            "account_id = :account_id",
+            "content_type = :content_type",
+            "topic = :topic",
+            "category = :category",
+            "workspace_id = :workspace_id",
+            "telegram_id = :telegram_id",
+            "thread_id = :thread_id"
+        ]
+        
+        if document_id and str(document_id).lower() not in ("none", ""):
+            # Si hay document_id válido, asegurarse de que esté en cmetadata de forma persistente
+            update_clauses.append("cmetadata = cmetadata || jsonb_build_object('document_id', :document_id::text)")
+
+        # Construir la consulta de actualización final
+        update_query = f"""
             UPDATE langchain_pg_embedding
-            SET
-                account_id = :account_id,
-                content_type = :content_type,
-                topic = :topic,
-                category = :category,
-                workspace_id = :workspace_id,
-                telegram_id = :telegram_id,
-                thread_id = :thread_id
+            SET {", ".join(update_clauses)}
             WHERE
                 collection_id = :collection_uuid
                 AND (
@@ -721,7 +800,8 @@ async def _update_embedding_columns_after_insert(
             "telegram_id": processed_telegram_id,
             "thread_id": processed_thread_id,
             "collection_uuid": collection_uuid,
-            "file_name": file_name
+            "file_name": file_name,
+            "document_id": document_id
         }
 
         result = await db.execute(text(update_query), params)
@@ -1012,8 +1092,8 @@ async def process_document_for_rag(
         if workspace_id:
             base_metadata["workspace_id"] = str(workspace_id) # Añadir workspace_id a los metadatos
 
-        # Generar documento único ID para agrupar chunks
-        document_id = str(uuid.uuid4())
+        # Generar documento único ID para agrupar chunks (o usar uno existente en metadata)
+        document_id = str(base_metadata.get("document_id") or uuid.uuid4())
         base_metadata["document_id"] = document_id
 
         ids, lc_documents = [], []
@@ -1101,7 +1181,8 @@ async def process_document_for_rag(
                 account_id=account_id,
                 content_type="user_documents",
                 topic=decoded_topic, # Usar el nombre decodificado
-                workspace_id=workspace_id
+                workspace_id=workspace_id,
+                document_id=document_id # Pasamos el document_id para vincular chunks con el archivo físico
             )
 
             # Los documentos de workspace se identifican por sus metadatos
@@ -1801,9 +1882,19 @@ async def list_user_collections(account_id: str, workspace_id: Optional[str] = N
                 """)
                 document_count = await db.scalar(count_query, count_params) or 0
 
+                # Contar subcolecciones
+                sub_count_query = select(func.count(UserDocumentTopic.id)).where(UserDocumentTopic.parent_id == topic.id)
+                subcollection_count = await db.scalar(sub_count_query) or 0
+
                 collections_list.append({
+                    "id": str(topic.id),
+                    "name": topic.name,
                     "topic": topic.name,
+                    "parent_id": str(topic.parent_id) if topic.parent_id else None,
+                    "position": topic.position,
+                    "item_type": topic.item_type,
                     "document_count": document_count,
+                    "subcollection_count": subcollection_count,
                     "description": topic.description,
                     "workspace_id": str(topic.workspace_id) if topic.workspace_id else None,
                     "workspace_name": topic.workspace.name if topic.workspace else None,
@@ -1825,7 +1916,9 @@ async def create_empty_collection(
     account_id: str, 
     topic_name: str, 
     description: Optional[str] = None,
-    workspace_id: Optional[str] = None
+    workspace_id: Optional[str] = None,
+    parent_id: Optional[str] = None,
+    item_type: str = 'collection'
 ) -> bool:
     """
     Crea una colección vacía en la tabla UserDocumentTopic.
@@ -1835,27 +1928,33 @@ async def create_empty_collection(
         topic_name: Nombre de la nueva colección.
         description: Descripción opcional de la colección.
         workspace_id: ID del workspace (opcional).
-        
+        parent_id: ID de la colección padre (opcional) para crear subcolecciones.
+        item_type: 'collection' o 'folder'.
     Returns:
         True si la colección se creó exitosamente, False si ya existe o hay error.
     """
     # Decodificar el nombre del topic al principio
     decoded_topic_name = unquote(topic_name)
-    logger.info(f"DEBUG: create_empty_collection llamado con account_id={account_id}, topic_name={topic_name} (decoded: {decoded_topic_name}), workspace_id={workspace_id}")
+    logger.info(f"DEBUG: create_empty_collection llamado con account_id={account_id}, topic_name={topic_name} (decoded: {decoded_topic_name}), workspace_id={workspace_id}, parent_id={parent_id}")
     logger.info(f"Creando colección vacía '{decoded_topic_name}' para cuenta {account_id}")
     
     async with DBSession(SessionLocal) as db:
         try:
-            # Verificar si la colección ya existe
+            # Verificar si la colección ya existe bajo el mismo parent/workspace
             existing_query = select(UserDocumentTopic).where(
-                UserDocumentTopic.account_id == uuid.UUID(account_id)
+                UserDocumentTopic.account_id == uuid.UUID(account_id),
+                UserDocumentTopic.name == decoded_topic_name
             )
+            
             if workspace_id:
                 existing_query = existing_query.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
             else:
                 existing_query = existing_query.where(UserDocumentTopic.workspace_id.is_(None))
-            
-            existing_query = existing_query.where(UserDocumentTopic.name == decoded_topic_name) # Usar el nombre decodificado
+
+            # CORRECCIÓN: La restricción de unicidad ix_account_workspace_topic en DB
+            # incluye (account_id, workspace_id, name).
+            # Si intentas crear una colección con el mismo nombre en el mismo workspace, fallará.
+            # parent_id no parece ser parte de la restricción única de DB.
             
             existing_collection = await db.scalar(existing_query)
             if existing_collection:
@@ -1866,12 +1965,14 @@ async def create_empty_collection(
                 account_id=uuid.UUID(account_id),
                 name=decoded_topic_name, # Usar el nombre decodificado
                 description=description,
-                workspace_id=uuid.UUID(workspace_id) if workspace_id else None
+                workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
+                parent_id=uuid.UUID(parent_id) if parent_id else None,
+                item_type=item_type
             )
             db.add(new_topic)
             await db.commit()
             await db.refresh(new_topic)
-            logger.info(f"✅ Colección vacía '{decoded_topic_name}' creada exitosamente.")
+            logger.info(f"✅ Colección vacía '{decoded_topic_name}' creada exitosamente (id={new_topic.id}).")
             return True
         except Exception as e:
             logger.error(f"❌ Error al crear colección vacía '{decoded_topic_name}': {e}", exc_info=True)
@@ -1884,10 +1985,12 @@ async def update_collection(
     old_topic_name: str,
     new_topic_name: Optional[str] = None,
     new_description: Optional[str] = None,
-    workspace_id: Optional[str] = None
+    workspace_id: Optional[str] = None,
+    parent_id: Optional[str] = None,
+    item_type: Optional[str] = None
 ) -> bool:
     """
-    Actualiza una colección existente (nombre, descripción, workspace_id o team_id).
+    Actualiza una colección existente (nombre, descripción, workspace_id, parent_id).
     
     Args:
         account_id: ID de la cuenta del usuario.
@@ -1895,7 +1998,7 @@ async def update_collection(
         new_topic_name: Nuevo nombre de la colección (opcional).
         new_description: Nueva descripción de la colección (opcional).
         workspace_id: ID del workspace (opcional).
-        
+        parent_id: Nuevo parent_id para mover la colección (opcional).
     Returns:
         True si la colección se actualizó exitosamente, False en caso contrario.
     """
@@ -1903,13 +2006,11 @@ async def update_collection(
     decoded_old_topic_name = unquote(old_topic_name)
     decoded_new_topic_name = unquote(new_topic_name) if new_topic_name else None
     
-    logger.info(f"Actualizando colección '{decoded_old_topic_name}' para cuenta {account_id}. Nuevos datos: topic={decoded_new_topic_name}, description={new_description}, workspace_id={workspace_id}")
+    logger.info(f"Actualizando colección '{decoded_old_topic_name}' para cuenta {account_id}. Nuevos datos: topic={decoded_new_topic_name}, description={new_description}, workspace_id={workspace_id}, parent_id={parent_id}")
 
     async with DBSession(SessionLocal) as db:
         try:
             # Buscar la colección SOLO por account_id y nombre
-            # No filtrar por workspace_id aquí para permitir actualizar colecciones
-            # que originalmente no tienen workspace asignado
             collection_query = select(UserDocumentTopic).where(
                 UserDocumentTopic.account_id == uuid.UUID(account_id),
                 UserDocumentTopic.name == decoded_old_topic_name
@@ -1927,16 +2028,21 @@ async def update_collection(
                     UserDocumentTopic.account_id == uuid.UUID(account_id),
                     UserDocumentTopic.name == decoded_new_topic_name
                 )
+                # Mantener la comprobación por workspace/parent para evitar conflictos
                 if workspace_id:
                     existing_query = existing_query.where(UserDocumentTopic.workspace_id == uuid.UUID(workspace_id))
                 else:
                     existing_query = existing_query.where(UserDocumentTopic.workspace_id.is_(None))
+
+                if parent_id:
+                    existing_query = existing_query.where(UserDocumentTopic.parent_id == uuid.UUID(parent_id))
+                else:
+                    existing_query = existing_query.where(UserDocumentTopic.parent_id.is_(None))
                 
                 existing_collection = (await db.execute(existing_query)).scalars().first()
                 if existing_collection:
-                    logger.warning(f"Ya existe una colección con el nombre '{decoded_new_topic_name}' para la cuenta {account_id}.")
+                    logger.warning(f"Ya existe una colección con el nombre '{decoded_new_topic_name}' para la cuenta {account_id} en el mismo contexto.")
                     return False
-
 
             # Actualizar los campos proporcionados
             old_workspace_id = collection.workspace_id
@@ -1946,6 +2052,10 @@ async def update_collection(
                 collection.description = new_description
             if workspace_id:
                 collection.workspace_id = uuid.UUID(workspace_id)
+            if parent_id is not None:
+                collection.parent_id = uuid.UUID(parent_id) if parent_id else None
+            if item_type:
+                collection.item_type = item_type
             
             await db.commit()
             await db.refresh(collection)
@@ -2241,6 +2351,22 @@ async def get_user_document_topic_by_name(account_id: str, topic_name: str, work
             """)
             document_count = await db.scalar(count_query, count_params) or 0
 
+            # Obtener subcolecciones
+            subcollections_query = select(UserDocumentTopic).where(UserDocumentTopic.parent_id == collection.id)
+            subcollections_result = await db.execute(subcollections_query)
+            subcollections = subcollections_result.scalars().all()
+            
+            subcollections_data = [
+                {
+                    "id": str(sc.id),
+                    "name": sc.name,
+                    "topic": sc.name,
+                    "parent_id": str(sc.parent_id),
+                    "item_type": sc.item_type
+                }
+                for sc in subcollections
+            ]
+
             linked_profiles_data = []
             for cp in collection.contact_profiles:
                 linked_profiles_data.append({
@@ -2253,8 +2379,13 @@ async def get_user_document_topic_by_name(account_id: str, topic_name: str, work
             return {
                 "id": str(collection.id),
                 "topic": collection.name,
+                "name": collection.name,
+                "parent_id": str(collection.parent_id) if collection.parent_id else None,
+                "position": collection.position,
+                "item_type": collection.item_type,
                 "description": collection.description,
                 "document_count": document_count,
+                "subcollections": subcollections_data,
                 "workspace_id": str(collection.workspace_id) if collection.workspace_id else None,
                 "created_by_account_id": str(collection.account_id),
                 "created_by_email": collection.account.email if collection.account else None,

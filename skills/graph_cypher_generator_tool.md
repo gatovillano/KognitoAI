@@ -1,1 +1,0 @@
-La pregunta o descripción completa en lenguaje natural sobre lo que se desea encontrar o analizar en el grafo de conocimiento.

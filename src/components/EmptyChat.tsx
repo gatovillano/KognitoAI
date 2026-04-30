@@ -34,6 +34,7 @@ interface EmptyChatProps {
   onToggleDeepResearch: () => void;
   onStartRecording: () => void;
   onStopRecording: () => void;
+  onStopResponding?: () => void;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRemoveContextItem: (item: any) => void;
   onPaste: (e: ClipboardEvent) => void;
@@ -66,6 +67,7 @@ export function EmptyChat({
   onToggleDeepResearch,
   onStartRecording,
   onStopRecording,
+  onStopResponding,
   onFileUpload,
   onRemoveContextItem,
   onPaste,
@@ -139,6 +141,7 @@ export function EmptyChat({
             newMessage={newMessage}
             setNewMessage={setNewMessage}
             onSendMessage={onSendMessage}
+            onStopResponding={onStopResponding}
             isResponding={isResponding}
             inputPlaceholder="Escribe tu consulta aquí..."
             isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
@@ -170,6 +173,7 @@ export function EmptyChat({
             <ContextSelectorButton
               onContextSelected={onContextSelected}
               currentContext={selectedContext}
+              workspaceId={workspaceId}
             />
           </ChatInputBar>
         </div>

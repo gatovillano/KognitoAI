@@ -34,7 +34,7 @@ export const useStreamingChat = (options: StreamingChatOptions = {}) => {
       }
 
       // Crear URL con la base URL correcta
-      const baseURL = process.env.NEXT_PUBLIC_API_URL || 'https://apibase.gatoslibres.art';
+      const baseURL = process.env.NEXT_PUBLIC_API_URL || 'https://apibase.cuerpolibre.cl';
       const streamUrl = `${baseURL}/api/chat/stream`;
 
       // Enviar request inicial

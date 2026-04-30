@@ -6,7 +6,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, Notebook, Users, Edit, Trash2, MoreHorizontal, Info, Lightbulb, FileText, Link } from 'lucide-react'; // Añadido Link
+import { Plus, Notebook, Users, Edit, Trash2, MoreHorizontal, Info, Lightbulb, FileText, Link, Bot } from 'lucide-react'; // Añadido Link y Bot
 import { motion, AnimatePresence } from 'framer-motion';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -817,42 +817,51 @@ export default function NotesPage() {
       />
 
       <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle className="text-xl font-bold text-primary">Módulo de Notas</SheetTitle>
-            <SheetDescription className="text-sm text-muted-foreground">
-              Captura, organiza y gestiona tus ideas, pensamientos y recordatorios de forma eficiente.
+        <SheetContent side="right" className="w-[400px] sm:w-[540px] overflow-y-auto">
+          <SheetHeader className="pb-6 border-b">
+            <SheetTitle className="text-2xl font-bold flex items-center gap-2">
+              <Notebook className="h-6 w-6 text-primary" />
+              Guía de Notas
+            </SheetTitle>
+            <SheetDescription>
+              Captura ideas y genera conocimiento con ayuda de la IA.
             </SheetDescription>
           </SheetHeader>
-          <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
-            <p><strong>¿Qué puedes hacer en tus Notas?</strong></p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Crear y Editar Notas:</strong> Escribe y organiza tus ideas con títulos y contenido.</li>
-              <li><strong>Categorizar Notas:</strong> Agrupa tus notas por categorías para una mejor organización.</li>
-              <li><strong>Organizar por Workspaces:</strong> Asocia notas a diferentes workspaces para mantener la información segmentada.</li>
-              <li><strong>Análisis de Notas:</strong> Obtén insights y resúmenes semánticos de tus notas, individualmente o en grupos.</li>
-              <li><strong>Vincular a Perfiles:</strong> Conecta tus notas a perfiles de contacto para contextualizar la información.</li>
-              <li><strong>Gestión de Notas:</strong> Edita, elimina y visualiza tus notas fácilmente.</li>
-            </ul>
+          
+          <div className="py-6 space-y-8">
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Captura Inteligente</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                El módulo de Notas no es solo un editor de texto; es un receptor de ideas. Puedes organizar tus notas por <strong>Categorías</strong> (Concepto, Idea, Tarea) o por <strong>Workspaces</strong> para mantener el orden.
+              </p>
+            </section>
 
-            <p><strong>Interacción con IA:</strong></p>
-            <p>Además de la gestión manual, puedes interactuar con tus notas a través del chat de IA. Las notas se integran a la "memoria" de Kognito, enriqueciendo sus respuestas por relevancia con la consulta. La IA dispone de herramientas especializadas para:</p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Buscar y recuperar información específica de tus notas.</li>
-              <li>Generar resúmenes y extraer ideas clave de tus notas.</li>
-              <li>Responder preguntas utilizando el contenido de tus notas.</li>
-              <li>Crear nuevas notas o expandir las existentes basándose en conversaciones.</li>
-            </ul>
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Interacción con el Agente</h3>
+              <div className="bg-primary/5 rounded-2xl p-4 border border-primary/10 space-y-3">
+                <p className="text-xs font-medium text-primary flex items-center gap-2">
+                  <Bot className="h-4 w-4" /> El Agente puede ayudarte a:
+                </p>
+                <ul className="text-xs space-y-2 text-muted-foreground list-disc pl-4">
+                  <li><strong>Resumir contenido extenso</strong> en puntos clave accionables.</li>
+                  <li><strong>Extraer tareas y eventos</strong> directamente desde una nota y agendarlos.</li>
+                  <li><strong>Mejorar la redacción</strong> o cambiar el tono de tus borradores.</li>
+                  <li><strong>Vincular notas</strong> a perfiles de contacto específicos para tener contexto de reuniones.</li>
+                </ul>
+              </div>
+            </section>
 
-            <p><strong>Beneficios Clave:</strong></p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Captura Rápida de Ideas:</strong> No pierdas ningún pensamiento importante.</li>
-              <li><strong>Organización Flexible:</strong> Adapta la estructura de tus notas a tus necesidades.</li>
-              <li><strong>Conocimiento Contextualizado:</strong> Conecta ideas y personas para una comprensión más profunda.</li>
-              <li><strong>Potenciado por IA:</strong> Aprovecha la inteligencia artificial para analizar y gestionar tu conocimiento.</li>
-            </ul>
-
-            <p>¡Convierte tus ideas en conocimiento accionable con el Módulo de Notas!</p>
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Organización Visual</h3>
+              <div className="grid grid-cols-1 gap-2 text-[11px]">
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-yellow-500/5 text-yellow-600 border border-yellow-500/10">
+                  <span className="font-bold">IDEA</span> Pequeños fragmentos de inspiración que el agente puede expandir.
+                </div>
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-purple-500/5 text-purple-600 border border-purple-500/10">
+                  <span className="font-bold">LINKED</span> Vincula notas a contactos para verlas en su perfil detallado.
+                </div>
+              </div>
+            </section>
           </div>
         </SheetContent>
       </Sheet>

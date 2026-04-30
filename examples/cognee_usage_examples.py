@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
-Ejemplos de uso de Cognee en KognitoAI
+Ejemplos de uso de las herramientas de Grafo de Conocimiento en KognitoAI.
 Demuestra diferentes casos de uso para grafos de conocimiento.
 """
 
 import asyncio
 import sys
 import os
+import logging
 
 # Agregar el directorio raíz al path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tools.cognee_knowledge_graph_tool import CogneeKnowledgeGraphTool
-import logging
+from skills.knowledge_and_memory_skill.scripts.conceptual_processing_tool import ConceptualProcessingTool
+from skills.knowledge_and_memory_skill.scripts.knowledge_graph_tool import KnowledgeGraphTool
+from skills.analysis_and_insights_skill.scripts.insight_generation_tool import InsightGenerationTool
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -25,7 +27,7 @@ async def example_1_process_research_documents():
     print("=" * 60)
     
     # Crear la herramienta
-    tool = CogneeKnowledgeGraphTool()
+    tool = ConceptualProcessingTool(account_id="researcher_001")
     
     # Documentos de ejemplo sobre IA y Machine Learning
     research_documents = [
@@ -81,15 +83,14 @@ async def example_1_process_research_documents():
     
     # Procesar documentos
     result = await tool._arun(
-        action="process_documents",
-        account_id="researcher_001",
         documents=research_documents,
         dataset_name="ai_research"
     )
     
     print("📊 Resultado del procesamiento:")
     print(result)
-    print("\n" + "=" * 60)
+    print("
+" + "=" * 60)
 
 async def example_2_search_knowledge_graph():
     """Ejemplo 2: Buscar información específica en el grafo."""
@@ -97,7 +98,7 @@ async def example_2_search_knowledge_graph():
     print("🔍 Ejemplo 2: Buscando en el grafo de conocimiento")
     print("=" * 60)
     
-    tool = CogneeKnowledgeGraphTool()
+    tool = KnowledgeGraphTool(account_id="researcher_001")
     
     # Diferentes tipos de consultas
     queries = [
@@ -108,19 +109,18 @@ async def example_2_search_knowledge_graph():
     ]
     
     for query in queries:
-        print(f"\n🔍 Consulta: {query}")
+        print(f"
+🔍 Consulta: {query}")
         print("-" * 40)
         
         result = await tool._arun(
-            action="search_graph",
-            account_id="researcher_001", 
-            query=query,
-            dataset_name="ai_research"
+            natural_language_query=query
         )
         
         print(result)
     
-    print("\n" + "=" * 60)
+    print("
+" + "=" * 60)
 
 async def example_3_get_insights():
     """Ejemplo 3: Obtener insights y patrones del grafo."""
@@ -128,7 +128,7 @@ async def example_3_get_insights():
     print("💡 Ejemplo 3: Obteniendo insights del grafo")
     print("=" * 60)
     
-    tool = CogneeKnowledgeGraphTool()
+    tool = InsightGenerationTool(account_id="researcher_001")
     
     # Consultas para insights
     insight_queries = [
@@ -139,19 +139,19 @@ async def example_3_get_insights():
     ]
     
     for query in insight_queries:
-        print(f"\n💡 Insights sobre: {query}")
+        print(f"
+💡 Insights sobre: {query}")
         print("-" * 40)
         
         result = await tool._arun(
-            action="get_insights",
-            account_id="researcher_001",
             query=query,
-            dataset_name="ai_research"
+            account_id="researcher_001"
         )
         
         print(result)
     
-    print("\n" + "=" * 60)
+    print("
+" + "=" * 60)
 
 async def example_4_business_documents():
     """Ejemplo 4: Procesar documentos empresariales."""
@@ -159,7 +159,8 @@ async def example_4_business_documents():
     print("💼 Ejemplo 4: Procesando documentos empresariales")
     print("=" * 60)
     
-    tool = CogneeKnowledgeGraphTool()
+    processing_tool = ConceptualProcessingTool(account_id="company_abc")
+    search_tool = KnowledgeGraphTool(account_id="company_abc")
     
     # Documentos empresariales de ejemplo
     business_docs = [
@@ -199,9 +200,7 @@ async def example_4_business_documents():
     ]
     
     # Procesar documentos empresariales
-    result = await tool._arun(
-        action="process_documents",
-        account_id="company_abc",
+    result = await processing_tool._arun(
         documents=business_docs,
         dataset_name="business_strategy"
     )
@@ -210,23 +209,22 @@ async def example_4_business_documents():
     print(result)
     
     # Buscar información específica
-    print(f"\n🔍 Buscando estrategias de IA...")
-    search_result = await tool._arun(
-        action="search_graph",
-        account_id="company_abc",
-        query="estrategias de inteligencia artificial",
-        dataset_name="business_strategy"
+    print(f"
+🔍 Buscando estrategias de IA...")
+    search_result = await search_tool._arun(
+        natural_language_query="estrategias de inteligencia artificial"
     )
     
     print(search_result)
-    print("\n" + "=" * 60)
+    print("
+" + "=" * 60)
 
 async def run_all_examples():
     """Ejecuta todos los ejemplos en secuencia."""
     
-    print("🧠 Ejemplos de Uso de Cognee en KognitoAI")
+    print("🧠 Ejemplos de Uso de las Herramientas de Grafo de Conocimiento en KognitoAI")
     print("=" * 80)
-    print("Estos ejemplos demuestran cómo usar Cognee para crear y consultar")
+    print("Estos ejemplos demuestran cómo usar las nuevas herramientas para crear y consultar")
     print("grafos de conocimiento con diferentes tipos de documentos.")
     print("=" * 80)
     
@@ -238,17 +236,20 @@ async def run_all_examples():
         await example_4_business_documents()
         
         print("✅ Todos los ejemplos completados exitosamente!")
-        print("\n💡 Próximos pasos:")
+        print("
+💡 Próximos pasos:")
         print("1. Accede a Neo4j Browser (http://localhost:7474) para visualizar el grafo")
         print("2. Experimenta con tus propios documentos")
-        print("3. Integra Cognee en tu flujo de trabajo")
+        print("3. Integra las herramientas de grafo de conocimiento en tu flujo de trabajo")
         
     except Exception as e:
         logger.error(f"❌ Error ejecutando ejemplos: {e}")
-        print(f"\n❌ Error: {e}")
-        print("\n🔧 Soluciones posibles:")
+        print(f"
+❌ Error: {e}")
+        print("
+🔧 Soluciones posibles:")
         print("1. Verifica que Neo4j esté corriendo: docker-compose up -d neo4j")
-        print("2. Revisa tu configuración en .env (NEO4J_*, GOOGLE_API_KEY)")
+        print("2. Revisa tu configuración en .env (NEO4J_*, OPENAI_API_KEY, etc)")
         print("3. Asegúrate de que el servicio core esté activo")
 
 if __name__ == "__main__":

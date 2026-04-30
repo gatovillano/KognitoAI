@@ -1,1 +1,0 @@
-El contenido en formato Markdown o texto plano que se convertirá a HTML.

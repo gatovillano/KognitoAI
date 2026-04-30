@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 from core.database import GitHubDocument # Asumiendo que get_db_session existe o se puede crear
 from core.dependencies import get_db_session
 from utils.db_session import DBSession
-from tools.github_repo_tool import GitHubRepoTool
+from skills.developer_tools_skill.scripts.github_repo_tool import GitHubRepoTool
 from utils.security import get_current_account_id
 from core.database import Account
 
@@ -38,7 +38,10 @@ async def manage_github_collection(
     # Si se usa autenticación, se podría obtener el account_id del usuario actual
     account_id_to_use = request.account_id if request.account_id else account_id
 
-    github_tool = GitHubRepoTool(account_id=account_id_to_use)
+    github_tool = GitHubRepoTool(
+        account_id=account_id_to_use,
+        workspace_id=request.workspace_id
+    )
     
     # Pasar la sesión de la base de datos a la herramienta si es necesario,
     # aunque la herramienta ya crea su propia SessionLocal.
@@ -55,6 +58,15 @@ async def manage_github_collection(
     logger.info(f"Gestionando colección de GitHub para account_id: {account_id_to_use}, repo_url: {request.repo_url}, action: {request.action}")
     
     try:
+        # Import and invoke create_empty_collection to ensure the repository is visible in the frontend list
+        from core.memory_manager import create_empty_collection
+        topic_to_create = request.collection_topic if request.collection_topic else "repositorio"
+        await create_empty_collection(
+            account_id=account_id_to_use,
+            topic_name=topic_to_create,
+            workspace_id=request.workspace_id
+        )
+
         result = await github_tool._arun(
             repo_url=request.repo_url,
             action=request.action,

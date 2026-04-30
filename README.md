@@ -35,7 +35,6 @@ Kognito AI está diseñado para ser tu asistente inteligente definitivo, ofrecie
 ### 📚 **Gestión de Conocimiento**
 *   **Gestión Documental Inteligente:** Sube y organiza documentos (PDFs, DOCX, TXT, MD). Se procesan automáticamente en ambas bases de datos.
 *   **Notas Colaborativas:** Crea y gestiona notas personales o compártelas con equipos.
-*   **Insights Proactivos:** Análisis continuo para encontrar conexiones, sinergias, duplicidades y brechas de información.
 *   **Migración Automática:** Scripts para convertir tu base de conocimientos existente en grafos.
 
 ### 🎯 **Productividad y Organización**
@@ -90,7 +89,7 @@ Kognito AI System
 │       ├── document_parser.py
 │       ├── embeddings.py
 │       ├── generate_mind_map.py
-│       ├── proactive_knowledge_linker.py
+│       ├── paginator.py
 │       └── security.py
 │
 ├── 2. Frontend Web (Next.js Dashboard)
