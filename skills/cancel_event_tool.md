@@ -1,1 +1,0 @@
-El ID numérico único del evento que se desea cancelar. El usuario debe proporcionar este ID.

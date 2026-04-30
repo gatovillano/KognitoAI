@@ -59,6 +59,7 @@ services:
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
       - ./scripts:/app/scripts
+      - ./skills:/app/skills
       - ./.env:/app/.env:ro # Montar el archivo .env para que los cambios se apliquen sin reconstruir
     env_file:
       - ./.env
@@ -237,6 +238,28 @@ services:
         sleep 10 && # Dar un poco más de tiempo por si acaso
         cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-neo4j} -f /init_neo4j_indexes.cypher || true
       "
+
+  # 8. Servicio TTS Kokoro (Local ONNX)
+  # 🌐 Acceso Host: http://localhost:8011
+  # 🔌 Acceso Interno: http://kokoro-tts:8011
+  kokoro-tts:
+    build:
+      context: ./kokoro_service
+      dockerfile: Dockerfile
+    container_name: kokoro-tts
+    restart: always
+    ports:
+      - "8011:8011"
+    # volumes:
+    #   # Montar los modelos desde una carpeta local
+    #   - ./kokoro_service/models:/opt/kokoro
+    networks:
+      - kognito_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 
 

@@ -72,17 +72,17 @@ class EnhancedMemoryManager:
             # 2. Obtener contexto del grafo de conocimiento (si está habilitado)
             graph_context = {"type": "graph", "results": [], "reason": "Disabled"}
             if enable_graph_search:
-                # 1. Buscar en el grafo de memorias del agente
-                agent_memory_dataset = f"agent_memories_{user_id.replace('-', '_')}"
+                # 1. Buscar en el grafo de memorias del agente (aislado por account_id y workspace_id)
+                agent_memory_dataset = "Agent Memories"
+                
                 agent_graph_context = await self._get_graph_context(
-                    user_query, agent_memory_dataset, max_results
+                    user_query, agent_memory_dataset, user_id, workspace_id, max_results
                 )
                 
                 # 2. Buscar en el grafo de documentos (asumiendo un dataset por defecto o workspace)
-                # Esta parte puede necesitar un nombre de dataset de documentos más explícito si existe
                 document_dataset = f"workspace_documents_{workspace_id.replace('-', '_')}" if workspace_id else "default_documents"
                 document_graph_context = await self._get_graph_context(
-                    user_query, document_dataset, max_results
+                    user_query, document_dataset, user_id, workspace_id, max_results
                 )
 
                 # Combinar ambos contextos de grafo
@@ -137,19 +137,21 @@ class EnhancedMemoryManager:
         self,
         user_query: str,
         dataset_name: str,
+        user_id: str,
+        workspace_id: Optional[str] = None,
         max_results: int = 10
     ) -> Dict[str, Any]:
-        """Obtiene contexto del grafo de conocimiento para un dataset específico."""
+        """Obtiene contexto del grafo de conocimiento para un dataset específico, filtrando por cuenta y workspace."""
         
         if not self.graph_db:
             return {"type": "graph", "results": [], "dataset": dataset_name}
         
         try:
             # 1. Buscar entidades relacionadas con la consulta en el dataset específico
-            entities = await self._find_relevant_entities(user_query, dataset_name)
+            entities = await self._find_relevant_entities(user_query, dataset_name, user_id, workspace_id)
             
             # 2. Obtener relaciones de esas entidades
-            relationships = await self._get_entity_relationships(entities)
+            relationships = await self._get_entity_relationships(entities, user_id, workspace_id)
             
             # 3. Construir contexto del grafo
             graph_context = {
@@ -166,8 +168,8 @@ class EnhancedMemoryManager:
             logger.error(f"❌ Error obteniendo contexto del grafo: {e}")
             return {"type": "graph", "results": []}
     
-    async def _find_relevant_entities(self, user_query: str, dataset_name: str) -> List[Dict[str, Any]]:
-        """Encuentra entidades relevantes en el grafo para un dataset específico."""
+    async def _find_relevant_entities(self, user_query: str, dataset_name: str, user_id: str, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Encuentra entidades relevantes en el grafo para un dataset específico, filtrando por cuenta y workspace."""
         
         try:
             # Extraer términos clave de la consulta
@@ -175,10 +177,25 @@ class EnhancedMemoryManager:
             if not query_terms:
                 return []
 
+            workspace_filter = ""
+            params = {
+                "query_terms": query_terms, 
+                "dataset_name": dataset_name,
+                "account_id": user_id
+            }
+
+            if workspace_id:
+                workspace_filter = "AND (n.workspace_id = $workspace_id OR n.workspace_id IS NULL)"
+                params["workspace_id"] = workspace_id
+            else:
+                workspace_filter = "AND n.workspace_id IS NULL"
+
             # Query para buscar entidades que pertenezcan al dataset_name
-            query = """
+            query = f"""
             MATCH (n)
             WHERE n.dataset_name = $dataset_name
+              AND (n.account_id = $account_id OR n.account_id IS NULL)
+              {workspace_filter}
               AND ANY(term IN $query_terms WHERE toLower(n.name) CONTAINS term OR toLower(n.description) CONTAINS term)
             RETURN n.id as id, n.name as name, n.type as type,
                    n.description as description, n.confidence as confidence
@@ -186,7 +203,6 @@ class EnhancedMemoryManager:
             LIMIT 20
             """
             
-            params = {"query_terms": query_terms, "dataset_name": dataset_name}
             result = await self.graph_db.execute_query(query, params)
             
             # Eliminar duplicados si los hubiera, manteniendo el orden de la base de datos
@@ -202,8 +218,8 @@ class EnhancedMemoryManager:
             logger.error(f"❌ Error buscando entidades relevantes: {e}")
             return []
     
-    async def _get_entity_relationships(self, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Obtiene las relaciones de las entidades encontradas."""
+    async def _get_entity_relationships(self, entities: List[Dict[str, Any]], user_id: str, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Obtiene las relaciones de las entidades encontradas, filtrando por cuenta y workspace."""
         
         if not entities:
             return []
@@ -214,10 +230,24 @@ class EnhancedMemoryManager:
             if not entity_ids:
                 return []
             
+            workspace_filter = ""
+            params = {
+                "entity_ids": entity_ids,
+                "account_id": user_id
+            }
+
+            if workspace_id:
+                workspace_filter = "AND (source.workspace_id = $workspace_id OR source.workspace_id IS NULL)"
+                params["workspace_id"] = workspace_id
+            else:
+                workspace_filter = "AND source.workspace_id IS NULL"
+
             # Query para obtener relaciones
-            query = """
+            query = f"""
             MATCH (source)-[r]->(target)
-            WHERE source.id IN $entity_ids OR target.id IN $entity_ids
+            WHERE (source.id IN $entity_ids OR target.id IN $entity_ids)
+              AND (source.account_id = $account_id OR source.account_id IS NULL)
+              {workspace_filter}
             RETURN source.id as source_id, source.name as source_name,
                    type(r) as relationship_type, r.description as description,
                    target.id as target_id, target.name as target_name,
@@ -226,7 +256,7 @@ class EnhancedMemoryManager:
             LIMIT 50
             """
             
-            relationships = await self.graph_db.execute_query(query, {"entity_ids": entity_ids})
+            relationships = await self.graph_db.execute_query(query, params)
             return relationships
             
         except Exception as e:

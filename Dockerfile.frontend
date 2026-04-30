@@ -48,4 +48,4 @@ EXPOSE 3000
 # El comando para iniciar el servidor de Next.js en modo desarrollo
 # El comando para iniciar el servidor de Next.js en modo desarrollo
 # Agregamos un script que muestre las URLs correctas
-CMD ["sh", "-c", "echo '🌐 Frontend disponible en:' && echo '  📍 Local: http://localhost:8880' && echo '  🌍 Público: https://kognito.gatoslibres.art' && echo '  🔧 API Local: http://localhost:8889' && echo '  🔧 API Pública: https://apibase.gatoslibres.art' && echo '' && npm run dev"]
+CMD ["sh", "-c", "echo '🌐 Frontend disponible en:' && echo '  📍 Local: http://localhost:8880' && echo '  🌍 Público: https://kognito.cuerpolibre.cl' && echo '  🔧 API Local: http://localhost:8889' && echo '  🔧 API Pública: https://apibase.cuerpolibre.cl' && echo '' && npm run dev"]

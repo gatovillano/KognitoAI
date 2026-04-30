@@ -1,7 +1,7 @@
 import logging
 import json
 from typing import List, Dict, Any, Optional
-from langchain.schema import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from core.llm_manager import get_fast_llm
 
 logger = logging.getLogger(__name__)

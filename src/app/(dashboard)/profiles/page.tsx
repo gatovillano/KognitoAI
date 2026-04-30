@@ -8,7 +8,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, User, Edit, Trash2, MoreHorizontal, Info, Mail, Phone, Search, ExternalLink } from 'lucide-react'; // Importar Search y ExternalLink
+import { Plus, User, Edit, Trash2, MoreHorizontal, Info, Mail, Phone, Search, ExternalLink, Bot } from 'lucide-react'; // Importar Search, ExternalLink y Bot
 import { motion, AnimatePresence } from 'framer-motion';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -352,40 +352,58 @@ export default function ProfilesPage() {
       </div>
 
       <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle className="text-xl font-bold text-primary">Módulo de Perfiles</SheetTitle>
-            <SheetDescription className="text-sm text-muted-foreground">
-              Gestiona y organiza la información de tus contactos y las interacciones que tienes con ellos.
+        <SheetContent side="right" className="w-[400px] sm:w-[540px] overflow-y-auto">
+          <SheetHeader className="pb-6 border-b">
+            <SheetTitle className="text-2xl font-bold flex items-center gap-2">
+              <User className="h-6 w-6 text-primary" />
+              Guía de Perfiles
+            </SheetTitle>
+            <SheetDescription>
+              Gestión estratégica de relaciones y contactos.
             </SheetDescription>
           </SheetHeader>
-          <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
-            <p><strong>¿Qué puedes hacer en tus Perfiles?</strong></p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Crear y Editar Perfiles:</strong> Registra y actualiza la información de tus contactos, incluyendo nombre, email, teléfono, etiquetas y campos personalizados.</li>
-              <li><strong>Categorizar Perfiles:</strong> Organiza tus contactos por categorías para una gestión más sencilla.</li>
-              <li><strong>Vinculación Inteligente:</strong> Conecta perfiles con notas, eventos y otros elementos para tener una visión 360 de tus interacciones.</li>
-              <li><strong>Gestión de Perfiles:</strong> Edita, elimina y visualiza tus perfiles de contacto fácilmente.</li>
-            </ul>
+          
+          <div className="py-6 space-y-8">
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">CRM Inteligente</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Organiza tu red de contactos mediante <strong>Categorías</strong> y <strong>Etiquetas</strong> personalizadas. El módulo de perfiles está diseñado para ofrecerte una visión completa de cada persona con la que interactúas.
+              </p>
+            </section>
 
-            <p><strong>Interacción con IA:</strong></p>
-            <p>Además de la gestión manual, puedes interactuar con tus perfiles a través del chat de IA. Los perfiles se integran a la "memoria" de Kognito, enriqueciendo sus respuestas por relevancia con la consulta. La IA dispone de herramientas especializadas para:</p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Buscar y recuperar información de contactos.</li>
-              <li>Crear y actualizar perfiles de contacto.</li>
-              <li>Vincular eventos y notas a perfiles específicos.</li>
-              <li>Generar resúmenes de interacciones con un contacto.</li>
-            </ul>
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Inteligencia de Relaciones (IA)</h3>
+              <div className="bg-primary/5 rounded-2xl p-4 border border-primary/10 space-y-3">
+                <p className="text-xs font-medium text-primary flex items-center gap-2">
+                  <Bot className="h-4 w-4" /> El Agente puede ayudarte a:
+                </p>
+                <ul className="text-xs space-y-2 text-muted-foreground list-disc pl-4">
+                  <li><strong>Resumir interacciones</strong> antes de una reunión importante.</li>
+                  <li><strong>Recordar detalles clave</strong> mencionados en notas o chats previos vinculados al perfil.</li>
+                  <li><strong>Sugerir seguimientos</strong> basados en la fecha de la última actualización.</li>
+                  <li><strong>Extraer información de contacto</strong> automáticamente desde correos o documentos.</li>
+                </ul>
+              </div>
+            </section>
 
-            <p><strong>Beneficios Clave:</strong></p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Centralización de Contactos:</strong> Toda la información de tus contactos en un solo lugar.</li>
-              <li><strong>Contexto Completo:</strong> Accede rápidamente a notas, eventos y otras interacciones relacionadas con cada perfil.</li>
-              <li><strong>Organización Eficiente:</strong> Categoriza y filtra tus contactos para una búsqueda rápida.</li>
-              <li><strong>Potenciado por IA:</strong> Utiliza la IA para gestionar y analizar tus relaciones de forma proactiva.</li>
-            </ul>
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Vinculación Contextual</h3>
+              <div className="grid grid-cols-1 gap-2 text-[11px]">
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-blue-500/5 text-blue-600 border border-blue-500/10">
+                  <span className="font-bold">NOTES</span> Accede a todas las notas asociadas a este contacto desde su perfil.
+                </div>
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-green-500/5 text-green-600 border border-green-500/10">
+                  <span className="font-bold">EVENTS</span> Consulta próximas reuniones y el historial de encuentros.
+                </div>
+              </div>
+            </section>
 
-            <p>¡Optimiza tus relaciones y la gestión de tus contactos con el Módulo de Perfiles!</p>
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Personalización</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed italic">
+                "Usa los campos personalizados para guardar datos específicos como cumpleaños, preferencias de comunicación o roles corporativos."
+              </p>
+            </section>
           </div>
         </SheetContent>
       </Sheet>

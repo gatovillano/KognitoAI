@@ -24,12 +24,15 @@ interface TaskDialogProps {
   onSaveSuccess: (task: TaskResponse) => void;
   task?: TaskResponse | null;
   workspaceId?: string;
+  initialStatus?: KanbanStatus;
 }
 
-export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspaceId }: TaskDialogProps) {
+export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspaceId, initialStatus }: TaskDialogProps) {
   const [description, setDescription] = useState(task?.description || '');
   const [startDate, setStartDate] = useState<Date | undefined>(task?.start_date ? new Date(task.start_date) : undefined);
   const [endDate, setEndDate] = useState<Date | undefined>(task?.end_date ? new Date(task.end_date) : undefined);
+  const [startTime, setStartTime] = useState(task?.start_date ? format(new Date(task.start_date), "HH:mm") : "09:00");
+  const [endTime, setEndTime] = useState(task?.end_date ? format(new Date(task.end_date), "HH:mm") : "18:00");
   const [status, setStatus] = useState<KanbanStatus>('Pendiente');
   const [isLoading, setIsLoading] = useState(false);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
@@ -41,24 +44,30 @@ export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspac
   useEffect(() => {
     if (task) {
       setDescription(task.description);
-      setStartDate(task.start_date ? new Date(task.start_date) : undefined);
-      setEndDate(task.end_date ? new Date(task.end_date) : undefined);
+      const sDate = task.start_date ? new Date(task.start_date) : undefined;
+      const eDate = task.end_date ? new Date(task.end_date) : undefined;
+      setStartDate(sDate);
+      setEndDate(eDate);
+      setStartTime(sDate ? format(sDate, "HH:mm") : "09:00");
+      setEndTime(eDate ? format(eDate, "HH:mm") : "18:00");
       setStatus(task.status as KanbanStatus || (task.is_completed ? 'Hecho' : 'Pendiente'));
       setSelectedWorkspaceId(task.workspace_id || '');
     } else {
       setDescription('');
       setStartDate(undefined);
       setEndDate(undefined);
-      setStatus('Pendiente');
+      setStartTime("09:00");
+      setEndTime("18:00");
+      setStatus(initialStatus || 'Pendiente');
       setSelectedWorkspaceId(workspaceId || '');
     }
-  }, [task, isOpen, workspaceId]);
+  }, [task, isOpen, workspaceId, initialStatus]);
 
   useEffect(() => {
     const fetchWorkspaces = async () => {
       setLoadingWorkspaces(true);
       try {
-        const response = await apiClient.get('/api/workspaces');
+        const response = await apiClient.get('/api/workspaces?limit=100');
         setWorkspaces(response.data.workspaces);
       } catch (error) {
         console.error("Error fetching workspaces:", error);
@@ -91,10 +100,21 @@ export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspac
     }
 
     setIsLoading(true);
+    const combineDateAndTime = (date: Date | undefined, time: string) => {
+      if (!date) return undefined;
+      const [hours, minutes] = time.split(':').map(Number);
+      const newDate = new Date(date);
+      newDate.setHours(hours, minutes, 0, 0);
+      return newDate;
+    };
+
+    const finalStartDate = combineDateAndTime(startDate, startTime);
+    const finalEndDate = combineDateAndTime(endDate, endTime);
+
     const payload = {
       description: description,
-      start_date: startDate?.toISOString(),
-      end_date: endDate?.toISOString(),
+      start_date: finalStartDate?.toISOString(),
+      end_date: finalEndDate?.toISOString(),
       status: status,
       is_completed: status === 'Hecho',
       workspace_id: selectedWorkspaceId === 'none' ? null : selectedWorkspaceId,
@@ -220,60 +240,82 @@ export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspac
                 <Label className="flex items-center gap-2 font-bold text-[10px] uppercase tracking-widest text-primary/70 mb-2">
                   <CalendarIconLucide className="h-3 w-3" /> Fecha Inicio
                 </Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant={"outline"}
-                      className={cn(
-                        "w-full h-11 rounded-xl bg-background/80 border-primary/20 justify-start text-left font-bold text-xs",
-                        !startDate && "text-muted-foreground"
-                      )}
-                    >
-                      <CalendarIconLucide className="mr-2 h-4 w-4 text-primary/50" />
-                      {startDate ? format(startDate, "PPP", { locale: es }) : <span>Seleccionar fecha</span>}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0 rounded-2xl border-border/40 shadow-2xl overflow-hidden">
-                    <Calendar
-                      mode="single"
-                      selected={startDate}
-                      onSelect={setStartDate}
-                      initialFocus
-                      locale={es}
-                      className="bg-card/95 backdrop-blur-xl"
+                <div className="flex gap-3">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant={"outline"}
+                        className={cn(
+                          "flex-grow h-11 rounded-xl bg-background/80 border-primary/20 justify-start text-left font-bold text-xs",
+                          !startDate && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarIconLucide className="mr-2 h-4 w-4 text-primary/50" />
+                        {startDate ? format(startDate, "PPP", { locale: es }) : <span>Seleccionar fecha</span>}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 rounded-2xl border-border/40 shadow-2xl overflow-hidden">
+                      <Calendar
+                        mode="single"
+                        selected={startDate}
+                        onSelect={setStartDate}
+                        initialFocus
+                        locale={es}
+                        className="bg-card/95 backdrop-blur-xl"
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <div className="flex items-center gap-2 bg-background/80 border border-primary/20 rounded-xl px-3 h-11">
+                    <Clock className="w-4 h-4 text-primary/50" />
+                    <input
+                      type="time"
+                      value={startTime}
+                      onChange={(e) => setStartTime(e.target.value)}
+                      className="bg-transparent border-none text-xs font-bold focus:outline-none [color-scheme:dark]"
                     />
-                  </PopoverContent>
-                </Popover>
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-2">
                 <Label className="flex items-center gap-2 font-bold text-[10px] uppercase tracking-widest text-primary/70 mb-2">
                   <CalendarIconLucide className="h-3 w-3" /> Fecha Fin
                 </Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant={"outline"}
-                      className={cn(
-                        "w-full h-11 rounded-xl bg-background/80 border-primary/20 justify-start text-left font-bold text-xs",
-                        !endDate && "text-muted-foreground"
-                      )}
-                    >
-                      <CalendarIconLucide className="mr-2 h-4 w-4 text-primary/50" />
-                      {endDate ? format(endDate, "PPP", { locale: es }) : <span>Seleccionar fecha</span>}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0 rounded-2xl border-border/40 shadow-2xl overflow-hidden">
-                    <Calendar
-                      mode="single"
-                      selected={endDate}
-                      onSelect={setEndDate}
-                      initialFocus
-                      locale={es}
-                      className="bg-card/95 backdrop-blur-xl"
+                <div className="flex gap-3">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant={"outline"}
+                        className={cn(
+                          "flex-grow h-11 rounded-xl bg-background/80 border-primary/20 justify-start text-left font-bold text-xs",
+                          !endDate && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarIconLucide className="mr-2 h-4 w-4 text-primary/50" />
+                        {endDate ? format(endDate, "PPP", { locale: es }) : <span>Seleccionar fecha</span>}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 rounded-2xl border-border/40 shadow-2xl overflow-hidden">
+                      <Calendar
+                        mode="single"
+                        selected={endDate}
+                        onSelect={setEndDate}
+                        initialFocus
+                        locale={es}
+                        className="bg-card/95 backdrop-blur-xl"
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <div className="flex items-center gap-2 bg-background/80 border border-primary/20 rounded-xl px-3 h-11">
+                    <Clock className="w-4 h-4 text-primary/50" />
+                    <input
+                      type="time"
+                      value={endTime}
+                      onChange={(e) => setEndTime(e.target.value)}
+                      className="bg-transparent border-none text-xs font-bold focus:outline-none [color-scheme:dark]"
                     />
-                  </PopoverContent>
-                </Popover>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

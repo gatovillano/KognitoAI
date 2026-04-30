@@ -76,7 +76,7 @@ export function DocumentCard({
       <CardContent className="text-sm text-muted-foreground flex-grow">
         <p>Autor: {document.author || 'N/A'}</p>
         <p>Tipo: <Badge variant="secondary">{document.document_type}</Badge></p>
-        <p>Fecha: {format(new Date(document.created_at!), "PPP", { locale: es })}</p>
+        <p>Fecha: {document.created_at && !isNaN(new Date(document.created_at).getTime()) ? format(new Date(document.created_at), "PPP", { locale: es }) : 'N/A'}</p>
         {document.status && (
           <p>Estado: <Badge variant="outline" className={`ml-2 ${document.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : document.status === 'processing' ? 'bg-blue-100 text-blue-800' : document.status === 'failed' ? 'bg-red-100 text-red-800' : ''}`}>
             {document.status === 'pending' ? 'Pendiente' : document.status === 'processing' ? 'Procesando' : document.status === 'failed' ? 'Error' : ''}

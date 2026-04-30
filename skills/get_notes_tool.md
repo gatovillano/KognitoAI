@@ -1,1 +1,0 @@
-Filtra las notas por una categoría específica. Ejemplo:

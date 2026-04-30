@@ -9,7 +9,7 @@ from sqlalchemy import update
 from utils.document_parser import extract_text_and_metadata_from_document
 from core.memory_manager import process_document_for_rag, process_multiple_documents_for_rag, list_user_documents, update_document_metadata
 from core.websocket_manager import send_personal_message # Importar send_personal_message
-from tools.knowledge_graph_tool import KnowledgeGraphTool
+from skills.knowledge_and_memory_skill.scripts.knowledge_graph_tool import KnowledgeGraphTool
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)

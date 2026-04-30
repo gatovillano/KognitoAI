@@ -35,6 +35,7 @@ async def schedule_event(
     attendee_ids: Optional[List[str]] = None,
     external_attendees: Optional[List[str]] = None,
     event_id: Optional[int] = None,
+    caldav_uid: Optional[str] = None,
     end_date: Optional[str] = None, # Nuevo campo
     end_time: Optional[str] = None # Nuevo campo
 ) -> Tuple[bool, str, AgendaEvent | None]:
@@ -128,6 +129,7 @@ async def schedule_event(
                 event_datetime_utc=event_datetime_utc,
                 end_date=end_datetime_utc, # Asignar la fecha de finalización
                 is_active=True,
+                caldav_uid=caldav_uid,
                 external_attendees=external_attendees if external_attendees else []
             )
             db.add(new_event)
@@ -312,7 +314,8 @@ async def get_agenda_for_period(account_id: str, period_type: str, target_date: 
         start_period_utc = start_period.astimezone(pytz.utc)
         end_period_utc = end_period.astimezone(pytz.utc)
 
-        stmt = (
+        # Consultar Eventos
+        events_stmt = (
             select(AgendaEvent)
             .where(
                 AgendaEvent.is_active == True,
@@ -320,34 +323,76 @@ async def get_agenda_for_period(account_id: str, period_type: str, target_date: 
                 AgendaEvent.event_datetime_utc <= end_period_utc
             )
         )
+        
+        # Consultar Tareas que vencen o comienzan en el período
+        tasks_stmt = (
+            select(Task)
+            .where(
+                or_(
+                    or_(
+                        Task.start_date >= start_period_utc,
+                        Task.start_date <= end_period_utc
+                    ),
+                    or_(
+                        Task.end_date >= start_period_utc,
+                        Task.end_date <= end_period_utc
+                    )
+                )
+            )
+        )
+
         if workspace_id:
-            # Mostrar TODOS los eventos del workspace (no filtrar por account_id)
-            stmt = stmt.where(AgendaEvent.workspace_id == uuid.UUID(workspace_id))
+            events_stmt = events_stmt.where(AgendaEvent.workspace_id == uuid.UUID(workspace_id))
+            tasks_stmt = tasks_stmt.where(Task.workspace_id == uuid.UUID(workspace_id))
         else:
-            # Si no se especifica un workspace, obtener eventos personales y de todos los workspaces a los que tiene acceso
             accessible_workspaces_stmt = select(WorkspacePermission.workspace_id).where(WorkspacePermission.account_id == uuid.UUID(account_id))
             result = await db.execute(accessible_workspaces_stmt)
             accessible_workspace_ids = [row[0] for row in result.fetchall()]
             
-            stmt = stmt.where(
+            events_stmt = events_stmt.where(
                 or_(
                     AgendaEvent.workspace_id.is_(None),
                     AgendaEvent.workspace_id.in_(accessible_workspace_ids)
                 )
             )
-        stmt = stmt.order_by(AgendaEvent.event_datetime_utc)
-        result = await db.execute(stmt)
-        events = result.scalars().all()
+            tasks_stmt = tasks_stmt.where(
+                or_(
+                    Task.account_id == uuid.UUID(account_id),
+                    Task.workspace_id.in_(accessible_workspace_ids)
+                )
+            )
 
-        if not events:
-            return f"No tienes eventos programados para {period_description}."
-
-        event_list = [f"Tu agenda para {period_description}:"]
-        for event in events:
-            local_time = event.event_datetime_utc.astimezone(user_tz)
-            event_list.append(f"- ID {event.id}: {event.summary} a las {local_time.strftime('%H:%M del %d-%m-%Y')}")
+        events_stmt = events_stmt.order_by(AgendaEvent.event_datetime_utc)
+        tasks_stmt = tasks_stmt.order_by(Task.end_date)
         
-        return "\n".join(event_list)
+        events_result = await db.execute(events_stmt)
+        events = events_result.scalars().all()
+        
+        tasks_result = await db.execute(tasks_stmt)
+        tasks = tasks_result.scalars().all()
+
+        if not events and not tasks:
+            return f"No tienes eventos ni tareas programadas para {period_description}."
+
+        agenda_output = [f"📅 Tu agenda para {period_description}:"]
+        
+        if events:
+            agenda_output.append("\n📌 **Eventos:**")
+            for event in events:
+                local_time = event.event_datetime_utc.astimezone(user_tz)
+                agenda_output.append(f"- ID {event.id}: {event.summary} a las {local_time.strftime('%H:%M del %d-%m-%Y')}")
+        
+        if tasks:
+            agenda_output.append("\n✅ **Tareas:**")
+            for task in tasks:
+                status_icon = "[x]" if task.is_completed else "[ ]"
+                due_info = ""
+                if task.end_date:
+                    local_due = task.end_date.astimezone(user_tz)
+                    due_info = f" (Vence: {local_due.strftime('%H:%M del %d-%m-%Y')})"
+                agenda_output.append(f"- {status_icon} ID {task.id}: {task.description}{due_info}")
+        
+        return "\n".join(agenda_output)
 
 async def get_agenda_for_day(account_id: str, target_day: str, workspace_id: Optional[str] = None) -> str:
     """
@@ -386,6 +431,7 @@ async def update_event_db(
     attendee_ids: Optional[List[str]] = None,
     external_attendees: Optional[List[str]] = None,
     workspace_id: Optional[str] = None,
+    caldav_uid: Optional[str] = None,
 ) -> Optional[AgendaEvent]:
     """
     Actualiza un evento existente en la base de datos.
@@ -433,6 +479,8 @@ async def update_event_db(
         # Lógica para external_attendees
         if external_attendees is not None:
             event.external_attendees = external_attendees
+        if caldav_uid is not None:
+            event.caldav_uid = caldav_uid
         
         try:
             await db.commit()
@@ -444,27 +492,39 @@ async def update_event_db(
             return None
 
 
-async def get_events_as_dicts(account_id: str, workspace_id: Optional[str] = None, include_past: bool = False) -> List[Dict[str, Any]]:
+async def get_events_as_dicts(
+    account_id: str, 
+    workspace_id: Optional[str] = None, 
+    include_past: bool = False,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None
+) -> List[Dict[str, Any]]:
     """
     Recupera eventos de un usuario o workspace y los devuelve como una lista de diccionarios.
     Si include_past es False (por defecto), solo recupera eventos futuros.
-    Esta función está diseñada para ser utilizada por endpoints de API que sirven a interfaces web.
+    Soporta filtrado por rango de fechas (start_date, end_date) en formato datetime UTC.
+    Esta función está diseñada para ser utilizada por endpoints de API que sirven a interfaces web y CalDAV.
     """
     async with DBSession(SessionLocal) as db:
-        account = await db.get(Account, account_id)
+        acc_uuid = uuid.UUID(account_id) if isinstance(account_id, str) else account_id
+        account = await db.get(Account, acc_uuid)
         if not account:
             return []
 
-        now_utc = datetime.now(pytz.utc)
         stmt = (
             select(AgendaEvent)
             .options(
                 selectinload(AgendaEvent.contact_profiles),
                 selectinload(AgendaEvent.workspace),
+                selectinload(AgendaEvent.account), # Cargar ansiosamente la cuenta
                 selectinload(AgendaEvent.attendees) # Cargar ansiosamente los asistentes
             )
             .where(AgendaEvent.is_active == True)
         )
+
+        if not include_past:
+            now_utc = datetime.now(pytz.utc)
+            stmt = stmt.where(AgendaEvent.event_datetime_utc >= now_utc)
 
         if workspace_id:
             # Si se especifica un workspace, verificar permisos
@@ -492,6 +552,12 @@ async def get_events_as_dicts(account_id: str, workspace_id: Optional[str] = Non
                     AgendaEvent.attendees.any(Account.id == uuid.UUID(account_id)) # Eventos donde soy asistente
                 )
             )
+
+        if start_date:
+            stmt = stmt.where(AgendaEvent.event_datetime_utc >= start_date)
+        if end_date:
+            stmt = stmt.where(AgendaEvent.event_datetime_utc <= end_date)
+
         stmt = stmt.order_by(AgendaEvent.event_datetime_utc)
         result = await db.execute(stmt)
         events = result.scalars().all()
@@ -726,6 +792,22 @@ async def unlink_profile_from_event(account_id: str, event_id: int, profile_id: 
         else:
             logger.warning(f"El vínculo entre el evento {event_id} y el perfil {profile_id} no fue encontrado para desvincular o el perfil no existe/no pertenece al usuario.")
             return False
+
+async def get_event_by_caldav_uid(account_id: str, caldav_uid: str) -> Optional[AgendaEvent]:
+    """
+    Busca un evento por su CalDAV UID.
+    """
+    async with DBSession(SessionLocal) as db:
+        stmt = select(AgendaEvent).options(
+            selectinload(AgendaEvent.contact_profiles),
+            selectinload(AgendaEvent.workspace),
+            selectinload(AgendaEvent.attendees)
+        ).where(
+            AgendaEvent.caldav_uid == caldav_uid,
+            AgendaEvent.account_id == uuid.UUID(account_id)
+        )
+        result = await db.execute(stmt)
+        return result.scalars().first()
 
 async def get_event_by_id(account_id: str, event_id: int) -> Optional[Dict[str, Any]]:
     """

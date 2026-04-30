@@ -12,7 +12,7 @@ import asyncio
 from datetime import time, datetime, timedelta
 from typing import Dict, Any, Optional, Callable
 # from telegram_client.bot_manager import bot_manager # Ya no se usará JobQueue de Telegram
-from apscheduler.schedulers.background import BackgroundScheduler # Importar APScheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler # Cambiar a AsyncIOScheduler
 from core.database import SessionLocal
 from utils.db_session import DBSession
 
@@ -24,7 +24,7 @@ class ToolScheduler:
     """
     
     def __init__(self):
-        self.scheduler = BackgroundScheduler()
+        self.scheduler = AsyncIOScheduler() # Usar AsyncIOScheduler
         self.scheduled_jobs = {} # Mantener esto para consistencia si es necesario
         
     def start(self):
@@ -188,17 +188,16 @@ tool_scheduler = ToolScheduler()
 # Funciones de conveniencia para herramientas específicas
 async def schedule_daily_analysis(account_id: Optional[str] = None, hour: int = 2, minute: int = 0):
     """Programa análisis diario de conocimiento."""
-    from utils.proactive_knowledge_linker import run_batch_analysis_job
+    # from utils.proactive_knowledge_linker import run_batch_analysis_job
     
     async def daily_analysis_task(account_id: Optional[str] = None, **kwargs):
         """Tarea de análisis diario."""
-        logger.info("Iniciando análisis diario programado...")
-        if account_id:
-            await run_batch_analysis_job(account_id_filter=account_id)
-        else:
-            await run_batch_analysis_job()
-        logger.info("Análisis diario completado.")
-        return "Análisis diario ejecutado exitosamente"
+        logger.info("Análisis diario saltado (proactive_knowledge_linker no disponible).")
+        # if account_id:
+        #     await run_batch_analysis_job(account_id_filter=account_id)
+        # else:
+        #     await run_batch_analysis_job()
+        return "Análisis diario saltado exitosamente"
     
     return await tool_scheduler.schedule_daily_tool(
         tool_name="daily_analysis",
@@ -208,17 +207,15 @@ async def schedule_daily_analysis(account_id: Optional[str] = None, hour: int = 
     )
 
 
-async def schedule_daily_insights(account_id: Optional[str] = None, hour: int = 8, minute: int = 0):
-    """Programa generación diaria de insights proactivos."""
-    from tools.get_proactive_insights_tool import GetProactiveInsightsTool
+async def schedule_daily_insights(account_id: str, hour: int = 7, minute: int = 0):
+    """Programa generación de insights diarios."""
+    # El módulo daily_insights_generator fue eliminado.
+    # Esta función se mantiene por compatibilidad pero no hace nada hasta que se reimplemente.
     
     async def daily_insights_task(account_id: str, **kwargs):
-        """Tarea de insights diarios."""
-        logger.info("Generando insights diarios programados...")
-        tool = GetProactiveInsightsTool(account_id=account_id)
-        result = await tool._arun(account_id=account_id)
-        logger.info("Insights diarios generados.")
-        return result
+        """Tarea stub de generación de insights diarios."""
+        logger.info("Generación de insights diarios saltada (daily_insights_generator no disponible).")
+        return "Insights diarios saltados"
     
     if not account_id:
         logger.warning("Se requiere account_id para programar insights diarios")

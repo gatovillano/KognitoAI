@@ -181,7 +181,7 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
         },
         edges: {
           width: 2,
-          color: { color: '#475569', highlight: '#1e293b', hover: '#1e293b', inherit: false, opacity: 1.0 },
+          color: { color: '#475569', highlight: '#1e293b', hover: '#1e293b' },
           arrows: { to: { enabled: true, scaleFactor: 0.5 } },
           font: { size: 10, color: '#000000', align: 'middle' }
         },
@@ -192,47 +192,22 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
             centralGravity: 0.3,
             springLength: 95,
             springConstant: 0.04,
-            damping: 0.9,
-            avoidOverlap: 0
+            damping: 0.09,
+            avoidOverlap: 0.1
           },
-          forceAtlas2Based: {
-            gravitationalConstant: -50,
-            centralGravity: 0.01,
-            springConstant: 0.08,
-            springLength: 100,
-            damping: 0.9,
-            avoidOverlap: 0
-          },
-          repulsion: {
-            centralGravity: 0.2,
-            springLength: 200,
-            springConstant: 0.05,
-            nodeDistance: 100,
-            damping: 0.9
-          },
-          hierarchicalRepulsion: {
-            centralGravity: 0.0,
-            springLength: 100,
-            springConstant: 0.01,
-            nodeDistance: 120,
-            damping: 0.9,
-            avoidOverlap: 0
-          },
-          maxVelocity: 50,
-          minVelocity: 0.1,
-          solver: 'barnesHut',
           stabilization: {
             enabled: true,
-            iterations: 2500,
-            updateInterval: 25,
+            iterations: 1000,
+            updateInterval: 100,
             onlyDynamicEdges: false,
             fit: true
-          },
-          timestep: 0.5,
-          adaptiveTimestep: true
+          }
         },
-        interaction: { navigationButtons: true, keyboard: true, hover: true },
-        layout: { improvedLayout: true }
+        layout: {
+          randomSeed: 2,
+          improvedLayout: true
+        },
+        interaction: { navigationButtons: true, keyboard: true, hover: true }
       };
 
       networkRef.current = new Network(visJsContainer.current, data, options);
@@ -281,21 +256,10 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
         }
       });
 
-      // Disable physics after stabilization to keep graph static
+      // Disable physics after stabilization to keep graph static (redundant when physics disabled,
+      // but kept for backward compatibility if physics is ever re-enabled)
       networkRef.current.on("stabilizationIterationsDone", () => {
         networkRef.current?.setOptions({ physics: { enabled: false } });
-      });
-
-      // Enable physics during drag for smooth movement
-      networkRef.current.on("dragStart", () => {
-        networkRef.current?.setOptions({ physics: { enabled: true } });
-      });
-
-      networkRef.current.on("dragEnd", () => {
-        // Disable physics after a short delay to allow settling
-        setTimeout(() => {
-          networkRef.current?.setOptions({ physics: { enabled: false } });
-        }, 500); // 500ms delay
       });
     }
 
@@ -333,6 +297,9 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
       if (edgesToAdd.length > 0) edgesDatasetRef.current.add(edgesToAdd);
       if (nodesToUpdate.length > 0) nodesDatasetRef.current.update(nodesToUpdate);
       if (edgesToUpdate.length > 0) edgesDatasetRef.current.update(edgesToUpdate);
+
+      // Re-habilitar la física al actualizar datos para permitir el re-layout
+      networkRef.current?.setOptions({ physics: { enabled: true } });
 
       // Para cambios significativos (como filtros), reorganización ultra-rápida
       // Eliminado: networkRef.current.fit(); // Ajustar la vista para que todos los nodos sean visibles

@@ -14,7 +14,9 @@ export const processMessageWithCitations = (text: string | any[], allSources: So
     ? text.join('\n\n')
     : (typeof text === 'string' ? text : JSON.stringify(text));
 
-  if (!allSources || allSources.length === 0) {    return {
+  if (!allSources || allSources.length === 0) {
+    return {
+      contentParts: [{ type: 'text', content: textString }],
       citedSources: [],
       uncitedSources: []
     };
@@ -165,6 +167,9 @@ export const stripMarkdown = (text: string): string => {
 
   // 10. Limpiar espacios en blanco extra
   cleanText = cleanText.replace(/\n{3,}/g, '\n\n');
+
+  // 11. Eliminar Emojis (para evitar que el TTS los mencione)
+  cleanText = cleanText.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '');
 
   return cleanText.trim();
 };

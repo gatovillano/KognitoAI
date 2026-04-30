@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Plus, Bot, Info, Share2 } from 'lucide-react';
+import { Plus, Bot, Info, Share2, Briefcase } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { WorkspaceDialog } from './workspace-dialog';
 import { ShareWorkspaceDialog } from './ShareWorkspaceDialog'; // Importar el nuevo componente
@@ -239,42 +239,57 @@ export default function WorkspacesPage() {
       )}
 
       <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle className="text-xl font-bold text-primary">Módulo de Workspaces</SheetTitle>
-            <SheetDescription className="text-sm text-muted-foreground">
-              Organiza y gestiona tus espacios de trabajo personalizados con asistentes de IA.
+        <SheetContent side="right" className="w-[400px] sm:w-[540px] overflow-y-auto">
+          <SheetHeader className="pb-6 border-b">
+            <SheetTitle className="text-2xl font-bold flex items-center gap-2">
+              <Briefcase className="h-6 w-6 text-primary" />
+              Guía de Workspaces
+            </SheetTitle>
+            <SheetDescription>
+              Espacios de trabajo inteligentes y segmentados.
             </SheetDescription>
           </SheetHeader>
-          <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
-            <p><strong>¿Qué son los Workspaces?</strong></p>
-            <p>Los workspaces son entornos aislados donde puedes configurar asistentes de IA con indicaciones de sistema específicas y gestionar colecciones de conocimientos exclusivas. Esto permite tener diferentes "personalidades" de IA y bases de conocimiento para distintas tareas o proyectos.</p>
+          
+          <div className="py-6 space-y-8">
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">¿Qué es un Workspace?</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Un Workspace es un ecosistema privado. Todo lo que sucede dentro (chats, documentos, tareas) está <strong>aislado</strong> del resto del sistema, permitiendo una organización impecable por proyectos o departamentos.
+              </p>
+            </section>
 
-            <p><strong>Características Principales:</strong></p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Asistentes Personalizados:</strong> Configura asistentes de IA con prompts de sistema únicos para cada workspace.</li>
-              <li><strong>Conocimiento Aislado:</strong> Gestiona colecciones de conocimientos (documentos, notas, etc.) que son accesibles solo dentro de ese workspace.</li>
-              <li><strong>Colaboración Segura:</strong> Comparte workspaces con equipos específicos, controlando el acceso a la información y las configuraciones.</li>
-              <li><strong>Roles de Usuario:</strong> Asigna diferentes roles (propietario, editor, lector) a los miembros del equipo dentro de cada workspace.</li>
-            </ul>
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Personalidad del Agente</h3>
+              <div className="bg-primary/5 rounded-2xl p-4 border border-primary/10 space-y-3">
+                <p className="text-xs font-medium text-primary flex items-center gap-2">
+                  <Bot className="h-4 w-4" /> Configuración Exclusiva:
+                </p>
+                <ul className="text-xs space-y-2 text-muted-foreground list-disc pl-4">
+                  <li><strong>System Prompt:</strong> Define cómo debe actuar la IA en este espacio (ej: "Actúa como un experto contable").</li>
+                  <li><strong>Contexto Especializado:</strong> El agente prioriza los archivos de este workspace para sus respuestas.</li>
+                  <li><strong>Identidad Visual:</strong> Asigna colores únicos para identificar rápidamente en qué proyecto estás trabajando.</li>
+                </ul>
+              </div>
+            </section>
 
-            <p><strong>Interacción con IA:</strong></p>
-            <p>Los workspaces potencian la interacción con la IA al permitirte tener asistentes altamente especializados. Puedes:</p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Interactuar con un asistente de IA que tiene un contexto y un propósito definidos por el workspace.</li>
-              <li>Realizar búsquedas y análisis que solo utilizan la base de conocimiento de ese workspace.</li>
-              <li>Generar contenido o resolver problemas con la IA, basándose en la información y la configuración específica del entorno.</li>
-            </ul>
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Colaboración y Seguridad</h3>
+              <div className="grid grid-cols-1 gap-2 text-[11px]">
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-green-500/5 text-green-600 border border-green-500/10">
+                  <span className="font-bold">ROLES</span> Propietario, Edición o Solo Lectura para un control total.
+                </div>
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-purple-500/5 text-purple-600 border border-purple-500/10">
+                  <span className="font-bold">COMPARTIR</span> Invita a miembros de tu equipo a colaborar en tiempo real.
+                </div>
+              </div>
+            </section>
 
-            <p><strong>Beneficios Clave:</strong></p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Contexto Controlado:</strong> Asegura que la IA opere con la información y el propósito correctos para cada tarea.</li>
-              <li><strong>Flexibilidad:</strong> Adapta tus asistentes de IA a una amplia gama de necesidades y proyectos.</li>
-              <li><strong>Privacidad y Seguridad:</strong> Mantén la información de diferentes proyectos o equipos separada y segura.</li>
-              <li><strong>Productividad Aumentada:</strong> Mejora la eficiencia al tener asistentes de IA especializados a tu disposición.</li>
-            </ul>
-
-            <p>{`¡Crea workspaces para cada aspecto de tu vida profesional o personal y potencia tu experiencia con Kognito AI!`}</p>
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Recomendación de Uso</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed italic">
+                "Usa los Workspaces para separar clientes, proyectos de larga duración o incluso áreas personales. La IA será mucho más eficiente si tiene un contexto enfocado."
+              </p>
+            </section>
           </div>
         </SheetContent>
       </Sheet>

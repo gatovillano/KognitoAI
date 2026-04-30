@@ -12,6 +12,8 @@ sin alterar la lógica del agente.
 
 import logging
 from typing import List, Optional, Dict, Any
+from datetime import datetime
+import pytz
 
 from core.prompts import (
     KAI_SYSTEM_PROMPT,
@@ -71,20 +73,36 @@ class PromptManager:
         summary_string: str,
         custom_prompt_from_profile: Optional[str],
         workspace_prompt: Optional[str],
-        tools: List[Any], # Añadir el parámetro tools
+        tools: List[Any],
         account_id: str,
         telegram_id: Optional[int],
         mode: Optional[str] = None,
         user_message: str = "",
         has_explicit_rag_context: bool = False,
         explicit_document_names: Optional[List[str]] = None,
-        context: Optional[Dict[str, Any]] = None # Nuevo parámetro
+        context: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         Construye el prompt del sistema dinámicamente, integrando todos los
         componentes de contexto.
         """
-        # 0. Construir instrucciones de contexto específico
+        # 0. Construir instrucciones de contexto específico (VISIBILIDAD MÁXIMA)
+        active_context_header = ""
+        if has_explicit_rag_context and explicit_document_names:
+            doc_list = "\n".join([f"- {name}" for name in explicit_document_names])
+            active_context_header = f"""
+🚨 **CONTEXTO PRIORITARIO SELECCIONADO POR EL USUARIO** 🚨
+El usuario ha seleccionado EXPLICITAMENTE los siguientes documentos/temas para esta consulta:
+{doc_list}
+
+**INSTRUCCIÓN OBLIGATORIA:**
+1. DEBES reconocer estos documentos en tu respuesta (ej: "Basado en los documentos seleccionados...").
+2. Prioriza ABSOLUTAMENTE la información de estos archivos sobre tu conocimiento general.
+3. Si no encuentras la respuesta en los fragmentos proporcionados abajo, usa la herramienta `document_rag_tool` filtrando por estos nombres o IDs.
+4. NUNCA digas que no tienes acceso si están en la lista de arriba; usa tus herramientas para profundizar.
+---------------------------------------------------------
+"""
+
         context_instructions = ""
         if context:
             ctx_type = context.get("type")
@@ -179,21 +197,28 @@ Instrucción: El usuario está interesado en la información contenida en esta c
             "\n".join(profile_info) if profile_info else "No hay información de perfil disponible."
         ]
 
-        if relevant_memories and "No se encontraron memorias relevantes" not in relevant_memories:
+        # Lógica mejorada para RAG: mostrar siempre si hay contexto explícito
+        if has_explicit_rag_context or (relevant_memories and "No se encontraron memorias relevantes" not in relevant_memories):
             doc_names_str = ", ".join(explicit_document_names) if explicit_document_names else "documentos específicos"
-            rag_instruction = (
-                f"**Instrucción de Contexto RAG:** Se te han proporcionado los siguientes {doc_names_str}. "
-                "Prioriza la información de estos documentos para responder a la consulta del usuario. "
-                "Si la información en estos documentos no es suficiente, puedes complementar con otras fuentes de conocimiento disponibles."
-                if has_explicit_rag_context
-                else "**Instrucción de Contexto RAG:** Has recibido 'Memorias y Documentos Relevantes' que pueden ser cruciales para la solicitud del usuario. "
-                "Asegúrate de integrar y comparar la información de TODAS las fuentes proporcionadas en esta sección para dar una respuesta completa y precisa, si es pertinente a la consulta."
-            )
+            
+            if has_explicit_rag_context:
+                rag_instruction = (
+                    f"**Instrucción de Contexto RAG:** El usuario ha seleccionado EXPLICITAMENTE los siguientes documentos como contexto prioritario: {doc_names_str}. "
+                    "DEBES usar la información de estos documentos para responder. Si no encuentras información relevante en los fragmentos de abajo, "
+                    "usa la herramienta `document_rag_tool` (si está disponible) o simplemente indica que tienes el documento seleccionado pero no encontraste el dato específico."
+                )
+            else:
+                rag_instruction = (
+                    "**Instrucción de Contexto RAG:** Has recibido 'Memorias y Documentos Relevantes' que pueden ser cruciales para la solicitud del usuario. "
+                    "Asegúrate de integrar y comparar la información de TODAS las fuentes proporcionadas en esta sección para dar una respuesta completa y precisa, si es pertinente a la consulta."
+                )
+            
             user_context_parts.extend([
                 "\n--- Memorias y Documentos Relevantes (Base de Conocimiento) ---",
                 rag_instruction,
-                relevant_memories
+                relevant_memories if relevant_memories else "No se encontraron fragmentos específicos en la base de conocimiento para esta consulta, pero el contexto está activo."
             ])
+        
         user_context_parts.append("---------------------------------------------------------")
         user_context_string = "\n".join(user_context_parts)
 
@@ -205,7 +230,6 @@ Instrucción: El usuario está interesado en la información contenida en esta c
             system_prompt_content = workspace_prompt
         elif custom_prompt_from_profile:
             system_prompt_content = custom_prompt_from_profile
-        # Si no hay workspace_prompt ni custom_prompt_from_profile, se mantiene el base_system_prompt
 
         # 3. Aplicar overrides de modo
         if mode:
@@ -225,20 +249,17 @@ Instrucción: El usuario está interesado en la información contenida en esta c
             logger.warning(f"No se pudo pre-formatear el prompt, puede contener placeholders desconocidos: {e}")
             system_prompt_content = system_prompt_content.replace('{query}', user_message)
             system_prompt_content = system_prompt_content.replace('{web_summary}', '')
-            # Also use the escaped version here if the problematic_placeholder is replaced
             problematic_placeholder = '{relevant_memories if "No se encontraron" not in relevant_memories else "No se encontró información interna relevante."}'
             if problematic_placeholder in system_prompt_content:
                 system_prompt_content = system_prompt_content.replace(problematic_placeholder, relevant_memories)
 
         # 5. Ensamblar el prompt final
-        
         id_instructions = f"""
 <b>Instrucciones Críticas de Identificación de Usuario:</b>
 - Para CUALQUIER herramienta que requiera el argumento `account_id`, DEBES usar este valor exacto: <b>{account_id}</b>.
 - Para CUALQUIER herramienta que requiera el argumento `telegram_id`, DEBES usar este valor exacto: <b>{telegram_id}</b>.
 """
 
-        # Instrucciones específicas sobre herramientas disponibles (más concisas)
         tools_capabilities = """
 <b>🌐 CAPACIDADES Y HERRAMIENTAS:</b>
 
@@ -249,14 +270,9 @@ Herramientas clave:
 - `web_search(query: str)`: Búsqueda web con Brave Search.
 - `web_scraper_tool(url: str)`: Extrae contenido de URLs.
 - `comprehensive_web_analyzer(query: str)`: Análisis web profundo.
-- `deep_research(query: str)`: Investigación profunda multi-agente. Ideal para temas complejos que requieren reportes narrativos de alta calidad. ✨
+- `deep_research(query: str)`: Investigación profunda multi-agente.
 - Otras: gestión de notas, agenda, documentos, imágenes, etc.
-
-**Reglas de Terminación:**
-- Si acabas de recibir un reporte de `deep_research`, **NO** utilices la herramienta de nuevo inmediatamente para el mismo tema. Proporciona la respuesta al usuario basándote en el reporte recibido.
-- Tu objetivo es finalizar la investigación y responder, no entrar en un bucle infinito de búsquedas.
 """
-        # 5. Generar documentación detallada de las herramientas para modelos que no soportan native tool calling
         tools_documentation = ""
         if tools:
             tools_documentation = "\n\n<b>🛠️ MANUAL DE HERRAMIENTAS DISPONIBLES:</b>\n"
@@ -280,20 +296,40 @@ Herramientas clave:
                 except:
                     continue
             
+        # 5. Obtener fecha y hora actual (dinámica para cada consulta)
+        user_tz = pytz.UTC
+        if user_profile and hasattr(user_profile, 'account') and user_profile.account and user_profile.account.timezone:
+            try:
+                user_tz = pytz.timezone(user_profile.account.timezone)
+                logger.debug(f"Usando zona horaria del usuario: {user_profile.account.timezone}")
+            except Exception as e:
+                logger.warning(f"Zona horaria inválida: {user_profile.account.timezone}. Usando UTC. Error: {e}")
+        
+        now = datetime.now(user_tz)
+        # Formatear la fecha en español de forma segura sin depender del locale global
+        dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+        meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+        
+        current_date_str = f"{dias[now.weekday()]}, {now.day} de {meses[now.month-1]} de {now.year}"
+        current_time_str = now.strftime("%H:%M:%S")
+        
+        time_context = f"""
+<b>📅 FECHA Y HORA ACTUAL:</b>
+Hoy es {current_date_str} y son las {current_time_str}.
+Usa esta información para responder preguntas sobre el tiempo, programar eventos en la `agenda` o recordatorios si el usuario lo solicita.
+"""
+
         final_prompt_parts = []
         if telegram_id:
-            final_prompt_parts.extend([
-                TELEGRAM_FORMATTING_PROMPT,
-                "<hr>",
-            ])
+            final_prompt_parts.extend([TELEGRAM_FORMATTING_PROMPT, "<hr>"])
         else:
-            final_prompt_parts.extend([
-                "💎 **MODO DE DISEÑO PREMIUM ACTIVADO** 💎",
-                HTML_DESIGN_PROMPT, # Prioridad absoluta al principio
-                "<hr>",
-            ])
+            final_prompt_parts.extend(["💎 **MODO DE DISEÑO PREMIUM ACTIVADO** 💎", HTML_DESIGN_PROMPT, "<hr>"])
+            
+        final_prompt_parts.append(time_context)
+        final_prompt_parts.append("<hr>")
             
         final_prompt_parts.extend([
+            active_context_header, # INSCRIPCIÓN PRIORITARIA AL PRINCIPIO
             context_instructions,
             user_context_string,
             summary_string,
@@ -310,12 +346,11 @@ Herramientas clave:
             CITATION_SYSTEM_PROMPT,
         ])
         final_prompt_parts.append("\n\nIMPORTANTE: Al citar fuentes, cada número de fuente debe estar entre sus propios corchetes. Por ejemplo, en lugar de [1, 2, 3], formatee como [1][2][3].")
-        final_prompt = "\n".join(final_prompt_parts)
-        # --- ESCAPE GLOBAL PARA LANGCHAIN ---
-        # Garantizamos que NADA en el prompt del sistema sea interpretado como variable por LangChain
-        final_prompt = final_prompt.replace('{', '{{').replace('}', '}}')
         
-        logger.debug(f"DEBUG (PromptManager): Prompt final del sistema enviado al LLM:\n{final_prompt}")
+        final_prompt = "\n".join(final_prompt_parts)
+        
+        # --- NOTA SOBRE ESCAPE ---
+        # No escapamos globalmente aquí para mantener la flexibilidad de la cadena.
+        # El escape de llaves '{' y '}' para LangChain se realiza en el agente (core/agent.py)
+        # justo antes de crear el ChatPromptTemplate, para evitar KeyErrors con JSONs.
         return final_prompt
-
-

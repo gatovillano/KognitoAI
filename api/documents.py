@@ -27,7 +27,7 @@ from utils.document_parser import extract_text_and_metadata_from_document
 from core.memory_manager import process_document_for_rag, list_user_documents, list_user_documents_all_teams, delete_document_chunks, get_full_document_content, update_document_metadata, link_profile_to_collection, unlink_profile_from_collection, get_user_document_topic_by_name, update_collection_workspace, create_empty_collection
 from utils.db_session import DBSession
 from core.dependencies import get_db_session
-from tools.add_web_to_rag_tool import AddWebToRAGTool
+from skills.rag_skill.scripts.add_web_to_rag_tool import AddWebToRAGTool
 from core.websocket_manager import send_personal_message
 from core.tasks import process_upload_task, extract_titles_and_update_metadata, process_knowledge_graph
 from utils.knowledge_graph_analysis import start_knowledge_graph_analysis

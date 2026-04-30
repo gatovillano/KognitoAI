@@ -200,7 +200,7 @@ class KnowledgeExtractionNode:
         """Guarda las entidades, relaciones y citas conceptuales en Neo4j."""
         account_id = state.get("account_id")
         workspace_id = state.get("workspace_id")
-        # Nombre del dataset para memorias conversacionales
+        # Nombre del dataset para memorias conversacionales (aislado por account_id y workspace_id en las propiedades)
         dataset_name = "Agent Memories"
 
         entities = data.get("entities", [])

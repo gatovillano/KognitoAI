@@ -18,7 +18,22 @@ import { useAuth } from '../context/AuthContext';
 import { notesService, Note } from '../api/notesService';
 import { workspaceService, Workspace } from '../api/workspaceService';
 import { colors, lightColors, spacing, borderRadius } from '../theme/colors';
-import { LogOut, Plus, Search, FileText, Calendar, ChevronRight, Layout, Filter, Tag, Sun, Moon, X } from 'lucide-react-native';
+import { 
+  LogOut, 
+  Plus, 
+  Search, 
+  FileText, 
+  Calendar, 
+  ChevronRight, 
+  Layout, 
+  Filter, 
+  Tag, 
+  Sun, 
+  Moon, 
+  X, 
+  Menu,
+  Clock
+} from 'lucide-react-native';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -42,6 +57,7 @@ export const HomeScreen = ({ navigation }: any) => {
 
   // Estado para mostrar/ocultar filtros
   const [showFilters, setShowFilters] = useState(false);
+  const [showAppMenu, setShowAppMenu] = useState(false);
 
   // Filtros
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
@@ -138,36 +154,51 @@ export const HomeScreen = ({ navigation }: any) => {
     return Array.from(new Set(cats));
   }, [notes]);
 
-  const renderNoteItem = ({ item }: { item: Note }) => (
+  const renderNoteItem = ({ item, index }: { item: Note, index: number }) => (
     <TouchableOpacity
-      style={[styles.noteCard, { backgroundColor: theme.surface, borderColor: theme.border }]}
+      style={[
+        styles.noteCard, 
+        { 
+          backgroundColor: theme.surface, 
+          borderColor: theme.border,
+          shadowColor: '#000',
+        }
+      ]}
       onPress={() => navigation.navigate('NoteDetail', { noteId: item.id })}
-      activeOpacity={0.7}
+      activeOpacity={0.8}
     >
       <View style={styles.noteHeader}>
         <View style={styles.titleContainer}>
-          <View style={[styles.iconCircle, { backgroundColor: (item.workspace_color || theme.primary) + '20' }]}>
-            <FileText size={16} color={item.workspace_color || theme.primary} />
+          <View style={[styles.iconCircle, { backgroundColor: (item.workspace_color || theme.primary) + '15', borderColor: (item.workspace_color || theme.primary) + '30', borderWidth: 1 }]}>
+            <FileText size={14} color={item.workspace_color || theme.primary} />
           </View>
           <Text style={[styles.noteTitle, { color: theme.text }]} numberOfLines={1}>{item.title || 'Sin título'}</Text>
         </View>
-        <ChevronRight size={18} color={theme.textMuted} />
+        <ChevronRight size={16} color={theme.textMuted} />
       </View>
 
       <Text style={[styles.noteExcerpt, { color: theme.textMuted }]} numberOfLines={2}>
-        {item.content ? item.content.replace(/[#*`]/g, '') : ''}
+        {item.content ? item.content.replace(/[#*`\n]/g, ' ').trim() : 'Sin contenido adicional'}
       </Text>
 
-      <View style={[styles.noteFooter, { borderTopColor: theme.border }]}>
-        <View style={styles.metaItem}>
-          <Calendar size={12} color={theme.textMuted} />
-          <Text style={[styles.metaText, { color: theme.textMuted }]}>
-            {item.created_at ? format(new Date(item.created_at), 'dd MMM yyyy', { locale: es }) : ''}
-          </Text>
+      <View style={[styles.noteFooter, { borderTopColor: theme.border + '50' }]}>
+        <View style={styles.metaRow}>
+          <View style={styles.metaItem}>
+            <Calendar size={12} color={theme.textMuted} />
+            <Text style={[styles.metaText, { color: theme.textMuted }]}>
+              {item.created_at ? format(new Date(item.created_at), 'dd MMM', { locale: es }) : ''}
+            </Text>
+          </View>
+          {item.category && (
+             <View style={[styles.metaItem, { marginLeft: spacing.sm }]}>
+                <Tag size={12} color={theme.textMuted} />
+                <Text style={[styles.metaText, { color: theme.textMuted }]}>{item.category}</Text>
+             </View>
+          )}
         </View>
 
         {item.workspace_name && (
-          <View style={[styles.workspaceBadge, { backgroundColor: (item.workspace_color || theme.primary) + '20' }]}>
+          <View style={[styles.workspaceBadge, { backgroundColor: (item.workspace_color || theme.primary) + '15' }]}>
             <Text style={[styles.workspaceBadgeText, { color: item.workspace_color || theme.primary }]}>
               {item.workspace_name}
             </Text>
@@ -180,38 +211,59 @@ export const HomeScreen = ({ navigation }: any) => {
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <LinearGradient
-        colors={[theme.primary, theme.background]}
+        colors={[theme.primary + '20', theme.background]}
         start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 0.2 }}
+        end={{ x: 0.5, y: 0.3 }}
         style={styles.gradientHeader}
       />
 
       <View style={styles.header}>
         <View>
           <Text style={[styles.welcomeText, { color: theme.text }]}>Mis Notas</Text>
-          <Text style={[styles.countText, { color: theme.textMuted }]}>
-            {isFiltered ? `Filtradas: ${notes.length}` : `Total: ${notes.length}`}
-          </Text>
+          <View style={styles.countRow}>
+             <Clock size={12} color={theme.primary} />
+             <Text style={[styles.countText, { color: theme.textMuted }]}>
+               {isFiltered ? `${notes.length} resultados` : `${notes.length} notas en total`}
+             </Text>
+          </View>
         </View>
         <View style={styles.headerActions}>
-          <TouchableOpacity onPress={() => navigation.navigate('Calendar')} style={styles.actionButton}>
-            <Calendar size={20} color={theme.text} />
+          <TouchableOpacity onPress={toggleTheme} style={[styles.actionButton, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            {isDarkMode ? <Sun size={18} color={theme.text} /> : <Moon size={18} color={theme.text} />}
           </TouchableOpacity>
-          <TouchableOpacity onPress={toggleTheme} style={styles.actionButton}>
-            {isDarkMode ? <Sun size={20} color={theme.text} /> : <Moon size={20} color={theme.text} />}
+          <TouchableOpacity onPress={() => setShowAppMenu(!showAppMenu)} style={[styles.actionButton, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <Menu size={18} color={theme.text} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={signOut} style={[styles.actionButton, { backgroundColor: 'rgba(239, 68, 68, 0.1)' }]}>
-            <LogOut size={20} color={colors.error} />
+          <TouchableOpacity onPress={signOut} style={[styles.actionButton, { backgroundColor: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.2)' }]}>
+            <LogOut size={18} color={colors.error} />
           </TouchableOpacity>
         </View>
       </View>
 
+      {/* App Menu Dropdown */}
+      {showAppMenu && (
+          <View style={[styles.dropdownMenu, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
+             <TouchableOpacity onPress={() => { setShowAppMenu(false); navigation.navigate('Chat'); }} style={styles.dropdownItem}>
+                <View style={styles.dropdownIconText}>
+                   <Layout size={16} color={theme.primary} style={{ marginRight: 10 }} />
+                   <Text style={[styles.dropdownText, { color: theme.text }]}>Chat IA</Text>
+                </View>
+             </TouchableOpacity>
+             <TouchableOpacity onPress={() => { setShowAppMenu(false); navigation.navigate('Calendar'); }} style={[styles.dropdownItem, { borderBottomWidth: 0 }]}>
+                <View style={styles.dropdownIconText}>
+                   <Calendar size={16} color={theme.primary} style={{ marginRight: 10 }} />
+                   <Text style={[styles.dropdownText, { color: theme.text }]}>Calendario</Text>
+                </View>
+             </TouchableOpacity>
+          </View>
+      )}
+
       <View style={styles.searchRow}>
         <View style={[styles.searchContainer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <Search size={20} color={theme.textMuted} style={styles.searchIcon} />
+          <Search size={18} color={theme.textMuted} style={styles.searchIcon} />
           <TextInput
             style={[styles.searchInput, { color: theme.text }]}
-            placeholder="Buscar..."
+            placeholder="Buscar en tus notas..."
             placeholderTextColor={theme.textMuted}
             value={searchTerm}
             onChangeText={setSearchTerm}
@@ -222,31 +274,26 @@ export const HomeScreen = ({ navigation }: any) => {
           style={[
             styles.filterButton,
             { backgroundColor: theme.surface, borderColor: theme.border },
-            isFiltered && { backgroundColor: theme.primary + '20', borderColor: theme.primary }
+            isFiltered && { backgroundColor: theme.primary + '15', borderColor: theme.primary + '50' }
           ]}
         >
-          <Filter size={22} color={isFiltered ? theme.primary : theme.textMuted} />
+          <Filter size={20} color={isFiltered ? theme.primary : theme.textMuted} />
           {isFiltered && <View style={styles.filterDot} />}
         </TouchableOpacity>
       </View>
 
       {showFilters && (
-        <View style={[styles.filtersPanel, { backgroundColor: theme.surface + '80', borderColor: theme.border }]}>
+        <View style={[styles.filtersPanel, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <View style={styles.filtersHeader}>
-            <Text style={[styles.filtersTitle, { color: theme.text }]}>Filtros Avanzados</Text>
+            <Text style={[styles.filtersTitle, { color: theme.text }]}>Filtros</Text>
             {isFiltered && (
               <TouchableOpacity onPress={clearFilters}>
-                <Text style={[styles.clearText, { color: theme.primary }]}>Limpiar todo</Text>
+                <Text style={[styles.clearText, { color: theme.primary }]}>Limpiar</Text>
               </TouchableOpacity>
             )}
           </View>
 
-          {/* Línea 1: Filtros de Workspace */}
           <View style={styles.filtersWrapper}>
-            <View style={styles.filterLabelRow}>
-              <Layout size={14} color={theme.textMuted} />
-              <Text style={[styles.filterLabel, { color: theme.textMuted }]}>Espacios</Text>
-            </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersContainer}>
               <TouchableOpacity
                 style={[styles.filterChip, { backgroundColor: theme.surface, borderColor: theme.border }, !selectedWorkspaceId && { backgroundColor: theme.primary, borderColor: theme.primary }]}
@@ -269,31 +316,6 @@ export const HomeScreen = ({ navigation }: any) => {
               ))}
             </ScrollView>
           </View>
-
-          {/* Línea 2: Filtros de Categoría */}
-          <View style={styles.filtersWrapper}>
-            <View style={styles.filterLabelRow}>
-              <Tag size={14} color={theme.textMuted} />
-              <Text style={[styles.filterLabel, { color: theme.textMuted }]}>Categorías</Text>
-            </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersContainer}>
-              <TouchableOpacity
-                style={[styles.filterChip, { backgroundColor: theme.surface, borderColor: theme.border }, !selectedCategory && { backgroundColor: theme.primary, borderColor: theme.primary }]}
-                onPress={() => setSelectedCategory(null)}
-              >
-                <Text style={[styles.filterText, { color: theme.textMuted }, !selectedCategory && { color: '#fff' }]}>Todas</Text>
-              </TouchableOpacity>
-              {(Array.isArray(categories) ? categories : []).map(cat => (
-                <TouchableOpacity
-                  key={cat}
-                  style={[styles.filterChip, { backgroundColor: theme.surface, borderColor: theme.border }, selectedCategory === cat && { backgroundColor: theme.primary, borderColor: theme.primary }]}
-                  onPress={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
-                >
-                  <Text style={[styles.filterText, { color: theme.textMuted }, selectedCategory === cat && { color: '#fff' }]}>{cat}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
         </View>
       )}
 
@@ -309,6 +331,7 @@ export const HomeScreen = ({ navigation }: any) => {
           contentContainerStyle={styles.listContent}
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.5}
+          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
           }
@@ -321,8 +344,11 @@ export const HomeScreen = ({ navigation }: any) => {
           }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <FileText size={48} color={theme.textMuted} />
-              <Text style={[styles.emptyText, { color: theme.textMuted }]}>No hay notas que coincidan</Text>
+              <View style={[styles.emptyIconCircle, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                 <FileText size={32} color={theme.textMuted} />
+              </View>
+              <Text style={[styles.emptyText, { color: theme.textMuted }]}>No se encontraron notas</Text>
+              <Text style={[styles.emptySubText, { color: theme.textMuted + '80' }]}>Intenta con otros términos de búsqueda o filtros.</Text>
             </View>
           }
         />
@@ -333,10 +359,12 @@ export const HomeScreen = ({ navigation }: any) => {
         onPress={() => navigation.navigate('CreateNote')}
       >
         <LinearGradient
-          colors={[theme.primary, theme.primaryLight]}
+          colors={[colors.primaryLight, colors.primary]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
           style={styles.fabGradient}
         >
-          <Plus size={30} color="#fff" />
+          <Plus size={28} color="#fff" />
         </LinearGradient>
       </TouchableOpacity>
     </View>
@@ -352,13 +380,13 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 250,
+    height: 300,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: spacing.xl * 2,
+    paddingTop: Platform.OS === 'ios' ? 60 : 50,
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.lg,
   },
@@ -367,20 +395,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   actionButton: {
-    padding: spacing.sm,
-    borderRadius: borderRadius.md,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
     marginLeft: spacing.sm,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
   },
   welcomeText: {
-    fontSize: 32,
-    fontWeight: '900',
-    letterSpacing: -0.5,
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: -0.8,
+  },
+  countRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
   },
   countText: {
-    fontSize: 14,
-    marginTop: spacing.xs,
-    fontWeight: '600',
+    fontSize: 13,
+    marginLeft: 6,
+    fontWeight: '500',
   },
   searchRow: {
     flexDirection: 'row',
@@ -393,124 +429,117 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.lg,
-    height: 54,
+    borderRadius: 16,
+    height: 50,
     borderWidth: 1,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
   },
   searchIcon: {
     marginRight: spacing.sm,
+    opacity: 0.6,
   },
   searchInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '500',
   },
   filterButton: {
-    width: 54,
-    height: 54,
-    borderRadius: borderRadius.lg,
+    width: 50,
+    height: 50,
+    borderRadius: 16,
     borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: spacing.sm,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
     position: 'relative',
   },
   filterDot: {
     position: 'absolute',
-    top: 12,
-    right: 12,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    top: 10,
+    right: 10,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: colors.primary,
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: '#fff',
   },
   filtersPanel: {
     marginHorizontal: spacing.lg,
-    borderRadius: borderRadius.xl,
+    borderRadius: 20,
     padding: spacing.md,
     marginBottom: spacing.md,
     borderWidth: 1,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+      },
+      android: {
+        elevation: 4,
+      }
+    })
   },
   filtersHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing.md,
-    paddingHorizontal: spacing.sm,
   },
   filtersTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  clearText: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '700',
   },
-  filtersWrapper: {
-    marginBottom: spacing.sm,
+  clearText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
-  filterLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.sm,
+  filtersWrapper: {
     marginBottom: spacing.xs,
   },
-  filterLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginLeft: spacing.xs,
-  },
   filtersContainer: {
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.xs,
   },
   filterChip: {
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: borderRadius.full,
+    paddingVertical: 6,
+    borderRadius: 12,
     marginRight: spacing.sm,
     borderWidth: 1,
-    minWidth: 60,
+    minWidth: 70,
     alignItems: 'center',
   },
   filterText: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   listContent: {
     padding: spacing.lg,
     paddingTop: spacing.xs,
-    paddingBottom: 100,
+    paddingBottom: 120,
   },
   noteCard: {
-    borderRadius: borderRadius.xl,
+    borderRadius: 20,
     padding: spacing.lg,
     marginBottom: spacing.md,
     borderWidth: 1,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
+    ...Platform.select({
+      ios: {
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.05,
+        shadowRadius: 10,
+      },
+      android: {
+        elevation: 2,
+      }
+    })
   },
   noteHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.md,
+    marginBottom: 12,
   },
   titleContainer: {
     flexDirection: 'row',
@@ -518,51 +547,55 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: spacing.sm,
+    marginRight: 10,
   },
   noteTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 17,
+    fontWeight: '700',
     flex: 1,
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
   },
   noteExcerpt: {
     fontSize: 14,
-    lineHeight: 22,
-    marginBottom: spacing.lg,
-    fontWeight: '400',
+    lineHeight: 20,
+    marginBottom: 16,
+    opacity: 0.8,
   },
   noteFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     borderTopWidth: 1,
-    paddingTop: spacing.md,
+    paddingTop: 12,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   metaItem: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   metaText: {
-    fontSize: 12,
-    marginLeft: spacing.xs,
+    fontSize: 11,
+    marginLeft: 4,
     fontWeight: '600',
   },
   workspaceBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
   },
   workspaceBadgeText: {
-    fontSize: 10,
-    fontWeight: '900',
+    fontSize: 9,
+    fontWeight: '800',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
   },
   loadingContainer: {
     flex: 1,
@@ -577,32 +610,87 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: spacing.xl * 2,
+    marginTop: 60,
+  },
+  emptyIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
   },
   emptyText: {
-    marginTop: spacing.md,
-    fontSize: 16,
-    fontWeight: '500',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  emptySubText: {
+    fontSize: 14,
     textAlign: 'center',
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: 40,
   },
   fab: {
     position: 'absolute',
-    bottom: spacing.xl,
-    right: spacing.xl,
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    elevation: 10,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
+    bottom: 80,
+    right: 25,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    ...Platform.select({
+      ios: {
+        shadowColor: colors.primary,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.3,
+        shadowRadius: 12,
+      },
+      android: {
+        elevation: 6,
+      }
+    })
   },
   fabGradient: {
     flex: 1,
-    borderRadius: 32,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
+    transform: [{ rotate: '0deg' }], // Can add dynamic rotation if needed
   },
+  dropdownMenu: {
+      position: 'absolute',
+      top: Platform.OS === 'ios' ? 105 : 95,
+      right: spacing.lg,
+      borderWidth: 1,
+      borderRadius: 16,
+      zIndex: 1000,
+      padding: 6,
+      minWidth: 160,
+      ...Platform.select({
+        ios: {
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 8 },
+          shadowOpacity: 0.15,
+          shadowRadius: 15,
+        },
+        android: {
+          elevation: 8,
+        }
+      })
+  },
+  dropdownItem: {
+      paddingVertical: 12,
+      paddingHorizontal: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(0,0,0,0.05)',
+  },
+  dropdownIconText: {
+     flexDirection: 'row',
+     alignItems: 'center',
+  },
+  dropdownText: {
+      fontSize: 15,
+      fontWeight: '600',
+  }
 });
+

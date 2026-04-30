@@ -23,3 +23,25 @@ class CalDAVRouter(APIRouter):
             )
             return func
         return decorator
+
+    def proppatch(self, path: str, **kwargs) -> Callable:
+        def decorator(func: Callable) -> Callable:
+            self.add_api_route(
+                path,
+                endpoint=func,
+                methods=["PROPPATCH"],
+                **kwargs,
+            )
+            return func
+        return decorator
+
+    def mkcalendar(self, path: str, **kwargs) -> Callable:
+        def decorator(func: Callable) -> Callable:
+            self.add_api_route(
+                path,
+                endpoint=func,
+                methods=["MKCALENDAR"],
+                **kwargs,
+            )
+            return func
+        return decorator

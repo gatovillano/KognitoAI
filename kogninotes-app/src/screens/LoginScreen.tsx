@@ -9,7 +9,8 @@ import {
     ScrollView,
     Alert,
     Image,
-    TouchableOpacity
+    TouchableOpacity,
+    StatusBar
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/Button';
@@ -42,71 +43,86 @@ export const LoginScreen = ({ navigation }: any) => {
     };
 
     return (
-        <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={[styles.container, { backgroundColor: theme.background }]}
-        >
-            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-                <View style={styles.header}>
-                    <Image
-                        source={require('../../assets/logo-simple.png')}
-                        style={styles.logo}
-                        resizeMode="contain"
-                    />
-                    <Text style={[styles.title, { color: theme.text }]}>Kognito</Text>
-                    <Text style={styles.titleSuffix}>Notes</Text>
-                    <Text style={[styles.subtitle, { color: theme.textMuted }]}>Tu exocerebro digital, ahora móvil.</Text>
-                </View>
-
-                <View style={[styles.formCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                    <Input
-                        label="Correo Electrónico"
-                        placeholder="ejemplo@kognito.ai"
-                        value={email}
-                        onChangeText={setEmail}
-                        keyboardType="email-address"
-                        autoCapitalize="none"
-                    />
-                    <Input
-                        label="Contraseña"
-                        placeholder="••••••••"
-                        value={password}
-                        onChangeText={setPassword}
-                        secureTextEntry
-                    />
-
-                    <TouchableOpacity activeOpacity={0.8} onPress={handleLogin} disabled={loading}>
-                        <LinearGradient
-                            colors={[theme.primary, theme.primaryLight]}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 0 }}
-                            style={styles.loginButton}
-                        >
-                            <Text style={styles.loginButtonText}>
-                                {loading ? 'Iniciando sesión...' : 'Entrar al Sistema'}
-                            </Text>
-                        </LinearGradient>
-                    </TouchableOpacity>
-
-                    <View style={styles.divider}>
-                        <View style={[styles.line, { backgroundColor: theme.border }]} />
-                        <Text style={[styles.dividerText, { color: theme.textMuted }]}>o también</Text>
-                        <View style={[styles.line, { backgroundColor: theme.border }]} />
+        <View style={[styles.container, { backgroundColor: theme.background }]}>
+            <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+            <LinearGradient
+                colors={[theme.primary + '15', theme.background]}
+                style={StyleSheet.absoluteFill}
+            />
+            
+            <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                style={{ flex: 1 }}
+            >
+                <ScrollView 
+                   contentContainerStyle={styles.scrollContent} 
+                   showsVerticalScrollIndicator={false}
+                   keyboardShouldPersistTaps="handled"
+                >
+                    <View style={styles.header}>
+                        <View style={[styles.logoContainer, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+                           <Image
+                               source={require('../../assets/logo-simple.png')}
+                               style={styles.logo}
+                               resizeMode="contain"
+                           />
+                        </View>
+                        <View style={styles.titleRow}>
+                           <Text style={[styles.title, { color: theme.text }]}>Kognito</Text>
+                           <Text style={[styles.titleSuffix, { color: theme.primary }]}>.ai</Text>
+                        </View>
+                        <Text style={[styles.subtitle, { color: theme.textMuted }]}>Tu exocerebro digital de alta fidelidad</Text>
                     </View>
 
-                    <Button
-                        title="Acceder con Telegram"
-                        onPress={() => navigation.navigate('TelegramLogin')}
-                        variant="outline"
-                        style={{ ...styles.telegramButton, borderColor: theme.primary }}
-                    />
-                </View>
+                    <View style={[styles.formCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                        <Input
+                            label="Identidad"
+                            placeholder="usuario@kognito.ai"
+                            value={email}
+                            onChangeText={setEmail}
+                            keyboardType="email-address"
+                            autoCapitalize="none"
+                        />
+                        <Input
+                            label="Llave de Acceso"
+                            placeholder="••••••••"
+                            value={password}
+                            onChangeText={setPassword}
+                            secureTextEntry
+                        />
 
-                <View style={styles.footer}>
-                    <Text style={[styles.footerText, { color: theme.textMuted }]}>© 2026 Kognito AI • Soberanía Cognitiva</Text>
-                </View>
-            </ScrollView>
-        </KeyboardAvoidingView>
+                        <TouchableOpacity activeOpacity={0.85} onPress={handleLogin} disabled={loading} style={styles.loginWrapper}>
+                            <LinearGradient
+                                colors={[colors.primaryLight, colors.primary]}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 0 }}
+                                style={styles.loginButton}
+                            >
+                                <Text style={styles.loginButtonText}>
+                                    {loading ? 'Sincronizando...' : 'Entrar al Sistema'}
+                                </Text>
+                            </LinearGradient>
+                        </TouchableOpacity>
+
+                        <View style={styles.divider}>
+                            <View style={[styles.line, { backgroundColor: theme.border }]} />
+                        </View>
+
+                        <Button
+                            title="Telegram Secure Login"
+                            onPress={() => navigation.navigate('TelegramLogin')}
+                            variant="outline"
+                            style={{ ...styles.telegramButton, borderColor: theme.primary + '50' }}
+                        />
+                    </View>
+
+                    <View style={styles.footer}>
+                        <Text style={[styles.footerText, { color: theme.textMuted }]}>Soberanía Cognitiva Garantizada</Text>
+                        <Text style={[styles.versionText, { color: theme.textMuted + '60' }]}>v1.2 • 2026</Text>
+                    </View>
+                </ScrollView>
+            </KeyboardAvoidingView>
+        </View>
     );
 };
 
@@ -116,60 +132,90 @@ const styles = StyleSheet.create({
     },
     scrollContent: {
         flexGrow: 1,
-        padding: spacing.lg,
+        padding: spacing.xl,
         justifyContent: 'center',
     },
     header: {
         alignItems: 'center',
         marginBottom: spacing.xl * 1.5,
     },
+    logoContainer: {
+       width: 80,
+       height: 80,
+       borderRadius: 24,
+       borderWidth: 1,
+       justifyContent: 'center',
+       alignItems: 'center',
+       marginBottom: 20,
+       ...Platform.select({
+          ios: {
+             shadowColor: '#000',
+             shadowOffset: { width: 0, height: 4 },
+             shadowOpacity: 0.1,
+             shadowRadius: 10,
+          },
+          android: {
+             elevation: 4,
+          }
+       })
+    },
     logo: {
-        width: 100,
-        height: 100,
-        marginBottom: spacing.md,
+        width: 50,
+        height: 50,
+    },
+    titleRow: {
+       flexDirection: 'row',
+       alignItems: 'baseline',
     },
     title: {
-        fontSize: 48,
+        fontSize: 42,
         fontWeight: '900',
         textAlign: 'center',
-        lineHeight: 48,
+        letterSpacing: -1.5,
     },
     titleSuffix: {
-        fontSize: 48,
+        fontSize: 32,
         fontWeight: '900',
-        color: '#6366f1',
-        textAlign: 'center',
-        lineHeight: 48,
-        marginTop: -5,
+        letterSpacing: -1,
+        marginLeft: 2,
     },
     subtitle: {
-        fontSize: 16,
-        marginTop: spacing.md,
+        fontSize: 15,
+        marginTop: 10,
         textAlign: 'center',
-        fontWeight: '500',
+        fontWeight: '600',
+        opacity: 0.8,
     },
     formCard: {
-        borderRadius: borderRadius.xl,
-        padding: spacing.lg,
+        borderRadius: 32,
+        padding: spacing.xl,
         borderWidth: 1,
         width: '100%',
-        elevation: 10,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.3,
-        shadowRadius: 20,
+        ...Platform.select({
+           ios: {
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 12 },
+              shadowOpacity: 0.15,
+              shadowRadius: 25,
+           },
+           android: {
+              elevation: 10,
+           }
+        })
+    },
+    loginWrapper: {
+       marginTop: spacing.md,
     },
     loginButton: {
-        height: 56,
-        borderRadius: borderRadius.md,
+        height: 58,
+        borderRadius: 18,
         justifyContent: 'center',
         alignItems: 'center',
-        marginTop: spacing.md,
     },
     loginButtonText: {
         color: '#fff',
         fontSize: 16,
-        fontWeight: 'bold',
+        fontWeight: '800',
         letterSpacing: 0.5,
     },
     divider: {
@@ -180,21 +226,26 @@ const styles = StyleSheet.create({
     line: {
         flex: 1,
         height: 1,
-    },
-    dividerText: {
-        paddingHorizontal: spacing.md,
-        fontSize: 14,
-        fontWeight: '600',
+        opacity: 0.5,
     },
     telegramButton: {
-        marginTop: 0,
+        borderRadius: 18,
+        height: 50,
     },
     footer: {
-        marginTop: spacing.xl,
+        marginTop: spacing.xl * 1.5,
         alignItems: 'center',
     },
     footerText: {
-        fontSize: 12,
-        fontWeight: '500',
+        fontSize: 11,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 2,
     },
+    versionText: {
+       fontSize: 10,
+       marginTop: 8,
+       fontWeight: '500',
+    }
 });
+

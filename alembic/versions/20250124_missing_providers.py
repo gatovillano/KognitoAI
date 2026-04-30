@@ -20,8 +20,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    op.add_column('accounts', sa.Column('fast_llm_provider', sa.String(50), nullable=True, comment='Proveedor de LLM para tareas rápidas.'))
-    op.add_column('accounts', sa.Column('vision_llm_provider', sa.String(50), nullable=True, comment='Proveedor de LLM para tareas de visión.'))
+    # Check if columns exist before adding
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = [col['name'] for col in inspector.get_columns('accounts')]
+    
+    if 'fast_llm_provider' not in columns:
+        op.add_column('accounts', sa.Column('fast_llm_provider', sa.String(50), nullable=True, comment='Proveedor de LLM para tareas rápidas.'))
+    if 'vision_llm_provider' not in columns:
+        op.add_column('accounts', sa.Column('vision_llm_provider', sa.String(50), nullable=True, comment='Proveedor de LLM para tareas de visión.'))
 
 
 def downgrade() -> None:

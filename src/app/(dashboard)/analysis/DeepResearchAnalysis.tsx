@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { DeepResearchAnalysisResult } from '@/lib/models';
+import { DeepResearchAnalysisResult, Analysis } from '@/lib/models';
 import { Zap, Link2, FileText, AlertTriangle, LayoutDashboard } from 'lucide-react';
 import { SectionTTSButton } from './analysis-detail-dialog';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
@@ -44,17 +44,30 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
       return { additionalSources: [] };
     }
 
-    // Normalizar: asignar type='web' si no tiene el campo type, para que SourceButton lo procese correctamente
-    const normalizedSources = rawSources.map((s: any) => ({
-      ...s,
-      type: s.type || 'web',
-      snippet: s.snippet || s.content || '',
-    }));
+    // Normalizar: asegurar estructura completa y IDs únicos para evitar colisiones en deduplicación
+    const normalizedSources = rawSources.map((s: any, index) => {
+      // Fallback de ID robusto
+      const stableId = s.id || s.document_id || s.metadata?.document_id || `source-${index}`;
+      
+      return {
+        ...s,
+        id: stableId,
+        type: s.type || 'web',
+        snippet: s.snippet || s.content || s.page_content || '',
+        url: s.url || s.metadata?.document_id || '',
+        title: s.title || s.name || s.metadata?.title || 'Fuente de investigación',
+      };
+    });
 
-    console.log(`[DeepResearch] Fuentes normalizadas: ${normalizedSources.length}`, normalizedSources);
+    console.log('[DeepResearch] === DEBUG FUENTES ===');
+    console.log('[DeepResearch] Raw sources count:', rawSources.length);
+    console.log('[DeepResearch] Normalized sources:', normalizedSources);
 
     // Usar collectSourcesFromMessage para deduplicar
-    return collectSourcesFromMessage(normalizedSources as any[]);
+    const result = collectSourcesFromMessage(normalizedSources as any[]);
+    console.log('[DeepResearch] Fuentes finales tras deduplicación:', result.additionalSources);
+    console.log('[DeepResearch] ==========================');
+    return result;
   }, [analysis]);
 
 

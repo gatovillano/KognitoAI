@@ -549,7 +549,7 @@ class GraphIntegration:
                     params["account_id"] = account_id
                 
                 if workspace_id:
-                    where_clauses.append("all(n IN nodes(path) WHERE n.workspace_id = $workspace_id OR n.workspace_id IS NULL)")
+                    where_clauses.append("all(n IN nodes(path) WHERE n.workspace_id = $workspace_id)")
                     params["workspace_id"] = workspace_id
 
                 rel_spec = ""
@@ -603,9 +603,9 @@ class GraphIntegration:
                     params["account_id"] = account_id
                 
                 if workspace_id:
-                    where_n.append("(n.workspace_id = $workspace_id OR n.workspace_id IS NULL)")
-                    where_rel.append("(n.workspace_id = $workspace_id OR n.workspace_id IS NULL)")
-                    where_rel.append("(m.workspace_id = $workspace_id OR m.workspace_id IS NULL)")
+                    where_n.append("n.workspace_id = $workspace_id")
+                    where_rel.append("n.workspace_id = $workspace_id")
+                    where_rel.append("m.workspace_id = $workspace_id")
                     params["workspace_id"] = workspace_id
 
                 cypher_query = f"""
@@ -676,10 +676,10 @@ class GraphIntegration:
                 params["account_id"] = account_id
             
             if workspace_id:
-                where_n.append("(n.workspace_id = $workspace_id OR n.workspace_id IS NULL)")
-                where_m.append("(m.workspace_id = $workspace_id OR m.workspace_id IS NULL)")
-                where_rel.append("(n.workspace_id = $workspace_id OR n.workspace_id IS NULL)")
-                where_rel.append("(m.workspace_id = $workspace_id OR m.workspace_id IS NULL)")
+                where_n.append("n.workspace_id = $workspace_id")
+                where_m.append("m.workspace_id = $workspace_id")
+                where_rel.append("n.workspace_id = $workspace_id")
+                where_rel.append("m.workspace_id = $workspace_id")
                 params["workspace_id"] = workspace_id
 
             cypher_query = f"""

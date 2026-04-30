@@ -238,11 +238,11 @@ async def get_search_tool(search_api: SearchAPI, config: Optional[RunnableConfig
 
 async def get_all_tools(config: Optional[RunnableConfig]): # Changed to Optional
     """Assemble complete toolkit including research and search tools."""
-    from tools.web_scraper_tool import WebScraperTool
-    from tools.knowledge_search_tool import KnowledgeSearchTool
-    from tools.knowledge_graph_tool import KnowledgeGraphTool
-    from tools.graph_cypher_generator_tool import GraphCypherGeneratorTool
-    from tools.comprehensive_web_analysis_tool import ComprehensiveWebAnalysisTool
+    from skills.web_scraper_tool import WebScraperTool
+    from skills.knowledge_search_tool import KnowledgeSearchTool
+    from skills.knowledge_graph_tool import KnowledgeGraphTool
+    from skills.graph_cypher_generator_tool import GraphCypherGeneratorTool
+    from skills.comprehensive_web_analysis_tool import ComprehensiveWebAnalysisTool
 
     # Extract account_id and workspace_id from config
     configurable = config.get("configurable", {}) if config else {}

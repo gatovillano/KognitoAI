@@ -1,1 +1,0 @@
-La consulta o tema sobre el cual generar insights.

@@ -11,6 +11,8 @@ from sqlalchemy.orm import selectinload
 from core.database import Nota, ContactProfile, Workspace, NoteContactProfileAssociation, WorkspacePermission
 from utils.embeddings import get_embedding_model
 from utils.security import check_workspace_permission # Importar check_workspace_permission
+from utils.sanitization import sanitize_text, sanitize_html
+from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,11 @@ class NotesManager:
         """
         Añade una nueva nota a la base de datos para una cuenta o workspace.
         """
+        # Sanitizar entradas
+        title = sanitize_text(title) if title else title
+        content = sanitize_html(content)
+        category = sanitize_text(category) if category else category
+        
         logger.info(f"Añadiendo nueva nota para la cuenta {account_id} con título '{title}'")
         effective_category = category if category and category.strip() else "General"
 
@@ -205,12 +212,12 @@ class NotesManager:
         update_data = {}
         content_changed = False
         if new_title is not None:
-            update_data['title'] = new_title
+            update_data['title'] = sanitize_text(new_title)
         if new_content is not None and note_to_update.content != new_content:
-            update_data['content'] = new_content
+            update_data['content'] = sanitize_html(new_content)
             content_changed = True
         if new_category is not None:
-            update_data['category'] = new_category
+            update_data['category'] = sanitize_text(new_category)
         if new_workspace_id is not None:
             update_data['workspace_id'] = uuid.UUID(new_workspace_id) if new_workspace_id else None
 

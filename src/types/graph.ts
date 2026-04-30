@@ -17,6 +17,8 @@ export interface GraphEdge {
   id: string;
   source: string; // ID del nodo de origen
   target: string; // ID del nodo de destino
+  from?: string; // Compatibilidad con Vis.js
+  to?: string; // Compatibilidad con Vis.js
   label: string;  // Etiqueta principal de la relación (e.g., r.type)
   properties?: { // Hacer properties opcional
     type?: string; // e.g., 'FUNDAMENTACION_TEORICA'

@@ -17,6 +17,8 @@ interface GraphEdge {
   id: string;
   source: string; // ID del nodo de origen
   target: string; // ID del nodo de destino
+  from?: string; // Compatibilidad con Vis.js
+  to?: string; // Compatibilidad con Vis.js
   label: string;  // Etiqueta principal de la relación (e.g., r.type)
   properties?: { // Hacer properties opcional
     type?: string; // e.g., 'FUNDAMENTACION_TEORICA'
@@ -99,9 +101,9 @@ export const useKnowledgeGraph = (workspaceId: string | null) => {
         setProcessingStatus('completed');
         console.log('🟢 Datos del grafo establecidos (loadGraphData):', { nodes: response.data.nodes.length, edges: response.data.edges.length });
       } else if (response.data && response.data.error === "Grafo vacío. Procesa los documentos primero para generar el grafo.") {
-          setError("Grafo vacío. Procesa los documentos primero para generar el grafo.");
-          setProcessingStatus('not_processed');
-          setGraphData(null); // Limpiar datos si el grafo está vacío
+        setError("Grafo vacío. Procesa los documentos primero para generar el grafo.");
+        setProcessingStatus('not_processed');
+        setGraphData(null); // Limpiar datos si el grafo está vacío
       } else {
         console.warn('🟡 Datos del grafo incompletos o ausentes, o error inesperado. Comprobando estado del procesamiento...');
         const statusResponse = await apiClient.get(`/api/knowledge-graph/${workspaceId}/status`);

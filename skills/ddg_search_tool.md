@@ -1,1 +1,0 @@
-La consulta de búsqueda que se enviará a DuckDuckGo

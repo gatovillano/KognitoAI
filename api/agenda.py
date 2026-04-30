@@ -279,6 +279,11 @@ async def update_event_endpoint(
                 raise HTTPException(status_code=403, detail="No tienes permiso para actualizar este evento.")
 
         update_data = event_update.model_dump(exclude_unset=True)
+        
+        # Convert empty string to None for workspace_id
+        if update_data.get('workspace_id') == '':
+            update_data['workspace_id'] = None
+            
         logger.info(f"[update_event_endpoint] update_data: {update_data}")
         
         # Manejar la actualización de asistentes por separado

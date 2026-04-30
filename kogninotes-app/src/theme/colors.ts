@@ -1,23 +1,24 @@
 // src/theme/colors.ts
 
 export const palette = {
-    primary: '#6366f1',
-    primaryLight: '#818cf8',
-    primaryDark: '#4f46e5',
+    // Primary based on Kognito logo (Blue to Cyan)
+    primary: '#00bfff',      // Cyan (hsl(200 100% 50%))
+    primaryLight: '#3399ff', // Soft Blue (hsl(220 100% 60%))
+    primaryDark: '#0099cc',  // Darker Cyan
 
-    // Dark Theme (Slate)
-    darkBackground: '#0f172a',
-    darkSurface: '#1e293b',
-    darkBorder: '#334155',
-    darkText: '#f8fafc',
-    darkTextMuted: '#94a3b8',
+    // Dark Theme (Modern Slate/Deep Blue)
+    darkBackground: '#181b21', // hsl(222 13% 11%)
+    darkSurface: '#111418',    // hsl(222 13% 8%)
+    darkBorder: '#23282f',     // hsl(222 13% 16%)
+    darkText: '#e2e4e9',       // hsl(220 9% 89%)
+    darkTextMuted: '#898fa3',  // hsl(220 9% 56%)
 
-    // Light Theme (Slate)
-    lightBackground: '#f8fafc',
-    lightSurface: '#ffffff',
-    lightBorder: '#e2e8f0',
-    lightText: '#0f172a',
-    lightTextMuted: '#64748b',
+    // Light Theme (Soft Gray)
+    lightBackground: '#fafafa', // hsl(0 0% 98%)
+    lightSurface: '#ffffff',    // white
+    lightBorder: '#e5e7eb',     // hsl(220 13% 91%)
+    lightText: '#14171c',       // hsl(220 13% 9%)
+    lightTextMuted: '#6b7280',  // hsl(220 9% 46%)
 
     error: '#ef4444',
     success: '#10b981',
@@ -27,6 +28,7 @@ export const palette = {
 export const colors = {
     primary: palette.primary,
     primaryLight: palette.primaryLight,
+    primaryDark: palette.primaryDark,
     background: palette.darkBackground,
     surface: palette.darkSurface,
     border: palette.darkBorder,
@@ -40,6 +42,7 @@ export const colors = {
 export const lightColors = {
     primary: palette.primary,
     primaryLight: palette.primaryLight,
+    primaryDark: palette.primaryDark,
     background: palette.lightBackground,
     surface: palette.lightSurface,
     border: palette.lightBorder,
@@ -61,7 +64,9 @@ export const spacing = {
 export const borderRadius = {
     sm: 4,
     md: 8,
-    lg: 16,
-    xl: 24,
+    lg: 14, // Aligned with --radius: 0.875rem
+    xl: 20,
+    xxl: 28,
     full: 9999,
 };
+
