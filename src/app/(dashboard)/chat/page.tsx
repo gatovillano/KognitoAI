@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { useWorkspace } from '@/contexts/WorkspaceContext';
 import { EmptyChat } from '@/components/EmptyChat';
 import dynamic from 'next/dynamic'; // Importar dynamic
 
@@ -20,6 +21,8 @@ interface SelectedContextItem {
 export default function NewChatPage() {
   const router = useRouter();
   const { user } = useAuth();
+  const { currentWorkspace } = useWorkspace();
+  const workspaceId = currentWorkspace?.id;
   const [newMessage, setNewMessage] = useState('');
   const [isResponding, setIsResponding] = useState(false);
   const [selectedContext, setSelectedContext] = useState<SelectedContextItem[]>([]);
@@ -98,7 +101,8 @@ export default function NewChatPage() {
         onImageUpload={() => {}}
         selectedContext={selectedContext}
         onContextSelected={setSelectedContext}
-        isVectorizingFile={false} // Añadir la prop requerida
+        isVectorizingFile={false}
+        workspaceId={workspaceId}
       />
       <WelcomeDialog isOpen={isWelcomeDialogOpen} onOpenChange={setIsWelcomeDialogOpen} />
     </>

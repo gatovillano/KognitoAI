@@ -110,9 +110,9 @@ export const SourceButton: React.FC<{ source: Source; citationNumber: number }> 
   );
 };
 
-const processMessageWithCitations = (text: string, allSources: Source[] | undefined): { contentParts: ContentPart[]; uncitedSources: Source[] } => {
+const processMessageWithCitations = (text: string, allSources: Source[] | undefined): { contentParts: ContentPart[]; citedSources: Source[]; uncitedSources: Source[] } => {
   if (!allSources || allSources.length === 0) {
-    return { contentParts: [{ type: 'text', content: text }], uncitedSources: [] };
+    return { contentParts: [{ type: 'text', content: text }], citedSources: [], uncitedSources: [] };
   }
 
   const contentParts: ContentPart[] = [];
@@ -141,8 +141,9 @@ const processMessageWithCitations = (text: string, allSources: Source[] | undefi
     contentParts.push({ type: 'text', content: text.substring(lastIndex) });
   }
 
+  const citedSources = allSources.filter(s => citedSourceIds.has(s.id));
   const uncitedSources = allSources.filter(s => !citedSourceIds.has(s.id));
-  return { contentParts, uncitedSources };
+  return { contentParts, citedSources, uncitedSources };
 };
 
 export function QuestionSliderDialog({ isOpen, onOpenChange, questions, title, analysisId, onDevelopClick }: QuestionSliderDialogProps) {

@@ -5,10 +5,19 @@ import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { Send, ArrowUp, X, Paperclip, Upload, Loader2, Mic, NotebookText, Image as ImageIcon } from 'lucide-react';
+import { Send, ArrowUp, X, Paperclip, Upload, Loader2, Mic, NotebookText, Image as ImageIcon, Square } from 'lucide-react';
 import { ContextSelectorButton } from '@/components/ContextSelectorButton';
 import { MoreActionsMenu } from './MoreActionsMenu';
 import NoteSelectorDialog from './NoteSelectorDialog';
+
+interface AutocompleteState {
+  isVisible: boolean;
+  trigger: '#' | '@' | null;
+  query: string;
+  options: string[];
+  activeIndex: number;
+  wordStartIndex: number;
+}
 
 interface SelectedContextItem {
   id: string;
@@ -43,6 +52,7 @@ interface ChatInputBarProps {
 
   setNewMessage: (value: string) => void;
   onSendMessage: (e?: React.FormEvent, message?: string) => void;
+  onStopResponding?: () => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onToggleKnowledgeAnalysis?: () => void;
   onToggleWebSearch?: () => void;
@@ -61,6 +71,8 @@ interface ChatInputBarProps {
   children?: React.ReactNode;
   workspaceId?: string;
   inputPlaceholder?: string;
+  activeRepositoryContext?: { type: 'github' | 'local', path: string, url?: string } | null;
+  onClearRepositoryContext?: () => void;
 }
 
 const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
@@ -79,6 +91,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   selectedToolName,
   setNewMessage,
   onSendMessage,
+  onStopResponding,
   onKeyDown = () => { },
   onToggleKnowledgeAnalysis = () => { },
   onToggleWebSearch = () => { },
@@ -96,7 +109,9 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   onOpenSearch,
   children,
   workspaceId,
-  inputPlaceholder
+  inputPlaceholder,
+  activeRepositoryContext,
+  onClearRepositoryContext = () => {}
 }) => {
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const [isNoteSelectorOpen, setIsNoteSelectorOpen] = useState(false);
@@ -104,6 +119,15 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   const [isWebSearchForcedState, setIsWebSearchForcedState] = useState(false);
   const [isComprehensiveAnalysisForcedState, setIsComprehensiveAnalysisForcedState] = useState(false);
   const [isDeepResearchForcedState, setIsDeepResearchForcedState] = useState(false);
+
+  const [autocomplete, setAutocomplete] = useState<AutocompleteState>({
+    isVisible: false,
+    trigger: null,
+    query: '',
+    options: [],
+    activeIndex: 0,
+    wordStartIndex: 0,
+  });
 
   const onToggleKnowledgeAnalysisForced = useCallback(() => {
     setIsKnowledgeAnalysisForcedState(prev => !prev);
@@ -121,8 +145,60 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     setIsDeepResearchForcedState(prev => !prev);
   }, []);
 
+  const updateAutocompleteOptions = async (trigger: '#' | '@', query: string) => {
+    try {
+      if (trigger === '#') {
+        const repoUrl = activeRepositoryContext?.type === 'github' ? activeRepositoryContext.url || activeRepositoryContext.path : null;
+        if (!repoUrl) return;
+
+        const token = localStorage.getItem('token');
+        const res = await fetch(`/api/github/tree_flat?repo_url=${encodeURIComponent(repoUrl)}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        const fullOptions: string[] = data.options || [];
+        const filtered = fullOptions.filter(o => o.toLowerCase().includes(query.toLowerCase())).slice(0, 50); // limit 50
+        
+        setAutocomplete(prev => ({
+          ...prev,
+          options: filtered,
+          activeIndex: 0,
+        }));
+      } else {
+        // TBD Local SSH options
+        const mockLocal = [".env", "config.py", "/home/gato/Proyectos", "/var/www/html"];
+        const filtered = mockLocal.filter(o => o.toLowerCase().includes(query.toLowerCase()));
+        setAutocomplete(prev => ({ ...prev, options: filtered, activeIndex: 0 }));
+      }
+    } catch (err) {
+      console.error("Autocomplete fetch error", err);
+    }
+  };
+
   const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setNewMessage(e.target.value);
+    const val = e.target.value;
+    setNewMessage(val);
+    
+    // Autocomplete detection
+    const cursorPosition = e.target.selectionStart;
+    const textBeforeCursor = val.slice(0, cursorPosition);
+    const match = /(#|@)([^\s]*)$/.exec(textBeforeCursor);
+    
+    if (match) {
+      const trigger = match[1] as '#' | '@';
+      const query = match[2];
+      const wordStartIndex = match.index;
+      setAutocomplete(prev => ({
+        ...prev,
+        isVisible: true,
+        trigger,
+        query,
+        wordStartIndex,
+      }));
+      updateAutocompleteOptions(trigger, query);
+    } else {
+      setAutocomplete(prev => ({ ...prev, isVisible: false }));
+    }
   }, [setNewMessage]);
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
@@ -161,6 +237,41 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   }, [setNewMessage, newMessage]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (autocomplete.isVisible && autocomplete.options.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setAutocomplete(prev => ({ ...prev, activeIndex: (prev.activeIndex + 1) % prev.options.length }));
+        return;
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setAutocomplete(prev => ({ ...prev, activeIndex: (prev.activeIndex - 1 + prev.options.length) % prev.options.length }));
+        return;
+      } else if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        const selectedOption = autocomplete.options[autocomplete.activeIndex];
+        const before = newMessage.slice(0, autocomplete.wordStartIndex);
+        const after = newMessage.slice(textAreaRef.current?.selectionStart || newMessage.length);
+        
+        // Insert the selected option
+        const insertText = `${autocomplete.trigger}${selectedOption} `;
+        setNewMessage(before + insertText + after);
+        setAutocomplete(prev => ({ ...prev, isVisible: false }));
+        
+        // Move cursor asynchronously
+        setTimeout(() => {
+          if (textAreaRef.current) {
+            const newPos = before.length + insertText.length;
+            textAreaRef.current.selectionStart = newPos;
+            textAreaRef.current.selectionEnd = newPos;
+          }
+        }, 0);
+        return;
+      } else if (e.key === 'Escape') {
+        setAutocomplete(prev => ({ ...prev, isVisible: false }));
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (newMessage.trim() || currentContext.length > 0 || (uploadedImagePreviews && uploadedImagePreviews.length > 0)) {
@@ -171,7 +282,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
       }
     }
     onKeyDown(e);
-  }, [newMessage, currentContext.length, uploadedImagePreviews, onKeyDown]);
+  }, [autocomplete, newMessage, currentContext.length, uploadedImagePreviews, onKeyDown]);
 
   const handleRemoveContextItem = useCallback((item: SelectedContextItem) => {
     onRemoveContextItem(item);
@@ -275,6 +386,54 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                 {imagePreviews}
               </div>
             )}
+            {activeRepositoryContext && (
+              <div className="mb-2 flex items-center justify-between bg-primary/10 border border-primary/20 rounded-md px-3 py-1.5 text-sm">
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <span className="shrink-0 text-primary">
+                    {activeRepositoryContext.type === 'github' ? '📍 Modo Repositorio:' : '🔑  SSH Local:'}
+                  </span>
+                  <span className="font-mono text-muted-foreground truncate" title={activeRepositoryContext.path}>
+                    {activeRepositoryContext.path}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={onClearRepositoryContext}
+                  className="shrink-0 ml-2 text-muted-foreground hover:text-destructive transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+            
+            {autocomplete.isVisible && autocomplete.options.length > 0 && (
+              <div className="absolute z-50 bottom-full mb-2 bg-popover text-popover-foreground border border-border shadow-lg rounded-md w-64 max-h-48 overflow-y-auto">
+                <div className="p-1">
+                  <div className="text-[10px] font-bold text-muted-foreground uppercase px-2 py-1">
+                    {autocomplete.trigger === '#' ? 'Archivos del Repositorio' : 'Archivos Locales'}
+                  </div>
+                  {autocomplete.options.map((option, index) => (
+                    <div 
+                      key={option}
+                      className={`px-2 py-1.5 text-sm cursor-pointer rounded-sm flex items-center gap-2 ${index === autocomplete.activeIndex ? 'bg-primary/20 text-primary' : 'hover:bg-muted'}`}
+                      onMouseDown={(evt) => {
+                        evt.preventDefault(); // prevent input blur
+                        const selectedOption = option;
+                        const before = newMessage.slice(0, autocomplete.wordStartIndex);
+                        const after = newMessage.slice(textAreaRef.current?.selectionStart || newMessage.length);
+                        const insertText = `${autocomplete.trigger}${selectedOption} `;
+                        setNewMessage(before + insertText + after);
+                        setAutocomplete(prev => ({ ...prev, isVisible: false }));
+                      }}
+                    >
+                      <Paperclip className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{option}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
             <Textarea
               ref={textAreaRef}
               value={newMessage}
@@ -333,14 +492,26 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                 >
                   {isProcessingAudio ? <Loader2 className="h-5 w-5 animate-spin" /> : <Mic className="h-5 w-5" />}
                 </Button>
-                <Button
-                  type="submit"
-                  size="icon"
-                  disabled={isUploadingFile || isVectorizingFile || (!newMessage.trim() && currentContext.length === 0 && (!uploadedImagePreviews || uploadedImagePreviews.length === 0))}
-                  className="rounded-full"
-                >
-                  {(isUploadingFile || isVectorizingFile) ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
-                </Button>
+                {isResponding ? (
+                  <Button
+                    type="button"
+                    size="icon"
+                    onClick={onStopResponding}
+                    title="Detener respuesta"
+                    className="rounded-full bg-red-500 hover:bg-red-600 text-white"
+                  >
+                    <Square className="h-4 w-4 fill-current" />
+                  </Button>
+                ) : (
+                  <Button
+                    type="submit"
+                    size="icon"
+                    disabled={isUploadingFile || isVectorizingFile || (!newMessage.trim() && currentContext.length === 0 && (!uploadedImagePreviews || uploadedImagePreviews.length === 0))}
+                    className="rounded-full"
+                  >
+                    {(isUploadingFile || isVectorizingFile) ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+                  </Button>
+                )}
               </div>
             </div>
           </div>

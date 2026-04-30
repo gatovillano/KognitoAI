@@ -15,6 +15,7 @@ from core.dependencies import get_db_session # Importar dependencia centralizada
 from api.schemas import UserSettingsResponse, UserSettingsUpdateRequest, UserPasswordUpdateRequest, UserSecretRequest, UserSecretResponse
 from utils.security import get_password_hash, verify_password
 from core.repositories.secret_repository import SecretRepository
+from utils.sanitization import sanitize_text
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -118,6 +119,7 @@ async def get_user_settings(current_account_id: str = Depends(get_current_accoun
         tts_voice=account.tts_voice,
         tts_speed=account.tts_speed,
         tts_region=account.tts_region, # Añadido campo tts_region
+        tts_api_base=account.tts_api_base,
         embedding_provider=account.embedding_provider, # Añadido campo embedding_provider
         embedding_model=account.embedding_model, # Añadido campo embedding_model
         embedding_api_key_name=account.embedding_api_key_name, # Añadido campo embedding_api_key_name
@@ -140,6 +142,8 @@ async def update_user_settings(
 
     # Aplicar actualizaciones
     for field, value in settings_update.dict(exclude_unset=True).items():
+        if field in ['name', 'bio'] and isinstance(value, str):
+            value = sanitize_text(value)
         setattr(account, field, value)
     
     await db.commit()
@@ -172,6 +176,7 @@ async def update_user_settings(
         tts_voice=account.tts_voice,
         tts_speed=account.tts_speed,
         tts_region=account.tts_region, # Añadido campo tts_region
+        tts_api_base=account.tts_api_base,
         embedding_provider=account.embedding_provider, # Añadido campo embedding_provider
         embedding_model=account.embedding_model, # Añadido campo embedding_model
         embedding_api_key_name=account.embedding_api_key_name, # Añadido campo embedding_api_key_name

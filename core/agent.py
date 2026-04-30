@@ -29,15 +29,14 @@ from typing import Optional, List, Any, cast, TypedDict, Dict
 import uuid
 import os
 import json # Importar el módulo json
+import re
 from pydantic import ValidationError
 
 # --- Langchain Core ---
-from langchain.agents import AgentExecutor
+# from langchain.agents import AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
-from langchain.agents.output_parsers.tools import ToolsAgentOutputParser
-from langchain.agents.format_scratchpad.tools import format_to_tool_messages
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda, RunnableConfig
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -45,9 +44,13 @@ from langchain_core.agents import AgentAction, AgentFinish # Importar AgentActio
 from sqlalchemy import update
 from langchain_core.messages import ToolMessage
 
+# langchain.agents no se usa en esta versión
+# Las funcionalidades se han movido a langgraph o langchain_core
+
+
 # --- Módulos del Proyecto ---
 from core.tools import get_all_langchain_tools
-from core.memory_manager import get_user_profile, add_memory_to_vector_db, get_relevant_memories
+from core.memory_manager import get_user_profile, add_memory_to_vector_db, get_relevant_memories, get_document_chunks
 from core.context_cache import get_cached_context, cache_context
 from core.database import SessionLocal, Account, ChatThread, Workspace
 from utils.db_session import DBSession
@@ -60,11 +63,11 @@ from core.enhanced_memory_manager import EnhancedMemoryManager
 from knowledge_graph.graph_database import GraphDB
 from knowledge_graph.graph_reasoning_node import GraphReasoningNode # NUEVO
 from knowledge_graph.knowledge_extraction_node import KnowledgeExtractionNode # NUEVO
-from tools.deep_research_tool import DeepResearchTool # Importar DeepResearchTool
+from skills.search_and_research_skill.scripts.deep_research_tool import DeepResearchTool # Importar DeepResearchTool
 
 # --- Claves para estado temporal ---
 from utils.image_generation import GENERATED_IMAGE_KEY
-# from tools.get_document_content_tool import DOCUMENT_NAME_KEY
+# from skills.get_document_content_tool import DOCUMENT_NAME_KEY
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -130,7 +133,6 @@ def _parse_tool_calls_from_text(text: str, available_tools: List[Any]) -> List[D
         r'<tool>\s*(\w+)\s*</tool>',
     ]
     
-    import re
     for pattern in explicit_patterns:
         matches = re.finditer(pattern, text, re.IGNORECASE)
         for match in matches:
@@ -300,56 +302,7 @@ from core.utils.logging_utils import AgentLogger
 logger = AgentLogger(__name__)
 
 
-def convert_langchain_tools_to_openai_format(tools: List[Any]) -> List[Dict[str, Any]]:
-    """
-    Convierte herramientas de LangChain al formato de OpenAI function calling.
-    
-    Esto es necesario porque LiteLLM a veces no convierte correctamente
-    las herramientas cuando se usa bind_tools con modelos OpenAI/GPT.
-    
-    Compatible con Pydantic v1 y v2.
-    
-    Args:
-        tools: Lista de herramientas de LangChain
-        
-    Returns:
-        Lista de herramientas en formato OpenAI function calling
-    """
-    openai_tools = []
-    
-    for tool in tools:
-        try:
-            # Extraer el schema de argumentos de la herramienta
-            if hasattr(tool, 'args_schema') and tool.args_schema:
-                # Convertir el schema de Pydantic a JSON Schema
-                # Compatible con Pydantic v1 (schema()) y v2 (model_json_schema())
-                if hasattr(tool.args_schema, 'model_json_schema'):
-                    # Pydantic v2
-                    schema = tool.args_schema.model_json_schema()
-                elif hasattr(tool.args_schema, 'schema'):
-                    # Pydantic v1
-                    schema = tool.args_schema.schema()
-                else:
-                    logger.warning(f"⚠️ Herramienta '{tool.name}' tiene args_schema pero no se puede extraer el schema")
-                    continue
-                
-                # Formato OpenAI function calling
-                openai_tool = {
-                    "type": "function",
-                    "function": {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "parameters": schema
-                    }
-                }
-                openai_tools.append(openai_tool)
-                logger.debug(f"🔧 Herramienta '{tool.name}' convertida a formato OpenAI")
-            else:
-                logger.warning(f"⚠️ Herramienta '{tool.name}' no tiene args_schema, saltando conversión")
-        except Exception as e:
-            logger.error(f"❌ Error al convertir herramienta '{tool.name}' a formato OpenAI: {e}", exc_info=True)
-    
-    return openai_tools
+
 
 
 # ==============================================================================
@@ -788,42 +741,90 @@ async def call_model_node(state: AgentState):
         logger.info(f"Aplicando RAG explícito con {len(rag_context)} item(s) de contexto. Se priorizará la búsqueda en estos documentos.")
         document_ids_for_rag = [item['id'] for item in rag_context if item.get('type') == 'document']
         document_names_for_rag = [item.get('name') for item in rag_context if item.get('type') == 'document' and item.get('name')] # Manejar 'name' de forma segura
+        
+        # Extraer topics si hay colecciones pasadas directamente en el rag_context
+        collection_topics = [item.get('topic') or item.get('name') for item in rag_context if item.get('type') == 'collection']
+        if collection_topics:
+            filter_topics = collection_topics
+            logger.info(f"Filtro de colección (topics) extraídos desde rag_context: {filter_topics}")
+            if not document_names_for_rag:
+                document_names_for_rag = []
+            document_names_for_rag.extend(collection_topics)
+            
         has_explicit_rag_context = True
 
-    # Soporte para contexto de colección
+    # Soporte para contexto de colección (legacy mode)
     if context and context.get("type") == "collection":
         topic = context.get("id")
         if topic:
             logger.info(f"Aplicando filtro de colección RAG para el tema: {topic}")
-            filter_topics = [topic]
+            if not filter_topics:
+                filter_topics = [topic]
+            elif topic not in filter_topics:
+                filter_topics.append(topic)
             has_explicit_rag_context = True
             # Si no hay nombres de documentos explícitos, usamos el nombre de la colección
             if not document_names_for_rag:
                 document_names_for_rag = [context.get("snapshot", {}).get("name", topic)]
     # --- CONSOLIDACIÓN Y RE-INDEXACIÓN DE FUENTES PARA EL LLM ---
     # Combinar fuentes de todas las ramas (RAG, Proactive, Graph), asegurando IDs secuenciales desde 1
-    # PRIORIDAD DE ORDEN: 1. RAG Context (adjuntos), 2. Graph Sources, 3. Tool/Proactive Sources
-    # Esto asegura que los IDs sean estables si el agente decide llamar a herramientas después
+    # PRIORIDAD DE ORDEN: 1. Tool/Proactive Sources (RAG), 2. Graph Sources, 3. RAG Context (como fallback)
     all_sources_for_llm: List[Source] = []
     final_sources_for_state = []
     seen_source_identifiers = set()
+    documents_with_content = set() # Track docs that already have at least one chunk
 
     def get_source_identifier(s: Dict[str, Any]) -> str:
         s_type = s.get('type', 'web')
         s_url = s.get('url') or s.get('id') or ''
-        return f"{s_type}:{s_url}"
+        s_snippet = s.get('snippet', '')
+        # Usar un hash del snippet para permitir múltiples fragmentos del mismo documento
+        import hashlib
+        snippet_hash = hashlib.md5(s_snippet.strip().encode()).hexdigest()[:8] if s_snippet.strip() else "empty"
+        return f"{s_type}:{s_url}:{snippet_hash}"
 
     raw_sources = []
-    
-    # 1. Procesar RAG Context (Documentos adjuntos explícitamente por el usuario)
+
+    # 1. Procesar Fuentes de RAG General y Herramientas (vienen en state['sources'])
+    # PRIORIDAD ALTA: Estos son resultados directos de herramientas activadas por el usuario o el agente
+    if state.get('sources'):
+        for s in state['sources']:
+            ident = get_source_identifier(s)
+            if ident not in seen_source_identifiers:
+                raw_sources.append(s)
+                seen_source_identifiers.add(ident)
+                # Marcar documento como "con contenido"
+                if s.get('type') == 'document' or s.get('type') == SourceType.DOCUMENT:
+                    doc_id = s.get('url') or s.get('id')
+                    if doc_id: documents_with_content.add(str(doc_id))
+
+    # 2. Procesar Fuentes de Grafo (vienen en state['graph_sources'])
+    # PRIORIDAD MEDIA: Contexto relacional del grafo
+    if state.get('graph_sources'):
+        for s in state['graph_sources']:
+            ident = get_source_identifier(s)
+            if ident not in seen_source_identifiers:
+                raw_sources.append(s)
+                seen_source_identifiers.add(ident)
+                # Marcar documento como "con contenido" si es un documento
+                if s.get('type') == 'document' or s.get('type') == SourceType.DOCUMENT:
+                    doc_id = s.get('url') or s.get('id')
+                    if doc_id: documents_with_content.add(str(doc_id))
+
+    # 3. Procesar RAG Context (Documentos adjuntos explícitamente por el usuario)
+    # SOLO los añadimos si no hemos encontrado ya contenido real para ellos
     if state.get('rag_context'):
         for item in state['rag_context']:
-            # Normalizar para que parezca una fuente citable
+            doc_id = str(item.get('id'))
+            if doc_id in documents_with_content:
+                continue # Ya tenemos fragmentos reales de este documento, no añadir la entrada vacía
+
+            # Normalizar para que parezca una fuente citable (como fallback sin snippet)
             normalized = {
                 "id": item.get('id'),
                 "title": item.get('name') or item.get('title') or "Documento Adjunto",
                 "url": item.get('url') or item.get('id') or f"document://{item.get('id')}",
-                "snippet": item.get('content') or item.get('snippet') or "",
+                "snippet": item.get('content') or item.get('snippet') or "", # Estará vacío probablemente
                 "type": item.get('type', 'document'),
                 "metadata": item.get('metadata', {})
             }
@@ -831,23 +832,6 @@ async def call_model_node(state: AgentState):
             if ident not in seen_source_identifiers:
                 raw_sources.append(normalized)
                 seen_source_identifiers.add(ident)
-
-    # 2. Procesar Fuentes de Grafo (vienen en state['graph_sources'])
-    if state.get('graph_sources'):
-        for s in state['graph_sources']:
-            ident = get_source_identifier(s)
-            if ident not in seen_source_identifiers:
-                raw_sources.append(s)
-                seen_source_identifiers.add(ident)
-
-    # 3. Procesar Fuentes de RAG General y Herramientas (vienen en state['sources'])
-    if state.get('sources'):
-        for s in state['sources']:
-            ident = get_source_identifier(s)
-            if ident not in seen_source_identifiers:
-                raw_sources.append(s)
-                seen_source_identifiers.add(ident)
-
     # 2. Procesar y re-indexar secuencialmente para que el LLM use [1], [2], [3]...
     for i, s_dict in enumerate(raw_sources, start=1):
         try:
@@ -880,17 +864,14 @@ async def call_model_node(state: AgentState):
     from core.prompt_manager import PromptManager
     prompt_manager = PromptManager(settings={"default_system_prompt": settings.default_system_prompt})
         
-    # Obtener herramientas si no están en el estado
-    if "tools" not in state:
-        tools = await get_all_langchain_tools(
-            account_id=state['account_id'],
-            telegram_id=state.get('telegram_id'),
-            thread_id=state['thread_id'],
-            workspace_id=state.get('workspace_id')
-        )
-        state["tools"] = tools
-    else:
-        tools = state["tools"]
+    # Recogemos las herramientas dinámicamente en cada paso del modelo para asegurar que
+    # si el agente crea una nueva skill (vía skill_factory), esta esté disponible inmediatamente.
+    tools = await get_all_langchain_tools(
+        account_id=state['account_id'],
+        telegram_id=state.get('telegram_id'),
+        thread_id=state['thread_id'],
+        workspace_id=state.get('workspace_id')
+    )
     
     workspace_prompt = None
     if state.get('workspace_id'):
@@ -1048,14 +1029,18 @@ async def call_model_node(state: AgentState):
                 "LLAMADA_A_HERRAMIENTA: nombre_herramienta\n"
                 "{\"argumento1\": \"valor1\", \"argumento2\": \"valor2\"}\n\n"
             )
-            # Escapar para LangChain
-            extra_instructions = extra_instructions.replace('{', '{{').replace('}', '}}')
             final_system_content += extra_instructions
         else:
             final_system_content += "\n\n⚠️ **CRITICAL TECHNICAL REMINDER:** Use your internal reasoning/thinking ONLY if the task is complex. Always provide a clear final response. If you use a tool, you MUST provide ALL required arguments."
 
+    # --- ESCAPE GLOBAL PARA LANGCHAIN (CRÍTICO) ---
+    # Escapamos todas las llaves '{' y '}' para evitar que LangChain intente parsear JSONs
+    # de herramientas o manuales como variables del prompt.
+    # El placeholder "messages" se maneja por separado vía MessagesPlaceholder.
+    final_system_content_escaped = final_system_content.replace('{', '{{').replace('}', '}}')
+
     prompt = ChatPromptTemplate.from_messages([
-        ("system", final_system_content),
+        ("system", final_system_content_escaped),
         MessagesPlaceholder(variable_name="messages"),
     ])
 
@@ -1408,6 +1393,27 @@ async def call_model_node(state: AgentState):
     if parsed_tool_calls:
         logger.info(f"✅ Parser híbrido extrajo {len(parsed_tool_calls)} tool calls del texto")
         
+        # --- LIMPIEZA DE CONTENIDO ---
+        # Removido el indicador de herramienta para que no sea visible para el usuario
+        patterns_to_strip = [
+            r'LLAMADA_A_HERRAMIENTA:\s*\w+.*?(?=\n|$)',
+            r'Herramienta:\s*\w+.*?(?=\n|$)',
+            r'\[TOOL_CALL\]\s*\w+.*?(?=\n|$)',
+            r'Tool:\s*\w+.*?(?=\n|$)',
+            r'<tool>\s*\w+\s*</tool>',
+            r'\{[\s\n]*"[\w\d_]+":[\s\S]*?\}'
+        ]
+        
+        cleaned_content = full_ai_message_content
+        for p in patterns_to_strip:
+            cleaned_content = re.sub(p, "", cleaned_content, flags=re.IGNORECASE | re.DOTALL)
+        
+        cleaned_content = re.sub(r'\n{3,}', '\n\n', cleaned_content).strip()
+        
+        if cleaned_content != full_ai_message_content:
+            logger.info("🧹 Mensaje limpiado de instrucciones técnicas.")
+            full_ai_message_content = cleaned_content
+
         # Si el modelo no devolvió tool calls nativos, usar los parseados
         if not tool_calls_from_llm:
             tool_calls_from_llm = parsed_tool_calls
@@ -1571,16 +1577,13 @@ async def tool_node(state: AgentState):
     conn_type = "chat" if state.get('telegram_id') else None
 
     # Obtener todas las herramientas
-    if "tools" in state:
-        all_tools = state["tools"]
-    else:
-        all_tools = await get_all_langchain_tools(
-            account_id=account_id,
-            telegram_id=telegram_id_int,
-            thread_id=state['thread_id'],
-            workspace_id=workspace_id
-        )
-        state["tools"] = all_tools
+    # Obtener todas las herramientas de forma dinámica
+    all_tools = await get_all_langchain_tools(
+        account_id=account_id,
+        telegram_id=telegram_id_int,
+        thread_id=state['thread_id'],
+        workspace_id=workspace_id
+    )
 
     # 1. Definir la función de ejecución de una sola herramienta
     from core.utils.tool_utils import get_tool_by_name
@@ -1796,9 +1799,9 @@ def should_continue(state: AgentState) -> str:
     logger.info("--- (Grafo) Nodo: Enrutamiento ---")
     last_message = state["messages"][-1]
     
-    # Loop protection: máximo 10 iteraciones de herramientas
+    # Loop protection: máximo configurable de iteraciones de herramientas
     loop_count = state.get("loop_count", 0)
-    if loop_count >= 10:
+    if loop_count >= settings.max_agent_loops:
         logger.warning(f"⚠️ Alerta de bucle detectada (loop_count={loop_count}). Forzando finalización.")
         return "generate_response"
 
@@ -2091,7 +2094,7 @@ async def graph_router_node(state: AgentState):
 
     # 2. Obtener datasets disponibles
     try:
-        datasets_info = await graph_db.get_available_datasets(state['account_id'])
+        datasets_info = await graph_db.get_available_datasets(state['account_id'], workspace_id=state.get('workspace_id'))
         if not datasets_info:
             logger.info("No hay datasets disponibles en el grafo.")
             state['target_datasets'] = ["Agent Memories"] # Fallback mínimo
@@ -2231,11 +2234,19 @@ async def rag_node(state: AgentState):
     # Preparar filtros
     if rag_context:
         explicit_doc_ids = [item['id'] for item in rag_context if item.get('type') == 'document']
+        
+        # Extraer topics si hay colecciones en rag_context
+        collection_topics = [item.get('topic') or item.get('name') for item in rag_context if item.get('type') == 'collection']
+        if collection_topics:
+            filter_topics = collection_topics
     
     if context and context.get("type") == "collection":
         topic = context.get("id")
         if topic:
-            filter_topics = [topic]
+            if not filter_topics:
+                filter_topics = [topic]
+            elif topic not in filter_topics:
+                filter_topics.append(topic)
 
     try:
         logger.info(f"🔍 Ejecutando RAG en nodo paralelo. Workspace: {state.get('workspace_id')}")
@@ -2248,9 +2259,35 @@ async def rag_node(state: AgentState):
             filter_topics=filter_topics,
             k=10
         )
-        
-        if rag_output and rag_output.sources:
-            # Convertir fuentes a diccionarios para el estado
+
+        # --- FALLBACK PARA CONTEXTO EXPLÍCITO ---
+        # Si el usuario seleccionó documentos pero la búsqueda semántica no encontró nada relevante
+        # (ej: por una pregunta muy genérica), recuperamos proactivamente los primeros fragmentos.
+        if not (rag_output and rag_output.sources) and explicit_doc_ids:
+            logger.info(f"⚠️ RAG semántico no encontró resultados para {len(explicit_doc_ids)} documentos. Aplicando fallback de fragmentos secuenciales.")
+            fallback_docs = await get_document_chunks(
+                account_id=state['account_id'],
+                document_ids=explicit_doc_ids,
+                limit=10
+            )
+
+            if fallback_docs:
+                from core.citation_models import create_document_source
+                sources_dicts = []
+                for i, doc in enumerate(fallback_docs):
+                    source = create_document_source(
+                        source_id=i + 1,
+                        title=doc.metadata.get("file_name", "Documento"),
+                        file_path=doc.metadata.get("document_id", ""),
+                        snippet=doc.page_content,
+                        metadata=doc.metadata
+                    )
+                    sources_dicts.append(source.dict())
+
+                logger.info(f"✅ Fallback completado. {len(sources_dicts)} fragmentos secuenciales recuperados.")
+                return {"sources": sources_dicts}
+
+        if rag_output and rag_output.sources:            # Convertir fuentes a diccionarios para el estado
             sources_dicts = [s.dict() for s in rag_output.sources]
             logger.info(f"✅ RAG completado. Fuentes encontradas: {len(sources_dicts)}")
             return {"sources": sources_dicts}

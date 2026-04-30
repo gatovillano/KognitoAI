@@ -153,11 +153,18 @@ class EmbeddingServiceFactory:
                 if not model_name:
                     raise ValueError(f"model_name es requerido para el proveedor {provider}.")
                 
+                # FIX: Si es Ollama local, evitamos enviar API Key para prevenir errores 401 (unauthorized)
+                # LiteLLM a veces intenta usar llaves del entorno si se pasan como None, 
+                # pero si las pasamos vacías explícitamente suele ser más seguro para local.
+                effective_api_key = api_key
+                if provider_lower == "ollama" and not api_base:
+                    effective_api_key = None # Opcionalmente "" si None no funciona
+                
                 # Para Google Vertex, a veces se requiere el project_id en el api_base o ENV
                 # Pero LiteLLM suele manejarlo automáticamente con las credenciales de entorno.
                 EmbeddingServiceFactory._instances[instance_key] = LiteLLMEmbeddingService(
                     model_name=model_name, 
-                    api_key=api_key, 
+                    api_key=effective_api_key, 
                     api_base=api_base
                 )
             else:

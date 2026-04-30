@@ -155,7 +155,8 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(days=settings.jwt_expiry_days)
+        # Expiración corta de seguridad (2 horas)
+        expire = datetime.now(timezone.utc) + timedelta(hours=2)
 
     to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
 
@@ -170,17 +171,8 @@ def decode_access_token(token: str) -> Optional[dict]:
     Returns:
         El payload (dict) si el token es válido, o None si ha expirado o es inválido.
     """
-    logger.debug(f"🔑 DEBUG: Token recibido en decode_access_token: {token[:50]}...")
-    logger.debug(
-        f"🔑 DEBUG: Usando JWT_SECRET_KEY que empieza con: {settings.jwt_secret_key[:10]}..."
-    )
-    logger.debug(f"🔑 DEBUG: Intentando decodificar token: {token[:50]}...")
-    logger.debug(
-        f"🔑 DEBUG: Usando JWT_SECRET_KEY que empieza con: {settings.jwt_secret_key[:10]}... (longitud: {len(settings.jwt_secret_key)})"
-    )
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=["HS256"])
-        logger.debug(f"✅ DEBUG: Token decodificado exitosamente. Payload: {payload}")
         return payload
     except jwt.ExpiredSignatureError:
         logger.warning("❌ Token JWT expirado.")
@@ -205,8 +197,6 @@ async def get_current_account_id(token: str = Depends(oauth2_scheme)) -> str:
         detail="No se pudieron validar las credenciales",
         headers={"WWW-Authenticate": "Bearer"},
     )
-
-    logger.info(f"🔑 DEBUG: Token recibido en get_current_account_id: {token[:50]}...")
 
     payload = decode_access_token(token)
 

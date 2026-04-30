@@ -9,6 +9,7 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { CalendarScreen } from '../screens/CalendarScreen';
 import { NoteDetailScreen } from '../screens/NoteDetailScreen';
 import { CreateNoteScreen } from '../screens/CreateNoteScreen';
+import { ChatScreen } from '../screens/ChatScreen';
 import { ActivityIndicator, View } from 'react-native';
 import { colors } from '../theme/colors';
 
@@ -35,6 +36,7 @@ export const Navigation = () => {
                     </>
                 ) : (
                     <>
+                        <Stack.Screen name="Chat" component={ChatScreen} />
                         <Stack.Screen name="Home" component={HomeScreen} />
                         <Stack.Screen name="Calendar" component={CalendarScreen} />
                         <Stack.Screen name="NoteDetail" component={NoteDetailScreen} />

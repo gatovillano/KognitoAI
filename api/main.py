@@ -11,6 +11,10 @@ from core.middleware.audit import AuditMiddleware
 import json
 import os
 from utils.patches import apply_patches
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from utils.limiter import limiter
 
 # Aplicar parches de estabilidad antes de cualquier otra cosa
 apply_patches()
@@ -19,6 +23,7 @@ apply_patches()
 from api.auth import router as auth_router
 from api.users import router as users_router
 from api.chat import router as chat_router
+from api.chat_share import router as chat_share_router
 from api.documents import router as documents_router
 from api.notes import router as notes_router
 from api.agenda import router as agenda_router
@@ -82,30 +87,50 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Configurar Rate Limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # Loguear siempre el error completo en el servidor para debugging
     logger.error(f"Request validation error for {request.method} {request.url}: {json.dumps(exc.errors(), indent=2)}")
+    
+    # En producción (DEBUG_MODE=False), ocultar los detalles exactos de la falla
+    detail = exc.errors() if settings.debug_mode else "Error de validación en la solicitud. Verifique los campos enviados."
+    
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content=jsonable_encoder({"detail": exc.errors()}),
+        content=jsonable_encoder({"detail": detail}),
     )
-
-# Configuración de CORS
-# Configuración de CORS con Regex para mayor flexibilidad y seguridad
-# Permite: localhost, la IP local 192.168.1.7 (cualquier puerto), y los dominios de producción.
-origin_regex = r"^https?://(localhost|192\.168\.1\.7|kognito\.gatoslibres\.art|apibase\.gatoslibres\.art)(:\d+)?$"
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=origin_regex,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Agregar middleware de auditoría
 app.add_middleware(AuditMiddleware)
 
+# Configuración de CORS
+# Permite: localhost, la IP local 192.168.1.7 (cualquier puerto), y los dominios de producción.
+allowed_origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://192.168.1.7:3000",
+    "http://192.168.1.7:3001",
+    "https://kognito.gatoslibres.art",
+    "https://apibase.gatoslibres.art",
+    "https://kognito.cuerpolibre.cl",
+    "https://apibase.cuerpolibre.cl",
+    "http://localhost:8081",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin"],
+)
 
 
 from api.galleries import router as galleries_router, MEDIA_ROOT, THUMBNAIL_ROOT
@@ -274,6 +299,7 @@ async def well_known_carddav(request: Request):
 # Incluir routers de los módulos
 # Incluir routers de los módulos
 app.include_router(chat_router, prefix="/api", tags=["chat"]) # Mover arriba para dar prioridad a las rutas de chat
+app.include_router(chat_share_router, prefix="/api/chat/share", tags=["chat-share"])
 
 app.include_router(auth_router, prefix="/api", tags=["auth"])
 app.include_router(users_router, prefix="/api", tags=["users"])
@@ -320,14 +346,16 @@ app.include_router(collection_search_router, prefix="/api", tags=["collection-se
 app.include_router(memory_router, prefix="/api", tags=["memory"]) # NUEVO: Incluir el router de memory
 app.include_router(tables_router, prefix="/api/tables", tags=["tables"])
 
-from api.tools import router as tools_router
+from api.skills import router as skills_router
 from api.deep_research import router as deep_research_router
 from api.gap_development import router as gap_development_router
 from api.mfa import router as mfa_router # Importar el router de MFA
-from core.tools import HTMLGeneratorTool # Importar la herramienta HTMLGeneratorTool
+from api.onlyoffice import router as onlyoffice_router # IMPORTAR ONLYOFFICE
+from skills.media_and_generation_skill.scripts.html_generator_tool import HTMLGeneratorTool # Importar la herramienta HTMLGeneratorTool desde skills
 from utils.security import get_current_account_id # Importar get_current_account_id
 
-app.include_router(tools_router, prefix="/api/tools", tags=["tools"])
+app.include_router(skills_router, prefix="/api/skills", tags=["skills"])
+app.include_router(onlyoffice_router, prefix="/api/onlyoffice", tags=["onlyoffice"]) # INCLUIR ONLYOFFICE
 app.include_router(deep_research_router, prefix="/api", tags=["deep-research"])
 app.include_router(gap_development_router, prefix="/api", tags=["gap-development"])
 app.include_router(mfa_router, prefix="/api", tags=["mfa"])

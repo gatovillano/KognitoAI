@@ -9,7 +9,7 @@ import { ChatAvatar } from './ChatAvatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ExternalLink, BrainCircuit, ChevronDown, ChevronUp } from 'lucide-react';
+import { ExternalLink, BrainCircuit, ChevronDown, ChevronUp, Check, X, Edit3 } from 'lucide-react';
 import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon, Notebook, Network, Download } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { Source, SourceButton, ContentPart } from '@/components/SourceButton';
@@ -23,6 +23,14 @@ export interface Artifact {
   version: number;
 }
 
+export interface MessageContentPart {
+  type: 'text' | 'reasoning' | 'tool_call' | 'tool_result';
+  content: string;
+  id?: string;
+  status?: 'start' | 'end' | 'error';
+  tool_name?: string;
+}
+
 interface ChatMessageProps {
   msg: {
     text: string;
@@ -33,9 +41,10 @@ interface ChatMessageProps {
     artifact?: Artifact;
     ragContext?: any[];
     sources?: Source[];
-    chunks?: string[]; // Añadir esta línea
+    chunks?: string[];
     reasoning?: string;
     reasoning_chunks?: string[];
+    content_parts?: MessageContentPart[];
     tool_code?: string;
   };
   index: number;
@@ -47,11 +56,181 @@ interface ChatMessageProps {
   isAudioPaused: boolean;
   children?: React.ReactNode; // Añadir la propiedad children
   onSourceClick?: (source: Source) => void;
+  scrollToBottom?: (behavior?: 'smooth' | 'auto', force?: boolean) => void;
 }
 
 
 
 
+
+const ReasoningBlock = ({ content, isThinkingOnly, scrollToBottom }: { content: string, isThinkingOnly: boolean, scrollToBottom?: (behavior?: 'smooth' | 'auto', force?: boolean) => void }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  useEffect(() => {
+    if (isThinkingOnly || isExpanded) {
+      scrollToBottom?.('auto');
+    }
+  }, [content, isExpanded, isThinkingOnly, scrollToBottom]);
+
+  return (    <div className="mb-4">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="flex items-center gap-2 mb-2 hover:bg-primary/10 p-1 px-2 rounded-lg transition-all duration-300 group/thinking"
+      >
+        <motion.div
+          className="relative p-1 rounded-md transition-colors"
+          animate={isThinkingOnly ? {
+            scale: [1, 1.05, 1],
+          } : {}}
+          transition={isThinkingOnly ? {
+            duration: 2,
+            repeat: Infinity,
+            ease: "easeInOut"
+          } : {}}
+        >
+          {isThinkingOnly && (
+            <motion.div
+              className="absolute inset-0 bg-primary/20 blur-md rounded-full"
+              animate={{
+                opacity: [0.2, 0.5, 0.2],
+                scale: [0.8, 1.2, 0.8],
+              }}
+              transition={{
+                duration: 3,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
+            />
+          )}
+          <BrainCircuit className="h-3.5 w-3.5 text-primary relative z-10" />
+        </motion.div>
+        <p className="font-bold uppercase tracking-[0.2em] text-[9px] text-primary/70 flex items-center gap-1 min-w-[80px] ml-1">
+          {isThinkingOnly ? (
+            <span className="flex items-center">
+              Pensando
+              <span className="flex ml-0.5">
+                {[0, 1, 2].map((i) => (
+                  <motion.span
+                    key={i}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: [0, 1, 0] }}
+                    transition={{
+                      duration: 1.5,
+                      repeat: Infinity,
+                      delay: i * 0.2,
+                      ease: "easeInOut"
+                    }}
+                  >
+                    .
+                  </motion.span>
+                ))}
+              </span>
+            </span>
+          ) : (
+            "Pensamiento"
+          )}
+        </p>
+        <motion.div
+          animate={{ rotate: isExpanded ? 180 : 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          <ChevronDown className="h-3 w-3 text-primary/60" />
+        </motion.div>
+      </button>
+
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="overflow-hidden"
+          >
+            <div className="pl-4 border-l-2 border-primary/20 py-1 mb-2">
+              <MarkdownRenderer
+                content={content}
+                fontSize="text-[13px]"
+                style={{ color: 'var(--primary)', opacity: 0.8 }}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+const ToolCallBlock = ({ part, scrollToBottom }: { part: MessageContentPart, scrollToBottom?: (behavior?: 'smooth' | 'auto', force?: boolean) => void }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const hasContent = !!part.content && part.status !== 'start';
+
+  useEffect(() => {
+    if (isExpanded) {
+      scrollToBottom?.('auto');
+    }
+  }, [isExpanded, scrollToBottom]);
+
+  return (
+    <div className="mb-4">
+      <div 
+        className={`flex flex-col bg-primary/5 rounded-lg border border-primary/10 overflow-hidden transition-all duration-300 ${isExpanded ? 'ring-1 ring-primary/20 shadow-sm' : ''}`}
+      >
+        <button
+          onClick={() => hasContent && setIsExpanded(!isExpanded)}
+          disabled={!hasContent}
+          className={`flex items-center gap-2 p-2 w-full text-left transition-colors ${hasContent ? 'hover:bg-primary/10 cursor-pointer' : 'cursor-default'}`}
+        >
+          {part.status === 'start' ? (
+            <Loader2 className="h-3.5 w-3.5 text-primary animate-spin" />
+          ) : part.status === 'error' ? (
+            <X className="h-3.5 w-3.5 text-destructive" />
+          ) : (
+            <Folder className="h-3.5 w-3.5 text-primary" />
+          )}
+          <p className="text-[11px] font-medium text-primary/80 flex-1">
+            {part.tool_name ? `Herramienta: ${part.tool_name}` : 'Ejecutando herramienta...'}
+            {part.status === 'end' && ' - Completado'}
+            {part.status === 'error' && ' - Falló'}
+          </p>
+          {hasContent && (
+             <motion.div
+               animate={{ rotate: isExpanded ? 180 : 0 }}
+               transition={{ duration: 0.3 }}
+             >
+               <ChevronDown className="h-3 w-3 text-primary/60" />
+             </motion.div>
+          )}
+        </button>
+
+        <AnimatePresence>
+          {isExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <div className="px-4 py-3 border-t border-primary/10 bg-background/50">
+                <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest text-primary/60">
+                   <ExternalLink className="h-3 w-3" />
+                   Salida de la herramienta
+                </div>
+                <div className="max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                  <MarkdownRenderer
+                    content={part.content}
+                    fontSize="text-[12px]"
+                    style={{ color: 'var(--foreground)', opacity: 0.9 }}
+                  />
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+};
 
 export const ChatMessage: React.FC<ChatMessageProps> = ({
   msg,
@@ -62,453 +241,235 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   isAudioLoading,
   playingMessageIndex,
   isAudioPaused,
-
-  children, // Recibir children en las props
+  children,
   onSourceClick,
+  scrollToBottom,
 }) => {
   const { settings } = useUserSettings();
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(msg.text);
-  const [isReasoningExpanded, setIsReasoningExpanded] = useState(false);
 
-  // Auto-expandir cuando se está pensando y aún no hay respuesta final
-  useEffect(() => {
-    const hasReasoning = (msg.reasoning || (msg.reasoning_chunks && msg.reasoning_chunks.length > 0));
-    const isThinkingOnly = hasReasoning && !msg.text && (!msg.chunks || msg.chunks.length === 0);
-
-    // Si está pensando solamente, expandir
-    if (isThinkingOnly) {
-      setIsReasoningExpanded(true);
-    }
-  }, [msg.reasoning, msg.reasoning_chunks, msg.text, msg.chunks]);
-
-  useEffect(() => {
-    // DEBUG: Verificar si llegan fuentes de GitHub
-    if (msg.sender === 'ai') {
-      console.log('ChatMessage sources debug:', {
-        text: msg.text?.substring(0, 50),
-        sources: msg.sources,
-        ragContext: msg.ragContext
-      });
-    }
-  }, [msg.sources, msg.ragContext, msg.sender, msg.text]);
+  // Determinar si está pensando solamente (para el fallback)
+  const hasReasoning = !!(msg.reasoning || (msg.reasoning_chunks && msg.reasoning_chunks.length > 0));
+  const isThinkingOnly = !!(hasReasoning && !msg.text && (!msg.chunks || msg.chunks.length === 0));
 
   // Obtener nombre amigable del modelo
   const displayModelName = settings?.llm_model
     ? settings.llm_model.split('/').pop()?.split(':')[0]
     : 'Assistant';
 
-  // Usar las funciones utilitarias para recolectar fuentes unificadas (msg.sources + ragContext)
-  const { additionalSources: uniqueSources, processedRagContext } = collectSourcesFromMessage(msg.sources, msg.ragContext);
+  // Recolectar fuentes unificadas
+  const { additionalSources: uniqueSources } = collectSourcesFromMessage(msg.sources, msg.ragContext);
 
-  const handleEdit = () => {
-    setIsEditing(true);
-  };
+  // Recolectar imágenes
+  const imagesToShow = Array.from(new Set([
+    ...(msg.image_base64 ? [msg.image_base64] : []),
+    ...(msg.images_base64 || []),
+  ]));
 
+  const handleEdit = () => setIsEditing(true);
   const handleSave = () => {
-    // Actualizar el texto del mensaje con el texto editado
     msg.text = editedText;
     setIsEditing(false);
   };
-
   const handleCancel = () => {
     setEditedText(msg.text);
     setIsEditing(false);
   };
-
-  const { contentParts, citedSources, uncitedSources } = processMessageWithCitations(
-    msg.chunks?.join('') || msg.text,
-    uniqueSources
-  );
-
-  // Determinar si el mensaje está en streaming
-  const isStreaming = msg.chunks !== undefined && msg.chunks.length > 0;
 
   return (
     <motion.div
       key={index}
       className="text-base sm:text-lg break-words font-sans p-1 sm:p-4 font-normal transition-all duration-500 group"
       initial={{ opacity: 0, y: 10 }}
-      animate={{
-        opacity: 1,
-        y: 0
-      }}
-      transition={{
-        duration: 0.6,
-        ease: "easeOut"
-      }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.6, ease: "easeOut" }}
     >
       {msg.sender === 'user' ? (
-        // Mensaje del usuario
-        <div
-          className="flex flex-col items-end mb-2"
-        >
+        <div className="flex flex-col items-end mb-2">
           <div className="flex items-start gap-3 max-w-[100%] mr-4" style={{ marginRight: '20px' }}>
-            <div
-              className="rounded-3xl rounded-br-none px-3 py-1.5 sm:px-4 sm:py-2 shadow-sm bg-muted/80 backdrop-blur-sm text-foreground border border-border/10 relative min-w-[100px]">
-              {/* Cola de la burbuja */}
-
+            <div className="rounded-3xl rounded-br-none px-3 py-1.5 sm:px-4 sm:py-2 shadow-sm bg-muted/80 backdrop-blur-sm text-foreground border border-border/10 relative min-w-[100px]">
               {isEditing ? (
                 <textarea
                   value={editedText}
                   onChange={(e) => setEditedText(e.target.value)}
                   className="w-full min-h-[80px] p-3 border border-border rounded-2xl resize-y focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
-                  placeholder="Edita tu mensaje aquí..."
                 />
               ) : (
-                <div className="text-sm sm:text-base break-words font-sans [&_p]:my-0 [&_ul]:my-0 [&_ol]:my-0 [&_li]:my-0 [&_h1]:my-0 [&_h2]:my-0 [&_h3]:my-0 [&_h4]:my-0 [&_h5]:my-0 [&_h6]:my-0">
+                <div className="text-sm sm:text-base break-words font-sans [&_p]:my-0">
                   <MarkdownRenderer content={msg.text} />
                 </div>
               )}
 
-              {/* Archivos adjuntos */}
+              {/* Imágenes del usuario */}
+              {imagesToShow.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2 justify-end">
+                  {imagesToShow.map((img, imgIdx) => (
+                    <Dialog key={imgIdx}>
+                      <DialogTrigger asChild>
+                        <img
+                          src={img}
+                          alt={`Imagen ${imgIdx + 1}`}
+                          className="max-w-[200px] max-h-[200px] rounded-xl cursor-pointer hover:opacity-90 transition-all border border-border/20 shadow-sm object-cover"
+                        />
+                      </DialogTrigger>
+                      <DialogContent className="max-w-[95vw] max-h-[95vh] p-0 overflow-hidden bg-black/80 backdrop-blur-sm border-none flex items-center justify-center">
+                        <img src={img} alt={`Imagen ${imgIdx + 1}`} className="max-w-full max-h-full object-contain" />
+                      </DialogContent>
+                    </Dialog>
+                  ))}
+                </div>
+              )}
+
               {msg.ragContext && msg.ragContext.length > 0 && (
                 <div className="mt-3 border-t border-border/20 pt-3">
-                  <p className="text-xs font-semibold text-muted-foreground mb-2">Archivos Adjuntos:</p>
                   <div className="space-y-2">
-                    {msg.ragContext.map((item, index) => (
-                      <div key={index} className="flex items-center gap-2 text-sm p-2 bg-background/50 rounded-lg">
-                        {item.type === 'document' ? <FileIcon className="h-4 w-4 flex-shrink-0" /> : <Folder className="h-4 w-4 flex-shrink-0" />}
-                        <span className="truncate" title={item.name}>{item.name}</span>
+                    {msg.ragContext.map((item, idx) => (
+                      <div key={idx} className="flex items-center gap-2 text-sm p-2 bg-background/50 rounded-lg">
+                        {item.type === 'document' ? <FileIcon className="h-4 w-4" /> : <Folder className="h-4 w-4" />}
+                        <span className="truncate">{item.name}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-
-              {(msg.image_base64 || (msg.images_base64 && msg.images_base64.length > 0)) && (
-                <div className="mt-3">
-                  {msg.image_base64 && (
-                    <Image
-                      src={msg.image_base64}
-                      alt="Imagen adjunta"
-                      className="max-w-full h-auto rounded-2xl cursor-pointer shadow-sm"
-                      onClick={() => window.open(msg.image_base64, '_blank')}
-                      width={500} // Asumiendo un ancho razonable
-                      height={500} // Asumiendo una altura razonable
-                    />
-                  )}
-                  {msg.images_base64 && msg.images_base64.length > 0 && (
-                    <div className="grid grid-cols-2 gap-2 mt-2">
-                      {msg.images_base64.map((image, index) => (
-                        <Image
-                          key={index}
-                          src={image}
-                          alt={`Imagen adjunta ${index + 1}`}
-                          className="w-full h-auto rounded-2xl cursor-pointer shadow-sm"
-                          onClick={() => window.open(image, '_blank')}
-                          width={500}
-                          height={500}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              {msg.document_url && (
-                <div className="mt-4">
-                  <Button
-                    variant="default"
-                    size="sm"
-                    className="rounded-full gap-2 shadow-md hover:shadow-lg transition-all"
-                    onClick={() => window.open(msg.document_url, '_blank')}
-                  >
-                    <Download className="h-4 w-4" />
-                    <span>{msg.document_url.split('/').pop() || 'Descargar PDF'}</span>
-                  </Button>
-                </div>
-              )}
             </div>
-
           </div>
-
-          {/* Botones de acción */}
           <div className="flex items-center gap-1 mt-0 mr-12 opacity-0 group-hover:opacity-100">
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full" onClick={() => handleCopyMessage(msg.text)}>
-              <Copy className="h-3 w-3" />
-            </Button>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleCopyMessage(msg.text)}><Copy className="h-3 w-3" /></Button>
             {isEditing ? (
               <>
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full text-green-600" onClick={handleSave}>
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 11.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                  </svg>
-                </Button>
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full text-red-600" onClick={handleCancel}>
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                  </svg>
-                </Button>
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-green-600" onClick={handleSave}><Check className="h-3 w-3" /></Button>
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-red-600" onClick={handleCancel}><X className="h-3 w-3" /></Button>
               </>
             ) : (
               <>
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full" onClick={() => handleRetry(msg.text)}>
-                  <RefreshCw className="h-3 w-3" />
-                </Button>
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full" onClick={handleEdit}>
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                  </svg>
-                </Button>
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleRetry(msg.text)}><RefreshCw className="h-3 w-3" /></Button>
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleEdit}><Edit3 className="h-3 w-3" /></Button>
               </>
             )}
           </div>
         </div>
       ) : (
-        // Mensaje de la IA
-        <div
-          className="flex flex-col mb-8"
-        >
+        <div className="flex flex-col mb-8">
           <div className="flex items-start gap-4">
             <div className="flex-shrink-0 mt-1">
-              <div className="relative group">
-                <div className="absolute -inset-1 bg-gradient-to-r from-primary to-secondary rounded-full blur opacity-25 group-hover:opacity-50 transition duration-500" />
-                <ChatAvatar sender="ai" />
-              </div>
+              <ChatAvatar sender="ai" />
             </div>
             <div className="flex-1 min-w-0">
-              {(msg.text || msg.tool_code || msg.reasoning || (msg.reasoning_chunks && msg.reasoning_chunks.length > 0)) && (
-                <div
-                  className="flex items-center gap-2 mb-2"
-                >
-                  <div className="flex items-center gap-2 bg-primary/10 px-3 py-1 rounded-full border border-primary/20 shadow-sm">
-                    <span className="font-black text-[10px] uppercase tracking-tighter text-primary">KAI Intelligence</span>
-                    <div className="h-1 w-1 rounded-full bg-primary animate-pulse" />
-                  </div>
-                  <span className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">{displayModelName}</span>
+              <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2 bg-primary/10 px-3 py-1 rounded-full border border-primary/20 shadow-sm">
+                  <span className="font-black text-[10px] uppercase tracking-tighter text-primary">KAI Intelligence</span>
                 </div>
-              )}
-
-              <div className="w-full">
-                {msg.tool_code && (
-                  <div className="bg-blue-500/5 backdrop-blur-md p-4 rounded-2xl border border-blue-500/20 text-xs text-blue-600 dark:text-blue-300 font-mono mb-4 shadow-inner">
-                    <div className="flex items-center gap-2 mb-2 opacity-70">
-                      <div className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-                      <p className="font-black uppercase tracking-widest text-[9px]">System Execution</p>
-                    </div>
-                    <pre className="whitespace-pre-wrap break-all leading-relaxed opacity-90">{JSON.stringify(JSON.parse(msg.tool_code), null, 2)}</pre>
-                  </div>
-                )}
-
-                {/* Bloque de Razonamiento (Chain of Thought) */}
-                {(msg.reasoning || (msg.reasoning_chunks && msg.reasoning_chunks.length > 0)) && (
-                  <div className="mb-4">
-                    <button
-                      onClick={() => setIsReasoningExpanded(!isReasoningExpanded)}
-                      className="flex items-center gap-2 mb-2 hover:bg-primary/10 p-1 px-2 rounded-lg transition-all duration-300 group/thinking"
-                    >
-                      <div className="bg-primary/20 p-1 rounded-md group-hover/thinking:bg-primary/30 transition-colors">
-                        <BrainCircuit className="h-3 w-3 text-primary" />
-                      </div>
-                      <p className="font-black uppercase tracking-widest text-[10px] text-primary/80">Proceso de Pensamiento</p>
-                      <motion.div
-                        animate={{ rotate: isReasoningExpanded ? 180 : 0 }}
-                        transition={{ duration: 0.3 }}
-                      >
-                        <ChevronDown className="h-3 w-3 text-primary/60" />
-                      </motion.div>
-                    </button>
-
-                    <AnimatePresence>
-                      {isReasoningExpanded && (
-                        <motion.div
-                          className="bg-primary/5 dark:bg-primary/10 backdrop-blur-sm rounded-2xl border border-primary/20 p-4 relative overflow-hidden group shadow-inner"
-                          initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                          animate={{ opacity: 1, height: 'auto', marginBottom: 16 }}
-                          exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                          transition={{ duration: 0.4, ease: "easeInOut" }}
-                        >
-                          {/* Efecto decorativo */}
-                          <div className="absolute top-0 left-0 w-1 h-full bg-primary/50" />
-
-                          <div className="text-sm prose dark:prose-invert max-w-none opacity-80 italic font-medium leading-relaxed">
-                            <MarkdownRenderer
-                              content={msg.reasoning || msg.reasoning_chunks?.join('') || ""}
-                              isStreaming={msg.reasoning_chunks !== undefined && msg.reasoning_chunks.length > 0 && !msg.text}
-                            />
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                )}
-
-                {isEditing ? (
-                  <textarea
-                    value={editedText}
-                    onChange={(e) => setEditedText(e.target.value)}
-                    className="w-full min-h-[100px] p-4 border border-border/40 rounded-2xl resize-y focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background/50 backdrop-blur-sm text-foreground"
-                    placeholder="Edita tu mensaje aquí..."
-                  />
-                ) : (
-                  <motion.div
-                    className="text-foreground break-words font-sans p-1 sm:p-4 font-normal transition-all duration-500"
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    transition={{
-                      duration: 0.5,
-                      ease: "easeOut"
-                    }}
-                  >
-                    {msg.sender === 'ai' && uniqueSources.length > 0 ? (() => {
-                        const fullText = msg.chunks?.join('') || msg.text;
-                        const { contentParts, citedSources, uncitedSources } = processMessageWithCitations(fullText, uniqueSources);
-
-                        return (
-                          <>
-                            <MarkdownRenderer
-                              contentParts={contentParts}
-                              content={fullText}
-                              fontSize="text-sm sm:text-base"
-                              isStreaming={msg.chunks !== undefined}
-                            />
-                            {/* Sección de Fuentes al final */}
-                            {(citedSources.length > 0 || uncitedSources.length > 0) && (
-                              <motion.div
-                                initial={{ opacity: 0, y: 5 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 0.3 }}
-                                className="mt-4 pt-4 border-t border-border/10"
-                              >
-                                <div className="flex items-center gap-2 mb-3">
-                                  <div className="p-1 rounded-md bg-primary/10">
-                                    <Notebook className="h-3 w-3 text-primary" />
-                                  </div>
-                                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                                    Fuentes y Resultados RAG
-                                  </span>
-                                  <span className="text-[10px] text-muted-foreground/70">
-                                    ({citedSources.length} citadas de {uniqueSources.length} totales)
-                                  </span>
-                                </div>
-
-                                {/* Fuentes Citadas (Siempre visibles) */}
-                                {citedSources.length > 0 && (
-                                  <div className="flex flex-wrap gap-2 mb-2">
-                                    {citedSources.map((source, idx) => (
-                                      <SourceButton
-                                        key={source.id || idx}
-                                        source={source}
-                                        citationNumber={source.citationNumber || idx + 1}
-                                        onSourceClick={onSourceClick}
-                                      />
-                                    ))}
-                                  </div>
-                                )}
-
-                                {/* Fuentes No Citadas (Colapsable) */}
-                                {uncitedSources.length > 0 && (
-                                  <Collapsible>
-                                    <CollapsibleTrigger asChild>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-7 px-3 text-xs gap-2 text-muted-foreground hover:text-foreground mb-2"
-                                      >
-                                        <ChevronDown className="h-3 w-3" />
-                                        <span>
-                                          {uncitedSources.length} fuente{uncitedSources.length > 1 ? 's' : ''} adicional{uncitedSources.length > 1 ? 'es' : ''} no citada{uncitedSources.length > 1 ? 's' : ''}
-                                        </span>
-                                      </Button>
-                                    </CollapsibleTrigger>
-                                    <CollapsibleContent>
-                                      <div className="flex flex-wrap gap-2">
-                                        {uncitedSources.map((source, idx) => (
-                                          <SourceButton
-                                            key={source.id || `uncited-${idx}`}
-                                            source={source}
-                                            citationNumber={null}
-                                            onSourceClick={onSourceClick}
-                                          />
-                                        ))}
-                                      </div>
-                                    </CollapsibleContent>
-                                  </Collapsible>
-                                )}
-                              </motion.div>
-                            )}
-                          </>
-                        );
-                      })() : (
-                        <MarkdownRenderer
-                          content={msg.chunks?.join('') || msg.text}
-                          fontSize="text-sm sm:text-base"
-                          isStreaming={msg.chunks !== undefined}
-                        />
-                      )}
-                    </motion.div>
-                )}
-
-
-                {msg.document_url && (
-                  <div className="mt-4">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-2xl gap-2 bg-card/40 backdrop-blur-md border-border/40 hover:bg-primary/5 transition-all shadow-sm"
-                      onClick={() => window.open(msg.document_url, '_blank')}
-                    >
-                      <Download className="h-4 w-4 text-primary" />
-                      <span className="font-bold text-xs">{msg.document_url.split('/').pop() || 'Descargar PDF'}</span>
-                    </Button>
-                  </div>
-                )}
-
-                {msg.artifact && (
-                  <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-primary/5 border border-primary/20 text-primary hover:bg-primary/10 cursor-pointer transition-all group/artifact">
-                    <ExternalLink className="h-4 w-4 group-hover/artifact:rotate-12 transition-transform" />
-                    <span className="text-xs font-bold uppercase tracking-wider">Ver Artefacto Interactivo</span>
-                  </div>
-                )}
-
+                <span className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">{displayModelName}</span>
               </div>
 
-              {(msg.text || msg.tool_code) && (
-                <div className="flex items-center gap-1 mt-3 ml-2 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-2 group-hover:translate-y-0">
-                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0 rounded-xl hover:bg-primary/10 hover:text-primary transition-all" onClick={() => handleCopyMessage(msg.text)} title="Copiar mensaje">
-                    <Copy className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-9 w-9 p-0 rounded-xl hover:bg-primary/10 hover:text-primary transition-all"
-                    onClick={() => handlePlayAudio(msg.text, index)}
-                    disabled={isAudioLoading && playingMessageIndex !== index}
-                    title="Escuchar mensaje"
-                  >
-                    {isAudioLoading && playingMessageIndex === index ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : playingMessageIndex === index && isAudioPaused ? (
-                      <Play className="h-3.5 w-3.5" />
-                    ) : playingMessageIndex === index ? (
-                      <Pause className="h-3.5 w-3.5" />
-                    ) : (
-                      <Play className="h-3.5 w-3.5" />
+              <div className="w-full">
+                {msg.content_parts && msg.content_parts.length > 0 ? (
+                  msg.content_parts.map((part, idx) => {
+                    if (part.type === 'reasoning') {
+                      const isLastReasoning = idx === msg.content_parts!.length - 1 && !msg.text;
+                      return <ReasoningBlock key={idx} content={part.content} isThinkingOnly={isLastReasoning} scrollToBottom={scrollToBottom} />;
+                    }
+                    if (part.type === 'tool_call') {
+                      return <ToolCallBlock key={idx} part={part} scrollToBottom={scrollToBottom} />;
+                    }
+                    if (part.type === 'text') {
+                      const { contentParts: parts } = processMessageWithCitations(part.content, uniqueSources);
+                      return (
+                        <div key={idx} className="mb-4">
+                          <MarkdownRenderer
+                            contentParts={parts}
+                            content={part.content}
+                            fontSize="text-sm sm:text-base"
+                            isStreaming={idx === msg.content_parts!.length - 1 && msg.chunks !== undefined}
+                          />
+                        </div>
+                      );
+                    }
+                    return null;
+                  })
+                ) : (
+                  <>
+                    {(msg.reasoning || (msg.reasoning_chunks && msg.reasoning_chunks.length > 0)) && (
+                      <ReasoningBlock 
+                        content={msg.reasoning || msg.reasoning_chunks?.join('') || ""} 
+                        isThinkingOnly={isThinkingOnly} 
+                        scrollToBottom={scrollToBottom}
+                      />
                     )}
-                  </Button>
-                  {isEditing ? (
-                    <>
-                      <Button variant="ghost" size="sm" className="h-9 w-9 p-0 rounded-xl text-green-600 hover:bg-green-50" onClick={handleSave}>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 11.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                      </Button>
-                      <Button variant="ghost" size="sm" className="h-9 w-9 p-0 rounded-xl text-red-600 hover:bg-red-50" onClick={handleCancel}>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                        </svg>
-                      </Button>
-                    </>
+                    <div className="mb-4">
+                      {(() => {
+                        const { contentParts: parts } = processMessageWithCitations(msg.text, uniqueSources);
+                        return (
+                          <MarkdownRenderer
+                            contentParts={parts}
+                            content={msg.text}
+                            fontSize="text-sm sm:text-base"
+                            isStreaming={msg.chunks !== undefined}
+                          />
+                        );
+                      })()}
+                    </div>
+                  </>
+                )}
+
+                {/* Imágenes de la IA */}
+                {imagesToShow.length > 0 && msg.sender === 'ai' && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {imagesToShow.map((img, imgIdx) => (
+                      <Dialog key={imgIdx}>
+                        <DialogTrigger asChild>
+                          <img
+                            src={img}
+                            alt={`Imagen ${imgIdx + 1}`}
+                            className="max-w-[200px] max-h-[200px] rounded-xl cursor-pointer hover:opacity-90 transition-all border border-border/20 shadow-sm object-cover"
+                          />
+                        </DialogTrigger>
+                        <DialogContent className="max-w-[95vw] max-h-[95vh] p-0 overflow-hidden bg-black/80 backdrop-blur-sm border-none flex items-center justify-center">
+                          <img src={img} alt={`Imagen ${imgIdx + 1}`} className="max-w-full max-h-full object-contain" />
+                        </DialogContent>
+                      </Dialog>
+                    ))}
+                  </div>
+                )}
+
+                {uniqueSources.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-border/10">
+                    <div className="flex items-center gap-2 mb-3 text-muted-foreground">
+                      <Notebook className="h-3 w-3" />
+                      <span className="text-[10px] font-bold uppercase tracking-widest">Fuentes</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {uniqueSources.map((source, idx) => (
+                        <SourceButton
+                          key={idx}
+                          source={source}
+                          citationNumber={idx + 1}
+                          onSourceClick={() => onSourceClick?.(source)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              <div className="flex items-center gap-1 mt-3 ml-2 opacity-0 group-hover:opacity-100 transition-all">
+                <Button variant="ghost" size="sm" className="h-9 w-9 p-0 rounded-xl" onClick={() => handleCopyMessage(msg.text)}><Copy className="h-3.5 w-3.5" /></Button>
+                <Button variant="ghost" size="sm" className="h-9 w-9 p-0 rounded-xl" onClick={() => handlePlayAudio(msg.text, index)}>
+                  {playingMessageIndex === index ? (
+                    isAudioLoading ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : isAudioPaused ? (
+                      <Play className="h-3.5 w-3.5" />
+                    ) : (
+                      <Pause className="h-3.5 w-3.5" />
+                    )
                   ) : (
-                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0 rounded-xl hover:bg-primary/10 hover:text-primary transition-all" onClick={handleEdit} title="Editar mensaje">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                      </svg>
-                    </Button>
+                    <Play className="h-3.5 w-3.5" />
                   )}
-                </div>
-              )}
+                </Button>
+              </div>
             </div>
           </div>
         </div>

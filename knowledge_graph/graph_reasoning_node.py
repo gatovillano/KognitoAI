@@ -134,20 +134,29 @@ class GraphReasoningNode:
         
         for concept in concepts:
             # Query de expansión: busca el concepto y sus vecinos hasta 2 saltos
-            # MODIFICACIÓN: Retornamos el path completo para que sea procesable por el parser y Mermaid
             dataset_filter = ""
             if target_datasets:
-                dataset_filter = f"AND n.dataset_name IN {target_datasets}"
+                dataset_filter = f"AND ALL(node IN nodes(p) WHERE node.dataset_name IN {target_datasets})"
             
+            workspace_filter_path = ""
+            params = {"concept": concept, "account_id": account_id}
+            if workspace_id:
+                workspace_filter_path = "AND ALL(node IN nodes(p) WHERE node.workspace_id = $workspace_id) AND ALL(rel IN relationships(p) WHERE rel.workspace_id = $workspace_id)"
+                params["workspace_id"] = workspace_id
+            else:
+                workspace_filter_path = "AND ALL(node IN nodes(p) WHERE node.workspace_id IS NULL) AND ALL(rel IN relationships(p) WHERE rel.workspace_id IS NULL)"
+
             neural_query = f"""
-            MATCH (n)
-            WHERE (n.name CONTAINS $concept OR n.description CONTAINS $concept)
-            {dataset_filter}
             MATCH p = (n)-[r*1..2]-(m)
+            WHERE (n.name CONTAINS $concept OR n.description CONTAINS $concept)
+              AND ALL(node IN nodes(p) WHERE (node.account_id = $account_id OR node.account_id IS NULL))
+              AND ALL(rel IN relationships(p) WHERE (rel.account_id = $account_id OR rel.account_id IS NULL))
+              {workspace_filter_path}
+              {dataset_filter}
             RETURN p as path
             LIMIT 10
             """
-            results = await self.graph_db.execute_query(neural_query, {"concept": concept})
+            results = await self.graph_db.execute_query(neural_query, params)
             if results:
                 logger.info(f"🕸️ Exploración para '{concept}': {len(results)} caminos encontrados.")
                 all_neural_data.extend(results)
@@ -232,8 +241,6 @@ Enfócate en cómo estos conceptos se entrelazan y qué revelan sobre el context
                 return extract_text_content(message.content)
         return None
 
-    async def _generate_cypher_query(self, user_query: str, target_datasets: Optional[List[str]] = None) -> Optional[str]:
-        """Genera una consulta Cypher usando un LLM a partir de la pregunta del usuario."""
     async def _generate_cypher_query(self, user_query: str, target_datasets: Optional[List[str]] = None) -> Optional[str]:
         """Genera una consulta Cypher usando un LLM a partir de la pregunta del usuario."""
         

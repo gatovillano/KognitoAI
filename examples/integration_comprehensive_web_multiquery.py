@@ -107,7 +107,7 @@ async def comprehensive_web_analysis_with_multiquery(query: str, account_id: str
     Versión mejorada del análisis web comprehensivo con MultiQuery.
     """
     import logging
-    from tools.web_search_tool import search_and_summarize_web
+    from skills.search_and_research_skill.scripts.web_search_tool import search_and_summarize_web
     from core.llm_manager import get_fast_llm
     
     logger = logging.getLogger(__name__)

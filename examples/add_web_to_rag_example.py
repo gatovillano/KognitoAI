@@ -7,7 +7,7 @@ Demuestra cómo añadir contenido web directamente a la base de conocimiento.
 
 import asyncio
 import logging
-from tools.add_web_to_rag_tool import AddWebToRAGTool
+from skills.rag_skill.scripts.add_web_to_rag_tool import AddWebToRAGTool
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)

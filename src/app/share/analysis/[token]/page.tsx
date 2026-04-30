@@ -241,18 +241,17 @@ const DeepResearchContent: React.FC<DeepResearchContentProps> = ({ resultPayload
         return collectSourcesFromMessage(sources as any[]);
     }, [sources]);
 
-    const { contentParts, citedSources, uncitedSources } = useMemo(() => {
     const { contentParts: summaryContentParts, citedSources: citedSourcesSummary, uncitedSources: uncitedSourcesSummary } = useMemo(() => {
         return processMessageWithCitations(summary, uniqueSources);
     }, [summary, uniqueSources]);
+
     const { contentParts: findingsContentParts, citedSources: citedSourcesFindings, uncitedSources: uncitedSourcesFindings } = useMemo(() => {
         return processMessageWithCitations(findings, uniqueSources);
     }, [findings, uniqueSources]);
+
     const { contentParts: recommendationsContentParts, citedSources: citedSourcesRecommendations, uncitedSources: uncitedSourcesRecommendations } = useMemo(() => {
         return processMessageWithCitations(recommendations.join("\n\n"), uniqueSources);
     }, [recommendations, uniqueSources]);
-        return processMessageWithCitations(finalReport, uniqueSources);
-    }, [finalReport, uniqueSources]);
 
     const handleSourceClick = (source: Source) => {
         console.log('Source clicked:', source);
@@ -317,7 +316,7 @@ const DeepResearchContent: React.FC<DeepResearchContentProps> = ({ resultPayload
                                     {citedSourcesSummary && citedSourcesSummary.length > 0 && (
                                         <div className="flex flex-wrap gap-2 mb-2">
                                             {citedSourcesSummary.map((source: Source, idx: number) => (
-                                                <SourceButton key={source.id || idx} source={source} citationNumber={source.citationNumber || idx + 1} onSourceClick={handleSourceClick} />
+                                                <SourceButton key={source.id || idx} source={source} citationNumber={idx + 1} onSourceClick={handleSourceClick} />
                                             ))}
                                         </div>
                                     )}
@@ -333,7 +332,7 @@ const DeepResearchContent: React.FC<DeepResearchContentProps> = ({ resultPayload
                                             <CollapsibleContent>
                                                 <div className="flex flex-wrap gap-2">
                                                     {uncitedSourcesSummary.map((source: Source, idx: number) => (
-                                                        <SourceButton key={`uncited-${source.id || idx}`} source={source} citationNumber={null} onSourceClick={handleSourceClick} />
+                                                        <SourceButton key={`uncited-${source.id || idx}`} source={source} citationNumber={-1} onSourceClick={handleSourceClick} />
                                                     ))}
                                                 </div>
                                             </CollapsibleContent>

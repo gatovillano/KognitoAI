@@ -26,10 +26,10 @@ from core.tts_manager import generate_speech_streaming, get_tts_client # Importa
 from utils.security import get_current_account_id, get_current_user, get_current_user_from_websocket_query_param, decode_access_token # Añadido decode_access_token
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
-from core.database import SessionLocal, ChatThread, settings, Workspace, Account
+from core.database import SessionLocal, ChatThread, settings, Workspace, Account, ChatTask
 from core.llm_manager import get_main_llm
-from tools.add_web_to_rag_tool import AddWebToRAGTool
-from tools.ddg_search_tool import create_ddg_search_tool
+from skills.rag_skill.scripts.add_web_to_rag_tool import AddWebToRAGTool
+from skills.search_and_research_skill.scripts.ddg_search_tool import create_ddg_search_tool
 from core.websocket_manager import send_personal_message
 from langchain_core.runnables import RunnableConfig # Importar RunnableConfig
 from core.dependencies import get_db_session # Importar dependencia centralizada
@@ -39,6 +39,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Global registry for active chat tasks to allow cancellation
+active_chat_tasks: Dict[str, Dict[str, Any]] = {}
 
 # get_db eliminado en favor de core.dependencies.get_db_session
 
@@ -105,6 +108,7 @@ class TextToSpeechRequest(BaseModel):
     voice: Optional[str] = None  # Voz opcional para la conversión
     provider: str = "google" # Nuevo campo para el proveedor de TTS
     speed: Optional[float] = None  # Velocidad del habla
+    model: Optional[str] = None  # Modelo opcional para la conversión (OpenAI/Compatible)
     region: Optional[str] = None  # Región para Azure TTS
 
 class PinThreadRequest(BaseModel):
@@ -601,17 +605,24 @@ async def text_to_speech(
     effective_provider = request.provider
     effective_voice = request.voice
     effective_speed = request.speed
+    effective_model = request.model
     effective_region = request.region
+    effective_api_base = None
 
     if account:
         if not effective_provider:
             effective_provider = account.tts_provider or "google"
+            logger.info(f"🎤 [TTS Trace] Provider en cuenta: {account.tts_provider}, Usando efectivo: {effective_provider}")
         if not effective_voice:
             effective_voice = account.tts_voice
         if effective_speed is None: # Comprobar None específicamente porque 0.0 es un valor válido aunque raro
             effective_speed = account.tts_speed if account.tts_speed is not None else 1.0
         if not effective_region:
             effective_region = account.tts_region
+        if not effective_model:
+            effective_model = account.tts_model
+        effective_api_base = account.tts_api_base
+        logger.info(f"🎤 [TTS Trace] Config: voice={effective_voice}, model={effective_model}, base={effective_api_base}")
     else:
         # Fallback total si no hay cuenta ni datos en request
         effective_provider = effective_provider or "google"
@@ -652,14 +663,24 @@ async def text_to_speech(
                 audio_format="mp3",
                 use_cache=True,
                 region=effective_region,  # Pasar la región para Azure TTS
-                account_id=uuid.UUID(current_account_id) # Pasar account_id para recuperar secretos
+                account_id=uuid.UUID(current_account_id), # Pasar account_id para recuperar secretos
+                api_base=effective_api_base, # Pasar la URL base para servicios TTS locales/OpenAI
+                model=effective_model # Pasar el modelo para servicios compatibles
             ):
                 yield audio_chunk
         except Exception as e:
             logger.error(f"❌ Error generando audio con el proveedor {effective_provider} TTS: {e}")
+            # Si el error es un NameError sobre 'model', registramos más detalles para depuración
+            if "name 'model' is not defined" in str(e):
+                logger.error(f"DEBUG TTS: provider={effective_provider}, model_val={effective_model}")
             raise HTTPException(status_code=500, detail=f"Error al generar audio: {str(e)}")
 
-    return StreamingResponse(generate_audio_stream(), media_type="audio/mpeg")
+    # Determinar el tipo de medio según el proveedor
+    media_type = "audio/mpeg"
+    if effective_provider.lower() in ["coquitts", "coqui"]:
+        media_type = "audio/wav"
+
+    return StreamingResponse(generate_audio_stream(), media_type=media_type)
 
 
 @router.get("/text-to-speech/cache-stats", summary="Obtener estadísticas del caché de TTS")
@@ -707,6 +728,136 @@ async def clear_tts_cache(provider: str = Query("google", description="Proveedor
     except Exception as e:
         logger.error(f"Error limpiando caché TTS para el proveedor {provider}: {e}")
         raise HTTPException(status_code=500, detail=f"Error al limpiar caché: {str(e)}")
+
+@router.get("/text-to-speech/models", summary="Obtener modelos disponibles para un proveedor")
+async def get_tts_models(
+    provider: str = Query(..., description="Proveedor de TTS"),
+    api_base: Optional[str] = Query(None, description="URL base opcional")
+):
+    """
+    Intenta obtener la lista de modelos disponibles para un proveedor de TTS.
+    Útil para OpenAI-compatible APIs locales.
+    """
+    if provider not in ["openai", "openai-compatible", "kokoro", "coquitts"]:
+        # Por ahora solo soportamos descubrimiento automático para OpenAI/Compatibles/Kokoro/Coqui
+        return {"models": []}
+    
+    url = api_base or "https://api.openai.com/v1"
+    
+    # Si estamos en Docker y el usuario pone localhost, lo traducimos a host.docker.internal
+    if "localhost" in url or "127.0.0.1" in url:
+        import os
+        if os.path.exists("/.dockerenv"):
+            url = url.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
+    
+    if not url.endswith("/"):
+        url += "/"
+    
+    import httpx
+    try:
+        async with httpx.AsyncClient() as client:
+            # Probamos varios endpoints e incluyendo varios niveles de profundidad
+            model_endpoints = ["models", "v1/models"]
+            for endpoint in model_endpoints:
+                try:
+                    full_url = f"{url}{endpoint}"
+                    logger.info(f"Intentando obtener modelos de: {full_url}")
+                    response = await client.get(full_url, timeout=5.0)
+                    if response.status_code == 200:
+                        data = response.json()
+                        # El servidor Kokoro devuelve {"models": [...]}
+                        models = data.get("models", [])
+                        if not models:
+                            # Si no hay "models", probar "data" (OpenAI style)
+                            items = data.get("data", []) if isinstance(data, dict) else data
+                            models = [m["id"] if isinstance(m, dict) else m for m in items if isinstance(m, (dict, str))]
+                        
+                        # Filtrar modelos que parezcan TTS
+                        tts_models = [m for m in models if "tts" in str(m).lower() or "kokoro" in str(m).lower()]
+                        
+                        if tts_models:
+                            return {"models": tts_models}
+                        elif models:
+                            return {"models": models}
+                except Exception as e:
+                    logger.debug(f"Error en endpoint de modelos {endpoint}: {e}")
+                    continue
+            
+            # Si no se encontraron modelos pero el api_base sugiere Kokoro o es local,
+            # devolver "kokoro" como fallback si al menos responde /voices (verificado en frontend)
+            return {"models": ["kokoro"]}
+    except Exception as e:
+        logger.error(f"Error conectando con {url} para obtener modelos: {e}")
+        return {"models": []}
+
+@router.get("/text-to-speech/voices", summary="Obtener voces disponibles para un proveedor")
+async def get_tts_voices(
+    provider: str = Query(..., description="Proveedor de TTS"),
+    api_base: Optional[str] = Query(None, description="URL base opcional")
+):
+    """
+    Intenta obtener la lista de voces disponibles para un proveedor de TTS.
+    Útil para Kokoro u otras APIs locales.
+    """
+    if provider not in ["openai", "openai-compatible", "kokoro", "coquitts"]:
+        return {"voices": []}
+    
+    url = api_base or "https://api.openai.com/v1"
+    
+    # Si estamos en Docker y el usuario pone localhost, lo traducimos a host.docker.internal
+    if "localhost" in url or "127.0.0.1" in url:
+        import os
+        if os.path.exists("/.dockerenv"):
+            url = url.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
+            logger.info(f"🔄 Traduciendo localhost/127.0.0.1 a host.docker.internal para descubrimiento de voces: {url}")
+    
+    if not url.endswith("/"):
+        url += "/"
+
+    # Si estamos en Docker y el usuario pone localhost, lo traducimos a host.docker.internal
+    if "localhost" in url or "127.0.0.1" in url:
+        import os
+        if os.path.exists("/.dockerenv"):
+            url = url.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
+            logger.info(f"🔄 Traduciendo localhost/127.0.0.1 a host.docker.internal para descubrimiento de voces: {url}")
+
+    if not url.endswith("/"):
+        url += "/"
+    
+    import httpx
+    try:
+        async with httpx.AsyncClient() as client:
+            # Intentar llamar al endpoint de voces (común en implementaciones locales como Kokoro)
+            # Probamos varios endpoints comunes
+            voice_endpoints = ["voices", "v1/voices"]
+            
+            for endpoint in voice_endpoints:
+                try:
+                    full_url = f"{url}{endpoint}"
+                    logger.info(f"Intentando obtener voces de: {full_url}")
+                    response = await client.get(full_url, timeout=5.0)
+                    if response.status_code == 200:
+                        data = response.json()
+                        # Kokoro-fastapi o este servidor Kokoro suelen devolver {"voices": [...]}
+                        if isinstance(data, dict):
+                            if "voices" in data:
+                                return {"voices": data["voices"]}
+                            elif "speakers" in data:
+                                return {"voices": data["speakers"]}
+                            elif "data" in data:
+                                return {"voices": data["data"]}
+                        elif isinstance(data, list):
+                            return {"voices": data}
+                        
+                        logger.warning(f"Formato de respuesta de voces no reconocido de {full_url}: {data}")
+                except Exception as inner_e:
+                    logger.debug(f"Error al intentar endpoint {endpoint}: {inner_e}")
+                    continue
+            
+            return {"voices": []}
+    except Exception as e:
+        logger.error(f"Error conectando con {url} para obtener voces: {e}")
+        return {"voices": []}
 
 @router.post("/transcribe-audio")
 async def transcribe_audio(file: UploadFile = File(...)):
@@ -816,26 +967,51 @@ async def handle_chat(
             logger.warning(f"No se encontró el hilo {request.thread_id} para la cuenta {current_account_id}.")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Hilo de chat con id {request.thread_id} no encontrado.")
         workspace_id = str(thread.workspace_id) if thread.workspace_id else None
-    
+
+    # Crear registro de ChatTask para seguimiento de cancelación
+    try:
+        chat_task = ChatTask(
+            id=uuid.UUID(task_id),
+            account_id=uuid.UUID(current_account_id),
+            thread_id=uuid.UUID(request.thread_id),
+            cancelled=False,
+            status="running"
+        )
+        db.add(chat_task)
+        await db.commit()
+    except Exception as e:
+        logger.error(f"Error creando ChatTask: {e}")
+        await db.rollback()
+        # Continuar de todos modos, la cancelación vía DB no funcionará pero el chat puede continuar
+
     logger.debug(f"DEBUG (api/chat.py): Llamando create_and_run_agent_streaming con thread_id: {request.thread_id}") # <--- NUEVO LOG
-    # Añadir la ejecución del agente como una tarea en segundo plano
-    background_tasks.add_task(
-        create_and_run_agent_streaming,
-        account_id=request.account_id,
-        thread_id=request.thread_id,
-        task_id=task_id,
-        telegram_id=request.telegram_id,
-        user_message=request.user_message,
-        image_base64=request.image_base64,
-        images_base64=request.images_base64,
-        document_url=request.document_url,
-        mode=request.mode,
-        rag_context=parsed_rag_context,
-        background_tasks=background_tasks,
-        workspace_id=workspace_id,
-        context=request.context # Pasar el contexto
+    # Crear y registrar la tarea para permitir cancelación
+    task = asyncio.create_task(
+        create_and_run_agent_streaming(
+            account_id=request.account_id,
+            thread_id=request.thread_id,
+            task_id=task_id,
+            telegram_id=request.telegram_id,
+            user_message=request.user_message,
+            image_base64=request.image_base64,
+            images_base64=request.images_base64,
+            document_url=request.document_url,
+            mode=request.mode,
+            rag_context=parsed_rag_context,
+            background_tasks=background_tasks,
+            workspace_id=workspace_id,
+            context=request.context # Pasar el contexto
+        )
     )
-    
+    # Registrar la tarea
+    active_chat_tasks[task_id] = {
+        "task": task,
+        "account_id": request.account_id,
+        "thread_id": request.thread_id
+    }
+    # Limpiar registro cuando la tarea termine
+    task.add_done_callback(lambda t: active_chat_tasks.pop(task_id, None))
+
     # Devolver una respuesta inmediata
     return {"thread_id": request.thread_id, "taskId": task_id}
 
@@ -897,26 +1073,49 @@ async def handle_chat_form(
             logger.warning(f"No se encontró el hilo {thread_id} para la cuenta {current_account_id}.")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Hilo de chat con id {thread_id} no encontrado.")
         final_workspace_id = str(thread.workspace_id) if thread.workspace_id else None
-    
+
+    # Crear registro de ChatTask para seguimiento de cancelación
+    try:
+        chat_task = ChatTask(
+            id=uuid.UUID(task_id),
+            account_id=uuid.UUID(current_account_id),
+            thread_id=uuid.UUID(thread_id),
+            cancelled=False,
+            status="running"
+        )
+        db.add(chat_task)
+        await db.commit()
+    except Exception as e:
+        logger.error(f"Error creando ChatTask: {e}")
+        await db.rollback()
+        # Continuar de todos modos, la cancelación vía DB no funcionará pero el chat puede continuar
+
     logger.debug(f"DEBUG (api/chat.py): Llamando create_and_run_agent_streaming con thread_id: {thread_id}") # <--- NUEVO LOG
-    # Añadir la ejecución del agente como una tarea en segundo plano
-    background_tasks.add_task(
-        create_and_run_agent_streaming,
-        account_id=account_id,
-        thread_id=thread_id,
-        task_id=task_id,
-        telegram_id=telegram_id,
-        user_message=user_message,
-        image_base64=image_base64,
-        images_base64=images_base64,
-        document_url=document_url,
-        mode=mode,
-        rag_context=parsed_rag_context,
-        background_tasks=background_tasks,
-        workspace_id=final_workspace_id,
-        context=parsed_context # Pasar el contexto parseado
+    # Crear y registrar la tarea para permitir cancelación
+    task = asyncio.create_task(
+        create_and_run_agent_streaming(
+            account_id=account_id,
+            thread_id=thread_id,
+            task_id=task_id,
+            telegram_id=telegram_id,
+            user_message=user_message,
+            image_base64=image_base64,
+            images_base64=images_base64,
+            document_url=document_url,
+            mode=mode,
+            rag_context=parsed_rag_context,
+            background_tasks=background_tasks,
+            workspace_id=final_workspace_id,
+            context=parsed_context # Pasar el contexto parseado
+        )
     )
-    
+    active_chat_tasks[task_id] = {
+        "task": task,
+        "account_id": account_id,
+        "thread_id": thread_id
+    }
+    task.add_done_callback(lambda t: active_chat_tasks.pop(task_id, None))
+
     # Devolver una respuesta inmediata
     return {"thread_id": thread_id, "taskId": task_id}
 
@@ -935,7 +1134,8 @@ async def create_and_run_agent_streaming(
     background_tasks: Optional[Any] = None,
     workspace_id: Optional[str] = None,
     context: Optional[Dict[str, Any]] = None, # Nuevo parámetro
-    k: int = 5
+    k: int = 5,
+    db_session: Optional[Any] = None  # DB session opcional para actualización de estado
 ):
     """
     Ejecuta el agente LangGraph y transmite los resultados a través de WebSockets.
@@ -950,6 +1150,10 @@ async def create_and_run_agent_streaming(
     from core.websocket_manager import send_personal_message # Asegurarse de que esté importado aquí también si es necesario
 
     logger.info(f"--- Iniciando agente LangGraph para account_id: {account_id}, thread_id: {thread_id} ---")
+
+    should_check_cancellation = db_session is not None
+    chunk_count = 0
+    cancellation_check_interval = 10  # Check every 10 chunks to avoid DB overload
 
     try:
         # Determinar el destinatario y el tipo de conexión
@@ -1043,7 +1247,25 @@ async def create_and_run_agent_streaming(
             final_graph_state = chunk_data
             # Las actualizaciones de streaming (stream_chunk) ahora se manejan directamente 
             # desde los nodos en core/agent.py para mayor tiempo real y evitar duplicaciones.
-            pass
+            
+            # Periodic cancellation check
+            if should_check_cancellation:
+                chunk_count += 1
+                if chunk_count % cancellation_check_interval == 0:
+                    try:
+                        # Query the ChatTask to check cancelled flag
+                        stmt = select(ChatTask).where(ChatTask.id == uuid.UUID(task_id))
+                        result = await db_session.execute(stmt)
+                        chat_task = result.scalars().first()
+                        if chat_task and chat_task.cancelled:
+                            logger.info(f"Chat task {task_id} cancelled via DB flag.")
+                            raise asyncio.CancelledError()
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        logger.warning(f"Error checking cancellation status: {e}")
+                        # Continue processing; don't fail just because cancellation check failed
+
 
         # El estado final es un diccionario con el nombre del último nodo ejecutado como clave.
         if not final_graph_state or "generateResponse" not in final_graph_state:
@@ -1126,6 +1348,9 @@ async def create_and_run_agent_streaming(
             "sources": final_sources,
         }, connection_type=conn_type)
 
+    except asyncio.CancelledError:
+        logger.info(f"Chat task {task_id} cancelled by user.")
+        raise  # Re-raise to ensure task is marked as cancelled
     except Exception as e:
         logger.error(f"Error en streaming agent LangGraph: {e}", exc_info=True)
         await send_personal_message(target_account_id, {
@@ -1134,3 +1359,26 @@ async def create_and_run_agent_streaming(
             "taskId": task_id,
             "message": str(e)
         }, connection_type=conn_type)
+
+@router.post("/tasks/{task_id}/cancel")
+async def cancel_chat_task(
+    task_id: str,
+    current_account_id: str = Depends(get_current_account_id)
+):
+    """
+    Cancela una tarea de chat en ejecución.
+    """
+    if task_id not in active_chat_tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    task_info = active_chat_tasks[task_id]
+    if task_info["account_id"] != current_account_id:
+        raise HTTPException(status_code=403, detail="Not authorized to cancel this task")
+
+    task = task_info["task"]
+    if task.done():
+        raise HTTPException(status_code=400, detail="Task already completed")
+
+    task.cancel()
+    # The task's done callback will clean up the registry
+    return {"status": "cancelled", "task_id": task_id}

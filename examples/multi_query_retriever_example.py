@@ -117,7 +117,7 @@ def ejemplo_uso_en_herramienta():
     print("\n🛠️ Uso desde herramientas del agente")
     print("=" * 50)
     
-    from tools.multi_query_search_tool import MultiQuerySearchTool
+    from skills.search_and_research_skill.scripts.multi_query_search_tool import MultiQuerySearchTool
     
     # Crear instancia de la herramienta
     tool = MultiQuerySearchTool()

@@ -85,7 +85,9 @@ export default function GraphProgressIndicator({ tasks, onDismiss }: { tasks: Gr
                             </div>
                             <div>
                                 <div className="flex items-center gap-2">
-                                    Grafo de Conocimiento
+                                    {tasks.some(t => t.message.toLowerCase().includes('análisis')) 
+                                        ? 'Procesamiento de IA'
+                                        : 'Grafo de Conocimiento'}
                                     <Sparkles className="h-4 w-4 text-purple-500 animate-pulse" />
                                 </div>
                                 <p className="text-xs font-normal text-muted-foreground mt-0.5">

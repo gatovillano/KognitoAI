@@ -32,7 +32,8 @@ from io import BytesIO
 import uuid
 import time
 
-from telegram import Update, Message, error as telegram_error
+import telegram
+from telegram import Update, Message
 from telegram.ext import (
     Application,
     MessageHandler,
@@ -51,8 +52,8 @@ from telegram_client.bot_manager import bot_manager
 from utils.helpers import markdown_to_telegram_html
 from utils.paginator import Paginator, split_text_into_pages
 from utils.image_generation import GENERATED_IMAGE_KEY
-from tools.get_document_content_tool import DOCUMENT_NAME_KEY
-from tools.schedule_event_tool import EVENT_ID_FOR_SCHEDULING_KEY
+from skills.document_management_skill.scripts.get_document_content_tool import DOCUMENT_NAME_KEY
+from skills.calendar_skill.scripts.schedule_event_tool import EVENT_ID_FOR_SCHEDULING_KEY
 from telegram_client.notification_scheduler import schedule_telegram_job
 from faster_whisper import WhisperModel
 
@@ -102,7 +103,7 @@ async def send_typing_heartbeat(application_or_context: Union[Application, Callb
             if bot:
                 await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
             await asyncio.sleep(4)
-        except (asyncio.CancelledError, telegram_error.NetworkError):
+        except (asyncio.CancelledError, telegram.error.NetworkError):
             break
         except Exception as e:
             logger.warning(f"No se pudo enviar la acción de 'typing': {e}")
@@ -205,7 +206,7 @@ async def send_agent_response(bot, chat_id, user_id, text, user_data):
             await bot.send_message(chat_id=chat_id, text=page, parse_mode='HTML', disable_web_page_preview=True)
             if i < len(pages) - 1:
                 await asyncio.sleep(0.5)
-        except telegram_error.BadRequest as e:
+        except telegram.error.BadRequest as e:
             logger.warning(f"Error al enviar mensaje con formato HTML (BadRequest): {e}. Reintentando como texto plano...")
             try:
                 # Fallback: enviar el texto sin ningún formato si el HTML falla

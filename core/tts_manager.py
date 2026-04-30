@@ -8,6 +8,7 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 import asyncio
 import uuid # Añadido para UUIDs
+from openai import AsyncOpenAI # Añadido para OpenAI TTS
 
 # Para Azure TTS
 import azure.cognitiveservices.speech as speechsdk # Añadido para Azure TTS
@@ -694,6 +695,369 @@ class AzureTTSService(TTSService):
         if self.cache:
             self.cache.clear_expired()
 
+# --- Implementación de OpenAITTSService ---
+class OpenAITTSService(TTSService):
+    """
+    Implementación de TTSService para OpenAI y compatibles (ej. Kokoro local).
+    """
+    DEFAULT_VOICE = "alloy"
+    
+    def __init__(self, cache_enabled: bool = True, cache_dir: Optional[str] = None, api_key: Optional[str] = None, api_base: Optional[str] = None, model: Optional[str] = None):
+        self.api_base = api_base or "https://api.openai.com/v1"
+        self.api_key = api_key or "sk-dummy"
+        self.model = model or "tts-1"
+        
+        # Traducir localhost a host.docker.internal si estamos en Docker
+        if ("localhost" in self.api_base or "127.0.0.1" in self.api_base) and os.path.exists("/.dockerenv"):
+            self.api_base = self.api_base.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
+            logger.info(f"🔄 Traduciendo local openai-compatible base a host.docker.internal: {self.api_base}")
+
+        self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.api_base)
+        
+        self.cache: Optional[TTSCache] = None
+        if cache_enabled:
+            self.cache = TTSCache(cache_dir=cache_dir)
+            
+        logger.info(f"✅ Cliente de OpenAI TTS inicializado con base_url '{self.api_base}' y modelo '{self.model}'.")
+
+    async def synthesize_speech(
+        self,
+        text: str,
+        voice: Optional[str] = None,
+        speaking_rate: float = 1.0,
+        pitch: float = 0.0,
+        volume_gain_db: float = 0.0,
+        audio_format: str = "mp3",
+        use_cache: bool = True
+    ) -> bytes:
+        
+        # Verificar caché primero
+        if use_cache and self.cache and text:
+            cached_audio = self.cache.get(text, voice or self.DEFAULT_VOICE, speaking_rate, audio_format)
+            if cached_audio:
+                logger.info(f"✅ Audio recuperado de caché ({len(cached_audio)} bytes)")
+                return cached_audio
+
+        try:
+            # Check type of response format, openai expects strings like "mp3", "opus", "aac", "flac"
+            valid_formats = ["mp3", "opus", "aac", "flac", "wav", "pcm"]
+            fmt = audio_format if audio_format in valid_formats else "mp3"
+
+            response = await self.client.audio.speech.create(
+                model=self.model,
+                voice=voice or self.DEFAULT_VOICE,
+                input=text,
+                response_format=fmt,
+                speed=speaking_rate
+            )
+            audio_content = response.content
+            
+            # Guardar en caché
+            if use_cache and self.cache and text:
+                self.cache.set(text, voice or self.DEFAULT_VOICE, speaking_rate, audio_format, audio_content)
+                
+            logger.info(f"✅ Audio generado exitosamente con OpenAI TTS: {len(audio_content)} bytes")
+            return audio_content
+        except Exception as e:
+            logger.error(f"❌ Error en síntesis de voz de OpenAI: {e}")
+            raise Exception(f"Error en OpenAI TTS: {e}")
+
+    async def synthesize_speech_streaming(
+        self,
+        text_chunks: List[str],
+        voice: Optional[str] = None,
+        speaking_rate: float = 1.0,
+        audio_format: str = "mp3",
+        use_cache: bool = True
+    ) -> AsyncGenerator[bytes, None]:
+        for i, chunk in enumerate(text_chunks):
+            if not chunk or not chunk.strip():
+                continue
+            try:
+                audio_content = await self.synthesize_speech(
+                    text=chunk,
+                    voice=voice,
+                    speaking_rate=speaking_rate,
+                    audio_format=audio_format,
+                    use_cache=use_cache
+                )
+                yield audio_content
+                logger.debug(f"✅ Fragmento {i+1}/{len(text_chunks)} procesado por OpenAI TTS")
+            except Exception as e:
+                logger.error(f"❌ Error procesando fragmento {i+1} con OpenAI TTS: {e}")
+                continue
+    
+    def get_cache_stats(self) -> Optional[Dict[str, Any]]:
+        if self.cache:
+            return self.cache.get_stats()
+        return None
+    
+    def clear_cache(self):
+        if self.cache:
+            self.cache.clear_expired()
+
+# --- Implementación de KokoroTTSService (Específico para servidor Kokoro ONNX) ---
+class KokoroTTSService(TTSService):
+    """
+    Implementación de TTSService para el servidor Kokoro ONNX del usuario.
+    Se conecta a un servidor local que expone un endpoint /tts.
+    """
+    DEFAULT_VOICE = "ef_dora"
+    
+    def __init__(self, cache_enabled: bool = True, cache_dir: Optional[str] = None, api_base: Optional[str] = None):
+        # Si el usuario no proporcionó un api_base, intentar autodescubrimiento
+        if not api_base or "localhost" in api_base or "127.0.0.1" in api_base:
+            base_url = api_base or "http://localhost:8011"
+            
+            # Si estamos en Docker, intentar detectar el mejor endpoint para Kokoro
+            if os.path.exists("/.dockerenv"):
+                import socket
+                # Prioridad 1: Intentar usar el nombre de servicio 'kokoro-tts' (estándar en este proyecto)
+                try:
+                    socket.gethostbyname("kokoro-tts")
+                    self.api_base = base_url.replace("localhost", "kokoro-tts").replace("127.0.0.1", "kokoro-tts").replace("host.docker.internal", "kokoro-tts")
+                    logger.info(f"🐳 Detectado servicio 'kokoro-tts' en red Docker. Usando: {self.api_base}")
+                except:
+                    # Fallback 2: host.docker.internal (Mac/Win o Linux con extra_hosts)
+                    self.api_base = base_url.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
+                    logger.info(f"🔄 Usando fallback host.docker.internal para Kokoro: {self.api_base}")
+            else:
+                self.api_base = base_url
+        else:
+            # Respetar el api_base manual si no es localhost
+            self.api_base = api_base
+            
+        # Safeguard: Si es Kokoro y apunta al puerto 8009 obsoleto, redirigir al 8011
+        if ":8009" in self.api_base:
+            self.api_base = self.api_base.replace(":8009", ":8011")
+            logger.info(f"🔄 [SAFEGUARD] Puerto de Kokoro redirigido de 8009 a 8011: {self.api_base}")
+
+        if not self.api_base.endswith("/tts") and not self.api_base.endswith("/tts/"):
+            if self.api_base.endswith("/"):
+                self.api_base += "tts"
+            else:
+                self.api_base += "/tts"
+        
+        self.cache: Optional[TTSCache] = None
+        if cache_enabled:
+            self.cache = TTSCache(cache_dir=cache_dir)
+            
+        logger.info(f"✅ Cliente de Kokoro TTS inicializado con api_base '{self.api_base}'.")
+
+    async def synthesize_speech(
+        self,
+        text: str,
+        voice: Optional[str] = None,
+        speaking_rate: float = 1.0,
+        pitch: float = 0.0,
+        volume_gain_db: float = 0.0,
+        audio_format: str = "wav",
+        use_cache: bool = True
+    ) -> bytes:
+        if not text or not text.strip():
+            return b""
+        
+        # Kokoro ONNX siempre devuelve WAV
+        effective_format = "wav"
+        
+        # Verificar caché primero
+        if use_cache and self.cache and text:
+            cached_audio = self.cache.get(text, voice or self.DEFAULT_VOICE, speaking_rate, effective_format)
+            if cached_audio:
+                logger.info(f"✅ Audio recuperado de caché ({len(cached_audio)} bytes)")
+                return cached_audio
+
+        import httpx
+        try:
+            # Payload según el servidor propocionado por el usuario
+            payload = {
+                "text": text,
+                "voice": (voice or self.DEFAULT_VOICE).strip(),
+                "speed": speaking_rate,
+                "lang": "es" # Por defecto español
+            }
+            
+            logger.debug(f"🚀 Enviando petición a Kokoro: {self.api_base} | voice={payload['voice']}")
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(self.api_base, json=payload, timeout=90.0)
+                
+                if response.status_code != 200:
+                    logger.error(f"❌ Kokoro TTS devolvió error {response.status_code}: {response.text}")
+                    response.raise_for_status()
+                
+                audio_content = response.content
+            
+            # Guardar en caché
+            if use_cache and self.cache and text:
+                self.cache.set(text, voice or self.DEFAULT_VOICE, speaking_rate, effective_format, audio_content)
+                
+            logger.info(f"✅ Audio generado exitosamente con Kokoro TTS: {len(audio_content)} bytes")
+            return audio_content
+        except Exception as e:
+            logger.error(f"❌ Error en síntesis de voz de Kokoro TTS en {self.api_base}: {e}")
+            raise Exception(f"Error en Kokoro TTS: {e}")
+
+    async def synthesize_speech_streaming(
+        self,
+        text_chunks: List[str],
+        voice: Optional[str] = None,
+        speaking_rate: float = 1.0,
+        audio_format: str = "wav",
+        use_cache: bool = True
+    ) -> AsyncGenerator[bytes, None]:
+        for i, chunk in enumerate(text_chunks):
+            if not chunk or not chunk.strip():
+                continue
+            try:
+                audio_content = await self.synthesize_speech(
+                    text=chunk,
+                    voice=voice,
+                    speaking_rate=speaking_rate,
+                    audio_format=audio_format,
+                    use_cache=use_cache
+                )
+                yield audio_content
+                logger.debug(f"✅ Fragmento {i+1}/{len(text_chunks)} procesado por Kokoro TTS")
+            except Exception as e:
+                logger.error(f"❌ Error procesando fragmento {i+1} con Kokoro TTS: {e}")
+                continue
+    
+    def get_cache_stats(self) -> Optional[Dict[str, Any]]:
+        if self.cache:
+            return self.cache.get_stats()
+        return None
+    
+    def clear_cache(self):
+        if self.cache:
+            self.cache.clear_expired()
+# --- Implementación de CoquiTTSService ---
+class CoquiTTSService(TTSService):
+    """
+    Implementación de TTSService para Coqui TTS (XTTS v2).
+    Se conecta a un servidor local que expone un endpoint /tts.
+    """
+    DEFAULT_VOICE = "Ana Maria"
+    
+    def __init__(self, cache_enabled: bool = True, cache_dir: Optional[str] = None, api_base: Optional[str] = None):
+        # Asegurarnos de que el endpoint termine en /tts si es el servidor estándar de XTTS
+        self.api_base = api_base or "http://localhost:8006"
+
+        # Si estamos en Docker, intentar detectar el mejor endpoint para Coqui
+        if os.path.exists("/.dockerenv") and any(x in self.api_base for x in ["localhost", "127.0.0.1", "host.docker.internal"]):
+            import socket
+            # Prioridad 1: Intentar usar el nombre de servicio 'coqui-tts'
+            try:
+                socket.gethostbyname("coqui-tts")
+                self.api_base = self.api_base.replace("localhost", "coqui-tts").replace("127.0.0.1", "coqui-tts").replace("host.docker.internal", "coqui-tts")
+                logger.info(f"🐳 Detectado servicio 'coqui-tts' en red Docker. Usando: {self.api_base}")
+            except:
+                # Fallback 2: host.docker.internal (Mac/Win)
+                if "localhost" in self.api_base or "127.0.0.1" in self.api_base:
+                    self.api_base = self.api_base.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
+                    logger.info(f"🔄 Usando fallback host.docker.internal para Coqui: {self.api_base}")
+
+        if not self.api_base.endswith("/tts") and not self.api_base.endswith("/tts/"):
+
+            if self.api_base.endswith("/"):
+                self.api_base += "tts"
+            else:
+                self.api_base += "/tts"
+        
+        self.cache: Optional[TTSCache] = None
+        if cache_enabled:
+            self.cache = TTSCache(cache_dir=cache_dir)
+            
+        logger.info(f"✅ Cliente de Coqui TTS inicializado con api_base '{self.api_base}'.")
+
+    async def synthesize_speech(
+        self,
+        text: str,
+        voice: Optional[str] = None,
+        speaking_rate: float = 1.0,
+        pitch: float = 0.0,
+        volume_gain_db: float = 0.0,
+        audio_format: str = "wav",
+        use_cache: bool = True
+    ) -> bytes:
+        if not text or not text.strip():
+            logger.warning("⚠️ Texto vacío recibido por Coqui TTS. Omitiendo síntesis.")
+            return b""
+        
+        # Verificar caché primero
+        if use_cache and self.cache and text:
+            cached_audio = self.cache.get(text, voice or self.DEFAULT_VOICE, speaking_rate, audio_format)
+            if cached_audio:
+                logger.info(f"✅ Audio recuperado de caché ({len(cached_audio)} bytes)")
+                return cached_audio
+
+        import httpx
+        try:
+            # Payload estándar para servidores XTTS v2 / Coqui local
+            payload = {
+                "text": text,
+                "speaker_id": (voice or self.DEFAULT_VOICE).strip(),
+                "language": "es" # Forzado a español para este servicio
+            }
+            
+            logger.debug(f"DEBUG Coqui TTS: Enviando petición a {self.api_base} con payload: {payload}")
+            
+            async with httpx.AsyncClient() as client:
+                # El timeout debe ser generoso ya que generar audio puede tomar tiempo
+                response = await client.post(self.api_base, json=payload, timeout=90.0)
+                
+                if response.status_code != 200:
+                    logger.error(f"❌ Coqui TTS devolvió error {response.status_code}: {response.text}")
+                    
+                response.raise_for_status()
+                audio_content = response.content
+            
+            # Guardar en caché
+            if use_cache and self.cache and text:
+                self.cache.set(text, voice or self.DEFAULT_VOICE, speaking_rate, audio_format, audio_content)
+                
+            logger.info(f"✅ Audio generado exitosamente con Coqui TTS: {len(audio_content)} bytes")
+            return audio_content
+        except Exception as e:
+            logger.error(f"❌ Error en síntesis de voz de Coqui TTS: {e}")
+            raise Exception(f"Error en Coqui TTS: {e}")
+
+    async def synthesize_speech_streaming(
+        self,
+        text_chunks: List[str],
+        voice: Optional[str] = None,
+        speaking_rate: float = 1.0,
+        audio_format: str = "wav",
+        use_cache: bool = True
+    ) -> AsyncGenerator[bytes, None]:
+        for i, chunk in enumerate(text_chunks):
+            if not chunk or not chunk.strip():
+                continue
+            try:
+                audio_content = await self.synthesize_speech(
+                    text=chunk,
+                    voice=voice,
+                    speaking_rate=speaking_rate,
+                    audio_format=audio_format,
+                    use_cache=use_cache
+                )
+                yield audio_content
+                logger.debug(f"✅ Fragmento {i+1}/{len(text_chunks)} procesado por Coqui TTS")
+            except Exception as e:
+                logger.error(f"❌ Error procesando fragmento {i+1} con Coqui TTS: {e}")
+                continue
+    
+    def get_cache_stats(self) -> Optional[Dict[str, Any]]:
+        if self.cache:
+            return self.cache.get_stats()
+        return None
+    
+    def clear_cache(self):
+        if self.cache:
+            self.cache.clear_expired()
+
+# --- TTSServiceFactory ---
+
 # --- TTSServiceFactory ---
 class TTSServiceFactory:
     """
@@ -709,7 +1073,9 @@ class TTSServiceFactory:
         cache_dir: Optional[str] = None,
         api_key_name: Optional[str] = None,
         region: Optional[str] = None, # Para Azure
-        account_id: Optional[uuid.UUID] = None # Para obtener secretos del usuario
+        account_id: Optional[uuid.UUID] = None, # Para obtener secretos del usuario
+        api_base: Optional[str] = None, # Para APIs locales o compatibles
+        model: Optional[str] = None # Para APIs locales o compatibles
     ) -> TTSService:
         """
         Obtiene una instancia del servicio TTS especificado.
@@ -721,6 +1087,8 @@ class TTSServiceFactory:
             api_key_name: Nombre de la clave API en UserSecret (si aplica).
             region: Región de Azure (si aplica).
             account_id: ID de la cuenta para recuperar secretos específicos del usuario.
+            api_base: URL base para servicios TTS locales/OpenAI.
+            model: Modelo de TTS a utilizar.
             
         Returns:
             Una instancia de TTSService
@@ -731,7 +1099,7 @@ class TTSServiceFactory:
         provider_lower = provider.lower()
         
         # Crear una clave única para la instancia basada en la configuración
-        instance_key = f"{provider_lower}-{cache_enabled}-{cache_dir}-{api_key_name}-{region}-{account_id}"
+        instance_key = f"{provider_lower}-{cache_enabled}-{cache_dir}-{api_key_name}-{region}-{account_id}-{api_base}-{model}"
         
         if instance_key not in TTSServiceFactory._instances:
             # Recuperar API Key si es necesario
@@ -741,7 +1109,7 @@ class TTSServiceFactory:
             if not api_key_name:
                 if provider_lower == "azure":
                     api_key_name = "AZURE_TTS_KEY"
-                elif provider_lower == "openai":
+                elif provider_lower == "openai" or provider_lower == "openai-compatible":
                     api_key_name = "OPENAI_API_KEY"
                 elif provider_lower == "google":
                     api_key_name = "GOOGLE_API_KEY"
@@ -766,9 +1134,34 @@ class TTSServiceFactory:
                     api_key=api_key,
                     region=region if region else settings.azure_speech_region # Usar la región de settings si no se especifica
                 )
-            # Aquí se añadirían otros proveedores en el futuro
-            # elif provider_lower == "openai":
-            #     TTSServiceFactory._instances[provider_lower] = OpenAITTSService(...)
+            elif provider_lower in ["openai", "openai-compatible"]:
+                # Si el modelo es "kokoro", usar el servicio dedicado de Kokoro ya que su API es única
+                if model and "kokoro" in model.lower():
+                    TTSServiceFactory._instances[instance_key] = KokoroTTSService(
+                        cache_enabled=cache_enabled,
+                        cache_dir=cache_dir,
+                        api_base=api_base
+                    )
+                else:
+                    TTSServiceFactory._instances[instance_key] = OpenAITTSService(
+                        cache_enabled=cache_enabled,
+                        cache_dir=cache_dir,
+                        api_key=api_key,
+                        api_base=api_base,
+                        model=model
+                    )
+            elif provider_lower == "kokoro":
+                TTSServiceFactory._instances[instance_key] = KokoroTTSService(
+                    cache_enabled=cache_enabled,
+                    cache_dir=cache_dir,
+                    api_base=api_base
+                )
+            elif provider_lower == "coquitts" or provider_lower == "coqui":
+                TTSServiceFactory._instances[instance_key] = CoquiTTSService(
+                    cache_enabled=cache_enabled,
+                    cache_dir=cache_dir,
+                    api_base=api_base
+                )
             else:
                 raise ValueError(f"Proveedor de TTS '{provider}' no soportado.")
                 
@@ -784,7 +1177,9 @@ async def get_tts_client(
     cache_dir: Optional[str] = None,
     api_key_name: Optional[str] = None,
     region: Optional[str] = None,
-    account_id: Optional[uuid.UUID] = None
+    account_id: Optional[uuid.UUID] = None,
+    api_base: Optional[str] = None,
+    model: Optional[str] = None
 ) -> TTSService:
     """
     Obtiene la instancia global del cliente TTS.
@@ -796,6 +1191,7 @@ async def get_tts_client(
         api_key_name: Nombre de la clave API en UserSecret (si aplica).
         region: Región de Azure (si aplica).
         account_id: ID de la cuenta para recuperar secretos específicos del usuario.
+        api_base: URL base para servicios TTS locales/OpenAI.
         
     Returns:
             Instancia de TTSService
@@ -805,14 +1201,40 @@ async def get_tts_client(
     # y la configuración es la misma, devolver la instancia global.
     # Esto es una simplificación, en un sistema más complejo se podría querer
     # un singleton por cada combinación de proveedor/configuración.
-    if _tts_client is None or _tts_client.__class__.__name__.lower().replace("ttsservice", "") != provider.lower():
+    # Obtener el tipo de servicio esperado según el proveedor
+    expected_class = None
+    p_lower = provider.lower()
+    if p_lower in ["google", "google-tts"]:
+        from core.tts_manager import GoogleTTSService
+        expected_class = GoogleTTSService
+    elif p_lower in ["azure", "azure-tts"]:
+        from core.tts_manager import AzureTTSService
+        expected_class = AzureTTSService
+    elif p_lower in ["openai", "openai-compatible"]:
+        if model and "kokoro" in model.lower():
+            from core.tts_manager import KokoroTTSService
+            expected_class = KokoroTTSService
+        else:
+            from core.tts_manager import OpenAITTSService
+            expected_class = OpenAITTSService
+    elif p_lower == "kokoro":
+        from core.tts_manager import KokoroTTSService
+        expected_class = KokoroTTSService
+    elif p_lower in ["coquitts", "coqui"]:
+        from core.tts_manager import CoquiTTSService
+        expected_class = CoquiTTSService
+
+    # Si no hay cliente, o es de otro tipo, o cambió la config
+    if _tts_client is None or not isinstance(_tts_client, expected_class) or getattr(_tts_client, "api_base", None) != api_base or getattr(_tts_client, "model", None) != model:
         _tts_client = await TTSServiceFactory.get_service(
             provider=provider, 
             cache_enabled=cache_enabled, 
             cache_dir=cache_dir,
             api_key_name=api_key_name,
             region=region,
-            account_id=account_id
+            account_id=account_id,
+            api_base=api_base,
+            model=model
         )
     return _tts_client
 
@@ -827,7 +1249,9 @@ async def generate_speech(
     use_cache: bool = True,
     api_key_name: Optional[str] = None,
     region: Optional[str] = None,
-    account_id: Optional[uuid.UUID] = None
+    account_id: Optional[uuid.UUID] = None,
+    api_base: Optional[str] = None,
+    model: Optional[str] = None
 ) -> bytes:
     """
     Función de conveniencia para generar audio a partir de texto.
@@ -842,6 +1266,7 @@ async def generate_speech(
         api_key_name: Nombre de la clave API en UserSecret (si aplica).
         region: Región de Azure (si aplica).
         account_id: ID de la cuenta para recuperar secretos específicos del usuario.
+        api_base: URL base para servicios TTS locales/OpenAI.
         
     Returns:
         Bytes del audio generado
@@ -850,7 +1275,9 @@ async def generate_speech(
         provider=provider, 
         api_key_name=api_key_name, 
         region=region, 
-        account_id=account_id
+        account_id=account_id,
+        api_base=api_base,
+        model=model
     )
     return await client.synthesize_speech(
         text=text,
@@ -870,7 +1297,9 @@ async def generate_speech_streaming(
     use_cache: bool = True,
     api_key_name: Optional[str] = None,
     region: Optional[str] = None,
-    account_id: Optional[uuid.UUID] = None
+    account_id: Optional[uuid.UUID] = None,
+    api_base: Optional[str] = None,
+    model: Optional[str] = None
 ) -> AsyncGenerator[bytes, None]:
     """
     Función de conveniencia para generar audio en streaming.
@@ -885,6 +1314,8 @@ async def generate_speech_streaming(
         api_key_name: Nombre de la clave API en UserSecret (si aplica).
         region: Región de Azure (si aplica).
         account_id: ID de la cuenta para recuperar secretos específicos del usuario.
+        api_base: URL base para servicios TTS locales/OpenAI.
+        model: Modelo de TTS a utilizar.
         
     Yields:
         Bytes de audio para cada fragmento
@@ -893,7 +1324,9 @@ async def generate_speech_streaming(
         provider=provider, 
         api_key_name=api_key_name, 
         region=region, 
-        account_id=account_id
+        account_id=account_id,
+        api_base=api_base,
+        model=model
     )
     async for chunk in client.synthesize_speech_streaming(
         text_chunks=text_chunks,

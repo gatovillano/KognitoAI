@@ -1,1 +1,0 @@
-La consulta de búsqueda para encontrar información relevante.

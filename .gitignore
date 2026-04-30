@@ -29,3 +29,8 @@ llm_context.md
 .kogniterm
 cuda_installer.run
 cuda-keyring_1.1-1_all.deb
+.kilo
+# Docker Secrets
+secrets/
+venv
+kogninotes-app

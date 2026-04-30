@@ -39,7 +39,7 @@ from sqlalchemy import (
     Column, String, DateTime, Text, ForeignKey, BigInteger, Integer, Boolean,
     UniqueConstraint, select, text, Float, Index, Table
 )
-from sqlalchemy.orm import sessionmaker, relationship, selectinload
+from sqlalchemy.orm import sessionmaker, relationship, selectinload, backref
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -157,6 +157,7 @@ class Account(Base):
     tts_voice = Column(String(255), nullable=True, comment="Voz de TTS preferida.")
     tts_speed = Column(Float, nullable=True, default=1.0, comment="Velocidad de la generación de voz (e.g., 1.0).")
     tts_region = Column(String(50), nullable=True, comment="Región del servicio de TTS (e.g., 'eastus' para Azure).")
+    tts_api_base = Column(String(255), nullable=True, comment="URL base opcional para un servicio de TTS local o custom.")
     
     # Configuraciones de Embeddings Personalizadas
     embedding_provider = Column(String(50), nullable=True, comment="Proveedor de Embeddings preferido (e.g., 'ollama', 'openai', 'google').")
@@ -164,6 +165,12 @@ class Account(Base):
     embedding_api_key_name = Column(String(255), nullable=True, comment="Nombre de la clave API en UserSecret para el proveedor de Embeddings.")
     embedding_api_base = Column(String(255), nullable=True, comment="URL base opcional para la API de Embeddings (ej. Ollama, Local).")
     disabled_skills = Column(JSONB, nullable=True, server_default=text("'[]'::jsonb"), comment="Lista de IDs de skills desactivadas por el usuario.")
+
+    # Configuración de Acceso Remoto / SSH (para local_file_navigator)
+    ssh_host = Column(String(255), nullable=True, comment="Hostname o IP del servidor SSH (o localhost para Docker host).")
+    ssh_port = Column(String(10), nullable=True, default="22", comment="Puerto SSH, por defecto 22.")
+    ssh_user = Column(String(255), nullable=True, comment="Usuario SSH.")
+    local_base_path = Column(String(512), nullable=True, comment="Directorio raíz al que se restringe el acceso SSH.")
 
     # Campos para MFA
     mfa_enabled = Column(Boolean, default=False, nullable=False, comment="Indica si el usuario tiene MFA habilitado.")
@@ -674,6 +681,7 @@ class AgendaEvent(Base):
     status = Column(String(50), nullable=False, default="Pendiente", comment="Estado del evento para tableros Kanban (ej. Pendiente, En Progreso, Completado).")
     end_date = Column(DateTime(timezone=True), nullable=True) # Nuevo campo para la fecha de finalización
     is_private = Column(Boolean, default=False, nullable=False, comment="Indica si el evento es privado (solo visible para el creador).")
+    caldav_uid = Column(String(255), nullable=True, index=True, comment="UID específico para sincronización CalDAV.")
 
     contact_profiles = relationship(
         "ContactProfile",
@@ -930,6 +938,7 @@ class Task(Base):
     start_date = Column(DateTime(timezone=True), nullable=True) # Nuevo campo para la fecha de inicio
     end_date = Column(DateTime(timezone=True), nullable=True) # Nuevo campo para la fecha de finalización
     status = Column(String(50), nullable=False, default="Pendiente", comment="Estado de la tarea para tableros Kanban (ej. Pendiente, En Progreso, Completado).")
+    caldav_uid = Column(String(255), nullable=True, index=True, comment="UID específico para sincronización CalDAV.")
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
 
@@ -947,6 +956,26 @@ class Task(Base):
         return f"<Task(id={self.id}, description='{self.description[:50]}...', is_completed={self.is_completed})>"
 
 
+class ChatTask(Base):
+    """
+    Guarda el estado de las tareas de chat para permitir cancelación between processes.
+    """
+    __tablename__ = "chat_tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    thread_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+
+    cancelled = Column(Boolean, default=False, nullable=False, index=True)
+    status = Column(String(50), default="running", nullable=False, index=True)  # running, completed, cancelled, failed
+
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+    # Relación con Account (opcional, para navegación)
+    account = relationship("Account", backref="chat_tasks")
+
+
 class GitHubDocument(Base):
     """
     Representa un documento individual de un repositorio de GitHub almacenado como conocimiento.
@@ -959,15 +988,15 @@ class GitHubDocument(Base):
     file_path = Column(String, nullable=False, comment="Ruta del archivo dentro del repositorio.")
     sha = Column(String, nullable=False, comment="SHA del contenido del archivo para detección de cambios.")
     content = Column(Text, nullable=False, comment="Contenido del archivo.")
-    
+
     # Opcional: vincular a un workspace o a una cuenta general
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=True, index=True)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=True, index=True)
     topic = Column(String, nullable=True, comment="Tema o categoría asociada al documento para colecciones RAG.")
-    
+
     # Columna de embedding para búsquedas semánticas o análisis
     embedding = Column(Vector(384), nullable=True, comment="Embedding vectorial del contenido del documento para búsquedas semánticas.")
-    
+
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
 
@@ -1128,6 +1157,29 @@ class SharedAnalysisLink(Base):
         return f"<SharedAnalysisLink(id={self.id}, analysis_id={self.analysis_id}, token='{self.token[:16]}...' )>"
 
 
+# --- Model for Shared Conversation Links ---
+class SharedConversationLink(Base):
+    """
+    Almacena enlaces compartidos para conversaciones (hilos de chat).
+    Permite compartir un chat completo con usuarios que no tienen cuenta en la plataforma.
+    """
+    __tablename__ = 'shared_conversation_links'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    thread_id = Column(UUID(as_uuid=True), ForeignKey('chat_threads.id'), nullable=False, index=True, comment="ID del hilo compartido")
+    token = Column(String(64), unique=True, nullable=False, index=True, comment="Tokenúnico para el enlace compartido")
+    password_hash = Column(String(255), nullable=True, comment="Hash de contraseña si el enlace está protegido")
+    expiry_date = Column(DateTime(timezone=True), nullable=True, comment="Fecha de expiración del enlace")
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"), nullable=False)
+    allow_reply = Column(Boolean, default=False, nullable=False, comment="Permitir responder al hilo compartido")
+
+    thread = relationship("ChatThread")
+
+    def __repr__(self):
+        return f"<SharedConversationLink(id={self.id}, thread_id={self.thread_id}, token='{self.token[:16]}...' )>"
+
+
 # ==============================================================================
 # SECCIÓN 2: FUNCIONES AUXILIARES DE LA BASE DE DATOS
 # ==============================================================================
@@ -1232,7 +1284,7 @@ async def delete_accounts_by_ids(db_session: AsyncSession, account_ids: list[uui
             AgendaEvent, Recordatorio, ProactiveInsight, VerificationCode,
             AnalysisTask, MindmapTask, UploadTask, Task, GitHubDocument,
             UserDocumentTopic, ChatThread, LangchainPgEmbedding, Workspace,
-            AnalyzedPair, GapDevelopmentAnalysis, UserSecret
+            AnalyzedPair, GapDevelopmentAnalysis, UserSecret, ChatTask
         ]
         for model in direct_dependents:
             if hasattr(model, 'account_id'):
@@ -1354,3 +1406,52 @@ async def log_pool_status():
         logger.debug(f"Estado del pool de conexiones: {pool_status}")
     except Exception as e:
         logger.error(f"Error al obtener el estado del pool: {e}", exc_info=True)
+
+class DocumentFolder(Base):
+    """
+    Representa una carpeta para organizar documentos de OnlyOffice.
+    """
+    __tablename__ = "onlyoffice_folders"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete='CASCADE'), nullable=False, index=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=True, index=True)
+    parent_id = Column(UUID(as_uuid=True), ForeignKey("onlyoffice_folders.id", ondelete='CASCADE'), nullable=True, index=True)
+    
+    name = Column(String(255), nullable=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+    # Relaciones
+    account = relationship("Account", backref="onlyoffice_folders")
+    workspace = relationship("Workspace", backref="onlyoffice_folders")
+    subfolders = relationship("DocumentFolder", backref=backref("parent", remote_side=[id]), cascade="all, delete-orphan")
+
+class Document(Base):
+    """
+    Representa un documento editable (Word, Excel, PPT) gestionado con OnlyOffice.
+    """
+    __tablename__ = "onlyoffice_documents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete='CASCADE'), nullable=False, index=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=True, index=True)
+    folder_id = Column(UUID(as_uuid=True), ForeignKey("onlyoffice_folders.id", ondelete='SET NULL'), nullable=True, index=True)
+    
+    filename = Column(String(255), nullable=False)
+    extension = Column(String(10), nullable=False)
+    file_path = Column(String(1024), nullable=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+    # Relaciones
+    account = relationship("Account", backref="onlyoffice_docs")
+    workspace = relationship("Workspace", backref="onlyoffice_docs")
+    folder = relationship("DocumentFolder", backref="documents")
+
+    def __repr__(self):
+        return f"<Document(id={self.id}, filename='{self.filename}')>"
+
+# --- Al final del archivo, asegúrate de que todos los modelos estén definidos antes de exportar ---

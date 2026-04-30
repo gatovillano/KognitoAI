@@ -20,7 +20,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    op.add_column('accounts', sa.Column('tts_region', sa.String(length=50), nullable=True, comment="Región del servicio de TTS (e.g., 'eastus' para Azure)."))
+    # Check if the column exists before adding
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if 'tts_region' not in [col['name'] for col in inspector.get_columns('accounts')]:
+        op.add_column('accounts', sa.Column('tts_region', sa.String(length=50), nullable=True, comment="Región del servicio de TTS (e.g., 'eastus' para Azure)."))
 
 
 def downgrade() -> None:

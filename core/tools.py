@@ -14,9 +14,24 @@ import uuid
 from sqlalchemy import select
 from core.database import SessionLocal, Account
 from core.skill_manager import SkillManager
+# from skills.html_generator_tool import HTMLGeneratorTool # REMOVED: Legacy import is now dynamic
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
+
+async def get_shared_dependencies():
+    """
+    Obtiene las instancias compartidas de GraphDB y GraphIntegration.
+    Utilizado por herramientas que requieren acceso directo al grafo.
+    """
+    from core.agent import get_shared_graph_dependencies
+    from knowledge_graph.graph_integration import GraphIntegration
+    
+    _graph_db, _ = await get_shared_graph_dependencies()
+    if _graph_db:
+        # Devolvemos la DB y una integración vinculada a esa DB
+        return _graph_db, GraphIntegration(_graph_db)
+    return None, None
 
 async def get_all_langchain_tools(
     account_id: str,
@@ -41,6 +56,19 @@ async def get_all_langchain_tools(
     except Exception as e:
         logger.warning(f"Could not fetch disabled_skills for account {account_id}: {e}")
 
+    workspace_name = None
+    try:
+        if workspace_id:
+            from core.database import Workspace
+            async with SessionLocal() as db:
+                stmt = select(Workspace).where(Workspace.id == uuid.UUID(workspace_id))
+                result = await db.execute(stmt)
+                workspace_obj = result.scalar_one_or_none()
+                if workspace_obj:
+                    workspace_name = workspace_obj.name
+    except Exception as e:
+        logger.warning(f"Could not fetch workspace_name for workspace_id {workspace_id}: {e}")
+
     try:
         skill_manager = SkillManager()
         
@@ -51,6 +79,7 @@ async def get_all_langchain_tools(
             telegram_id=telegram_id,
             thread_id=thread_id,
             workspace_id=workspace_id,
+            workspace_name=workspace_name,
             progress_callback=progress_callback,
             disabled_skills=disabled_skills
         )

@@ -3,12 +3,12 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from tools.query_memory_graph_tool import QueryMemoryGraphTool
+from skills.knowledge_and_memory_skill.scripts.query_memory_graph_tool import QueryMemoryGraphTool
 
 @pytest.fixture
 def mock_graph_integration():
     """Fixture para mockear la integración con el grafo."""
-    with patch('tools.query_memory_graph_tool.GraphIntegration', autospec=True) as mock_graph:
+    with patch('skills.knowledge_and_memory_skill.scripts.query_memory_graph_tool.GraphIntegration', autospec=True) as mock_graph:
         mock_instance = mock_graph.return_value
         mock_instance.search_knowledge_graph = AsyncMock()
         yield mock_instance

@@ -31,6 +31,10 @@ async def get_user_api_key(account_id: str, provider: str) -> Optional[str]:
             repo = SecretRepository(db)
             key_name = f"{provider.upper()}_API_KEY"
             api_key = await repo.get_decrypted_secret(uuid.UUID(account_id), key_name)
+            
+            if not api_key and provider.lower() in ["gemini", "google"]:
+                api_key = await repo.get_decrypted_secret(uuid.UUID(account_id), "GOOGLE_API_KEY")
+            
             return api_key
     except Exception as e:
         logger.error(f"Error al obtener API key para {provider}: {e}")
@@ -52,26 +56,38 @@ async def get_user_api_base(account_id: str) -> Optional[str]:
 
 
 @router.get("/llm/models/{provider}", response_model=List[Dict[str, Any]])
-async def get_provider_models(provider: str, current_account_id: str = Depends(get_current_account_id)):
+async def get_provider_models(
+    provider: str, 
+    api_base: Optional[str] = None,
+    refresh: bool = False,
+    current_account_id: str = Depends(get_current_account_id)
+):
     """
     Obtiene la lista de modelos disponibles directamente desde el proveedor.
+    Permite opcionalmente pasar una api_base personalizada (útil para previsualización antes de guardar).
     """
     provider = provider.lower()
     now = time.time()
     
-    # Verificar caché
-    if provider in _models_cache:
+    # Verificar caché (solo si no se pide refresh)
+    if not refresh and provider in _models_cache:
         cache_entry = _models_cache[provider]
-        if now - cache_entry["timestamp"] < CACHE_TTL:
+        # Para Ollama/local, el cache es mucho más corto (5 min) para detectar cambios locales
+        ttl = 300 if provider == "ollama" else CACHE_TTL
+        if now - cache_entry["timestamp"] < ttl:
             logger.info(f"Retornando modelos de {provider} desde caché.")
             return cache_entry["models"]
 
     models = []
     
     try:
-        # Obtener API key del usuario para este proveedor
+        # Prioridad de API Base:
+        # 1. Parámetro de la función (para previsualización)
+        # 2. Base de datos del usuario
+        # 3. Configuración global (.env LLM_API_BASE)
+        # 4. Configuración específica (.env OLLAMA_API_URL para Ollama)
         user_api_key = await get_user_api_key(current_account_id, provider)
-        user_api_base = await get_user_api_base(current_account_id)
+        user_api_base = api_base if api_base is not None else await get_user_api_base(current_account_id)
         
         # Proveedores específicos: llamadas directas a sus APIs
         if provider == "openrouter":
@@ -329,17 +345,31 @@ async def get_provider_models(provider: str, current_account_id: str = Depends(g
                 ]
             logger.info(f"Obtenidos {len(models)} modelos de Cerebras")
 
-        elif provider == "ollama":
-            ollama_base = user_api_base or settings.llm_api_base or "http://localhost:11434"
+        elif provider in ["ollama", "ollama-cloud"]:
+            if provider == "ollama-cloud":
+                # Para la nube, priorizamos el base del usuario o el default cloud
+                # Ignoramos settings globales que suelen ser para el host local
+                # Para la nube, priorizamos el base del usuario si no es un endpoint local evidente
+                is_local = any(x in (user_api_base or "") for x in ["localhost", "127.0.0.1", "host.docker.internal", "8086", "11434"])
+                ollama_base = user_api_base if (user_api_base and not is_local) else "https://ollama.com"
+            else:
+                # Para ollama local
+                ollama_base = user_api_base or settings.llm_api_base or settings.ollama_api_url or "http://localhost:11434"
+            
+            logger.info(f"Intentando obtener modelos de Ollama ({provider}) en: {ollama_base}")
             try:
+                headers = {}
+                if provider == "ollama-cloud" and user_api_key:
+                    headers["Authorization"] = f"Bearer {user_api_key}"
+                
                 async with httpx.AsyncClient() as client:
-                    response = await client.get(
-                        f"{ollama_base}/api/tags", 
-                        timeout=5.0
-                    )
+                    # Asegurar que no duplicamos /api/tags si ya viene en la base
+                    url = f"{ollama_base.rstrip('/')}/api/tags"
+                    response = await client.get(url, headers=headers, timeout=10.0)
                     if response.status_code == 200:
                         data = response.json()
-                        for m in data.get("models", []):
+                        raw_models = data.get("models", [])
+                        for m in raw_models:
                             name = m.get("name")
                             models.append({
                                 "id": f"ollama/{name}",
@@ -347,12 +377,64 @@ async def get_provider_models(provider: str, current_account_id: str = Depends(g
                                 "size": m.get("size"),
                                 "digest": m.get("digest"),
                             })
+                        logger.info(f"Obtenidos {len(models)} modelos reales de Ollama en {ollama_base}")
+                    else:
+                        logger.warning(f"Ollama respondió con error {response.status_code} en {ollama_base}")
             except Exception as e:
-                logger.debug(f"Ollama no disponible en {ollama_base}: {e}")
+                logger.warning(f"Ollama no disponible o error en {ollama_base}: {e}")
             
             if not models:
-                models = [{"id": "ollama/llama3", "name": "Llama 3 (Local - no detectado)"}]
-            logger.info(f"Obtenidos {len(models)} modelos de Ollama")
+                logger.info(f"No se detectaron modelos en {ollama_base}, usando modelo de respaldo.")
+                models = [{"id": "ollama/llama3", "name": f"Llama 3 (No detectado en {ollama_base})"}]
+            
+            return models
+
+        elif provider == "openai-compatible":
+            # Para cualquier servidor compatible con la API de OpenAI: Local AI, LM Studio, Ollama con API OpenAI, etc.
+            if not user_api_base:
+                return [{"id": "openai-compatible/sin-configurar", "name": "⚠️ Ingresa tu API Base URL primero"}]
+            
+            api_base = user_api_base.rstrip("/")
+            # Intentar con /v1/models y también sin /v1 por si el usuario ya lo incluyó
+            endpoints_to_try = []
+            if "/v1" in api_base:
+                endpoints_to_try = [f"{api_base}/models"]
+            else:
+                endpoints_to_try = [f"{api_base}/v1/models", f"{api_base}/models"]
+
+            logger.info(f"Intentando obtener modelos de servidor OpenAI-compatible en: {api_base}")
+            
+            for endpoint in endpoints_to_try:
+                try:
+                    async with httpx.AsyncClient() as client:
+                        headers = {}
+                        if user_api_key:
+                            headers["Authorization"] = f"Bearer {user_api_key}"
+                        else:
+                            headers["Authorization"] = "Bearer local-key"  # Local AI no requiere key real
+                        
+                        response = await client.get(endpoint, headers=headers, timeout=8.0)
+                        if response.status_code == 200:
+                            data = response.json()
+                            raw_models = data.get("data", [])
+                            for m in raw_models:
+                                model_id = m.get("id", "")
+                                models.append({
+                                    "id": f"openai/{model_id}",
+                                    "name": model_id,
+                                })
+                            logger.info(f"Obtenidos {len(models)} modelos de servidor local en {endpoint}")
+                            break  # Salir del loop si tuvo éxito
+                        else:
+                            logger.warning(f"Endpoint {endpoint} respondió con {response.status_code}")
+                except Exception as e:
+                    logger.warning(f"Error al conectar con {endpoint}: {e}")
+                    continue
+            
+            if not models:
+                return [{"id": "openai-compatible/error", "name": f"⚠️ No se pudo conectar a {api_base}"}]
+            
+            return models
 
         elif provider == "huggingface":
             api_key = user_api_key

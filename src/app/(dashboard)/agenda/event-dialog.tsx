@@ -39,9 +39,10 @@ interface EventDialogProps {
   workspaceId?: string;
   event?: AgendaEvent | null;
   initialDate?: Date;
+  initialStatus?: 'Pendiente' | 'En Progreso' | 'Hecho';
 }
 
-export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, event, initialDate }: EventDialogProps) {
+export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, event, initialDate, initialStatus }: EventDialogProps) {
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
 
@@ -66,7 +67,7 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
     const fetchWorkspaces = async () => {
       setLoadingWorkspaces(true);
       try {
-        const response = await apiClient.get('/api/workspaces');
+        const response = await apiClient.get('/api/workspaces?limit=100');
         if (response.data && Array.isArray(response.data.workspaces)) {
           setWorkspaces(response.data.workspaces);
         } else if (Array.isArray(response.data)) {
@@ -115,11 +116,11 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
           attendee_ids: [],
           external_attendees: [],
           workspace_id: workspaceId || 'none',
-          status: 'Pendiente',
+          status: initialStatus || 'Pendiente',
         });
       }
     }
-  }, [isOpen, event, initialDate, workspaceId, form]);
+  }, [isOpen, event, initialDate, workspaceId, initialStatus, form]);
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     const toastId = toast.loading(event ? 'Actualizando evento...' : 'Agendando evento...');

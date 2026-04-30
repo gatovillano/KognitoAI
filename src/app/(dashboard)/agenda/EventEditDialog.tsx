@@ -66,7 +66,7 @@ export function EventEditDialog({ isOpen, onOpenChange, onSaveSuccess, onCloseDe
     const fetchWorkspaces = async () => {
       setLoadingWorkspaces(true);
       try {
-        const response = await apiClient.get('/api/workspaces');
+        const response = await apiClient.get('/api/workspaces?limit=100');
         if (response.data && Array.isArray(response.data.workspaces)) {
           setWorkspaces(response.data.workspaces);
         } else if (Array.isArray(response.data)) {

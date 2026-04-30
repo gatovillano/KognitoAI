@@ -1,1 +1,0 @@
-La acción a realizar. Puede ser

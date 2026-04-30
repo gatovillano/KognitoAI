@@ -32,9 +32,9 @@ echo -e "  🗄️  ${GREEN}PGAdmin:${NC}          http://localhost:5056"
 echo ""
 
 echo -e "${YELLOW}🌍 URLs Públicas:${NC}"
-echo -e "  🌐 ${GREEN}Frontend:${NC}         https://kognito.gatoslibres.art"
-echo -e "  🔧 ${GREEN}API:${NC}              https://apibase.gatoslibres.art"
-echo -e "  📱 ${GREEN}Telegram Panel:${NC}   https://webapp3.gatoslibres.art"
+echo -e "  🌐 ${GREEN}Frontend:${NC}         https://kognito.cuerpolibre.cl"
+echo -e "  🔧 ${GREEN}API:${NC}              https://apibase.cuerpolibre.cl"
+echo -e "  📱 ${GREEN}Telegram Panel:${NC}   https://webapp3.cuerpolibre.cl"
 echo ""
 
 echo -e "${RED}⚠️  IMPORTANTE:${NC}"

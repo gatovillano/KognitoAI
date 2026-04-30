@@ -3,17 +3,15 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from tools.memory_add_tool import MemoryAddTool
+from skills.knowledge_and_memory_skill.scripts.memory_add_tool import MemoryAddTool
 
 @pytest.fixture
 def mock_dependencies():
     """Fixture para mockear las dependencias de la herramienta."""
-    with patch('tools.memory_add_tool.add_memory_to_vector_db', new_callable=AsyncMock) as mock_add, \
-         patch('tools.memory_add_tool.proactive_knowledge_linker_trigger', new_callable=AsyncMock) as mock_linker, \
-         patch('tools.memory_add_tool.schedule_memory_graph_processing', new_callable=AsyncMock) as mock_scheduler:
+    with patch('skills.knowledge_and_memory_skill.scripts.memory_add_tool.add_memory_to_vector_db', new_callable=AsyncMock) as mock_add, \
+         patch('skills.knowledge_and_memory_skill.scripts.memory_add_tool.schedule_memory_graph_processing', new_callable=AsyncMock) as mock_scheduler:
         yield {
             "add": mock_add,
-            "linker": mock_linker,
             "scheduler": mock_scheduler
         }
 
@@ -40,8 +38,7 @@ async def test_memory_add_tool_successful_call(mock_dependencies):
     assert add_args["type"] == mem_type
     assert add_args["workspace_id"] == "test_workspace"
 
-    # 2. Verificar que se disparó el linker proactivo
-    mock_dependencies["linker"].assert_called_once()
+
 
     # 3. Verificar que se programó el procesamiento del grafo (¡NUEVO!)
     mock_dependencies["scheduler"].assert_called_once_with(account_id="test_account_id")
@@ -64,7 +61,6 @@ async def test_memory_add_tool_handles_empty_content(mock_dependencies):
     # Assert
     assert result == "No se puede guardar contenido vacío en la memoria."
     mock_dependencies["add"].assert_not_called()
-    mock_dependencies["linker"].assert_not_called()
     mock_dependencies["scheduler"].assert_not_called()
 
 @pytest.mark.asyncio
@@ -85,5 +81,4 @@ async def test_memory_add_tool_handles_db_error(mock_dependencies):
     assert "Ocurrió un error" in result
     assert "DB connection error" in result
     mock_dependencies["add"].assert_called_once()
-    mock_dependencies["linker"].assert_not_called()
     mock_dependencies["scheduler"].assert_not_called()

@@ -23,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.security import get_password_hash, verify_password, create_access_token, get_current_account_id, oauth2_scheme
 from core.dependencies import get_db_session
+from utils.limiter import limiter
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -112,17 +113,18 @@ class TelegramLoginRequest(BaseModel):
 
 # --- Endpoints de Email/Pass y Social Login ---
 @router.post("/auth/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED, summary="Registrar con email/pass")
-async def register_user(request: RegisterRequest, db: AsyncSession = Depends(get_db_session)):
+@limiter.limit("5/minute")
+async def register_user(request: Request, register_data: RegisterRequest, db: AsyncSession = Depends(get_db_session)):
     """Registra una nueva cuenta de usuario con email y contraseña."""
     existing_account_result = await db.execute(select(Account).where(Account.email == request.email))
     if existing_account_result.scalars().first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ya existe una cuenta con este correo electrónico.")
 
     new_account = Account(
-        email=request.email,
-        hashed_password=get_password_hash(request.password),
-        name=request.name or request.email.split('@')[0],
-        username=request.name or request.email.split('@')[0] # Usar el nombre proporcionado o parte del email como username
+        email=register_data.email,
+        hashed_password=get_password_hash(register_data.password),
+        name=register_data.name or register_data.email.split('@')[0],
+        username=register_data.name or register_data.email.split('@')[0] # Usar el nombre proporcionado o parte del email como username
     )
     db.add(new_account)
     await db.commit()
@@ -131,11 +133,12 @@ async def register_user(request: RegisterRequest, db: AsyncSession = Depends(get
     return RegisterResponse(access_token=access_token, message="¡Registro exitoso! Ya puedes iniciar sesión.")
 
 @router.post("/auth/login", response_model=TokenResponse, summary="Iniciar sesión con email/pass")
-async def login_for_access_token(request: LoginRequest, db: AsyncSession = Depends(get_db_session)):
+@limiter.limit("10/minute")
+async def login_for_access_token(request: Request, login_data: LoginRequest, db: AsyncSession = Depends(get_db_session)):
     """Inicia sesión con email y contraseña y devuelve un token de acceso JWT."""
-    account_result = await db.execute(select(Account).where(Account.email == request.email))
+    account_result = await db.execute(select(Account).where(Account.email == login_data.email))
     account = account_result.scalars().first()
-    if not account or not account.hashed_password or not verify_password(request.password, account.hashed_password):
+    if not account or not account.hashed_password or not verify_password(login_data.password, account.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email o contraseña incorrectos.")
 
     access_token = create_access_token(data={"sub": str(account.id)})
@@ -155,7 +158,8 @@ def verify_telegram_hash(data: TelegramLoginRequest, bot_token: str) -> bool:
 
 
 @router.post("/auth/telegram/callback", response_model=TokenResponse, summary="Callback de Login Social de Telegram")
-async def handle_telegram_login(login_data: TelegramLoginRequest, db: AsyncSession = Depends(get_db_session)):
+@limiter.limit("10/minute")
+async def handle_telegram_login(request: Request, login_data: TelegramLoginRequest, db: AsyncSession = Depends(get_db_session)):
     """Maneja el callback de autenticación social de Telegram, crea o vincula la cuenta y devuelve un token."""
     logger.warning("--- /api/auth/telegram/callback endpoint has been hit! ---")
     if not settings.telegram_bot_token: raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Autenticación de Telegram no configurada.")
@@ -206,7 +210,8 @@ async def request_verification_code_options():
     )
 
 @router.post("/auth/request-code", summary="Solicitar código de verificación")
-async def request_verification_code(request_data: AuthRequestCode, db: AsyncSession = Depends(get_db_session)):
+@limiter.limit("3/minute")
+async def request_verification_code(request: Request, request_data: AuthRequestCode, db: AsyncSession = Depends(get_db_session)):
     """Busca al usuario, genera un código, lo guarda en la BD y lo envía a Telegram vía HTTP."""
     repo = AccountRepository(db)
     identity = await repo.find_telegram_identity(request_data.identifier)
@@ -234,7 +239,11 @@ async def request_verification_code(request_data: AuthRequestCode, db: AsyncSess
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(telegram_service_url, json=message_payload, timeout=10)
+            headers = {
+                "X-Internal-API-Key": settings.internal_api_key_for_bot,
+                "Content-Type": "application/json"
+            }
+            response = await client.post(telegram_service_url, json=message_payload, headers=headers, timeout=10)
             response.raise_for_status()  # Lanza un error para respuestas 4xx o 5xx
         
         logger.info(f"Petición de envío de código a {telegram_service_url} exitosa para chat_id {telegram_id}")
@@ -248,7 +257,8 @@ async def request_verification_code(request_data: AuthRequestCode, db: AsyncSess
         raise HTTPException(status_code=500, detail="Fallo al enviar el mensaje a través del servicio interno.")
 
 @router.post("/auth/verify-code", response_model=TokenResponse, summary="Verificar código")
-async def verify_code_and_get_token(request_data: AuthVerifyCode, db: AsyncSession = Depends(get_db_session)):
+@limiter.limit("10/minute")
+async def verify_code_and_get_token(request: Request, request_data: AuthVerifyCode, db: AsyncSession = Depends(get_db_session)):
     """Verifica un código contra la BD y devuelve un token si es válido."""
     repo = AccountRepository(db)
     identity = await repo.find_telegram_identity(request_data.identifier)

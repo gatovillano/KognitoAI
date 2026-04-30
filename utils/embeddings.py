@@ -199,6 +199,13 @@ class KognitoEmbeddingAdapter(Embeddings):
     async def aembed_query(self, text: str) -> List[float]:
         return await self.service.aembed_query(text)
 
+async def get_text_embedding(text: str, account_id: Optional[uuid.UUID] = None) -> Optional[List[float]]:
+    """
+    Wrapper para generar el embedding de un texto. 
+    Mantiene compatibilidad con el código que antes importaba esto desde proactive_knowledge_linker.
+    """
+    return await aembed_query(text, account_id)
+
 def get_embedding_model() -> Optional[Embeddings]:
     """
     Devuelve una instancia compatible con LangChain (Embeddings) que usa el servicio global.

@@ -45,7 +45,8 @@ export function GitHubRepoDialog({ isOpen, onOpenChange, onSuccess }: GitHubRepo
             apiClient.get("/api/workspaces")
           ]);
           setCollections(collectionsResponse.data);
-          setWorkspaces(Array.isArray(workspacesResponse.data) ? workspacesResponse.data : []);
+          const wData = workspacesResponse.data;
+          setWorkspaces(Array.isArray(wData) ? wData : (wData?.workspaces || []));
         } catch (error: any) {
           console.error("Error al cargar los datos:", error);
           toast({
