@@ -118,7 +118,10 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         apiClient.get(`/api/collections/${topic}/details`, { params: workspaceId ? { workspace_id: workspaceId } : {} })
       ]);
 
-      const serverDocuments = docsRes.data;
+      const serverDocuments = docsRes.data.map((doc: Document) => ({
+    ...doc,
+    id: doc.id || `${doc.file_name}-${doc.topic}` // Ensure unique ID
+  }));
 
       const savedAnalysesData = analysesRes.data;
       const collectionData = collectionRes.data;
@@ -520,9 +523,9 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     try {
       // Determinar qué endpoint usar basado en el modo
       if (mode === 'conceptual') {
-        // Modo Conceptual: Usar la herramienta de Cognee
+        // Modo Conceptual: Usar la herramienta de Procesamiento Conceptual
         await apiClient.post('/api/tools/run', {
-          tool_name: "cognee_knowledge_graph",
+          tool_name: "conceptual_processing",
           action: "process_documents",
           dataset_name: datasetName,  // Nombre para organizar el grafo
           topic: processingTopic || undefined,  // Nombre de la colección para filtrar documentos

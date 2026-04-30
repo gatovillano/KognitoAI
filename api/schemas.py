@@ -36,6 +36,7 @@ class UserSettingsResponse(BaseModel):
     tts_voice: Optional[str]
     tts_speed: Optional[float]
     tts_region: Optional[str]
+    tts_api_base: Optional[str]
     # Campos de Embeddings
     embedding_provider: Optional[str]
     embedding_model: Optional[str]
@@ -77,6 +78,7 @@ class UserSettingsUpdateRequest(BaseModel):
     tts_voice: Optional[str] = None
     tts_speed: Optional[float] = None
     tts_region: Optional[str] = None
+    tts_api_base: Optional[str] = None
     # Campos de Embeddings
     embedding_provider: Optional[str] = None
     embedding_model: Optional[str] = None

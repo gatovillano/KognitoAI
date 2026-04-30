@@ -10,7 +10,7 @@ from core.llm_manager import get_main_llm
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.messages import BaseMessage 
 from langchain_core.prompts import ChatPromptTemplate
-from tools.create_pdf_tool import CreatePDFTool 
+from skills.document_management_skill.scripts.create_pdf_tool import CreatePDFTool 
 
 logger = logging.getLogger(__name__)
 

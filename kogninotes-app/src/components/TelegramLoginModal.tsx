@@ -17,7 +17,7 @@ export const TelegramLoginModal = ({ visible, onClose, onSuccess }: TelegramLogi
     <!DOCTYPE html>
     <html>
       <head>
-        <base href="https://bot.gatoslibres.art">
+        <base href="https://bot.cuerpolibre.cl">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
           body { 
@@ -67,7 +67,7 @@ export const TelegramLoginModal = ({ visible, onClose, onSuccess }: TelegramLogi
                     originWhitelist={['*']}
                     source={{
                         html: telegramWidgetHtml,
-                        baseUrl: 'https://bot.gatoslibres.art'
+                        baseUrl: 'https://bot.cuerpolibre.cl'
                     }}
                     style={styles.webview}
                     onMessage={(event) => {

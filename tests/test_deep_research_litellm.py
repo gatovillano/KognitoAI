@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.llm_manager import initialize_llms, get_main_llm, get_fast_llm
 from core.config import settings
-from tools.deep_research_tool_litellm import create_deep_research_tool_litellm
+from skills.search_and_research_skill.scripts.deep_research_tool_litellm import create_deep_research_tool_litellm
 
 # Configurar logging
 logging.basicConfig(

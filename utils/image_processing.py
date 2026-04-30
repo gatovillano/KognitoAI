@@ -4,7 +4,7 @@ import logging
 from fastapi import UploadFile
 from PIL import Image
 
-from tools.image_background_eraser_tool import ImageBackgroundEraserTool
+from skills.media_and_generation_skill.scripts.image_background_eraser_tool import ImageBackgroundEraserTool
 
 logger = logging.getLogger(__name__)
 

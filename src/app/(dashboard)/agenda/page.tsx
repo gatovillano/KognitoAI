@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { PlusCircle, Clock, Trash2, Users, MoreHorizontal, Info, CheckCircle2, Link as LinkIcon, CalendarIcon } from 'lucide-react';
+import { PlusCircle, Clock, Trash2, Users, MoreHorizontal, Info, CheckCircle2, Link as LinkIcon, CalendarIcon, Bot } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { EventDialog } from './event-dialog';
 import { Calendar } from '@/components/ui/calendar';
@@ -23,6 +23,8 @@ import { TaskDialog } from './task-dialog'; // Importar TaskDialog
 import { Checkbox } from '@/components/ui/checkbox'; // Importar Checkbox para las tareas
 import { WeeklyScheduleView } from './WeeklyScheduleView'; // Importar WeeklyScheduleView
 import { MonthlyScheduleView } from './MonthlyScheduleView'; // Importar MonthlyScheduleView
+import { KanbanView } from './KanbanView'; // Importar KanbanView
+import { GanttView } from './GanttView'; // Importar GanttView
 import { AgendaEvent, TaskResponse } from './types';
 
 
@@ -32,7 +34,7 @@ export default function AgendaPage() {
   const [allTasks, setAllTasks] = useState<TaskResponse[]>([]); // Nuevo estado para todas las tareas
   const [isLoading, setIsLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
-  const [viewType, setViewType] = useState<'day' | 'week' | 'month'>('month'); // Nuevo estado para el tipo de vista
+  const [viewType, setViewType] = useState<'day' | 'week' | 'month' | 'kanban' | 'gantt'>('month'); // Nuevo estado para el tipo de vista
   const [workspaceId, setWorkspaceId] = useState<string | null>(null); // Nuevo estado para workspace_id
 
   const [isEventDialogOpen, setIsEventDialogOpen] = useState(false);
@@ -44,6 +46,7 @@ export default function AgendaPage() {
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
   const [isEventEditDialogOpen, setIsEventEditDialogOpen] = useState(false); // Nuevo estado para el diálogo de edición
   const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
+  const [kanbanInitialStatus, setKanbanInitialStatus] = useState<'Pendiente' | 'En Progreso' | 'Hecho' | undefined>(undefined);
 
   // Detectar workspace_id desde la URL
   useEffect(() => {
@@ -166,7 +169,22 @@ export default function AgendaPage() {
       user_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
     setInitialEventDate(date); // Establecer la fecha inicial para el diálogo
+    setInitialEventDate(date); // Establecer la fecha inicial para el diálogo
+    setKanbanInitialStatus(undefined);
     setIsEventDialogOpen(true);
+  };
+
+  const handleCreateEventFromKanban = (status: 'Pendiente' | 'En Progreso' | 'Hecho') => {
+    setKanbanInitialStatus(status);
+    setSelectedEvent(null);
+    setInitialEventDate(new Date());
+    setIsEventDialogOpen(true);
+  };
+
+  const handleCreateTaskFromKanban = (status: 'Pendiente' | 'En Progreso' | 'Hecho') => {
+    setKanbanInitialStatus(status);
+    setSelectedTask(null);
+    setIsTaskDialogOpen(true);
   };
 
   const [initialEventDate, setInitialEventDate] = useState<Date | undefined>(undefined); // Nuevo estado para la fecha inicial del evento
@@ -346,7 +364,7 @@ export default function AgendaPage() {
 
           <div className="flex items-center gap-3">
             <div className="bg-card/40 backdrop-blur-md p-1 rounded-2xl border border-border/40 flex gap-1">
-              {(['day', 'week', 'month'] as const).map((type) => (
+              {(['day', 'week', 'month', 'kanban', 'gantt'] as const).map((type) => (
                 <Button
                   key={type}
                   variant={viewType === type ? 'default' : 'ghost'}
@@ -354,7 +372,7 @@ export default function AgendaPage() {
                   onClick={() => setViewType(type)}
                   className={`rounded-xl px-4 font-bold text-xs uppercase tracking-widest transition-all ${viewType === type ? 'shadow-lg shadow-primary/20' : 'text-muted-foreground hover:text-foreground'}`}
                 >
-                  {type === 'day' ? 'Día' : type === 'week' ? 'Semana' : 'Mes'}
+                  {type === 'day' ? 'Día' : type === 'week' ? 'Semana' : type === 'month' ? 'Mes' : type === 'kanban' ? 'Kanban' : 'Gantt'}
                 </Button>
               ))}
             </div>
@@ -378,9 +396,9 @@ export default function AgendaPage() {
             </DropdownMenu>
           </div>
         </div>
-
-        <div className={`flex-grow grid gap-8 min-h-0 ${viewType === 'week' || viewType === 'month' ? 'md:grid-cols-1' : 'md:grid-cols-12'}`}>
-          <div className={`${viewType === 'week' || viewType === 'month' ? 'hidden' : 'md:col-span-4'} flex flex-col gap-6`}>
+        
+        <div className={`flex-grow grid gap-8 min-h-0 ${viewType === 'week' || viewType === 'month' || viewType === 'kanban' || viewType === 'gantt' ? 'md:grid-cols-1' : 'md:grid-cols-12'}`}>
+          <div className={`${viewType === 'week' || viewType === 'month' || viewType === 'kanban' || viewType === 'gantt' ? 'hidden' : 'md:col-span-4'} flex flex-col gap-6`}>
             <Card className="border-border/40 bg-card/40 backdrop-blur-xl rounded-[2rem] overflow-hidden shadow-sm">
               <Calendar
                 mode="single"
@@ -413,7 +431,7 @@ export default function AgendaPage() {
             </div>
           </div>
 
-          <div className={`${viewType === 'week' || viewType === 'month' ? 'md:col-span-1' : 'md:col-span-8'} flex flex-col min-h-0`}>
+          <div className={`${viewType === 'week' || viewType === 'month' || viewType === 'kanban' ? 'md:col-span-1' : 'md:col-span-8'} flex flex-col min-h-0`}>
             {viewType === 'week' ? (
               <WeeklyScheduleView
                 currentDate={selectedDate || new Date()}
@@ -425,6 +443,8 @@ export default function AgendaPage() {
                 onEditTask={(task) => { setSelectedTask(task); setIsTaskDialogOpen(true); }}
                 onDeleteTask={(task) => setDeletingTask(task)}
                 onToggleTaskCompleted={handleToggleTaskCompleted}
+                onMoveEvent={handleMoveEvent}
+                onMoveTask={handleMoveTask}
               />
             ) : viewType === 'month' ? (
               <MonthlyScheduleView
@@ -439,6 +459,13 @@ export default function AgendaPage() {
                 onMoveEvent={handleMoveEvent}
                 onMoveTask={handleMoveTask}
               />
+            ) : viewType === 'kanban' ? (
+              <KanbanView 
+                onCreateEvent={handleCreateEventFromKanban}
+                onCreateTask={handleCreateTaskFromKanban}
+              />
+            ) : viewType === 'gantt' ? (
+              <GanttView />
             ) : (
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
@@ -572,12 +599,14 @@ export default function AgendaPage() {
         onSaveSuccess={handleSaveSuccess}
         initialDate={initialEventDate} // Pasar la fecha inicial
         workspaceId={workspaceId || undefined} // Pasar el workspaceId
+        initialStatus={kanbanInitialStatus}
       />        <TaskDialog
         isOpen={isTaskDialogOpen}
         onOpenChange={setIsTaskDialogOpen}
         onSaveSuccess={handleTaskSaveSuccess}
         task={selectedTask} // Pasar la tarea seleccionada para edición
         workspaceId={workspaceId || undefined} // Pasar el workspaceId
+        initialStatus={kanbanInitialStatus}
       />
       {selectedEvent && (
         <EventDetailsDialog
@@ -636,42 +665,58 @@ export default function AgendaPage() {
       </AlertDialog>
 
       <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle className="text-xl font-bold text-primary">Módulo de Agenda</SheetTitle>
-            <SheetDescription className="text-sm text-muted-foreground">
-              Gestiona tus eventos, reuniones y tareas de forma centralizada y eficiente.
+        <SheetContent side="right" className="w-[400px] sm:w-[540px] overflow-y-auto">
+          <SheetHeader className="pb-6 border-b">
+            <SheetTitle className="text-2xl font-bold flex items-center gap-2">
+              <CalendarIcon className="h-6 w-6 text-primary" />
+              Guía de Agenda
+            </SheetTitle>
+            <SheetDescription>
+              Organización inteligente de eventos y tareas.
             </SheetDescription>
           </SheetHeader>
-          <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
-            <p><strong>¿Qué puedes hacer en tu Agenda?</strong></p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Agendar Eventos:</strong> Crea eventos con detalles como resumen, descripción, ubicación y participantes.</li>
-              <li><strong>Añadir Tareas:</strong> Registra tus tareas pendientes, márcalas como completadas y establece fechas de vencimiento.</li>
-              <li><strong>Vistas Personalizadas:</strong> Visualiza tu agenda por día, semana o mes para una mejor organización.</li>
-              <li><strong>Integración con Contactos:</strong> Vincula eventos y tareas a perfiles de contacto para tener toda la información contextualizada.</li>
-              <li><strong>Compartir con Equipos:</strong> Comparte eventos con tu equipo para una colaboración fluida.</li>
-              <li><strong>Edición y Eliminación:</strong> Modifica o cancela eventos y tareas de forma sencilla.</li>
-            </ul>
+          
+          <div className="py-6 space-y-8">
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Control Total del Tiempo</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Gestiona tus compromisos mediante múltiples vistas: <strong>Mes</strong> para una visión global, <strong>Canal Kanban</strong> para tus flujos de tareas, y <strong>Gantt</strong> para cronogramas de proyectos.
+              </p>
+            </section>
 
-            <p><strong>Interacción con IA:</strong></p>
-            <p>Además de la gestión manual, puedes interactuar con tu agenda a través del chat de IA. La IA dispone de herramientas especializadas para:</p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Crear, modificar y cancelar eventos.</li>
-              <li>Añadir, completar y eliminar tareas.</li>
-              <li>Consultar tu disponibilidad y próximos compromisos.</li>
-              <li>Generar resúmenes de tus actividades y recordatorios.</li>
-            </ul>
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Asistente de Agenda (IA)</h3>
+              <div className="bg-primary/5 rounded-2xl p-4 border border-primary/10 space-y-3">
+                <p className="text-xs font-medium text-primary flex items-center gap-2">
+                  <Bot className="h-4 w-4" /> El Agente puede ayudarte a:
+                </p>
+                <ul className="text-xs space-y-2 text-muted-foreground list-disc pl-4">
+                  <li><strong>Programar reuniones</strong> simplemente enviando un mensaje de voz o texto.</li>
+                  <li><strong>Mover compromisos</strong> si tus planes cambian.</li>
+                  <li><strong>Priorizar tareas</strong> y recordarte lo que vence hoy.</li>
+                  <li><strong>Consultar disponibilidad</strong> en tus calendarios conectados.</li>
+                </ul>
+              </div>
+            </section>
 
-            <p><strong>Beneficios Clave:</strong></p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Organización Centralizada:</strong> Ten un control total sobre tus compromisos y responsabilidades.</li>
-              <li><strong>Productividad Mejorada:</strong> Prioriza tus tareas y eventos importantes para optimizar tu tiempo.</li>
-              <li><strong>Colaboración Efectiva:</strong> Facilita la coordinación con tu equipo en proyectos y reuniones.</li>
-              <li><strong>Recordatorios Inteligentes:</strong> Mantente al tanto de tus próximos eventos y plazos.</li>
-            </ul>
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Integración de Tareas</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Las tareas no son solo notas; tienen fechas, estados de progreso y pueden estar vinculadas a un <strong>Workspace</strong> específico para mantener el contexto del proyecto.
+              </p>
+            </section>
 
-            <p>¡Organiza tu día a día y optimiza tu productividad con el Módulo de Agenda!</p>
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Vistas Especializadas</h3>
+              <div className="grid grid-cols-1 gap-2 text-[11px]">
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-orange-500/5 text-orange-600 border border-orange-500/10">
+                  <span className="font-bold">KANBAN</span> Visualiza el flujo: Pendiente → En Progreso → Hecho.
+                </div>
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-blue-500/5 text-blue-600 border border-blue-500/10">
+                  <span className="font-bold">GANTT</span> Ideal para ver la duración y solapamiento de proyectos largos.
+                </div>
+              </div>
+            </section>
           </div>
         </SheetContent>
       </Sheet>

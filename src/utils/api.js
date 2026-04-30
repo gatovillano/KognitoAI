@@ -2,7 +2,7 @@
  * Utilidades para realizar peticiones a la API
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://apibase.gatoslibres.art';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://apibase.cuerpolibre.cl';
 
 /**
  * Realiza una petición HTTP a la API

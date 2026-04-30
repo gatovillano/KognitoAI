@@ -8,7 +8,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, Brain, Trash2, Github, Edit, Share2, Upload, CheckCircle, XCircle, Clock, Network, ChevronDown, Settings, AlertTriangle, BarChart3, Info } from 'lucide-react';
+import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, Brain, Trash2, Github, Edit, Share2, Upload, CheckCircle, XCircle, Clock, Network, ChevronDown, Settings, AlertTriangle, BarChart3, Info, Bot } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
@@ -81,7 +81,7 @@ export default function RagCollectionsPage() {
   const [isDatasetDialogOpen, setIsDatasetDialogOpen] = useState(false);
   const [processingTopic, setProcessingTopic] = useState<string | null>(null);
   const [processingWorkspaceId, setProcessingWorkspaceId] = useState<string | null>(null);
-  const [graphTasks, setGraphTasks] = useState<GraphTask[]>([]);
+  const [activeTasks, setActiveTasks] = useState<GraphTask[]>([]);
 
   const { registerMessageHandler } = useWebSocketContext();
 
@@ -149,17 +149,34 @@ export default function RagCollectionsPage() {
           onUploadFailed(message.data || message);
           break;
         case 'knowledge_graph_progress':
-          const graphData = message.data as GraphTask;
-          if (graphData && graphData.task_id) {
-            setGraphTasks(prev => {
-              const exists = prev.some(t => t.task_id === graphData.task_id);
+        case 'analysis_progress':
+          const taskData = message.data as GraphTask;
+          if (taskData && taskData.task_id) {
+            setActiveTasks(prev => {
+              // 1. Verificar si ya existe por ID exacto
+              const exists = prev.some(t => t.task_id === taskData.task_id);
               if (exists) {
-                return prev.map(t => t.task_id === graphData.task_id ? { ...t, ...graphData } : t);
+                return prev.map(t => t.task_id === taskData.task_id ? { ...t, ...taskData } : t);
               }
-              return [...prev, graphData];
+
+              // 2. Si no existe, intentar vincular con una tarea temporal del mismo topic y tipo si existe
+              // Esto evita que aparezcan dos recuadros cuando se inicia la tarea
+              const tempTaskIndex = prev.findIndex(t => 
+                (t.task_id.startsWith('temp-')) && 
+                (t.topic === taskData.topic)
+              );
+
+              if (tempTaskIndex !== -1) {
+                const newTasks = [...prev];
+                newTasks[tempTaskIndex] = { ...newTasks[tempTaskIndex], ...taskData };
+                return newTasks;
+              }
+
+              // 3. Si no hay nada con qué vincular, añadir como nueva
+              return [...prev, taskData];
             });
 
-            if (graphData.is_complete) {
+            if (taskData.is_complete && message.type === 'knowledge_graph_progress') {
               fetchCollections();
             }
           }
@@ -194,12 +211,30 @@ export default function RagCollectionsPage() {
     try {
       setSelectedAnalysis(null);
       setAnalyzingTopic(topic);
+      
+      const tempTaskId = `temp-${Date.now()}`;
+      setActiveTasks(prev => [...prev, {
+        task_id: tempTaskId,
+        phase: 'initializing',
+        message: 'Iniciando análisis de colección...',
+        progress_percent: 0,
+        is_complete: false,
+        has_error: false,
+        processing_mode: 'conceptual',
+        topic: topic
+      }]);
+
       const response = await apiClient.post('/api/start-collection-analysis', { topic });
       setCollectionPollingId(response.data.task_id);
+      
+      // Vincular ID real con la tarea temporal
+      setActiveTasks(prev => prev.map(t => t.task_id === tempTaskId ? { ...t, task_id: response.data.task_id } : t));
+      
       toast.info(`Análisis de la colección "${topic}" iniciado.`);
     } catch (error) {
       toast.error("No se pudo iniciar el análisis de la colección.");
       setAnalyzingTopic(null);
+      setActiveTasks(prev => prev.filter(t => !t.task_id.startsWith('temp-')));
     }
   };
 
@@ -324,7 +359,7 @@ export default function RagCollectionsPage() {
     try {
       // Inicializar tarea localmente para feedback inmediato
       const tempTaskId = `temp-${Date.now()}`;
-      setGraphTasks(prev => [...prev, {
+      setActiveTasks(prev => [...prev, {
         task_id: tempTaskId,
         phase: 'initializing',
         message: 'Iniciando procesamiento...',
@@ -337,9 +372,9 @@ export default function RagCollectionsPage() {
 
       // Determinar qué endpoint usar basado en el modo
       if (mode === 'conceptual') {
-        // Modo Conceptual: Usar la herramienta de Cognee
+        // Modo Conceptual: Usar la herramienta de Procesamiento Conceptual
         const payload = {
-          tool_name: "cognee_knowledge_graph",
+          tool_name: "conceptual_processing",
           action: "process_documents",
           dataset_name: datasetName,  // Nombre para organizar el grafo
           topic: processingTopic || undefined,  // Nombre de la colección para filtrar documentos
@@ -350,7 +385,7 @@ export default function RagCollectionsPage() {
 
         // Actualizar el ID de la tarea temporal con el real si viene en la respuesta
         if (response.data?.task_id) {
-          setGraphTasks(prev => prev.map(t => t.task_id === tempTaskId ? { ...t, task_id: response.data.task_id } : t));
+          setActiveTasks(prev => prev.map(t => t.task_id === tempTaskId ? { ...t, task_id: response.data.task_id } : t));
         }
       } else {
         // Modo Híbrido (Estándar): Llamar al endpoint optimizado
@@ -363,7 +398,7 @@ export default function RagCollectionsPage() {
 
         // Actualizar el ID de la tarea temporal con el real
         if (response.data?.task_id) {
-          setGraphTasks(prev => prev.map(t => t.task_id === tempTaskId ? { ...t, task_id: response.data.task_id } : t));
+          setActiveTasks(prev => prev.map(t => t.task_id === tempTaskId ? { ...t, task_id: response.data.task_id } : t));
         }
       }
 
@@ -375,7 +410,7 @@ export default function RagCollectionsPage() {
       console.error(error);
       toast.error("Error al iniciar el procesamiento del grafo.", { id: toastId });
       // Limpiar tareas temporales en caso de error
-      setGraphTasks(prev => prev.filter(t => !t.task_id.startsWith('temp-')));
+      setActiveTasks(prev => prev.filter(t => !t.task_id.startsWith('temp-')));
     } finally {
       setIsProcessingKnowledgeGraph(false);
       setProcessingTopic(null);
@@ -442,7 +477,10 @@ export default function RagCollectionsPage() {
                 onShare={handleShareCollection}
                 onChat={handleChatCollection}
                 onProcessKnowledgeGraph={handleProcessKnowledgeGraph}
-                isAnalyzing={collectionPollingId !== null && analyzingTopic === collection.topic}
+                isAnalyzing={
+                  (collectionPollingId !== null && analyzingTopic === collection.topic) || 
+                  activeTasks.some(t => t.topic === collection.topic && !t.is_complete && !t.has_error && !t.task_id.includes('temp'))
+                }
                 type="list" // Specify type as 'list'
               />
               {/* La etiqueta del workspace ahora se renderiza dentro de CollectionDisplay */}
@@ -573,13 +611,13 @@ export default function RagCollectionsPage() {
         </div>
       </div>
 
-      {(uploadTasks.length > 0 || graphTasks.length > 0) && (
+      {(uploadTasks.length > 0 || activeTasks.length > 0) && (
         <div className="fixed bottom-6 right-6 z-50 w-80 space-y-4">
           {uploadTasks.length > 0 && <UploadProgressIndicator tasks={uploadTasks} />}
-          {graphTasks.length > 0 && (
+          {activeTasks.length > 0 && (
             <GraphProgressIndicator
-              tasks={graphTasks}
-              onDismiss={(taskId) => setGraphTasks(prev => prev.filter(t => t.task_id !== taskId))}
+              tasks={activeTasks}
+              onDismiss={(taskId) => setActiveTasks(prev => prev.filter(t => t.task_id !== taskId))}
             />
           )}
         </div>
@@ -698,47 +736,61 @@ export default function RagCollectionsPage() {
       )} */}
 
       <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle className="text-xl font-bold text-primary">Colecciones de Conocimientos (RAG)</SheetTitle>
-            <SheetDescription className="text-sm text-muted-foreground">
-              Este módulo te permite organizar y gestionar tus documentos de forma eficiente, extrayendo y conectando información clave para un acceso rápido y contextualizado.
+        <SheetContent side="right" className="w-[400px] sm:w-[540px] overflow-y-auto">
+          <SheetHeader className="pb-6 border-b">
+            <SheetTitle className="text-2xl font-bold flex items-center gap-2">
+              <Brain className="h-6 w-6 text-primary" />
+              Guía de Conocimientos (RAG)
+            </SheetTitle>
+            <SheetDescription>
+              Entrena y gestiona la memoria a largo plazo de tu asistente.
             </SheetDescription>
           </SheetHeader>
-          <div className="py-4 text-sm text-gray-700 dark:text-gray-300 space-y-4">
-            <p><strong>¿Qué son las Colecciones de Conocimientos?</strong></p>
-            <p>Son agrupaciones temáticas de documentos que te permiten mantener tu información organizada y relevante. Puedes crear colecciones para diferentes proyectos, temas o áreas de interés.</p>
+          
+          <div className="py-6 space-y-8">
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">¿Qué es el RAG en Kognito?</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                RAG (Generación Aumentada por Recuperación) permite que el Agente consulte tus documentos personales o corporativos antes de responderte. Es como darle una <strong>biblioteca privada</strong> que solo él puede leer para darte respuestas exactas y citadas.
+              </p>
+            </section>
 
-            <p><strong>Características Principales:</strong></p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Memoria de Kognito:</strong> Los documentos que subes se integran a la "memoria" de Kognito, enriqueciendo sus respuestas por relevancia con la consulta en el chat.</li>
-              <li><strong>Organización Temática:</strong> Agrupa documentos por temas específicos para una mejor gestión.</li>
-              <li><strong>Análisis Detallado:</strong> Accede a herramientas de análisis para cada documento y para el conjunto de textos de una colección.</li>
-              <li><strong>Extracción de Títulos:</strong> Genera automáticamente títulos relevantes para tus documentos.</li>
-              <li><strong>Gestión de Documentos:</strong> Sube, edita, comparte y elimina documentos fácilmente.</li>
-              <li><strong>Grafos de Conocimiento:</strong> Convierte la información de tus documentos en grafos de conocimiento interactivos para visualizar relaciones y extraer insights.</li>
-              <li><strong>Integración con GitHub:</strong> Añade repositorios de GitHub directamente a tus colecciones para analizar código y documentación.</li>
-              <li><strong>Colaboración:</strong> Comparte colecciones con tu equipo para trabajar de forma conjunta.</li>
-            </ul>
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Interacción con el Agente</h3>
+              <div className="bg-primary/5 rounded-2xl p-4 border border-primary/10 space-y-3">
+                <p className="text-xs font-medium text-primary flex items-center gap-2">
+                  <Bot className="h-4 w-4" /> El Agente puede ayudarte a:
+                </p>
+                <ul className="text-xs space-y-2 text-muted-foreground list-disc pl-4">
+                  <li><strong>Responder preguntas complexas</strong> basándose en PDFs, Excels o código de GitHub.</li>
+                  <li><strong>Cruzar información</strong> entre diferentes colecciones para hallar conexiones.</li>
+                  <li><strong>Generar grafos de conocimiento</strong> para visualizar cómo se relacionan las entidades en tus textos.</li>
+                  <li><strong>Entrenar su propia memoria</strong> con nuevos archivos que subas.</li>
+                </ul>
+              </div>
+            </section>
 
-            <p><strong>Interacción con IA:</strong></p>
-            <p>Además de la gestión manual, puedes interactuar con tus colecciones a través del chat de IA. La IA dispone de herramientas especializadas para:</p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Realizar búsquedas semánticas dentro de tus documentos.</li>
-              <li>Generar resúmenes y extraer información clave de colecciones específicas.</li>
-              <li>Responder preguntas utilizando el conocimiento de tus documentos.</li>
-              <li>Crear nuevos documentos o contenido basado en la información de tus colecciones.</li>
-            </ul>
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Herramientas Avanzadas</h3>
+              <div className="grid grid-cols-1 gap-2 text-[11px]">
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-orange-500/5 text-orange-600 border border-orange-500/10">
+                  <span className="font-bold">KNOWLEDGE GRAPH</span> Convierte texto en una red de nodos y relaciones lógicas para un análisis profundo.
+                </div>
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-blue-500/5 text-blue-600 border border-blue-500/10">
+                  <span className="font-bold">GITHUB REPOS</span> Analiza repositorios enteros y chatea con el código fuente de forma contextual.
+                </div>
+              </div>
+            </section>
 
-            <p><strong>Flujo de Trabajo Sugerido:</strong></p>
-            <ol className="list-decimal pl-5 space-y-2">
-              <li><strong>Crear Colección:</strong> Inicia creando una nueva colección para tu tema.</li>
-              <li><strong>Subir Documentos:</strong> Añade tus archivos (PDFs, textos, etc.) o repositorios de GitHub a la colección.</li>
-              <li><strong>Analizar:</strong> Utiliza las herramientas de análisis para obtener resúmenes, palabras clave y otros insights.</li>
-              <li><strong>Generar Grafos:</strong> Si tu colección es rica en datos, genera un grafo de conocimiento para una exploración visual.</li>
-              <li><strong>Interactuar:</strong> Usa la colección para responder preguntas, generar contenido o apoyar tus procesos de toma de decisiones.</li>
-            </ol>
-            <p>¡Explora y potencia tu conocimiento con las Colecciones de Conocimientos!</p>
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Flujo de Trabajo Sugerido</h3>
+              <ol className="text-sm space-y-3 text-muted-foreground list-decimal pl-5">
+                <li><strong>Crea una Colección:</strong> Agrupa por tema (ej: "Proyectos 2024").</li>
+                <li><strong>Sube Documentos:</strong> Soporta PDFs, TXT, Word y más.</li>
+                <li><strong>Procesa Grafos:</strong> Opcionalmente, genera la red de conocimientos.</li>
+                <li><strong>Consulta:</strong> Chatea con la colección en el botón interactivo de cada tarjeta.</li>
+              </ol>
+            </section>
           </div>
         </SheetContent>
       </Sheet>

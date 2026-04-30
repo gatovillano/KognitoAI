@@ -1,23 +1,26 @@
 // src/components/Input.tsx
 import React from 'react';
 import { View, TextInput, Text, StyleSheet, TextInputProps } from 'react-native';
-import { colors, borderRadius, spacing } from '../theme/colors';
+import { colors, lightColors, borderRadius, spacing } from '../theme/colors';
 
 interface InputProps extends TextInputProps {
   label?: string;
   error?: string;
+  theme?: 'dark' | 'light';
 }
 
-export const Input: React.FC<InputProps> = ({ label, error, style, ...props }) => {
+export const Input: React.FC<InputProps> = ({ label, error, style, theme = 'dark', ...props }) => {
+  const themeColors = theme === 'light' ? lightColors : colors;
+  
   return (
     <View style={styles.container}>
-      {label && <Text style={styles.label}>{label}</Text>}
+      {label && <Text style={[styles.label, { color: themeColors.text }]}>{label}</Text>}
       <TextInput
-        style={[styles.input, error ? styles.inputError : null, style]}
-        placeholderTextColor={colors.textMuted}
+        style={[styles.input, { backgroundColor: themeColors.surface, color: themeColors.text, borderColor: themeColors.border }, error ? styles.inputError : null, style]}
+        placeholderTextColor={themeColors.textMuted}
         {...props}
       />
-      {error && <Text style={styles.errorText}>{error}</Text>}
+      {error && <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>}
     </View>
   );
 };

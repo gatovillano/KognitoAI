@@ -7,7 +7,7 @@ import sys
 # Añadir el directorio raíz al PYTHONPATH
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools.structured_data_generator_tool import StructuredDataGeneratorTool
+from skills.data_and_forms_skill.scripts.structured_data_generator_tool import StructuredDataGeneratorTool
 
 async def test_tool():
     tool = StructuredDataGeneratorTool()

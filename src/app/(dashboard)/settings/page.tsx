@@ -14,7 +14,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import apiClient from '@/lib/api'; // Importar apiClient
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Edit, Trash2, Eye, Calendar, User, Sparkles, Brain, Zap, Image as ImageIcon, Wrench, Puzzle } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, Calendar, User, Sparkles, Brain, Zap, Image as ImageIcon, Wrench, Puzzle, Info, RefreshCw, Globe } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Memory {
   id: string;
@@ -34,6 +37,8 @@ const LLM_PROVIDERS = [
   { id: 'anthropic', name: 'Anthropic (Claude)', env_key: 'ANTHROPIC_API_KEY' },
   { id: 'openrouter', name: 'OpenRouter', env_key: 'OPENROUTER_API_KEY' },
   { id: 'ollama', name: 'Ollama (Local)', env_key: null },
+  { id: 'ollama-cloud', name: '☁️ Ollama Cloud', env_key: 'OLLAMA_API_KEY' },
+  { id: 'openai-compatible', name: '🖥️ Local AI / OpenAI Compatible', env_key: null },
   { id: 'mistral', name: 'Mistral AI', env_key: 'MISTRAL_API_KEY' },
 ];
 
@@ -47,12 +52,17 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
     'openrouter/anthropic/claude-3.5-sonnet'
   ],
   ollama: ['ollama/llama3.1', 'ollama/mistral', 'ollama/phi3', 'ollama/gemma2'],
+  'ollama-cloud': ['ollama/llama3.1', 'ollama/mistral', 'ollama/phi3', 'ollama/gemma2', 'ollama/qwen2.5'],
+  'openai-compatible': [],
   mistral: ['mistral/mistral-large-latest', 'mistral/mistral-small-latest'],
 };
 
 const TTS_PROVIDERS = [
   { id: 'google', name: 'Google Cloud TTS', env_key: 'GOOGLE_APPLICATION_CREDENTIALS' },
   { id: 'openai', name: 'OpenAI TTS', env_key: 'OPENAI_API_KEY' },
+  { id: 'openai-compatible', name: '🖥️ Local / OpenAI Compatible (TTS)', env_key: null },
+  { id: 'kokoro', name: '🚀 Kokoro TTS (Local/Docker)', env_key: null },
+  { id: 'coquitts', name: '🐸 Coqui TTS / XTTS v2 (Local)', env_key: null },
   { id: 'azure', name: 'Azure TTS', env_key: 'AZURE_TTS_KEY' },
 ];
 
@@ -63,6 +73,8 @@ const TTS_VOICES_BY_PROVIDER: Record<string, string[]> = {
     'en-US-Neural2-A', 'en-US-Neural2-C', 'en-US-Neural2-D', 'en-US-Neural2-E',
   ],
   openai: ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'],
+  'openai-compatible': ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'],
+  coquitts: ['Ana Maria', 'Luis', 'Claribel Dervla', 'Daisy Milana', 'Badrani Sade', 'Eugenio Matthias', 'Adia Sayo', 'Abrahan Mack'],
   azure: [
     'es-MX-DaliaNeural', 'es-MX-JorgeNeural', 'es-MX-CandelaNeural', 'es-MX-GerardoNeural',
     'es-ES-ElviraNeural', 'es-ES-AlvaroNeural', 'es-ES-LaiaNeural', 'es-ES-ArnauNeural',
@@ -73,6 +85,7 @@ const TTS_VOICES_BY_PROVIDER: Record<string, string[]> = {
 const EMBEDDING_PROVIDERS = [
   { id: 'kognito-internal', name: 'Kognito Interno', env_key: null },
   { id: 'ollama', name: 'Ollama (Local)', env_key: null },
+  { id: 'ollama-cloud', name: '☁️ Ollama Cloud', env_key: 'OLLAMA_API_KEY' },
   { id: 'openai', name: 'OpenAI Embeddings', env_key: 'OPENAI_API_KEY' },
   { id: 'google', name: 'Google Embeddings', env_key: 'GOOGLE_API_KEY' },
 ];
@@ -84,6 +97,7 @@ const SEARCH_PROVIDERS = [
 const EMBEDDING_MODELS_BY_PROVIDER: Record<string, string[]> = {
   'kognito-internal': ['paraphrase-multilingual-mpnet-base-v2'],
   ollama: ['nomic-embed-text', 'llama3', 'mistral'],
+  'ollama-cloud': ['nomic-embed-text', 'llama3', 'mistral'],
   openai: ['text-embedding-ada-002', 'text-embedding-3-small', 'text-embedding-3-large'],
   google: ['text-embedding-004', 'text-embedding-gecko'],
 };
@@ -107,7 +121,7 @@ const SkillsSettings: React.FC = () => {
   useEffect(() => {
     const fetchSkills = async () => {
       try {
-        const response = await apiClient.get<{ skills: SkillMetadata[] }>('/api/tools/available');
+        const response = await apiClient.get<{ skills: SkillMetadata[] }>('/api/skills/available');
         setAvailableSkills(response.data.skills);
       } catch (error) {
         console.error('Error fetching skills:', error);
@@ -135,6 +149,14 @@ const SkillsSettings: React.FC = () => {
     }
   };
 
+  const [selectedSkill, setSelectedSkill] = useState<SkillMetadata | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+  const openSkillDialog = (skill: SkillMetadata) => {
+    setSelectedSkill(skill);
+    setIsDialogOpen(true);
+  };
+
   if (loading) return <div className="p-8 text-center">Cargando habilidades...</div>;
 
   return (
@@ -142,7 +164,11 @@ const SkillsSettings: React.FC = () => {
       {availableSkills.map((skill: SkillMetadata) => {
         const isEnabled = !settings?.disabled_skills?.includes(skill.id);
         return (
-          <Card key={skill.id} className={`overflow-hidden transition-all duration-300 ${isEnabled ? 'border-primary/20 bg-primary/5' : 'opacity-70 grayscale border-muted-foreground/20'}`}>
+          <Card 
+            key={skill.id} 
+            className={`overflow-hidden transition-all duration-300 relative group cursor-pointer hover:shadow-lg ${isEnabled ? 'border-primary/20 bg-primary/5' : 'opacity-70 grayscale border-muted-foreground/20'}`}
+            onClick={() => openSkillDialog(skill)}
+          >
             <CardHeader className="pb-2">
               <div className="flex justify-between items-start">
                 <div className="flex items-center gap-2">
@@ -151,10 +177,12 @@ const SkillsSettings: React.FC = () => {
                   </div>
                   <CardTitle className="text-sm font-bold uppercase tracking-tight">{skill.id.replace(/_/g, ' ')}</CardTitle>
                 </div>
-                <Switch
-                  checked={isEnabled}
-                  onCheckedChange={() => toggleSkill(skill.id)}
-                />
+                <div onClick={(e) => e.stopPropagation()}>
+                  <Switch
+                    checked={isEnabled}
+                    onCheckedChange={() => toggleSkill(skill.id)}
+                  />
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -165,11 +193,34 @@ const SkillsSettings: React.FC = () => {
                 <Badge variant={isEnabled ? 'default' : 'secondary'} className="text-[10px] uppercase font-bold px-2 py-0">
                   {isEnabled ? 'Activo' : 'Desactivado'}
                 </Badge>
+                <div className="text-primary opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] font-medium">
+                  <Info className="h-3 w-3" /> Ver detalles
+                </div>
               </div>
             </CardContent>
           </Card>
         );
       })}
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-2xl">
+              <Wrench className="h-6 w-6 text-primary" />
+              {selectedSkill?.id.replace(/_/g, ' ').toUpperCase()}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="prose prose-sm dark:prose-invert max-w-none mt-4">
+            {selectedSkill?.description ? (
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {selectedSkill.description}
+              </ReactMarkdown>
+            ) : (
+              <p className="text-muted-foreground italic">No hay una descripción detallada para esta habilidad.</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
@@ -198,6 +249,7 @@ const LLMSettingsForm: React.FC = () => {
     tts_voice: settings?.tts_voice || 'es-MX-DaliaNeural', // Google default
     tts_speed: settings?.tts_speed || 1.0,
     tts_region: settings?.tts_region || '', // Nuevo campo para Azure
+    tts_api_base: settings?.tts_api_base || '', // Nuevo campo para API TTS local
   });
 
   const [localEmbedding, setLocalEmbedding] = useState({
@@ -210,12 +262,23 @@ const LLMSettingsForm: React.FC = () => {
   const [mainModels, setMainModels] = useState<any[]>([]);
   const [fastModels, setFastModels] = useState<any[]>([]);
   const [visionModels, setVisionModels] = useState<any[]>([]);
-  const [loadingModels, setLoadingModels] = useState({ main: false, fast: false, vision: false });
+  const [ttsModels, setTtsModels] = useState<string[]>([]);
+  const [ttsVoices, setTtsVoices] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState({ main: false, fast: false, vision: false, tts: false, voices: false });
 
-  const fetchModels = async (provider: string, type: 'main' | 'fast' | 'vision') => {
+  const fetchModels = async (provider: string, type: 'main' | 'fast' | 'vision', options: { apiBase?: string; refresh?: boolean } = {}) => {
     setLoadingModels(prev => ({ ...prev, [type]: true }));
     try {
-      const resp = await apiClient.get(`/api/llm/models/${provider}`);
+      const { apiBase, refresh } = options;
+      let url = `/api/llm/models/${provider}`;
+      const params = new URLSearchParams();
+      if (apiBase) params.append('api_base', apiBase);
+      if (refresh) params.append('refresh', 'true');
+      
+      const queryString = params.toString();
+      if (queryString) url += `?${queryString}`;
+
+      const resp = await apiClient.get(url);
       const models = resp?.data || [];
       if (type === 'main') setMainModels(models);
       else if (type === 'fast') setFastModels((prev: any[]) => [...models]);
@@ -226,6 +289,51 @@ const LLMSettingsForm: React.FC = () => {
       setLoadingModels(prev => ({ ...prev, [type]: false }));
     }
   };
+
+  const fetchTTSModels = async (provider: string, apiBase?: string) => {
+    if (!['openai', 'openai-compatible', 'kokoro', 'coquitts'].includes(provider)) {
+      setTtsModels([]);
+      return;
+    }
+    
+    setLoadingModels(prev => ({ ...prev, tts: true }));
+    try {
+      const url = `/api/text-to-speech/models?provider=${provider}${apiBase ? `&api_base=${encodeURIComponent(apiBase)}` : ''}`;
+      const resp = await apiClient.get(url);
+      setTtsModels(resp.data.models || []);
+    } catch (e) {
+      console.error(`Error fetching TTS models for ${provider}:`, e);
+      setTtsModels([]);
+    } finally {
+      setLoadingModels(prev => ({ ...prev, tts: false }));
+    }
+  };
+
+  const fetchTTSVoices = async (provider: string, apiBase?: string) => {
+    if (!['openai', 'openai-compatible', 'kokoro', 'coquitts'].includes(provider)) {
+      setTtsVoices([]);
+      return;
+    }
+    
+    setLoadingModels(prev => ({ ...prev, voices: true }));
+    try {
+      const url = `/api/text-to-speech/voices?provider=${provider}${apiBase ? `&api_base=${encodeURIComponent(apiBase)}` : ''}`;
+      const resp = await apiClient.get(url);
+      setTtsVoices(resp.data.voices || []);
+    } catch (e) {
+      console.error(`Error fetching TTS voices for ${provider}:`, e);
+      setTtsVoices([]);
+    } finally {
+      setLoadingModels(prev => ({ ...prev, voices: false }));
+    }
+  };
+
+  useEffect(() => {
+    if (['openai', 'openai-compatible', 'kokoro', 'coquitts'].includes(localTTS.tts_provider)) {
+      fetchTTSModels(localTTS.tts_provider, localTTS.tts_api_base);
+      fetchTTSVoices(localTTS.tts_provider, localTTS.tts_api_base);
+    }
+  }, [localTTS.tts_provider, localTTS.tts_api_base]);
 
   const renderModelItem = (m: any, currentProvider: string) => {
     const isString = typeof m === 'string';
@@ -303,16 +411,31 @@ const LLMSettingsForm: React.FC = () => {
   };
 
   useEffect(() => {
-    if (localLLM.llm_provider) fetchModels(localLLM.llm_provider, 'main');
-  }, [localLLM.llm_provider]);
+    const handler = setTimeout(() => {
+      if (localLLM.llm_provider) {
+        fetchModels(localLLM.llm_provider, 'main', { apiBase: localLLM.llm_api_base });
+      }
+    }, 500); // 500ms debounce
+    return () => clearTimeout(handler);
+  }, [localLLM.llm_provider, localLLM.llm_api_base]);
 
   useEffect(() => {
-    if (localLLM.fast_llm_provider) fetchModels(localLLM.fast_llm_provider, 'fast');
-  }, [localLLM.fast_llm_provider]);
+    const handler = setTimeout(() => {
+      if (localLLM.fast_llm_provider) {
+        fetchModels(localLLM.fast_llm_provider, 'fast', { apiBase: localLLM.llm_api_base });
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [localLLM.fast_llm_provider, localLLM.llm_api_base]);
 
   useEffect(() => {
-    if (localLLM.vision_llm_provider) fetchModels(localLLM.vision_llm_provider, 'vision');
-  }, [localLLM.vision_llm_provider]);
+    const handler = setTimeout(() => {
+      if (localLLM.vision_llm_provider) {
+        fetchModels(localLLM.vision_llm_provider, 'vision', { apiBase: localLLM.llm_api_base });
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [localLLM.vision_llm_provider, localLLM.llm_api_base]);
 
   useEffect(() => {
     if (settings) {
@@ -333,6 +456,7 @@ const LLMSettingsForm: React.FC = () => {
         tts_voice: settings.tts_voice || 'es-MX-DaliaNeural',
         tts_speed: settings.tts_speed || 1.0,
         tts_region: settings.tts_region || '',
+        tts_api_base: settings.tts_api_base || '',
       });
       setLocalEmbedding({
         embedding_provider: settings.embedding_provider || 'kognito-internal',
@@ -454,7 +578,8 @@ const LLMSettingsForm: React.FC = () => {
                       setLocalLLM(prev => ({
                         ...prev,
                         llm_provider: v,
-                        llm_model: firstModel
+                        llm_model: firstModel,
+                        llm_api_base: v === 'ollama-cloud' ? '' : prev.llm_api_base
                       }));
                     }}
                   >
@@ -470,7 +595,18 @@ const LLMSettingsForm: React.FC = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="text-[11px] font-bold uppercase text-muted-foreground">Modelo</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-[11px] font-bold uppercase text-muted-foreground">Modelo</Label>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-4 w-4" 
+                      onClick={() => fetchModels(localLLM.llm_provider, 'main', { apiBase: localLLM.llm_api_base, refresh: true })}
+                      title="Refrescar modelos"
+                    >
+                      <RefreshCw className={`h-3 w-3 ${loadingModels.main ? 'animate-spin' : ''}`} />
+                    </Button>
+                  </div>
                   <Select
                     value={localLLM.llm_model}
                     onValueChange={(v) => setLocalLLM(prev => ({ ...prev, llm_model: v }))}
@@ -627,18 +763,42 @@ const LLMSettingsForm: React.FC = () => {
             </div>
 
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>API Base URL (Opcional)</Label>
+                <Label className="flex items-center gap-1.5 mb-2">
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                  <span>API Base URL {localLLM.llm_provider === 'openai-compatible' ? <span className="text-red-500">*</span> : '(Opcional)'}</span>
+                </Label>
                 <Input
-                  placeholder="https://api.openai.com/v1"
+                  placeholder={
+                    localLLM.llm_provider === 'openai-compatible' ? 'http://host.docker.internal:8080/v1' :
+                    localLLM.llm_provider === 'ollama' ? 'http://host.docker.internal:11434' :
+                    localLLM.llm_provider === 'ollama-cloud' ? 'https://ollama.com' :
+                    'https://api.openai.com/v1'
+                  }
                   value={localLLM.llm_api_base}
                   onChange={(e) => setLocalLLM(prev => ({ ...prev, llm_api_base: e.target.value }))}
-                  className="bg-background/50 backdrop-blur-sm border-primary/20"
+                  className="bg-background/50 backdrop-blur-sm border-primary/20 focus:border-primary/50 transition-all font-mono text-sm"
                 />
-                <p className="text-[11px] text-muted-foreground italic">
-                  Útil para Ollama local o proxies personalizados.
-                </p>
-              </div>
+                <div className="mt-1.5 p-2 rounded-lg bg-muted/30 border border-muted-foreground/10">
+                  <p className="text-[11px] text-muted-foreground leading-relaxed italic">
+                    {localLLM.llm_provider === 'openai-compatible' ? (
+                      <>
+                        <strong>Local AI / LM Studio:</strong> Escribe la URL de tu servidor local.<br/>
+                        Ej. Docker: <code className="bg-primary/10 px-1 rounded">http://host.docker.internal:8080/v1</code><br/>
+                        Ej. Sin Docker: <code className="bg-primary/10 px-1 rounded">http://localhost:8080/v1</code>
+                      </>
+                    ) : localLLM.llm_provider === 'ollama' ? (
+                      <>
+                        <strong>Protip Ollama:</strong> Si usas Docker, prueba con <code className="bg-primary/10 px-1 rounded">http://host.docker.internal:11434</code>. Si es local fuera de docker, usa <code className="bg-primary/10 px-1 rounded">http://localhost:11434</code>.
+                      </>
+                    ) : localLLM.llm_provider === 'ollama-cloud' ? (
+                      <>
+                        <strong>Ollama Cloud:</strong> Ingresa la URL de tu instancia de Ollama en la nube y tu API Key.
+                      </>
+                    ) : (
+                      "Útil para proveedores compatibles con OpenAI, Ollama local o proxies personalizados."
+                    )}
+                  </p>
+                </div>
             </div>
           </div>
         </CardContent>
@@ -693,8 +853,32 @@ const LLMSettingsForm: React.FC = () => {
                 </div>
               )}
 
+              {(localTTS.tts_provider === 'openai-compatible' || localTTS.tts_provider === 'openai' || localTTS.tts_provider === 'coquitts') && (
+                <div className="space-y-2">
+                  <Label>API Base URL (Opcional)</Label>
+                  <Input
+                    placeholder={
+                      localTTS.tts_provider === 'coquitts' ? 'http://localhost:8006' :
+                      localTTS.tts_provider === 'openai-compatible' ? 'http://localhost:8080/v1' :
+                      'https://api.openai.com/v1'
+                    }
+                    value={localTTS.tts_api_base || ''}
+                    onChange={(e) => setLocalTTS(prev => ({ ...prev, tts_api_base: e.target.value }))}
+                    className="bg-background/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-colors font-mono text-sm"
+                  />
+                  <p className="text-[10px] text-muted-foreground italic mt-1 leading-relaxed">
+                    {localTTS.tts_provider === 'coquitts' ?
+                      "Para Coqui TTS / XTTS v2 local (ej. http://localhost:8006)" :
+                      "Para servicios TTS locales o compatibles con OpenAI."}
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-2">
-                <Label>Voz</Label>
+                <div className="flex items-center justify-between">
+                  <Label>Voz</Label>
+                  {loadingModels.voices && <RefreshCw className="h-3 w-3 animate-spin text-primary" />}
+                </div>
                 <Select
                   value={localTTS.tts_voice}
                   onValueChange={(v) => setLocalTTS(prev => ({ ...prev, tts_voice: v }))}
@@ -703,11 +887,20 @@ const LLMSettingsForm: React.FC = () => {
                     <SelectValue placeholder="Selecciona una voz" />
                   </SelectTrigger>
                   <SelectContent className="max-h-[300px]">
-                    {(TTS_VOICES_BY_PROVIDER[localTTS.tts_provider] || []).map(v => (
+                    {/* Combinar voces estáticas y dinámicas, evitando duplicados */}
+                    {Array.from(new Set([
+                      ...(ttsVoices.length > 0 ? ttsVoices : []),
+                      ...(TTS_VOICES_BY_PROVIDER[localTTS.tts_provider] || [])
+                    ])).map(v => (
                       <SelectItem key={v} value={v}>{v}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {ttsVoices.length > 0 && (
+                  <p className="text-[11px] text-muted-foreground italic">
+                    Voces detectadas automáticamente de la API.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -729,16 +922,41 @@ const LLMSettingsForm: React.FC = () => {
               </div>
             </div>
             <div className="space-y-4">
-              {/* Aquí se podría añadir un campo para tts_model si los proveedores lo soportan */}
-              {/* <div className="space-y-2">
-                <Label>Modelo TTS</Label>
-                <Input
-                  placeholder="tts-1"
-                  value={localTTS.tts_model}
-                  onChange={(e) => setLocalTTS(prev => ({ ...prev, tts_model: e.target.value }))}
-                  className="bg-background/50 backdrop-blur-sm border-primary/20"
-                />
-              </div> */}
+              {(localTTS.tts_provider === 'openai' || localTTS.tts_provider === 'openai-compatible') && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Modelo de TTS</Label>
+                    {loadingModels.tts && <RefreshCw className="h-3 w-3 animate-spin text-primary" />}
+                  </div>
+                  {ttsModels.length > 0 ? (
+                    <Select
+                      value={localTTS.tts_model}
+                      onValueChange={(v) => setLocalTTS(prev => ({ ...prev, tts_model: v }))}
+                    >
+                      <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-primary/20">
+                        <SelectValue placeholder="Selecciona un modelo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ttsModels.map(m => (
+                          <SelectItem key={m} value={m}>{m}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      placeholder="Ej: tts-1 o kokoro"
+                      value={localTTS.tts_model || ''}
+                      onChange={(e) => setLocalTTS(prev => ({ ...prev, tts_model: e.target.value }))}
+                      className="bg-background/50 backdrop-blur-sm border-primary/20"
+                    />
+                  )}
+                  <p className="text-[11px] text-muted-foreground italic">
+                    {ttsModels.length > 0 
+                      ? "Modelos detectados automáticamente de la API." 
+                      : "Ingresa el nombre del modelo si no se detectó automáticamente."}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </CardContent>
@@ -764,7 +982,13 @@ const LLMSettingsForm: React.FC = () => {
                   value={localEmbedding.embedding_provider}
                   onValueChange={(v) => {
                     const firstModel = EMBEDDING_MODELS_BY_PROVIDER[v]?.[0] || '';
-                    setLocalEmbedding(prev => ({ ...prev, embedding_provider: v, embedding_model: firstModel }));
+                    const provider = EMBEDDING_PROVIDERS.find(p => p.id === v);
+                    setLocalEmbedding(prev => ({ 
+                      ...prev, 
+                      embedding_provider: v, 
+                      embedding_model: firstModel,
+                      embedding_api_key_name: provider?.env_key || prev.embedding_api_key_name
+                    }));
                   }}
                 >
                   <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-colors">
@@ -811,7 +1035,7 @@ const LLMSettingsForm: React.FC = () => {
               <div className="space-y-2">
                 <Label>API Base URL (Opcional)</Label>
                 <Input
-                  placeholder="http://localhost:11434"
+                  placeholder={localEmbedding.embedding_provider === 'ollama-cloud' ? 'https://ollama.com' : 'http://localhost:11434'}
                   value={localEmbedding.embedding_api_base}
                   onChange={(e) => setLocalEmbedding(prev => ({ ...prev, embedding_api_base: e.target.value }))}
                   className="bg-background/50 backdrop-blur-sm border-primary/20"
@@ -843,7 +1067,11 @@ const LLMSettingsForm: React.FC = () => {
               <Select value={newKey.provider} onValueChange={(v) => setNewKey(prev => ({ ...prev, provider: v }))}>
                 <SelectTrigger><SelectValue placeholder="Proveedor" /></SelectTrigger>
                 <SelectContent>
-                  {[...LLM_PROVIDERS, ...TTS_PROVIDERS, ...EMBEDDING_PROVIDERS, ...SEARCH_PROVIDERS].filter(p => p.env_key).map(p => (
+                  {Array.from(new Map(
+                    [...LLM_PROVIDERS, ...TTS_PROVIDERS, ...EMBEDDING_PROVIDERS, ...SEARCH_PROVIDERS]
+                      .filter(p => p.env_key)
+                      .map(p => [p.id, p])
+                  ).values()).map(p => (
                     <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -988,6 +1216,7 @@ const SettingsPage: React.FC = () => {
     content: '',
     type: 'general'
   });
+  const [workspaces, setWorkspaces] = useState<any[]>([]);
 
   useEffect(() => {
     getSettings();
@@ -1001,7 +1230,19 @@ const SettingsPage: React.FC = () => {
     if (activeTab === 'memories' && !memories.length) {
       fetchMemories();
     }
+    if (activeTab === 'sync' && !workspaces.length) {
+      fetchWorkspaces();
+    }
   }, [activeTab]);
+
+  const fetchWorkspaces = async () => {
+    try {
+      const response = await apiClient.get('/api/workspaces');
+      setWorkspaces(response.data.workspaces || response.data || []);
+    } catch (error) {
+      console.error('Error fetching workspaces:', error);
+    }
+  };
 
   const fetchMemories = async () => {
     setMemoryLoading(true);
@@ -1133,6 +1374,7 @@ const SettingsPage: React.FC = () => {
           <TabsTrigger value="memories">Memorias</TabsTrigger>
           <TabsTrigger value="skills">Skills</TabsTrigger>
           <TabsTrigger value="security">Seguridad</TabsTrigger>
+          <TabsTrigger value="remote">Acceso Remoto / SSH</TabsTrigger>
           <TabsTrigger value="sync">Sincronización</TabsTrigger>
         </TabsList>
         <TabsContent value="personal-data">
@@ -1372,6 +1614,17 @@ const SettingsPage: React.FC = () => {
             )}
           </div>
         </TabsContent>
+        <TabsContent value="skills">
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-xl font-semibold mb-1">Habilidades (Skills)</h2>
+              <p className="text-sm text-muted-foreground mb-6">
+                Activa o desactiva las capacidades de la IA. Las habilidades desactivadas no estarán disponibles para el agente.
+              </p>
+            </div>
+            <SkillsSettings />
+          </div>
+        </TabsContent>
         <TabsContent value="security">
           <Card>
             <CardHeader>
@@ -1385,6 +1638,89 @@ const SettingsPage: React.FC = () => {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="remote">
+          <Card className="border-none shadow-md bg-gradient-to-br from-card to-secondary/20">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Globe className="h-5 w-5 text-primary" />
+                Acceso a Archivos Locales (SSH)
+              </CardTitle>
+              <CardDescription>
+                Configura una conexión SSH para permitir al agente explorar y leer directamente archivos de tu máquina o de un servidor remoto.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="ssh_host">Servidor / Host SSH</Label>
+                    <Input id="ssh_host" placeholder="Ej: 192.168.1.100 o localhost" value={settings?.ssh_host || ''} onChange={(e) => updateSettings({ ssh_host: e.target.value })} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ssh_port">Puerto SSH</Label>
+                    <Input id="ssh_port" placeholder="22" value={settings?.ssh_port || ''} onChange={(e) => updateSettings({ ssh_port: e.target.value })} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="ssh_user">Usuario SSH</Label>
+                    <Input id="ssh_user" placeholder="gato" value={settings?.ssh_user || ''} onChange={(e) => updateSettings({ ssh_user: e.target.value })} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="local_base_path">Directorio Raíz Permitido</Label>
+                    <Input id="local_base_path" placeholder="/home/gato/Proyectos" value={settings?.local_base_path || ''} onChange={(e) => updateSettings({ local_base_path: e.target.value })} />
+                  </div>
+                </div>
+                
+                <div className="mt-8 border-t border-border pt-4">
+                  <h4 className="text-sm font-bold mb-2">Credenciales (Guardado Seguro)</h4>
+                  <p className="text-xs text-muted-foreground mb-4">La contraseña o llave privada de SSH se guarda encriptada en la bóveda de secretos de tu cuenta.</p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="ssh_password">Contraseña SSH (si usa)</Label>
+                      <div className="flex gap-2">
+                        <Input id="ssh_password" type="password" placeholder="••••••••" onChange={(e) => setNewKey(prev => ({...prev, provider: 'ssh_password', value: e.target.value}))} />
+                        <Button variant="secondary" onClick={async () => {
+                          if(!newKey.value) return;
+                          try {
+                            // Se asume import o función ya definida para guardar en api/users/me/secrets
+                            await fetch('/api/users/me/secrets', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+                                body: JSON.stringify({ key_name: 'SSH_PASSWORD', value: newKey.value, description: 'Contraseña para File Navigator SSH' })
+                            });
+                            toast.success("Contraseña guardada segura");
+                          } catch(err) { toast.error("Error guardando") }
+                        }}>Guardar</Button>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="ssh_key">Llave Privada (RSA/ED25519)</Label>
+                      <div className="flex gap-2">
+                        <Input id="ssh_key" type="password" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..." onChange={(e) => setNewKey(prev => ({...prev, provider: 'ssh_key', value: e.target.value}))} />
+                        <Button variant="secondary" onClick={async () => {
+                          if(!newKey.value) return;
+                          try {
+                            await fetch('/api/users/me/secrets', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+                                body: JSON.stringify({ key_name: 'SSH_PRIVATE_KEY', value: newKey.value, description: 'Llave privada SSH' })
+                            });
+                            toast.success("Llave guardada segura");
+                          } catch(err) { toast.error("Error guardando llave") }
+                        }}>Guardar</Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="sync">
           <Card>
             <CardHeader>
@@ -1394,25 +1730,65 @@ const SettingsPage: React.FC = () => {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="caldav-url">URL de Sincronización CalDAV</Label>
-                <div className="flex items-center space-x-2 mt-1">
-                  <Input
-                    id="caldav-url"
-                    readOnly
-                    value={`${window.location.origin}/api/caldav/calendars/${user?.account_id}/default/`}
-                  />
-                  <Button
-                    onClick={() => {
-                      if (typeof window !== "undefined") {
-                        navigator.clipboard.writeText(`${window.location.origin}/api/caldav/calendars/${user?.account_id}/default/`);
-                        toast.success('URL copiada al portapapeles');
-                      }
-                    }}
-                  >
-                    Copiar
-                  </Button>
+              <div className="space-y-6">
+                <div>
+                  <Label className="text-sm font-bold uppercase tracking-widest text-primary/70">Calendario Personal</Label>
+                  <p className="text-xs text-muted-foreground mb-2">Eventos y tareas fuera de workspaces.</p>
+                  <div className="flex items-center space-x-2">
+                    <Input
+                      readOnly
+                      className="bg-muted/50 font-mono text-xs"
+                      value={typeof window !== "undefined" ? `${window.location.origin}/api/caldav/calendars/${user?.account_id}/default/` : ""}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (typeof window !== "undefined") {
+                          navigator.clipboard.writeText(`${window.location.origin}/api/caldav/calendars/${user?.account_id}/default/`);
+                          toast.success('URL copiada');
+                        }
+                      }}
+                    >
+                      Copiar
+                    </Button>
+                  </div>
                 </div>
+
+                {workspaces.length > 0 && (
+                  <div className="space-y-4 pt-4 border-t border-border/40">
+                    <Label className="text-sm font-bold uppercase tracking-widest text-primary/70">Workspaces</Label>
+                    <p className="text-xs text-muted-foreground mb-4">Cada workspace actúa como un calendario independiente.</p>
+                    {workspaces.map((ws) => (
+                      <div key={ws.id} className="space-y-2 p-4 rounded-2xl bg-muted/30 border border-border/40">
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: ws.color || 'var(--primary)' }} />
+                          <span className="text-xs font-black uppercase tracking-tight">{ws.name}</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Input
+                            readOnly
+                            className="bg-background/50 font-mono text-[10px] h-8"
+                            value={typeof window !== "undefined" ? `${window.location.origin}/api/caldav/calendars/${user?.account_id}/${ws.id}/` : ""}
+                          />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 px-3 text-[10px] font-bold"
+                            onClick={() => {
+                              if (typeof window !== "undefined") {
+                                navigator.clipboard.writeText(`${window.location.origin}/api/caldav/calendars/${user?.account_id}/${ws.id}/`);
+                                toast.success(`URL de ${ws.name} copiada`);
+                              }
+                            }}
+                          >
+                            Copiar
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <h3 className="font-semibold">Instrucciones</h3>

@@ -20,6 +20,7 @@ import os
 from dotenv import load_dotenv
 import logging
 from typing import Optional, List
+from utils.docker_secrets import get_secret
 
 # Carga las variables de entorno desde un archivo .env en la raíz del proyecto.
 # Se usa override=True para permitir que los cambios en el archivo montado tomen precedencia.
@@ -80,6 +81,7 @@ class Config:
         self.ollama_api_url: str = os.getenv("OLLAMA_API_URL", "http://host.docker.internal:11434") # URL por defecto para acceder al host desde Docker
         self.llm_request_timeout: int = int(os.getenv("LLM_REQUEST_TIMEOUT", 300)) # Nuevo: Tiempo de espera para las solicitudes al LLM en segundos
         self.llm_max_retries: int = int(os.getenv("LLM_MAX_RETRIES", 3)) # Nuevo: Número máximo de reintentos para llamadas al LLM
+        self.max_agent_loops: int = int(os.getenv("MAX_AGENT_LOOPS", 20)) # Nuevo: Límite de iteraciones para el agente de herramientas
         
         # --- Configuración de Rate Limiting y Tokens ---
         self.rate_limit_enabled: bool = os.getenv("RATE_LIMIT_ENABLED", "True").lower() in ('true', '1', 't')
@@ -93,7 +95,7 @@ class Config:
 
 
         # --- Configuración de Telegram ---
-        self.telegram_bot_token: Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN")
+        self.telegram_bot_token: Optional[str] = get_secret("telegram_bot_token", "TELEGRAM_BOT_TOKEN")
         self.bot_username: Optional[str] = os.getenv("BOT_USERNAME")
         
         # URL de la WebApp (el panel de control).
@@ -118,16 +120,18 @@ class Config:
         self.google_project_location: Optional[str] = os.getenv("GOOGLE_PROJECT_LOCATION")
         
         # Clave para la herramienta de búsqueda web.
-        self.brave_search_api_key: Optional[str] = os.getenv("BRAVE_SEARCH_API_KEY")
+        self.brave_search_api_key: Optional[str] = get_secret("brave_search_api_key", "BRAVE_SEARCH_API_KEY")
         # ¡NUEVA LÍNEA! Clave para la herramienta de búsqueda Tavily.
-        self.tavily_api_key: Optional[str] = os.getenv("TAVILY_API_KEY")
+        self.tavily_api_key: Optional[str] = get_secret("tavily_api_key", "TAVILY_API_KEY")
         # ¡NUEVA LÍNEA! Token de GitHub para importar repositorios privados.
-        self.github_token: Optional[str] = os.getenv("GITHUB_TOKEN")
+        self.github_token: Optional[str] = get_secret("github_token", "GITHUB_TOKEN")
         # ¡NUEVA LÍNEA! Clave de API para OpenRouter.
-        self.openrouter_api_key: Optional[str] = os.getenv("OPENROUTER_API_KEY")
+        self.openrouter_api_key: Optional[str] = get_secret("openrouter_api_key", "OPENROUTER_API_KEY")
+        # ¡NUEVA LÍNEA! Clave de API para Ollama Cloud.
+        self.ollama_api_key: Optional[str] = get_secret("ollama_api_key", "OLLAMA_API_KEY")
 
         # ¡NUEVA LÍNEA! La URL de nuestro servidor API para que los clientes sepan a dónde llamar.
-        self.api_server_url: str = os.getenv("API_SERVER_URL", "https://apibase.gatoslibres.art")
+        self.api_server_url: str = os.getenv("API_SERVER_URL", "https://apibase.cuerpolibre.cl")
         
         # Determine default internal URL based on environment
         default_internal = self.api_server_url
@@ -138,29 +142,32 @@ class Config:
         # ¡NUEVA LÍNEA! URL interna para comunicación entre contenedores (Docker network)
         self.internal_api_server_url: str = os.getenv("INTERNAL_API_SERVER_URL", default_internal)
         # ¡NUEVA LÍNEA! Un secreto para proteger los endpoints de administración.
-        self.admin_secret: str = os.getenv("ADMIN_SECRET", "default-admin-secret")
+        self.admin_secret: str = get_secret("admin_secret", "ADMIN_SECRET", "default-admin-secret")
         
         # Clave maestra para el cifrado de datos en la base de datos (pgcrypto)
-        self.db_encryption_key: str = os.getenv("DB_ENCRYPTION_KEY", "super-secret-db-encryption-key")
+        self.db_encryption_key: str = get_secret("db_encryption_key", "DB_ENCRYPTION_KEY", "super-secret-db-encryption-key")
 
         # --- Configuración de la Base de Datos (PostgreSQL) ---
         self.postgres_user: Optional[str] = os.getenv("POSTGRES_USER")
-        self.postgres_password: Optional[str] = os.getenv("POSTGRES_PASSWORD")
+        self.postgres_password: Optional[str] = get_secret("postgres_password", "POSTGRES_PASSWORD")
         self.postgres_db: Optional[str] = os.getenv("POSTGRES_DB")
         # URL de conexión completa, construida en docker-compose.yml, pero leída aquí para validación.
+        # Si DATABASE_URL no existe, la construimos usando los secretos.
         self.database_url: Optional[str] = os.getenv("DATABASE_URL")
+        if not self.database_url and self.postgres_user and self.postgres_password and self.postgres_db:
+            self.database_url = f"postgresql+psycopg://{self.postgres_user}:{self.postgres_password}@db:5432/{self.postgres_db}"
         
         # --- Configuración de Neo4j y Cognee (para Grafos de Conocimiento) ---
         self.neo4j_uri: Optional[str] = os.getenv("NEO4J_URI", "bolt://localhost:7687")
         self.neo4j_user: Optional[str] = os.getenv("NEO4J_USER", "neo4j")
-        self.neo4j_password: Optional[str] = os.getenv("NEO4J_PASSWORD")
+        self.neo4j_password: Optional[str] = get_secret("neo4j_password", "NEO4J_PASSWORD")
 
 
         
         # --- Configuración de RAG (Chunking) ---
         self.chunk_size: int = int(os.getenv("CHUNK_SIZE", 100))
         self.chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", 20))
-        self.internal_api_key_for_bot: str = os.getenv("INTERNAL_API_KEY_FOR_BOT", "super-secret-internal-key")
+        self.internal_api_key_for_bot: str = get_secret("internal_api_key_for_bot", "INTERNAL_API_KEY_FOR_BOT", "super-secret-internal-key")
         self.global_collection_name: str = os.getenv("GLOBAL_COLLECTION_NAME", "global_knowledge_base") # Nueva variable
 
         # RAG General
@@ -185,6 +192,9 @@ class Config:
         self.use_hybrid_ner: bool = os.getenv("USE_HYBRID_NER", "True").lower() in ('true', '1', 't')
         # Umbral de confianza para GLiNER
         self.gliner_threshold: float = float(os.getenv("GLINER_THRESHOLD", 0.6))
+        
+        # --- Configuración de Skills Globales ---
+        self.get_proactive_insights_enabled: bool = os.getenv("GET_PROACTIVE_INSIGHTS_ENABLED", "True").lower() in ('true', '1', 't')
 
 
         # Loaders de Documentos Avanzados (APIs externas)
@@ -211,10 +221,11 @@ class Config:
         self.tts_default_speaking_rate: float = float(os.getenv("TTS_DEFAULT_SPEAKING_RATE", "1.0"))
 
         # --- Configuración de Umbrales para proactive_knowledge_linker_tool ---
-        self.DUPLICITY_SIMILARITY_THRESHOLD: float = float(os.getenv("DUPLICITY_SIMILARITY_THRESHOLD", 0.90)) # Umbral para duplicidad (alta similitud)
-        self.SYNERGY_SIMILARITY_THRESHOLD: float = float(os.getenv("SYNERGY_SIMILARITY_THRESHOLD", 0.65)) # Umbral para sinergia (moderada similitud)
-        self.CONTRADICTION_SENTIMENT_THRESHOLD: float = float(os.getenv("CONTRADICTION_SENTIMENT_THRESHOLD", 0.70)) # Diferencia de polaridad para contradicción
-        self.EVOLUTION_MIN_DAYS_THRESHOLD: int = int(os.getenv("EVOLUTION_MIN_DAYS_THRESHOLD", 30)) # Días mínimos para evolución/cambio
+        # Configuración de vinculación proactiva (Eliminado)
+        # DUPLICITY_SIMILARITY_THRESHOLD = float(os.getenv("DUPLICITY_SIMILARITY_THRESHOLD", 0.90)) # Umbral para duplicidad (alta similitud)
+        # SYNERGY_SIMILARITY_THRESHOLD = float(os.getenv("SYNERGY_SIMILARITY_THRESHOLD", 0.65)) # Umbral para sinergia (moderada similitud)
+        # CONTRADICTION_SENTIMENT_THRESHOLD = float(os.getenv("CONTRADICTION_SENTIMENT_THRESHOLD", 0.70)) # Diferencia de polaridad para contradicción
+        # EVOLUTION_MIN_DAYS_THRESHOLD = int(os.getenv("EVOLUTION_MIN_DAYS_THRESHOLD", 30)) # Días mínimos para evolución/cambio
 
         # --- Prompt de Sistema por Defecto ---
         self.default_system_prompt: str = os.getenv(
@@ -296,7 +307,7 @@ class Config:
         )
 
         # --- Configuración de JWT ---
-        self.jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "supersecretkey")
+        self.jwt_secret_key: str = get_secret("jwt_secret_key", "JWT_SECRET_KEY", "supersecretkey")
         self.jwt_expiry_days: int = int(os.getenv("JWT_EXPIRY_DAYS", 7))
         self.debug_mode: bool = os.getenv("DEBUG_MODE", "False").lower() in ('true', '1', 't')
         self.log_level: str = os.getenv("LOG_LEVEL", "INFO").upper() # Nuevo: Nivel de logging configurable

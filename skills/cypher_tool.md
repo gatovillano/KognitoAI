@@ -1,1 +1,0 @@
-La consulta Cypher a ejecutar en la base de datos Neo4j.

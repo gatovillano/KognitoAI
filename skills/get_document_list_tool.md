@@ -1,1 +1,0 @@
-El nombre del tema o colección para listar documentos específicos de esa colección.

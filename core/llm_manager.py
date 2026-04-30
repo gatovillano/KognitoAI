@@ -4,16 +4,19 @@ import logging
 import time
 import asyncio
 import os
-import torch # Importar torch
+import torch  # Importar torch
 from collections import deque
 from threading import Lock
 from typing import Optional, Dict, Any, List, Union
 from datetime import datetime
-import litellm # Importar litellm
+import litellm  # Importar litellm
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.rate_limiters import BaseRateLimiter
 from langchain_community.chat_models import ChatLiteLLM
-from langchain_core.messages import BaseMessage, HumanMessage # Importar BaseMessage y HumanMessage
+from langchain_core.messages import (
+    BaseMessage,
+    HumanMessage,
+)  # Importar BaseMessage y HumanMessage
 from core.config import settings
 from core.database import SessionLocal, Account, UserSecret
 from core.repositories.secret_repository import SecretRepository
@@ -24,17 +27,20 @@ litellm.drop_params = True
 
 # Disable debug mode for LiteLLM to reduce logging
 litellm.set_verbose = False
-logging.getLogger('LiteLLM').setLevel(logging.WARNING)
-logging.getLogger('LiteLLM/UniversalDeployer').setLevel(logging.WARNING)
+logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+logging.getLogger("LiteLLM/UniversalDeployer").setLevel(logging.WARNING)
 # Silenciar los logs de "Provider List" que a veces salen por stdout
 import os
+
 os.environ["LITELLM_LOG"] = "ERROR"
 
 # --- Configuración del Logger ---
 from core.utils.logging_utils import AgentLogger
+
 logger = AgentLogger(__name__)
 
 # --- Rate Limiter Implementation ---
+
 
 class RateLimiter(BaseRateLimiter):
     """
@@ -42,9 +48,10 @@ class RateLimiter(BaseRateLimiter):
     expected by LangChain's `rate_limiter` parameter. It ensures that no more
     than a specified number of requests are made per minute.
     """
+
     _instance = None
     _lock = Lock()
-    
+
     max_requests: int
     per_seconds: int
     request_timestamps: deque
@@ -53,8 +60,12 @@ class RateLimiter(BaseRateLimiter):
         with cls._lock:
             if cls._instance is None:
                 cls._instance = super().__new__(cls)
-                cls._instance.max_requests = kwargs.get('max_requests', settings.rate_limit_max_requests)
-                cls._instance.per_seconds = kwargs.get('per_seconds', settings.rate_limit_per_seconds)
+                cls._instance.max_requests = kwargs.get(
+                    "max_requests", settings.rate_limit_max_requests
+                )
+                cls._instance.per_seconds = kwargs.get(
+                    "per_seconds", settings.rate_limit_per_seconds
+                )
                 cls._instance.request_timestamps = deque()
                 logger.info(
                     f"RateLimiter: {cls._instance.max_requests} req / {cls._instance.per_seconds}s | Activo: {settings.rate_limit_enabled}"
@@ -66,7 +77,7 @@ class RateLimiter(BaseRateLimiter):
         self.max_requests = max_requests
         self.per_seconds = per_seconds
         self.request_timestamps = deque()
-        pass # State is managed by the singleton __new__
+        pass  # State is managed by the singleton __new__
 
     async def aacquire(self, **kwargs: Any) -> None:
         """
@@ -79,7 +90,10 @@ class RateLimiter(BaseRateLimiter):
         with self._lock:
             now = time.monotonic()
             # Prune old timestamps
-            while self.request_timestamps and self.request_timestamps[0] <= now - self.per_seconds:
+            while (
+                self.request_timestamps
+                and self.request_timestamps[0] <= now - self.per_seconds
+            ):
                 self.request_timestamps.popleft()
 
             wait_time = 0
@@ -93,7 +107,7 @@ class RateLimiter(BaseRateLimiter):
                         f"Rate limit of {self.max_requests}/{self.per_seconds}s reached. "
                         f"Async waiting for {wait_time:.2f} seconds."
                     )
-        
+
         if wait_time > 0:
             await asyncio.sleep(wait_time)
 
@@ -110,7 +124,10 @@ class RateLimiter(BaseRateLimiter):
 
         with self._lock:
             now = time.monotonic()
-            while self.request_timestamps and self.request_timestamps[0] <= now - self.per_seconds:
+            while (
+                self.request_timestamps
+                and self.request_timestamps[0] <= now - self.per_seconds
+            ):
                 self.request_timestamps.popleft()
 
             wait_time = 0
@@ -119,15 +136,18 @@ class RateLimiter(BaseRateLimiter):
                 time_since_oldest = now - oldest_request_time
                 wait_time = self.per_seconds - time_since_oldest
                 if wait_time > 0:
-                    logger.warning(f"Rate limit reached. Sync waiting for {wait_time:.2f}s.")
+                    logger.warning(
+                        f"Rate limit reached. Sync waiting for {wait_time:.2f}s."
+                    )
                     time.sleep(wait_time)
-            
+
             self.request_timestamps.append(time.monotonic())
+
 
 # Initialize the global rate limiter
 gemini_rate_limiter = RateLimiter(
     max_requests=settings.rate_limit_max_requests,
-    per_seconds=settings.rate_limit_per_seconds
+    per_seconds=settings.rate_limit_per_seconds,
 )
 
 # --- Global LLM Instances ---
@@ -135,13 +155,16 @@ _main_agent_llm_instance: Optional[ChatLiteLLM] = None
 _fast_task_llm_instance: Optional[ChatLiteLLM] = None
 _vision_llm_instance: Optional[ChatLiteLLM] = None
 
-def get_main_llm() -> Optional[ChatLiteLLM]: # More specific return type
+
+def get_main_llm() -> Optional[ChatLiteLLM]:  # More specific return type
     """Returns the initialized main agent LLM instance."""
     return _main_agent_llm_instance
 
-def get_fast_llm() -> Optional[ChatLiteLLM]: # More specific return type
+
+def get_fast_llm() -> Optional[ChatLiteLLM]:  # More specific return type
     """Returns the initialized fast task LLM instance, or the main one as a fallback."""
     return _fast_task_llm_instance or _main_agent_llm_instance
+
 
 def get_vision_llm() -> Optional[ChatLiteLLM]:
     """Returns the initialized vision LLM instance for multimodal tasks."""
@@ -151,9 +174,11 @@ def get_vision_llm() -> Optional[ChatLiteLLM]:
 def normalize_openrouter_model_name(model_name: str) -> str:
     """
     Normaliza el nombre del modelo para OpenRouter.
-    
+
     Asegura que el modelo tenga el formato 'organizacion/modelo' requerido por OpenRouter.
     Si es un modelo nativo (aurora, pony), le añade el prefijo 'openrouter/'.
+    Para Step 3.5 Flash, le añade el prefijo 'stepfun/'.
+    Elimina el prefijo 'openrouter/' de modelos que no son nativos de OpenRouter.
     """
     # Si ya tiene el prefijo de proveedor (ej: 'openai/' o 'openrouter/'), no tocarlo
     if "/" in model_name and not model_name.startswith("openrouter/"):
@@ -161,13 +186,34 @@ def normalize_openrouter_model_name(model_name: str) -> str:
         # lo dejamos pasar ya que OpenRouter acepta IDs de otros proveedores.
         return model_name
 
-    native_models = ["aurora-alpha", "pony-alpha", "step-3.5-flash:free"]
-    
+    native_models = ["aurora-alpha", "pony-alpha"]
+    stepfun_models = ["step-3.5-flash:free"]
+
     model_lower = model_name.lower()
-    # Si es un modelo nativo sin prefijo, añadírselo para tener el ID completo de OpenRouter
+
+    # Si tiene prefijo 'openrouter/', verificar si es un modelo nativo
+    if model_name.startswith("openrouter/"):
+        model_without_prefix = model_name[len("openrouter/") :]
+        model_without_prefix_lower = model_without_prefix.lower()
+
+        # Si es un modelo nativo (aurora/pony), mantener el prefijo
+        if any(native in model_without_prefix_lower for native in native_models):
+            return model_name
+        else:
+            # Para otros modelos, eliminar el prefijo 'openrouter/'
+            return model_without_prefix
+
+    # Si es un modelo de StepFun sin prefijo, añadir 'stepfun/'
+    if (
+        any(stepfun in model_lower for stepfun in stepfun_models)
+        and not "/" in model_name
+    ):
+        return f"stepfun/{model_name}"
+
+    # Si es un modelo nativo de OpenRouter sin prefijo, añadir 'openrouter/'
     if any(native in model_lower for native in native_models) and not "/" in model_name:
         return f"openrouter/{model_name}"
-        
+
     return model_name
 
 
@@ -178,32 +224,36 @@ def apply_openrouter_model_specific_logic(model_name: str, llm_kwargs: dict):
     """
     if "extra_body" not in llm_kwargs:
         llm_kwargs["extra_body"] = {}
-    
+
     model_lower = model_name.lower()
-    
+
     # 1. Detección de modelos de razonamiento (Reasoning/Thinking)
     # Solo habilitamos si el modelo es específicamente de razonamiento (o1, deepseek-r1)
     # o si se solicita explícitamente mediante una flag del sistema (que por defecto es False).
     reasoning_models = ["-r1", "o1-", "o3-", "deepseek-r1", "thinking-cloud"]
-    
+
     is_reasoning_model = any(x in model_lower for x in reasoning_models)
-    
+
     if is_reasoning_model or settings.global_force_reasoning:
         # Habilitamos el rastro de razonamiento nativo de OpenRouter
         llm_kwargs["extra_body"]["include_reasoning"] = True
-        logger.info(f"🧠 Habilitando razonamiento nativo (Force: {settings.global_force_reasoning}) para: {model_name}")
+        logger.info(
+            f"🧠 Habilitando razonamiento nativo (Force: {settings.global_force_reasoning}) para: {model_name}"
+        )
     else:
         # Por defecto, NO incluir razonamiento para evitar romper modos JSON y estructurados
         # OpenRouter recomienda mandar False si queremos asegurar que no se cuele texto de razonamiento
         llm_kwargs["extra_body"]["include_reasoning"] = False
-        logger.info(f"🧠 Razonamiento nativo DESHABILITADO para: {model_name} (estabilidad JSON)")
+        logger.info(
+            f"🧠 Razonamiento nativo DESHABILITADO para: {model_name} (estabilidad JSON)"
+        )
 
     # 2. Adaptadores específicos para plataformas de inferencia
     # Algunos modelos requieren flags específicos para mostrar el bloque de pensamiento
     if "glm-4.5-air" in model_lower or "glm-4" in model_lower:
         # GLM suele usar el campo 'thinking'
         llm_kwargs["extra_body"]["thinking"] = {"type": "enabled"}
-        
+
     elif "gpt-oss-120b" in model_lower:
         # Este modelo es propenso a errores si enviamos tipos complejos, usamos solo flags simples
         llm_kwargs["extra_body"]["reasoning"] = True
@@ -216,7 +266,10 @@ def apply_openrouter_model_specific_logic(model_name: str, llm_kwargs: dict):
         # Log para depuración de los parámetros enviados a OpenRouter
         logger.info(f"⚙️ OpenRouter extra_body final: {llm_kwargs['extra_body']}")
 
-async def get_llm_for_user(account_id: str, purpose: str = "main") -> Optional[ChatLiteLLM]:
+
+async def get_llm_for_user(
+    account_id: str, purpose: str = "main"
+) -> Optional[ChatLiteLLM]:
     """
     Returns a customized LLM instance for a specific user based on their settings.
     If the user has no custom settings, returns the global default instance.
@@ -248,23 +301,57 @@ async def get_llm_for_user(account_id: str, purpose: str = "main") -> Optional[C
 
             # Si el usuario no tiene proveedor o modelo configurado, usar global
             if not provider_target or not model_target:
-                if purpose == "fast": return get_fast_llm()
-                if purpose == "vision": return get_vision_llm()
+                if purpose == "fast":
+                    return get_fast_llm()
+                if purpose == "vision":
+                    return get_vision_llm()
                 return get_main_llm()
 
             # 2. Obtener API Key de los secretos
-            repo = SecretRepository(db)
-            provider_env_name = provider_target.upper()
-            key_name = f"{provider_env_name}_API_KEY"
-            api_key = await repo.get_decrypted_secret(account.id, key_name)
+            secret_repo = SecretRepository(db)
+            api_key_name = None
+            if provider_target.lower().replace("_", "-") in ["gemini", "google"]:
+                api_key_name = "GEMINI_API_KEY"
+            elif provider_target.lower().replace("_", "-") == "ollama-cloud":
+                api_key_name = "OLLAMA_API_KEY"
 
-            # Si no hay API key y el proveedor requiere una (casi todos menos ollama), 
+            key_to_search = (
+                api_key_name
+                or f"{provider_target.upper().replace('-', '_')}_API_KEY"
+            )
+            api_key = await secret_repo.get_decrypted_secret(account.id, key_to_search)
+            if api_key:
+                logger.info(
+                    f"🔑 Clave encontrada para {key_to_search}: {api_key[:4]}...{api_key[-4:] if len(api_key) > 8 else ''}"
+                )
+            else:
+                logger.warning(
+                    f"⚠️ No se encontró clave para {key_to_search} en la cuenta del usuario."
+                )
+
+            # Fallback para Google AI Studio: buscar GOOGLE_API_KEY si no se encuentra GEMINI_API_KEY
+            if not api_key and provider_target.lower() in ["gemini", "google"]:
+                api_key = await secret_repo.get_decrypted_secret(
+                    account.id, "GOOGLE_API_KEY"
+                )
+                # Último fallback: usar variable de entorno global
+                if not api_key and settings.google_api_key:
+                    api_key = settings.google_api_key
+
+            # Fallback para Ollama Cloud
+            if not api_key and provider_target.lower().replace("_", "-") == "ollama-cloud":
+                if settings.ollama_api_key:
+                    api_key = settings.ollama_api_key
+
+            # Si no hay API key y el proveedor requiere una (casi todos menos ollama),
             # podríamos intentar usar la global o fallar. Usaremos la global como fallback.
-            
+
             # 3. Construir instancia personalizada
             llm_kwargs = {
                 "model_name": model_target,
-                "temperature": account.llm_temperature if account.llm_temperature is not None else settings.llm_temperature,
+                "temperature": account.llm_temperature
+                if account.llm_temperature is not None
+                else settings.llm_temperature,
                 "streaming": True,
                 "verbose": False,
                 "max_retries": 0,
@@ -275,61 +362,164 @@ async def get_llm_for_user(account_id: str, purpose: str = "main") -> Optional[C
 
             if api_key:
                 llm_kwargs["api_key"] = api_key
-            
+
             # --- FIX: Manejo específico para OpenRouter ---
             if provider_target.lower() == "openrouter":
                 llm_kwargs["api_base"] = "https://openrouter.ai/api/v1"
-                
-                # Paso 1: Obtener el ID real del modelo (ej: 'openrouter/aurora-alpha' o 'anthropic/claude-3')
+
+                # Paso 1: Obtener el ID real del modelo
                 actual_id = normalize_openrouter_model_name(model_target)
-                
-                # Paso 2: Para LiteLLM, el formato final debe ser 'openrouter/ID_REAL'
-                # Si actual_id ya empieza por openrouter/, no lo duplicamos
-                if actual_id.startswith("openrouter/"):
-                    llm_kwargs["model_name"] = actual_id
-                else:
-                    llm_kwargs["model_name"] = f"openrouter/{actual_id}"
-                
-                # Forzar el proveedor para evitar errores internos de LiteLLM
-                llm_kwargs["custom_llm_provider"] = "openrouter"
-                
+
+                # Paso 2: Añadir prefijo openrouter/ para LiteLLM
+                llm_kwargs["model_name"] = f"openrouter/{actual_id}"
+
+                # Usar provider openai ya que OpenRouter es compatible con OpenAI
+                llm_kwargs["provider"] = "openai"
+
                 # Aplicar lógica de adaptador universal según el modelo
                 apply_openrouter_model_specific_logic(actual_id, llm_kwargs)
-                
+
                 # Headers recomendados por OpenRouter para mejor soporte y visibilidad
                 if "extra_headers" not in llm_kwargs:
                     llm_kwargs["extra_headers"] = {}
-                llm_kwargs["extra_headers"]["HTTP-Referer"] = "https://kognito.ai" # Identificador de la app
+                llm_kwargs["extra_headers"]["HTTP-Referer"] = (
+                    "https://kognito.ai"  # Identificador de la app
+                )
                 llm_kwargs["extra_headers"]["X-Title"] = "Kognito AI"
+
+                logger.info(
+                    f"OpenRouter: {llm_kwargs['model_name']} (Con adaptadores y headers)"
+                )
+
+                logger.info(
+                    f"OpenRouter: {llm_kwargs['model_name']} (Con adaptadores y headers)"
+                )
+
+            elif provider_target.lower() == "openai-compatible":
+                # Servidor local compatible con OpenAI: Local AI, LM Studio, etc.
+                # LiteLLM requiere una api_key aunque el servidor no la necesite
+                if not llm_kwargs.get("api_key"):
+                    llm_kwargs["api_key"] = "local-key"
+                if account.llm_api_base:
+                    llm_kwargs["api_base"] = account.llm_api_base.rstrip("/")
+                else:
+                    logger.warning(
+                        "openai-compatible requiere una API Base URL pero no está configurada."
+                    )
+                # Asegurarnos de que el model_name tenga prefijo openai/ para LiteLLM
+                if not model_target.startswith("openai/"):
+                    llm_kwargs["model_name"] = f"openai/{model_target.split('/')[-1]}"
+                logger.info(
+                    f"🖥️ Local AI (openai-compatible): {llm_kwargs['model_name']} en {llm_kwargs.get('api_base')}"
+                )
+
+            elif provider_target.lower().replace("_", "-") == "ollama-cloud":
+                # Ollama Cloud: https://docs.ollama.com/cloud
+                # API base: https://api.ollama.com/v1 (o la personalizada del usuario)
+
+                api_base_str = account.llm_api_base
+                if api_base_str:
+                    if not api_base_str.startswith("http"):
+                        # Si no tiene protocolo, detectar si es local o público
+                        is_likely_local = any(x in api_base_str.lower() for x in ["localhost", "127.0.0.1", "host.docker.internal", "192.168.", "10.", "172."])
+                        protocol = "http" if is_likely_local else "https"
+                        api_base_str = f"{protocol}://{api_base_str}"
+                    api_base_str = api_base_str.rstrip("/")
+
+                    logger.info(f"☁️ Ollama URL final: {api_base_str}")
+
+                    llm_kwargs["api_base"] = api_base_str
+                else:
+                    llm_kwargs["api_base"] = "https://api.ollama.com/v1"
+
+                # Autenticación: Bearer token en header
+                if api_key:
+                    llm_kwargs["headers"] = {"Authorization": f"Bearer {api_key}"}
+                    logger.info(
+                        f"☁️ Ollama Cloud: API Key configurada (len={len(api_key)})"
+                    )
+                else:
+                    logger.warning("☁️ Ollama Cloud: SIN API Key!")
+
+                # Usar ollama_chat/ para forzar endpoint /api/chat
+                # Pero el modelo real debe enviarse en el campo "model"
+                actual_model = model_target.split("/")[-1].strip()
+                llm_kwargs["model_name"] = f"ollama_chat/{actual_model}"
+                llm_kwargs["custom_llm_provider"] = "ollama"
+                # Forzar que el modelo real se envíe a Ollama
+                llm_kwargs["extra_body"] = {"model": actual_model}
+
+                logger.info(
+                    f"☁️ Ollama Cloud: model={llm_kwargs['model_name']}, actual={actual_model}, base={llm_kwargs.get('api_base')}"
+                )
+
+            elif "ollama" in provider_target.lower():
+                # Usar la URL configurada en settings como fallback para ollama local
+                logger.info(f"DEBUG OLLAMA: account.llm_api_base={account.llm_api_base}, settings.ollama_api_url={settings.ollama_api_url}")
+                api_base_str = account.llm_api_base or settings.ollama_api_url or "http://host.docker.internal:11434"
                 
-                logger.info(f"OpenRouter: {llm_kwargs['model_name']} (Con adaptadores y headers)")
+                if api_base_str and not api_base_str.startswith("http"):
+                    # Si no tiene protocolo, detectar si es local o público
+                    is_likely_local = any(x in api_base_str.lower() for x in ["localhost", "127.0.0.1", "host.docker.internal", "192.168.", "10.", "172."])
+                    protocol = "http" if is_likely_local else "https"
+                    api_base_str = f"{protocol}://{api_base_str}"
+                
+                api_base_str = api_base_str.rstrip("/")
+                
+                logger.info(f"☁️ Ollama Local URL: {api_base_str}")
+                
+                llm_kwargs["api_base"] = api_base_str
+
+                # Usar ollama_chat/ para forzar endpoint /api/chat
+                actual_model = model_target.split("/")[-1].strip()
+                llm_kwargs["model_name"] = f"ollama_chat/{actual_model}"
+                llm_kwargs["custom_llm_provider"] = "ollama"
+                # Forzar que el modelo real se envíe a Ollama
+                llm_kwargs["extra_body"] = {"model": actual_model}
+
+                logger.info(f"☁️ Ollama Local URL: {api_base_str}, model: {llm_kwargs['model_name']}, actual: {actual_model}")
+
+                # Si el usuario NO está usando ollama-cloud pero proporcionó una API Key,
+                # a veces es mejor NO enviarla si es local para evitar errores de 401.
+                if api_key:
+                    logger.info("ℹ️ Ignorando API Key para Ollama local.")
+                    llm_kwargs.pop("api_key", None)
+
             elif account.llm_api_base and ("http" in account.llm_api_base):
                 # Solo usar api_base si parece una URL válida (contiene http)
                 # Esto previene el uso de valores accidentales como correos electrónicos
                 llm_kwargs["api_base"] = account.llm_api_base
-            elif "ollama" in provider_target.lower():
-                # Fallback para ollama si no se especifica base
-                llm_kwargs["api_base"] = "http://localhost:11434"
 
             # Configuraciones específicas por proveedor (LiteLLM)
-            if "gemini" in model_target.lower() and account.llm_provider.lower() != "openrouter":
+            if (
+                "gemini" in model_target.lower()
+                or provider_target.lower() in ["gemini", "google"]
+            ) and account.llm_provider.lower() != "openrouter":
                 llm_kwargs["provider"] = "google_ai_studio"
 
-            logger.info(f"🛠️ Creando LLM personalizado para usuario {account_id}: {llm_kwargs['model_name']} ({account.llm_provider})")
-            
+            logger.info(
+                f"🛠️ Creando LLM personalizado para usuario {account_id}: {llm_kwargs['model_name']} ({account.llm_provider})"
+            )
+
             # Nota: ChatLiteLLM pasará extra_body a la API de OpenRouter
             return ChatLiteLLM(**llm_kwargs)
 
     except Exception as e:
-        logger.error(f"❌ Error al obtener LLM personalizado para {account_id}: {e}", exc_info=True)
-        return get_main_llm() # Fallback a global en caso de error
+        logger.error(
+            f"❌ Error al obtener LLM personalizado para {account_id}: {e}",
+            exc_info=True,
+        )
+        return get_main_llm()  # Fallback a global en caso de error
+
 
 def get_fallback_llm() -> Optional[ChatLiteLLM]:
     """Returns a fallback LLM instance using a different provider when OpenRouter fails."""
     try:
         # Try to use Gemini as fallback if the main model is OpenRouter
         if "openrouter" in settings.llm_model.lower():
-            logger.info("🔄 Switching to Gemini as fallback for OpenRouter context limit issues.")
+            logger.info(
+                "🔄 Switching to Gemini as fallback for OpenRouter context limit issues."
+            )
             fallback_llm = ChatLiteLLM(
                 model_name="gemini/gemini-2.0-flash-exp",
                 temperature=0.0,
@@ -346,18 +536,26 @@ def get_fallback_llm() -> Optional[ChatLiteLLM]:
         logger.error(f"❌ Failed to create fallback LLM: {e}")
         return None
 
-async def _invoke_llm_cached(llm: BaseLanguageModel, prompt: Union[str, List[BaseMessage]]) -> Any:
+
+async def _invoke_llm_cached(
+    llm: BaseLanguageModel, prompt: Union[str, List[BaseMessage]]
+) -> Any:
     """Función wrapper para invocar el LLM, asegurando el formato de mensaje correcto."""
     if isinstance(prompt, str):
         # Envuelve el prompt de cadena en un HumanMessage para cumplir con las expectativas del modelo
         messages = [HumanMessage(content=prompt)]
-    elif isinstance(prompt, list) and all(isinstance(msg, BaseMessage) for msg in prompt):
+    elif isinstance(prompt, list) and all(
+        isinstance(msg, BaseMessage) for msg in prompt
+    ):
         # Si ya es una lista de BaseMessage, úsalo directamente
         messages = prompt
     else:
-        raise TypeError("El prompt debe ser una cadena o una lista de objetos BaseMessage.")
-    
+        raise TypeError(
+            "El prompt debe ser una cadena o una lista de objetos BaseMessage."
+        )
+
     return await llm.ainvoke(messages)
+
 
 async def initialize_llms():
     """
@@ -365,7 +563,7 @@ async def initialize_llms():
     with a compliant rate limiter.
     """
     global _main_agent_llm_instance, _fast_task_llm_instance, _vision_llm_instance
-    
+
     # Detectar si hay una GPU disponible
     use_gpu = torch.cuda.is_available()
     if use_gpu:
@@ -375,31 +573,53 @@ async def initialize_llms():
 
     try:
         logger.info(f"Inicializando LLM Principal: {settings.llm_model}")
-        
+
         llm_kwargs = {
             "model_name": settings.llm_model,
             "temperature": settings.llm_temperature,
             "streaming": True,
             "verbose": False,
-            "max_retries": 0, # We handle rate limiting, so disable litellm's retries for this
-            "rate_limiter": gemini_rate_limiter, # Pass the compliant rate limiter
-            "max_tokens": settings.deep_research_max_tokens, # Allow for massive reports
+            "max_retries": 0,  # We handle rate limiting, so disable litellm's retries for this
+            "rate_limiter": gemini_rate_limiter,  # Pass the compliant rate limiter
+            "max_tokens": settings.deep_research_max_tokens,  # Allow for massive reports
             "timeout": settings.llm_request_timeout,
         }
-        
+
         if use_gpu:
             llm_kwargs["device"] = "cuda"
-            llm_kwargs["force_redownload"] = True # Forzar la descarga para asegurar la compatibilidad de la GPU
+            llm_kwargs["force_redownload"] = (
+                True  # Forzar la descarga para asegurar la compatibilidad de la GPU
+            )
 
         if settings.llm_api_base:
             llm_kwargs["api_base"] = settings.llm_api_base
-        
+
         # Configurar proveedor específico según el formato del modelo
         model_lower = settings.llm_model.lower()
-        
+
         if "openrouter" in model_lower:
             logger.info("🔧 Applying OpenRouter specific config for main LLM.")
-            apply_openrouter_model_specific_logic(settings.llm_model, llm_kwargs)
+            llm_kwargs["api_base"] = "https://openrouter.ai/api/v1"
+
+            # Normalizar el nombre del modelo - eliminar prefijo openrouter/ para evitar duplicados
+            actual_id = normalize_openrouter_model_name(settings.llm_model)
+
+            # Configurar el nombre del modelo con el prefijo openrouter/ necesario para LiteLLM
+            llm_kwargs["model_name"] = f"openrouter/{actual_id}"
+
+            # Usar provider openai ya que OpenRouter es compatible con OpenAI
+            llm_kwargs["provider"] = "openai"
+
+            # Aplicar lógica de adaptador universal según el modelo
+            apply_openrouter_model_specific_logic(actual_id, llm_kwargs)
+
+            # Headers recomendados por OpenRouter para mejor soporte y visibilidad
+            if "extra_headers" not in llm_kwargs:
+                llm_kwargs["extra_headers"] = {}
+            llm_kwargs["extra_headers"]["HTTP-Referer"] = (
+                "https://kognito.ai"  # Identificador de la app
+            )
+            llm_kwargs["extra_headers"]["X-Title"] = "Kognito AI"
         elif "anthropic" in model_lower:
             logger.info("🔧 Applying Anthropic specific config.")
             llm_kwargs["provider"] = "anthropic"
@@ -444,7 +664,7 @@ async def initialize_llms():
             "streaming": True,
             "verbose": False,
             "max_retries": 0,
-            "rate_limiter": gemini_rate_limiter, # Use the same rate limiter instance
+            "rate_limiter": gemini_rate_limiter,  # Use the same rate limiter instance
             "timeout": settings.llm_request_timeout,
         }
 
@@ -453,13 +673,17 @@ async def initialize_llms():
 
         if settings.llm_api_base:
             fast_llm_kwargs["api_base"] = settings.llm_api_base
-        
+
         # Configurar proveedor específico según el formato del modelo
         fast_model_lower = settings.fast_llm_model.lower()
-        
+
         if "openrouter" in fast_model_lower:
             logger.info("🔧 Applying OpenRouter specific config for fast LLM.")
-            apply_openrouter_model_specific_logic(settings.fast_llm_model, fast_llm_kwargs)
+            fast_llm_kwargs["api_base"] = "https://openrouter.ai/api/v1"
+            actual_id = normalize_openrouter_model_name(settings.fast_llm_model)
+            fast_llm_kwargs["model_name"] = f"openrouter/{actual_id}"
+            fast_llm_kwargs["provider"] = "openai"
+            apply_openrouter_model_specific_logic(actual_id, fast_llm_kwargs)
         elif "anthropic" in fast_model_lower:
             logger.info("🔧 Applying Anthropic specific config for fast LLM.")
             fast_llm_kwargs["provider"] = "anthropic"
@@ -482,7 +706,9 @@ async def initialize_llms():
         _fast_task_llm_instance = fast_llm
         logger.info("Modelo LLM Rápido listo.")
     except Exception as e:
-        logger.warning(f"⚠️ Failed to initialize the fast task LLM. The main LLM will be used as a fallback: {e}")
+        logger.warning(
+            f"⚠️ Failed to initialize the fast task LLM. The main LLM will be used as a fallback: {e}"
+        )
         _fast_task_llm_instance = _main_agent_llm_instance
 
     try:
@@ -496,16 +722,20 @@ async def initialize_llms():
             "rate_limiter": gemini_rate_limiter,
             "timeout": settings.llm_request_timeout,
         }
-        
+
         if use_gpu:
             vision_llm_kwargs["device"] = "cuda"
-        
+
         # Configurar proveedor específico según el formato del modelo
         vision_model_lower = settings.vision_model.lower()
-        
+
         if "openrouter" in vision_model_lower:
             logger.info("🔧 Applying OpenRouter specific config for vision LLM.")
-            apply_openrouter_model_specific_logic(settings.vision_model, vision_llm_kwargs)
+            vision_llm_kwargs["api_base"] = "https://openrouter.ai/api/v1"
+            actual_id = normalize_openrouter_model_name(settings.vision_model)
+            vision_llm_kwargs["model_name"] = f"openrouter/{actual_id}"
+            vision_llm_kwargs["provider"] = "openai"
+            apply_openrouter_model_specific_logic(actual_id, vision_llm_kwargs)
         elif "anthropic" in vision_model_lower:
             logger.info("🔧 Applying Anthropic specific config for vision LLM.")
             vision_llm_kwargs["provider"] = "anthropic"
@@ -522,14 +752,17 @@ async def initialize_llms():
         _vision_llm_instance = vision_llm
         logger.info("Modelo LLM Visión listo.")
     except Exception as e:
-        logger.warning(f"⚠️ Failed to initialize the vision LLM. The main LLM will be used as a fallback: {e}")
+        logger.warning(
+            f"⚠️ Failed to initialize the vision LLM. The main LLM will be used as a fallback: {e}"
+        )
         _vision_llm_instance = _main_agent_llm_instance
+
 
 async def get_enhanced_llm_response(
     user_message: str,
     user_id: str,
     workspace_id: Optional[str] = None,
-    use_knowledge_graph: bool = True
+    use_knowledge_graph: bool = True,
 ) -> Dict[str, Any]:
     """
     Obtiene respuesta del LLM enriquecida con contexto del grafo de conocimiento.
@@ -549,7 +782,9 @@ async def get_enhanced_llm_response(
         # 1. Obtener contexto enriquecido si está habilitado
         enhanced_context = None
         if use_knowledge_graph:
-            enhanced_context = await _get_enhanced_context(user_message, user_id, workspace_id)
+            enhanced_context = await _get_enhanced_context(
+                user_message, user_id, workspace_id
+            )
 
         # 2. Construir prompt enriquecido
         enriched_prompt = await _build_enriched_prompt(user_message, enhanced_context)
@@ -561,20 +796,28 @@ async def get_enhanced_llm_response(
 
         # Log del modelo en uso
         # Try the common attribute names for the underlying model identifier
-        model_name = getattr(llm, 'model_name', getattr(llm, 'model', 'unknown'))
-        logger.info(f"🤖 ENHANCED RESPONSE: Usando modelo '{model_name}' para generar respuesta.")
+        model_name = getattr(llm, "model_name", getattr(llm, "model", "unknown"))
+        logger.info(
+            f"🤖 ENHANCED RESPONSE: Usando modelo '{model_name}' para generar respuesta."
+        )
 
-        logger.info(f"📝 Prompt para respuesta enriquecida enviado al LLM.") # Log del prompt
+        logger.info(
+            f"📝 Prompt para respuesta enriquecida enviado al LLM."
+        )  # Log del prompt
         response = await _invoke_llm_cached(llm, enriched_prompt)
-        logger.info(f"🗣️ Respuesta cruda del LLM para respuesta enriquecida recibida.") # Log de la respuesta cruda del LLM
+        logger.info(
+            f"🗣️ Respuesta cruda del LLM para respuesta enriquecida recibida."
+        )  # Log de la respuesta cruda del LLM
 
         # 4. Procesar y enriquecer la respuesta
         enhanced_response = {
-            "response": response.content if hasattr(response, 'content') else str(response),
+            "response": response.content
+            if hasattr(response, "content")
+            else str(response),
             "user_message": user_message,
             "enhanced_context": enhanced_context,
             "reasoning_used": enhanced_context is not None,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
 
         # 5. Guardar memoria enriquecida
@@ -589,7 +832,10 @@ async def get_enhanced_llm_response(
         # Fallback a respuesta tradicional
         return await _get_traditional_response(user_message)
 
-async def _get_enhanced_context(user_message: str, user_id: str, workspace_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+
+async def _get_enhanced_context(
+    user_message: str, user_id: str, workspace_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     """Obtiene contexto enriquecido del grafo de conocimiento."""
     try:
         from core.enhanced_memory_manager import EnhancedMemoryManager
@@ -603,7 +849,7 @@ async def _get_enhanced_context(user_message: str, user_id: str, workspace_id: O
         graph_db = GraphDB(
             uri=settings.neo4j_uri,
             user=settings.neo4j_user,
-            password=settings.neo4j_password
+            password=settings.neo4j_password,
         )
 
         enhanced_manager = EnhancedMemoryManager(graph_db=graph_db)
@@ -619,7 +865,10 @@ async def _get_enhanced_context(user_message: str, user_id: str, workspace_id: O
         logger.warning(f"⚠️ Error obteniendo contexto enriquecido: {e}")
         return None
 
-async def _build_enriched_prompt(user_message: str, enhanced_context: Optional[Dict[str, Any]] = None) -> str:
+
+async def _build_enriched_prompt(
+    user_message: str, enhanced_context: Optional[Dict[str, Any]] = None
+) -> str:
     """Construye un prompt enriquecido con contexto del grafo de conocimiento."""
 
     base_prompt = f"Usuario: {user_message}"
@@ -633,7 +882,11 @@ async def _build_enriched_prompt(user_message: str, enhanced_context: Optional[D
 """
 
     # Agregar entidades relevantes
-    entities = enhanced_context.get("sources", {}).get("knowledge_graph", {}).get("entities", [])
+    entities = (
+        enhanced_context.get("sources", {})
+        .get("knowledge_graph", {})
+        .get("entities", [])
+    )
     if entities:
         enriched_prompt += "Entidades relevantes encontradas:\n"
         for entity in entities[:5]:
@@ -641,7 +894,11 @@ async def _build_enriched_prompt(user_message: str, enhanced_context: Optional[D
         enriched_prompt += "\n"
 
     # Agregar relaciones relevantes
-    relationships = enhanced_context.get("sources", {}).get("knowledge_graph", {}).get("relationships", [])
+    relationships = (
+        enhanced_context.get("sources", {})
+        .get("knowledge_graph", {})
+        .get("relationships", [])
+    )
     if relationships:
         enriched_prompt += "Relaciones relevantes:\n"
         for rel in relationships[:3]:
@@ -679,7 +936,10 @@ Asistente:"""
 
     return enriched_prompt
 
-async def _save_enhanced_interaction(enhanced_response: Dict[str, Any], user_id: str) -> None:
+
+async def _save_enhanced_interaction(
+    enhanced_response: Dict[str, Any], user_id: str
+) -> None:
     """Guarda la interacción enriquecida para futuras referencias."""
     try:
         # Aquí integrarías con tu sistema de guardado de memorias
@@ -687,6 +947,7 @@ async def _save_enhanced_interaction(enhanced_response: Dict[str, Any], user_id:
 
     except Exception as e:
         logger.error(f"❌ Error guardando interacción enriquecida: {e}")
+
 
 async def _get_traditional_response(user_message: str) -> Dict[str, Any]:
     """Fallback a respuesta tradicional sin contexto enriquecido."""
@@ -698,11 +959,13 @@ async def _get_traditional_response(user_message: str) -> Dict[str, Any]:
         response = await _invoke_llm_cached(llm, user_message)
 
         return {
-            "response": response.content if hasattr(response, 'content') else str(response),
+            "response": response.content
+            if hasattr(response, "content")
+            else str(response),
             "user_message": user_message,
             "enhanced_context": None,
             "reasoning_used": False,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
 
     except Exception as e:
@@ -712,5 +975,5 @@ async def _get_traditional_response(user_message: str) -> Dict[str, Any]:
             "user_message": user_message,
             "enhanced_context": None,
             "reasoning_used": False,
-            "error": str(e)
+            "error": str(e),
         }

@@ -137,8 +137,6 @@ async def create_scheduled_tool(
     try:
         # Validar herramienta disponible
         available_tools = {
-            'daily_analysis': _get_daily_analysis_function,
-            'daily_insights': _get_daily_insights_function,
             'weekly_cleanup': _get_weekly_cleanup_function,
             'key_rotation_check': _get_key_rotation_check_function
         }
@@ -343,8 +341,6 @@ async def get_scheduled_tools_status(
                          if getattr(job, 'enabled', True))
         
         available_tools = [
-            'daily_analysis',
-            'daily_insights',
             'weekly_cleanup',
             'key_rotation_check'
         ]
@@ -387,25 +383,6 @@ def _get_next_run_time(job) -> Optional[str]:
         return None
     except:
         return None
-
-def _get_daily_analysis_function():
-    """Retorna la función para análisis diario."""
-    async def daily_analysis_task(account_id: str, **kwargs):
-        from utils.proactive_knowledge_linker import run_batch_analysis_job
-        logger.info(f"Ejecutando análisis diario programado para cuenta {account_id}")
-        await run_batch_analysis_job(account_id_filter=account_id)
-        return "Análisis diario completado"
-    return daily_analysis_task
-
-def _get_daily_insights_function():
-    """Retorna la función para insights diarios."""
-    async def daily_insights_task(account_id: str, **kwargs):
-        from tools.get_proactive_insights_tool import GetProactiveInsightsTool
-        logger.info(f"Generando insights diarios programados para cuenta {account_id}")
-        tool = GetProactiveInsightsTool(account_id=account_id)
-        result = await tool._arun(account_id=account_id)
-        return result
-    return daily_insights_task
 
 def _get_weekly_cleanup_function():
     """Retorna la función para limpieza semanal."""
